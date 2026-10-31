@@ -47,6 +47,17 @@ struct AskPicks: Equatable {
 struct NextPicks: Equatable {
     var seq: Int
     var picked: Set<Int>
+    /// Ones with their "?" on, to ask what they mean.
+    var explain: Set<Int> = []
+    var isEmpty: Bool { picked.isEmpty && explain.isEmpty }
+}
+
+/// The done card's follow-ups going with Mike's next message: the ticked
+/// ones, and the ones he's asking about with their "?".
+struct FollowUpPicks {
+    var ticked: [String] = []
+    var explain: [String] = []
+    var isEmpty: Bool { ticked.isEmpty && explain.isEmpty }
 }
 
 /// App state: the runner connection, the thread list, the selection and the
@@ -1187,19 +1198,35 @@ final class AppModel {
     /// said "Nothing needed from you", but it says Done now.
     func toggleFollowUp(threadId: String, card: AsksCard, index: Int) {
         guard card.isDone, card.isOpen, card.next.indices.contains(index) else { return }
-        var picked = nextPicks[threadId].flatMap { $0.seq == card.seq ? $0.picked : nil } ?? []
-        if picked.remove(index) == nil { picked.insert(index) }
-        nextPicks[threadId] = picked.isEmpty ? nil : NextPicks(seq: card.seq, picked: picked)
-        sessions[threadId]?.setNextPicks(seq: card.seq, picks: picked)
+        var picks = nextPicks[threadId].flatMap { $0.seq == card.seq ? $0 : nil } ?? NextPicks(seq: card.seq, picked: [])
+        if picks.picked.remove(index) == nil { picks.picked.insert(index) }
+        setNextPicks(picks, threadId: threadId)
+    }
+
+    /// The "?" on a done card's follow-up: turns on (or off) asking the
+    /// agent what it meant, which goes with his next message like a tick.
+    /// It used to send on its own at once, so he couldn't ask about two
+    /// of them, or add a word (Mike, 1 Nov).
+    func toggleExplain(threadId: String, card: AsksCard, index: Int) {
+        guard card.isDone, card.isOpen, card.next.indices.contains(index) else { return }
+        var picks = nextPicks[threadId].flatMap { $0.seq == card.seq ? $0 : nil } ?? NextPicks(seq: card.seq, picked: [])
+        if picks.explain.remove(index) == nil { picks.explain.insert(index) }
+        setNextPicks(picks, threadId: threadId)
+    }
+
+    private func setNextPicks(_ picks: NextPicks, threadId: String) {
+        nextPicks[threadId] = picks.isEmpty ? nil : picks
+        sessions[threadId]?.setNextPicks(seq: picks.seq, picks: picks.picked, explain: picks.explain)
         focusComposer(threadId)
     }
 
-    /// The words of the follow-ups ticked on the thread's open done card,
-    /// in the card's order.
-    func pickedFollowUps(threadId: String) -> [String] {
+    /// The words of the follow-ups ticked, and of those asked about, on
+    /// the thread's open done card, in the card's order.
+    func pickedFollowUps(threadId: String) -> FollowUpPicks {
         guard case .asks(let card)? = sessions[threadId]?.openCard?.content, card.isDone, card.isOpen,
-              let mine = nextPicks[threadId], mine.seq == card.seq else { return [] }
-        return card.next.indices.filter { mine.picked.contains($0) }.map { card.next[$0] }
+              let mine = nextPicks[threadId], mine.seq == card.seq else { return FollowUpPicks() }
+        return FollowUpPicks(ticked: card.next.indices.filter { mine.picked.contains($0) }.map { card.next[$0] },
+                             explain: card.next.indices.filter { mine.explain.contains($0) }.map { card.next[$0] })
     }
 
     /// Puts one of Mike's messages in the thread's composer to edit: sending
@@ -1267,10 +1294,10 @@ final class AppModel {
         let answers = Decisions.answers(asks: asks, picks: picks, notes: notes).map(\.answer)
         // Follow-ups ticked on a done card go first too (it has no asks,
         // so it's one or the other).
-        let followUps = threadId.map { pickedFollowUps(threadId: $0) } ?? []
+        let followUps = threadId.map { pickedFollowUps(threadId: $0) } ?? FollowUpPicks()
         let ticked = threadId.flatMap { nextPicks[$0] }
         let trimmed = !followUps.isEmpty
-            ? Decisions.followUpMessage(followUps, extra: draft.text)
+            ? Decisions.followUpMessage(followUps.ticked, explain: followUps.explain, extra: draft.text)
             : answers.isEmpty
             ? draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
             : Decisions.message(asks: asks, picks: picks, notes: notes, extra: draft.text)
@@ -1357,20 +1384,6 @@ final class AppModel {
                 show(error)
             }
         }
-    }
-
-    /// The "?" on a done card's follow-up: asks the agent what it meant,
-    /// at once, as its own message. Mike got a follow-up that seemed to
-    /// come from nowhere and had no way to ask about it short of typing
-    /// the question out (31 Oct). What's in the composer stays there.
-    func explainFollowUp(threadId: String, card: AsksCard, index: Int) {
-        guard card.isDone, card.isOpen, card.next.indices.contains(index) else { return }
-        guard let client = client(for: threadId), isRemote(threadId) || connection == .connected else {
-            showConnectionError(notConnectedText(threadId, "that wasn't sent"))
-            return
-        }
-        ActivityRecorder.shared.sent(threadId: threadId, images: 0, answers: 0)
-        post(threadId: threadId, text: Decisions.explainMessage(card.next[index]), images: [], answers: [], client: client)
     }
 
     /// Updates panel, From Mike: a new thread in the repo the runner

@@ -340,15 +340,19 @@ public struct AsksCard: Sendable, Hashable {
     public var next: [String]
     /// The follow-ups ticked, by index, waiting in the composer.
     public var pickedNext: Set<Int>
+    /// The follow-ups whose "?" is on, by index: he'll ask what they mean
+    /// with his next message, alongside any ticked ones.
+    public var explainNext: Set<Int>
     /// What Mike has written and pasted in the boxes under the asks he
     /// picked Something else on, by ask index. The card makes room for
     /// each box from it; the box itself is a text view over that room.
     public var notes: [Int: AskNote]
 
-    public init(seq: Int, asks: [Ask], ticked: Set<Int> = [], isOpen: Bool = true, picks: [Int: Int] = [:], next: [String] = [], notes: [Int: AskNote] = [:], pickedNext: Set<Int> = []) {
+    public init(seq: Int, asks: [Ask], ticked: Set<Int> = [], isOpen: Bool = true, picks: [Int: Int] = [:], next: [String] = [], notes: [Int: AskNote] = [:], pickedNext: Set<Int> = [], explainNext: Set<Int> = []) {
         self.seq = seq
         self.notes = notes
         self.pickedNext = pickedNext
+        self.explainNext = explainNext
         self.asks = asks
         self.next = next
         self.ticked = ticked

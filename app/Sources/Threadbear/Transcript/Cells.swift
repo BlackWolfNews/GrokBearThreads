@@ -551,9 +551,14 @@ final class TextRowCell: RowCellView {
                 let button = explainButtons[index] ?? makeExplainButton(index)
                 button.frame = NSRect(x: full.minX + origin.x + container.size.width - RowRenderer.rowInset - side,
                                       y: full.minY + origin.y + circle.midY - side / 2, width: side, height: side)
-                // Set each time, so it follows a zoom change.
-                let image = Symbols.image("questionmark.circle", size: 14)
+                // Set each time, so it follows a zoom change. Filled and
+                // in the accent when on, like a ticked row's circle.
+                let on = card.explainNext.contains(index)
+                let image = Symbols.image(on ? "questionmark.circle.fill" : "questionmark.circle", size: 14)
                 if button.image !== image { button.image = image }
+                let tint: NSColor = on ? .controlAccentColor : .secondaryLabelColor
+                if button.contentTintColor != tint { button.contentTintColor = tint }
+                button.state = on ? .on : .off
                 if button.isHidden { button.isHidden = false }
                 shown.insert(index)
             }
@@ -562,7 +567,7 @@ final class TextRowCell: RowCellView {
     }
 
     private func makeExplainButton(_ index: Int) -> NSButton {
-        let button = NSButton()
+        let button = PointerButton()
         button.isBordered = false
         button.bezelStyle = .regularSquare
         button.imagePosition = .imageOnly
@@ -610,6 +615,15 @@ final class TextRowCell: RowCellView {
 
     override func updateSlices(force: Bool = false) {
         textView.updateSlice(force: force)
+    }
+}
+
+/// A borderless button that shows the pointing hand, as the card's own
+/// rows (text, not views) do; a plain NSButton keeps the I-beam the text
+/// view under it sets (Mike, 1 Nov).
+final class PointerButton: NSButton {
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .pointingHand)
     }
 }
 

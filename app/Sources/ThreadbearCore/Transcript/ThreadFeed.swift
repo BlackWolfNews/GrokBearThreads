@@ -161,8 +161,8 @@ public struct ThreadFeed: Sendable {
     }
 
     /// Mike ticked follow-ups on a done card (see `TranscriptModel.setNextPicks`).
-    public mutating func setNextPicks(_ seq: Int, _ picks: Set<Int>) -> TranscriptChange {
-        model.setNextPicks(seq, picks)
+    public mutating func setNextPicks(_ seq: Int, _ picks: Set<Int>, explain: Set<Int> = []) -> TranscriptChange {
+        model.setNextPicks(seq, picks, explain: explain)
     }
 
     /// The thread's background work changed (see

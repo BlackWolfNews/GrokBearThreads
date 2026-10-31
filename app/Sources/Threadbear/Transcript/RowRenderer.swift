@@ -1333,7 +1333,9 @@ enum RowRenderer {
     /// than buttons, as a long one broke into two buttons; the pointer
     /// lights up the whole row (`.tbRow`). The follow-ups go once he's
     /// replied, like an ask's answers. A "?" at each row's right asks
-    /// the agent what it meant, as one can come out of nowhere (31 Oct).
+    /// the agent what it meant, as one can come out of nowhere (31 Oct);
+    /// it toggles too and goes with the ticks, so he can ask about
+    /// several at once (1 Nov).
     private static func doneText(_ card: AsksCard, width: CGFloat) -> NSAttributedString {
         let title = Theme.changesTitleFont
         let button = Theme.labelFont
@@ -1389,8 +1391,8 @@ enum RowRenderer {
     /// How far a follow-up row's words sit in from its hover fill.
     static var rowInset: CGFloat { zoomed(8) }
 
-    /// The room at a follow-up row's right for its "?", which asks the
-    /// agent what it meant (`explain:<n>`).
+    /// The room at a follow-up row's right for its "?", which turns on
+    /// asking the agent what it meant (`explain:<n>`).
     static var explainRoom: CGFloat { zoomed(22) }
 
     /// A plain sentence for a failure whose cause the runner gave.

@@ -125,7 +125,7 @@ final class ThreadSession {
                         _ = model.setAskPicks(picks.asksSeq, picks.picks)
                         _ = model.setAskNotes(picks.asksSeq, picks.notes)
                     }
-                    if let nextPicks { _ = model.setNextPicks(nextPicks.seq, nextPicks.picked) }
+                    if let nextPicks { _ = model.setNextPicks(nextPicks.seq, nextPicks.picked, explain: nextPicks.explain) }
                     model.load(events: page.events, inProgress: page.inProgress)
                     _ = model.setBackground(background)
                     if debug { print(String(format: "    after model %.0f MB", memoryMB())) }
@@ -420,10 +420,10 @@ final class ThreadSession {
 
     /// Shows the follow-ups ticked on the done card from `seq` as ticked
     /// (before it's loaded, the model is built with AppModel.nextPicks).
-    func setNextPicks(seq: Int, picks: Set<Int>) {
+    func setNextPicks(seq: Int, picks: Set<Int>, explain: Set<Int>) {
         guard state == .loaded, !rebuilding else { return }
         let oldStart = displayStart
-        let change = feed.setNextPicks(seq, picks)
+        let change = feed.setNextPicks(seq, picks, explain: explain)
         guard !change.isEmpty else { return }
         show(change, oldStart: oldStart)
     }

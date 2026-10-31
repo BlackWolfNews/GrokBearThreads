@@ -31,7 +31,7 @@ struct ComposerView: View {
         // Answers picked on the open card of asks go with the message.
         let picks = thread.map { app.picks(for: $0) } ?? [:]
         // So are follow-ups ticked on a done card.
-        let followUps = thread.map { app.pickedFollowUps(threadId: $0.id) } ?? []
+        let followUps = thread.map { app.pickedFollowUps(threadId: $0.id) } ?? FollowUpPicks()
         let canSend = !picks.isEmpty || !followUps.isEmpty || ComposerChips.canSend(text: draft.wrappedValue.text, imageCount: draft.wrappedValue.images.count)
         // A new thread on its way: what was sent stays, greyed and locked,
         // until the runner has made the thread.
@@ -140,7 +140,7 @@ struct ComposerView: View {
     /// With answers picked, the box is for anything else: a Something
     /// else answer has its own box on the card. Under asks with none
     /// picked, it's the way to answer in other words.
-    private func placeholder(_ picks: [Int: Int], followUps: [String], needsYou: Bool) -> String {
+    private func placeholder(_ picks: [Int: Int], followUps: FollowUpPicks, needsYou: Bool) -> String {
         if let thread, app.editing[thread.id] != nil { return "Your message…" }
         if !picks.isEmpty || !followUps.isEmpty { return "Add anything else…" }
         return needsYou ? "Or say something else…" : "Message"

@@ -143,8 +143,16 @@ public enum Decisions {
 
     /// The message for follow-ups ticked on a done card: the one on its
     /// own, or several as a list, then anything he typed.
-    public static func followUpMessage(_ followUps: [String], extra: String = "") -> String {
+    public static func followUpMessage(_ followUps: [String], explain: [String] = [], extra: String = "") -> String {
         var body = followUps.count == 1 ? followUps[0] : followUps.map { "- \($0)" }.joined(separator: "\n")
+        // The ones with their "?" on: one asked about on its own, several
+        // as one question over a list.
+        if !explain.isEmpty {
+            let question = explain.count == 1
+                ? explainMessage(explain[0])
+                : "What do you mean by these? Please explain.\n" + explain.map { "- \($0)" }.joined(separator: "\n")
+            body += (body.isEmpty ? "" : "\n\n") + question
+        }
         let more = extra.trimmingCharacters(in: .whitespacesAndNewlines)
         if !more.isEmpty { body += (body.isEmpty ? "" : "\n\n") + more }
         return body

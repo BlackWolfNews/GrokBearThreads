@@ -805,7 +805,8 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// the ask's links where links open (the pane or the browser). The done
     /// card's `archive` archives the thread, as ⌘E does, and `next:<n>`
     /// ticks or unticks a suggested follow-up, which waits in the composer;
-    /// `explain:<n>` (the "?" at its right) asks the agent what it meant.
+    /// `explain:<n>` (the "?" at its right) turns on asking the agent what
+    /// it meant, which waits in the composer the same way.
     /// `page:<n>` shows ask `n` on a paged card, and `collapse` folds the
     /// card to its heading or brings it back.
     func askAction(_ card: AsksCard, action: String) {
@@ -830,8 +831,8 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
             return
         }
         if action.hasPrefix("explain:") {
-            guard let n = Int(action.dropFirst(8)) else { return }
-            app.explainFollowUp(threadId: thread.id, card: card, index: n)
+            guard card.isOpen, let n = Int(action.dropFirst(8)), card.next.indices.contains(n) else { return }
+            app.toggleExplain(threadId: thread.id, card: card, index: n)
             return
         }
         let parts = action.split(separator: ":")

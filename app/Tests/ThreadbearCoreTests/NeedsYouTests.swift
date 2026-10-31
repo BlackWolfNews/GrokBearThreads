@@ -111,6 +111,24 @@ final class NeedsYouTests: XCTestCase {
         XCTAssertEqual(Decisions.explainMessage("Check the nightly"), "What do you mean by \"Check the nightly\"? Please explain.")
     }
 
+    /// A follow-up's "?" toggles like its tick and goes with the ticks:
+    /// one question each, or one over a list for several.
+    func testFollowUpsAskedAboutGoWithTheTicks() {
+        var model = TranscriptModel(events: [done(1, turn: "t1", needs: "nothing", next: ["Check the nightly", "Refresh the cache", "Bump Node"])])
+        _ = model.setNextPicks(1, [0], explain: [1, 2])
+        XCTAssertEqual(card(model, "ak:1")?.pickedNext, [0])
+        XCTAssertEqual(card(model, "ak:1")?.explainNext, [1, 2])
+        _ = model.setNextPicks(1, [0], explain: [])
+        XCTAssertEqual(card(model, "ak:1")?.explainNext, [])
+        var later = TranscriptModel()
+        _ = later.setNextPicks(1, [], explain: [0])
+        later.load(events: [done(1, turn: "t1", needs: "nothing", next: ["Check the nightly"])])
+        XCTAssertEqual(card(later, "ak:1")?.explainNext, [0])
+        XCTAssertEqual(Decisions.followUpMessage([], explain: ["Bump Node"]), "What do you mean by \"Bump Node\"? Please explain.")
+        XCTAssertEqual(Decisions.followUpMessage(["Check the nightly"], explain: ["Refresh the cache", "Bump Node"], extra: "thanks"),
+                       "Check the nightly\n\nWhat do you mean by these? Please explain.\n- Refresh the cache\n- Bump Node\n\nthanks")
+    }
+
     /// The open card is what the composer draws at its top (ComposerCard),
     /// with its picks; Mike's reply takes it out of the composer as well.
     func testTheOpenCardIsTheLastTurnsUntilHeReplies() {
