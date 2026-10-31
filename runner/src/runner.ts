@@ -399,6 +399,9 @@ export type RunnerDeps = {
   // A completed turn asked Mike to Restart to Update, by end_turn or in its
   // closing "What I need from you" (app-restarts.ts signs the thread up).
   appRestartAsked?: (threadId: string) => void;
+  // Whether Mike is at this Mac, as presence last found it (presence.ts);
+  // undefined when it hasn't been checked. Only read for phone messages.
+  atMac?: () => boolean | undefined;
 };
 
 const DELTA_INTERVAL_MS = 33; // at most ~30 delta flushes a second per thread
@@ -505,6 +508,7 @@ export class Runner {
   private poolsShown?: string;
   private ranDry = new Map<string, number>();
   private appRestartAsked?: (threadId: string) => void;
+  private atMac?: () => boolean | undefined;
 
   constructor(deps: RunnerDeps) {
     this.cfg = deps.config;
@@ -523,6 +527,7 @@ export class Runner {
     this.models = deps.models;
     this.projects = deps.projects;
     this.appRestartAsked = deps.appRestartAsked;
+    this.atMac = deps.atMac;
     this.adapters = deps.adapters;
     this.accounts = deps.accounts;
     this.usage = deps.usage;
@@ -2063,7 +2068,19 @@ export class Runner {
     turn.ended = false;
     turn.owedReply = undefined;
     this.markDirty(st);
-    rt.session!.send({ id: msg.turnId, text: msg.text, images: msg.images });
+    rt.session!.send({ id: msg.turnId, text: this.forAgent(msg), images: msg.images });
+  }
+
+  // The text the agent gets for a message. One from the phone says so, and
+  // whether he's still at the Mac, so the agent doesn't hand him a Mac-only
+  // step while he's out and keeps the reply short. It goes on every phone
+  // message rather than once, as he moves between the two. The transcript
+  // keeps what he typed.
+  private forAgent(msg: { text: string; origin?: MessageOrigin }): string {
+    if (msg.origin !== 'phone') return msg.text;
+    const atMac = this.atMac?.();
+    const where = atMac === true ? ', at the Mac' : atMac === false ? ', away from the Mac' : '';
+    return `[Sent from the iPhone app${where}]\n${msg.text}`;
   }
 
   // Writes the turn's first events before changing any state, so if the
@@ -2113,7 +2130,7 @@ export class Runner {
     // Never two live CLIs on one session: wait for a releasing one to exit.
     while (rt.closing) await rt.closing;
     if (rt.turn?.turnId !== msg.turnId) return; // interrupted while waiting
-    let text = msg.text;
+    let text = this.forAgent(msg);
     if (!rt.session && rec.worktreePending) {
       await this.prepareWorktree(st, msg.turnId);
       if (rt.turn?.turnId !== msg.turnId) return; // interrupted during setup
@@ -2904,7 +2921,7 @@ export class Runner {
             // transcript carried to a new folder that wouldn't resume gets
             // the move's note, any other thread with earlier turns the
             // not-found one.
-            let text = first.text;
+            let text = this.forAgent(first);
             const earlier = rec.lastTurnCompletedSeq > 0;
             if (rt.carried || earlier) {
               rec.handoff = rt.carried ?? { fromCwd: rec.cwd, fromAccountId: rec.accountId, lost: true };
@@ -2918,7 +2935,7 @@ export class Runner {
             // order, matched to their ids when the counts agree.
             if (msgs.length === turn.messages.length) {
               msgs.slice(1).forEach((m, i) => {
-                if (m.type === 'user.message') rt.session!.send({ id: turn.messages[i + 1], text: m.text, images: m.images });
+                if (m.type === 'user.message') rt.session!.send({ id: turn.messages[i + 1], text: this.forAgent(m), images: m.images });
               });
             }
             return;

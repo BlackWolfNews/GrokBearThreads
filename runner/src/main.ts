@@ -163,8 +163,13 @@ async function main(): Promise<void> {
     poolHost: { pool: (id) => runner.smallModelPool(id), ranDry: (id) => runner.noteRanDry(id) },
   });
   const projects = new Projects({ home: cfg.home, clock: realClock, log });
+  // Presence as the Convex mirror last checked it, for the line a phone
+  // message gets (Runner.forAgent). Only phone messages read it, and they
+  // only come through that mirror.
+  let atMac: boolean | undefined;
   runner = new Runner({
     projects,
+    atMac: () => atMac,
     config: cfg,
     store,
     adapters: { claude, codex },
@@ -270,7 +275,7 @@ async function main(): Promise<void> {
     config: { ...cfg.sync, runnerId: syncRunnerId, icon: runnerIcon },
     key: readSyncKey(cfg.home),
     statePath: `${cfg.home}/sync-state.json`,
-    presence: async () => isAtMac(rpcServer?.appConnected() ?? false, await hidIdleMs()),
+    presence: async () => (atMac = isAtMac(rpcServer?.appConnected() ?? false, await hidIdleMs())),
     runner: {
       onNotification: (fn) => runner.onNotification(fn),
       list: (include) => runner.list(include),

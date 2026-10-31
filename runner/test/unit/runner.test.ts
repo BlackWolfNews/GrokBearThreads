@@ -141,6 +141,32 @@ test('idle release after 30 minutes, then the next send resumes the session', as
   assert.equal(h.runner.get(thread.id).costUsd, 0.005);
 });
 
+test('a message from the phone tells the agent so, and where Mike is; the transcript keeps what he typed', async () => {
+  let atMac: boolean | undefined;
+  const h = makeHarness(undefined, {}, { atMac: () => atMac });
+  const { thread, turnId } = create(h, { origin: 'phone' });
+  const s = h.adapter.last;
+  // Presence not checked yet: just where it came from.
+  assert.deepEqual(s.sent, [{ id: turnId, text: '[Sent from the iPhone app]\nFix the tests\nmore detail here', images: [] }]);
+  s.init();
+  // Steered into the running turn, while he's away.
+  atMac = false;
+  h.runner.send(thread.id, 'on the bus', [], { origin: 'phone' });
+  assert.equal(s.sent[1].text, '[Sent from the iPhone app, away from the Mac]\non the bus');
+  // Typed at the Mac: nothing added.
+  h.runner.send(thread.id, 'back at my desk');
+  assert.equal(s.sent[2].text, 'back at my desk');
+  s.result('completed', 0.01);
+  await tick();
+  // A new turn, sent from the phone at the desk.
+  atMac = true;
+  h.runner.send(thread.id, 'from the couch', [], { origin: 'phone' });
+  await tick();
+  assert.equal(h.adapter.last.sent.at(-1)?.text, '[Sent from the iPhone app, at the Mac]\nfrom the couch');
+  const typed = h.events(thread.id).filter((e) => e.type === 'user.message').map((e) => e.text);
+  assert.deepEqual(typed, ['Fix the tests\nmore detail here', 'on the bus', 'back at my desk', 'from the couch']);
+});
+
 test('a send during a turn goes into it: shown at once, handed to the CLI, answered by that turn', () => {
   const h = makeHarness();
   const { thread, turnId } = create(h);
