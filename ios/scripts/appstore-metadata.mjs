@@ -181,6 +181,9 @@ async function appStoreVersion(app) {
   const want = {
     description: meta.description, keywords: meta.keywords, promotionalText: meta.promotionalText,
     supportUrl: meta.supportUrl, marketingUrl: meta.marketingUrl,
+    // App Store Connect refuses What's New on an app's first version, so it's only sent when
+    // metadata.json has one (from 1.0.1 on).
+    ...(meta.whatsNew ? { whatsNew: meta.whatsNew } : {}),
   };
   if (loc) await patchAttrs("appStoreVersionLocalizations", loc.id, `version[${meta.locale}]`, loc.attributes, want);
   else {
