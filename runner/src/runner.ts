@@ -272,6 +272,10 @@ type Runtime = {
   carried?: ThreadRecord['handoff'];
   deleted?: boolean; // anything the old CLI still reports is dropped
   turn?: Turn;
+  // When the live CLI last said anything, and whether it looks frozen
+  // (frozen-cli.ts): the check's clock, and what an interrupt has to know.
+  lastOutputAt?: number;
+  frozen?: boolean;
   tasks: BackgroundTask[]; // background work the live CLI is running
   // The version of the CLI running the live session, from its cliVersion
   // output (Codex reports it; Claude doesn't yet).
@@ -1030,6 +1034,56 @@ export class Runner {
       out.push({ threadId: rec.id, sessionId: rec.nativeSessionId, tasks: rt.tasks });
     }
     return out;
+  }
+
+  // Claude turns the CLI has said nothing in for a while, for the frozen
+  // CLI check (frozen-cli.ts). Not one waiting on Mike's approval: that's
+  // quiet because of him, and the CLI is fine.
+  quietTurns(minMs: number): { threadId: string; turnId: string; sessionId: string; quietMs: number }[] {
+    const now = this.clock.now();
+    const out: { threadId: string; turnId: string; sessionId: string; quietMs: number }[] = [];
+    for (const { rec, rt } of this.threads.values()) {
+      const turn = rt.turn;
+      if (!turn || rt.deleted || !rt.session || rt.closing || rec.provider !== 'claude' || !rec.nativeSessionId) continue;
+      if (turn.auto && !turn.cliStarted) continue;
+      if (rec.status === 'waiting') continue;
+      const quietMs = now - Math.max(turn.startedAt, rt.lastOutputAt ?? 0);
+      if (quietMs >= minMs) out.push({ threadId: rec.id, turnId: turn.turnId, sessionId: rec.nativeSessionId, quietMs });
+    }
+    return out;
+  }
+
+  // Says so in the thread and puts it in Needs you, as the agent can't: a
+  // frozen CLI isn't reading anything.
+  cliFrozen(threadId: string, turnId: string, text: string): void {
+    const st = this.threads.get(threadId);
+    if (!st || st.rt.turn?.turnId !== turnId) return;
+    st.rt.frozen = true;
+    st.rec.forceUnread = true;
+    this.emit(st, { type: 'system.note', text }, turnId);
+    this.markDirty(st);
+  }
+
+  cliMovingAgain(threadId: string, turnId: string, text: string): void {
+    const st = this.threads.get(threadId);
+    if (!st) return;
+    st.rt.frozen = false;
+    st.rec.forceUnread = false;
+    // A turn that has ended meanwhile (stopped by hand) has nothing to add.
+    if (st.rt.turn?.turnId === turnId) this.emit(st, { type: 'system.note', text }, turnId);
+    this.markDirty(st);
+  }
+
+  // Ends the turn and stops the CLI. TERM can't reach a process blocked in
+  // the kernel, but the spawner follows it with KILL (proc.ts).
+  stopFrozenCli(threadId: string, turnId: string, text: string): void {
+    const st = this.threads.get(threadId);
+    if (!st || st.rt.turn?.turnId !== turnId) return;
+    const session = st.rt.session;
+    st.rt.frozen = false;
+    st.rec.forceUnread = false;
+    this.failTurn(st, text);
+    session?.kill();
   }
 
   // The summary's background list: what the CLI is still running, then
@@ -2248,6 +2302,7 @@ export class Runner {
     const sink: SessionSink = {
       output: (o) => {
         if (rt.generation !== gen) return;
+        rt.lastOutputAt = this.clock.now();
         try {
           this.onOutput(st, o);
         } catch (e) {
@@ -2881,6 +2936,7 @@ export class Runner {
     const missing = err && (err instanceof SessionNotFoundError || err.name === 'SessionNotFoundError' || /no conversation found/i.test(err.message));
     if (err && !rt.started && !missing && rt.releasedGen !== gen) this.tellStarted(rec.provider, rt.startVersion, false);
     rt.session = undefined;
+    rt.frozen = false;
     rt.tasks = [];
     rt.finished = [];
     rt.taskEndedInTurn = false;
@@ -2976,6 +3032,8 @@ export class Runner {
       if (rt.turn !== turn) return;
       this.log.warn('the CLI did not end an interrupted turn; ending it', { threadId });
       this.failTurn(st, 'Interrupted.');
+      // It'd never read the next message either.
+      if (rt.frozen) session.kill();
     }, INTERRUPT_GRACE_MS);
     session.interrupt().catch((e: unknown) => {
       // Before the CLI has initialised there's nothing to interrupt; stop it.

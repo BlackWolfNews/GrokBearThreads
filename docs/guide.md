@@ -431,6 +431,12 @@ the thread runs on.
   can change your mind later in System Settings > Privacy & Security >
   Files and Folders. Starting threads in `~/ThreadbearThreads` keeps these prompts
   away until you choose a folder that needs them.
+- **A Mac nobody's sitting at.** The agent waits for that answer, so on a
+  second Mac a folder prompt can hold a thread up with nobody there to click.
+  Give Threadbear Runner Full Disk Access on that Mac, in System Settings >
+  Privacy & Security, and the prompts stop. If a thread does get stuck like
+  this, it says so after a minute or two and goes in Needs you. Five minutes
+  later Threadbear stops the turn, and your next message carries on from there.
 
 ## Your phone and a browser
 <!-- slug: phone-and-browser -->

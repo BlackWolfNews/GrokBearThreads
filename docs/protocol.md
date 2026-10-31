@@ -1061,6 +1061,38 @@ the agent to stop any that are stuck and to ask Mike if it can't tell.
 Jobs it has been told about are kept in `stuck-jobs.json` in the data
 dir for a day, so a runner restart doesn't tell it again.
 
+### Frozen CLIs
+
+A CLI can freeze on something only a person can answer: on 31 Oct 2026 a
+phone thread on Bruce sat for 11 minutes with its main thread in `open(2)`,
+behind a macOS privacy dialog nobody was at the Mac to click. The agent
+can't say so, as it isn't running. So every 30 seconds the runner
+(frozen-cli.ts) looks for Claude turns whose CLI has said nothing for a
+minute, leaving out any waiting on an approval, and runs macOS's `sample`
+for a second on the CLI (the process whose arguments carry its session id).
+A turn that seems fine is looked at less and less, up to every 5 minutes.
+Commands aren't sampled: the CLI moves one that blocks to the background
+after 2 minutes and tells the agent, which can say so.
+
+Stuck means the main thread spent at least 90% of the sample in one file
+system call (`open`, `stat`, `getattrlist`, `getdirentries` and so on), at
+two looks in a row. A CLI waiting on the model or a command sits in
+`kevent`, and doesn't count.
+
+The thread then gets a `system.note` saying what's stuck, on which Mac, and
+what to do, and goes in Needs you (`forceUnread`). If the CLI says anything
+after that, a second note says it's moving again and it leaves Needs you. A
+CLI still stuck 5 minutes after the note has its turn failed with an `error`
+saying why, and is stopped; the next message resumes the session in a new
+CLI. Interrupting a turn whose CLI is known to be frozen stops the
+CLI too, as it would never read the next message. Codex threads aren't
+looked at.
+
+The prompt itself is about the runner: macOS blames the LaunchAgent's
+program, `Threadbear Runner.app`, for everything under it, CLI included, so
+answering once holds across CLI updates. Full Disk Access for that app stops
+the folder prompts altogether, which a Mac nobody sits at needs.
+
 ## Settings and models
 
 The runner makes small model calls of its own (classify, extract,
