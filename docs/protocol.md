@@ -2497,6 +2497,8 @@ the mirror back as state. The Mac app doesn't use it.
   `turn.completed` (`completed`, `needs: "nothing"`), all under one
   `turnId`, and marks it seen, since Mike has heard it. The title comes
   from the question, then a model title with the answer as the reply.
+  The thread is set to Haiku when the runner has a Claude login, as a
+  spoken follow-up wants a quick reply; otherwise the account's default.
   The first message sent to it starts a fresh session with a handoff
   note saying the thread began as a quick ask that a fast model answered
   (see `threads.update` for the note). Like `create`, it finishes with

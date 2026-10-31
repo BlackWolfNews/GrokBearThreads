@@ -47,6 +47,16 @@ test('a quick ask with no sources has just the answer', () => {
   assert.equal(text, ask.answer);
 });
 
+test('a follow-up runs on Haiku, so a spoken question gets a quick reply', async () => {
+  const h = makeHarness();
+  const { thread } = h.runner.quickAsk(ask);
+  assert.equal(thread.model, 'claude-haiku-5-5');
+  h.runner.send(thread.id, 'How big is the other one?');
+  await tick();
+  assert.equal(h.adapter.last.opts.model, 'claude-haiku-5-5');
+  assert.equal(h.events(thread.id).some((e) => e.type === 'system.note' && /isn't a/.test(e.text)), false);
+});
+
 test("a follow-up starts a fresh session told the thread began as a quick ask", async () => {
   const h = makeHarness();
   const { thread } = h.runner.quickAsk(ask);

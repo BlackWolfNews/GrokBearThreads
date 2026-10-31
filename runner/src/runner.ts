@@ -81,7 +81,7 @@ import { copySessionTranscript, subagentTranscriptPath } from './transcripts.ts'
 import { historyItems, selectHistory } from './handoff-history.ts';
 import { readSubagentTranscript } from './adapters/claude/subagents.ts';
 import { fileContext } from './adapters/claude/normalize.ts';
-import type { Models } from './models/index.ts';
+import { HAIKU, type Models } from './models/index.ts';
 import { EXPLAIN_SYSTEM, RECENT_CHARS, RECENT_MESSAGES, explainPrompt } from './explain.ts';
 import type { ExplainTurn } from './explain.ts';
 import { SAID_MAX, WAKE_SYSTEM, awayFor, hibernateNote, readWakeAnswer, wakePrompt } from './wake-when.ts';
@@ -1533,7 +1533,12 @@ export class Runner {
     const question = params.question.trim();
     const answer = params.answer.trim();
     if (!question || !answer) throw new RpcError(ErrorCode.badParams, 'question and answer required');
-    const { st, notes } = this.makeThread({ text: question, origin: 'phone', worktree: false });
+    // A follow-up is usually spoken and waited on, so it starts on the fastest
+    // model (timed 31 Oct: about 3 s, Codex's GPT-6-Luna 4 to 5.5 s). Without a
+    // Claude login it's left to the account's default, as naming a model the
+    // login can't run would write a note into the thread.
+    const model = this.usableAccounts().some((a) => a.provider === 'claude') ? HAIKU : undefined;
+    const { st, notes } = this.makeThread({ text: question, origin: 'phone', worktree: false, ...(model ? { model } : {}) });
     const { rec } = st;
     const turnId = crypto.randomUUID();
     const sources = (params.sources ?? []).filter((x) => x?.url).slice(0, 10);
