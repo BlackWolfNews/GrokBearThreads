@@ -922,6 +922,25 @@ export class ConvexSync {
     this.dirty.set(t.id, doc);
   }
 
+  // A thread the phone made has its row written before its command
+  // finishes: the phone opens the thread as soon as it has the id, and a
+  // row still waiting for the next flush (SYNC_COALESCE_MS) reads to it as
+  // a deleted thread. If this write fails, the next flush tries again.
+  private async writeRowNow(threadId: string): Promise<void> {
+    try {
+      this.mark(this.deps.runner.get(threadId));
+      const doc = this.dirty.get(threadId);
+      if (!doc) return;
+      const row = forBackend(doc, this.backendApiVersion ?? 0);
+      await this.post('mutation', 'sync:upsertThreads', { key: this.deps.key, threads: [row] });
+      this.sent.set(threadId, JSON.stringify(row));
+      if (this.dirty.get(threadId) === doc) this.dirty.delete(threadId);
+      this.written++;
+    } catch (e) {
+      this.deps.log.debug('new thread row not written yet', { threadId, error: String(e) });
+    }
+  }
+
   // A thread just shared has its pictures looked for; one no longer shared
   // has them dropped. At start every shared thread is looked through (what's
   // up already is skipped), and one shared then stopped while the runner
@@ -1452,6 +1471,7 @@ export class ConvexSync {
           if ((e as { code?: unknown })?.code === ErrorCode.threadNotFound) this.deps.log.info('phone command for a thread that has gone', { kind: c.kind, threadId: c.threadId });
           else this.deps.log.warn('phone command failed', { kind: c.kind, threadId: c.threadId, error: note });
         }
+        if (resultThreadId) await this.writeRowNow(resultThreadId);
         await this.post('mutation', 'sync:finishCommand', { key: this.deps.key, commandId: c.commandId, ok, ...(note ? { note } : {}), ...(resultThreadId ? { resultThreadId } : {}) });
       } catch (e) {
         // Couldn't take or finish it: the next update of the list brings

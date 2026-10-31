@@ -563,6 +563,11 @@ test('commands: each pending one is taken once, applied through the runner as fr
   assert.ok(finished.every((f) => f.ok === true && f.key === 'k'));
   assert.ok(typeof finished[2]!.resultThreadId === 'string');
   assert.equal(h.runner.get(finished[2]!.resultThreadId as string).title, 'a new one');
+  // Its row is in Convex before the phone hears the id, or the phone opens
+  // the thread to "This thread's gone".
+  const finishAt = calls.findIndex((c) => c.fn === 'sync:finishCommand' && c.args.commandId === 'c3');
+  const rowAt = calls.findIndex((c) => c.fn === 'sync:upsertThreads' && (c.args.threads as { threadId: string }[]).some((r) => r.threadId === finished[2]!.resultThreadId));
+  assert.ok(rowAt >= 0 && rowAt < finishAt, 'the new row is written before the command finishes');
   // The message the phone sent is in the transcript, marked as from the phone.
   const ev = h.events(t.id).find((e: { type: string; text?: string }) => e.type === 'user.message' && e.text === 'from my phone') as { origin?: string };
   assert.equal(ev?.origin, 'phone');

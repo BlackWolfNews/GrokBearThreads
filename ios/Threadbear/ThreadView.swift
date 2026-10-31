@@ -197,18 +197,28 @@ struct ThreadView: View {
 
     private func follow() async {
         guard let backend = model.backend else { return }
+        // A thread made from the phone can open a moment before the Mac has
+        // written its row. Until it's been seen once, "not found" means "not
+        // yet": ask again each second for a while before calling it gone.
+        var waited = 0
         do {
-            for try await value in backend.thread(threadId) {
-                detail = value
-                loaded = true
-                if let thread = value?.thread, thread.unread || thread.needsYou, !InboxSections.needsAnswer(thread), !markedSeen {
-                    // Opening it reads it, as on the Mac. Once per visit, so a
-                    // reply arriving while it's open is read too but not spammed.
-                    markedSeen = true
-                    _ = try? await backend.update(threadId: threadId, change: .markSeen)
-                } else if value?.thread.unread == false {
-                    markedSeen = false
+            while !Task.isCancelled {
+                for try await value in backend.thread(threadId) {
+                    if value == nil, detail == nil, waited < 15 { continue }
+                    detail = value
+                    loaded = true
+                    if let thread = value?.thread, thread.unread || thread.needsYou, !InboxSections.needsAnswer(thread), !markedSeen {
+                        // Opening it reads it, as on the Mac. Once per visit, so a
+                        // reply arriving while it's open is read too but not spammed.
+                        markedSeen = true
+                        _ = try? await backend.update(threadId: threadId, change: .markSeen)
+                    } else if value?.thread.unread == false {
+                        markedSeen = false
+                    }
                 }
+                guard !loaded else { return }
+                waited += 1
+                try? await Task.sleep(for: .seconds(1))
             }
         } catch {
             model.report(error)
