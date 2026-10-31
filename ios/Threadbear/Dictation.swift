@@ -19,6 +19,8 @@ final class Dictation {
     private var task: SFSpeechRecognitionTask?
     private var onDeviceBroken = false
     private var generation = 0
+    /// Whether start has touched the audio session and mic, so stop has something to undo.
+    private var holdsAudio = false
 
     /// `onText` gets the whole transcript so far, every time it changes.
     func start(onText: @escaping (String) -> Void) async {
@@ -34,6 +36,7 @@ final class Dictation {
         stop()
         generation += 1
         let current = generation
+        holdsAudio = true
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.record, mode: .measurement, options: .duckOthers)
@@ -102,6 +105,12 @@ final class Dictation {
 
     func stop() {
         generation += 1
+        // Every send and every closed thread lands here, mic used or not. Going
+        // on would make the engine's input node, which sets up the mic hardware,
+        // and deactivate a session we never took, all while another app may be
+        // playing: Mike's podcast paused for a moment on each send (31 Oct).
+        guard holdsAudio else { return }
+        holdsAudio = false
         if engine.isRunning { engine.stop() }
         engine.inputNode.removeTap(onBus: 0)
         request?.endAudio()
