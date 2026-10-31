@@ -140,7 +140,8 @@ extension AppModel {
         let settings = ThreadSettings(app: self, thread: thread)
         var state = ScheduleEditorState()
         if let draftKey, let draft = drafts[draftKey] {
-            state.text = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            // Pictures can't go with a schedule, so their chips stay out of its words.
+            state.text = InlinePictures.words(draft.text).trimmingCharacters(in: .whitespacesAndNewlines)
             state.draftImages = draft.images.count
             state.draftKey = draftKey
         }

@@ -12,6 +12,7 @@ import type { Logger } from '../../log.ts';
 import { ClaudeNormalizer, fileContext } from './normalize.ts';
 import { groupSpawner, type ProcessRegistry } from '../../proc.ts';
 import { prepareImageForModel } from '../../media.ts';
+import { placePictures } from '../../pictures.ts';
 import { toolTitle, truncateInput } from '../../tools.ts';
 import { RUNNER_VERSION } from '../../config.ts';
 import { stripModelSuffix } from '../../accounts.ts';
@@ -444,12 +445,14 @@ class ClaudeSession implements AgentSession {
     this.normalizer.sent();
     // In case the CLI ran no Stop hook after the last end_turn.
     this.endTurnTaken = false;
-    const content: Record<string, unknown>[] = [];
-    for (const img of input.images) {
-      const { data, mediaType } = prepareImageForModel(img, this.opts.tmpDir);
-      content.push({ type: 'image', source: { type: 'base64', media_type: mediaType, data: data.toString('base64') } });
-    }
-    if (input.text || content.length === 0) content.push({ type: 'text', text: input.text });
+    // Each picture where its [Picture N] marker is in the words, or before
+    // them when nothing places it (pictures.ts).
+    const content: Record<string, unknown>[] = placePictures(input.text, input.images).map((part) => {
+      if ('text' in part) return { type: 'text', text: part.text };
+      const { data, mediaType } = prepareImageForModel(part.image, this.opts.tmpDir);
+      return { type: 'image', source: { type: 'base64', media_type: mediaType, data: data.toString('base64') } };
+    });
+    if (content.length === 0) content.push({ type: 'text', text: input.text });
     this.input.push({
       type: 'user',
       message: { role: 'user', content: content.length === 1 && content[0].type === 'text' ? input.text : (content as never) },

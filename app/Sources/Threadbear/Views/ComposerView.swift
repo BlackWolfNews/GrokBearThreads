@@ -5,6 +5,8 @@ import UniformTypeIdentifiers
 
 /// The message box: a rounded card the width of the transcript column.
 /// Return sends, Shift-Return adds a line (carrying a markdown list on), paste, drop or "+" adds images,
+/// each as a chip in the words where the cursor is (PictureChips.swift)
+/// with its thumbnail in the strip over them,
 /// and the row under the text holds the account, model and permission
 /// chips (and the folder's, away from the default) and send (or Stop).
 struct ComposerView: View {
@@ -17,6 +19,7 @@ struct ComposerView: View {
     var controller: TranscriptController? = nil
     @State private var height: CGFloat = ComposerTextField.minHeight
     @State private var importing = 0
+    @State private var handle = ComposerHandle()
 
     static var cornerRadius: CGFloat { zoomed(20) }
     static var padding: CGFloat { zoomed(14) }
@@ -24,8 +27,10 @@ struct ComposerView: View {
     private var draftKey: String { thread?.id ?? "new" }
 
     var body: some View {
+        // Normalized, so a picture added from outside the box (an ask's
+        // box, a schedule left behind) shows as a chip too.
         let draft = Binding<Draft>(
-            get: { app.drafts[draftKey] ?? Draft() },
+            get: { (app.drafts[draftKey] ?? Draft()).normalized },
             set: { app.drafts[draftKey] = $0 }
         )
         // Answers picked on the open card of asks go with the message.
@@ -72,18 +77,19 @@ struct ComposerView: View {
                 AnswerChips(thread: thread, picks: picks)
             }
             if !draft.wrappedValue.images.isEmpty || importing > 0 {
-                AttachmentStrip(images: draft.images, importing: importing)
+                AttachmentStrip(images: draft.wrappedValue.images, importing: importing) { removePicture(at: $0, from: draft) }
                     .disabled(creating)
                     .opacity(creating ? 0.5 : 1)
             }
             ComposerTextField(
-                text: draft.text,
+                draft: draft,
                 height: $height,
                 focusTrigger: app.focusRequests[draftKey] ?? 0,
                 placeholder: placeholder(picks, followUps: followUps, needsYou: needsYou),
                 onSend: { send() },
                 onReturnWhenEmpty: { returnWhenEmpty(draft.wrappedValue) },
-                onImages: { urls in attach(urls, to: draft) },
+                pictures: ComposerTextView.Pictures(allowed: { picturesAllowed() }, importOne: { await importPicture($0) }),
+                handle: handle,
                 onEscape: { cancelEdit() },
                 editable: !creating
             )
@@ -180,22 +186,42 @@ struct ComposerView: View {
         return true
     }
 
-    /// Paste, drop and the "+" button all end up here: each file goes
-    /// through the runner's `media.import` into the draft.
-    private func attach(_ urls: [URL], to draft: Binding<Draft>) {
-        guard !urls.isEmpty else { return }
-        // A picture this Mac's runner keeps would be a path another
-        // runner hasn't got.
+    /// Whether pictures can go in this box, saying why not when they can't:
+    /// a picture this Mac's runner keeps would be a path another runner
+    /// hasn't got.
+    private func picturesAllowed() -> Bool {
         if let name = thread.flatMap(app.runnerName(of:)) ?? (thread == nil ? app.newThreadRunner?.name : nil) {
             app.errorMessage = "Pictures can't go to \(name) from this Mac yet."
-            return
+            return false
         }
+        return true
+    }
+
+    /// Paste, drop and the "+" button put a chip in the words, and each
+    /// picture goes through the runner's `media.import` (here) meanwhile.
+    private func importPicture(_ url: URL) async -> ImageRef? {
+        importing += 1
+        let ref = await app.importImages([url]).first
+        importing -= 1
+        return ref
+    }
+
+    /// With no text view to put them in, pictures go at the end.
+    private func attach(_ urls: [URL], to draft: Binding<Draft>) {
+        guard !urls.isEmpty, picturesAllowed() else { return }
         importing += urls.count
         Task {
             let refs = await app.importImages(urls)
             importing -= urls.count
-            draft.wrappedValue.images += refs
+            draft.wrappedValue.append(refs)
         }
+    }
+
+    /// The strip's remove button: through the words, so the chip goes too,
+    /// as one undo, and the cursor stays where it was.
+    private func removePicture(at index: Int, from draft: Binding<Draft>) {
+        if handle.textView?.removePicture(at: index) == true { return }
+        draft.wrappedValue = draft.wrappedValue.removingImage(at: index)
     }
 
     private func chooseImages(for draft: Binding<Draft>) {
@@ -206,7 +232,13 @@ struct ComposerView: View {
         panel.allowedContentTypes = [.image]
         panel.prompt = "Add"
         let finish = { (response: NSApplication.ModalResponse) in
-            if response == .OK { attach(panel.urls, to: draft) }
+            guard response == .OK else { return }
+            // Chips where the cursor was, as a paste would put them.
+            if let textView = handle.textView {
+                textView.insertPictures(panel.urls)
+            } else {
+                attach(panel.urls, to: draft)
+            }
         }
         if let window = NSApp.keyWindow {
             panel.beginSheetModal(for: window, completionHandler: finish)
@@ -247,13 +279,14 @@ private struct EditingBanner: View {
 }
 
 private struct AttachmentStrip: View {
-    @Binding var images: [ImageRef]
+    let images: [ImageRef]
     let importing: Int
+    let onRemove: (Int) -> Void
 
     var body: some View {
         HStack(spacing: zoomed(8)) {
             ForEach(Array(images.enumerated()), id: \.offset) { index, image in
-                AttachmentThumbnail(path: image.path) { images.remove(at: index) }
+                AttachmentThumbnail(path: image.path) { onRemove(index) }
             }
             // One placeholder per image still being imported, so the strip
             // doesn't jump when they arrive.
@@ -324,17 +357,26 @@ private struct AsyncThumbnail: View {
     }
 }
 
+/// The composer's text view, for the "+" button and the strip's remove
+/// buttons, which work on the words where the cursor is.
+final class ComposerHandle {
+    weak var textView: ComposerTextView?
+}
+
 /// NSTextView-backed field that grows with its text: two lines at least,
 /// ten at most, then it scrolls.
 struct ComposerTextField: NSViewRepresentable {
-    @Binding var text: String
+    /// Read straight off the text: its words, a mark for each picture's
+    /// chip, and the pictures in the chips' order.
+    @Binding var draft: Draft
     @Binding var height: CGFloat
     var focusTrigger: Int
     var placeholder: String
     var onSend: () -> Void
     /// Return with nothing typed: true if it did something.
     var onReturnWhenEmpty: () -> Bool = { false }
-    var onImages: ([URL]) -> Void
+    var pictures: ComposerTextView.Pictures?
+    var handle: ComposerHandle?
     /// Esc: true if it did something (left an edit).
     var onEscape: () -> Bool = { false }
     /// False while what's in it is being sent (a new thread being made).
@@ -369,6 +411,7 @@ struct ComposerTextField: NSViewRepresentable {
         scroll.scrollerStyle = .overlay
         scroll.borderType = .noBorder
         context.coordinator.textView = textView
+        handle?.textView = textView
         context.coordinator.watchWidth(of: scroll)
         DispatchQueue.main.async { context.coordinator.updateHeight() }
         return scroll
@@ -409,12 +452,14 @@ struct ComposerTextField: NSViewRepresentable {
         guard let textView = scroll.documentView as? ComposerTextView else { return }
         textView.onSend = onSend
         textView.onReturnWhenEmpty = onReturnWhenEmpty
-        textView.onImages = onImages
+        textView.pictures = pictures
         textView.onEscape = onEscape
         textView.placeholder = placeholder
+        handle?.textView = textView
         if textView.isEditable != editable { textView.isEditable = editable }
-        if textView.string != text {
-            textView.replaceText(text)
+        let wanted = draft.normalized
+        if textView.draftNow != wanted {
+            textView.show(wanted)
             context.coordinator.updateHeight()
         }
         if context.coordinator.lastFocus != focusTrigger {
@@ -460,7 +505,7 @@ struct ComposerTextField: NSViewRepresentable {
 
         func textDidChange(_ notification: Notification) {
             guard let textView else { return }
-            parent.text = textView.string
+            parent.draft = textView.draftNow
             updateHeight()
         }
 
@@ -481,7 +526,13 @@ final class ComposerTextView: NSTextView {
     var onSend: (() -> Void)?
     var onReturnWhenEmpty: (() -> Bool)?
     var onEscape: (() -> Bool)?
+    /// Pictures pasted or dropped in an ask's box, which keeps them beside
+    /// its words (AskAnswerBox). The composer sets `pictures` instead.
     var onImages: (([URL]) -> Void)?
+    /// Set in the composer: pictures pasted, dropped or chosen become chips
+    /// in the words where the cursor is (PictureAttachment), each copied in
+    /// through the runner as it shows.
+    var pictures: Pictures?
     var placeholder = "" {
         didSet { if placeholder != oldValue { needsDisplay = true } }
     }
@@ -511,9 +562,7 @@ final class ComposerTextView: NSTextView {
     /// font and line spacing are put back on the whole text.
     func replaceText(_ text: String) {
         string = text
-        if let storage = textStorage, storage.length > 0 {
-            storage.setAttributes(ComposerTextField.attributes, range: NSRange(location: 0, length: storage.length))
-        }
+        restyle()
     }
 
     /// The font and line height at the current zoom, for what's typed
@@ -523,9 +572,22 @@ final class ComposerTextView: NSTextView {
         font = ComposerTextField.font
         defaultParagraphStyle = attributes[.paragraphStyle] as? NSParagraphStyle
         typingAttributes = attributes
-        if let storage = textStorage, storage.length > 0 {
-            storage.setAttributes(attributes, range: NSRange(location: 0, length: storage.length))
+        restyle()
+    }
+
+    /// The composer's font and line spacing on the whole text, keeping the
+    /// pictures' chips (setAttributes alone would drop them).
+    private func restyle() {
+        guard let storage = textStorage, storage.length > 0 else { return }
+        let whole = NSRange(location: 0, length: storage.length)
+        var chips: [(NSRange, Any)] = []
+        storage.enumerateAttribute(.attachment, in: whole) { value, range, _ in
+            if let value { chips.append((range, value)) }
         }
+        storage.beginEditing()
+        storage.setAttributes(ComposerTextField.attributes, range: whole)
+        for (range, chip) in chips { storage.addAttribute(.attachment, value: chip, range: range) }
+        storage.endEditing()
     }
 
     override func keyDown(with event: NSEvent) {
@@ -569,7 +631,9 @@ final class ComposerTextView: NSTextView {
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        if takeImages(from: sender.draggingPasteboard) { return true }
+        // Where it's dropped, as a paste goes where the cursor is.
+        let at = characterIndexForInsertion(at: convert(sender.draggingLocation, from: nil))
+        if takeImages(from: sender.draggingPasteboard, at: NSRange(location: at, length: 0)) { return true }
         return super.performDragOperation(sender)
     }
 
@@ -586,11 +650,13 @@ final class ComposerTextView: NSTextView {
     }
 
     /// Image files go straight to `media.import`; raw image data (a
-    /// screenshot on the clipboard) is written to a temp PNG first.
-    func takeImages(from pasteboard: NSPasteboard) -> Bool {
+    /// screenshot on the clipboard) is written to a temp PNG first. In the
+    /// composer they go in as chips in place of `range` (the selection, for
+    /// a paste).
+    func takeImages(from pasteboard: NSPasteboard, at range: NSRange? = nil) -> Bool {
         let urls = imageURLs(pasteboard)
         if !urls.isEmpty {
-            onImages?(urls)
+            deliver(urls, at: range)
             return true
         }
         // Text with an image flavour (rich text from a browser) stays text.
@@ -608,10 +674,18 @@ final class ComposerTextView: NSTextView {
         let url = folder.appendingPathComponent("pasted-\(UUID().uuidString.prefix(8)).png")
         do {
             try png.write(to: url)
-            onImages?([url])
+            deliver([url], at: range)
             return true
         } catch {
             return false
+        }
+    }
+
+    private func deliver(_ urls: [URL], at range: NSRange?) {
+        if pictures != nil {
+            insertPictures(urls, replacing: range)
+        } else {
+            onImages?(urls)
         }
     }
 
@@ -627,6 +701,7 @@ final class ComposerTextView: NSTextView {
     private var wasEmpty = true
 
     override func didChangeText() {
+        renumberPictures()
         super.didChangeText()
         if string.isEmpty != wasEmpty {
             wasEmpty = string.isEmpty
@@ -652,5 +727,260 @@ final class ComposerTextView: NSTextView {
             let rect = NSRect(x: x, y: textContainerInset.height, width: max(0, bounds.width - x), height: ComposerTextField.lineHeight)
             NSAttributedString(string: placeholder, attributes: attributes).draw(with: rect, options: [.usesLineFragmentOrigin])
         }
+    }
+}
+
+// MARK: Pictures among the words
+
+/// What the composer's pictures are in the text (docs/protocol.md,
+/// "Pictures in a message"): each a `PictureAttachment` on a U+FFFC, the
+/// k-th standing for the draft's k-th picture, so the draft is read
+/// straight off the text and undo, cut and paste carry the pictures along.
+extension ComposerTextView {
+    struct Pictures {
+        /// Whether pictures can go in at all; says why not itself.
+        var allowed: () -> Bool
+        /// Copies one in through the runner (`media.import`); nil if it couldn't.
+        var importOne: @MainActor (URL) async -> ImageRef?
+    }
+
+    /// Chips and their pictures copied or cut in the composer, so a paste
+    /// there brings the pictures back, not just their marks.
+    struct Clip: Codable {
+        var text: String
+        var images: [ImageRef]
+    }
+
+    static let clipType = NSPasteboard.PasteboardType("com.mikerosoft.threadbear.composer-pictures")
+
+    private var whole: NSRange { NSRange(location: 0, length: textStorage?.length ?? 0) }
+
+    /// What the box holds as a draft: the words, with a mark for each chip
+    /// whose picture is in, and those pictures in order. A chip still being
+    /// copied in isn't part of it yet, nor is a stray U+FFFC pasted as text.
+    var draftNow: Draft { draft(in: whole) }
+
+    func draft(in range: NSRange) -> Draft {
+        guard let storage = textStorage, range.length > 0, NSMaxRange(range) <= storage.length else { return Draft() }
+        let ns = storage.string as NSString
+        var text = ""
+        var images: [ImageRef] = []
+        var last = range.location
+        func words(to end: Int) {
+            guard end > last else { return }
+            text += InlinePictures.words(ns.substring(with: NSRange(location: last, length: end - last)))
+        }
+        storage.enumerateAttribute(.attachment, in: range) { value, run, _ in
+            guard value != nil else { return }
+            words(to: run.location)
+            for i in run.location..<NSMaxRange(run) where ns.character(at: i) == 0xFFFC {
+                if let picture = (storage.attribute(.attachment, at: i, effectiveRange: nil) as? PictureAttachment)?.picture {
+                    text += InlinePictures.markString
+                    images.append(picture)
+                }
+            }
+            last = NSMaxRange(run)
+        }
+        words(to: NSMaxRange(range))
+        return Draft(text: text, images: images)
+    }
+
+    /// A draft in the box (another thread's, or the box emptied after a
+    /// send), its marks drawn as chips. Like `replaceText`, the cursor goes
+    /// to the end.
+    func show(_ draft: Draft) {
+        guard let storage = textStorage else { return }
+        storage.setAttributedString(chips(for: draft.normalized))
+        setSelectedRange(NSRange(location: storage.length, length: 0))
+        renumberPictures()
+        if string.isEmpty != wasEmpty { wasEmpty = string.isEmpty }
+        needsDisplay = true
+    }
+
+    /// A draft's words in the composer's style, each mark a chip for its
+    /// picture.
+    private func chips(for draft: Draft) -> NSAttributedString {
+        let attributes = ComposerTextField.attributes
+        let out = NSMutableAttributedString()
+        var images = draft.images.makeIterator()
+        var run = ""
+        for scalar in draft.text.unicodeScalars {
+            if scalar == InlinePictures.mark {
+                if let picture = images.next() {
+                    out.append(NSAttributedString(string: run, attributes: attributes))
+                    run = ""
+                    out.append(chip(PictureAttachment(picture: picture, source: picture.path)))
+                }
+            } else {
+                run.unicodeScalars.append(scalar)
+            }
+        }
+        out.append(NSAttributedString(string: run, attributes: attributes))
+        return out
+    }
+
+    private func chip(_ attachment: PictureAttachment) -> NSAttributedString {
+        attachment.owner = self
+        var attributes = ComposerTextField.attributes
+        attributes[.attachment] = attachment
+        return NSAttributedString(string: InlinePictures.markString, attributes: attributes)
+    }
+
+    /// Chips for `urls` in place of `range` (the selection by default),
+    /// with a space either side, as T3 Code does. Each is copied in through
+    /// the runner as it shows, dimmed until it's in; one that can't be read
+    /// goes again.
+    func insertPictures(_ urls: [URL], replacing range: NSRange? = nil) {
+        guard !urls.isEmpty else { return }
+        guard let pictures else {
+            onImages?(urls)
+            return
+        }
+        guard pictures.allowed(), let storage = textStorage else { return }
+        let ns = storage.string as NSString
+        let picked = range ?? selectedRange()
+        let location = min(picked.location, ns.length)
+        let replace = NSRange(location: location, length: min(picked.length, ns.length - location))
+        let attributes = ComposerTextField.attributes
+        let space = NSAttributedString(string: " ", attributes: attributes)
+        func isSpace(_ index: Int) -> Bool {
+            guard index >= 0, index < ns.length, let scalar = Unicode.Scalar(ns.character(at: index)) else { return false }
+            return CharacterSet.whitespacesAndNewlines.contains(scalar)
+        }
+        let attachments = urls.map { PictureAttachment(picture: nil, source: $0.path) }
+        let piece = NSMutableAttributedString()
+        if location > 0, !isSpace(location - 1) { piece.append(space) }
+        for (i, attachment) in attachments.enumerated() {
+            if i > 0 { piece.append(space) }
+            piece.append(chip(attachment))
+        }
+        if !isSpace(NSMaxRange(replace)) { piece.append(space) }
+        guard shouldChangeText(in: replace, replacementString: piece.string) else { return }
+        storage.replaceCharacters(in: replace, with: piece)
+        didChangeText()
+        setSelectedRange(NSRange(location: location + piece.length, length: 0))
+        window?.makeFirstResponder(self)
+        for (attachment, url) in zip(attachments, urls) {
+            Task { @MainActor [weak self] in
+                let ref = await pictures.importOne(url)
+                self?.settle(attachment, ref)
+            }
+        }
+    }
+
+    /// A chip's picture is in (or couldn't be read). Gone from the words
+    /// by then (undone, deleted, or the box shows another draft now), it's
+    /// dropped.
+    private func settle(_ attachment: PictureAttachment, _ picture: ImageRef?) {
+        guard window != nil, let storage = textStorage, let range = range(of: attachment) else { return }
+        if let picture {
+            attachment.picture = picture
+            needsDisplay = true
+            // The draft takes it now.
+            didChangeText()
+        } else {
+            let gone = withSpace(range)
+            guard shouldChangeText(in: gone, replacementString: "") else { return }
+            storage.replaceCharacters(in: gone, with: "")
+            didChangeText()
+        }
+    }
+
+    /// A chip's range and one space beside it (after, or else before), so
+    /// taking it out doesn't leave two.
+    private func withSpace(_ range: NSRange) -> NSRange {
+        let ns = string as NSString
+        if NSMaxRange(range) < ns.length, ns.character(at: NSMaxRange(range)) == 0x20 {
+            return NSRange(location: range.location, length: range.length + 1)
+        }
+        if range.location > 0, ns.character(at: range.location - 1) == 0x20 {
+            return NSRange(location: range.location - 1, length: range.length + 1)
+        }
+        return range
+    }
+
+    private func range(of attachment: PictureAttachment) -> NSRange? {
+        var found: NSRange?
+        textStorage?.enumerateAttribute(.attachment, in: whole) { value, range, stop in
+            if (value as? PictureAttachment) === attachment {
+                found = NSRange(location: range.location, length: 1)
+                stop.pointee = true
+            }
+        }
+        return found
+    }
+
+    /// Takes out the `index`-th picture that's in (the strip's order) and
+    /// a space beside it, as one undo step. False when there's no such chip.
+    func removePicture(at index: Int) -> Bool {
+        guard let storage = textStorage else { return false }
+        var found: NSRange?
+        var seen = 0
+        storage.enumerateAttribute(.attachment, in: whole) { value, range, stop in
+            guard (value as? PictureAttachment)?.picture != nil else { return }
+            if seen == index {
+                found = NSRange(location: range.location, length: 1)
+                stop.pointee = true
+            }
+            seen += 1
+        }
+        guard let found else { return false }
+        let range = withSpace(found)
+        guard shouldChangeText(in: range, replacementString: "") else { return false }
+        storage.replaceCharacters(in: range, with: "")
+        didChangeText()
+        return true
+    }
+
+    /// Each chip's number is its place among the box's pictures, so the
+    /// chips read 1, 2, 3 left to right whatever was added or taken out.
+    func renumberPictures() {
+        guard let storage = textStorage, let layoutManager else { return }
+        var number = 0
+        storage.enumerateAttribute(.attachment, in: whole) { value, range, _ in
+            guard let attachment = value as? PictureAttachment else { return }
+            number += 1
+            guard attachment.number != number else { return }
+            attachment.number = number
+            // Picture 10 is wider than Picture 9.
+            layoutManager.invalidateLayout(forCharacterRange: range, actualCharacterRange: nil)
+            layoutManager.invalidateDisplay(forCharacterRange: range)
+        }
+    }
+
+    // Copy and cut carry the chips' pictures; anywhere else they read as
+    // the markers the agent would get.
+
+    override func writeSelection(to pboard: NSPasteboard, types: [NSPasteboard.PasteboardType]) -> Bool {
+        let selected = draft(in: selectedRange())
+        guard !selected.images.isEmpty, let data = try? JSONEncoder().encode(Clip(text: selected.text, images: selected.images)) else {
+            return super.writeSelection(to: pboard, types: types)
+        }
+        pboard.declareTypes([Self.clipType, .string], owner: nil)
+        pboard.setData(data, forType: Self.clipType)
+        return pboard.setString(InlinePictures.messageText(selected.text), forType: .string)
+    }
+
+    override var readablePasteboardTypes: [NSPasteboard.PasteboardType] {
+        pictures == nil ? super.readablePasteboardTypes : [Self.clipType] + super.readablePasteboardTypes
+    }
+
+    override func preferredPasteboardType(from availableTypes: [NSPasteboard.PasteboardType], restrictedToTypesFrom allowedTypes: [NSPasteboard.PasteboardType]?) -> NSPasteboard.PasteboardType? {
+        if pictures != nil, availableTypes.contains(Self.clipType), allowedTypes?.contains(Self.clipType) ?? true { return Self.clipType }
+        return super.preferredPasteboardType(from: availableTypes, restrictedToTypesFrom: allowedTypes)
+    }
+
+    override func readSelection(from pboard: NSPasteboard, type: NSPasteboard.PasteboardType) -> Bool {
+        guard type == Self.clipType, pictures != nil, let storage = textStorage,
+              let data = pboard.data(forType: type), let clip = try? JSONDecoder().decode(Clip.self, from: data) else {
+            return super.readSelection(from: pboard, type: type)
+        }
+        let piece = chips(for: Draft(text: clip.text, images: clip.images))
+        let replace = rangeForUserTextChange
+        guard replace.location != NSNotFound, shouldChangeText(in: replace, replacementString: piece.string) else { return false }
+        storage.replaceCharacters(in: replace, with: piece)
+        didChangeText()
+        setSelectedRange(NSRange(location: replace.location + piece.length, length: 0))
+        return true
     }
 }

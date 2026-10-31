@@ -1,4 +1,5 @@
 import AppKit
+import ThreadbearCore
 
 /// Restarting into a new build without the window going away (Mike, 29 Oct:
 /// "restart with a very, very minimal flicker, if none at all").
@@ -280,7 +281,11 @@ final class Handover {
         let state = AppUpdater.restoreState(app: app)
         info["mode"] = state.mode
         info["selection"] = state.selection
-        let drafts = app.drafts.compactMapValues { $0.text.isEmpty ? nil : $0.text }
+        // Words only: a picture's chip would be a mark with no picture behind it.
+        let drafts = app.drafts.compactMapValues { draft in
+            let words = InlinePictures.words(draft.text)
+            return words.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : words
+        }
         if !drafts.isEmpty { info["drafts"] = drafts }
         stopListening()
         listen(Self.doneName, from: pid) { _ in Handover.shared.quit() }

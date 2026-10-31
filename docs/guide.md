@@ -181,7 +181,12 @@ it appear in `~/ThreadbearThreads`.
 Return sends and Shift-Return adds a new line. In a list, Shift-Return
 starts the next item ("2. " after "1. milk", "- " after "- milk"), and
 Shift-Return on an empty item ends the list. You can paste or drop images
-into the composer. Stop (⌘.) ends a turn that's running.
+into the composer, or add them with +. Each one goes in where the cursor
+is (or where you drop it) as a small chip, "Picture 1", "Picture 2", with
+its thumbnail, and the agent gets each picture right there in your words.
+So "this one [Picture 1] should look like this one [Picture 2]" says which
+is which. The thumbnails show over the text too; the cross on one takes it
+and its chip out. Stop (⌘.) ends a turn that's running.
 
 A message shows in the thread as soon as you send it, faded, with a
 spinner beside it until the runner has it (a busy Mac can hold the runner

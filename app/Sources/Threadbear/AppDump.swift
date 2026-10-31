@@ -472,7 +472,8 @@ struct AppDump: Encodable {
         } else {
             settings = newThreadSettings(app)
         }
-        return Composer(draft: key, text: app.drafts[key]?.text ?? "", images: app.drafts[key]?.images.count ?? 0,
+        // Chips as the [Picture N] markers they'll go as, not invisible marks.
+        return Composer(draft: key, text: InlinePictures.messageText(app.drafts[key]?.normalized.text ?? ""), images: app.drafts[key]?.images.count ?? 0,
                         editing: app.editing[key]?.seq,
                         cwd: settings.cwd, account: settings.account, model: settings.model, ask: settings.ask, effort: settings.effort,
                         pool: settings.pool, chip: ThreadSettings(app: app, thread: app.selectedThread).modelChipTitle,

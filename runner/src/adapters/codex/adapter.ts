@@ -28,6 +28,7 @@ import {
 import { CodexApprovals } from './approvals.ts';
 import { CodexTools, dynamicToolSpecs, TOOL_GUIDANCE, type ToolDefinition } from './tools.ts';
 import { CodexNormalizer, limitsFromAccount } from './normalize.ts';
+import { placePictures } from '../../pictures.ts';
 import type {
   CodexNormalizerLike,
   GetAccountRateLimitsResponse,
@@ -287,12 +288,15 @@ export function threadConfig(threadId: string): Record<string, unknown> {
 }
 
 function inputItems(input: UserInput): UserInputItem[] {
-  // Images first, as the paths the runner already copied into media/.
-  // Codex reads and shrinks them itself (spike 6), and the model sees the
-  // path, so "edit this picture" works. No `detail`: "original" costs about
-  // four times the tokens.
-  const items: UserInputItem[] = input.images.map((img) => ({ type: 'localImage', path: img.path }));
-  if (input.text || items.length === 0) items.push({ type: 'text', text: input.text, text_elements: [] });
+  // Images as the paths the runner already copied into media/, each where
+  // its [Picture N] marker is in the words, or before them when nothing
+  // places it (pictures.ts). Codex reads and shrinks them itself (spike 6),
+  // and the model sees the path, so "edit this picture" works. No
+  // `detail`: "original" costs about four times the tokens.
+  const items: UserInputItem[] = placePictures(input.text, input.images).map((part) =>
+    'text' in part ? { type: 'text', text: part.text, text_elements: [] } : { type: 'localImage', path: part.image.path },
+  );
+  if (items.length === 0) items.push({ type: 'text', text: input.text, text_elements: [] });
   return items;
 }
 

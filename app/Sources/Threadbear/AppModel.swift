@@ -20,9 +20,43 @@ enum ConnectionState: Equatable {
     case unauthorized
 }
 
+/// What's in a composer. Each picture has a mark in the text where its
+/// chip is, the k-th mark standing for `images[k]` (InlinePictures).
 struct Draft: Equatable {
     var text = ""
     var images: [ImageRef] = []
+
+    /// One mark per picture: a picture added from outside the composer
+    /// gets a chip at the end, and marks whose pictures didn't come along
+    /// go.
+    var normalized: Draft {
+        Draft(text: InlinePictures.normalized(text, imageCount: images.count), images: images)
+    }
+
+    /// The words to send, the chips as [Picture N] markers numbered from
+    /// `first` (after an ask box's pictures), or none when there's
+    /// nothing but pictures.
+    func words(first: Int = 1) -> String {
+        InlinePictures.sentText(normalized.text, first: first).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Pictures added at the end, each with its chip.
+    mutating func append(_ refs: [ImageRef]) {
+        self = normalized
+        for ref in refs {
+            text = InlinePictures.appending(InlinePictures.markString, to: text)
+            images.append(ref)
+        }
+    }
+
+    /// Without the picture at `index`, and its chip.
+    func removingImage(at index: Int) -> Draft {
+        let whole = normalized
+        guard whole.images.indices.contains(index) else { return whole }
+        var images = whole.images
+        images.remove(at: index)
+        return Draft(text: InlinePictures.removingMark(index, from: whole.text), images: images)
+    }
 }
 
 /// One of Mike's messages being edited in the composer.
@@ -1234,7 +1268,9 @@ final class AppModel {
     func startEditing(threadId: String, seq: Int, text: String, images: [ImageRef]) {
         let before = editing[threadId]?.before ?? drafts[threadId] ?? Draft()
         editing[threadId] = MessageEdit(seq: seq, before: before)
-        drafts[threadId] = Draft(text: text, images: images)
+        // Its [Picture N] markers back as chips where they were.
+        let back = InlinePictures.draft(text: text, images: images)
+        drafts[threadId] = Draft(text: back.text, images: back.images)
         focusComposer(threadId)
     }
 
@@ -1248,8 +1284,8 @@ final class AppModel {
     /// until the runner has started the new turn; an error leaves it there
     /// to try again.
     private func sendEdit(threadId: String, edit: MessageEdit) {
-        let draft = drafts[threadId] ?? Draft()
-        let text = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let draft = (drafts[threadId] ?? Draft()).normalized
+        let text = draft.words()
         guard !text.isEmpty || !draft.images.isEmpty, !edit.sending else { return }
         guard let client = client(for: threadId), isRemote(threadId) || connection == .connected else {
             showConnectionError(notConnectedText(threadId, "the edit wasn't sent"))
@@ -1283,7 +1319,8 @@ final class AppModel {
             sendEdit(threadId: threadId, edit: edit)
             return
         }
-        let draft = drafts[key] ?? Draft()
+        let stored = drafts[key] ?? Draft()
+        let draft = stored.normalized
         // Answers picked on the open card go first, each question then its
         // answer, and his own words after them (Decisions.message).
         let thread = threadId.flatMap { threads[$0] }
@@ -1296,20 +1333,23 @@ final class AppModel {
         // so it's one or the other).
         let followUps = threadId.map { pickedFollowUps(threadId: $0) } ?? FollowUpPicks()
         let ticked = threadId.flatMap { nextPicks[$0] }
-        let trimmed = !followUps.isEmpty
-            ? Decisions.followUpMessage(followUps.ticked, explain: followUps.explain, extra: draft.text)
-            : answers.isEmpty
-            ? draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            : Decisions.message(asks: asks, picks: picks, notes: notes, extra: draft.text)
         // Pictures from the asks' boxes first, numbered as the answers say,
-        // then the composer's.
-        let images = Decisions.images(asks: asks, picks: picks, notes: notes) + draft.images
+        // then the composer's, whose chips go as [Picture N] markers after
+        // the boxes' numbers (docs/protocol.md, "Pictures in a message").
+        let boxImages = Decisions.images(asks: asks, picks: picks, notes: notes)
+        let words = draft.words(first: boxImages.count + 1)
+        let trimmed = !followUps.isEmpty
+            ? Decisions.followUpMessage(followUps.ticked, explain: followUps.explain, extra: words)
+            : answers.isEmpty
+            ? words
+            : Decisions.message(asks: asks, picks: picks, notes: notes, extra: words)
+        let images = boxImages + draft.images
         guard !trimmed.isEmpty || !images.isEmpty else { return }
         // A second Return while the first new thread is still being made.
         if threadId == nil, creatingThread { return }
         // A new thread on another runner goes over that runner's connection.
         if threadId == nil, let runnerId = newThreadRunnerId {
-            return sendNewThread(on: runnerId, text: trimmed, draft: draft)
+            return sendNewThread(on: runnerId, text: trimmed, draft: stored)
         }
         guard let client = client(for: threadId), threadId.map(isRemote) == true || connection == .connected else {
             showConnectionError(notConnectedText(threadId, "that wasn't sent"))
@@ -1336,7 +1376,7 @@ final class AppModel {
                 do {
                     let thread = try await client.createThread(request)
                     // Only what was sent goes; the box was locked meanwhile.
-                    if drafts[key] == draft { drafts[key] = nil }
+                    if drafts[key] == stored { drafts[key] = nil }
                     // In a pool the runner picked the login; that's the one
                     // that counts as used.
                     rememberLastAccount(request.poolId == nil ? account : thread.accountId)
@@ -1762,7 +1802,7 @@ final class AppModel {
         guard !urls.isEmpty else { return }
         Task {
             let refs = await importImages(urls)
-            drafts[key, default: Draft()].images += refs
+            drafts[key, default: Draft()].append(refs)
         }
     }
 

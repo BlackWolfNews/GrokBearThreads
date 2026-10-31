@@ -1074,6 +1074,25 @@ enum RowRenderer {
     /// the review's title small, then what he picked and his notes, not
     /// the review's id and the wording the agent gets (Mike, 29 Oct).
     static func userText(_ message: UserMessage) -> NSAttributedString {
+        pictureChips(userWords(message), imageCount: message.images.count)
+    }
+
+    /// His [Picture N] markers drawn as the chips he pasted
+    /// (docs/protocol.md, "Pictures in a message"), with the pictures
+    /// themselves over the words as before.
+    static func pictureChips(_ text: NSAttributedString, imageCount: Int) -> NSAttributedString {
+        let found = InlinePictures.markers(in: text.string, imageCount: imageCount)
+        guard !found.isEmpty else { return text }
+        let out = NSMutableAttributedString(attributedString: text)
+        for marker in found.reversed() {
+            var attributes = out.attributes(at: marker.range.location, effectiveRange: nil)
+            attributes[.attachment] = PictureChip.attachment(number: marker.index + 1, font: attributes[.font] as? NSFont ?? Theme.bodyFont)
+            out.replaceCharacters(in: marker.range, with: NSAttributedString(string: "\u{FFFC}", attributes: attributes))
+        }
+        return out
+    }
+
+    private static func userWords(_ message: UserMessage) -> NSAttributedString {
         let plain = Theme.text()
         let lines: [(label: String, text: String)]
         let extra: String

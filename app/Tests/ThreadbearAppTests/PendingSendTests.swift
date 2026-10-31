@@ -47,6 +47,31 @@ final class PendingSendTests: XCTestCase {
         XCTAssertEqual(app.errorMessage, "Busy")
     }
 
+    /// The pictures' chips go as [Picture N] markers where they sat, the
+    /// pictures in the chips' order (docs/protocol.md, "Pictures in a
+    /// message"); a failed send puts the chips back.
+    func testChipsGoAsPictureMarkersWhereTheySat() async throws {
+        let (app, transport) = try await connected()
+        let session = app.session(for: "th1")
+        let mark = InlinePictures.markString
+        let red = ImageRef(path: "/inbox/red.png", mediaType: "image/png")
+        let blue = ImageRef(path: "/inbox/blue.png", mediaType: "image/png")
+        let draft = Draft(text: "this \(mark) should look like \(mark) ", images: [red, blue])
+        app.drafts["th1"] = draft
+        app.send(threadId: "th1")
+        XCTAssertEqual(session.pending.first?.text, "this [Picture 1] should look like [Picture 2]")
+        XCTAssertEqual(session.pending.first?.images, [red, blue])
+        try await until { transport.waiting("threads.send") }
+        transport.fail("threads.send", message: "Busy")
+        try await until { app.drafts["th1"] != nil }
+        XCTAssertEqual(app.drafts["th1"], draft)
+        // Pictures and no words go as pictures alone, as they always did.
+        app.drafts["th1"] = Draft(text: "\(mark) \(mark)", images: [red, blue])
+        app.send(threadId: "th1")
+        XCTAssertEqual(session.pending.last?.text, "")
+        XCTAssertEqual(session.pending.last?.images, [red, blue])
+    }
+
     /// Taken but not shown: queued behind the running turn. A dropped
     /// connection clears it (the runner brings it back with its turn).
     func testATakenMessageWithNoUserMessageShowsAsQueued() async throws {

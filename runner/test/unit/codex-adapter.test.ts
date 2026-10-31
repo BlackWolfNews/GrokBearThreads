@@ -330,6 +330,23 @@ test('a send before start is held, then sent as turn/start with images first', a
   await h.session.end();
 });
 
+// docs/protocol.md, "Pictures in a message".
+test('pictures go to Codex where their [Picture N] markers are, the rest before the words', async () => {
+  const h = await open();
+  await started(h);
+  const pic = (name: string) => ({ path: `/media/${name}.png`, mediaType: 'image/png' });
+  h.session.send({ id: 'm1', text: 'this [Picture 2] beside [Picture 1]\n', images: [pic('red'), pic('blue'), pic('green')] });
+  const req = await h.conn.request('turn/start');
+  assert.deepEqual(req.params.input, [
+    { type: 'localImage', path: '/media/green.png' },
+    { type: 'text', text: 'this [Picture 2]', text_elements: [] },
+    { type: 'localImage', path: '/media/blue.png' },
+    { type: 'text', text: ' beside [Picture 1]', text_elements: [] },
+    { type: 'localImage', path: '/media/red.png' },
+  ]);
+  await h.session.end();
+});
+
 test('our own turn: no cliTurn, and the result answers our message', async () => {
   const h = await open();
   await started(h);

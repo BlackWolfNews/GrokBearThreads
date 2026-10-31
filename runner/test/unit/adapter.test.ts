@@ -1,4 +1,6 @@
 import { test } from 'node:test';
+import fs from 'node:fs';
+import path from 'node:path';
 import assert from 'node:assert/strict';
 import { ClaudeAdapter, alwaysAllow, modelChoices, terminalMcpTools } from '../../src/adapters/claude/adapter.ts';
 import type { SessionSink, AdapterOutput, ToolApprovalRequest } from '../../src/adapters/types.ts';
@@ -156,6 +158,27 @@ test('thread rules go to the CLI as allowedTools; messages carry the turn id', a
   session.send({ id: 'turn-1', text: 'hi', images: [] });
   await new Promise((r) => setImmediate(r));
   assert.equal(state.sent[0].uuid, 'turn-1');
+  state.close!();
+});
+
+// docs/protocol.md, "Pictures in a message".
+test('pictures go to the CLI where their [Picture N] markers are, the rest before the words', async () => {
+  const { session, state } = start();
+  const dir = tmpDir();
+  // Tiny files: the adapter reads each one to send it.
+  const png = (name: string, byte: number) => {
+    const file = path.join(dir, name);
+    fs.writeFileSync(file, Buffer.from([0x89, 0x50, 0x4e, 0x47, byte]));
+    return { path: file, mediaType: 'image/png' };
+  };
+  const [red, blue, green] = [png('red.png', 1), png('blue.png', 2), png('green.png', 3)];
+  const b64 = (ref: { path: string }) => fs.readFileSync(ref.path).toString('base64');
+  session.send({ id: 'turn-1', text: 'this [Picture 1] next to [Picture 2]', images: [red, blue, green] });
+  session.send({ id: 'turn-2', text: 'no pictures', images: [] });
+  await new Promise((r) => setImmediate(r));
+  const blocks = state.sent[0].message.content.map((b: any) => (b.type === 'text' ? b.text : b.source.data));
+  assert.deepEqual(blocks, [b64(green), 'this [Picture 1]', b64(red), ' next to [Picture 2]', b64(blue)]);
+  assert.equal(state.sent[1].message.content, 'no pictures', 'words alone still go as a plain string');
   state.close!();
 });
 
