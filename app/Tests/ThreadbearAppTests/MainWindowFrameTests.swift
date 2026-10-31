@@ -20,6 +20,25 @@ final class MainWindowFrameTests: XCTestCase {
         return w
     }
 
+    /// The back and forward mouse buttons only act on MainWindowFrame's
+    /// window. Since macOS 27.2 the one async look at launch missed it in
+    /// Mike's app, so the tracker takes its window as soon as it's in one,
+    /// and again if it finds itself in another.
+    func testTheTrackerTakesWhicheverWindowItIsIn() {
+        let saved = UserDefaults.standard.string(forKey: MainWindowFrame.key(MainWindowFrame.defaultName))
+        defer { UserDefaults.standard.set(saved, forKey: MainWindowFrame.key(MainWindowFrame.defaultName)) }
+        let tracker = MainWindowFrameTracker.TrackerView()
+        let first = window(at: NSRect(x: 0, y: 0, width: 800, height: 500))
+        defer { first.close() }
+        first.contentView?.addSubview(tracker)
+        XCTAssertTrue(MainWindowFrame.window === first, "taken straight away, not on a later turn of the main queue")
+
+        let second = window(at: NSRect(x: 0, y: 0, width: 800, height: 500))
+        defer { second.close() }
+        second.contentView?.addSubview(tracker)
+        XCTAssertTrue(MainWindowFrame.window === second)
+    }
+
     func testAMovedWindowOpensThereNextTime() throws {
         let screen = try XCTUnwrap(NSScreen.main).visibleFrame
         let first = window(at: NSRect(x: screen.minX + 40, y: screen.minY + 40, width: 800, height: 500))

@@ -70,19 +70,34 @@ struct MainWindowFrameTracker: NSViewRepresentable {
     final class TrackerView: NSView {
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            if let window { Handover.shared.conceal(window, main: true) }
+            guard let window else { return }
+            Handover.shared.conceal(window, main: true)
+            MainWindowFrameTracker.adopt(window)
         }
+    }
+
+    /// Since macOS 27.2 (30 Oct) Mike's installed app stopped knowing its
+    /// main window: the mouse's back and forward buttons did nothing and
+    /// the frame stopped saving, while a dev app was fine. Taking the window
+    /// only from one async look at launch missed it, so it's taken whenever
+    /// the tracker lands in a window, and checked again on every update.
+    @MainActor
+    static func adopt(_ window: NSWindow) {
+        guard MainWindowFrame.window !== window else { return }
+        AppLog.write("window", MainWindowFrame.window == nil ? "main window found" : "main window changed")
+        MainWindowFrame.window = window
+        if !MainWindowFrame.scripted { MainWindowFrame.track(window) }
     }
 
     func makeNSView(context: Context) -> NSView {
         let view = TrackerView()
         DispatchQueue.main.async {
-            guard let window = view.window else { return }
-            MainWindowFrame.window = window
-            if !MainWindowFrame.scripted { MainWindowFrame.track(window) }
+            if let window = view.window { Self.adopt(window) }
         }
         return view
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {}
+    func updateNSView(_ nsView: NSView, context: Context) {
+        if let window = nsView.window { Self.adopt(window) }
+    }
 }
