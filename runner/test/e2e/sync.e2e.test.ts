@@ -207,7 +207,7 @@ describe('convex mirror e2e', { skip: LOCAL ? false : 'no local Convex deploymen
     for (const t of started) await client.call('threads.delete', { threadId: t.id });
     const saidOnDisk = JSON.parse(fs.readFileSync(path.join(home, 'schedules.json'), 'utf8'));
     assert.equal(saidOnDisk.version, 2, 'the file is the backend copy');
-    // Bruce goes, so the phone's "newest runner online" is this one again.
+    // Bruce goes, so the phone's main runner online is this one again.
     await api('mutation', 'sync:bye', { key, runnerId: 'e2e-bruce' });
   });
 
@@ -343,6 +343,18 @@ describe('convex mirror e2e', { skip: LOCAL ? false : 'no local Convex deploymen
     const newThread = (await client.call('threads.list', { include: ['inbox'] }) as any).threads.find((t: any) => t.id === createdOutcome.threadId);
     assert.equal(newThread?.title, 'a thread from the phone');
     await client.call('threads.delete', { threadId: createdOutcome.threadId });
+    // With no runner named, a new thread goes to the runner with the most
+    // threads, even when a spare Mac heartbeat last: a phone thread once went
+    // to Bruce, which has none of Mike's repos and no printer.
+    const beat = (id: string, threadCount: number) => api('mutation', 'sync:heartbeat', { key, runner: { runnerId: id, name: id, version: 'x', startedAt: new Date().toISOString(), draining: false, threadCount } });
+    await beat('e2e-main', 100_000);
+    await beat('e2e-spare', 0);
+    const routed = (await api('mutation', 'phone:create', { token: issued.token, text: 'which runner?' })) as string;
+    const toMain = (await api('query', 'sync:pendingCommands', { key, runnerId: 'e2e-main' })) as any[];
+    assert.ok(toMain.some((c) => c.commandId === routed), JSON.stringify(toMain));
+    await api('mutation', 'sync:takeCommand', { key, commandId: routed });
+    await api('mutation', 'sync:finishCommand', { key, commandId: routed, ok: true });
+    for (const id of ['e2e-main', 'e2e-spare']) await api('mutation', 'sync:bye', { key, runnerId: id });
     await client.call('threads.update', { threadId: made.id, archived: true });
     await run('npx', ['convex', 'run', ...ENV_ARGS, 'tokens:revoke', JSON.stringify({ name: 'e2e' })], { cwd: REPO });
 

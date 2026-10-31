@@ -24,7 +24,7 @@ Two things Mike wants that one runner on the laptop can't give:
 - **Convex.** Every row (threads, messages, projects, schedules, accounts)
   carries `runnerId`. The `runners` table has each runner's name, version and
   heartbeat. Phone commands go to the thread's runner, and a new thread names
-  one or goes to "any" (the newest one online). The phone needs nothing new
+  one or goes to "any" (the online one with the most threads). The phone needs nothing new
   beyond a machine label on rows.
 - **Runner identity.** `ensureRunnerId` gives each data dir a stable id, and
   the name defaults to the hostname (`defaultRunnerName`), so Bruce would

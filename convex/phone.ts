@@ -12,7 +12,7 @@ import { API_VERSION } from './version';
 import { imagesFrom, shareImage } from './share';
 
 // A runner not heard from for this long is offline, and a command with no
-// runnerId goes to the newest one still online.
+// runnerId goes to the main one still online (mainRunner).
 const ONLINE_MS = 3 * 60_000;
 const DEN_LIMIT = 100;
 
@@ -355,14 +355,14 @@ export const share = mutation({
   },
 });
 
-// A new thread. With no runnerId, the newest runner still online takes it
+// A new thread. With no runnerId, the main runner still online takes it
 // (or the first one back, as "any").
 export const create = mutation({
   args: { token: v.string(), text: v.string(), runnerId: v.optional(v.string()), cwd: v.optional(v.string()), accountId: v.optional(v.string()), model: v.optional(v.string()) },
   returns: v.id('commands'),
   handler: async (ctx, { token, text, runnerId, cwd, accountId, model }) => {
     await checkPhoneToken(ctx, token);
-    const target = runnerId || (await newestRunner(ctx));
+    const target = runnerId || (await mainRunner(ctx));
     return queue(ctx, target, 'create', undefined, { text, ...(cwd ? { cwd } : {}), ...(accountId ? { accountId } : {}), ...(model ? { model } : {}) });
   },
 });
@@ -389,18 +389,20 @@ export const quickAsk = mutation({
     if (!a || a.length > 20000) throw new ConvexError({ kind: 'invalid', message: 'answer must be 1 to 20000 characters' });
     if ((sources?.length ?? 0) > 10) throw new ConvexError({ kind: 'invalid', message: 'at most 10 sources' });
     if (!Number.isFinite(askedAt)) throw new ConvexError({ kind: 'invalid', message: 'askedAt must be a time' });
-    const target = runnerId || (await newestRunner(ctx));
+    const target = runnerId || (await mainRunner(ctx));
     return queue(ctx, target, 'quickAsk', undefined, { question: q, answer: a, sources: sources ?? [], askedAt });
   },
 });
 
-// The newest runner seen in the last ONLINE_MS, or "any" (the first one
-// back takes it).
-async function newestRunner(ctx: QueryCtx): Promise<string> {
-  let best: { runnerId: string; lastSeenAt: number } | undefined;
+// The online runner with the most threads, or "any" (the first one back takes
+// it). Most threads stands in for the Mac Mike really works on, which has his
+// repos and printer. Going by the latest heartbeat instead sent a phone thread
+// to whichever runner had just checked in, so about half landed on Bruce.
+async function mainRunner(ctx: QueryCtx): Promise<string> {
+  let best: { runnerId: string; threadCount: number; lastSeenAt: number } | undefined;
   for await (const r of ctx.db.query('runners')) {
     if (r.draining || Date.now() - r.lastSeenAt > ONLINE_MS) continue;
-    if (!best || r.lastSeenAt > best.lastSeenAt) best = r;
+    if (!best || r.threadCount > best.threadCount || (r.threadCount === best.threadCount && r.lastSeenAt > best.lastSeenAt)) best = r;
   }
   return best?.runnerId ?? 'any';
 }

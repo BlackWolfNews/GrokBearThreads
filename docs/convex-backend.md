@@ -515,7 +515,8 @@ within a second or two while it's online (state `taken`, then `done` or
   `{ snooze: { until?, untilRestart? } }`, `{ wake: true }`, `{ archive:
   true }`, `{ unarchive: true }`, `{ markSeen: true }`, `{ title }`.
 - `phone:create({ token, text, runnerId?, cwd?, accountId?, model? })`.
-  With no `runnerId`, the newest runner seen in the last 3 minutes, or
+  With no `runnerId`, of the runners seen in the last 3 minutes, the one with
+  the most threads (the Mac Mike works on, not whichever last heartbeat), or
   `"any"` (the first runner back takes it).
 - `phone:quickAsk({ token, question, answer, sources?, askedAt, runnerId? })`
   (API 10): a quick ask the phone has already answered out loud, kept as a
