@@ -62,6 +62,9 @@ public protocol Backend: Sendable {
     /// For a backend before API 2: asks the runner for up to 50 text messages older than `beforeSeq`;
     /// they turn up in `thread(_:)` once it has written them.
     func loadEarlier(threadId: String, beforeSeq: Int) async throws -> String
+    /// The Pocket's cards (backend API 19), live.
+    func pocket() -> AsyncThrowingStream<[PocketCard], Error>
+    func removePocketCard(id: String) async throws
     /// pushKey (backend API 4): base64 of this phone's relay key (PushKeyStore).
     func registerDevice(apnsToken: String, environment: String, pushKey: String?) async throws
     /// Backend API 3: when this phone (by its APNs token) is notified.
@@ -154,6 +157,14 @@ public final class ConvexBackend: Backend, @unchecked Sendable {
 
     public func search(_ text: String) async throws -> [PhoneThread] {
         try Self.decode([PhoneThread].self, try await transport.query("phone:search", args(["text": .string(text)])))
+    }
+
+    public func pocket() -> AsyncThrowingStream<[PocketCard], Error> {
+        live("phone:pocket", [:], as: [PocketCard].self)
+    }
+
+    public func removePocketCard(id: String) async throws {
+        _ = try await transport.mutation("phone:removePocketCard", args(["id": .string(id)]))
     }
 
     public func schedules() -> AsyncThrowingStream<[PhoneSchedule], Error> {

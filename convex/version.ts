@@ -68,4 +68,7 @@
 //    args carry each with its URL for the runner, which fetches it;
 //    sync:finishCommand deletes them. Nothing changes for an older runner
 //    until a phone sends a photo, which it only does from 18.
-export const API_VERSION = 18;
+// 19: the Pocket. phone:pocket and phone:removePocketCard for the phone,
+//    sync:savePocketCard, sync:removePocketCard and sync:pocketCards for the
+//    runner's `pocket` tool. Nothing else changes for older clients.
+export const API_VERSION = 19;

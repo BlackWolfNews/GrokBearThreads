@@ -10,6 +10,8 @@ struct InboxView: View {
     @State private var hibernateTarget: PhoneThread?
     @State private var query = ""
     @State private var olderArchived: [PhoneThread] = []
+    @State private var pocketOpen = false
+    @State private var afterPocket: PocketView.Next?
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -82,6 +84,12 @@ struct InboxView: View {
                         Image(systemName: "line.3.horizontal")
                     }
                 }
+                if model.showsPocket {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { pocketOpen = true } label: { Image(systemName: "wallet.pass") }
+                            .accessibilityLabel("Pocket")
+                    }
+                }
                 if quick.settings.isReady {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button { quick.open() } label: { Image(systemName: "waveform") }
@@ -91,6 +99,24 @@ struct InboxView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { composing = true } label: { Image(systemName: "square.and.pencil") }
                         .accessibilityLabel("New thread")
+                }
+            }
+            .fullScreenCover(isPresented: $pocketOpen, onDismiss: {
+                // Only once the cover has gone: nothing else can present
+                // or push while it's still up.
+                switch afterPocket {
+                case let .thread(id): path.append(id)
+                case .add: model.composeText = "Add to my pocket: "
+                case nil: break
+                }
+                afterPocket = nil
+            }) {
+                PocketView { afterPocket = $0 }
+            }
+            .onAppear {
+                if model.opensPocketAtLaunch {
+                    model.opensPocketAtLaunch = false
+                    pocketOpen = true
                 }
             }
             .sheet(isPresented: $composing, onDismiss: { composeText = "" }) {

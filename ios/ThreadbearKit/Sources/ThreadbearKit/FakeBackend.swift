@@ -10,6 +10,7 @@ public final class FakeBackend: Backend, @unchecked Sendable {
     private var messagesById: [String: [PhoneMessage]]
     private var runnerList: [PhoneRunner]
     private var scheduleList: [PhoneSchedule]
+    private var pocketCards = FakeBackend.samplePocket
     private var commands: [String: CommandStatus] = [:]
     private var listeners: [UUID: @Sendable () -> Void] = [:]
     /// How long a fake turn takes. Zero in tests.
@@ -62,6 +63,14 @@ public final class FakeBackend: Backend, @unchecked Sendable {
 
     public func runners() -> AsyncThrowingStream<[PhoneRunner], Error> {
         watch { [unowned self] in lock.withLock { runnerList } }
+    }
+
+    public func pocket() -> AsyncThrowingStream<[PocketCard], Error> {
+        watch { [unowned self] in lock.withLock { pocketCards } }
+    }
+
+    public func removePocketCard(id: String) async throws {
+        mutate { s in s.pocketCards.removeAll { $0.id == id } }
     }
 
     public func projects() -> AsyncThrowingStream<[PhoneProject], Error> {
@@ -294,6 +303,12 @@ public final class FakeBackend: Backend, @unchecked Sendable {
     /// FakeBackendTests checks for the names that used to be here.
     /// The projects the sample threads are in, with symbols for icons (a
     /// picture would need a URL to fetch; the demo has no backend).
+    public static let samplePocket = [
+        PocketCard(id: "seeds to pick up", title: "Seeds to pick up", text: "Sweet peas\nRunner beans\nThe small terracotta pots", place: "garden centre", source: "Garden planner", updatedAt: "2026-10-20T09:00:00Z"),
+        PocketCard(id: "train home", title: "Train home", text: "Booking ABC123\nCoach C, seat 42", source: "Trip", updatedAt: "2026-10-21T09:00:00Z"),
+        PocketCard(id: "post the parcel", title: "Post the parcel", text: "Sam Taylor\n12 Harbour Street\nBristol BS1 4QA\nUK", threadId: "demo_upload", source: "Website", updatedAt: "2026-10-22T09:00:00Z"),
+    ]
+
     public static let sampleProjects = [
         PhoneProject(id: "p_garden", title: "Garden planner", icon: PhoneProjectIcon(symbol: "leaf", by: "librarian")),
         PhoneProject(id: "p_site", title: "Website", icon: PhoneProjectIcon(symbol: "globe", by: "librarian")),

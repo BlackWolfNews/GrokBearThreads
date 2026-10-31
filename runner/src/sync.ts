@@ -67,7 +67,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 18;
+export const BACKEND_API_VERSION = 19;
 // From this one a thread's row carries its open card of asks and a finished
 // turn's next steps, and a message row can be `summary` (end_turn's
 // bullets), so the phone shows end-of-turn cards. An older backend's
@@ -578,6 +578,9 @@ export function toAccountDoc(a: Account) {
 
 type ListName = 'projects' | 'schedules' | 'accounts';
 
+export type PocketCardInput = { title: string; text: string; place?: string; threadId?: string; source?: string };
+export type PocketCardSummary = { title: string; text: string; place?: string; source?: string; updatedAt: string };
+
 export class ConvexSync {
   private deps: SyncDeps;
   private post: Post;
@@ -777,6 +780,24 @@ export class ConvexSync {
   async revokeToken(id: string): Promise<boolean> {
     this.mustBeOn();
     return (await this.backend('mutation', 'sync:revokeToken', { key: this.deps.key, id })) === true;
+  }
+
+  // The `pocket` tool (threadbear-mcp.ts). Straight to the backend: the cards
+  // live there, for the phone, and aren't kept on any runner.
+  async savePocketCard(card: PocketCardInput): Promise<'added' | 'replaced'> {
+    this.mustBeOn();
+    return (await this.backend('mutation', 'sync:savePocketCard', { key: this.deps.key, card })) === 'replaced' ? 'replaced' : 'added';
+  }
+
+  async removePocketCard(title: string): Promise<boolean> {
+    this.mustBeOn();
+    return (await this.backend('mutation', 'sync:removePocketCard', { key: this.deps.key, title })) === true;
+  }
+
+  async pocketCards(): Promise<PocketCardSummary[]> {
+    this.mustBeOn();
+    const r = await this.backend('query', 'sync:pocketCards', { key: this.deps.key });
+    return Array.isArray(r) ? (r as PocketCardSummary[]) : [];
   }
 
   private mustBeOn(): void {

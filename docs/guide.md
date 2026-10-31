@@ -476,6 +476,18 @@ it in the thread if it needs more), and its answer is read out when it's done. T
 beside the mic brings back the text box. The agent is told the thread
 started with Ask and picks up from there.
 
+The Pocket is for what you'll want while you're out. Tell a thread you're
+heading to the post office and its agent can file a card with the address and
+what to take; the wallet button at the top of the inbox opens the deck. The
+cards are saved on the phone, so they open straight away with no signal. Tap
+a card to bring it forward, then tap it again to fill the screen, black on
+white, for reading out or holding up at a counter. Press and hold a card to
+copy it, open its thread or remove it. A card can name a place: while the app's
+open the phone checks where you are, marks that card "here" and brings it to
+the front (it asks first, and your location stays on the phone apart from the
+map search it asks Apple). Agents replace or remove cards too, and the pencil
+starts a thread to add one.
+
 Your threads also have a website, on your own Convex deployment. To sign a
 browser in, Settings > Phone & browser > Open signed in opens it in your
 browser (or run `npm run web:sign-in` from your Threadbear folder). Each

@@ -259,6 +259,30 @@ export const projects = query({
   },
 });
 
+// The Pocket (API 19; schema.ts, pocketCards). A card's id is its key.
+export const pocket = query({
+  args: { token: v.string() },
+  returns: v.array(v.object({ id: v.string(), title: v.string(), text: v.string(), place: v.optional(v.string()), threadId: v.optional(v.string()), source: v.optional(v.string()), updatedAt: v.string() })),
+  handler: async (ctx, { token }) => {
+    await checkPhoneToken(ctx, token);
+    const rows = await ctx.db.query('pocketCards').collect();
+    return rows.map(({ _id, _creationTime, key, ...card }) => ({ id: key, ...card }));
+  },
+});
+
+// Straight to the table, not a command for a runner: the card's on the phone
+// because Mike's out, and his Mac may well be asleep.
+export const removePocketCard = mutation({
+  args: { token: v.string(), id: v.string() },
+  returns: v.null(),
+  handler: async (ctx, { token, id }) => {
+    await checkPhoneToken(ctx, token);
+    const had = await ctx.db.query('pocketCards').withIndex('by_key', (q) => q.eq('key', id)).first();
+    if (had) await ctx.db.delete(had._id);
+    return null;
+  },
+});
+
 export const schedules = query({
   args: { token: v.string() },
   returns: v.array(v.any()),

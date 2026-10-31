@@ -26,6 +26,7 @@ import { nudgedThisTurn, signInNudge, turnSignIns, uncovered } from './connector
 import type { PanelPlace } from './protocol.ts';
 import { readRelease, type ReleaseJson } from './release.ts';
 import { userLine } from './user-name.ts';
+import type { ConvexSync } from './sync.ts';
 
 // What the tools drive: the Runner itself, or during a handover
 // (docs/protocol.md) a ThreadRouter (handover.ts) that reaches threads on
@@ -42,6 +43,9 @@ export type ThreadControl = {
 
 // Messages a thread when the Mac app restarts onto a new build (app-restarts.ts).
 export type AppRestartControl = Pick<AppRestarts, 'watch' | 'isWatching'>;
+
+// The phone's Pocket, in the Convex backend (sync.ts).
+export type PocketControl = Pick<ConvexSync, 'savePocketCard' | 'removePocketCard' | 'pocketCards'>;
 
 export type ScheduleControl = Async<Scheduler, 'create' | 'list' | 'find' | 'update' | 'delete'>;
 
@@ -112,7 +116,7 @@ export function buildThreadbearTools(
   // before its final answer rather than after it (needs.ts).
   // bulletReplies: Settings > General; false has agents write a normal
   // message as the reply, with the bullets only for previews.
-  opts: { sleep?: (ms: number) => Promise<void>; provider?: 'claude' | 'codex'; bulletReplies?: () => boolean } = {},
+  opts: { sleep?: (ms: number) => Promise<void>; provider?: 'claude' | 'codex'; bulletReplies?: () => boolean; pocket?: () => PocketControl | undefined } = {},
 ) {
   const codex = opts.provider === 'codex';
   const bulletReplies = () => opts.bulletReplies?.() !== false;
@@ -268,6 +272,37 @@ export function buildThreadbearTools(
       }),
     ),
   ];
+
+  // One tool for filing, replacing, removing and listing, as Mike wants the
+  // agents' tool list kept short (29 Oct). Titles are the ids, so a thread
+  // that didn't file a card can still replace or remove it.
+  const pocket = opts.pocket?.();
+  const pocketTools = pocket
+    ? [
+        tool(
+          'pocket',
+          "Keeps a short card in the Pocket on the user's iPhone, a deck that opens instantly and works with no signal, for when they're out. File one when they say they're heading somewhere or will need a fact away from their Mac: the address to write on a parcel and what to bring, booking codes for a trip. Write what they'd read at a counter, not an explanation. The same title replaces a card; when it's done with, remove it. With no title, lists the cards.",
+          {
+            title: z.string().trim().min(1).max(60).optional().describe('Short name for the card, like "Post to Corby".'),
+            text: z.string().trim().min(1).max(2000).optional().describe('What goes on the card, plain text, with line breaks where it should break.'),
+            place: z.string().trim().min(1).max(100).optional().describe('Where it applies, as you would search a map: "post office", "Bunnings". The phone marks the card "here" and brings it to the front there.'),
+            remove: z.boolean().optional().describe('Take the card with this title out.'),
+          },
+          handle(async ({ title, text, place, remove }) => {
+            if (!title) {
+              const cards = await pocket.pocketCards();
+              return cards.length ? cards.map((c) => `${c.title}${c.place ? ` (${c.place})` : ''}${c.source ? ` [${c.source}]` : ''}\n${c.text}`).join('\n\n') : 'The Pocket is empty.';
+            }
+            if (remove) return (await pocket.removePocketCard(title)) ? `Took "${title}" out of the Pocket.` : `No card called "${title}" in the Pocket.`;
+            if (!text) throw new Error('A card needs text. To take one out, pass remove: true.');
+            const t = await control.get(selfId);
+            const source = t.projects?.[0]?.title ?? t.title;
+            const how = await pocket.savePocketCard({ title, text, ...(place ? { place } : {}), threadId: selfId, ...(source ? { source } : {}) });
+            return `${how === 'replaced' ? 'Replaced' : 'Filed'} "${title}" in the Pocket.`;
+          }),
+        ),
+      ]
+    : [];
 
   // Highlights (docs/protocol.md): the list beside the transcript of what
   // the thread made and shared. Always this thread's own.
@@ -711,6 +746,7 @@ export function buildThreadbearTools(
       : []),
     ...reviewTools,
     ...highlightTools,
+    ...pocketTools,
     ...(schedules ? scheduleTools : []),
     ...(projects ? projectTools : []),
     tool(
@@ -938,7 +974,8 @@ function clip(text: string, max = 2000): string {
 export const SHOWING_THE_USER =
   'When you have design options, mockups or wireframes for the user to choose between, put them in front of them with show_options (a side-by-side review window where they pick one and leave notes), not as pins or a list in your reply; their answer comes back as a message. ' +
   "For a single file or link they should look at (a doc, a screenshot, a preview URL, a PR), use pin, with show: true to open it in Threadbear's side pane rather than running `open`. " +
-  "To put one of Threadbear's own panels in front of them (this thread's Highlights, a patch panel such as the Convex dashboard, Usage), use show_panel.";
+  "To put one of Threadbear's own panels in front of them (this thread's Highlights, a patch panel such as the Convex dashboard, Usage), use show_panel. " +
+  "When they say they're heading out or will need a fact away from their Mac (an address, a booking code, what to take), file it on their phone with pocket.";
 
 // Also in the instructions, for the same reason. The librarian files
 // threads by itself, but it only sees a summary and can miss one; the
@@ -973,7 +1010,7 @@ export function guideLine(file = guidePath(), exists: (p: string) => boolean = f
   );
 }
 
-export function threadbearMcpServer(control: ThreadControl, selfId: string, schedules?: ScheduleControl, projects?: ProjectControl, appRestarts?: AppRestartControl, bulletReplies: () => boolean = () => true): McpSdkServerConfigWithInstance {
+export function threadbearMcpServer(control: ThreadControl, selfId: string, schedules?: ScheduleControl, projects?: ProjectControl, appRestarts?: AppRestartControl, bulletReplies: () => boolean = () => true, pocket?: () => PocketControl | undefined): McpSdkServerConfigWithInstance {
   const guide = guideLine();
   const server = createSdkMcpServer({
     name: SERVER_NAME,
@@ -989,7 +1026,7 @@ export function threadbearMcpServer(control: ThreadControl, selfId: string, sche
       (bulletReplies()
         ? 'End every turn by calling end_turn, with a short summary of what you did (the user reads it first, as your reply) and anything they have to do.'
         : 'End every turn by writing your reply as an ordinary message, then calling end_turn with a short summary of what you did (for previews and notifications) and anything they have to do.'),
-    tools: buildThreadbearTools(control, selfId, Date.now, schedules, projects, appRestarts, { bulletReplies }),
+    tools: buildThreadbearTools(control, selfId, Date.now, schedules, projects, appRestarts, { bulletReplies, pocket }),
   });
   server.tools = [...ALWAYS_ASK_TOOLS].map((name) => ({ name: name.split('__').at(-1)!, permission_policy: 'always_ask' as const }));
   return server;

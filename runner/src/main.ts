@@ -104,6 +104,8 @@ async function main(): Promise<void> {
   // Threads waiting to hear the Mac app has restarted onto a new build
   // (app-restarts.ts); made once the runner is.
   let appRestarts!: AppRestarts;
+  // Asked for per thread, as sync is made after the runner. No tool while sync is off: the Pocket lives in the backend.
+  const pocketControl = () => (sync.status().state === 'off' ? undefined : sync);
   let restarter!: Restarter;
   // Where the agent tools reach threads this runner doesn't have: draining
   // runners' (Peers) while this is the primary, the primary's once this one
@@ -139,7 +141,7 @@ async function main(): Promise<void> {
     claudePath: cfg.claudePath,
     registry,
     log,
-    mcpServersFor: (threadId) => ({ [SERVER_NAME]: threadbearMcpServer(router(), threadId, scheduleControl(), projectControl(), appRestarts, () => cfg.bulletReplies) }),
+    mcpServersFor: (threadId) => ({ [SERVER_NAME]: threadbearMcpServer(router(), threadId, scheduleControl(), projectControl(), appRestarts, () => cfg.bulletReplies, pocketControl) }),
     alwaysAsk: ALWAYS_ASK_TOOLS,
   });
   // One app-server per live Codex thread, each starting what E says is
@@ -149,7 +151,7 @@ async function main(): Promise<void> {
     codexArgs: cfg.codexArgs,
     registry,
     log,
-    toolsFor: (threadId) => buildThreadbearTools(router(), threadId, Date.now, scheduleControl(), projectControl(), appRestarts, { provider: 'codex', bulletReplies: () => cfg.bulletReplies }),
+    toolsFor: (threadId) => buildThreadbearTools(router(), threadId, Date.now, scheduleControl(), projectControl(), appRestarts, { provider: 'codex', bulletReplies: () => cfg.bulletReplies, pocket: pocketControl }),
     onNotice: (text) => runner.notice('warning', text),
   });
   // The runner's own small-model calls, on the settings' Claude pool.

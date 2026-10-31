@@ -12,6 +12,12 @@ final class AppModel {
     private(set) var runners: [PhoneRunner] = []
     /// The projects by id, for the rows' icons (backend API 5 carries them).
     private(set) var projects: [String: PhoneProject] = [:]
+    /// The Pocket's cards, from the file until the backend answers, so they
+    /// show with no signal.
+    private(set) var pocket: [PocketCard] = []
+    var showsPocket: Bool { isFake || !pocket.isEmpty || (apiVersion ?? 0) >= BackendCompatibility.pocketAPIVersion }
+    /// `-ThreadbearPocket` (Debug only): start with the Pocket open.
+    var opensPocketAtLaunch = false
     private(set) var inbox: [PhoneThread] = []
     private(set) var hibernating: [PhoneThread] = []
     private(set) var den: [PhoneThread] = []
@@ -109,6 +115,7 @@ final class AppModel {
 
     init() {
         let args = ProcessInfo.processInfo.arguments
+        opensPocketAtLaunch = args.contains("-ThreadbearPocket")
         if args.contains("-ThreadbearFake") {
             // -ThreadbearSlowLoad: the lists answer after a few seconds, to see the loading rows.
             connect(FakeBackend(listDelay: args.contains("-ThreadbearSlowLoad") ? .seconds(6) : .zero), pairing: nil)
@@ -253,6 +260,7 @@ final class AppModel {
     /// token was refused) is left as it was.
     func leaveDemo() {
         stop()
+        pocket = []
         backend = nil
         isFake = false
         runners = []
@@ -265,7 +273,22 @@ final class AppModel {
         loaded = []
     }
 
+    func removePocketCard(_ card: PocketCard) {
+        guard let backend else { return }
+        // Gone at once, and back if the backend wouldn't have it.
+        let before = pocket
+        pocket.removeAll { $0.id == card.id }
+        Task {
+            do { try await backend.removePocketCard(id: card.id) } catch {
+                pocket = before
+                lastError = error.localizedDescription
+            }
+        }
+    }
+
     func unpair() {
+        PocketStore.standard.clear()
+        pocket = []
         PairingStore.clear()
         stop()
         backend = nil
@@ -310,6 +333,7 @@ final class AppModel {
         self.pairing = pairing
         isFake = backend is FakeBackend
         authProblem = nil
+        if !isFake { pocket = PocketStore.standard.load() }
         tasks.append(follow(backend.runners()) { $0.runners = $1 })
         tasks.append(follow(backend.projects()) { model, list in
             // Two runners could use the same id; the first one wins.
@@ -329,6 +353,12 @@ final class AppModel {
             // fail and retry.
             if (identity.apiVersion ?? 0) >= BackendCompatibility.countsAPIVersion, !Task.isCancelled, let self {
                 self.tasks.append(self.follow(backend.counts()) { $0.counts = $1 })
+            }
+            if (identity.apiVersion ?? 0) >= BackendCompatibility.pocketAPIVersion, !Task.isCancelled, let self {
+                self.tasks.append(self.follow(backend.pocket()) { model, cards in
+                    model.pocket = cards
+                    if !model.isFake { PocketStore.standard.save(cards) }
+                })
             }
         })
         if registerPush, let apnsToken { register(apnsToken) }

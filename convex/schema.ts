@@ -244,6 +244,21 @@ export default defineSchema({
     icon: v.optional(v.object({ symbol: v.optional(v.string()), picture: v.optional(v.string()), by: v.string() })),
   }).index('by_runnerId', ['runnerId']),
 
+  // The phone's Pocket: short cards agents file for when Mike's out
+  // (API 19, the `pocket` tool). They live here rather than on a runner, so
+  // both runners share one deck and the phone can remove one while the Mac
+  // sleeps. `key` is the title in lower case: filing the same title again
+  // replaces the card, whichever thread does it.
+  pocketCards: defineTable({
+    key: v.string(),
+    title: v.string(),
+    text: v.string(),
+    place: v.optional(v.string()), // what to search the map for, to mark the card "here"
+    threadId: v.optional(v.string()),
+    source: v.optional(v.string()), // the project or thread it came from, as it was then
+    updatedAt: v.string(),
+  }).index('by_key', ['key']),
+
   // A project's picture, in file storage, as the phone shows it: PNG at
   // most 256 px (an SVG is drawn to PNG by the runner, since the phone
   // can't draw SVG). One row per project; the runner replaces it when the

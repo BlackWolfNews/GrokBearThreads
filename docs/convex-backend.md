@@ -542,3 +542,14 @@ Changes from the proposal: `answers` values are strings, not arrays (a
 multi-select question's choices go in one string, comma-joined, which is
 what the Mac app sends); `view` and `lastActivityMs` are on every row; a
 `title` change was added to `update`.
+
+## The Pocket (API 19)
+
+The phone's deck of cards for when Mike's out (`pocketCards`, the `pocket`
+tool in `runner/src/threadbear-mcp.ts`, `ios/Threadbear/PocketView.swift`).
+Unlike the other lists, this table is the only copy: the tool writes to it
+directly through `sync:savePocketCard`, and the phone removes cards directly
+with `phone:removePocketCard`, not through a command. Both runners then share
+one deck, and removing a card works while the Macs sleep. With sync off the
+tool isn't offered. The phone saves what it last saw in `pocket.json`
+(`PocketStore`), which is what makes the deck work with no signal.

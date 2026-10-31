@@ -697,6 +697,52 @@ export const setAccounts = mutation({
   },
 });
 
+// ------------------------------------------------------------ pocket
+// Cards the `pocket` tool files for the phone (schema.ts, pocketCards).
+
+const pocketKey = (title: string) => title.trim().toLowerCase();
+
+export const savePocketCard = mutation({
+  args: {
+    key: v.string(),
+    card: v.object({ title: v.string(), text: v.string(), place: v.optional(v.string()), threadId: v.optional(v.string()), source: v.optional(v.string()) }),
+  },
+  returns: v.union(v.literal('added'), v.literal('replaced')),
+  handler: async (ctx, { key, card }) => {
+    checkRunnerKey(key);
+    const k = pocketKey(card.title);
+    const doc = { ...card, title: card.title.trim(), key: k, updatedAt: new Date().toISOString() };
+    const had = await ctx.db.query('pocketCards').withIndex('by_key', (q) => q.eq('key', k)).first();
+    if (had) {
+      await ctx.db.replace(had._id, doc);
+      return 'replaced';
+    }
+    await ctx.db.insert('pocketCards', doc);
+    return 'added';
+  },
+});
+
+export const removePocketCard = mutation({
+  args: { key: v.string(), title: v.string() },
+  returns: v.boolean(),
+  handler: async (ctx, { key, title }) => {
+    checkRunnerKey(key);
+    const had = await ctx.db.query('pocketCards').withIndex('by_key', (q) => q.eq('key', pocketKey(title))).first();
+    if (had) await ctx.db.delete(had._id);
+    return had !== null;
+  },
+});
+
+export const pocketCards = query({
+  args: { key: v.string() },
+  returns: v.array(v.object({ title: v.string(), text: v.string(), place: v.optional(v.string()), source: v.optional(v.string()), updatedAt: v.string() })),
+  handler: async (ctx, { key }) => {
+    checkRunnerKey(key);
+    const rows = await ctx.db.query('pocketCards').collect();
+    return rows.map((c) => ({ title: c.title, text: c.text, ...(c.place ? { place: c.place } : {}), ...(c.source ? { source: c.source } : {}), updatedAt: c.updatedAt }));
+  },
+});
+
 // ------------------------------------------------------------ commands
 // What the phone asked for (phone.ts). The owning runner subscribes to
 // pendingCommands, takes each one (once: takeCommand says no the second
