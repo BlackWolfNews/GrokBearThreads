@@ -4,7 +4,7 @@
 // fresh session told how the thread began.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { makeHarness, tick } from '../helpers/fakes.ts';
+import { FakeAccounts, makeHarness, tick, withCodex } from '../helpers/fakes.ts';
 
 const ask = {
   question: 'What did I call the backup drive on Bruce?',
@@ -47,7 +47,16 @@ test('a quick ask with no sources has just the answer', () => {
   assert.equal(text, ask.answer);
 });
 
-test('a follow-up runs on Haiku, so a spoken question gets a quick reply', async () => {
+test('with a Codex login, a follow-up runs on Luna at low effort, so a spoken question gets a quick reply', async () => {
+  const h = makeHarness(undefined, {}, { accounts: new FakeAccounts(withCodex()) });
+  const { thread } = h.runner.quickAsk(ask);
+  assert.equal(thread.provider, 'codex');
+  assert.equal(thread.model, 'gpt-6-luna');
+  assert.equal(thread.effort, 'low');
+  assert.equal(h.events(thread.id).some((e) => e.type === 'system.note' && /isn't a|doesn't offer/.test(e.text)), false);
+});
+
+test('with only Claude logins, a follow-up runs on Haiku', async () => {
   const h = makeHarness();
   const { thread } = h.runner.quickAsk(ask);
   assert.equal(thread.model, 'claude-haiku-5-5');

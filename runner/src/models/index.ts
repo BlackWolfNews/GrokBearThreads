@@ -27,6 +27,8 @@ export type ModelJob = 'classify' | 'extract' | 'summarize' | 'generate' | 'deci
 // a thread).
 export const HAIKU = 'claude-haiku-5-5';
 export const OPUS = 'claude-opus-5-5';
+// The model a thread kept from Ask starts on, when there's a Codex login.
+export const ASK_CODEX_MODEL = 'gpt-6-luna';
 
 export const ROUTES: Record<ModelJob, string> = {
   classify: HAIKU,

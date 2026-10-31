@@ -81,7 +81,7 @@ import { copySessionTranscript, subagentTranscriptPath } from './transcripts.ts'
 import { historyItems, selectHistory } from './handoff-history.ts';
 import { readSubagentTranscript } from './adapters/claude/subagents.ts';
 import { fileContext } from './adapters/claude/normalize.ts';
-import { HAIKU, type Models } from './models/index.ts';
+import { ASK_CODEX_MODEL, HAIKU, type Models } from './models/index.ts';
 import { EXPLAIN_SYSTEM, RECENT_CHARS, RECENT_MESSAGES, explainPrompt } from './explain.ts';
 import type { ExplainTurn } from './explain.ts';
 import { SAID_MAX, WAKE_SYSTEM, awayFor, hibernateNote, readWakeAnswer, wakePrompt } from './wake-when.ts';
@@ -1534,11 +1534,19 @@ export class Runner {
     const answer = params.answer.trim();
     if (!question || !answer) throw new RpcError(ErrorCode.badParams, 'question and answer required');
     // A follow-up is usually spoken and waited on, so it starts on the fastest
-    // model (timed 31 Oct: about 3 s, Codex's GPT-6-Luna 4 to 5.5 s). Without a
-    // Claude login it's left to the account's default, as naming a model the
-    // login can't run would write a note into the thread.
-    const model = this.usableAccounts().some((a) => a.provider === 'claude') ? HAIKU : undefined;
-    const { st, notes } = this.makeThread({ text: question, origin: 'phone', worktree: false, ...(model ? { model } : {}) });
+    // model. Timed 31 Oct: level with Haiku on a 60-word reply (about 4.5 s),
+    // but about 10 s for 300 words against Haiku's 21 to 31, at low effort.
+    // Codex's Fast and Ultrafast settings aren't used: Fast showed no gain and
+    // costs 2.5x the limits, and Ultrafast needs a plan Mike isn't on. With no
+    // login for either it's the account's default, as naming a model the login
+    // can't run would write a note into the thread.
+    const usable = this.usableAccounts();
+    const speed = usable.some((a) => a.provider === 'codex')
+      ? { model: ASK_CODEX_MODEL, effort: 'low' as const }
+      : usable.some((a) => a.provider === 'claude')
+        ? { model: HAIKU }
+        : {};
+    const { st, notes } = this.makeThread({ text: question, origin: 'phone', worktree: false, ...speed });
     const { rec } = st;
     const turnId = crypto.randomUUID();
     const sources = (params.sources ?? []).filter((x) => x?.url).slice(0, 10);
