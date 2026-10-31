@@ -16,5 +16,5 @@ export const GITHUB_PUBLIC = false;
  * until there's an App Store Connect record. Until APP_STORE_LIVE is on, every App Store badge
  * says "Coming soon to the App Store" and isn't a link.
  */
-export const APP_STORE_URL = "";
-export const APP_STORE_LIVE = false;
+export const APP_STORE_URL = "https://apps.apple.com/app/id6827837354";
+export const APP_STORE_LIVE = true;
