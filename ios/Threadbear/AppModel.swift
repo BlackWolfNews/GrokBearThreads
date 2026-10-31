@@ -99,6 +99,10 @@ final class AppModel {
 
     private var tasks: [Task<Void, Never>] = []
     private(set) var apnsToken: String?
+    /// Bumped each time the Convex connection is rebuilt (comingBack), so
+    /// views holding live queries on the old one start them again.
+    private(set) var connection = 0
+    private var backgroundedAt: Date?
     /// On the sample threads (FakeBackend) rather than a real deployment:
     /// the demo from the pair screen, or `-ThreadbearFake` for screenshots.
     private(set) var isFake = false
@@ -279,7 +283,28 @@ final class AppModel {
         loaded = []
     }
 
-    private func connect(_ backend: any Backend, pairing: Pairing?) {
+    func wentToBackground() { backgroundedAt = .now }
+
+    /// iOS suspends the app soon after it leaves the screen, and the
+    /// WebSocket under convex-swift doesn't come back from that: the lists
+    /// already showing stay as they were, and anything subscribed afterwards
+    /// (opening a thread) waits forever, with no "Reconnecting…" because the
+    /// client still thinks it's connected. Mike, 31 Oct: the inbox showed but
+    /// no thread opened, and not one phone call had reached Convex in two
+    /// hours. So back from the background, a fresh client.
+    func comingBack() {
+        defer { backgroundedAt = nil }
+        guard let since = backgroundedAt, Date.now.timeIntervalSince(since) > 5,
+              !isFake, let pairing, authProblem == nil else { return }
+        let kept = loaded
+        connect(ConvexBackend(deploymentURL: pairing.deploymentURL, token: pairing.token), pairing: pairing, registerPush: false)
+        // What's on screen stays until the fresh answers replace it, rather
+        // than flashing the loading rows.
+        loaded = kept
+        connection += 1
+    }
+
+    private func connect(_ backend: any Backend, pairing: Pairing?, registerPush: Bool = true) {
         stop()
         self.backend = backend
         self.pairing = pairing
@@ -306,7 +331,7 @@ final class AppModel {
                 self.tasks.append(self.follow(backend.counts()) { $0.counts = $1 })
             }
         })
-        if let apnsToken { register(apnsToken) }
+        if registerPush, let apnsToken { register(apnsToken) }
     }
 
     private func stop() {

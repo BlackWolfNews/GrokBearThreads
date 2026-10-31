@@ -23,7 +23,14 @@ struct ThreadbearApp: App {
                     }
                     quick.onKept = { [model] threadId in model.openThreadId = threadId }
                 }
-                .onChange(of: scenePhase, initial: true) { _, phase in quick.scenePhaseChanged(to: phase) }
+                .onChange(of: scenePhase, initial: true) { _, phase in
+                    quick.scenePhaseChanged(to: phase)
+                    switch phase {
+                    case .background: model.wentToBackground()
+                    case .active: model.comingBack()
+                    default: break
+                    }
+                }
                 // Ask for notifications once paired, including straight
                 // after pairing, not only on a launch that was already paired.
                 .onChange(of: model.isPaired, initial: true) { _, paired in

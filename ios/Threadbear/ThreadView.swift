@@ -60,9 +60,11 @@ struct ThreadView: View {
             }
         }
         .hibernateDialog(for: $hibernateTarget)
-        .task(id: threadId) { await follow() }
-        .task(id: "\(threadId):\(limit):\(model.hasMessagePages)") { await followMessages() }
-        .task(id: sent?.id) { await followCommand() }
+        // model.connection in each id: a fresh Convex client after the app
+        // comes back from the background, so these follow it, not the old one.
+        .task(id: "\(threadId):\(model.connection)") { await follow() }
+        .task(id: "\(threadId):\(limit):\(model.hasMessagePages):\(model.connection)") { await followMessages() }
+        .task(id: "\(sent?.id ?? ""):\(model.connection)") { await followCommand() }
     }
 
     private func content(_ detail: ThreadDetail) -> some View {

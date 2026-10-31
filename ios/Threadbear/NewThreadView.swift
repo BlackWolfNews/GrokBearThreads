@@ -52,7 +52,7 @@ struct NewThreadView: View {
                     }
                 }
             }
-            .task(id: commandId) { await waitForThread() }
+            .task(id: "\(commandId ?? ""):\(model.connection)") { await waitForThread() }
             .task {
                 if photos.isEmpty, let sample = model.samplePhoto, let photo = await PickedPhoto.from(sample) { photos = [photo] }
             }
