@@ -490,8 +490,8 @@ a card to bring it forward, then tap it again to fill the screen, black on
 white, for reading out or holding up at a counter. Press and hold a card to
 copy it, open its thread or remove it. A card can name a place: while the app's
 open the phone checks where you are, marks that card "here" and brings it to
-the front (it asks first, and your location stays on the phone apart from the
-map search it asks Apple). Agents replace or remove cards too, and the pencil
+the front (it asks first, and only the phone and Apple's map search see your
+location). Agents replace or remove cards too, and the pencil
 starts a thread to add one. The librarian looks after them as well: it updates
 a thread's card when the facts change, takes it out once the thread says it's
 done, and files one when you say you're going somewhere and the agent didn't.

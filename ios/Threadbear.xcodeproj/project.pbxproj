@@ -328,7 +328,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Threadbear;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Threadbear uses the camera to scan the pairing code on your Mac, and to take photos you send to a thread.";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Threadbear checks whether you're near a place on one of your Pocket cards, to bring that card to the front. Your location stays on the phone.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Threadbear checks whether you're near a place on one of your Pocket cards, to bring that card to the front. Only the phone and Apple's map search see your location.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Threadbear listens after you press the button to Ask or tap the mic in an Ask thread, to hear what you say.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Threadbear turns what you say to Ask into text, on the phone where it can.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -366,7 +366,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Threadbear;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Threadbear uses the camera to scan the pairing code on your Mac, and to take photos you send to a thread.";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Threadbear checks whether you're near a place on one of your Pocket cards, to bring that card to the front. Your location stays on the phone.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Threadbear checks whether you're near a place on one of your Pocket cards, to bring that card to the front. Only the phone and Apple's map search see your location.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Threadbear listens after you press the button to Ask or tap the mic in an Ask thread, to hear what you say.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Threadbear turns what you say to Ask into text, on the phone where it can.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;

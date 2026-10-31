@@ -56,10 +56,13 @@ public struct PocketStore: Sendable {
     public func save(_ cards: [PocketCard]) {
         guard let data = try? JSONEncoder().encode(cards) else { return }
         try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-        // These can be addresses and booking codes: locked with the phone,
-        // and kept out of its backups.
+        // Readable once the phone's been unlocked since it started, not only
+        // while unlocked: iOS can start the app in the background on a locked
+        // phone, and with no signal then the deck would stay empty. Checked on
+        // the real phone, 1 Nov: .completeFileProtection refused the read.
+        // These can be addresses and booking codes, so still out of backups.
         #if os(iOS)
-        try? data.write(to: file, options: [.atomic, .completeFileProtection])
+        try? data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         #else
         try? data.write(to: file, options: .atomic)
         #endif

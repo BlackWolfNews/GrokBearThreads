@@ -19,7 +19,8 @@ final class AppModel {
     /// show with no signal.
     private(set) var pocket: [PocketCard] = []
     var showsPocket: Bool { isFake || !pocket.isEmpty || (apiVersion ?? 0) >= BackendCompatibility.pocketAPIVersion }
-    /// `-ThreadbearPocket` (Debug only): start with the Pocket open.
+    /// `-ThreadbearPocket`: start with the Pocket open, for screenshots and
+    /// for checking it on the phone, where nothing can tap the button.
     var opensPocketAtLaunch = false
     private(set) var inbox: [PhoneThread] = []
     /// Rows sliding off the inbox on their way out (`archive`).
