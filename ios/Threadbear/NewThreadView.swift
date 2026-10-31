@@ -15,7 +15,6 @@ struct NewThreadView: View {
     }
     @State private var folder: String?
     @State private var commandId: String?
-    @State private var dictation = Dictation()
 
     var body: some View {
         NavigationStack {
@@ -23,17 +22,6 @@ struct NewThreadView: View {
                 Section {
                     TextField("What should it do?", text: $text, axis: .vertical)
                         .lineLimit(4...12)
-                    Button {
-                        if dictation.isListening { dictation.stop() } else {
-                            let before = text.isEmpty ? "" : text + " "
-                            Task { await dictation.start { text = before + $0 } }
-                        }
-                    } label: {
-                        Label(dictation.isListening ? "Stop listening" : "Dictate", systemImage: dictation.isListening ? "stop.circle" : "mic")
-                    }
-                    if let problem = dictation.problem {
-                        Text(problem).font(.footnote).foregroundStyle(.secondary)
-                    }
                 }
                 Section("Folder") {
                     Picker("Folder", selection: $folder) {
@@ -58,7 +46,6 @@ struct NewThreadView: View {
                 }
             }
             .task(id: commandId) { await waitForThread() }
-            .onDisappear { dictation.stop() }
         }
     }
 
@@ -76,7 +63,6 @@ struct NewThreadView: View {
 
     private func start() {
         guard let backend = model.backend else { return }
-        dictation.stop()
         let message = text.trimmingCharacters(in: .whitespacesAndNewlines)
         Task {
             do {

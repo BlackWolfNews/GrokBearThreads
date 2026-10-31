@@ -99,9 +99,9 @@ nonisolated final class AudioInput: @unchecked Sendable {
         }
     }
 
-    /// Forgets that the session's active, so the next start activates it again. Threadbear's reply
-    /// dictation shares the audio session and turns it off when it's done, so a quick ask after it
-    /// can't trust `sessionActive`. (The category's checked against the session itself, in
+    /// Forgets that the session's active, so the next start activates it again. The system can take
+    /// the audio session away between asks (a call, another app), so a quick ask can't trust
+    /// `sessionActive`. (The category's checked against the session itself, in
     /// `configureIfNeeded`, rather than set again here: setting it while the engine's going is an
     /// audio configuration change, which restarts the mic.)
     func resetSession() {
@@ -226,7 +226,7 @@ nonisolated final class AudioInput: @unchecked Sendable {
 
     private func configureIfNeeded() throws {
         let session = AVAudioSession.sharedInstance()
-        // Reply dictation sets its own category; only then does this one need setting again.
+        // Something else can change the category; only then does this one need setting again.
         guard !configured || session.category != .playAndRecord else { return }
         do {
             // Loud speaker rather than the earpiece, and AirPods for both directions when they're in.

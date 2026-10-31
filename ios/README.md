@@ -1,7 +1,7 @@
 # Threadbear for iPhone
 
 The phone side of Threadbear: the inbox, a thread's last messages, replies
-(typed or dictated), approvals and questions, Hibernate and the Den, new
+(typed), approvals and questions, Hibernate and the Den, new
 threads and push. It reads the Convex mirror the runner writes
 (`docs/convex-backend.md`, `convex/phone.ts`) and never talks to the runner
 directly, so it works with the Mac asleep: whatever you send waits in
@@ -11,7 +11,7 @@ directly, so it works with the Mac asleep: whatever you send waits in
   sidebar), the Convex transport, a `FakeBackend` with sample data. `swift
   test` runs on the Mac, and `./check.sh` runs it whenever `ios/` changed.
 - Every mic tap goes through `Threadbear/MicTap.swift`, which waits for the
-  mic's format to settle (a tap too early crashed Ask and reply dictation);
+  mic's format to settle (a tap too early crashed Ask);
   `MicTapTests` fails on an `installTap` anywhere else.
 - The rows look like the Mac sidebar's (`Threadbear/Look.swift`): the
   project's tile with its picture (from `phone:projects`, backend API 5,

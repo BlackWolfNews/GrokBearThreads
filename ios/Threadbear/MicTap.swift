@@ -1,11 +1,11 @@
 import AVFoundation
 
 /// The only place the app puts a tap on the mic. Just after the audio
-/// session's category changes (Ask's playAndRecord, reply dictation's record,
-/// a call) the input node can still report the old format, and a tap in a
-/// format the hardware isn't running at throws an Objective-C exception,
-/// which Swift can't catch. It crashed Ask on 29 Oct and reply dictation on
-/// 30 Oct, on the XS Max. So this refuses until the format has settled, and
+/// session's category changes (Ask's playAndRecord, a call) the input node
+/// can still report the old format, and a tap in a format the hardware isn't
+/// running at throws an Objective-C exception, which Swift can't catch. It
+/// crashed Ask on 29 Oct and the old reply dictation on 30 Oct, on the XS
+/// Max. So this refuses until the format has settled, and
 /// callers try again a moment later (it settles within tens of
 /// milliseconds). MicTapTests fails on an `installTap(` anywhere else.
 nonisolated enum MicTap {

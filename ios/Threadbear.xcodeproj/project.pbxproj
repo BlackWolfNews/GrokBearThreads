@@ -328,8 +328,8 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Threadbear;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Threadbear uses the camera to scan the pairing code on your Mac.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Threadbear listens after you tap the mic, to type your reply, or after you press the button to Ask, to hear your question.";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Threadbear turns what you say into text for your reply or your question to Ask, on the phone where it can.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Threadbear listens after you press the button to Ask or tap the mic in an Ask thread, to hear what you say.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Threadbear turns what you say to Ask into text, on the phone where it can.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -365,8 +365,8 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Threadbear;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Threadbear uses the camera to scan the pairing code on your Mac.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Threadbear listens after you tap the mic, to type your reply, or after you press the button to Ask, to hear your question.";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Threadbear turns what you say into text for your reply or your question to Ask, on the phone where it can.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Threadbear listens after you press the button to Ask or tap the mic in an Ask thread, to hear what you say.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Threadbear turns what you say to Ask into text, on the phone where it can.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

@@ -2,7 +2,7 @@ import Foundation
 import Testing
 
 /// A mic tap put on before the format has settled is an Objective-C
-/// exception Swift can't catch: it crashed Ask on 29 Oct and reply dictation
+/// exception Swift can't catch: it crashed Ask on 29 Oct and the old reply dictation
 /// on 30 Oct. The app's MicTap.install checks first, so every tap must go
 /// through it. This reads the app's sources, as the Mac app's TipsTests do.
 struct MicTapTests {
