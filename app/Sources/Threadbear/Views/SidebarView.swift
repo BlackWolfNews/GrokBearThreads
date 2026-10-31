@@ -937,16 +937,7 @@ private struct RowActions: View {
             ForEach(Array(actions.enumerated()), id: \.offset) { _, action in
                 switch action {
                 case .snooze:
-                    Menu {
-                        SnoozeMenuItems(threadId: thread.id, confirmIfBusy: true)
-                    } label: {
-                        Image(systemName: "moon.zzz")
-                    }
-                    .menuStyle(.button)
-                    .buttonStyle(RowIconButtonStyle())
-                    .menuIndicator(.hidden)
-                    .fixedSize()
-                    .tip("Hibernate")
+                    HibernateButton(threadId: thread.id)
                 case .archive:
                     Button {
                         guard BusyConfirm.allowed(.archive, threadId: thread.id, app: app) else { return }
@@ -965,6 +956,24 @@ private struct RowActions: View {
                 }
             }
         }
+    }
+}
+
+/// The moon: a plain button that pops the Hibernate menu up from AppKit.
+/// It was a SwiftUI `Menu`, which since macOS 27.2 took the click on a
+/// row and never opened (31 Oct), while a bare one in a test app still did.
+private struct HibernateButton: View {
+    @Environment(AppModel.self) private var app
+    let threadId: String
+    @State private var anchor = MenuAnchor()
+
+    var body: some View {
+        Button {
+            anchor.popUp(SnoozeNSMenu.make(threadId: threadId, app: app), below: true)
+        } label: { Image(systemName: "moon.zzz") }
+            .buttonStyle(RowIconButtonStyle())
+            .background(MenuAnchorView(anchor: anchor))
+            .tip("Hibernate")
     }
 }
 
@@ -1106,36 +1115,66 @@ struct SnoozeMenu: View {
 struct SnoozeMenuItems: View {
     @Environment(AppModel.self) private var app
     let threadId: String
-    /// From a row's hover button: ask before snoozing a thread whose turn
-    /// is underway, which stops the turn.
-    var confirmIfBusy = false
 
     var body: some View {
         ForEach(Snooze.presets(now: app.now)) { preset in
             Button(preset.title) {
-                guard allowed() else { return }
                 app.snooze(threadId, until: Snooze.date(for: preset.id, now: Date()))
             }
         }
         if app.restartPending {
             Button(Snooze.untilRestartTitle, systemImage: "arrow.clockwise") {
-                guard allowed() else { return }
                 app.snoozeUntilRestart(threadId)
             }
         }
         Divider()
         Button("Pick a time…", systemImage: "calendar") {
-            guard allowed() else { return }
             SnoozePicker.show(threadId: threadId, app: app)
         }
         Button(WakeWords.menuTitle, systemImage: "text.bubble") {
-            guard allowed() else { return }
             WakeWhenPrompt.show(threadId: threadId, app: app)
         }
     }
+}
 
-    private func allowed() -> Bool {
-        !confirmIfBusy || BusyConfirm.allowed(.snooze, threadId: threadId, app: app)
+/// The Hibernate menu as an AppKit menu, for the row's moon button: the
+/// same presets, "Until the runner restarts" while one's waiting, then
+/// "Pick a time…" and "Wake when…".
+@MainActor
+enum SnoozeNSMenu {
+    static func make(threadId: String, app: AppModel) -> NSMenu {
+        // From a hover button, so ask before snoozing a thread whose turn
+        // is underway, which stops the turn. Asked when an item is chosen.
+        func allowed() -> Bool { BusyConfirm.allowed(.snooze, threadId: threadId, app: app) }
+        let menu = NSMenu()
+        for preset in Snooze.presets(now: app.now) {
+            menu.addItem(ActionMenuItem(preset.title) {
+                guard allowed() else { return }
+                app.snooze(threadId, until: Snooze.date(for: preset.id, now: Date()))
+            })
+        }
+        if app.restartPending {
+            let restart = ActionMenuItem(Snooze.untilRestartTitle) {
+                guard allowed() else { return }
+                app.snoozeUntilRestart(threadId)
+            }
+            restart.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: nil)
+            menu.addItem(restart)
+        }
+        menu.addItem(.separator())
+        let pick = ActionMenuItem("Pick a time…") {
+            guard allowed() else { return }
+            SnoozePicker.show(threadId: threadId, app: app)
+        }
+        pick.image = NSImage(systemSymbolName: "calendar", accessibilityDescription: nil)
+        menu.addItem(pick)
+        let words = ActionMenuItem(WakeWords.menuTitle) {
+            guard allowed() else { return }
+            WakeWhenPrompt.show(threadId: threadId, app: app)
+        }
+        words.image = NSImage(systemSymbolName: "text.bubble", accessibilityDescription: nil)
+        menu.addItem(words)
+        return menu
     }
 }
 
