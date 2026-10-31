@@ -92,6 +92,13 @@ extension NSView {
         anchor.text = text
         setAccessibilityHelp(text.isEmpty ? nil : text)
     }
+
+    /// Puts this view's tip up straight away, for a mark whose click is
+    /// asking what it means. The click itself took any tip down first.
+    func showTipNow() {
+        guard let anchor = subviews.lazy.compactMap({ $0 as? TipAnchorView }).first else { return }
+        Tips.shared.showNow(anchor)
+    }
 }
 
 /// Which tip is up, and the panel it's in. One for the whole app, as
@@ -141,6 +148,19 @@ final class Tips {
         inside.removeAll { $0 === anchor }
         if dismissed === anchor { dismissed = nil }
         refresh()
+    }
+
+    func showNow(_ anchor: TipAnchorView) {
+        timer?.invalidate()
+        timer = nil
+        if dismissed === anchor { dismissed = nil }
+        if shown !== anchor { hide() }
+        // At the anchor rather than the pointer, and without hover's check
+        // for the window under the pointer: the click was the asking.
+        guard let window = anchor.window, window.isVisible else { return }
+        let rect = window.convertToScreen(anchor.convert(anchor.bounds, to: nil))
+        shown = anchor
+        panel.show(anchor.text, at: NSPoint(x: rect.minX, y: rect.maxY), on: window.screen)
     }
 
     func placed(_ anchor: TipAnchorView) {

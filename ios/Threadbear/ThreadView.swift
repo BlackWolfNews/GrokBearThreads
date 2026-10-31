@@ -425,7 +425,9 @@ struct MessageView: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .background(BubbleBackground().clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous)))
-                if let origin = originText {
+                if message.origin == "phone" {
+                    PhoneMark()
+                } else if let origin = originText {
                     Text(origin).font(.caption2).foregroundStyle(.tertiary)
                 }
             }
@@ -462,10 +464,35 @@ struct MessageView: View {
 
     private var originText: String? {
         switch message.origin {
-        case "phone": "From the phone"
         case "schedule": "Scheduled"
         case "runner": "From the runner"
         default: nil
+        }
+    }
+}
+
+/// Under a message sent from the iPhone app: a small phone in place of a
+/// line of text, as on the Mac, that says what it means when tapped.
+private struct PhoneMark: View {
+    @State private var showing = false
+
+    var body: some View {
+        Button { showing = true } label: {
+            Image(systemName: "iphone")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .padding(6)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(-6)
+        .accessibilityLabel("Sent from the iPhone app")
+        .popover(isPresented: $showing) {
+            Text("Sent from the iPhone app")
+                .font(.footnote)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .presentationCompactAdaptation(.popover)
         }
     }
 }

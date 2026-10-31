@@ -608,7 +608,7 @@ async function dispatch(client, method, p) {
       // As the runner has it once the CLI starts a session (the app's
       // Finish setting up counts that as a login that works).
       t.summary.nativeSessionId ??= 'mock-session-' + t.summary.id;
-      setTimeout(() => fakeTurn(t.summary.id, p.text ?? '', p.images ?? [], turnId, undefined, extra), 10 + slow.queueMs);
+      setTimeout(() => fakeTurn(t.summary.id, p.text ?? '', p.images ?? [], turnId, p.origin === 'phone' ? 'phone' : undefined, extra), 10 + slow.queueMs);
       return { turnId };
     }
     case 'threads.edit': {
@@ -1658,7 +1658,7 @@ function addRemoteDemo() {
     const push = (fields, turnId) => events.push({ seq: events.length + 1, ts: ago(minutes), threadId: id, ...(turnId ? { turnId } : {}), ...fields });
     turns.forEach((turn, i) => {
       const turnId = `${id}_t${i}`;
-      push({ type: 'user.message', text: turn.ask, images: turn.images ?? [] }, turnId);
+      push({ type: 'user.message', text: turn.ask, images: turn.images ?? [], ...(turn.origin ? { origin: turn.origin } : {}) }, turnId);
       push({ type: 'turn.started' }, turnId);
       for (const [j, tool] of (turn.tools ?? []).entries()) {
         const itemId = `${id}_c${i}_${j}`;
@@ -1683,6 +1683,8 @@ function addRemoteDemo() {
   }], { unread: true, needsYou: true });
   make('bruce_media', 'Tidy the media drive', '/Volumes/CannMedia', 300, 'idle', [{
     ask: 'Find duplicate videos on the media drive.',
+    // Sent from the iPhone app, so the transcript shows its phone mark.
+    origin: 'phone',
     // Output past the runner's cut, kept whole in a blob on bruce.
     tools: [{ command: 'fdupes -r /Volumes/CannMedia/Footage', text: bruceFile(BRUCE_FILES.blob).slice(0, 600), blobPath: BRUCE_FILES.blob }],
     answer: `Found 14 duplicates, 61 GB in all. I listed them in \`duplicates.txt\` and left the files alone.\n\nThe [full scan](<${BRUCE_FILES.blob}>) has every match.`,

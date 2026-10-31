@@ -390,10 +390,11 @@ enum Automation {
             board.writeObjects([URL(fileURLWithPath: path) as NSURL])
             return composer.takeImages(from: board) ? "ok" : "error not an image"
         case "click":
-            // A visible, enabled button in the transcript with this title.
+            // A visible, enabled button in the transcript with this title,
+            // or this accessibility label for an icon-only one.
             guard let title = c["title"] as? String else { return "error no title" }
             let buttons = all(NSButton.self, in: app.transcript.tableView)
-                .filter { $0.title == title && $0.isEnabled && !$0.isHiddenOrHasHiddenAncestor }
+                .filter { ($0.title == title || $0.accessibilityLabel() == title) && $0.isEnabled && !$0.isHiddenOrHasHiddenAncestor }
             guard let button = buttons.last else { return "error no button \(title)" }
             button.performClick(nil)
             return "ok"

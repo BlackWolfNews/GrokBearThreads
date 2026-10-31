@@ -230,6 +230,9 @@ final class TextRowCell: RowCellView {
     /// Left of a message still on its way to the runner: a spinner while
     /// it's sent, a clock once it's queued behind the running turn.
     let pendingMark = PendingMark()
+    /// Left of a message Mike sent from the iPhone app: a small phone, its
+    /// tip saying so on hover or click, in place of a line of text.
+    let phoneMark = NSButton()
     private var editable = false
     private var pointerInside = false
     /// The open card's Something else boxes, by ask, over the room its
@@ -267,9 +270,22 @@ final class TextRowCell: RowCellView {
         addSubview(edit)
         pendingMark.isHidden = true
         addSubview(pendingMark)
+        phoneMark.isBordered = false
+        phoneMark.bezelStyle = .regularSquare
+        phoneMark.imagePosition = .imageOnly
+        phoneMark.target = self
+        phoneMark.action = #selector(phoneClicked)
+        phoneMark.isHidden = true
+        phoneMark.setTip("Sent from the iPhone app")
+        phoneMark.setAccessibilityLabel("Sent from the iPhone app")
+        addSubview(phoneMark)
     }
 
     required init?(coder: NSCoder) { fatalError() }
+
+    @objc private func phoneClicked() {
+        phoneMark.showTipNow()
+    }
 
     @objc private func editClicked() {
         delegate?.editMessage(rowId: rowId)
@@ -317,6 +333,7 @@ final class TextRowCell: RowCellView {
         let top = RowMetrics.rowTop
         box.isHidden = true
         images.isHidden = true
+        phoneMark.isHidden = true
         textView.isHidden = render.text == nil
         editable = false
         var pending: UserMessage.Pending?
@@ -351,11 +368,24 @@ final class TextRowCell: RowCellView {
                 box.set(fill: Theme.bubbleBackground, stroke: nil, radius: RowMetrics.bubbleRadius)
                 textView.place(bubble.insetBy(dx: RowMetrics.bubblePadH, dy: RowMetrics.bubblePadV))
             }
+            // Right beside the bubble (or the pictures) and level with its
+            // last line; the pending mark and the pencil go left of it.
+            var markEdge = render.text != nil ? box.frame.minX : images.frame.minX
+            if message.origin == "phone" {
+                let side = zoomed(22)
+                let bottom = render.text != nil ? box.frame.maxY : images.frame.maxY
+                phoneMark.isHidden = false
+                phoneMark.frame = NSRect(x: markEdge - side - zoomed(2), y: bottom - side - zoomed(4), width: side, height: side)
+                let image = Symbols.image("iphone", size: 12)
+                if phoneMark.image !== image { phoneMark.image = image }
+                phoneMark.contentTintColor = .tertiaryLabelColor
+                markEdge = phoneMark.frame.minX
+            }
             pending = message.pending
             if let state = message.pending {
                 // Where the pencil goes on a message that's landed.
                 let side = zoomed(22)
-                let left = render.text != nil ? box.frame.minX : images.frame.minX
+                let left = markEdge
                 let bottom = render.text != nil ? box.frame.maxY : images.frame.maxY
                 pendingMark.frame = NSRect(x: left - side - zoomed(6), y: bottom - side - zoomed(4), width: side, height: side)
                 pendingMark.show(state)
@@ -365,7 +395,7 @@ final class TextRowCell: RowCellView {
                 // level with its last line, as Codex and ChatGPT put theirs.
                 editable = true
                 let side = zoomed(22)
-                let left = render.text != nil ? box.frame.minX : images.frame.minX
+                let left = markEdge
                 let bottom = render.text != nil ? box.frame.maxY : images.frame.maxY
                 edit.frame = NSRect(x: left - side - zoomed(6), y: bottom - side - zoomed(4), width: side, height: side)
                 let image = Symbols.image("pencil", size: 12)
