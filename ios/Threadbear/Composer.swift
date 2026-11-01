@@ -9,16 +9,20 @@ struct Composer: View {
     /// Returns whether it went, so a failed send keeps the text.
     var onSend: (String, [PickedPhoto]) async -> Bool
     @State private var photos: [PickedPhoto] = []
+    @State private var cursor = TextCursor()
     @State private var sending = false
+
+    /// Each photo a chip in the words where it was put in, as on the Mac.
+    private var words: PhotoWords { PhotoWords(text: $text, photos: $photos, cursor: cursor) }
 
     var body: some View {
         VStack(spacing: 6) {
             if !photos.isEmpty {
-                PhotoStrip(photos: $photos)
+                PhotoStrip(photos: $photos) { words.remove($0) }
             }
             HStack(alignment: .bottom, spacing: 8) {
                 if model.canSendPhotos {
-                    PhotoMenu(photos: $photos) {
+                    PhotoMenu(photos: $photos, onAdd: { words.insert($0) }) {
                         Image(systemName: "plus.circle")
                             .font(.system(size: 30))
                             .symbolRenderingMode(.hierarchical)
@@ -29,7 +33,8 @@ struct Composer: View {
                     .accessibilityLabel("Add a photo")
                 }
                 PastableTextField(text: $text, placeholder: placeholder, lines: 1...6,
-                                  onPasteImages: model.canSendPhotos ? { addPasted($0, to: $photos, model: model) } : nil)
+                                  onPasteImages: model.canSendPhotos ? { addPasted($0, model: model) { words.insert($0) } } : nil,
+                                  photos: $photos, cursor: cursor)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 9)
                     .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
@@ -42,7 +47,7 @@ struct Composer: View {
                             .font(.system(size: 30))
                     }
                 }
-                .disabled((trimmed.isEmpty && photos.isEmpty) || sending)
+                .disabled((words.message.isEmpty && photos.isEmpty) || sending)
                 .accessibilityLabel("Send")
             }
         }
@@ -50,14 +55,12 @@ struct Composer: View {
         .padding(.vertical, 8)
         .background(.bar)
         .task {
-            if photos.isEmpty, let sample = model.samplePhoto, let photo = await PickedPhoto.from(sample) { photos = [photo] }
+            if photos.isEmpty, let sample = model.samplePhoto, let photo = await PickedPhoto.from(sample) { words.insert([photo]) }
         }
     }
 
-    private var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
-
     private func send() {
-        let message = trimmed
+        let message = words.message
         guard !message.isEmpty || !photos.isEmpty else { return }
         sending = true
         Task {

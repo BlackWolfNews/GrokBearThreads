@@ -9,6 +9,14 @@ import ThreadbearKit
     let jpeg: Data
     let thumbnail: UIImage
     var storageId: String?
+    /// Small enough to draw into its chip each time the words are laid out
+    /// (PhotoChips.swift), its short side 96 px.
+    lazy var chipThumbnail: UIImage = {
+        let side = min(thumbnail.size.width, thumbnail.size.height)
+        guard side > 96 else { return thumbnail }
+        let scale = 96 / side
+        return thumbnail.preparingThumbnail(of: CGSize(width: thumbnail.size.width * scale, height: thumbnail.size.height * scale)) ?? thumbnail
+    }()
 
     init?(jpeg: Data) {
         guard let thumbnail = UIImage(data: jpeg) else { return nil }
@@ -23,17 +31,67 @@ import ThreadbearKit
     }
 }
 
-/// Adds photos pasted into a composer, as many as still fit.
-@MainActor func addPasted(_ images: [Data], to photos: Binding<[PickedPhoto]>, model: AppModel) {
+/// Photos pasted into a composer, made ready to send and then put in
+/// (`PhotoWords.insert`, which takes as many as still fit).
+@MainActor func addPasted(_ images: [Data], model: AppModel, insert: @escaping ([PickedPhoto]) -> Void) {
     Task {
-        for data in images {
-            guard photos.wrappedValue.count < PhotoPrep.maxPhotos else { return }
+        var picked: [PickedPhoto] = []
+        for data in images.prefix(PhotoPrep.maxPhotos) {
             if let photo = await PickedPhoto.from(data) {
-                photos.wrappedValue.append(photo)
+                picked.append(photo)
             } else {
                 model.report(TransportError.server("Couldn't read that photo."))
             }
         }
+        if !picked.isEmpty { insert(picked) }
+    }
+}
+
+/// Where a composer's cursor is, in its words (UTF-16). A plain reference,
+/// so moving the cursor doesn't redraw the composer; the text field keeps
+/// it up to date and puts the cursor back there after the words change.
+final class TextCursor {
+    var range = NSRange(location: NSNotFound, length: 0)
+}
+
+/// A composer's words and photos together: each photo a chip in the words,
+/// a mark there (InlinePictures), and the photos in the marks' order.
+@MainActor struct PhotoWords {
+    var text: Binding<String>
+    var photos: Binding<[PickedPhoto]>
+    var cursor: TextCursor
+
+    /// New photos as chips where the cursor is (the end, before it's been
+    /// in the box), as many as still fit.
+    func insert(_ new: [PickedPhoto]) {
+        let have = photos.wrappedValue
+        let new = Array(new.prefix(max(0, PhotoPrep.maxPhotos - have.count)))
+        guard !new.isEmpty else { return }
+        let words = InlinePictures.normalized(text.wrappedValue, count: have.count)
+        let at = cursor.range.location == NSNotFound ? NSRange(location: (words as NSString).length, length: 0) : cursor.range
+        let result = InlinePictures.inserting(new.count, in: words, replacing: at)
+        var all = have
+        all.insert(contentsOf: new, at: min(result.firstIndex, all.count))
+        cursor.range = NSRange(location: result.cursor, length: 0)
+        photos.wrappedValue = all
+        text.wrappedValue = result.text
+    }
+
+    /// The strip's remove button: the photo and its chip.
+    func remove(_ photo: PickedPhoto) {
+        var all = photos.wrappedValue
+        guard let index = all.firstIndex(where: { $0.id == photo.id }) else { return }
+        let words = InlinePictures.normalized(text.wrappedValue, count: all.count)
+        all.remove(at: index)
+        photos.wrappedValue = all
+        text.wrappedValue = InlinePictures.removingMark(index, from: words)
+    }
+
+    /// What's sent: the words with each chip as a [Picture N] marker, or
+    /// none when there are only photos.
+    var message: String {
+        InlinePictures.sentText(InlinePictures.normalized(text.wrappedValue, count: photos.wrappedValue.count))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
@@ -43,6 +101,9 @@ import ThreadbearKit
 struct PhotoMenu<Label: View>: View {
     @Environment(AppModel.self) private var model
     @Binding var photos: [PickedPhoto]
+    /// Puts each one in as a chip where the cursor is (PhotoWords.insert);
+    /// without it, they go on the end of `photos`.
+    var onAdd: (([PickedPhoto]) -> Void)? = nil
     @ViewBuilder var label: () -> Label
     @State private var choosing = false
     @State private var chosen: [PhotosPickerItem] = []
@@ -79,7 +140,7 @@ struct PhotoMenu<Label: View>: View {
     private func add(_ data: Data?) async {
         guard photos.count < PhotoPrep.maxPhotos else { return }
         if let data, let photo = await PickedPhoto.from(data) {
-            photos.append(photo)
+            if let onAdd { onAdd([photo]) } else { photos.append(photo) }
         } else {
             model.report(TransportError.server("Couldn't read that photo."))
         }
@@ -89,6 +150,8 @@ struct PhotoMenu<Label: View>: View {
 /// The photos waiting to go, each with a button to take it out.
 struct PhotoStrip: View {
     @Binding var photos: [PickedPhoto]
+    /// Takes its chip out of the words too (PhotoWords.remove).
+    var onRemove: ((PickedPhoto) -> Void)? = nil
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -101,7 +164,7 @@ struct PhotoStrip: View {
                         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                         .overlay(alignment: .topTrailing) {
                             Button {
-                                photos.removeAll { $0.id == photo.id }
+                                if let onRemove { onRemove(photo) } else { photos.removeAll { $0.id == photo.id } }
                             } label: {
                                 Image(systemName: "xmark.circle.fill")
                                     .symbolRenderingMode(.palette)

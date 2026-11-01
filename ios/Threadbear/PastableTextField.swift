@@ -1,4 +1,5 @@
 import SwiftUI
+import ThreadbearKit
 import UIKit
 
 /// A text box that also takes a pasted photo. SwiftUI's TextField only ever
@@ -6,12 +7,22 @@ import UIKit
 /// pasteboard holds an image. Pasting from the edit menu or ⌘V is the user's
 /// own act, so reading the pasteboard then doesn't bring up iOS's "Allow
 /// Paste" prompt; checking `hasImages` beforehand doesn't either.
+///
+/// Given `photos`, each one is a chip in the words where it was put in
+/// (docs/protocol.md, "Pictures in a message"): a mark in `text`
+/// (InlinePictures) drawn as its PhotoChipAttachment, so deleting a chip
+/// takes its photo out too.
 struct PastableTextField: UIViewRepresentable {
     @Binding var text: String
     var placeholder: String
     var lines: ClosedRange<Int>
     /// Nil when photos can't be sent: Paste is then text only.
     var onPasteImages: (([Data]) -> Void)?
+    /// The photos whose chips are in the words, in order.
+    var photos: Binding<[PickedPhoto]>? = nil
+    /// Kept up to date with the cursor, and where it goes after the words
+    /// change from outside (photos put in).
+    var cursor: TextCursor? = nil
 
     func makeUIView(context: Context) -> PastingTextView {
         let view = PastingTextView()
@@ -30,7 +41,18 @@ struct PastableTextField: UIViewRepresentable {
 
     func updateUIView(_ view: PastingTextView, context: Context) {
         context.coordinator.parent = self
-        if view.text != text { view.text = text }
+        let photos = self.photos?.wrappedValue ?? []
+        let words = InlinePictures.normalized(text, count: photos.count)
+        let shown = view.contents
+        if shown.text != words || shown.photoIds != photos.map(\.id) || view.chipsOutOfOrder {
+            context.coordinator.updating = true
+            view.show(words, photos: photos)
+            if let range = cursor?.range, range.location != NSNotFound {
+                let length = ((view.text ?? "") as NSString).length
+                view.selectedRange = NSRange(location: min(range.location, length), length: 0)
+            }
+            context.coordinator.updating = false
+        }
         view.placeholderLabel.text = placeholder
         view.placeholderLabel.isHidden = !text.isEmpty
         view.onPasteImages = onPasteImages
@@ -52,11 +74,26 @@ struct PastableTextField: UIViewRepresentable {
 
     final class Coordinator: NSObject, UITextViewDelegate {
         var parent: PastableTextField
+        /// Set while the view shows new words from outside, whose changes
+        /// aren't his typing.
+        var updating = false
         init(_ parent: PastableTextField) { self.parent = parent }
 
         func textViewDidChange(_ view: UITextView) {
-            parent.text = view.text
-            (view as? PastingTextView)?.placeholderLabel.isHidden = !view.text.isEmpty
+            guard !updating, let view = view as? PastingTextView else { return }
+            let contents = view.contents
+            parent.text = contents.text
+            // A chip deleted or moved in the words takes its photo along.
+            if let photos = parent.photos, contents.photoIds != photos.wrappedValue.map(\.id) {
+                let byId = Dictionary(photos.wrappedValue.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+                photos.wrappedValue = contents.photoIds.compactMap { byId[$0] }
+            }
+            view.placeholderLabel.isHidden = !view.text.isEmpty
+        }
+
+        func textViewDidChangeSelection(_ view: UITextView) {
+            guard !updating else { return }
+            parent.cursor?.range = view.selectedRange
         }
     }
 }
@@ -64,6 +101,9 @@ struct PastableTextField: UIViewRepresentable {
 final class PastingTextView: UITextView {
     var onPasteImages: (([Data]) -> Void)?
     let placeholderLabel = UILabel()
+    /// The photos the chips stand for, to draw them again in the other
+    /// appearance.
+    private var chipPhotos: [PickedPhoto] = []
 
     override init(frame: CGRect, textContainer: NSTextContainer?) {
         super.init(frame: frame, textContainer: textContainer)
@@ -79,6 +119,13 @@ final class PastingTextView: UITextView {
             placeholderLabel.topAnchor.constraint(equalTo: frameLayoutGuide.topAnchor),
         ])
         isAccessibilityElement = true
+        // A chip is a picture drawn for light or dark and one text size,
+        // and the words carry their font: lay them out again.
+        registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitPreferredContentSizeCategory.self]) { (view: PastingTextView, _) in
+            let selection = view.selectedRange
+            view.show(view.contents.text, photos: view.chipPhotos)
+            view.selectedRange = selection
+        }
     }
 
     required init?(coder: NSCoder) { fatalError("not from a storyboard") }
@@ -86,6 +133,70 @@ final class PastingTextView: UITextView {
     override var accessibilityLabel: String? {
         get { placeholderLabel.text }
         set {}
+    }
+
+    private var baseAttributes: [NSAttributedString.Key: Any] {
+        [.font: UIFont.preferredFont(forTextStyle: .body), .foregroundColor: UIColor.label]
+    }
+
+    /// The words on show, each mark a chip for its photo.
+    func show(_ words: String, photos: [PickedPhoto]) {
+        let base = baseAttributes
+        let font = UIFont.preferredFont(forTextStyle: .body)
+        let out = NSMutableAttributedString()
+        var run = ""
+        var next = 0
+        for scalar in words.unicodeScalars {
+            guard scalar == InlinePictures.mark else {
+                run.unicodeScalars.append(scalar)
+                continue
+            }
+            guard next < photos.count else { continue }
+            out.append(NSAttributedString(string: run, attributes: base))
+            run = ""
+            var chip = base
+            chip[.attachment] = PhotoChipAttachment(photo: photos[next], number: next + 1, font: font, traits: traitCollection)
+            out.append(NSAttributedString(string: InlinePictures.markString, attributes: chip))
+            next += 1
+        }
+        out.append(NSAttributedString(string: run, attributes: base))
+        attributedText = out
+        typingAttributes = base
+        chipPhotos = photos
+    }
+
+    /// What's in it: the words with a mark for each chip, and the chips'
+    /// photos in order. U+FFFC typed or pasted as text is no photo.
+    var contents: (text: String, photoIds: [UUID]) {
+        let attributed = attributedText ?? NSAttributedString()
+        let ns = attributed.string as NSString
+        var text = ""
+        var ids: [UUID] = []
+        var last = 0
+        attributed.enumerateAttribute(.attachment, in: NSRange(location: 0, length: attributed.length)) { value, range, _ in
+            guard let chip = value as? PhotoChipAttachment else { return }
+            text += InlinePictures.words(ns.substring(with: NSRange(location: last, length: range.location - last)))
+            text += InlinePictures.markString
+            ids.append(chip.photoId)
+            last = NSMaxRange(range)
+        }
+        text += InlinePictures.words(ns.substring(from: last))
+        return (text, ids)
+    }
+
+    /// A chip whose number isn't its place any more (one before it went).
+    var chipsOutOfOrder: Bool {
+        var place = 0
+        var stale = false
+        attributedText?.enumerateAttribute(.attachment, in: NSRange(location: 0, length: attributedText.length)) { value, _, stop in
+            guard let chip = value as? PhotoChipAttachment else { return }
+            place += 1
+            if chip.number != place {
+                stale = true
+                stop.pointee = true
+            }
+        }
+        return stale
     }
 
     private var pastesImages: Bool { onPasteImages != nil && UIPasteboard.general.hasImages }
@@ -102,5 +213,40 @@ final class PastingTextView: UITextView {
         let images = (UIPasteboard.general.images ?? []).compactMap { $0.jpegData(compressionQuality: 1) }
         if images.isEmpty { return super.paste(sender) }
         onPasteImages(images)
+    }
+
+    // Copied chips go as the markers the agent would get, as plain text:
+    // as pictures, a paste would bring the chip itself back as a photo.
+
+    override func copy(_ sender: Any?) {
+        guard let words = selectionWithMarkers else { return super.copy(sender) }
+        UIPasteboard.general.string = words
+    }
+
+    override func cut(_ sender: Any?) {
+        guard let words = selectionWithMarkers, let range = selectedTextRange else { return super.cut(sender) }
+        UIPasteboard.general.string = words
+        replace(range, withText: "")
+        delegate?.textViewDidChange?(self)
+    }
+
+    /// The selected words with each chip as `[Picture N]`; nil with no chip in it.
+    private var selectionWithMarkers: String? {
+        let range = selectedRange
+        guard range.length > 0, let attributed = attributedText, NSMaxRange(range) <= attributed.length else { return nil }
+        let piece = attributed.attributedSubstring(from: range)
+        let ns = piece.string as NSString
+        var out = ""
+        var last = 0
+        var any = false
+        piece.enumerateAttribute(.attachment, in: NSRange(location: 0, length: piece.length)) { value, run, _ in
+            guard let chip = value as? PhotoChipAttachment else { return }
+            any = true
+            out += InlinePictures.words(ns.substring(with: NSRange(location: last, length: run.location - last)))
+            out += InlinePictures.marker(chip.number)
+            last = NSMaxRange(run)
+        }
+        out += InlinePictures.words(ns.substring(from: last))
+        return any ? out : nil
     }
 }

@@ -11,15 +11,8 @@ export type MessagePart = { text: string } | { image: ImageRef };
 const MARKER = /\[Picture (\d{1,3})\]/g;
 
 export function placePictures(text: string, images: ImageRef[]): MessagePart[] {
-  const placed = new Set<number>();
-  const cuts: { at: number; index: number }[] = [];
-  for (const m of text.matchAll(MARKER)) {
-    const index = Number(m[1]) - 1;
-    // A marker naming no picture, or one already placed, is just words.
-    if (index < 0 || index >= images.length || placed.has(index)) continue;
-    placed.add(index);
-    cuts.push({ at: m.index + m[0].length, index });
-  }
+  const cuts = pictureCuts(text, images.length);
+  const placed = new Set(cuts.map((c) => c.index));
   const parts: MessagePart[] = [];
   images.forEach((image, i) => {
     if (!placed.has(i)) parts.push({ image });
@@ -32,6 +25,27 @@ export function placePictures(text: string, images: ImageRef[]): MessagePart[] {
   }
   pushWords(parts, text.slice(from));
   return parts;
+}
+
+// Where each of `count` pictures goes: just after the first marker naming
+// it, in the order the markers come. A marker naming no picture, or one
+// already placed, is just words.
+function pictureCuts(text: string, count: number): { at: number; index: number }[] {
+  const placed = new Set<number>();
+  const cuts: { at: number; index: number }[] = [];
+  for (const m of text.matchAll(MARKER)) {
+    const index = Number(m[1]) - 1;
+    if (index < 0 || index >= count || placed.has(index)) continue;
+    placed.add(index);
+    cuts.push({ at: m.index + m[0].length, index });
+  }
+  return cuts;
+}
+
+// How many of a message's `count` pictures no marker places: the ones that
+// go before the words.
+export function unplacedPictures(text: string, count: number): number {
+  return count - pictureCuts(text, count).length;
 }
 
 // The Claude API turns down a text block of nothing but whitespace, as

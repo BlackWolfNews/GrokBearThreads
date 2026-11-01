@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { placePictures } from '../../src/pictures.ts';
+import { placePictures, unplacedPictures } from '../../src/pictures.ts';
 import type { ImageRef } from '../../src/protocol.ts';
 
 const red: ImageRef = { path: '/media/red.png', mediaType: 'image/png' };
@@ -65,4 +65,11 @@ test('only the exact marker counts', () => {
     { image: red },
     { text: '[picture 1] [Picture1] [Picture 1 ]' },
   ]);
+});
+
+test('the pictures no marker places are counted, for the mirror\'s line', () => {
+  assert.equal(unplacedPictures('this [Picture 1] and [Picture 2]', 2), 0);
+  assert.equal(unplacedPictures('see [Picture 2]', 3), 2);
+  assert.equal(unplacedPictures('no markers', 1), 1);
+  assert.equal(unplacedPictures('[Picture 1] [Picture 1]', 1), 0);
 });

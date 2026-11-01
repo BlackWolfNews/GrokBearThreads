@@ -184,10 +184,12 @@ public final class FakeBackend: Backend, @unchecked Sendable {
 
     public func uploadPhoto(_ jpeg: Data) async throws -> String { UUID().uuidString }
 
-    /// What the runner's mirror shows for a message with pictures (sync.ts toMessageDoc).
+    /// What the runner's mirror shows for a message with pictures (sync.ts
+    /// toMessageDoc): a line for the ones no [Picture N] marker places.
     private static func withPictures(_ text: String, _ images: [String]) -> String {
-        guard !images.isEmpty else { return text }
-        let note = images.count == 1 ? "[1 picture]" : "[\(images.count) pictures]"
+        let count = InlinePictures.unplaced(text, count: images.count)
+        guard count > 0 else { return text }
+        let note = count == 1 ? "[1 picture]" : "[\(count) pictures]"
         return text.isEmpty ? note : "\(text)\n\n\(note)"
     }
 
@@ -392,7 +394,7 @@ public final class FakeBackend: Backend, @unchecked Sendable {
                 PhoneMessage(seq: 1, role: .user, text: "Let people pick metric or imperial in settings", at: ago(15)),
             ],
             "a3": [
-                PhoneMessage(seq: 120, role: .user, text: "The date picker gets cut off on small phones, can you fix it?", at: ago(50)),
+                PhoneMessage(seq: 120, role: .user, text: "The date picker gets cut off on small phones, like this [Picture 1]. Can you fix it?", at: ago(50)),
                 PhoneMessage(seq: 121, role: .tool, text: "Read src/DatePicker.tsx", toolKind: "read", at: ago(48)),
                 PhoneMessage(seq: 122, role: .tool, text: "Edited src/DatePicker.tsx", toolKind: "edit", at: ago(40)),
                 PhoneMessage(seq: 123, role: .assistant, text: "That fits now. Checking the other sizes.", at: ago(38)),

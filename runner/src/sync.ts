@@ -28,6 +28,7 @@ import type { Notification } from './runner.ts';
 import type { ScheduleBackend, StoredSchedule } from './schedules.ts';
 import { ThreadIndex, type RemoteThreads } from './thread-index.ts';
 import { paths, readRunnerJson, writeRunnerJson } from './config.ts';
+import { unplacedPictures } from './pictures.ts';
 
 // At most one write per thread this often while a turn runs: a running
 // thread's preview and working line change many times a second.
@@ -442,7 +443,9 @@ export function toMessageDoc(threadId: string, e: PersistedEvent): MessageDoc | 
   const cut = e.text.length > MESSAGE_CHARS ? e.text.slice(0, MESSAGE_CHARS) + '\n\n[cut: the rest is on the Mac]' : e.text;
   // Pictures stay on the Mac, so the phone and website get a line saying
   // there were some; a photo sent with no words would be an empty bubble.
-  const pictures = e.type === 'user.message' ? (e.images?.length ?? 0) : 0;
+  // One a [Picture N] marker places shows as a chip there instead, so the
+  // line counts only the rest (docs/protocol.md, "Pictures in a message").
+  const pictures = e.type === 'user.message' ? unplacedPictures(e.text, e.images?.length ?? 0) : 0;
   const note = pictures === 1 ? '[1 picture]' : pictures ? `[${pictures} pictures]` : '';
   const text = note ? (cut ? `${cut}\n\n${note}` : note) : cut;
   const doc: MessageDoc = { threadId, seq: e.seq, role: e.type === 'user.message' ? 'user' : 'assistant', text, at: e.ts };

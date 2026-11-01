@@ -434,6 +434,8 @@ struct EarlierButton: View {
 
 struct MessageView: View {
     var message: PhoneMessage
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         switch message.role {
@@ -477,7 +479,11 @@ struct MessageView: View {
                 }
             }
         } else {
-            Text(message.text)
+            // Its [Picture N] markers as chips, as the Mac draws them.
+            PhotoChip.text(message.text, font: .preferredFont(forTextStyle: .body), traits: UITraitCollection { traits in
+                traits.userInterfaceStyle = colorScheme == .dark ? .dark : .light
+                traits.displayScale = displayScale
+            })
         }
     }
 

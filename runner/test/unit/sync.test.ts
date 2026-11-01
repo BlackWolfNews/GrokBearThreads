@@ -691,6 +691,11 @@ test('toMessageDoc keeps text and tool calls, nothing else, and a schedule origi
   assert.equal(toMessageDoc('t', { ...base, type: 'tool.call', itemId: 'i', name: 'Bash', kind: 'command', title: 'ls', input: {} } as never)?.role, 'tool');
   assert.equal(toMessageDoc('t', { ...base, type: 'tool.result', itemId: 'i', ok: true } as never), undefined);
   assert.equal(toMessageDoc('t', { ...base, type: 'reasoning', itemId: 'i', text: 'thinking' } as never), undefined);
+  // Pictures a [Picture N] marker places show as chips on the phone, so
+  // the line counts only the rest.
+  const pic = { path: '/m/a.png', mediaType: 'image/png' };
+  assert.equal(toMessageDoc('t', { ...base, type: 'user.message', text: 'this [Picture 1] like [Picture 2]', images: [pic, pic] } as never)?.text, 'this [Picture 1] like [Picture 2]');
+  assert.equal(toMessageDoc('t', { ...base, type: 'user.message', text: 'see [Picture 2]', images: [pic, pic] } as never)?.text, 'see [Picture 2]\n\n[1 picture]');
 });
 
 // ------------------------------------------------------------ push text

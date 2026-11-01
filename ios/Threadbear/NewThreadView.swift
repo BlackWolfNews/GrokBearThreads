@@ -18,18 +18,23 @@ struct NewThreadView: View {
     @State private var effort: String?
     @State private var commandId: String?
     @State private var photos: [PickedPhoto] = []
+    @State private var cursor = TextCursor()
+
+    /// Each photo a chip in the words where it was put in, as on the Mac.
+    private var words: PhotoWords { PhotoWords(text: $text, photos: $photos, cursor: cursor) }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
                     PastableTextField(text: $text, placeholder: "What should it do?", lines: 4...12,
-                                      onPasteImages: model.canSendPhotos ? { addPasted($0, to: $photos, model: model) } : nil)
+                                      onPasteImages: model.canSendPhotos ? { addPasted($0, model: model) { words.insert($0) } } : nil,
+                                      photos: $photos, cursor: cursor)
                     if model.canSendPhotos {
-                        PhotoMenu(photos: $photos) {
+                        PhotoMenu(photos: $photos, onAdd: { words.insert($0) }) {
                             Label("Add a photo", systemImage: "photo")
                         }
-                        if !photos.isEmpty { PhotoStrip(photos: $photos) }
+                        if !photos.isEmpty { PhotoStrip(photos: $photos) { words.remove($0) } }
                     }
                 }
                 if !models.isEmpty {
@@ -58,13 +63,13 @@ struct NewThreadView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     if commandId != nil { ProgressView() } else {
-                        Button("Start", action: start).disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && photos.isEmpty)
+                        Button("Start", action: start).disabled(words.message.isEmpty && photos.isEmpty)
                     }
                 }
             }
             .task(id: "\(commandId ?? ""):\(model.connection)") { await waitForThread() }
             .task {
-                if photos.isEmpty, let sample = model.samplePhoto, let photo = await PickedPhoto.from(sample) { photos = [photo] }
+                if photos.isEmpty, let sample = model.samplePhoto, let photo = await PickedPhoto.from(sample) { words.insert([photo]) }
             }
         }
     }
@@ -74,7 +79,7 @@ struct NewThreadView: View {
 
     private func start() {
         guard let backend = model.backend else { return }
-        let message = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let message = words.message
         Task {
             do {
                 let images = try await model.upload(photos)
