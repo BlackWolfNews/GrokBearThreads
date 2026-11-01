@@ -210,6 +210,7 @@ enum Automation {
                 "maxLiveCLIs": settings.maxLiveCLIs,
                 "followMain": settings.followMain,
                 "bulletReplies": settings.bulletReplies,
+                "oneReply": settings.oneReply,
                 // "" is none (small jobs off), or an older runner with no pools.
                 "smallJobsPool": settings.models.pool ?? "",
                 "privateFolders": settings.models.privateFolders,

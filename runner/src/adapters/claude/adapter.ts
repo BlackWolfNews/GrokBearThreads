@@ -16,7 +16,7 @@ import { placePictures } from '../../pictures.ts';
 import { toolTitle, truncateInput } from '../../tools.ts';
 import { RUNNER_VERSION } from '../../config.ts';
 import { stripModelSuffix } from '../../accounts.ts';
-import { END_TURN_FULL_NAME, END_TURN_NUDGE } from '../../needs.ts';
+import { END_TURN_FULL_NAME, END_TURN_NUDGE, ONE_REPLY_END_TURN_NUDGE, ONE_REPLY_WRITE_NUDGE } from '../../needs.ts';
 
 // Variables a parent Claude Code session sets for its own children. If the
 // runner was started from inside one (tests, a terminal in T3), they would
@@ -56,9 +56,12 @@ export function cliEnv(account: Account, base: NodeJS.ProcessEnv = process.env):
 // Mike's local CLI transcripts followed an end_turn (28 Oct 2026). Named
 // there, end_turn's result lets the empty reply end the turn quietly. Any
 // names already in the variable stay.
-export function terminalMcpTools(base: string | undefined): string {
+// With one reply, end_turn isn't the turn's end: the reply comes after
+// it, so it stays off the list, and a turn that stops with no words after
+// it is sent back for them (onStop).
+export function terminalMcpTools(base: string | undefined, oneReply = false): string {
   const names = (base ?? '').split(',').map((s) => s.trim()).filter(Boolean);
-  if (!names.includes(END_TURN_FULL_NAME)) names.push(END_TURN_FULL_NAME);
+  if (!oneReply && !names.includes(END_TURN_FULL_NAME)) names.push(END_TURN_FULL_NAME);
   return names.join(',');
 }
 
@@ -107,6 +110,8 @@ export type ClaudeAdapterDeps = {
   mcpServersFor?: (threadId: string) => Record<string, McpServerConfig>;
   // Tools that ask Mike even in a thread with full access.
   alwaysAsk?: Set<string>;
+  // One reply (needs.ts), read when a session starts, as its end_turn is.
+  oneReply?: () => boolean;
 };
 
 export class ClaudeAdapter implements AgentAdapter {
@@ -253,6 +258,12 @@ class ClaudeSession implements AgentSession {
   // the turn now ending called it (a taken call, from the PostToolUse hook).
   private hasEndTurn = false;
   private endTurnTaken = false;
+  // One reply: whether this session's end_turn is that kind, and whether
+  // the agent has written words since the turn's end_turn.
+  private oneReply = false;
+  private wroteAfterEnd = false;
+  private pastEndTurn = false;
+  private endTurnCall?: string;
 
   constructor(opts: StartSessionOptions, sink: SessionSink, deps: ClaudeAdapterDeps) {
     this.opts = opts;
@@ -266,10 +277,11 @@ class ClaudeSession implements AgentSession {
   start(): void {
     const { opts, deps } = this;
     const env = cliEnv(opts.account);
+    this.oneReply = deps.oneReply?.() === true;
     const options: Options = {
       cwd: opts.cwd,
       pathToClaudeCodeExecutable: deps.claudePath,
-      env: { ...env, CLAUDE_CODE_TERMINAL_MCP_TOOLS: terminalMcpTools(env.CLAUDE_CODE_TERMINAL_MCP_TOOLS), ...opts.env },
+      env: { ...env, CLAUDE_CODE_TERMINAL_MCP_TOOLS: terminalMcpTools(env.CLAUDE_CODE_TERMINAL_MCP_TOOLS, this.oneReply), ...opts.env },
       settingSources: ['user', 'project', 'local'],
       systemPrompt: { type: 'preset', preset: 'claude_code', ...(opts.instructions ? { append: opts.instructions } : {}) },
       includePartialMessages: true,
@@ -315,7 +327,11 @@ class ClaudeSession implements AgentSession {
     if (isEffortLevel(level)) this.sink.output({ kind: 'effort', level });
     const stop = input as { stop_hook_active?: boolean; background_tasks?: unknown[] };
     const ended = this.endTurnTaken;
+    const wrote = this.wroteAfterEnd;
     this.endTurnTaken = false;
+    this.wroteAfterEnd = false;
+    this.pastEndTurn = false;
+    this.endTurnCall = undefined;
     // A turn that ended in plain text leaves the runner reading the card
     // from the prose (needs.ts, needsFromText), which drops what end_turn
     // would have carried: on 30 Oct 2026 an agent skipped it for three
@@ -324,8 +340,11 @@ class ClaudeSession implements AgentSession {
     // already follows a nudge. Not while background work it started is
     // still going, as the turn that work wakes will end it. Sub-agents
     // stop through SubagentStop, never here.
-    if (!this.hasEndTurn || ended || stop.stop_hook_active || stop.background_tasks?.length) return {};
-    return { decision: 'block', reason: END_TURN_NUDGE };
+    if (!this.hasEndTurn || stop.stop_hook_active || stop.background_tasks?.length) return {};
+    // One reply: end_turn without words after it leaves no reply, so the
+    // agent is asked for it, once (the hook's own guard, stop_hook_active).
+    if (ended) return this.oneReply && !wrote ? { decision: 'block', reason: ONE_REPLY_WRITE_NUDGE } : {};
+    return { decision: 'block', reason: this.oneReply ? ONE_REPLY_END_TURN_NUDGE : END_TURN_NUDGE };
   }
 
   private onEndTurn(input: HookInput): Record<string, never> {
@@ -347,6 +366,15 @@ class ClaudeSession implements AgentSession {
       for await (const msg of this.q) {
         for (const out of this.normalizer.handle(msg as Record<string, unknown>)) {
           this.sink.output(out);
+          // Words after end_turn's result, by the events' own order: the
+          // hook that sets endTurnTaken can run before the text written
+          // ahead of the call comes through.
+          if (out.kind === 'event') {
+            const ev = out.event;
+            if (ev.type === 'tool.call' && ev.name === END_TURN_FULL_NAME) this.endTurnCall = ev.itemId;
+            else if (ev.type === 'tool.result' && ev.itemId === this.endTurnCall && ev.ok) this.pastEndTurn = true;
+            else if (this.pastEndTurn && ev.type === 'assistant.text' && !ev.itemId.includes('/') && ev.text.trim()) this.wroteAfterEnd = true;
+          }
           if (out.kind === 'event' && out.event.type === 'tool.call') this.markToolSeen(out.event.itemId);
         }
       }

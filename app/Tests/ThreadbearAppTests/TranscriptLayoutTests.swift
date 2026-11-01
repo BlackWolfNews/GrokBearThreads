@@ -113,6 +113,38 @@ final class TranscriptLayoutTests: XCTestCase {
         XCTAssertEqual(style?.tabStops.first?.location, style?.headIndent, "wrapped values hang under the value column")
     }
 
+    /// One reply's answers say what they do, so they're rows: a circle,
+    /// the label, "my pick" on the agent's, the note under it, the whole
+    /// row the click; in one box, with "Something else…" last (docs/
+    /// reply-card-design, A). Asks without notes keep their buttons.
+    func testAnswersWithNotesAreRowsInABox() {
+        let ask = Ask(action: "Deploy main to production?", options: ["Deploy it", "Hold off"], optionNotes: ["I deploy and check it went out", ""], suggested: 0)
+        let text = RowRenderer.asksText(AsksCard(seq: 1, asks: [ask]))
+        let string = text.string as NSString
+        let deploy = string.range(of: "Deploy it")
+        XCTAssertNotEqual(deploy.location, NSNotFound, text.string)
+        XCTAssertNil(text.attribute(.tbButton, at: deploy.location, effectiveRange: nil), "a row, not a button")
+        var row = NSRange()
+        XCTAssertEqual(text.attribute(.tbRow, at: deploy.location, longestEffectiveRange: &row, in: NSRange(location: 0, length: text.length)) as? String, "pick:0:0")
+        let note = string.range(of: "I deploy and check it went out")
+        XCTAssertTrue(NSLocationInRange(note.location, row), "the note is part of its row")
+        XCTAssertLessThan((text.attribute(.font, at: note.location, effectiveRange: nil) as? NSFont)?.pointSize ?? 99, Theme.bodyFont.pointSize)
+        XCTAssertTrue(text.string.contains("Deploy it  my pick"), text.string)
+        XCTAssertFalse(text.string.contains("Hold off  my pick"), text.string)
+        let own = string.range(of: "Something else…")
+        XCTAssertEqual(text.attribute(.tbRow, at: own.location, effectiveRange: nil) as? String, "pick:0:-1")
+        // One box from the first row to the last, a rule above each row but the first.
+        var box = NSRange()
+        XCTAssertNotNil(text.attribute(.tbBlockBackground, at: deploy.location, longestEffectiveRange: &box, in: NSRange(location: 0, length: text.length)))
+        XCTAssertTrue(NSLocationInRange(own.location, box))
+        XCTAssertFalse(NSLocationInRange(string.range(of: "Deploy main").location, box), "the question stays out of it")
+        XCTAssertNil(text.attribute(.tbRowRule, at: deploy.location, effectiveRange: nil))
+        XCTAssertNotNil(text.attribute(.tbRowRule, at: string.range(of: "Hold off").location, effectiveRange: nil))
+        // Plain options stay buttons.
+        let plain = RowRenderer.asksText(AsksCard(seq: 2, asks: [Ask(action: "Merge?", options: ["Merge", "Wait"])]))
+        XCTAssertNotNil(plain.attribute(.tbButton, at: (plain.string as NSString).range(of: "Merge\u{00A0}").location, effectiveRange: nil) ?? plain.attribute(.tbButton, at: (plain.string as NSString).range(of: "Merge", options: .backwards).location, effectiveRange: nil))
+    }
+
     /// An open card draws each ask the way the agent would have written it
     /// in its message: one paragraph, the why at the body size and colour,
     /// numbered when there are several, its buttons in under the text.

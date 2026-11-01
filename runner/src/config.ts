@@ -93,6 +93,10 @@ export type Config = {
   // A turn's reply in the Mac app: end_turn's bullets, or (false) the
   // agent's own message, with the bullets only for previews.
   bulletReplies: boolean;
+  // One reply (docs/protocol.md, "One reply"): end_turn carries the card
+  // and a headline, and the agent's message straight after it is the
+  // turn's reply. Off by default while Mike tries it (1 Nov 2026).
+  oneReply: boolean;
   // Mike's runner tags a signed release of main once a day for everyone
   // else's copy (src/upstream.ts): runner.json `releases`.
   releases?: { publish: boolean; signingKey?: string };
@@ -140,6 +144,7 @@ export type RunnerJson = {
   pools?: unknown[];
   followMain?: boolean;
   bulletReplies?: boolean;
+  oneReply?: boolean;
   releases?: { publish?: boolean; signingKey?: string };
   models?: { pool?: string | null; privateFolders?: string[] };
   // icon: an SF Symbol for this runner in lists (machine.ts works one out).
@@ -232,6 +237,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     ),
     followMain: env.THREADBEAR_FOLLOW_MAIN ? env.THREADBEAR_FOLLOW_MAIN !== '0' : json.followMain !== false,
     bulletReplies: json.bulletReplies !== false,
+    oneReply: json.oneReply === true,
     ...(json.releases?.publish === true ? { releases: { publish: true, ...(typeof json.releases.signingKey === 'string' ? { signingKey: expandHome(json.releases.signingKey) } : {}) } } : {}),
     models: modelSettingsFrom(json),
     ...(codexPath ? { codexPath: expandHome(codexPath) } : {}),

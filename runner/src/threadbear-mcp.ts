@@ -19,7 +19,7 @@ import { parseWhen, relativeFuture, relativeTime } from './when.ts';
 
 export { parseWhen, relativeFuture, relativeTime };
 import { RUNNER_VERSION, expandHome } from './config.ts';
-import { ALREADY_ENDED, endTurnDescription, END_TURN_TOOL, BULLETS_ONLY, ENDED, endedThisTurn, MAX_BYLINE, NARRATION_ONLY, NO_REPLY, needsFromTool, summaryFromTool, turnReply, type TurnReply } from './needs.ts';
+import { ALREADY_ENDED, endTurnDescription, END_TURN_TOOL, BULLETS_ONLY, ENDED, endedThisTurn, MAX_BYLINE, NARRATION_ONLY, NO_REPLY, needsFromTool, oneReplyAccepted, summaryFromTool, turnReply, type TurnReply } from './needs.ts';
 import { asksForAppRestart, type AppRestarts } from './app-restarts.ts';
 import { PANEL_PLACES } from './panel-requests.ts';
 import { nudgedThisTurn, signInNudge, turnSignIns, uncovered } from './connectors.ts';
@@ -117,10 +117,15 @@ export function buildThreadbearTools(
   // before its final answer rather than after it (needs.ts).
   // bulletReplies: Settings > General; false has agents write a normal
   // message as the reply, with the bullets only for previews.
-  opts: { sleep?: (ms: number) => Promise<void>; provider?: 'claude' | 'codex'; bulletReplies?: () => boolean; pocket?: () => PocketControl | undefined } = {},
+  // oneReply: Settings > General; end_turn carries the card and a
+  // headline, and the agent's message after it is the reply (needs.ts).
+  // Read once, here, as it changes the tool's own shape: a live session
+  // keeps the tool it started with, and the handler goes by that.
+  opts: { sleep?: (ms: number) => Promise<void>; provider?: 'claude' | 'codex'; bulletReplies?: () => boolean; oneReply?: () => boolean; pocket?: () => PocketControl | undefined } = {},
 ) {
   const codex = opts.provider === 'codex';
   const bulletReplies = () => opts.bulletReplies?.() !== false;
+  const oneReply = opts.oneReply?.() === true;
   const all = async (): Promise<ThreadSummary[]> => control.list(['inbox', 'snoozed', 'archived']);
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
 
@@ -619,11 +624,83 @@ export function buildThreadbearTools(
     ),
   ];
 
+  // end_turn with one reply (docs/protocol.md, "One reply"): the card and
+  // a headline; the reply is the message the agent writes next. Nothing to
+  // check for a reply, as it comes after; only a second call, a sign-in no
+  // ask covers, and Restart to Update apply, as below.
+  const oneReplyEndTurn = () =>
+    tool(
+      END_TURN_TOOL,
+      endTurnDescription(codex ? 'codex' : 'claude', bulletReplies(), true),
+      {
+        headline: z.string().optional().describe('One line, at most 80 characters, for the sidebar and notifications: the result, or what you need from them.'),
+        needs: z.enum(['you', 'nothing']).optional().describe('"you" when the user has to do something before this can go on; "nothing" when it is done. Left out, it follows the asks.'),
+        asks: z
+          .array(
+            z.object({
+              question: z.string().min(1).describe('One sentence, at most 160 characters: the question, or the step for them to take, naming the thing. It shows right under your reply, so no background.'),
+              options: z
+                .array(
+                  z.object({
+                    label: z.string().min(1).describe('The answer, 1 to 4 words: "Deploy it".'),
+                    does: z.string().optional().describe('What happens if they pick it, at most 90 characters: "I deploy and watch the logs".'),
+                  }),
+                )
+                .max(6)
+                .optional()
+                .describe('For every decision or step: 2 to 4 answers. They can always write their own instead.'),
+              suggested: z.number().int().optional().describe('Index into options of the answer you would pick.'),
+              links: z
+                .array(
+                  z.object({
+                    title: z.string().min(1).describe('What the button does, short: "Open login page", "See the preview".'),
+                    url: z.string().min(1).describe('A web page (https://…), a file or folder on this Mac (an absolute or ~ path), or review:<id> to open one of this thread\'s show_options reviews.'),
+                  }),
+                )
+                .max(3)
+                .optional()
+                .describe('Where to go to do it or judge it: the page, the PR, the file. Give one whenever there is somewhere to go.'),
+            }),
+          )
+          .max(10)
+          .optional()
+          .describe('Each thing the user has to do or decide, most blocking first. Usually one.'),
+        next: z
+          .array(z.string())
+          .max(3)
+          .optional()
+          .describe('With needs "nothing": follow-ups in this thread worth doing next, each the message the user would send to start it, about 8 words. Only ones that really came up; usually none.'),
+        byline: z
+          .string()
+          .optional()
+          .describe('Only in a thread the user did not start (a tool, a schedule or another thread did): how it came out in a few plain words, about 6 ("network blip, nothing to do"). The sidebar shows them under its title, so the user can tell at a glance how much it matters. Leave it out in a thread the user started.'),
+        archive: z
+          .boolean()
+          .optional()
+          .describe('true to archive this thread once the turn is over. Only when the user has asked for this thread to be archived or the message that started it says to, and only with needs "nothing".'),
+      },
+      handle(async (input) => {
+        const parsed = needsFromTool(input);
+        const needs = parsed?.needs ?? 'nothing';
+        const asks = parsed?.asks ?? [];
+        const events = await turnEvents();
+        if (endedThisTurn(events, SERVER_NAME)) throw new Error(ALREADY_ENDED);
+        const missing = uncovered(turnSignIns(events), needs === 'you' ? asks : []);
+        if (missing.length && !nudgedThisTurn(events)) throw new Error(signInNudge(missing));
+        let restart = '';
+        if (needs === 'you' && appRestarts && asksForAppRestart(asks)) {
+          if (!appRestarts.isWatching(selfId)) appRestarts.watch(selfId);
+          restart = " You'll get a message here when the app restarts onto the new build.";
+        }
+        return oneReplyAccepted(needs === 'you', restart);
+      }),
+    );
+
   return [
     // Says what the turn needs from Mike. The runner reads it from the
     // thread's own tool.call when the turn completes (needs.ts), so the
     // handler only checks it; a sub-agent's call never reaches the thread.
-    tool(
+    oneReply ? oneReplyEndTurn() : tool(
       END_TURN_TOOL,
       endTurnDescription(codex ? 'codex' : 'claude', bulletReplies()),
       {
@@ -1020,7 +1097,8 @@ export function guideLine(file = guidePath(), exists: (p: string) => boolean = f
   );
 }
 
-export function threadbearMcpServer(control: ThreadControl, selfId: string, schedules?: ScheduleControl, projects?: ProjectControl, appRestarts?: AppRestartControl, bulletReplies: () => boolean = () => true, pocket?: () => PocketControl | undefined): McpSdkServerConfigWithInstance {
+export function threadbearMcpServer(control: ThreadControl, selfId: string, schedules?: ScheduleControl, projects?: ProjectControl, appRestarts?: AppRestartControl, bulletReplies: () => boolean = () => true, pocket?: () => PocketControl | undefined, oneReply: () => boolean = () => false): McpSdkServerConfigWithInstance {
+  const one = oneReply();
   const guide = guideLine();
   const server = createSdkMcpServer({
     name: SERVER_NAME,
@@ -1033,10 +1111,12 @@ export function threadbearMcpServer(control: ThreadControl, selfId: string, sche
       'Use move_thread when the work belongs in another folder (for example a repo), so this thread runs there from the next turn. ' +
       `${SHOWING_THE_USER} ` +
       (projects ? `${FILING_PROJECTS} ` : '') +
-      (bulletReplies()
-        ? 'End every turn by calling end_turn, with a short summary of what you did (the user reads it first, as your reply) and anything they have to do.'
-        : 'End every turn by writing your reply as an ordinary message, then calling end_turn with a short summary of what you did (for previews and notifications) and anything they have to do.'),
-    tools: buildThreadbearTools(control, selfId, Date.now, schedules, projects, appRestarts, { bulletReplies, pocket }),
+      (one
+        ? 'End every turn by calling end_turn, then writing your reply straight after it: the reply is the only text the user sees from the turn.'
+        : bulletReplies()
+          ? 'End every turn by calling end_turn, with a short summary of what you did (the user reads it first, as your reply) and anything they have to do.'
+          : 'End every turn by writing your reply as an ordinary message, then calling end_turn with a short summary of what you did (for previews and notifications) and anything they have to do.'),
+    tools: buildThreadbearTools(control, selfId, Date.now, schedules, projects, appRestarts, { bulletReplies, pocket, oneReply: () => one }),
   });
   server.tools = [...ALWAYS_ASK_TOOLS].map((name) => ({ name: name.split('__').at(-1)!, permission_policy: 'always_ask' as const }));
   return server;

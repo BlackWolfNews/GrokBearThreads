@@ -35,7 +35,9 @@ final class BackgroundLayoutManager: NSLayoutManager {
             guard !box.isNull else { return }
             let style = storage.attribute(.paragraphStyle, at: effective.location, effectiveRange: nil) as? NSParagraphStyle
             let pad = MarkdownRenderer.codePad
-            let head = (style?.headIndent ?? 0) - pad
+            // From the first line's indent when it's further left: an
+            // answer row's circle sits left of its words.
+            let head = min(style?.headIndent ?? 0, style?.firstLineHeadIndent ?? 0) - pad
             let tail = width + (style?.tailIndent ?? 0) + pad
             var rect = NSRect(x: head, y: box.minY - pad, width: max(0, tail - head), height: box.height + pad * 2)
             rect.origin.y = max(0, rect.origin.y)
@@ -46,6 +48,15 @@ final class BackgroundLayoutManager: NSLayoutManager {
             Theme.cardBorder.setStroke()
             path.lineWidth = 0.5
             path.stroke()
+            // The lines between answer rows, across the box.
+            storage.enumerateAttribute(.tbRowRule, in: effective) { rule, ruleRange, _ in
+                guard rule != nil else { return }
+                let first = self.glyphIndexForCharacter(at: ruleRange.location)
+                let line = self.lineFragmentRect(forGlyphAt: first, effectiveRange: nil)
+                let y = (line.minY + origin.y).rounded() + 0.25
+                Theme.cardBorder.setFill()
+                NSRect(x: rect.minX, y: y, width: rect.width, height: 0.5).fill()
+            }
         }
 
         storage.enumerateAttribute(.tbInlineBackground, in: characters) { value, range, _ in

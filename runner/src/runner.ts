@@ -89,7 +89,7 @@ import { SAID_MAX, WAKE_SYSTEM, awayFor, hibernateNote, readWakeAnswer, wakeProm
 import { emptyHighlights, observe as observeHighlights, pinItem, remove as removeHighlight, unpin as unpinHighlight, upsert as upsertHighlight, view as highlightsView, absolute, type ThreadHighlights } from './highlights.ts';
 import { SERVER_NAME, approvalTitle } from './threadbear-mcp.ts';
 import { PANEL_ACK_WAIT_MS, PANEL_PLACES, resolvePanel } from './panel-requests.ts';
-import { archiveFromTool, bylineFromTool, END_TURN_TOOL, endTurnAccepted, endTurnAsksForMessage, endTurnOwesReply, endTurnTaken, needsFromText, needsFromTool, summaryFromTool, summaryMarkdown } from './needs.ts';
+import { archiveFromTool, bylineFromTool, END_TURN_TOOL, endTurnAccepted, endTurnAsksForMessage, endTurnOwesReply, endTurnTaken, endTurnWantsReply, needsFromText, needsFromTool, splitReplySection, summaryFromTool, summaryMarkdown } from './needs.ts';
 import type { Needs } from './needs.ts';
 import { asksForAppRestart } from './app-restarts.ts';
 import type { ConnectorsStatus } from './connectors.ts';
@@ -259,6 +259,15 @@ type Turn = {
   // (TranscriptReducer, reply(of:)): a "Done." under them is still a
   // repeat. The bullets' length, while it's owed.
   owedReply?: number;
+  // One reply (docs/protocol.md, "One reply"): the accepted end_turn said
+  // the reply comes next, so the agent's text after it is kept, streamed
+  // and marked `final`, the turn's reply. headline: end_turn gave one, and
+  // it's the preview. replyNeeds: the reply ended in a "What I need from
+  // you" section, which came off it and stands in for an end_turn with no
+  // asks or follow-ups (needs.ts, splitReplySection).
+  replyAfter?: boolean;
+  headline?: boolean;
+  replyNeeds?: Needs;
 };
 
 type Runtime = {
@@ -2365,7 +2374,21 @@ export class Runner {
         // was a narration block's summary: then this is the reply, in the
         // summary's place. Thinking after it is dropped too: Opus mused
         // "I'd already wrapped up" under its summary (29 Oct 2026).
-        if (ev.type === 'assistant.text' && rt.turn?.ended && !ev.itemId.includes('/') && rt.turn.narrationItem && !rt.turn.summarized && ev.text.trim()) {
+        if (rt.turn?.replyAfter && (ev.type === 'assistant.text' || ev.type === 'reasoning') && !ev.itemId.includes('/')) {
+          // One reply: this is the reply (or the thinking before it, which
+          // folds into the work), not text to drop. A "What I need from
+          // you" section comes off it when end_turn brought no card of its
+          // own, and becomes the card (needs.ts, splitReplySection).
+          if (ev.type === 'assistant.text') {
+            const tool = rt.turn.endTurn ? needsFromTool(rt.turn.endTurn) : undefined;
+            const split = !tool?.asks?.length && !tool?.next?.length ? splitReplySection(ev.text) : undefined;
+            if (split?.needs) {
+              rt.turn.replyNeeds = split.needs;
+              this.log.info('took the card from the reply', { threadId: rec.id, needs: split.needs.needs, asks: split.needs.asks?.length ?? 0 });
+            }
+            ev = { type: 'assistant.text', itemId: ev.itemId, text: split?.needs ? split.reply : ev.text, final: true, ...(ev.narration ? { narration: true as const } : {}) };
+          }
+        } else if (ev.type === 'assistant.text' && rt.turn?.ended && !ev.itemId.includes('/') && rt.turn.narrationItem && !rt.turn.summarized && ev.text.trim()) {
           rt.inProgress.delete(ev.itemId);
           this.log.info('replaced a summary with the text after end_turn', { threadId: rec.id, chars: ev.text.length });
           ev = { type: 'assistant.text', itemId: rt.turn.narrationItem, text: ev.text };
@@ -2385,7 +2408,7 @@ export class Runner {
         }
         // Once the turn has its summary, that is the reply: Codex's final
         // answer after it folds away in the app and isn't the preview.
-        if (ev.type === 'assistant.text' && !rt.turn?.summarized) rec.preview = oneLine(ev.text, LIMITS.previewChars);
+        if (ev.type === 'assistant.text' && !rt.turn?.summarized && !rt.turn?.headline && ev.text.trim()) rec.preview = oneLine(ev.text, LIMITS.previewChars);
         if (rt.turn) {
           // A Codex child's items carry its prefix (<child>/<id>); Claude's
           // sub-agents never reach the thread's events.
@@ -2400,6 +2423,14 @@ export class Runner {
           }
           if (ev.type === 'tool.result' && ev.itemId === rt.turn.endTurnCall && endTurnAccepted(ev)) {
             rt.turn.ended = true;
+            if (endTurnWantsReply(ev)) {
+              rt.turn.replyAfter = true;
+              const headline = typeof rt.turn.endTurn?.headline === 'string' ? rt.turn.endTurn.headline.trim() : '';
+              if (headline) {
+                rt.turn.headline = true;
+                rec.preview = oneLine(headline, LIMITS.previewChars);
+              }
+            }
             const bullets = summaryFromTool(rt.turn.endTurn);
             rt.turn.owedReply = !bullets ? undefined : endTurnAsksForMessage(ev) ? 0 : endTurnOwesReply(ev) ? summaryMarkdown(bullets).length : undefined;
           }
@@ -2443,7 +2474,7 @@ export class Runner {
         // above, so it doesn't flash up and vanish.
         // That includes the message an owed reply keeps (owedReply): it
         // lands whole, as a sign-off line it drops would leave a row behind.
-        if (rt.turn?.ended && (o.delta.type === 'assistant.text.delta' || o.delta.type === 'reasoning.delta') && !o.delta.itemId.includes('/')) break;
+        if (rt.turn?.ended && !rt.turn.replyAfter && (o.delta.type === 'assistant.text.delta' || o.delta.type === 'reasoning.delta') && !o.delta.itemId.includes('/')) break;
         this.addDelta(st, o.delta);
         break;
       case 'session':
@@ -5202,6 +5233,7 @@ export function cleanTitle(text: string): string {
 // text's "What I need from you" section, else nothing said.
 function turnNeeds(turn: Turn): (Needs & { from: 'tool' | 'text' }) | undefined {
   const tool = turn.endTurn && needsFromTool(turn.endTurn);
+  if (turn.replyNeeds) return { ...turn.replyNeeds, from: 'text' };
   if (tool) return { ...tool, from: 'tool' };
   const text = turn.lastText && needsFromText(turn.lastText);
   return text ? { ...text, from: 'text' } : undefined;

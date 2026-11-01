@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { PersistedEvent } from '../../src/protocol.ts';
-import { archiveFromTool, bylineFromTool, CODEX_END_TURN_DESCRIPTION, END_TURN_DESCRIPTION, END_TURN_FULL_NAME, endTurnDescription, needsFromText, needsFromTool, summaryFromTool, summaryMarkdown, turnReply } from '../../src/needs.ts';
+import { archiveFromTool, bylineFromTool, CODEX_END_TURN_DESCRIPTION, CODEX_ONE_REPLY_DESCRIPTION, END_TURN_DESCRIPTION, END_TURN_FULL_NAME, endTurnDescription, needsFromText, needsFromTool, ONE_REPLY_DESCRIPTION, splitReplySection, summaryFromTool, summaryMarkdown, turnReply } from '../../src/needs.ts';
 import { END_TURN_TOOL } from '../../src/needs.ts';
 import { SERVER_NAME } from '../../src/threadbear-mcp.ts';
 import { ClaudeNormalizer, fileContext } from '../../src/adapters/claude/normalize.ts';
@@ -348,4 +348,39 @@ test('a byline is one short line, or nothing', () => {
   assert.equal(bylineFromTool({ byline: 3 }), undefined);
   assert.equal(bylineFromTool(undefined), undefined);
   assert.equal(bylineFromTool({ byline: 'x'.repeat(200) })?.length, 80);
+});
+
+test('the card text is cut at a word with an ellipsis, never mid-word', () => {
+  const why = 'Or step away from the keyboard and say "go", and I\'ll do the picker myself, though you might see it move. '.repeat(8);
+  const ask = needsFromTool({ asks: [{ action: 'Add the runner to Full Disk Access.', why }] })?.asks?.[0];
+  assert.ok(ask?.why && ask.why.length <= 500);
+  assert.match(ask!.why!, /\w…$/);
+  assert.doesNotMatch(ask!.why!, / \w…$/, 'not a single letter before the ellipsis');
+});
+
+test('one reply: its description says the reply comes after end_turn, and keeps the card out of it', () => {
+  assert.equal(endTurnDescription('claude', true, true), ONE_REPLY_DESCRIPTION);
+  assert.equal(endTurnDescription('codex', false, true), CODEX_ONE_REPLY_DESCRIPTION);
+  assert.match(ONE_REPLY_DESCRIPTION, /write your reply as ordinary text straight after it/);
+  assert.match(ONE_REPLY_DESCRIPTION, /Never write a "What I need from you" section/);
+  assert.match(CODEX_ONE_REPLY_DESCRIPTION, /your final answer/);
+  // Far shorter than the bullets' one.
+  assert.ok(ONE_REPLY_DESCRIPTION.length < END_TURN_DESCRIPTION.length * 0.6);
+});
+
+test('one reply: a closing section comes off the reply, bold, # or a bare line', () => {
+  const bare = splitReplySection("Fixed it.\n\nWhat I need from you:\n1. Tell me whether to deploy.\n2. Check the logs.");
+  assert.equal(bare.reply, 'Fixed it.');
+  assert.equal(bare.needs?.needs, 'you');
+  assert.equal(bare.needs?.asks?.length, 2);
+  const heading = splitReplySection('Fixed it.\n\n## What I need from you\n1. Run it with your key.');
+  assert.equal(heading.reply, 'Fixed it.');
+  assert.equal(heading.needs?.asks?.[0].action, 'Run it with your key.');
+  const nothing = splitReplySection('Fixed and committed.\n\nNothing needed from you right now.\n\n- Check it on production tomorrow');
+  assert.equal(nothing.reply, 'Fixed and committed.');
+  assert.deepEqual(nothing.needs, { needs: 'nothing', next: ['Check it on production tomorrow'] });
+  // A mention in a sentence isn't a section, and a reply with none is kept whole.
+  const none = splitReplySection('The script says nothing needed from you is wrong, so I fixed it.');
+  assert.equal(none.needs, undefined);
+  assert.equal(none.reply, 'The script says nothing needed from you is wrong, so I fixed it.');
 });

@@ -43,18 +43,27 @@ export function needsFromTool(input: unknown): Needs | undefined {
   for (const a of Array.isArray(o.asks) ? o.asks : []) {
     if (!a || typeof a !== 'object') continue;
     const r = a as Record<string, unknown>;
-    const action = str(r.action, MAX_ACTION);
+    // One reply (docs/protocol.md, "One reply") asks a question and has no
+    // why; the card shows it as the ask's paragraph, so it's the action.
+    const action = clipText(r.action, MAX_ACTION) ?? clipText(r.question, MAX_ACTION);
     if (!action) continue;
     const ask: Ask = { action };
     const where = str(r.where, MAX_SHORT);
     if (where) ask.where = where;
     const reply = str(r.reply, MAX_SHORT);
     if (reply) ask.reply = reply;
-    const why = str(r.why, MAX_ACTION);
+    const why = clipText(r.why, MAX_ACTION);
     if (why) ask.why = why;
-    const options = (Array.isArray(r.options) ? r.options : []).map((o) => str(o, MAX_SHORT)).filter((o): o is string => !!o).slice(0, MAX_OPTIONS);
+    // An answer is a label, or with one reply { label, does }: does says
+    // what happens if Mike picks it, drawn under its label on the card.
+    const answers = (Array.isArray(r.options) ? r.options : [])
+      .map((o) => (o && typeof o === 'object' ? { label: str((o as Record<string, unknown>).label, MAX_SHORT), does: clipText((o as Record<string, unknown>).does, MAX_SHORT) } : { label: str(o, MAX_SHORT), does: undefined }))
+      .filter((o): o is { label: string; does: string | undefined } => !!o.label)
+      .slice(0, MAX_OPTIONS);
+    const options = answers.map((o) => o.label);
     if (options.length) {
       ask.options = options;
+      if (answers.some((o) => o.does)) ask.optionNotes = answers.map((o) => o.does ?? '');
       // Only an index that points at one of them; anything else is no pick.
       const s = r.suggested;
       if (typeof s === 'number' && Number.isInteger(s) && s >= 0 && s < options.length) ask.suggested = s;
@@ -72,7 +81,7 @@ export function needsFromTool(input: unknown): Needs | undefined {
 // card's buttons (docs/protocol.md, "Next steps"). Only here, as a card
 // of asks already has its own buttons.
 function done(v: unknown): Needs {
-  const next = [...new Set((Array.isArray(v) ? v : []).map((n) => str(n, MAX_NEXT_CHARS)).filter((n): n is string => !!n))].slice(0, MAX_NEXT);
+  const next = [...new Set((Array.isArray(v) ? v : []).map((n) => clipText(n, MAX_NEXT_CHARS)).filter((n): n is string => !!n))].slice(0, MAX_NEXT);
   return next.length ? { needs: 'nothing', next } : { needs: 'nothing' };
 }
 
@@ -137,6 +146,17 @@ function str(v: unknown, max: number): string | undefined {
   if (typeof v !== 'string') return undefined;
   const t = v.trim();
   return t ? t.slice(0, max) : undefined;
+}
+
+// Words Mike reads on the card, kept to max but cut at a word with an
+// ellipsis, never mid-word: a why cut at 500 characters ended "though you
+// m" on 31 Oct 2026, and he couldn't tell it was cut.
+function clipText(v: unknown, max: number): string | undefined {
+  const t = str(v, Number.MAX_SAFE_INTEGER);
+  if (!t || t.length <= max) return t;
+  const cut = t.slice(0, max - 1);
+  const space = cut.lastIndexOf(' ');
+  return `${(space > max * 0.6 ? cut.slice(0, space) : cut).replace(/[\s,;:.-]+$/, '')}…`;
 }
 
 // The heading starts a line, in bold or as a # heading (a plain mention in
@@ -379,9 +399,104 @@ const CODEX_MESSAGE_END_TURN_DESCRIPTION =
   END_TURN_SUMMARY_LINKS +
   END_TURN_ASKS;
 
-export function endTurnDescription(provider: 'claude' | 'codex', bulletReplies: boolean): string {
+// One reply (docs/protocol.md, "One reply"; docs/reply-card-design): the
+// agent calls end_turn first, with the card and a headline, then writes
+// its reply as its final message. Its context was written up to three
+// times (message, bullets, why), each told to stand alone, and Opus sent
+// the message as narration, which reaches us only paraphrased. A message
+// with no tool call after it is never narration, and it's where models
+// write their answer anyway: in 32 eval sessions this wording lost no
+// replies (today's lost the agent's words in 6 of 16), and wrote the reply
+// twice in 2 runs where putting it inside end_turn did in 9
+// (~/dev/me/misc/end-turn-eval/v3). Codex already worked in this order.
+const ONE_REPLY_REPLY =
+  'Then write your reply as ordinary text straight after it, as your final message. ' +
+  'That reply is the only text the user sees from this turn: everything you write before end_turn folds away into your working, out of sight. So don\'t write your answer before calling it, and call no tools after it. ' +
+  'The reply: lead with the point and keep it as short as it can be while they can act on it without reading your working. ' +
+  'A work report is a few bullets of what changed and the result, each linked to where it can be checked: [tests pass](work:npm test) quotes a few words of a step in your working (the command you ran or its description) and opens it there, lit up; [its own thread](thread:<its id from list_threads>) opens another thread; web pages and files link as usual. ' +
+  'An explanation, a draft or an answer to their question is prose, at the length it needs. ' +
+  'When you\'re asking something, end the reply with what they need to know to answer it. The question itself, and what each answer would do, are in the card under the reply, so don\'t repeat them. ' +
+  'Never write a "What I need from you" section, a "Nothing needed from you" line or a list of follow-ups in the reply: asks and next are those. ';
+
+const ONE_REPLY_FIELDS =
+  'headline is one line of at most 80 characters for the sidebar and notifications: the result, or what you need from them. ' +
+  'needs is "you" when something waits on the user (an approval, a decision, a key, something to look at) and "nothing" when the work is done or still going by itself; left out, it follows the asks. ' +
+  'asks: each thing the user has to do or decide, most blocking first; usually one. ' +
+  'question is one sentence of at most 160 characters, the question or the step to take, naming the thing ("Deploy the walkies-api fix to production?"). It shows right under your reply, so give no background. ' +
+  'options: for every decision or step, 2 to 4 answers, each a label of 1 to 4 words and does, what happens if they pick it, in at most 90 characters ("I deploy and watch the logs"). They can always write their own answer instead. suggested is the index of the one you\'d pick. ' +
+  'For a step they have to do themselves, offer answers like Done and "Can you do it?" when you could plausibly do it yourself. ' +
+  'links: up to 3 places to go to do it or judge it (the page to log in on, the PR, the preview, the file, or review:<id> for a show_options review), each a button titled as the action ("Open the PR"). ' +
+  'next is only for when nothing is needed: up to 3 follow-ups that really came up, each the message the user would send to start it, about 8 words; usually none. ' +
+  'archive: true only when the user asked for this thread to be archived, or the message that started the thread says to. ' +
+  'Sub-agents never call this; only the thread\'s own agent does.';
+
+const ONE_REPLY_WHAT =
+  'Ends the turn\'s work and sets up what the user sees under your reply: the card of asks, or the done card. ' +
+  'Call it once, when the work is finished. ';
+
+export const ONE_REPLY_DESCRIPTION = ONE_REPLY_WHAT + ONE_REPLY_REPLY + ONE_REPLY_FIELDS;
+export const CODEX_ONE_REPLY_DESCRIPTION = ONE_REPLY_WHAT + CODEX_END_TURN_HOW + ONE_REPLY_REPLY.replace('your final message', 'your final answer') + ONE_REPLY_FIELDS;
+
+export function endTurnDescription(provider: 'claude' | 'codex', bulletReplies: boolean, oneReply = false): string {
+  if (oneReply) return provider === 'codex' ? CODEX_ONE_REPLY_DESCRIPTION : ONE_REPLY_DESCRIPTION;
   if (provider === 'codex') return bulletReplies ? CODEX_END_TURN_DESCRIPTION : CODEX_MESSAGE_END_TURN_DESCRIPTION;
   return bulletReplies ? END_TURN_DESCRIPTION : MESSAGE_END_TURN_DESCRIPTION;
+}
+
+// What an accepted one-reply end_turn says: the reply comes next. The
+// runner knows the result by these words and keeps the text after it as
+// the turn's reply (runner.ts, onOutput).
+export const ONE_REPLY_NEXT = 'Now write your reply';
+
+export function oneReplyAccepted(needsYou: boolean, restart = ''): string {
+  return needsYou
+    ? `${ENDED} will wait in Needs you.${restart} ${ONE_REPLY_NEXT}: it's the only text the user sees from this turn, with the card of asks under it. Don't repeat the questions or answers, and write nothing after your reply.`
+    : `${ENDED} is done. ${ONE_REPLY_NEXT}: it's the only text the user sees from this turn. Write nothing after it.`;
+}
+
+export function endTurnWantsReply(result: { ok: boolean; text: string }): boolean {
+  return endTurnAccepted(result) && result.text.includes(ONE_REPLY_NEXT);
+}
+
+// The Stop hook's nudges with one reply (adapter.ts, onStop): a turn that
+// ended without end_turn already has its message, which the app shows as
+// the reply; one that took end_turn and wrote nothing after it is asked
+// for its reply once.
+export const ONE_REPLY_END_TURN_NUDGE =
+  'This turn ended without end_turn, so Threadbear has no card for it. ' +
+  'Call end_turn now (load it with ToolSearch first if you need to), with needs and any asks or next follow-ups from what you just wrote. ' +
+  "Your message above is the reply: don't write it again.";
+export const ONE_REPLY_WRITE_NUDGE =
+  'Write your reply now, as ordinary text: the user sees only what you write after end_turn, with the card under it. ' +
+  "Don't repeat the questions or answers on the card.";
+
+// A reply that ends in a "What I need from you" section, or a "Nothing
+// needed from you" line, comes apart into the reply above it and what the
+// section says (needsFromText). With one reply, Sonnet wrote the section
+// into its reply in 4 of 16 eval sessions and left end_turn's asks empty,
+// so a turn whose end_turn has no asks or follow-ups takes its card from
+// here, and the reply loses the section the card now shows. The heading
+// may be a line on its own with no bold or #, as Sonnet wrote it.
+const BARE_HEADING = /^\s*(?:#{1,6}\s+)?(?:\*\*)?\s*What I need from you\s*:?\s*(?:\*\*)?\s*:?\s*$/i;
+export function splitReplySection(reply: string): { reply: string; needs?: Needs } {
+  const lines = reply.replace(/\r\n/g, '\n').split('\n');
+  const from = Math.max(0, lines.length - NEAR_END_LINES);
+  for (let i = lines.length - 1; i >= from; i--) {
+    const m = HEADING.exec(lines[i]);
+    const heading = BARE_HEADING.test(lines[i]) || (m && ((m[2] && m[3]) || (m[1] && !m[2])));
+    if (!heading) continue;
+    const section = lines.slice(i);
+    // A bare heading becomes a bold one so needsFromText reads it.
+    section[0] = `**What I need from you:** ${(m?.[4] ?? '').trim()}`.trimEnd();
+    const needs = needsFromText(section.join('\n'));
+    return needs ? { reply: lines.slice(0, i).join('\n').trimEnd(), needs } : { reply };
+  }
+  for (let i = from; i < lines.length; i++) {
+    if (!NOTHING_LINE.test(lines[i]) || !/^\W*nothing/i.test(lines[i].replace(/^[\s*_#>-]+/, ''))) continue;
+    const needs = needsFromText(lines.slice(i).join('\n'));
+    return needs ? { reply: lines.slice(0, i).join('\n').trimEnd(), needs } : { reply };
+  }
+  return { reply };
 }
 
 // What end_turn says when the turn has no reply yet. An error result, so

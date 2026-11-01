@@ -1613,6 +1613,10 @@ public struct Ask: Sendable, Hashable, Codable {
     public var reply: String?
     public var why: String?
     public var options: [String]
+    /// With one reply, what each option does if Mike picks it, in the
+    /// options' order ("" for none). The card draws them under the labels
+    /// as rows (docs/protocol.md, "One reply").
+    public var optionNotes: [String]
     public var suggested: Int?
     /// Where to go to do it or judge it, shown as buttons on the card.
     public var links: [AskLink]
@@ -1625,12 +1629,13 @@ public struct Ask: Sendable, Hashable, Codable {
     public var plainAction: String { PreviewText.plain(action) }
     public var plainWhere: String? { where_.flatMap { $0.isEmpty ? nil : PreviewText.plain($0) } }
 
-    public init(action: String, where_: String? = nil, reply: String? = nil, why: String? = nil, options: [String] = [], suggested: Int? = nil, links: [AskLink] = [], ticked: Bool = false) {
+    public init(action: String, where_: String? = nil, reply: String? = nil, why: String? = nil, options: [String] = [], optionNotes: [String] = [], suggested: Int? = nil, links: [AskLink] = [], ticked: Bool = false) {
         self.action = action
         self.where_ = where_
         self.reply = reply
         self.why = why
         self.options = options
+        self.optionNotes = optionNotes
         self.suggested = suggested
         self.links = links
         self.ticked = ticked
@@ -1644,6 +1649,10 @@ public struct Ask: Sendable, Hashable, Codable {
         why = (try? c.decodeIfPresent(String.self, forKey: .why)) ?? nil
         let options = ((try? c.decodeIfPresent([String].self, forKey: .options)) ?? nil) ?? []
         self.options = options
+        // One note per option, or none: a list that doesn't line up is
+        // dropped rather than guessed at.
+        let notes = ((try? c.decodeIfPresent([String].self, forKey: .optionNotes)) ?? nil) ?? []
+        optionNotes = notes.count == options.count && notes.contains(where: { !$0.isEmpty }) ? notes : []
         let pick = (try? c.decodeIfPresent(Int.self, forKey: .suggested)) ?? nil
         suggested = pick.flatMap { options.indices.contains($0) ? $0 : nil }
         links = c.lossyArray(AskLink.self, forKey: .links)
@@ -1657,13 +1666,14 @@ public struct Ask: Sendable, Hashable, Codable {
         try c.encodeIfPresent(reply, forKey: .reply)
         try c.encodeIfPresent(why, forKey: .why)
         if !options.isEmpty { try c.encode(options, forKey: .options) }
+        if !optionNotes.isEmpty { try c.encode(optionNotes, forKey: .optionNotes) }
         try c.encodeIfPresent(suggested, forKey: .suggested)
         if !links.isEmpty { try c.encode(links, forKey: .links) }
         if ticked { try c.encode(true, forKey: .ticked) }
     }
 
     enum CodingKeys: String, CodingKey {
-        case action, reply, ticked, why, options, suggested, links
+        case action, reply, ticked, why, options, optionNotes, suggested, links
         case where_ = "where"
     }
 }

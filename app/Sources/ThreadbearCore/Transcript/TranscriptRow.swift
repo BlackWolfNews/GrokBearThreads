@@ -51,12 +51,17 @@ public struct TextItem: Sendable, Hashable {
     /// paraphrase of what the agent wrote, not the words.
     public var isNarration: Bool
 
-    public init(itemId: String, text: String, isStreaming: Bool = false, isSummary: Bool = false, givesWay: Bool = false, isNarration: Bool = false) {
+    /// One reply's reply (`final` on its event): the turn's reply, whatever
+    /// else the turn wrote (TranscriptReducer.reply(of:)).
+    public var isFinal: Bool
+
+    public init(itemId: String, text: String, isStreaming: Bool = false, isSummary: Bool = false, givesWay: Bool = false, isNarration: Bool = false, isFinal: Bool = false) {
         self.itemId = itemId
         self.text = text
         self.isStreaming = isStreaming
         self.isSummary = isSummary
         self.givesWay = givesWay
+        self.isFinal = isFinal
         self.isNarration = isNarration
     }
 }

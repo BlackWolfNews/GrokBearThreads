@@ -616,6 +616,23 @@ final class WorkGroupTests: XCTestCase {
         XCTAssertNil(model(givesWay: true).row(id: "a:e1.summary"), "folded into the work")
     }
 
+    /// One reply (docs/protocol.md, "One reply"): the message after
+    /// end_turn is the reply, even under a longer message before it (a
+    /// narration block or a draft), which folds into the work.
+    func testOneReplysFinalMessageIsTheReply() {
+        let model = TranscriptModel(events: [
+            E.user(1, "Why is the bundle so big?"), Self.started(2),
+            E.call(3, "c1").withTurn("t1"), E.result(4, "c1").withTurn("t1"),
+            E.event(5, "assistant.text", ["itemId": "m1", "text": String(repeating: "A long draft of the answer. ", count: 20), "narration": true], turn: "t1"),
+            E.call(6, "e1", name: "mcp__threadbear__end_turn", kind: "mcp", title: "end_turn").withTurn("t1"),
+            E.result(7, "e1", text: "Noted: this thread is done. Now write your reply: it's the only text the user sees from this turn.").withTurn("t1"),
+            E.event(8, "assistant.text", ["itemId": "m2", "text": "It's moment's locales.", "final": true], turn: "t1"),
+            E.done(9),
+        ])
+        XCTAssertNotNil(model.row(id: "a:m2"))
+        XCTAssertNil(model.row(id: "a:m1"), "folded into the work")
+    }
+
     func testATurnWithNoEditsHasNoCard() {
         let model = TranscriptModel(events: [E.user(1, "Hi"), E.call(2, "c1"), E.text(3, "m1", "Hello"), E.done(4)])
         XCTAssertNil(model.rows.first { $0.kind == .changes })

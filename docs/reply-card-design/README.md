@@ -195,3 +195,57 @@ write now: 70% of whys under a message that showed repeat it.
    survey is rerun, before against after.
 3. Then the pick becomes the default for next week's release, and the
    rules it replaces come out.
+
+## What Mike picked, and the eval (1 Nov 2026)
+
+Mike picked A: "try your pick… run an eval, and then if it passes… I'll
+try it out for a little bit." The eval lives in
+`~/dev/me/misc/end-turn-eval/v3`. `harness.mjs` runs a real session the
+way the runner does: the Agent SDK, Claude Code's prompt with Threadbear's
+lines, adaptive thinking shown summarised (which is what produces
+narration), and a stand-in threadbear server. There are four tasks:
+- a fix that ends done (`slug`)
+- a missing key (`key`)
+- explain, then decide (`bundle`)
+- a deploy decision (`deploy`)
+
+Each task ran on Opus 5.5 at medium and high, Sonnet 5.5 and Haiku 5.5:
+64 sessions in all (two rounds), about $7.40. `grade.mjs` says what the Mac app would
+have shown.
+
+| per 16 runs | today | A1: reply inside end_turn | A2: end_turn, then the reply |
+|---|---|---|---|
+| agent's own words lost | 6 (all Opus) | 0 | 0 |
+| needs right | 13 | 11 | 14 |
+| reply written twice | (6 rewrote it after end_turn) | 9 | 2 |
+| "What I need from you" in the reply | - | 4 | 1 |
+| output tokens, median | 2,343 | 2,191 | 1,667 |
+| card characters, median | 259 | 188 | 205 |
+
+A1 kept the reply safe but models wrote it out a second time after
+end_turn: they want to end on a message. Narration never came after the
+last tool call in any of the 32 sessions checked, while 10 narration
+blocks came before one. So A2 puts the reply where models already write
+it: end_turn first (the card and a headline), then the message. Codex
+already worked this way.
+
+On screen it's the same as A. The remaining misses:
+- Sonnet once wrote a bare "What I need from you:" section into its
+  reply. The runner now turns such a section into the card
+  (`splitReplySection`).
+- Opus once asked a sensible extra question (redirect the old URLs?).
+- The notes under answers share words with the reply ("I run the deploy
+  and check it went out"). Today's cards repeated whole sentences of
+  context instead.
+
+Built behind Settings > General > One reply (`oneReply`), off by default,
+for Mike to try (docs/protocol.md, "One reply").
+
+Regression cases for the trial, real threads where the reply went wrong:
+- 77e7a0a6, this one: the reply came as narration.
+- 6fb15afc: the card repeated the message.
+- f6ffb3a1: the Walkies deploy.
+- The "4K Video Downloader" thread: "Explained the two follow-ups" over
+  an explanation that never showed.
+- 6f706f43 and 669bf3d0: asks about things only in narration.
+- 3a05f958: a reply reset by a message arriving mid-turn.

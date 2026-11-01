@@ -566,7 +566,7 @@ export type EventBody =
   // narration: the provider sent only a summary of what the agent wrote
   // (Claude's narration blocks, normalize.ts); a later event with the
   // same itemId replaces it (docs/protocol.md, Transient events).
-  | { type: 'assistant.text'; itemId: string; text: string; summary?: true; givesWay?: true; narration?: true }
+  | { type: 'assistant.text'; itemId: string; text: string; summary?: true; givesWay?: true; narration?: true; final?: true }
   | { type: 'reasoning'; itemId: string; text: string }
   | { type: 'tool.call'; itemId: string; name: string; kind: ToolKind; title: string; input: Record<string, unknown> }
   | {
@@ -653,7 +653,9 @@ export type NeedsWho = 'you' | 'nothing';
 // One thing a turn needs from Mike (docs/protocol.md, "Needs you"). With
 // options it's a decision the app steps him through, the agent's pick
 // (suggested, an index into options) marked; he can always write his own.
-export type Ask = { action: string; where?: string; reply?: string; why?: string; options?: string[]; suggested?: number; links?: AskLink[] };
+// optionNotes: with one reply, what each option does if Mike picks it, in
+// the options' order ("" for none); the card draws them under the labels.
+export type Ask = { action: string; where?: string; reply?: string; why?: string; options?: string[]; optionNotes?: string[]; suggested?: number; links?: AskLink[] };
 // Somewhere to go to do or judge an ask: a web page, or a file or folder
 // on this Mac (an absolute or ~ path). The app shows each as a button.
 export type AskLink = { title: string; url: string };

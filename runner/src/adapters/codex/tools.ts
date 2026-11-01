@@ -16,6 +16,7 @@ import type { ToolApprovalAnswer, ToolApprovalRequest } from '../types.ts';
 import type { PermissionMode } from '../../protocol.ts';
 import { ALWAYS_ASK_TOOLS, FILING_PROJECTS, guideLine, SERVER_NAME, SHOWING_THE_USER } from '../../threadbear-mcp.ts';
 import { userLine } from '../../user-name.ts';
+import { CODEX_ONE_REPLY_DESCRIPTION, END_TURN_TOOL } from '../../needs.ts';
 import { toolTitle, truncateInput } from '../../tools.ts';
 import type { DynamicToolCallParams, DynamicToolCallResponse, DynamicToolSpec } from './types.ts';
 
@@ -43,15 +44,27 @@ export const NAMESPACE_DESCRIPTION_MAX = 1024;
 // projects brief: the same guidance Claude threads get in the MCP server's
 // instructions.
 const GUIDE = guideLine();
-export const TOOL_GUIDANCE =
+const GUIDANCE_HEAD =
   userLine() +
   (GUIDE ? `${GUIDE} ` : '') +
   "This thread's threadbear tools manage Threadbear itself: list and read threads, start new ones, message them, rename, snooze, archive, move and delete them, and schedule messages for later. " +
   'Use move_thread when the work belongs in another folder (for example a repo), so this thread runs there from the next turn. ' +
   `${SHOWING_THE_USER} ` +
-  `${FILING_PROJECTS} ` +
+  `${FILING_PROJECTS} `;
+export const TOOL_GUIDANCE =
+  GUIDANCE_HEAD +
   // Before, not after: Codex's final answer ends its turn (needs.ts).
   'End every turn by calling end_turn as your last tool call, just before your final answer, with a short summary of what you did (the user reads it first) and anything they have to do.';
+// With one reply (needs.ts), the final answer after end_turn is the reply.
+export const ONE_REPLY_TOOL_GUIDANCE =
+  GUIDANCE_HEAD +
+  'End every turn by calling end_turn as your last tool call, then writing your reply as your final answer: it is the only text the user sees from the turn.';
+
+// Which guidance a thread's tools call for: one reply's end_turn has its
+// own description.
+export function toolGuidance(tools: ToolDefinition[]): string {
+  return tools.some((t) => t.name === END_TURN_TOOL && t.description === CODEX_ONE_REPLY_DESCRIPTION) ? ONE_REPLY_TOOL_GUIDANCE : TOOL_GUIDANCE;
+}
 
 // The tools as one dynamic-tool namespace, with JSON Schema from zod.
 export function dynamicToolSpecs(tools: ToolDefinition[]): DynamicToolSpec[] {

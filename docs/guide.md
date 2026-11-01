@@ -96,7 +96,10 @@ same line and its bullets replace the earlier ones, so there's still one
 reply to read. If you'd rather read the agent's own message every time,
 turn off Bullet replies in Settings > General: agents write a normal message
 from their next turn, under the same "Worked" line, and the bullets only
-show in previews, notifications and on the phone. A link with ↑ after it goes to the step it's about: click
+show in previews, notifications and on the phone. Or turn on One reply
+there: the agent sets up its card first, then writes its reply once,
+after it, so the reply is never lost or repeated on the card. The card
+only asks, and each answer says what happens if you pick it. A link with ↑ after it goes to the step it's about: click
 it and the work opens there, with that step lit up. A link to another
 thread opens that thread.
 

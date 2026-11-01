@@ -5,6 +5,7 @@ import path from 'node:path';
 import { FakeAccounts, makeHarness, tick, tmpDir, withCodex } from '../helpers/fakes.ts';
 import { copySessionTranscript, projectDirName } from '../../src/transcripts.ts';
 import { buildThreadbearTools, parseWhen } from '../../src/threadbear-mcp.ts';
+import { needsFromTool } from '../../src/needs.ts';
 import { toolTitle } from '../../src/tools.ts';
 
 function start(h: ReturnType<typeof makeHarness>, text = 'Fix the tests', extra: Record<string, unknown> = {}) {
@@ -14,11 +15,12 @@ function start(h: ReturnType<typeof makeHarness>, text = 'Fix the tests', extra:
   return { thread, s };
 }
 
-function tools(h: ReturnType<typeof makeHarness>, selfId: string, bulletReplies?: () => boolean) {
+function tools(h: ReturnType<typeof makeHarness>, selfId: string, bulletReplies?: () => boolean, oneReply?: () => boolean) {
   // end_turn's wait for its own call to land is counted, not slept.
   const slept: number[] = [];
   const list = buildThreadbearTools(h.runner, selfId, () => Date.parse('2026-10-26T12:00:00Z'), undefined, undefined, undefined, {
     bulletReplies,
+    oneReply,
     sleep: async (ms) => {
       slept.push(ms);
     },
@@ -807,4 +809,68 @@ test("a Claude or Codex thread's instructions point at the guide", async () => {
   const instructions = (server.instance as unknown as { server: { _instructions?: string } }).server._instructions ?? '';
   assert.ok(instructions.includes(guidePath()), instructions);
   assert.ok(TOOL_GUIDANCE.includes(guidePath()), TOOL_GUIDANCE);
+});
+
+// One reply (docs/protocol.md, "One reply"; 1 Nov 2026): end_turn carries
+// the card and a headline, and the message after it is the reply.
+test('one reply: end_turn takes the card, never asks for a message first, and says the reply comes next', async () => {
+  const h = makeHarness();
+  const { thread, s } = start(h);
+  const { call, list } = tools(h, thread.id, undefined, () => true);
+  const t = list.find((x) => x.name === 'end_turn');
+  assert.match(t?.description ?? '', /write your reply as ordinary text straight after it/);
+  assert.ok(!('summary' in (t?.inputSchema ?? {})), 'no bullets to fill in');
+  toolCall(s, 'b1', 'Bash', { command: 'npm test' });
+  toolResult(s, 'b1');
+  // No words since the last step: fine, the reply comes after.
+  const input = { headline: 'Limit fixed and committed; deploy waits on you', asks: [{ question: 'Deploy main to production?', options: [{ label: 'Deploy it', does: 'I deploy and check it went out' }, { label: 'Hold off' }], suggested: 0 }] };
+  toolCall(s, 'e1', END_TURN, input);
+  const r = await call('end_turn', input);
+  assert.equal(r.error, false);
+  assert.match(r.text, /^Noted: this thread will wait in Needs you/);
+  assert.match(r.text, /Now write your reply/);
+  s.out({ kind: 'event', event: { type: 'tool.result', itemId: 'e1', ok: true, text: r.text, truncated: false, images: [] } });
+  // No summary is written: the reply is the next message.
+  assert.ok(!h.events(thread.id).some((e) => e.type === 'assistant.text' && 'summary' in e && e.summary));
+  assert.equal(h.runner.get(thread.id).preview, 'Limit fixed and committed; deploy waits on you');
+  // The reply streams, then lands whole, marked final.
+  s.out({ kind: 'delta', delta: { type: 'assistant.text.delta', itemId: 'm1', text: 'Users now get 3' } });
+  s.text('m1', 'Users now get 3 requests a day. A deploy also sends #48 and #49.');
+  const reply = h.events(thread.id).find((e) => e.type === 'assistant.text' && e.itemId === 'm1');
+  assert.ok(reply && reply.type === 'assistant.text' && reply.final, 'the reply is kept and marked final');
+  // The headline stays the preview.
+  assert.equal(h.runner.get(thread.id).preview, 'Limit fixed and committed; deploy waits on you');
+  s.result('completed');
+  await tick();
+  const card = h.runner.get(thread.id);
+  assert.equal(card.needs, 'you');
+  // A second call in the same turn is refused, as before.
+  const again = await call('end_turn', input);
+  assert.equal(again.error, true);
+});
+
+test('one reply: a question and answers with notes become an ask with option notes', () => {
+  const needs = needsFromTool({ asks: [{ question: 'Deploy main to production?', options: [{ label: 'Deploy it', does: 'I deploy and check it went out' }, { label: 'Hold off' }], suggested: 0 }] });
+  assert.deepEqual(needs, { needs: 'you', asks: [{ action: 'Deploy main to production?', options: ['Deploy it', 'Hold off'], optionNotes: ['I deploy and check it went out', ''], suggested: 0 }] });
+  // Plain labels, as before: no notes.
+  assert.deepEqual(needsFromTool({ asks: [{ action: 'Merge?', options: ['Merge', 'Wait'] }] }), { needs: 'you', asks: [{ action: 'Merge?', options: ['Merge', 'Wait'] }] });
+});
+
+test("one reply: a reply that ends in a What I need from you section gives the card, and loses the section", async () => {
+  const h = makeHarness();
+  const { thread, s } = start(h);
+  const { call } = tools(h, thread.id, undefined, () => true);
+  toolCall(s, 'b1', 'Bash', { command: 'git commit -m fix' });
+  toolResult(s, 'b1');
+  // Sonnet's way: needs nothing and no asks, with the ask in the reply.
+  const input = { needs: 'nothing' };
+  toolCall(s, 'e1', END_TURN, input);
+  const r = await call('end_turn', input);
+  s.out({ kind: 'event', event: { type: 'tool.result', itemId: 'e1', ok: true, text: r.text, truncated: false, images: [] } });
+  s.text('m1', "I fixed the off-by-one and committed it. I haven't deployed.\n\nWhat I need from you:\n1. Tell me whether to deploy `02057bb`.");
+  const reply = h.events(thread.id).find((e) => e.type === 'assistant.text' && e.itemId === 'm1');
+  assert.equal(reply?.type === 'assistant.text' && reply.text, "I fixed the off-by-one and committed it. I haven't deployed.");
+  s.result('completed');
+  await tick();
+  assert.equal(h.runner.get(thread.id).needs, 'you');
 });

@@ -1256,19 +1256,15 @@ enum RowRenderer {
             // types in the composer becomes this ask's answer.
             let own = card.picks[i] == Decisions.ownAnswer
             answers.append(AskButton(title: own ? "✓ Something else" : "Something else…", action: "pick:\(i):\(Decisions.ownAnswer)", style: own ? .picked : .plain))
-            for row in [links, answers] where !row.isEmpty {
-                output.append(NSAttributedString(string: "\n", attributes: [.font: button, .paragraphStyle: buttonStyle]))
-                for (k, item) in row.enumerated() {
-                    if k > 0 { output.append(NSAttributedString(string: "    ", attributes: [.font: button, .paragraphStyle: buttonStyle, .baselineOffset: buttonOffset])) }
-                    // Spaces inside the run are the button's padding; the
-                    // no-break ones keep a short title from wrapping apart.
-                    var attributes: [NSAttributedString.Key: Any] = [
-                        .font: button, .foregroundColor: item.style.textColor, .paragraphStyle: buttonStyle, .baselineOffset: buttonOffset,
-                        .tbAction: item.action, .tbButton: item.style.rawValue,
-                    ]
-                    if let peek = item.peek { attributes[.tbPeek] = peek }
-                    output.append(NSAttributedString(string: "\u{00A0}\u{00A0}\u{00A0}" + item.title.replacingOccurrences(of: " ", with: "\u{00A0}") + "\u{00A0}\u{00A0}\u{00A0}", attributes: attributes))
-                }
+            // With one reply each answer says what it does, so they're rows
+            // rather than buttons (docs/reply-card-design, option A).
+            let rows = !ask.optionNotes.isEmpty
+            if rows {
+                if !links.isEmpty { appendButtons(links, to: output, font: button, style: buttonStyle, offset: buttonOffset) }
+                output.append(answerRows(ask, index: i, picked: card.picks[i], indent: indent))
+            }
+            for row in rows ? [] : [links, answers] where !row.isEmpty {
+                appendButtons(row, to: output, font: button, style: buttonStyle, offset: buttonOffset)
             }
             // Something else: room for its box, under the answers and lined
             // up with them, as tall as what's written and pasted in it.
@@ -1284,6 +1280,98 @@ enum RowRenderer {
                 ]))
             }
         }
+        return output
+    }
+
+    /// A line of the card's buttons: `.tbAction` runs that
+    /// BackgroundLayoutManager draws as buttons.
+    private static func appendButtons(_ row: [AskButton], to output: NSMutableAttributedString, font: NSFont, style: NSParagraphStyle, offset: CGFloat) {
+        output.append(NSAttributedString(string: "\n", attributes: [.font: font, .paragraphStyle: style]))
+        for (k, item) in row.enumerated() {
+            if k > 0 { output.append(NSAttributedString(string: "    ", attributes: [.font: font, .paragraphStyle: style, .baselineOffset: offset])) }
+            // Spaces inside the run are the button's padding; the
+            // no-break ones keep a short title from wrapping apart.
+            var attributes: [NSAttributedString.Key: Any] = [
+                .font: font, .foregroundColor: item.style.textColor, .paragraphStyle: style, .baselineOffset: offset,
+                .tbAction: item.action, .tbButton: item.style.rawValue,
+            ]
+            if let peek = item.peek { attributes[.tbPeek] = peek }
+            output.append(NSAttributedString(string: "\u{00A0}\u{00A0}\u{00A0}" + item.title.replacingOccurrences(of: " ", with: "\u{00A0}") + "\u{00A0}\u{00A0}\u{00A0}", attributes: attributes))
+        }
+    }
+
+    /// An ask's answers as rows (one reply, docs/reply-card-design A): a
+    /// circle, the label, "my pick" on the agent's, and under it what
+    /// picking it does, in a box with a line between rows, then "Something
+    /// else…". The whole row is the click (`.tbRow`, `pick:<ask>:<n>`), as
+    /// on the done card; picking fills its circle. Each row is one
+    /// paragraph, its note after a line separator so it wraps under the
+    /// label, not under the circle.
+    private static func answerRows(_ ask: Ask, index i: Int, picked: Int?, indent: CGFloat) -> NSAttributedString {
+        let output = NSMutableAttributedString()
+        let font = Theme.bodyFont
+        let small = Theme.smallFont
+        let inset = rowInset + indent
+        let words = inset + ceil(font.pointSize * 1.2) + zoomed(8)
+        let choices = Decisions.choices(for: ask)
+        let total = choices.count + 1
+        // The line break that starts the first row ends the paragraph over
+        // it, so it stays out of the box; the ones after belong to the row
+        // they end, so the box runs unbroken from the first row to the last.
+        var breakAttributes: [NSAttributedString.Key: Any] = [.font: font]
+        for n in 0..<total {
+            let own = n == choices.count
+            let pick = own ? Decisions.ownAnswer : n
+            let action = "pick:\(i):\(pick)"
+            // Natural line heights, so a note's smaller line takes less room
+            // than its label's: three answers with notes have to fit the
+            // card's cap (ComposerCardHost.maxHeight).
+            let style = NSMutableParagraphStyle()
+            style.firstLineHeadIndent = inset
+            style.headIndent = words
+            style.tailIndent = -zoomed(8)
+            style.lineSpacing = zoomed(2)
+            style.paragraphSpacingBefore = zoomed(n == 0 ? 14 : 6)
+            style.paragraphSpacing = zoomed(6)
+            let offset: CGFloat = 0
+            style.tabStops = [NSTextTab(textAlignment: .left, location: words)]
+            var attributes: [NSAttributedString.Key: Any] = [
+                .font: font, .foregroundColor: own ? NSColor.secondaryLabelColor : NSColor.labelColor, .paragraphStyle: style, .baselineOffset: offset,
+                .tbAction: action, .tbRow: action, .tbBlockBackground: Theme.answerRowsFill,
+            ]
+            if n > 0 { attributes[.tbRowRule] = true }
+            breakAttributes[.paragraphStyle] = breakAttributes[.paragraphStyle] ?? style
+            output.append(NSAttributedString(string: "\n", attributes: breakAttributes))
+            let isPicked = picked == pick
+            let isSuggested = !own && ask.suggested == n
+            output.append(isPicked
+                ? symbol("checkmark.circle.fill", label: "Picked", font: font, attributes: attributes, color: .controlAccentColor)
+                : symbol("circle", label: "Not picked", font: font, attributes: attributes, color: isSuggested ? .controlAccentColor : Theme.faintText))
+            output.append(NSAttributedString(string: "\t" + (own ? "Something else…" : choices[n]), attributes: attributes))
+            if isSuggested {
+                var pickAttributes = attributes
+                pickAttributes[.font] = small
+                pickAttributes[.foregroundColor] = NSColor.controlAccentColor
+                output.append(NSAttributedString(string: "  my pick", attributes: pickAttributes))
+            }
+            if !own, n < ask.optionNotes.count, !ask.optionNotes[n].isEmpty {
+                var noteAttributes = attributes
+                noteAttributes[.font] = small
+                noteAttributes[.foregroundColor] = NSColor.secondaryLabelColor
+                output.append(NSAttributedString(string: "\u{2028}" + PreviewText.plain(ask.optionNotes[n]), attributes: noteAttributes))
+            }
+            // The next row's break is this row's last character.
+            breakAttributes = attributes
+            breakAttributes.removeValue(forKey: .tbRowRule)
+        }
+        // The box reaches the code-block pad below the last row's words,
+        // past where the card measures to (its last line), so a line of
+        // that height under it keeps the box's bottom edge in the card.
+        let spacer = NSMutableParagraphStyle()
+        spacer.minimumLineHeight = MarkdownRenderer.codePad + zoomed(2)
+        spacer.maximumLineHeight = MarkdownRenderer.codePad + zoomed(2)
+        output.append(NSAttributedString(string: "\n", attributes: breakAttributes))
+        output.append(NSAttributedString(string: "\u{200B}", attributes: [.font: small, .paragraphStyle: spacer]))
         return output
     }
 

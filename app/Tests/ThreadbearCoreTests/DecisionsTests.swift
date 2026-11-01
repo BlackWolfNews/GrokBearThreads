@@ -168,4 +168,17 @@ final class DecisionsTests: XCTestCase {
         // A box whose Something else was taken back sends no pictures.
         XCTAssertEqual(Decisions.images(asks: [merge, signIn, events], picks: [1: Decisions.ownAnswer], notes: notes).count, 2)
     }
+
+    /// One reply's answers come with what each does; a list that doesn't
+    /// line up with the options is dropped rather than guessed at.
+    func testOptionNotesDecodeWhenTheyLineUp() throws {
+        let good = try JSONDecoder().decode(Ask.self, from: Data(#"{"action":"Deploy?","options":["Deploy it","Hold off"],"optionNotes":["I deploy and check it went out",""]}"#.utf8))
+        XCTAssertEqual(good.optionNotes, ["I deploy and check it went out", ""])
+        let short = try JSONDecoder().decode(Ask.self, from: Data(#"{"action":"Deploy?","options":["Deploy it","Hold off"],"optionNotes":["Only one"]}"#.utf8))
+        XCTAssertEqual(short.optionNotes, [])
+        let none = try JSONDecoder().decode(Ask.self, from: Data(#"{"action":"Deploy?","options":["Deploy it"]}"#.utf8))
+        XCTAssertEqual(none.optionNotes, [])
+        let back = try JSONDecoder().decode(Ask.self, from: JSONEncoder().encode(good))
+        XCTAssertEqual(back, good)
+    }
 }

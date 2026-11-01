@@ -26,7 +26,7 @@ import {
   type OversizedLine,
 } from './appserver.ts';
 import { CodexApprovals } from './approvals.ts';
-import { CodexTools, dynamicToolSpecs, TOOL_GUIDANCE, type ToolDefinition } from './tools.ts';
+import { CodexTools, dynamicToolSpecs, toolGuidance, type ToolDefinition } from './tools.ts';
 import { CodexNormalizer, limitsFromAccount } from './normalize.ts';
 import { placePictures } from '../../pictures.ts';
 import type {
@@ -481,10 +481,11 @@ export class CodexSession implements AgentSession {
       this.threadId = opts.sessionId;
       res = await this.resume({ ...common, threadId: opts.sessionId, excludeTurns: true });
     } else {
-      const tools = dynamicToolSpecs(this.deps.toolsFor?.(opts.threadId) ?? []);
+      const defs = this.deps.toolsFor?.(opts.threadId) ?? [];
+      const tools = dynamicToolSpecs(defs);
       // With tools, the guidance on using them leads the developer
       // instructions (the namespace description is too short to hold it).
-      const developer = [tools.length ? TOOL_GUIDANCE : '', opts.instructions ?? ''].filter(Boolean).join('\n\n');
+      const developer = [tools.length ? toolGuidance(defs) : '', opts.instructions ?? ''].filter(Boolean).join('\n\n');
       const config = { ...common.config, ...(developer ? { developer_instructions: developer } : {}) };
       const params: ThreadStartParams = { ...common, config, ...(tools.length ? { dynamicTools: tools } : {}) };
       res = await this.proc.request<ThreadStartResponse>('thread/start', params);

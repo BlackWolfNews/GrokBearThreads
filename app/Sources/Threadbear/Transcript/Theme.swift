@@ -204,6 +204,9 @@ enum Theme {
     static let cardBorder = dynamic(dark: NSColor(white: 1, alpha: 0.12), light: NSColor(white: 0, alpha: 0.12))
     /// Behind a work line the pointer is over (it opens on a click).
     static let hoverFill = dynamic(dark: NSColor(white: 1, alpha: 0.05), light: NSColor(white: 0, alpha: 0.04))
+    /// Behind an ask's answer rows (one reply): barely there, as the box's
+    /// border does the work.
+    static let answerRowsFill = dynamic(dark: NSColor(white: 1, alpha: 0.02), light: NSColor(white: 0, alpha: 0.015))
     static let hairline = dynamic(dark: NSColor(white: 1, alpha: 0.1), light: NSColor(white: 0, alpha: 0.1))
 
     /// Text tiers that read the same in both looks. The system's tertiary
@@ -331,6 +334,9 @@ extension NSAttributedString.Key {
     /// (BackgroundLayoutManager.hoveredRow), and a click anywhere on its
     /// lines counts, not just on the words.
     static let tbRow = NSAttributedString.Key("tbRow")
+    /// A hairline across the top of this paragraph, inside its
+    /// `.tbBlockBackground` box: the line between an ask's answer rows.
+    static let tbRowRule = NSAttributedString.Key("tbRowRule")
 }
 
 /// How a button on an asks card is drawn (`.tbButton`).
