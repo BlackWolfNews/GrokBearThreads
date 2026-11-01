@@ -2685,7 +2685,8 @@ the mirror back as state. The Mac app doesn't use it.
   file storage (`phone:imageUploadUrl`), when `text` may be empty: the
   runner fetches each, sends it as an ordinary `ImageRef`, and
   `sync:finishCommand` deletes them from storage, whether or not the send
-  worked. The phone's text can place its photos with `[Picture N]`
+  worked. The phone uploads a photo as soon as it's picked, so one that's
+  never sent goes back with `phone:discardImage` (backend API 25). The phone's text can place its photos with `[Picture N]`
   markers, in `images`' order (Pictures in a message). A message row with
   pictures no marker places gets a `[1 picture]` line, as the pictures
   themselves stay on the Mac; the ones a marker places show as chips. `update` takes one

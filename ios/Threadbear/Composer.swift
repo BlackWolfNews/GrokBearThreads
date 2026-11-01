@@ -9,20 +9,21 @@ struct Composer: View {
     /// Returns whether it went, so a failed send keeps the text.
     var onSend: (String, [PickedPhoto]) async -> Bool
     @State private var photos: [PickedPhoto] = []
+    @State private var adding = 0
     @State private var cursor = TextCursor()
     @State private var sending = false
 
     /// Each photo a chip in the words where it was put in, as on the Mac.
-    private var words: PhotoWords { PhotoWords(text: $text, photos: $photos, cursor: cursor) }
+    private var words: PhotoWords { PhotoWords(text: $text, photos: $photos, adding: $adding, cursor: cursor) }
 
     var body: some View {
         VStack(spacing: 6) {
-            if !photos.isEmpty {
-                PhotoStrip(photos: $photos) { words.remove($0) }
+            if !photos.isEmpty || adding > 0 {
+                PhotoStrip(words: words)
             }
             HStack(alignment: .bottom, spacing: 8) {
                 if model.canSendPhotos {
-                    PhotoMenu(photos: $photos, onAdd: { words.insert($0) }) {
+                    PhotoMenu(words: words) {
                         Image(systemName: "plus.circle")
                             .font(.system(size: 30))
                             .symbolRenderingMode(.hierarchical)
@@ -33,7 +34,7 @@ struct Composer: View {
                     .accessibilityLabel("Add a photo")
                 }
                 PastableTextField(text: $text, placeholder: placeholder, lines: 1...6,
-                                  onPasteImages: model.canSendPhotos ? { addPasted($0, model: model) { words.insert($0) } } : nil,
+                                  onPasteImages: model.canSendPhotos ? { words.addPasted($0, model: model) } : nil,
                                   photos: $photos, cursor: cursor)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 9)
@@ -47,7 +48,8 @@ struct Composer: View {
                             .font(.system(size: 30))
                     }
                 }
-                .disabled((words.message.isEmpty && photos.isEmpty) || sending)
+                // Not with a photo still on its way, which would be left behind.
+                .disabled((words.message.isEmpty && photos.isEmpty) || sending || adding > 0)
                 .accessibilityLabel("Send")
             }
         }
@@ -55,7 +57,7 @@ struct Composer: View {
         .padding(.vertical, 8)
         .background(.bar)
         .task {
-            if photos.isEmpty, let sample = model.samplePhoto, let photo = await PickedPhoto.from(sample) { words.insert([photo]) }
+            if photos.isEmpty, let load = model.loadSamplePhoto { words.add([load], model: model) }
         }
     }
 

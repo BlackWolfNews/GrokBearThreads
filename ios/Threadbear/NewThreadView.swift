@@ -17,24 +17,29 @@ struct NewThreadView: View {
     @State private var modelId: String?
     @State private var effort: String?
     @State private var commandId: String?
+    /// From the tap on Start until the command's queued. A separate job from
+    /// waiting on the runner, and without it Start looks dead (and can be
+    /// tapped again, for a second thread) while the photos finish going up.
+    @State private var starting: Task<Void, Never>?
     @State private var photos: [PickedPhoto] = []
+    @State private var adding = 0
     @State private var cursor = TextCursor()
 
     /// Each photo a chip in the words where it was put in, as on the Mac.
-    private var words: PhotoWords { PhotoWords(text: $text, photos: $photos, cursor: cursor) }
+    private var words: PhotoWords { PhotoWords(text: $text, photos: $photos, adding: $adding, cursor: cursor) }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
                     PastableTextField(text: $text, placeholder: "What should it do?", lines: 4...12,
-                                      onPasteImages: model.canSendPhotos ? { addPasted($0, model: model) { words.insert($0) } } : nil,
+                                      onPasteImages: model.canSendPhotos ? { words.addPasted($0, model: model) } : nil,
                                       photos: $photos, cursor: cursor)
                     if model.canSendPhotos {
-                        PhotoMenu(photos: $photos, onAdd: { words.insert($0) }) {
+                        PhotoMenu(words: words) {
                             Label("Add a photo", systemImage: "photo")
                         }
-                        if !photos.isEmpty { PhotoStrip(photos: $photos) { words.remove($0) } }
+                        if !photos.isEmpty || adding > 0 { PhotoStrip(words: words) }
                     }
                 }
                 if !models.isEmpty {
@@ -60,16 +65,22 @@ struct NewThreadView: View {
             .navigationTitle("New thread")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        starting?.cancel()
+                        dismiss()
+                    }
+                }
                 ToolbarItem(placement: .confirmationAction) {
-                    if commandId != nil { ProgressView() } else {
-                        Button("Start", action: start).disabled(words.message.isEmpty && photos.isEmpty)
+                    if commandId != nil || starting != nil { ProgressView() } else {
+                        // Not with a photo still on its way, which would be left behind.
+                        Button("Start", action: start).disabled((words.message.isEmpty && photos.isEmpty) || adding > 0)
                     }
                 }
             }
             .task(id: "\(commandId ?? ""):\(model.connection)") { await waitForThread() }
             .task {
-                if photos.isEmpty, let sample = model.samplePhoto, let photo = await PickedPhoto.from(sample) { words.insert([photo]) }
+                if photos.isEmpty, let load = model.loadSamplePhoto { words.add([load], model: model) }
             }
         }
     }
@@ -80,11 +91,17 @@ struct NewThreadView: View {
     private func start() {
         guard let backend = model.backend else { return }
         let message = words.message
-        Task {
+        let photos = photos
+        starting = Task {
+            defer { starting = nil }
             do {
                 let images = try await model.upload(photos)
+                // Cancelled while the photos were going up: no thread after all.
+                try Task.checkCancellation()
                 commandId = try await backend.create(text: message, runnerId: nil, cwd: nil, images: images,
                                                      settings: NewThreadSettings(model: modelId, effort: effort))
+                model.sent(photos)
+            } catch is CancellationError {
             } catch {
                 model.report(error)
             }
@@ -106,6 +123,9 @@ struct NewThreadView: View {
                 }
                 if status?.state == .failed {
                     model.report(TransportError.server(status?.note ?? "The runner couldn't start it."))
+                    // The backend deleted the copies with the failed command,
+                    // so trying again needs new ones.
+                    for photo in photos { photo.upload = nil }
                     self.commandId = nil
                     return
                 }

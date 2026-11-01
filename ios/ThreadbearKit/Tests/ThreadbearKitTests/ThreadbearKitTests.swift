@@ -505,6 +505,54 @@ private func properties(of data: Data) -> [CFString: Any] {
     @Test func somethingElseIsNotAPhoto() {
         #expect(PhotoPrep.jpeg(from: Data("hello".utf8)) == nil)
     }
+
+    @Test func aPreparedPhotoHasASmallThumbnail() throws {
+        let prepared = try #require(PhotoPrep.prepared(from: samplePhoto(width: 4000, height: 3000)))
+        #expect(properties(of: prepared.jpeg)[kCGImagePropertyPixelWidth] as? Int == 2048)
+        #expect(prepared.thumbnail.width == PhotoPrep.thumbnailPixels)
+        #expect(prepared.thumbnail.height == PhotoPrep.thumbnailPixels * 3 / 4)
+    }
+}
+
+@Suite struct PhotoUploadTests {
+    /// Waits for a discard, as dropping an upload takes its copy back in the background.
+    private func firstDiscard(_ stream: AsyncStream<String>) async -> String? {
+        await withTaskGroup(of: String?.self) { group in
+            group.addTask { await stream.first { _ in true } }
+            group.addTask {
+                try? await Task.sleep(for: .milliseconds(300))
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
+    }
+
+    @Test func aPhotoNeverSentIsTakenBack() async throws {
+        let (discards, sink) = AsyncStream.makeStream(of: String.self)
+        var upload: PhotoUpload? = PhotoUpload(upload: { "id1" }, discard: { sink.yield($0) })
+        #expect(try await upload?.storageId == "id1")
+        upload = nil
+        #expect(await firstDiscard(discards) == "id1")
+    }
+
+    @Test func aSentPhotoIsLeftForTheBackend() async throws {
+        let (discards, sink) = AsyncStream.makeStream(of: String.self)
+        var upload: PhotoUpload? = PhotoUpload(upload: { "id1" }, discard: { sink.yield($0) })
+        _ = try await upload?.storageId
+        upload?.keep()
+        upload = nil
+        #expect(await firstDiscard(discards) == nil)
+    }
+
+    @Test func aFailedUploadHasNothingToTakeBack() async {
+        let (discards, sink) = AsyncStream.makeStream(of: String.self)
+        var upload: PhotoUpload? = PhotoUpload(upload: { throw TransportError.server("no signal") }, discard: { sink.yield($0) })
+        await #expect(throws: (any Error).self) { _ = try await upload?.storageId }
+        upload = nil
+        #expect(await firstDiscard(discards) == nil)
+    }
 }
 
 @Test func aThreadMikeDidNotStartSaysWhoDid() {

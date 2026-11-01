@@ -406,6 +406,19 @@ export const imageUploadUrl = mutation({
   },
 });
 
+// A photo the phone uploaded and then never sent (API 25): it uploads as soon
+// as one's picked, so taking one back out, or giving up on the message, has
+// to take its copy back too. Nothing else would ever delete it.
+export const discardImage = mutation({
+  args: { token: v.string(), storageId: v.id('_storage') },
+  returns: v.null(),
+  handler: async (ctx, { token, storageId }) => {
+    await checkPhoneToken(ctx, token);
+    if (await ctx.db.system.get(storageId)) await ctx.storage.delete(storageId);
+    return null;
+  },
+});
+
 // A quick ask the phone has already answered out loud (API 10), kept as a
 // thread so Mike can carry on in it. The runner writes the exchange with
 // no turn run (docs/protocol.md, Sync, "quickAsk"); phone:command gives the

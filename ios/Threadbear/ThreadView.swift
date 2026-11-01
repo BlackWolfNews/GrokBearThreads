@@ -284,6 +284,7 @@ struct ThreadView: View {
         do {
             let images = try await model.upload(photos)
             let id = try await backend.send(threadId: thread.threadId, text: message, answers: answers, images: images)
+            model.sent(photos)
             sent = (id, nil)
             picks = [:]
             nextPicks = []

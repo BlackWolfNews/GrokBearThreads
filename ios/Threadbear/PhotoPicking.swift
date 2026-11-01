@@ -2,48 +2,21 @@ import PhotosUI
 import SwiftUI
 import ThreadbearKit
 
-/// A photo waiting in a composer. Once uploaded it keeps its storage id, so
-/// trying a failed send again doesn't leave a second copy in Convex.
+/// A photo waiting in a composer, already prepared off the main thread
+/// (PhotoPrep.prepared). `upload` is its copy in file storage, which goes
+/// back if this is dropped before it's sent, and which trying a failed send
+/// again reuses rather than leaving a second one in Convex.
 @MainActor final class PickedPhoto: Identifiable {
     nonisolated let id = UUID()
     let jpeg: Data
     let thumbnail: UIImage
-    var storageId: String?
-    /// Small enough to draw into its chip each time the words are laid out
-    /// (PhotoChips.swift), its short side 96 px.
-    lazy var chipThumbnail: UIImage = {
-        let side = min(thumbnail.size.width, thumbnail.size.height)
-        guard side > 96 else { return thumbnail }
-        let scale = 96 / side
-        return thumbnail.preparingThumbnail(of: CGSize(width: thumbnail.size.width * scale, height: thumbnail.size.height * scale)) ?? thumbnail
-    }()
+    var upload: PhotoUpload?
+    /// Which connection `upload` started on (AppModel.startUpload).
+    var uploadConnection = 0
 
-    init?(jpeg: Data) {
-        guard let thumbnail = UIImage(data: jpeg) else { return nil }
-        self.jpeg = jpeg
-        self.thumbnail = thumbnail
-    }
-
-    /// Ready to send, or nil if it can't be read as an image.
-    static func from(_ data: Data) async -> PickedPhoto? {
-        let jpeg = await Task.detached(priority: .userInitiated) { PhotoPrep.jpeg(from: data) }.value
-        return jpeg.flatMap { PickedPhoto(jpeg: $0) }
-    }
-}
-
-/// Photos pasted into a composer, made ready to send and then put in
-/// (`PhotoWords.insert`, which takes as many as still fit).
-@MainActor func addPasted(_ images: [Data], model: AppModel, insert: @escaping ([PickedPhoto]) -> Void) {
-    Task {
-        var picked: [PickedPhoto] = []
-        for data in images.prefix(PhotoPrep.maxPhotos) {
-            if let photo = await PickedPhoto.from(data) {
-                picked.append(photo)
-            } else {
-                model.report(TransportError.server("Couldn't read that photo."))
-            }
-        }
-        if !picked.isEmpty { insert(picked) }
+    init(_ prepared: PhotoPrep.Prepared) {
+        jpeg = prepared.jpeg
+        thumbnail = UIImage(cgImage: prepared.thumbnail)
     }
 }
 
@@ -59,7 +32,47 @@ final class TextCursor {
 @MainActor struct PhotoWords {
     var text: Binding<String>
     var photos: Binding<[PickedPhoto]>
+    /// Photos being read and prepared, which the strip shows as spinners.
+    /// Reading one can take seconds when iCloud has the original.
+    var adding: Binding<Int>
     var cursor: TextCursor
+
+    /// How many more it can take, counting the ones on their way.
+    var room: Int { max(0, PhotoPrep.maxPhotos - photos.wrappedValue.count - adding.wrappedValue) }
+
+    /// Reads and prepares each photo off the main thread, shows it as soon
+    /// as it's ready and starts uploading it. All at once, so one waiting on
+    /// iCloud doesn't hold up the rest, but they go in in the order given.
+    func add(_ loads: [@Sendable () async -> Data?], model: AppModel) {
+        let loads = Array(loads.prefix(room))
+        guard !loads.isEmpty else { return }
+        adding.wrappedValue += loads.count
+        let reading = loads.map { load in
+            Task.detached(priority: .userInitiated) { () -> PhotoPrep.Prepared? in
+                guard let data = await load() else { return nil }
+                return PhotoPrep.prepared(from: data)
+            }
+        }
+        Task {
+            for task in reading {
+                let prepared = await task.value
+                adding.wrappedValue -= 1
+                if let prepared {
+                    let photo = PickedPhoto(prepared)
+                    model.startUpload(photo)
+                    insert([photo])
+                } else {
+                    model.report(TransportError.server("Couldn't read that photo."))
+                }
+            }
+        }
+    }
+
+    /// Photos pasted in, each encoded off the main thread as the full-size
+    /// original, which PhotoPrep shrinks as it does a picked one.
+    func addPasted(_ images: [UIImage], model: AppModel) {
+        add(images.map { image in { image.jpegData(compressionQuality: 1) } }, model: model)
+    }
 
     /// New photos as chips where the cursor is (the end, before it's been
     /// in the box), as many as still fit.
@@ -100,10 +113,7 @@ final class TextCursor {
 /// asks the first time. Left out where there's no camera (the simulator).
 struct PhotoMenu<Label: View>: View {
     @Environment(AppModel.self) private var model
-    @Binding var photos: [PickedPhoto]
-    /// Puts each one in as a chip where the cursor is (PhotoWords.insert);
-    /// without it, they go on the end of `photos`.
-    var onAdd: (([PickedPhoto]) -> Void)? = nil
+    var words: PhotoWords
     @ViewBuilder var label: () -> Label
     @State private var choosing = false
     @State private var chosen: [PhotosPickerItem] = []
@@ -118,45 +128,34 @@ struct PhotoMenu<Label: View>: View {
         } label: {
             label()
         }
-        .disabled(photos.count >= PhotoPrep.maxPhotos)
-        .photosPicker(isPresented: $choosing, selection: $chosen, maxSelectionCount: max(1, PhotoPrep.maxPhotos - photos.count), matching: .images)
+        .disabled(words.room == 0)
+        // .current: as it's stored. The default can have the system convert
+        // each HEIC first, and PhotoPrep reads HEIC and makes its own JPEG anyway.
+        .photosPicker(isPresented: $choosing, selection: $chosen, maxSelectionCount: max(1, words.room), matching: .images, preferredItemEncoding: .current)
         .onChange(of: chosen) {
             let items = chosen
             guard !items.isEmpty else { return }
             chosen = []
-            Task {
-                for item in items {
-                    let data = try? await item.loadTransferable(type: Data.self)
-                    await add(data)
-                }
-            }
+            words.add(items.map { item in { try? await item.loadTransferable(type: Data.self) } }, model: model)
         }
         .fullScreenCover(isPresented: $takingPhoto) {
-            CameraPicker { data in Task { await add(data) } }
-                .ignoresSafeArea()
-        }
-    }
-
-    private func add(_ data: Data?) async {
-        guard photos.count < PhotoPrep.maxPhotos else { return }
-        if let data, let photo = await PickedPhoto.from(data) {
-            if let onAdd { onAdd([photo]) } else { photos.append(photo) }
-        } else {
-            model.report(TransportError.server("Couldn't read that photo."))
+            CameraPicker { image in
+                // Encoding a full-size photo takes a moment too, so not on the main thread.
+                words.add([{ image.jpegData(compressionQuality: 1) }], model: model)
+            }
+            .ignoresSafeArea()
         }
     }
 }
 
 /// The photos waiting to go, each with a button to take it out.
 struct PhotoStrip: View {
-    @Binding var photos: [PickedPhoto]
-    /// Takes its chip out of the words too (PhotoWords.remove).
-    var onRemove: ((PickedPhoto) -> Void)? = nil
+    var words: PhotoWords
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                ForEach(photos) { photo in
+                ForEach(words.photos.wrappedValue) { photo in
                     Image(uiImage: photo.thumbnail)
                         .resizable()
                         .scaledToFill()
@@ -164,7 +163,7 @@ struct PhotoStrip: View {
                         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                         .overlay(alignment: .topTrailing) {
                             Button {
-                                if let onRemove { onRemove(photo) } else { photos.removeAll { $0.id == photo.id } }
+                                words.remove(photo)
                             } label: {
                                 Image(systemName: "xmark.circle.fill")
                                     .symbolRenderingMode(.palette)
@@ -176,6 +175,14 @@ struct PhotoStrip: View {
                         }
                         .accessibilityLabel("Photo to send")
                 }
+                ForEach(0..<words.adding.wrappedValue, id: \.self) { _ in
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        // A fill, not a background colour: a Form's row is already that, and the tile vanished.
+                        .fill(Color(.tertiarySystemFill))
+                        .frame(width: 64, height: 64)
+                        .overlay { ProgressView() }
+                        .accessibilityLabel("Adding a photo")
+                }
             }
         }
     }
@@ -184,7 +191,7 @@ struct PhotoStrip: View {
 /// The system camera. There's no SwiftUI one, so UIKit's picker, as QRScanner
 /// wraps UIKit for the pairing code.
 private struct CameraPicker: UIViewControllerRepresentable {
-    var onPhoto: (Data) -> Void
+    var onPhoto: (UIImage) -> Void
     @Environment(\.dismiss) private var dismiss
 
     func makeUIViewController(context: Context) -> UIImagePickerController {
@@ -203,7 +210,7 @@ private struct CameraPicker: UIViewControllerRepresentable {
         init(_ parent: CameraPicker) { self.parent = parent }
 
         func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
-            if let data = (info[.originalImage] as? UIImage)?.jpegData(compressionQuality: 1) { parent.onPhoto(data) }
+            if let image = info[.originalImage] as? UIImage { parent.onPhoto(image) }
             parent.dismiss()
         }
 

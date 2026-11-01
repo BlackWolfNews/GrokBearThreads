@@ -87,4 +87,7 @@
 //    pictures, and phone:messages' `images` carries them (a pinned one with
 //    `pinned`). Nothing changes for an older runner or phone, which just
 //    doesn't have them.
-export const API_VERSION = 24;
+// 25: phone:discardImage, for a photo the phone uploaded and never sent. A
+//    phone only ever calls it on a best-effort basis, so on an older backend
+//    the photo just stays in file storage, and an older phone never calls it.
+export const API_VERSION = 25;

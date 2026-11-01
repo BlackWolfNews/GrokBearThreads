@@ -96,7 +96,8 @@ final class AppModel {
     var searchText: String?
     /// `-ThreadbearPhoto <path>` (Debug only): start the composers with this
     /// photo, for the screenshots, as nothing can tap the system picker.
-    var samplePhoto: Data?
+    /// With `-ThreadbearSlowPhoto` it takes a few seconds, to see the spinner tile.
+    var loadSamplePhoto: (@Sendable () async -> Data?)?
 
     /// Whether this backend takes photos. The demo does, so App Review sees it.
     var canSendPhotos: Bool { isFake || (apiVersion ?? 0) >= BackendCompatibility.photosAPIVersion }
@@ -107,15 +108,49 @@ final class AppModel {
         isFake || (apiVersion ?? 0) >= BackendCompatibility.modelsAPIVersion ? NewThreadChoices.models(accounts) : []
     }
 
-    /// Uploads what isn't up yet and returns the storage ids, in order.
+    /// Starts a photo on its way to file storage, if it isn't already. Done
+    /// as soon as it's picked, so that Send usually has nothing to wait for.
+    /// One started on a connection that's since been replaced (comingBack)
+    /// goes again, as its mutation may never answer.
+    func startUpload(_ photo: PickedPhoto) {
+        guard let backend, photo.upload == nil || photo.uploadConnection != connection else { return }
+        let jpeg = photo.jpeg
+        photo.uploadConnection = connection
+        photo.upload = PhotoUpload(
+            upload: { try await backend.uploadPhoto(jpeg) },
+            discard: { try? await backend.discardPhoto($0) })
+    }
+
+    /// Waits for the photos to be up and returns the storage ids, in order.
     func upload(_ photos: [PickedPhoto]) async throws -> [String] {
-        guard let backend else { throw TransportError.server("Not connected.") }
+        guard backend != nil else { throw TransportError.server("Not connected.") }
+        // All of them at once, whatever's left to go.
+        photos.forEach(startUpload)
         var ids: [String] = []
         for photo in photos {
-            if photo.storageId == nil { photo.storageId = try await backend.uploadPhoto(photo.jpeg) }
-            if let id = photo.storageId { ids.append(id) }
+            guard let upload = photo.upload else { continue }
+            do {
+                ids.append(try await upload.storageId)
+            } catch {
+                // It may have failed back when it was picked, with the signal
+                // since come back, so a send gets one fresh try of its own.
+                photo.upload = nil
+                startUpload(photo)
+                do {
+                    guard let again = photo.upload else { throw error }
+                    ids.append(try await again.storageId)
+                } catch {
+                    photo.upload = nil
+                    throw error
+                }
+            }
         }
         return ids
+    }
+
+    /// They've gone with a message, so they're the backend's to delete now.
+    func sent(_ photos: [PickedPhoto]) {
+        for photo in photos { photo.upload?.keep() }
     }
 
     private var tasks: [Task<Void, Never>] = []
@@ -148,7 +183,14 @@ final class AppModel {
         if let i = args.firstIndex(of: "-ThreadbearOpen"), i + 1 < args.count { openThreadId = args[i + 1] }
         if let i = args.firstIndex(of: "-ThreadbearCompose"), i + 1 < args.count { composeText = args[i + 1] }
         if let i = args.firstIndex(of: "-ThreadbearSearch"), i + 1 < args.count { searchText = args[i + 1] }
-        if let i = args.firstIndex(of: "-ThreadbearPhoto"), i + 1 < args.count { samplePhoto = FileManager.default.contents(atPath: args[i + 1]) }
+        if let i = args.firstIndex(of: "-ThreadbearPhoto"), i + 1 < args.count {
+            let sample = FileManager.default.contents(atPath: args[i + 1])
+            let slow = args.contains("-ThreadbearSlowPhoto")
+            loadSamplePhoto = {
+                if slow { try? await Task.sleep(for: .seconds(20)) }
+                return sample
+            }
+        }
         #endif
         Task { [weak self] in
             while !Task.isCancelled {

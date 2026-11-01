@@ -251,6 +251,7 @@ public final class FakeBackend: Backend, @unchecked Sendable {
     }
 
     public func uploadPhoto(_ jpeg: Data) async throws -> String { UUID().uuidString }
+    public func discardPhoto(_ storageId: String) async throws {}
 
     /// What the runner's mirror shows for a message with pictures (sync.ts
     /// toMessageDoc): a line for the ones no [Picture N] marker places.

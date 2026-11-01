@@ -49,6 +49,8 @@ public protocol Backend: Sendable {
     /// Puts a JPEG in file storage on its way to the runner (backend API 18), and returns its
     /// storage id. The backend deletes it once the runner has its copy.
     func uploadPhoto(_ jpeg: Data) async throws -> String
+    /// Takes back a photo that was uploaded and then never sent (backend API 25).
+    func discardPhoto(_ storageId: String) async throws
     func respond(threadId: String, approvalId: String, decision: ApprovalOption) async throws -> String
     /// Answers keyed by question text, several choices joined with ", ",
     /// as the Mac app sends them. `summary` goes in the transcript.
@@ -203,6 +205,10 @@ public final class ConvexBackend: Backend, @unchecked Sendable {
         }
         struct Uploaded: Decodable { var storageId: String }
         return try Self.decode(Uploaded.self, try await post(url, jpeg)).storageId
+    }
+
+    public func discardPhoto(_ storageId: String) async throws {
+        _ = try await transport.mutation("phone:discardImage", args(["storageId": .string(storageId)]))
     }
 
     public func send(threadId: String, text: String, answers: [AskAnswer], images: [String]) async throws -> String {

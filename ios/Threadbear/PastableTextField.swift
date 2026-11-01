@@ -17,7 +17,7 @@ struct PastableTextField: UIViewRepresentable {
     var placeholder: String
     var lines: ClosedRange<Int>
     /// Nil when photos can't be sent: Paste is then text only.
-    var onPasteImages: (([Data]) -> Void)?
+    var onPasteImages: (([UIImage]) -> Void)?
     /// The photos whose chips are in the words, in order.
     var photos: Binding<[PickedPhoto]>? = nil
     /// Kept up to date with the cursor, and where it goes after the words
@@ -99,7 +99,7 @@ struct PastableTextField: UIViewRepresentable {
 }
 
 final class PastingTextView: UITextView {
-    var onPasteImages: (([Data]) -> Void)?
+    var onPasteImages: (([UIImage]) -> Void)?
     let placeholderLabel = UILabel()
     /// The photos the chips stand for, to draw them again in the other
     /// appearance.
@@ -209,8 +209,7 @@ final class PastingTextView: UITextView {
 
     override func paste(_ sender: Any?) {
         guard pastesImages, let onPasteImages else { return super.paste(sender) }
-        // Each as the full-size original: PhotoPrep shrinks it as it does a picked one.
-        let images = (UIPasteboard.general.images ?? []).compactMap { $0.jpegData(compressionQuality: 1) }
+        let images = UIPasteboard.general.images ?? []
         if images.isEmpty { return super.paste(sender) }
         onPasteImages(images)
     }

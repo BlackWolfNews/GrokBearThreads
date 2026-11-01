@@ -107,7 +107,7 @@ nonisolated final class PhotoChipAttachment: NSTextAttachment {
         self.number = number
         super.init(data: nil, ofType: nil)
         let metrics = PhotoChip.Metrics(font: font)
-        let image = PhotoChip.image(number: number, thumbnail: photo.chipThumbnail, metrics: metrics, traits: traits)
+        let image = PhotoChip.image(number: number, thumbnail: photo.thumbnail, metrics: metrics, traits: traits)
         self.image = image
         bounds = CGRect(x: 0, y: metrics.baselineOffset, width: image.size.width, height: image.size.height)
     }
