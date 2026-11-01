@@ -281,6 +281,12 @@ older thread's pictures stay on the Mac and the phone says so. They're
 deleted with the thread. Mike's attachments and tools' screenshots stay on
 the Mac unless the thread is shared (`shareImages`), as they're many and big.
 
+They go as the file is, so a GIF keeps its frames; the phone's 1400 pixel limit
+is only on what it decodes for the column. MP4 and MOV files an agent writes
+the same way or pins go through the same rows (`.mp4`, `.m4v`, `.mov`, under
+the same 10 MB), which took no backend change as the phone tells a video from
+a picture by its bytes. Shared pages still get only pictures.
+
 ### Build order
 
 1. **Project and summaries.** `convex/` with the schema above, the runner

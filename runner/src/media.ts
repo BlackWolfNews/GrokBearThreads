@@ -69,6 +69,52 @@ export function sniffImage(buf: Buffer): ImageInfo | null {
   return null;
 }
 
+// An MP4 or QuickTime file's type and picture size, which the phone lays out
+// from as it does a picture's. The size is optional: a file can have it
+// anywhere, or not in a way this finds, and the phone then gets it on loading.
+export function sniffVideo(buf: Buffer): ImageInfo | null {
+  if (buf.length < 12 || buf.toString('ascii', 4, 8) !== 'ftyp') return null;
+  const brand = buf.toString('ascii', 8, 12);
+  // HEIC and AVIF photos are ISO boxes with a ftyp too.
+  if (/^(heic|heix|hevc|hevx|heim|heis|mif1|msf1|avif|avis)$/.test(brand)) return null;
+  return { mediaType: brand === 'qt  ' ? 'video/quicktime' : 'video/mp4', ...videoSize(buf) };
+}
+
+// moov > trak > tkhd, of the first track with a picture (audio's are 0 x 0).
+function videoSize(buf: Buffer): { width?: number; height?: number } {
+  for (const [start, end] of boxes(buf, 0, buf.length, 'moov')) {
+    for (const [trakStart, trakEnd] of boxes(buf, start, end, 'trak')) {
+      for (const [at, tkhdEnd] of boxes(buf, trakStart, trakEnd, 'tkhd')) {
+        // Version 1 has 8-byte times, which moves the rest along 12.
+        const shift = buf[at] === 1 ? 12 : 0;
+        if (at + 84 + shift > tkhdEnd) continue;
+        const width = buf.readUInt32BE(at + 76 + shift) >>> 16;
+        const height = buf.readUInt32BE(at + 80 + shift) >>> 16;
+        if (!width || !height) continue;
+        // A phone's upright clip is stored sideways, with a rotation here.
+        return buf.readInt32BE(at + 40 + shift) === 0 ? { width: height, height: width } : { width, height };
+      }
+    }
+  }
+  return {};
+}
+
+// [start, end] of the contents of each box of a type between two offsets.
+function* boxes(buf: Buffer, from: number, to: number, type: string): Generator<[number, number]> {
+  let i = from;
+  while (i + 8 <= to) {
+    let size = buf.readUInt32BE(i);
+    let header = 8;
+    if (size === 1 && i + 16 <= to) {
+      size = Number(buf.readBigUInt64BE(i + 8));
+      header = 16;
+    } else if (size === 0) size = to - i;
+    if (size < header || i + size > to) return;
+    if (buf.toString('ascii', i + 4, i + 8) === type) yield [i + header, i + size];
+    i += size;
+  }
+}
+
 // Biggest image file accepted from the app.
 const MAX_IMAGE_BYTES = 100 * 1024 * 1024;
 

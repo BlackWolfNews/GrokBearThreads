@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import type { PersistedEvent } from './protocol.ts';
 import { absolute } from './highlights.ts';
-import { sniffImage } from './media.ts';
+import { sniffImage, sniffVideo } from './media.ts';
 
 // A picture bigger than this stays on the Mac.
 export const SHARE_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -33,9 +33,15 @@ export function imageType(file: string): string | undefined {
   return ext ? TYPES[ext] : undefined;
 }
 
+// What the phone can play as well as show (reply pictures only: a shared
+// page draws its pictures with <img>).
+function replyMediaType(file: string): string | undefined {
+  return imageType(file) ?? (/\.(mp4|m4v|mov)$/i.test(file) ? 'video/mp4' : undefined);
+}
+
 // A Markdown image's address as a file on this Mac: an absolute path, a
 // file:// URL or a ~ path. Undefined for a web address or anything else.
-export function localImagePath(src: string, home = os.homedir()): string | undefined {
+export function localImagePath(src: string, home = os.homedir(), typeOf = imageType): string | undefined {
   let p = src.trim();
   if (p.startsWith('file://')) {
     try {
@@ -45,17 +51,17 @@ export function localImagePath(src: string, home = os.homedir()): string | undef
     }
   } else if (p.startsWith('~/')) p = home + p.slice(1);
   if (!p.startsWith('/') || p.includes('\0')) return undefined;
-  return imageType(p) ? p : undefined;
+  return typeOf(p) ? p : undefined;
 }
 
 // ![alt](src) and ![alt](<src> "title"), as CommonMark writes them.
 const MARKDOWN_IMAGE = /!\[[^\]]*\]\(\s*(?:<([^>\n]+)>|([^)\s]+))(?:\s+"[^"]*")?\s*\)/g;
 
-export function markdownImages(text: string, home = os.homedir()): { src: string; path: string }[] {
+export function markdownImages(text: string, home = os.homedir(), typeOf = imageType): { src: string; path: string }[] {
   const out: { src: string; path: string }[] = [];
   for (const m of text.matchAll(MARKDOWN_IMAGE)) {
     const src = (m[1] ?? m[2])!;
-    const p = localImagePath(src, home);
+    const p = localImagePath(src, home, typeOf);
     if (p && !out.some((x) => x.src === src)) out.push({ src, path: p });
   }
   return out;
@@ -94,8 +100,9 @@ export function readShareImage(file: string): { bytes: Uint8Array } | { skip: st
 
 // What the phone shows of any thread, shared or not (backend API 24,
 // docs/convex-backend.md): what the agent put in front of Mike on purpose,
-// a picture in its reply or a picture it pinned. Attachments and what tools
-// hand back stay on the Mac, as they're many and big.
+// a picture or video in its reply, or one it pinned. Attachments and what
+// tools hand back stay on the Mac, as they're many and big. The file goes as
+// it is, so a GIF keeps its frames; the phone shrinks only what it draws.
 export type ReplyImage = {
   seq: number;
   path: string; // the file on this Mac
@@ -106,17 +113,18 @@ export type ReplyImage = {
 export const PIN_TOOL = 'mcp__threadbear__pin';
 
 export function replyImagesInEvent(e: PersistedEvent, cwd: string | undefined, home = os.homedir()): ReplyImage[] {
-  if (e.type === 'assistant.text') return markdownImages(e.text, home).map(({ src, path }) => ({ seq: e.seq, path, src }));
+  if (e.type === 'assistant.text') return markdownImages(e.text, home, replyMediaType).map(({ src, path }) => ({ seq: e.seq, path, src }));
   if (e.type !== 'tool.call' || e.name !== PIN_TOOL || typeof e.input.path !== 'string') return [];
   // The pin tool takes a path relative to the thread's folder.
   const raw = e.input.path.trim();
   if (!raw || (!raw.startsWith('/') && !raw.startsWith('~') && !cwd)) return [];
   const file = absolute(raw, cwd ?? '/', home);
-  return imageType(file) ? [{ seq: e.seq, path: file, pinned: true }] : [];
+  return replyMediaType(file) ? [{ seq: e.seq, path: file, pinned: true }] : [];
 }
 
 // The bytes to upload and what they really are, or why not. An agent can
-// write any path with a .png on the end, so the file has to be a picture.
+// write any path with a .png on the end, so the file has to be a picture or
+// a video.
 export function readReplyImage(file: string): { bytes: Uint8Array; mediaType: string; width?: number; height?: number } | { skip: string } {
   let read: ReturnType<typeof readShareImage>;
   try {
@@ -125,7 +133,8 @@ export function readReplyImage(file: string): { bytes: Uint8Array; mediaType: st
     return { skip: "it can't be read" };
   }
   if ('skip' in read) return read;
-  const info = sniffImage(Buffer.from(read.bytes));
+  const buf = Buffer.from(read.bytes);
+  const info = sniffImage(buf) ?? sniffVideo(buf);
   if (!info) return { skip: "it isn't a picture" };
   return { bytes: read.bytes, mediaType: info.mediaType, ...(info.width ? { width: info.width } : {}), ...(info.height ? { height: info.height } : {}) };
 }

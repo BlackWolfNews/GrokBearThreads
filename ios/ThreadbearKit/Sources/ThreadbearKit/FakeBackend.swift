@@ -43,11 +43,12 @@ public final class FakeBackend: Backend, @unchecked Sendable {
     // MARK: A thread with pictures
 
     /// `-ThreadbearPictures`: one thread with each way a picture can come:
-    /// wide in a reply, tall in a reply, pinned, and one only on the Mac.
+    /// wide in a reply, tall in a reply, animated, pinned, and one only on the
+    /// Mac.
     private static func pictureThread(now: Date) -> (thread: PhoneThread, messages: [PhoneMessage], images: [MessageImage]) {
         let ago = { (minutes: Double) in now.addingTimeInterval(-minutes * 60) }
         let thread = PhoneThread(threadId: "pics", title: "Back panel screw layout", cwd: "~/dev/workbench", preview: "Here's where the screws go.", lastActivityAt: ago(2))
-        let wide = "/Users/you/guide/back-screws.png", tall = "/Users/you/guide/case-side.png"
+        let wide = "/Users/you/guide/back-screws.png", tall = "/Users/you/guide/case-side.png", moving = "/Users/you/guide/which-way.gif"
         let messages = [
             PhoneMessage(seq: 1, role: .user, text: "Where do the back screws go?", at: ago(9)),
             PhoneMessage(seq: 2, role: .tool, text: "Wrote guide/back-screws.png", toolKind: "write", at: ago(7)),
@@ -64,6 +65,10 @@ public final class FakeBackend: Backend, @unchecked Sendable {
 
             ![Side view](\(tall))
 
+            Which way it turns:
+
+            ![Which way it turns](\(moving))
+
             And the first go, which I haven't got any more:
 
             ![First attempt](/Users/you/guide/first-go.png)
@@ -73,6 +78,7 @@ public final class FakeBackend: Backend, @unchecked Sendable {
             MessageImage(seq: 3, pinned: true, url: samplePicture("pinned", width: 900, height: 900, hue: 0.33), width: 900, height: 900),
             MessageImage(seq: 4, src: wide, url: samplePicture("wide", width: 1600, height: 900, hue: 0.58), width: 1600, height: 900),
             MessageImage(seq: 4, src: tall, url: samplePicture("tall", width: 800, height: 2000, hue: 0.08), width: 800, height: 2000),
+            MessageImage(seq: 4, src: moving, url: sampleAnimation("moving", width: 720, height: 480), width: 720, height: 480),
         ]
         return (thread, messages, images)
     }
@@ -94,6 +100,28 @@ public final class FakeBackend: Backend, @unchecked Sendable {
             CGImageDestinationAddImage(out, image, nil)
             CGImageDestinationFinalize(out)
         }
+        return file.absoluteString
+    }
+
+    /// A GIF of a bar crossing the frame, holding longer on its last frame, so
+    /// it shows whether a picture plays and keeps each frame's own time.
+    private static func sampleAnimation(_ name: String, width: Int, height: Int) -> String {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("sample-\(name).gif")
+        let frames = 12
+        guard let out = CGImageDestinationCreateWithURL(file as CFURL, "com.compuserve.gif" as CFString, frames, nil) else { return file.absoluteString }
+        CGImageDestinationSetProperties(out, [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0]] as CFDictionary)
+        let space = CGColorSpace(name: CGColorSpace.sRGB)!
+        for frame in 0..<frames {
+            guard let c = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { continue }
+            c.setFillColor(CGColor(red: 0.16, green: 0.3, blue: 0.5, alpha: 1))
+            c.fill(CGRect(x: 0, y: 0, width: width, height: height))
+            c.setFillColor(CGColor(red: 1, green: 0.8, blue: 0.2, alpha: 1))
+            c.fill(CGRect(x: (width - 80) * frame / (frames - 1), y: 0, width: 80, height: height))
+            guard let image = c.makeImage() else { continue }
+            let delay = frame == frames - 1 ? 0.8 : 0.1
+            CGImageDestinationAddImage(out, image, [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: delay]] as CFDictionary)
+        }
+        CGImageDestinationFinalize(out)
         return file.absoluteString
     }
 

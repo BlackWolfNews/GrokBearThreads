@@ -49,6 +49,73 @@ test('reply images: pictures in a reply and pinned pictures, nothing else', () =
   assert.deepEqual(replyImagesInEvent(ev(7, { type: 'tool.result', itemId: 'j', ok: true, text: '', truncated: false, images: [image] }), '/w', home), []);
 });
 
+test('reply images: a video goes to the phone, but not to a shared page', () => {
+  const home = '/Users/ann';
+  const base = { threadId: 't', turnId: 'u', ts: '2026-11-01T00:00:00.000Z' };
+  const text = { ...base, seq: 1, type: 'assistant.text', itemId: 'm', text: '![clip](/w/a.mp4) ![old](/w/b.MOV) ![web](/w/c.webm)' } as never;
+  assert.deepEqual(replyImagesInEvent(text, '/w', home), [
+    { seq: 1, path: '/w/a.mp4', src: '/w/a.mp4' },
+    { seq: 1, path: '/w/b.MOV', src: '/w/b.MOV' },
+  ]);
+  const pin = { ...base, seq: 2, type: 'tool.call', itemId: 'i', name: PIN_TOOL, kind: 'mcp', title: 'pin', input: { path: 'clip.m4v' } } as never;
+  assert.deepEqual(replyImagesInEvent(pin, '/w', home), [{ seq: 2, path: '/w/clip.m4v', pinned: true }]);
+  assert.equal(localImagePath('/w/a.mp4', home), undefined);
+  assert.deepEqual(imagesInEvent(text, home), []);
+});
+
+// The boxes of an MP4 as far as the size: ftyp, then moov > trak > tkhd.
+function mp4(brand: string, tracks: { width: number; height: number; rotated?: boolean; version?: 0 | 1 }[]): Buffer {
+  const box = (type: string, ...parts: Buffer[]) => {
+    const size = Buffer.alloc(4);
+    size.writeUInt32BE(8 + parts.reduce((n, p) => n + p.length, 0));
+    return Buffer.concat([size, Buffer.from(type, 'ascii'), ...parts]);
+  };
+  const trak = ({ width, height, rotated, version = 0 }: (typeof tracks)[number]) => {
+    const shift = version === 1 ? 12 : 0;
+    const tkhd = Buffer.alloc(84 + shift);
+    tkhd[0] = version;
+    tkhd.writeInt32BE(rotated ? 0 : 0x10000, 40 + shift);
+    tkhd.writeUInt32BE(width * 0x10000, 76 + shift);
+    tkhd.writeUInt32BE(height * 0x10000, 80 + shift);
+    return box('trak', box('tkhd', tkhd));
+  };
+  return Buffer.concat([box('ftyp', Buffer.from(brand.padEnd(8, '\0'), 'latin1')), box('mdat', Buffer.alloc(40)), box('moov', box('mvhd', Buffer.alloc(100)), ...tracks.map(trak))]);
+}
+
+test('reply images: a video has to really be one, and says its size', () => {
+  const dir = tmpDir();
+  const write = (name: string, bytes: Buffer) => {
+    const file = path.join(dir, name);
+    fs.writeFileSync(file, bytes);
+    return file;
+  };
+  // The first track with a picture, past an audio track of 0 x 0.
+  const read = readReplyImage(write('a.mp4', mp4('isom', [{ width: 0, height: 0 }, { width: 1280, height: 720 }])));
+  assert.ok(!('skip' in read));
+  assert.deepEqual({ mediaType: read.mediaType, width: read.width, height: read.height }, { mediaType: 'video/mp4', width: 1280, height: 720 });
+  // A clip filmed upright is stored sideways with a rotation.
+  const upright = readReplyImage(write('b.mov', mp4('qt  ', [{ width: 1920, height: 1080, rotated: true, version: 1 }])));
+  assert.ok(!('skip' in upright));
+  assert.deepEqual({ mediaType: upright.mediaType, width: upright.width, height: upright.height }, { mediaType: 'video/quicktime', width: 1080, height: 1920 });
+  // No size found still goes: the phone gets it as it loads.
+  const sizeless = readReplyImage(write('c.mp4', mp4('mp42', [])));
+  assert.ok(!('skip' in sizeless));
+  assert.equal(sizeless.width, undefined);
+  assert.deepEqual(readReplyImage(write('d.mp4', Buffer.from('not a video at all, whatever it says'))), { skip: "it isn't a picture" });
+  assert.deepEqual(readReplyImage(write('e.mp4', mp4('heic', []))), { skip: "it isn't a picture" });
+});
+
+test('reply images: a GIF goes as it is, with all its frames', () => {
+  const dir = tmpDir();
+  const file = path.join(dir, 'a.gif');
+  const bytes = Buffer.concat([Buffer.from('GIF89a'), Buffer.from([0x20, 0x00, 0x10, 0x00]), Buffer.alloc(200, 7)]);
+  fs.writeFileSync(file, bytes);
+  const read = readReplyImage(file);
+  assert.ok(!('skip' in read));
+  assert.equal(read.mediaType, 'image/gif');
+  assert.deepEqual(Buffer.from(read.bytes), bytes);
+});
+
 test('reply images: a file has to really be a picture', () => {
   const dir = tmpDir();
   const png = path.join(dir, 'real.png');
