@@ -7,7 +7,8 @@ biggest, with the question, the choices and their reasons, a note on any of
 them and Send on the right. Picking opens that choice's note box and puts the
 cursor in it. Click an image to enlarge it, and again or Esc to see them all.
 Grid, 2-up, the thumbnail strip and Later went; closing the window keeps the
-draft. The usage notes below describe the earlier window where they differ.
+draft. The dock's Review panel described below went too, as reviews have only
+opened in their own window since 30 October. The usage notes below describe the earlier window where they differ.
 The reply format didn't change.
 
 Design pass, 27 October 2026. Mike approved A, the separate comparison window.

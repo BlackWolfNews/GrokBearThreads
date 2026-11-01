@@ -6,18 +6,12 @@ import ThreadbearCore
 extension AppModel {
     /// Opens a review in a window of its own, most of the screen (Mike,
     /// 30 Oct): beside the thread as a dock tab the images were too small
-    /// to compare. A review already in the Review panel moves out of it,
-    /// keeping its draft.
+    /// to compare.
     func openReview(threadId: String, review: DesignReview) {
         let key = threadId + "/" + review.id
         if let existing = reviewWindows[key] {
             existing.session.receive(review)
             existing.present()
-            return
-        }
-        if let session = reviewPanel, session.threadId == threadId, session.review.id == review.id {
-            session.receive(review)
-            popOutReview()
             return
         }
         presentReviewWindow(makeReviewSession(threadId: threadId, review: review))
@@ -27,7 +21,9 @@ extension AppModel {
         // Resolve the client for each call: a review can stay open through
         // a runner handover and must not keep the disconnected client.
         func connected() throws -> RPCClient {
-            guard let client else { throw NSError(domain: "Threadbear", code: 1, userInfo: [NSLocalizedDescriptionKey: "The runner is disconnected."]) }
+            // RPCError rather than a plain error, so ReviewSession can tell a
+            // runner that's restarting from one that refused.
+            guard let client else { throw RPCError.disconnected(nil) }
             return client
         }
         let service = ReviewService(
@@ -37,35 +33,6 @@ extension AppModel {
             cancel: { revision in try await connected().cancelReview(threadId: threadId, reviewId: review.id, revision: revision) }
         )
         return ReviewSession(threadId: threadId, review: review, service: service)
-    }
-
-    /// A tab in the main panel's group (Mike, 28 Oct), or in the group of
-    /// its thread's own panel if it has one, unless it's open already,
-    /// wherever that is.
-    private func showReviewPanel(threadId: String) {
-        let panel = WindowDock.review
-        if dock.layout.contains(panel) {
-            dock.show(panel)
-        } else if let group = dock.layout.group(containing: WindowDock.threadPanel(threadId)) {
-            dock.open(panel, .tab(group: group.id))
-        } else {
-            openMainTab(panel)
-        }
-    }
-
-    func closeReviewPanel() {
-        if let session = reviewPanel { Task { await session.saveNow() } }
-        dock.close(WindowDock.review)
-        reviewPanel = nil
-    }
-
-    /// Moves the panel's review into a window of its own, for full screen
-    /// or a second display. The same session, so nothing typed is lost.
-    func popOutReview() {
-        guard let session = reviewPanel else { return }
-        dock.close(WindowDock.review)
-        reviewPanel = nil
-        presentReviewWindow(session)
     }
 
     private func presentReviewWindow(_ session: ReviewSession) {
@@ -85,16 +52,6 @@ extension AppModel {
 
     func receiveReview(_ review: DesignReview, threadId: String) {
         reviewWindows[threadId + "/" + review.id]?.session.receive(review)
-        if let session = reviewPanel, session.threadId == threadId, session.review.id == review.id { session.receive(review) }
-    }
-}
-
-/// The Review panel's bar: pop it out into a window.
-struct ReviewPanelButtons: View {
-    @Environment(AppModel.self) private var app
-
-    var body: some View {
-        PaneHeaderButton(symbol: "macwindow.on.rectangle", help: "Open in its own window") { app.popOutReview() }
     }
 }
 
@@ -291,7 +248,6 @@ private struct ReviewTitlebarButtons: View {
 /// reasons and put Pick and Send at opposite ends of the window.
 struct ReviewWindow: View {
     @Bindable var session: ReviewSession
-    var inPanel = false
     let back: () -> Void
     let close: () -> Void
     @Environment(\.colorScheme) private var colorScheme

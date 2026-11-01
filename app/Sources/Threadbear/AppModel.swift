@@ -220,9 +220,6 @@ final class AppModel {
     /// as none.
     var nextPicks: [String: NextPicks] = [:]
     @ObservationIgnored var reviewWindows: [String: ReviewWindowController] = [:]
-    /// The review open in the dock's Review panel (WindowDock.review), if
-    /// any. A review popped out into its own window leaves it.
-    var reviewPanel: ReviewSession?
     /// The first thread list has arrived. Until then the sidebar list stays
     /// empty, so it's filled in one go.
     var threadsLoaded = false

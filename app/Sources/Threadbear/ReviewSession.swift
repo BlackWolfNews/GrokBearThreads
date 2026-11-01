@@ -33,6 +33,7 @@ final class ReviewSession {
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let cacheKey: String
     @ObservationIgnored private let autosave: Bool
+    @ObservationIgnored private let reconnectWait: Duration
     @ObservationIgnored private let cacheOwner = UUID().uuidString
     @ObservationIgnored private var timer: Task<Void, Never>?
 
@@ -43,13 +44,14 @@ final class ReviewSession {
         var conflict: Bool?
     }
 
-    init(threadId: String, review: DesignReview, service: ReviewService, defaults: UserDefaults = .standard, autosave: Bool = true) {
+    init(threadId: String, review: DesignReview, service: ReviewService, defaults: UserDefaults = .standard, autosave: Bool = true, reconnectWait: Duration = .seconds(20)) {
         self.threadId = threadId
         self.review = review
         self.draft = review.response ?? review.draft
         self.service = service
         self.defaults = defaults
         self.autosave = autosave
+        self.reconnectWait = reconnectWait
         cacheKey = "reviewDraft.\(threadId).\(review.id)"
         if let data = defaults.data(forKey: cacheKey), let cached = try? JSONDecoder().decode(CachedDraft.self, from: data), cached.draft != draft {
             draft = cached.draft
@@ -118,6 +120,31 @@ final class ReviewSession {
         if cachedDraft()?.owner == cacheOwner { defaults.removeObject(forKey: cacheKey) }
     }
 
+    /// Runs a call to the runner, waiting out a runner that's restarting. It
+    /// updates itself several times a day and is gone for a few seconds each
+    /// time, which isn't worth an error or a second press of Send. Retrying
+    /// is safe: an identical answer to a review already answered returns the
+    /// original, and never sends twice.
+    private func ridingOutRestart<T>(_ call: () async throws -> T) async throws -> T {
+        let clock = ContinuousClock()
+        let deadline = clock.now + reconnectWait
+        while true {
+            do {
+                return try await call()
+            } catch where Self.isRunnerAway(error) && clock.now < deadline {
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+        }
+    }
+
+    private static func isRunnerAway(_ error: Error) -> Bool {
+        switch error as? RPCError {
+        case .disconnected, .connectFailed, .timeout: return true
+        case .server(let code, _): return code == RPCError.busy
+        default: return false
+        }
+    }
+
     private func scheduleSave() {
         guard autosave, !conflict else { return }
         timer?.cancel()
@@ -133,7 +160,7 @@ final class ReviewSession {
         let sent = draft
         let attemptedRevision = review.revision
         do {
-            let saved = try await service.save(attemptedRevision, sent)
+            let saved = try await ridingOutRestart { try await service.save(attemptedRevision, sent) }
             if saved.revision >= review.revision { review = saved }
             dirty = normalized(draft) != (review.response ?? review.draft)
             if saved.revision < review.revision && dirty {
@@ -175,7 +202,9 @@ final class ReviewSession {
 
     func refresh() async {
         do { receive(try await service.load()) }
-        catch { self.error = "Couldn’t load the review. \(error.localizedDescription)" }
+        catch where Self.isRunnerAway(error) {
+            // It polls again in a few seconds; nothing here needs saying.
+        } catch { self.error = "Couldn’t load the review. \(error.localizedDescription)" }
     }
 
     func keepMyDraft() async {
@@ -196,7 +225,8 @@ final class ReviewSession {
         guard review.isPending, !conflict else { return }
         let submittedRevision = review.revision
         do {
-            let answered = try await service.respond(submittedRevision, draft)
+            let sent = draft
+            let answered = try await ridingOutRestart { try await service.respond(submittedRevision, sent) }
             review = answered
             draft = answered.response ?? answered.draft
             dirty = false

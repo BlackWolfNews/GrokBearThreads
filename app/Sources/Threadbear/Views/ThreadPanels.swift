@@ -36,11 +36,6 @@ extension AppModel {
     func dockChanged(_ layout: DockLayout) {
         let main = layout.group(containing: WindowDock.main)
         mainTabs = mainTabs.filter { main?.panels.contains($0) == true }
-        if reviewPanel != nil, !layout.contains(WindowDock.review), let session = reviewPanel {
-            // Closed from its tab's ×, or with its context.
-            Task { await session.saveNow() }
-            reviewPanel = nil
-        }
         for (threadId, transcript) in panelTranscripts where !layout.contains(WindowDock.threadPanel(threadId)) {
             transcript.show(nil)
             panelTranscripts[threadId] = nil

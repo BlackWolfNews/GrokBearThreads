@@ -301,7 +301,7 @@ enum Automation {
             return "ok \(id)"
         case "dock-move":
             // A panel dragged to a side of the window, as a drag there does:
-            // {"panel": "review" (or a full id), "edge": "right"}.
+            // {"panel": "usage" (or a full id), "edge": "right"}.
             guard let name = c["panel"] as? String else { return "error panel is a panel id" }
             let panel = app.dock.layout.panels.first { $0 == name || $0 == "threadbear." + name } ?? name
             guard app.dock.layout.contains(panel) else { return "error \(name) isn't in the layout" }
@@ -912,12 +912,11 @@ enum Automation {
             guard let path = c["path"] as? String, path.hasPrefix("/") else { return "error path must be absolute" }
             if let refused = refusesToWrite(path) { return refused }
             guard var window else { return "error no window" }
-            // {"review": id}: its own window when popped out; in the
-            // Review panel it's in the main window already.
+            // {"review": id}: its own window.
             if let id = c["review"] as? String {
                 if let review = app.reviewWindows.values.first(where: { $0.session.review.id == id })?.window {
                     window = review
-                } else if app.reviewPanel?.review.id != id {
+                } else {
                     return "error that review isn't open"
                 }
             }
@@ -944,12 +943,11 @@ enum Automation {
             // The window's id for `screencapture -l`, once anything pending
             // has been drawn (as `screenshot` waits).
             guard var window else { return "error no window" }
-            // {"review": id}: its own window when popped out; in the
-            // Review panel it's in the main window already.
+            // {"review": id}: its own window.
             if let id = c["review"] as? String {
                 if let review = app.reviewWindows.values.first(where: { $0.session.review.id == id })?.window {
                     window = review
-                } else if app.reviewPanel?.review.id != id {
+                } else {
                     return "error that review isn't open"
                 }
             }
@@ -1909,14 +1907,11 @@ enum Automation {
         let key = threadId + "/" + snapshot.id
         if c["close"] as? Bool == true {
             app.reviewWindows[key]?.close()
-            if app.reviewPanel?.review.id == snapshot.id { app.closeReviewPanel() }
             return "ok closed"
         }
         app.openReview(threadId: threadId, review: snapshot)
-        // {"popOut": true}: into its own window, as the panel's button does.
-        if c["popOut"] as? Bool == true { app.popOutReview() }
-        let controller = app.reviewWindows[key]
-        guard let session = controller?.session ?? app.reviewPanel else { return "error couldn't open review" }
+        guard let controller = app.reviewWindows[key] else { return "error couldn't open review" }
+        let session = controller.session
         await session.refresh()
         if let mode = c["mode"] as? String, ReviewMode(rawValue: mode) == .all { session.showAll() }
         if let mode = c["mode"] as? String, ReviewMode(rawValue: mode) == .single { session.enlarge(session.focused) }
@@ -1927,10 +1922,10 @@ enum Automation {
         if c["save"] as? Bool == true { await session.saveNow() }
         if c["submit"] as? Bool == true { await session.submit() }
         if c["cancel"] as? Bool == true { await session.cancelReview() }
-        controller?.window?.tuckBehind()
+        controller.window?.tuckBehind()
         try? await Task.sleep(for: .milliseconds(250))
         return "ok " + json([
-            "id": session.review.id, "window": controller?.window?.windowNumber ?? 0, "panel": controller == nil,
+            "id": session.review.id, "window": controller.window?.windowNumber ?? 0,
             "status": session.review.status, "revision": session.review.revision,
             "mode": session.mode.rawValue, "actual": session.actualSize,
             "pickedId": session.draft.pickedId ?? "", "notes": session.draft.notes,

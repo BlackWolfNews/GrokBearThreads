@@ -97,7 +97,7 @@ final class ReviewWindowTests: XCTestCase {
         let service = ReviewService(load: { review }, save: { _, _ in review }, respond: { _, _ in review }, cancel: { _ in review })
         let session = ReviewSession(threadId: "thread", review: review, service: service,
                                     defaults: UserDefaults(suiteName: "ReviewWindowTests.\(UUID().uuidString)")!, autosave: false)
-        let host = NSHostingView(rootView: ReviewWindow(session: session, inPanel: true, back: {}, close: {}))
+        let host = NSHostingView(rootView: ReviewWindow(session: session, back: {}, close: {}))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 760), styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = host

@@ -202,4 +202,90 @@ final class ReviewSessionTests: XCTestCase {
         XCTAssertFalse(session.canSubmit)
         XCTAssertEqual(session.draft.notes["A"], "Mine")
     }
+
+    // MARK: A runner restart in the middle of it
+
+    /// The runner updates itself several times a day and is gone for a few
+    /// seconds each time. On 1 Nov that swallowed Mike's pick and his first
+    /// press of Send, and he had to press it again.
+    private func answered(_ draft: ReviewDraft) -> DesignReview {
+        var done = review()
+        done.status = "answered"
+        done.revision = 1
+        done.draft = draft
+        done.response = draft
+        return done
+    }
+
+    func testSendRidesOutARunnerRestart() async {
+        var attempts = 0
+        let server = review()
+        let service = ReviewService(load: { server }, save: { _, _ in server }, respond: { [self] _, draft in
+            attempts += 1
+            if attempts == 1 { throw RPCError.disconnected(nil) }
+            if attempts == 2 { throw RPCError.connectFailed("refused") }
+            if attempts == 3 { throw RPCError.server(code: RPCError.busy, message: "Restarting.") }
+            return answered(draft)
+        }, cancel: { _ in server })
+        let session = ReviewSession(threadId: "thread", review: server, service: service, defaults: cache(), autosave: false, reconnectWait: .seconds(5))
+        session.pick("B")
+        await session.submit()
+        XCTAssertEqual(attempts, 4)
+        XCTAssertEqual(session.review.status, "answered", "one press of Send is enough")
+        XCTAssertNil(session.error)
+    }
+
+    func testASaveRidesOutARunnerRestartWithoutShowingAnError() async {
+        var attempts = 0
+        var server = review()
+        let service = ReviewService(load: { server }, save: { revision, draft in
+            attempts += 1
+            if attempts == 1 { throw RPCError.disconnected(nil) }
+            server.revision = revision + 1
+            server.draft = draft
+            return server
+        }, respond: { _, _ in server }, cancel: { _ in server })
+        let session = ReviewSession(threadId: "thread", review: server, service: service, defaults: cache(), autosave: false, reconnectWait: .seconds(5))
+        session.pick("B")
+        await session.saveNow()
+        XCTAssertEqual(attempts, 2)
+        XCTAssertNil(session.error)
+        XCTAssertFalse(session.dirty)
+        XCTAssertEqual(session.review.draft.pickedId, "B")
+    }
+
+    func testARestartThatNeverEndsStillSaysSoAndKeepsTheDraft() async {
+        let server = review()
+        let service = ReviewService(load: { throw RPCError.disconnected(nil) }, save: { _, _ in server }, respond: { _, _ in
+            throw RPCError.disconnected(nil)
+        }, cancel: { _ in server })
+        let session = ReviewSession(threadId: "thread", review: server, service: service, defaults: cache(), autosave: false, reconnectWait: .milliseconds(50))
+        session.pick("B")
+        await session.submit()
+        XCTAssertEqual(session.review.status, "pending")
+        XCTAssertNotNil(session.error)
+        XCTAssertEqual(session.draft.pickedId, "B")
+    }
+
+    func testARealRefusalIsNotRetried() async {
+        var attempts = 0
+        let server = review()
+        let service = ReviewService(load: { server }, save: { _, _ in server }, respond: { _, _ in
+            attempts += 1
+            throw RPCError.server(code: -32602, message: "Stale revision.")
+        }, cancel: { _ in server })
+        let session = ReviewSession(threadId: "thread", review: server, service: service, defaults: cache(), autosave: false, reconnectWait: .seconds(30))
+        session.pick("B")
+        await session.submit()
+        XCTAssertEqual(attempts, 1, "waiting wouldn't change the answer")
+        XCTAssertNotNil(session.error)
+    }
+
+    func testThePollDoesntPutUpAnErrorDuringARestart() async {
+        let server = review()
+        let service = ReviewService(load: { throw RPCError.disconnected(nil) }, save: { _, _ in server }, respond: { _, _ in server }, cancel: { _ in server })
+        let session = ReviewSession(threadId: "thread", review: server, service: service, defaults: cache(), autosave: false)
+        await session.refresh()
+        XCTAssertNil(session.error, "it polls again in a few seconds")
+    }
 }
