@@ -607,9 +607,15 @@ export function endTurnTaken(result: { ok: boolean; text: string }): boolean {
   return result.ok && result.text.startsWith('Noted');
 }
 
-// Whether this turn already has an end_turn that was taken, so a second
-// is refused: Opus once sent its card four times (29 Oct 2026).
-export function endedThisTurn(events: PersistedEvent[], serverName = 'threadbear'): boolean {
+// The input of the end_turn this turn has already taken, so a second is
+// refused: Opus once sent its card four times (29 Oct 2026). A message since
+// the call opens the turn again, as it's owed an answer and maybe a card of
+// its own: on 1 Nov 2026 Mike's "Archive" from the phone landed just after
+// end_turn, and the agent couldn't call it again to do what he asked (thread
+// cdfccbc3). The message goes in the events before the CLI gets it, so the
+// agent can't have seen one that isn't there yet. One that came while the call
+// ran counts too, as the agent called it without having read that message.
+export function takenEndTurn(events: PersistedEvent[], serverName = 'threadbear'): Record<string, unknown> | undefined {
   const endTurn = `mcp__${serverName}__${END_TURN_TOOL}`;
   let start = 0;
   for (let i = events.length - 1; i >= 0; i--) {
@@ -618,12 +624,21 @@ export function endedThisTurn(events: PersistedEvent[], serverName = 'threadbear
       break;
     }
   }
-  const calls = new Set<string>();
+  const calls = new Map<string, Record<string, unknown>>();
+  let taken: Record<string, unknown> | undefined;
   for (const e of events.slice(start)) {
-    if (e.type === 'tool.call' && e.name === endTurn) calls.add(e.itemId);
-    if (e.type === 'tool.result' && calls.has(e.itemId) && endTurnTaken(e)) return true;
+    if (e.type === 'user.message') {
+      calls.clear();
+      taken = undefined;
+    }
+    if (e.type === 'tool.call' && e.name === endTurn) calls.set(e.itemId, e.input);
+    if (e.type === 'tool.result' && !taken && endTurnTaken(e)) taken = calls.get(e.itemId);
   }
-  return false;
+  return taken;
+}
+
+export function endedThisTurn(events: PersistedEvent[], serverName = 'threadbear'): boolean {
+  return takenEndTurn(events, serverName) !== undefined;
 }
 
 // What the Claude adapter's Stop hook sends back, once, to a turn that
@@ -636,6 +651,20 @@ export const END_TURN_NUDGE =
   "Your message above is the reply: don't write it again, and write nothing after end_turn.";
 
 export const ALREADY_ENDED = 'Already ended: this turn has had its end_turn, and the user has its summary and asks. Stop here, with no more text.';
+
+// A repeat end_turn that only adds archive: the card that was taken stands
+// (runner.ts, onOutput). The repeat could always do this, by accident, under a
+// result saying it had been refused. Not ENDED or "Noted": the runner would
+// take it for a new end_turn, and write its summary out a second time.
+export const ARCHIVE_ADDED = 'Added: this thread will be archived once the turn is over, and the rest of your end_turn stands. If you have written your reply, stop here with no more text.';
+
+export function endTurnRefusedRepeat(result: { text: string }): boolean {
+  return result.text.startsWith(ALREADY_ENDED);
+}
+
+export function endTurnAddedArchive(result: { ok: boolean; text: string }): boolean {
+  return result.ok && result.text === ARCHIVE_ADDED;
+}
 
 // Whether the turn so far has given Mike a reply, for end_turn to check
 // before it ends the turn. An agent that drafted its answer in thinking

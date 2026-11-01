@@ -29,18 +29,34 @@ test('"Always allow" keeps only allow rules, scoped to the session', () => {
 // A stand-in for the SDK's query(): records the options and the messages
 // sent, and lets the test call canUseTool.
 function fakeQuery() {
-  const state: { options?: any; sent: any[]; flags: unknown[]; models?: any[]; close?: () => void } = { sent: [], flags: [] };
+  const state: { options?: any; sent: any[]; flags: unknown[]; models?: any[]; close?: () => void; frame?: (f: unknown) => Promise<void> } = { sent: [], flags: [] };
   const fn = ((args: { prompt: AsyncIterable<any>; options: any }) => {
     state.options = args.options;
     let stop!: () => void;
     const stopped = new Promise<void>((r) => (stop = r));
     state.close = stop;
+    // Frames the test hands over, as if they came out of the CLI.
+    const frames: unknown[] = [];
+    let wake = () => {};
+    state.frame = async (f) => {
+      frames.push(f);
+      wake();
+      await new Promise((r) => setImmediate(r));
+    };
+    let closed = false;
+    void stopped.then(() => {
+      closed = true;
+      wake();
+    });
     void (async () => {
       for await (const m of args.prompt) state.sent.push(m);
     })();
     return {
       async *[Symbol.asyncIterator]() {
-        await stopped;
+        while (!closed) {
+          if (frames.length) yield frames.shift();
+          else await new Promise<void>((r) => (wake = r));
+        }
       },
       interrupt: async () => undefined,
       setModel: async () => undefined,
@@ -122,6 +138,30 @@ test('Stop hook: a turn that skipped end_turn is sent back once to call it', asy
   assert.equal((await stop({ hook_event_name: 'Stop', stop_hook_active: false })).decision, 'block');
   // Background work it started will wake a turn that ends it.
   assert.deepEqual(await stop({ hook_event_name: 'Stop', stop_hook_active: false, background_tasks: [{ id: 'b1' }] }), {});
+  state.close!();
+});
+
+// Thread cdfccbc3 (1 Nov 2026): Mike's "Archive" from the phone landed between
+// end_turn and the reply. send() cleared the note of the taken end_turn, so
+// the Stop hook sent the turn back to call a tool that then said "Already ended".
+test('Stop hook: a message sent after end_turn does not make it forget the call', async () => {
+  const { session, state, outputs } = start([], {}, { mcpServersFor: () => ({ threadbear: { type: 'sdk', name: 'threadbear' } }) });
+  const stop = state.options.hooks.Stop[0].hooks[0];
+  await state.options.hooks.PostToolUse[0].hooks[0]({ hook_event_name: 'PostToolUse', tool_name: END_TURN_FULL_NAME });
+  session.send({ id: 'turn-2', text: 'Archive', images: [] });
+  assert.deepEqual(await stop({ hook_event_name: 'Stop', stop_hook_active: false }), {});
+  assert.equal(outputs.filter((o: AdapterOutput) => o.kind === 'endTurnNudge').length, 0);
+  state.close!();
+});
+
+test('Stop hook: an end_turn in a turn that ended with no Stop does not count for the next', async () => {
+  const { session, state } = start([], {}, { mcpServersFor: () => ({ threadbear: { type: 'sdk', name: 'threadbear' } }) });
+  const stop = state.options.hooks.Stop[0].hooks[0];
+  await state.options.hooks.PostToolUse[0].hooks[0]({ hook_event_name: 'PostToolUse', tool_name: END_TURN_FULL_NAME });
+  // Stopped by hand: the CLI reports the result without running Stop.
+  await state.frame!({ type: 'result', subtype: 'error_during_execution', is_error: true, duration_ms: 1, session_id: 's', errors: [] });
+  session.send({ id: 'turn-2', text: 'Carry on', images: [] });
+  assert.equal((await stop({ hook_event_name: 'Stop', stop_hook_active: false })).reason, END_TURN_NUDGE);
   state.close!();
 });
 

@@ -276,7 +276,7 @@ export async function runDev(client: RunnerClient, cmd: string, args: string[], 
       if (own && args[0] === 'threads.update') {
         const u = params as { archived?: unknown; snoozedUntil?: unknown };
         if (u.archived === true || (u.snoozedUntil !== undefined && u.snoozedUntil !== null)) {
-          console.error("Can't snooze or archive the thread this runs in from inside its own turn. Ask the user to, or do it when the work is done.");
+          console.error("Can't snooze or archive the thread this runs in from inside its own turn. To archive it once the turn is over, call end_turn with archive: true (again, if you already have). To snooze it, ask the user to.");
           return 1;
         }
       }

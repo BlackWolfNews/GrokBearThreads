@@ -89,7 +89,7 @@ import { SAID_MAX, WAKE_SYSTEM, awayFor, hibernateNote, readWakeAnswer, wakeProm
 import { emptyHighlights, observe as observeHighlights, pinItem, remove as removeHighlight, unpin as unpinHighlight, upsert as upsertHighlight, view as highlightsView, absolute, type ThreadHighlights } from './highlights.ts';
 import { SERVER_NAME, approvalTitle } from './threadbear-mcp.ts';
 import { PANEL_ACK_WAIT_MS, PANEL_PLACES, resolvePanel } from './panel-requests.ts';
-import { archiveFromTool, bylineFromTool, END_TURN_TOOL, endTurnAccepted, endTurnAsksForMessage, endTurnOwesReply, endTurnTaken, endTurnWantsReply, needsFromText, needsFromTool, splitReplySection, summaryFromTool, summaryMarkdown } from './needs.ts';
+import { archiveFromTool, bylineFromTool, END_TURN_TOOL, endTurnAccepted, endTurnAddedArchive, endTurnAsksForMessage, endTurnOwesReply, endTurnRefusedRepeat, endTurnTaken, endTurnWantsReply, needsFromText, needsFromTool, splitReplySection, summaryFromTool, summaryMarkdown } from './needs.ts';
 import type { Needs } from './needs.ts';
 import { asksForAppRestart } from './app-restarts.ts';
 import type { ConnectorsStatus } from './connectors.ts';
@@ -236,6 +236,9 @@ type Turn = {
   // The agent's own end_turn input and last text, for what the turn needs
   // from Mike (needs.ts). Never a sub-agent's.
   endTurn?: Record<string, unknown>;
+  // What endTurn was before the latest call, until that call's result says
+  // whether it replaced it (a repeat doesn't).
+  endTurnBefore?: Record<string, unknown>;
   lastText?: string;
   // The agent's latest end_turn call, and whether one was accepted since
   // Mike last wrote. Text after that is dropped: end_turn has already told
@@ -2157,6 +2160,9 @@ export class Runner {
     // He wrote again, so the turn owes him another reply.
     turn.ended = false;
     turn.owedReply = undefined;
+    // ...and an archive it asked for before reading this is off: "wait, one
+    // more thing" shouldn't send the thread away. It can ask again.
+    if (turn.endTurn?.archive) turn.endTurn = { ...turn.endTurn, archive: false };
     this.markDirty(st);
     rt.session!.send({ id: msg.turnId, text: this.forAgent(msg), images: msg.images });
   }
@@ -2428,8 +2434,16 @@ export class Runner {
             rt.turn.narrationItem = ev.narration ? ev.itemId : undefined;
           }
           if (ev.type === 'tool.call' && own && ev.name === `mcp__${SERVER_NAME}__${END_TURN_TOOL}`) {
+            rt.turn.endTurnBefore = rt.turn.endTurn;
             rt.turn.endTurn = ev.input;
             rt.turn.endTurnCall = ev.itemId;
+          }
+          // A refused repeat changes nothing: its archive once took effect
+          // under a result saying it hadn't, and its card replaced the one
+          // Mike was told about. One that adds archive adds only that.
+          if (ev.type === 'tool.result' && ev.itemId === rt.turn.endTurnCall) {
+            if (endTurnRefusedRepeat(ev)) rt.turn.endTurn = rt.turn.endTurnBefore;
+            else if (endTurnAddedArchive(ev)) rt.turn.endTurn = { ...rt.turn.endTurnBefore, archive: true };
           }
           if (ev.type === 'tool.result' && ev.itemId === rt.turn.endTurnCall && endTurnAccepted(ev)) {
             rt.turn.ended = true;

@@ -328,10 +328,7 @@ class ClaudeSession implements AgentSession {
     const stop = input as { stop_hook_active?: boolean; background_tasks?: unknown[] };
     const ended = this.endTurnTaken;
     const wrote = this.wroteAfterEnd;
-    this.endTurnTaken = false;
-    this.wroteAfterEnd = false;
-    this.pastEndTurn = false;
-    this.endTurnCall = undefined;
+    this.forgetEndTurn();
     // A turn that ended in plain text leaves the runner reading the card
     // from the prose (needs.ts, needsFromText), which drops what end_turn
     // would have carried: on 30 Oct 2026 an agent skipped it for three
@@ -346,6 +343,13 @@ class ClaudeSession implements AgentSession {
     if (ended) return this.oneReply && !wrote ? { decision: 'block', reason: ONE_REPLY_WRITE_NUDGE } : {};
     this.sink.output({ kind: 'endTurnNudge' });
     return { decision: 'block', reason: this.oneReply ? ONE_REPLY_END_TURN_NUDGE : END_TURN_NUDGE };
+  }
+
+  private forgetEndTurn(): void {
+    this.endTurnTaken = false;
+    this.wroteAfterEnd = false;
+    this.pastEndTurn = false;
+    this.endTurnCall = undefined;
   }
 
   private onEndTurn(input: HookInput): Record<string, never> {
@@ -365,6 +369,12 @@ class ClaudeSession implements AgentSession {
     let error: Error | undefined;
     try {
       for await (const msg of this.q) {
+        // A turn stopped by hand reports its result with no Stop hook, and
+        // its end_turn mustn't count for the next one. Not done on send():
+        // a message sent during a turn lands before the Stop that turn still
+        // has coming, and that sent a turn which had called end_turn back
+        // to call it (1 Nov 2026, thread cdfccbc3).
+        if ((msg as { type?: string }).type === 'result') this.forgetEndTurn();
         for (const out of this.normalizer.handle(msg as Record<string, unknown>)) {
           this.sink.output(out);
           // Words after end_turn's result, by the events' own order: the
@@ -472,8 +482,6 @@ class ClaudeSession implements AgentSession {
 
   send(input: UserInput): void {
     this.normalizer.sent();
-    // In case the CLI ran no Stop hook after the last end_turn.
-    this.endTurnTaken = false;
     // Each picture where its [Picture N] marker is in the words, or before
     // them when nothing places it (pictures.ts).
     const content: Record<string, unknown>[] = placePictures(input.text, input.images).map((part) => {

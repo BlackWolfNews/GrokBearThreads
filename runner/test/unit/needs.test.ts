@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { PersistedEvent } from '../../src/protocol.ts';
-import { archiveFromTool, bylineFromTool, CODEX_END_TURN_DESCRIPTION, CODEX_ONE_REPLY_DESCRIPTION, END_TURN_DESCRIPTION, END_TURN_FULL_NAME, endTurnDescription, needsFromText, needsFromTool, ONE_REPLY_DESCRIPTION, splitReplySection, summaryFromTool, summaryMarkdown, turnReply } from '../../src/needs.ts';
+import { archiveFromTool, bylineFromTool, endedThisTurn, CODEX_END_TURN_DESCRIPTION, CODEX_ONE_REPLY_DESCRIPTION, END_TURN_DESCRIPTION, END_TURN_FULL_NAME, endTurnDescription, needsFromText, needsFromTool, ONE_REPLY_DESCRIPTION, splitReplySection, summaryFromTool, summaryMarkdown, turnReply } from '../../src/needs.ts';
 import { END_TURN_TOOL } from '../../src/needs.ts';
 import { SERVER_NAME } from '../../src/threadbear-mcp.ts';
 import { ClaudeNormalizer, fileContext } from '../../src/adapters/claude/normalize.ts';
@@ -275,6 +275,16 @@ test('turnReply: only the current turn counts, and a message from Mike mid-turn 
   assert.deepEqual(turnReply(log(user(), { type: 'turn.started', turnId: 'turn-0' }, text('Earlier answer.'), { type: 'turn.completed', turnId: 'turn-0', outcome: 'completed', durationMs: 1 }, user('again'), started, call('e1', END))), { landed: true, replied: false });
   assert.deepEqual(turnReply(log(user(), started, text('Working on it.'), user('also do X'), call('e1', END))), { landed: true, replied: false });
   assert.deepEqual(turnReply(log(user(), started, text('Working on it.'), user('also do X'), text('Did X too.', 'm2'), call('e1', END))), { landed: true, replied: true });
+});
+
+test('endedThisTurn: a message after the taken end_turn opens it again, even one sent while the call ran', () => {
+  const noted = { ...result('e1'), text: 'Noted: this thread is done.' } as never;
+  assert.equal(endedThisTurn(log(user(), started, call('e1', END), noted)), true);
+  assert.equal(endedThisTurn(log(user(), started, call('e1', END), noted, user('Archive'))), false);
+  // Sent before the result came back: the agent called it without having seen the message.
+  assert.equal(endedThisTurn(log(user(), started, call('e1', END), user('Archive'), noted)), false);
+  // And one taken after the message ends it again.
+  assert.equal(endedThisTurn(log(user(), started, call('e1', END), noted, user('Archive'), call('e2', END), { ...result('e2'), text: 'Noted: this thread is done.' } as never)), true);
 });
 
 test("turnReply: not landed until the call is in the events; a Codex child's items are ignored", () => {

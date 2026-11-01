@@ -19,7 +19,7 @@ import { parseWhen, relativeFuture, relativeTime } from './when.ts';
 
 export { parseWhen, relativeFuture, relativeTime };
 import { RUNNER_VERSION, expandHome } from './config.ts';
-import { ALREADY_ENDED, endTurnDescription, endTurnForm, END_TURN_TOOL, BULLETS_ONLY, ENDED, endedThisTurn, MAX_BYLINE, NARRATION_ONLY, NO_REPLY, needsFromTool, oneReplyAccepted, oneReplyAlreadyWritten, summaryFromTool, turnReply, type TurnReply } from './needs.ts';
+import { ALREADY_ENDED, ARCHIVE_ADDED, endTurnDescription, endTurnForm, END_TURN_TOOL, BULLETS_ONLY, ENDED, takenEndTurn, MAX_BYLINE, NARRATION_ONLY, NO_REPLY, needsFromTool, oneReplyAccepted, oneReplyAlreadyWritten, summaryFromTool, turnReply, type TurnReply } from './needs.ts';
 import { asksForAppRestart, type AppRestarts } from './app-restarts.ts';
 import { PANEL_PLACES } from './panel-requests.ts';
 import { nudgedThisTurn, signInNudge, turnSignIns, uncovered } from './connectors.ts';
@@ -625,6 +625,17 @@ export function buildThreadbearTools(
     ),
   ];
 
+  // An end_turn in a turn that has had one, with no message since: only
+  // archive gets through, as it's the one thing nothing else can do from
+  // inside a turn (update_thread refuses). Not for a card waiting on Mike,
+  // which archiving would hide. Undefined when this isn't a repeat.
+  const repeatEndTurn = (events: PersistedEvent[], input: { needs?: unknown; archive?: unknown }): string | undefined => {
+    const taken = takenEndTurn(events, SERVER_NAME);
+    if (!taken) return undefined;
+    if (input.archive === true && input.needs !== 'you' && needsFromTool(taken)?.needs !== 'you') return ARCHIVE_ADDED;
+    throw new Error(ALREADY_ENDED);
+  };
+
   // end_turn with one reply (docs/protocol.md, "One reply"): the card and
   // a headline; the reply is the message the agent writes next. Nothing to
   // check for a reply, as it comes after; only a second call, a sign-in no
@@ -678,14 +689,15 @@ export function buildThreadbearTools(
         archive: z
           .boolean()
           .optional()
-          .describe('true to archive this thread once the turn is over. Only when the user has asked for this thread to be archived or the message that started it says to, and only with needs "nothing".'),
+          .describe('true to archive this thread once the turn is over. Only when the user has asked for this thread to be archived or the message that started it says to, and only with needs "nothing". If they ask after you have called end_turn, call it again with this.'),
       },
       handle(async (input) => {
         const parsed = needsFromTool(input);
         const needs = parsed?.needs ?? 'nothing';
         const asks = parsed?.asks ?? [];
         const events = await turnEvents();
-        if (endedThisTurn(events, SERVER_NAME)) throw new Error(ALREADY_ENDED);
+        const repeat = repeatEndTurn(events, input);
+        if (repeat) return repeat;
         const missing = uncovered(turnSignIns(events), needs === 'you' ? asks : []);
         if (missing.length && !nudgedThisTurn(events)) throw new Error(signInNudge(missing));
         let restart = '';
@@ -755,7 +767,7 @@ export function buildThreadbearTools(
         archive: z
           .boolean()
           .optional()
-          .describe('true to archive this thread once the turn is over. Only when the user has asked for this thread to be archived or the message that started it says to, and only with needs "nothing".'),
+          .describe('true to archive this thread once the turn is over. Only when the user has asked for this thread to be archived or the message that started it says to, and only with needs "nothing". If they ask after you have called end_turn, call it again with this.'),
       },
       handle(async (args) => {
         const { asks, archive } = args;
@@ -777,7 +789,8 @@ export function buildThreadbearTools(
         // runner knows, so it keeps a message that follows anyway
         // (needs.ts, BULLETS_ONLY).
         const owed = Boolean(!needsMessage && reply && (!reply.replied || reply.narrationOnly));
-        if (endedThisTurn(await turnEvents(), SERVER_NAME)) throw new Error(ALREADY_ENDED);
+        const repeat = repeatEndTurn(await turnEvents(), { ...args, needs });
+        if (repeat) return repeat;
         // A connector that needs Mike to sign in again (a gateway service's
         // sign_in stub, or claude.ai's "needs you to sign in again") came
         // up this turn and no ask covers it: refused once, saying which
@@ -1001,7 +1014,7 @@ export function buildThreadbearTools(
       handle(async ({ threadId, id: alias, title, mikeAsked, model, effort, pool: p, permissionMode, snooze, archived }) => {
         const id = await resolve(threadId ?? alias);
         const stops = (snooze !== undefined && snooze.trim().toLowerCase() !== 'off') || archived === true;
-        if (id === selfId && stops) throw new Error("Can't snooze or archive this thread from inside its own turn. Ask the user to, or do it when the work is done.");
+        if (id === selfId && stops) throw new Error("Can't snooze or archive this thread from inside its own turn. To archive it once the turn is over, call end_turn with archive: true (again, if you already have). To snooze it, ask the user to.");
         const upd: Parameters<ThreadControl['update']>[0] = { threadId: id };
         if (title !== undefined) {
           upd.title = title;

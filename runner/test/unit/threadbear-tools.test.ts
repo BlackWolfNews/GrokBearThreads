@@ -250,6 +250,7 @@ test('update renames and snoozes others, but will not stop its own turn', async 
   assert.match((await t.call('update_thread', { title: 'Renamed me' })).text, /title: Renamed me/);
   const own = await t.call('update_thread', { archived: true });
   assert.equal(own.error, true);
+  assert.match(own.text, /end_turn with archive: true/, 'says the way that works');
   assert.equal(h.runner.get(me.id).archivedAt, undefined);
   const snoozed = await t.call('update_thread', { threadId: other.id, snooze: '2h' });
   assert.match(snoozed.text, /snoozed until: 2026-10-26T14:00:00\.000Z/);
@@ -549,6 +550,105 @@ test('end_turn is taken once a turn', async () => {
   const r2 = await call('end_turn', { summary: ['Done again.'] });
   assert.equal(r2.error, true);
   assert.match(r2.text, /Already ended/);
+});
+
+// Thread cdfccbc3 (1 Nov 2026): "Archive" sent from the phone just after
+// end_turn, with both ways to do it refused. The agent scheduled a message to
+// itself a minute later, and only that looked like an answer.
+test('one reply: a message that arrives after end_turn can have the thread archived', async () => {
+  const h = makeHarness();
+  const { thread, s } = start(h);
+  const { call } = tools(h, thread.id, undefined, () => true);
+  const result = (itemId: string, r: { text: string; error: boolean }) =>
+    s.out({ kind: 'event', event: { type: 'tool.result', itemId, ok: !r.error, text: r.text, truncated: false, images: [] } });
+  const first = { headline: 'Fixed', needs: 'nothing' };
+  toolCall(s, 'e1', END_TURN, first);
+  result('e1', await call('end_turn', first));
+  h.runner.send(thread.id, 'Archive');
+  s.text('m1', 'That is fixed.');
+  // The CLI finishes the turn it was on, then runs the message as its next,
+  // all inside the one thread turn.
+  const [firstId, secondId] = s.sent.map((m) => m.id!);
+  s.result('completed', undefined, undefined, { answered: [firstId], answers: firstId, queuedTurns: 1 });
+  assert.equal(h.runner.get(thread.id).archivedAt, undefined);
+  const again = { headline: 'Archiving', needs: 'nothing', archive: true };
+  toolCall(s, 'e2', END_TURN, again);
+  const r = await call('end_turn', again);
+  assert.equal(r.error, false);
+  assert.match(r.text, /^Noted: this thread is done/);
+  result('e2', r);
+  s.text('m2', 'Archiving this now.');
+  assert.equal(h.runner.get(thread.id).archivedAt, undefined);
+  s.result('completed', undefined, undefined, { answered: [secondId], answers: secondId, queuedTurns: 0 });
+  await tick();
+  assert.ok(h.runner.get(thread.id).archivedAt, 'archived once the turn is over');
+});
+
+test('a message after end_turn takes back an archive it asked for', async () => {
+  const h = makeHarness();
+  const { thread, s } = start(h);
+  const { call } = tools(h, thread.id, undefined, () => true);
+  const input = { needs: 'nothing', archive: true };
+  toolCall(s, 'e1', END_TURN, input);
+  const r = await call('end_turn', input);
+  s.out({ kind: 'event', event: { type: 'tool.result', itemId: 'e1', ok: true, text: r.text, truncated: false, images: [] } });
+  h.runner.send(thread.id, "Wait, don't, one more thing");
+  const [firstId, secondId] = s.sent.map((m) => m.id!);
+  s.result('completed', undefined, undefined, { answered: [firstId], answers: firstId, queuedTurns: 1 });
+  s.text('m1', 'Sure, what is it?');
+  s.result('completed', undefined, undefined, { answered: [secondId], answers: secondId, queuedTurns: 0 });
+  await tick();
+  assert.equal(h.runner.get(thread.id).status, 'idle', 'the turn is over');
+  assert.equal(h.runner.get(thread.id).archivedAt, undefined);
+});
+
+test('a repeat end_turn with no new message: archive is added and the card stands, anything else is refused and changes nothing', async () => {
+  const h = makeHarness();
+  const { thread, s } = start(h);
+  const { call } = tools(h, thread.id, undefined, () => true);
+  const send = async (itemId: string, input: Record<string, unknown>) => {
+    toolCall(s, itemId, END_TURN, input);
+    const r = await call('end_turn', input);
+    s.out({ kind: 'event', event: { type: 'tool.result', itemId, ok: !r.error, text: r.text, truncated: false, images: [] } });
+    return r;
+  };
+  await send('e1', { headline: 'Fixed', needs: 'nothing', next: ['Do the next thing'] });
+  s.text('m1', 'That is fixed.');
+  // The refused one's card doesn't replace the one that was taken.
+  const refused = await send('e2', { needs: 'you', asks: [{ question: 'Really?' }] });
+  assert.equal(refused.error, true);
+  assert.match(refused.text, /Already ended/);
+  const added = await send('e3', { needs: 'nothing', archive: true });
+  assert.equal(added.error, false);
+  assert.match(added.text, /will be archived/);
+  const n = h.events(thread.id).filter((e) => e.type === 'assistant.text').length;
+  s.result('completed');
+  await tick();
+  const t = h.runner.get(thread.id);
+  assert.ok(t.archivedAt);
+  const done = h.events(thread.id).filter((e) => e.type === 'turn.completed').at(-1) as { needs?: string; next?: string[] };
+  assert.equal(done.needs, 'nothing');
+  assert.deepEqual(done.next, ['Do the next thing']);
+  assert.equal(h.events(thread.id).filter((e) => e.type === 'assistant.text').length, n);
+});
+
+test('a repeat end_turn cannot archive a turn that is waiting on Mike', async () => {
+  const h = makeHarness();
+  const { thread, s } = start(h);
+  const { call } = tools(h, thread.id, undefined, () => true);
+  const asks = { needs: 'you', asks: [{ question: 'Deploy it?' }] };
+  toolCall(s, 'e1', END_TURN, asks);
+  const r = await call('end_turn', asks);
+  s.out({ kind: 'event', event: { type: 'tool.result', itemId: 'e1', ok: true, text: r.text, truncated: false, images: [] } });
+  const again = { needs: 'nothing', archive: true };
+  toolCall(s, 'e2', END_TURN, again);
+  const refused = await call('end_turn', again);
+  assert.equal(refused.error, true);
+  s.out({ kind: 'event', event: { type: 'tool.result', itemId: 'e2', ok: false, text: refused.text, truncated: false, images: [] } });
+  s.result('completed');
+  await tick();
+  assert.equal(h.runner.get(thread.id).archivedAt, undefined);
+  assert.equal(h.runner.get(thread.id).needs, 'you');
 });
 
 test("Codex's summary is the reply, and its final answer after it doesn't take over the preview", async () => {

@@ -1661,8 +1661,14 @@ A turn the agent finished can say whether Mike has to do anything, so
 - **Needs from the asks.** `needs` may be left out: asks mean `you`,
   none mean `nothing`. Agents filling in a summary forgot it 2 times in
   9.
-- **Once a turn.** A second `end_turn` after an accepted one in the same
-  turn is refused ("Already ended"); Opus once sent its card four times.
+- **Once a turn, or once a message.** A second `end_turn` after an accepted
+  one in the same turn is refused ("Already ended") and changes nothing; Opus
+  once sent its card four times. A `user.message` since then opens the turn
+  again, as it's owed an answer of its own (a message sent during a call that
+  came back accepted counts, since the agent can't have read it), so that
+  message's `end_turn` is taken and its card replaces the last. A repeat with
+  no new message that adds `archive: true`, where neither call has `needs:
+  "you"`, is taken too, and adds only that; the first card stands.
 - **A reply first.** `end_turn` is refused (an error result) until the
   turn has replied to Mike: a `summary` in the call itself, or an own `assistant.text` after the turn's last
   `tool.result` from a tool outside the `threadbear` server, and after
@@ -1727,6 +1733,8 @@ A turn the agent finished can say whether Mike has to do anything, so
   it's over, with a `system.note` saying why; the thread can't archive
   itself mid-turn, as that stops the CLI. It's ignored with `needs: "you"`,
   on an interrupted or failed turn, and when a message is already queued.
+  A message sent into the turn after that call cancels it, until an `end_turn`
+  asks again, so a thread doesn't go while Mike is still talking to it.
   The description tells agents to use it only when Mike asks, so a thread
   he hadn't finished with doesn't vanish from his inbox.
 - **The fallback.** A completed turn with no `end_turn` call is read for
