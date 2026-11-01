@@ -223,6 +223,11 @@ if `tb` isn't found (an older runner, or outside a thread), use
   be unlocked" at the end is fine: it's installed, just not opened.
   That's his own phone only: uploading to App Store Connect still needs
   him to ask.
+- The iOS simulator: only ever use your worktree's own,
+  `ios/scripts/sim.sh boot` (it prints the id; `stop` when you're done),
+  never one picked from `simctl list`. It may be another thread's: on 1 Nov
+  one thread installed over another's repro and shut it down, and nothing
+  said so.
 - `tb show <id>` reads a thread as text (`--tools` for results, each under
   its own call), `tb events <id> --from N --to M` a range of events by seq,
   `tb logs` the runner log, and `tb export <id>` copies a thread into

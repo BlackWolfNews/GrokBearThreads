@@ -25,6 +25,10 @@ directly, so it works with the Mac asleep: whatever you send waits in
 - `scripts/sim-shots.sh [dir] [--dark]`: screenshots on sample data in the
   simulator (`-ThreadbearFake`, `-ThreadbearOpen <threadId>`,
   `-ThreadbearCompose <text>`, `-ThreadbearSearch <text>`), on a 6.9" iPhone, so they're App Store sized.
+- `scripts/sim.sh [boot|stop]`: this worktree's own simulator, for
+  `sim-shots.sh` and any repro of your own. It prints the id; use that
+  rather than picking a simulator from `simctl list`, and `stop` it when
+  you're done. It refuses to boot a third.
 - `appstore/` and `scripts/appstore-*`: the App Store listing and release,
   in `appstore/RELEASE.md`.
 - `scripts/install-phone.sh`: build, install over wifi, launch.
