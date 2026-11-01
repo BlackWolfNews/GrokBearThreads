@@ -83,10 +83,15 @@ struct PastableTextField: UIViewRepresentable {
             guard !updating, let view = view as? PastingTextView else { return }
             let contents = view.contents
             parent.text = contents.text
-            // A chip deleted or moved in the words takes its photo along.
+            // A chip deleted or moved in the words takes its photo along. One
+            // that's only just arrived has no chip here yet, as the view
+            // hasn't been updated, so a key pressed right then mustn't count
+            // as deleting it. It stays, and normalized() gives it a mark.
             if let photos = parent.photos, contents.photoIds != photos.wrappedValue.map(\.id) {
                 let byId = Dictionary(photos.wrappedValue.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-                photos.wrappedValue = contents.photoIds.compactMap { byId[$0] }
+                let drawn = Set(view.chipPhotos.map(\.id))
+                let arriving = photos.wrappedValue.filter { !drawn.contains($0.id) && !contents.photoIds.contains($0.id) }
+                photos.wrappedValue = contents.photoIds.compactMap { byId[$0] } + arriving
             }
             view.placeholderLabel.isHidden = !view.text.isEmpty
         }
@@ -103,7 +108,7 @@ final class PastingTextView: UITextView {
     let placeholderLabel = UILabel()
     /// The photos the chips stand for, to draw them again in the other
     /// appearance.
-    private var chipPhotos: [PickedPhoto] = []
+    private(set) var chipPhotos: [PickedPhoto] = []
 
     override init(frame: CGRect, textContainer: NSTextContainer?) {
         super.init(frame: frame, textContainer: textContainer)
