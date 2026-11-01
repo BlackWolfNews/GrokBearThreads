@@ -362,6 +362,7 @@ type Drain = {
   keep: Set<string>;
   going: Set<string>; // being let go
   onHandedOver: (threadId: string) => void;
+  since: number;
   backgroundMs: number;
   agentMs: number;
   checkMs: number;
@@ -373,6 +374,18 @@ type Drain = {
 // How often a draining runner looks again at threads it keeps for
 // background work, since that work's limit passes without an event.
 const DRAIN_CHECK_MS = 5000;
+// How long background shells and monitors hold a kept thread after its last
+// turn. Most are waits that end by themselves, and the runner updates after
+// every landing: at 30 minutes, nearly every long wait was cut off (1 Nov:
+// a scan's wait, 4.5 hours of silence). A dev server does sit out the limit,
+// but that costs one old runner process, and only one per thread that has
+// work going, since a kept thread doesn't get kept again.
+const DRAIN_BACKGROUND_MS = 4 * 60 * 60_000;
+// A thread in use never reaches that limit, and would stay on the old release
+// for as long as its dev server ran. Past this long there, it goes across
+// after a much shorter quiet spell.
+const DRAIN_MAX_OLD_MS = 12 * 60 * 60_000;
+const DRAIN_SETTLE_MS = 30 * 60_000;
 // How long subagents hold a kept thread after its last turn. Long, since
 // they end by themselves; only a stuck one should ever reach it.
 const DRAIN_AGENT_MS = 4 * 60 * 60_000;
@@ -873,13 +886,14 @@ export class Runner {
   // `ready` says whether the new runner is there to hear about one (it has
   // connected); until it is, threads stay here, and recheckHandovers() looks
   // again once it does.
-  async beginDrain(keep: Iterable<string>, opts: { onHandedOver: (threadId: string) => void; backgroundMs: number; agentMs?: number; checkMs?: number; ready?: () => boolean }): Promise<void> {
+  async beginDrain(keep: Iterable<string>, opts: { onHandedOver: (threadId: string) => void; backgroundMs?: number; agentMs?: number; checkMs?: number; ready?: () => boolean }): Promise<void> {
     if (this.draining) throw new Error('already draining');
     const d: Drain = {
       keep: new Set([...keep].filter((id) => this.threads.has(id))),
       going: new Set(),
       onHandedOver: opts.onHandedOver,
-      backgroundMs: opts.backgroundMs,
+      since: this.clock.now(),
+      backgroundMs: opts.backgroundMs ?? DRAIN_BACKGROUND_MS,
       agentMs: opts.agentMs ?? DRAIN_AGENT_MS,
       checkMs: opts.checkMs ?? DRAIN_CHECK_MS,
       checkQueued: false,
@@ -952,8 +966,9 @@ export class Runner {
   // Nothing would be cut short by letting it go now: no turn, approval or
   // question, wake grace, turn-end hook or action. Queued messages go with
   // it. Background shells and monitors hold it for backgroundMs after its
-  // last turn, as they hold an idle restart (a dev server never ends), and
-  // are then stopped with a note. Subagents hold it for agentMs: they
+  // last turn (a dev server never ends), or DRAIN_SETTLE_MS once it has
+  // been here DRAIN_MAX_OLD_MS, and are then stopped with a note, and the thread told
+  // on the new runner. Subagents hold it for agentMs: they
   // finish by themselves, and stopping one throws away its work (27 Oct: a
   // builder agent an agent left running was cut off after 30 minutes).
   private readyToHandOver(st: ThreadState, d: Drain): boolean {
@@ -961,8 +976,9 @@ export class Runner {
     if (rt.turn || rt.approvals.size || rt.wakeTimer || rt.hooksRunning || rt.runningActions?.size) return false;
     if (rt.tasks.length === 0) return true;
     const idleFor = this.clock.now() - rt.activeAt;
-    const agents = rt.tasks.some((t) => t.kind === 'agent');
-    return idleFor >= (agents ? d.agentMs : d.backgroundMs);
+    if (rt.tasks.some((t) => t.kind === 'agent')) return idleFor >= d.agentMs;
+    if (this.clock.now() - d.since >= DRAIN_MAX_OLD_MS && idleFor >= DRAIN_SETTLE_MS) return true;
+    return idleFor >= d.backgroundMs;
   }
 
   // Lets go of a thread for good: its CLI exits (background work, if any,
@@ -5230,7 +5246,7 @@ function stoppedWorkMessage(what: string[], last: boolean): string {
     '',
     ...lines,
     '',
-    `If you said you'd report back or carry on after ${one ? 'it' : 'them'}, check how far ${one ? 'it' : 'they'} got and do that now; work running elsewhere may have finished by itself. Start ${one ? 'it' : 'them'} again only if that's still needed. The runner updates often and background work only lasts about 30 minutes past your last turn when it does, so for a longer wait use schedule_message to come back and check. If it no longer matters, say so in a line.`,
+    `If you said you'd report back or carry on after ${one ? 'it' : 'them'}, check how far ${one ? 'it' : 'they'} got and do that now; work running elsewhere may have finished by itself. Start ${one ? 'it' : 'them'} again only if that's still needed. An update only holds background work for about 4 hours past your last turn, so for a longer wait use schedule_message to come back and check. If it no longer matters, say so in a line.`,
     ...(last ? ['', "Threadbear won't wake this thread for this again, so if Mike needs to step in, ask him in end_turn."] : []),
   ].join('\n');
 }

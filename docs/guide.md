@@ -627,10 +627,10 @@ left it alone for a while with nothing typed. The window stays where it is
 while it does: the new version opens the same thread underneath and takes
 over, so you shouldn't see it go.
 
-A runner update can stop a job a thread left running in the background, if it
-goes on for more than about 30 minutes after the thread's last turn. The
-thread gets told and wakes by itself to check on it, so you'll see it pick
-back up rather than go quiet.
+A runner update lets a job a thread left running in the background finish, for
+up to about 4 hours after the thread's last turn. If one goes on longer it's
+stopped, and the thread gets told and wakes by itself to check on it, so you'll
+see it pick back up rather than go quiet.
 
 The Updates icon on the left-hand rail shows what's on its way for the app,
 the runner and the Claude Code and Codex tools. A grey dot means something

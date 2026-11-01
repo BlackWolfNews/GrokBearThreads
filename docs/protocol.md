@@ -995,9 +995,13 @@ restart wait for busy threads. It hands over instead:
   `threads.search` and `hello` include kept threads.
 - A kept thread moves across once nothing would be cut short: no turn,
   approval or question, background work or wake grace. Background shells
-  and monitors hold it for 30 minutes after its last turn at most (a dev
+  and monitors hold it for 4 hours after its last turn at most (a dev
   server never ends), and are then stopped with the usual note, and the
-  thread is told when it comes across (Stopped background work). Subagents
+  thread is told when it comes across (Stopped background work). A thread
+  in use could stay on the old release for as long as its work runs, so
+  once it has been there 12 hours, 30 minutes without a turn is enough.
+  The stuck-job check (Stuck background jobs) goes on running on the
+  draining runner, for the threads it keeps. Subagents
   hold it until they finish, up to 4 hours: they end by themselves, and
   stopping one throws its work away. Messages queued for it at that moment move with it
   and the primary starts them, so a message sent during the turn runs on

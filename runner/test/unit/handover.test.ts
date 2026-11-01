@@ -297,6 +297,50 @@ test('a runner away for more than a day leaves a note rather than waking the thr
   assert.match(notes.at(-1)!, /Not waking this thread.*more than a day/);
 });
 
+test('by default a background wait is held for 4 hours after its last turn, so an update does not cut it off', async () => {
+  const h = makeHarness();
+  const t = create(h).thread;
+  const s = h.adapter.last;
+  s.init();
+  s.out({ kind: 'tasks', tasks: [{ id: 'b1', type: 'local_bash', kind: 'shell', description: 'Wait for the scan' }] });
+  s.result('completed');
+  const handed: string[] = [];
+  await h.runner.beginDrain([t.id], { onHandedOver: (id) => handed.push(id), checkMs: MIN });
+  h.clock.advance(239 * MIN);
+  await tick();
+  assert.deepEqual(handed, []);
+  assert.equal(s.ended, false);
+  h.clock.advance(MIN);
+  await tick();
+  assert.deepEqual(handed, [t.id]);
+});
+
+test('a thread kept in use goes across once it has been on the old runner 12 hours and gone quiet for 30 minutes', async () => {
+  const h = makeHarness();
+  const t = create(h).thread;
+  const s = h.adapter.last;
+  s.init();
+  s.out({ kind: 'tasks', tasks: [{ id: 'b1', type: 'local_bash', kind: 'shell', description: 'npm run dev' }] });
+  s.result('completed');
+  const handed: string[] = [];
+  await h.runner.beginDrain([t.id], { onHandedOver: (id) => handed.push(id), checkMs: MIN });
+  // Someone keeps using it, so the 4 hours never pass.
+  for (const hours of [3, 3, 3, 2.75]) {
+    h.clock.advance(hours * 60 * MIN);
+    await tick();
+    h.runner.send(t.id, 'one more thing');
+    s.result('completed');
+    await tick();
+  }
+  // 11 hours 45 in. Twelve hours pass, but it was only just used.
+  h.clock.advance(29 * MIN);
+  await tick();
+  assert.deepEqual(handed, []);
+  h.clock.advance(MIN);
+  await tick();
+  assert.deepEqual(handed, [t.id]);
+});
+
 test('an approval holds a kept thread until it is answered', async () => {
   const h = makeHarness();
   const t = h.runner.create({ text: 'edit it', accountId: 'claude-3', permissionMode: 'ask' }).thread;

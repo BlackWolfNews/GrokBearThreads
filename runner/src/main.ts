@@ -538,7 +538,9 @@ async function main(): Promise<void> {
       stopHousekeeping();
       scheduler.stop();
       librarian.stop();
-      stuckJobs.stop();
+      // stuckJobs goes on: background work can hold a thread here for hours,
+      // and a wait that can never end should still be noticed. It only looks
+      // at this runner's threads, so the primary's check doesn't cover them.
       frozenClis.stop();
       macScreen?.stop();
       connectors.stop();
@@ -555,7 +557,6 @@ async function main(): Promise<void> {
       elsewhere = undefined;
       // Every thread not kept lets go now; resolves once their CLIs exit.
       await runner.beginDrain(keeps, {
-        backgroundMs: BACKGROUND_HOLD_MS,
         // Only while a new runner is connected to hear it; otherwise it
         // would load the thread as after a crash.
         ready: () => primaryHeard && (drainServer?.connectedClients() ?? 0) > 0,
@@ -648,10 +649,6 @@ async function main(): Promise<void> {
     }
   });
 }
-
-// How long background work holds a kept thread on a draining runner after
-// its last turn, as it holds an idle restart (update.ts uses the same).
-const BACKGROUND_HOLD_MS = 30 * 60_000;
 
 // A warning when the Codex binary new sessions would start isn't there, or
 // undefined. Threadbear's own copy may still be on its way.

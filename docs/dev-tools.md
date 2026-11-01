@@ -344,7 +344,8 @@ When main differs it runs `deploy.mjs --no-restart` from the clone, which
 is the deploy script's own steps (typecheck and unit tests in the clone,
 snapshot, smoke test, point `current` at the release) and nothing from
 the working tree, then asks `runner.restart` for the usual restart once no
-thread is busy (background work holds it 30 minutes at most) with the
+thread is busy (background work holds it 30 minutes at most; under
+`launch.mjs` it's a handover instead, see protocol.md) with the
 reason "Updating to main at <short>: <subject>". `launch.mjs`'s crash
 rollback covers a release that doesn't come up.
 
