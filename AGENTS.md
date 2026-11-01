@@ -250,6 +250,17 @@ than one, and use `status` to see whose is whose.
   with the same thread open. Look at the images before saying it works,
   then `stop`. An instance quits after an hour with no command. The
   commands are in `app/README.md` ("Seeing and driving it from a script").
+- A cursor bug only shows with the real pointer: unit tests, `dump` and
+  `shot` can't see it, and two fixes for the done card's "?" passed them
+  and changed nothing Mike could see. Read `NSCursor.currentSystem` from a
+  small separate process that moves the pointer with CGEvent, and only once
+  `HIDIdleTime` says Mike has been away, putting his pointer and front app
+  back afterwards. The dev window sits behind his, so float it first (a
+  temporary `window.level`), or you're reading whichever app is on top, and
+  check its log shows the moves arriving. Rest about a second as well as
+  moving: a tip coming up makes AppKit work the cursor out again, and
+  SwiftUI's view behind AppKit content answers with the arrow. Run it with
+  the fix taken out too, to see it fail.
 - `shot` runs screencapture from your shell. If it says the image was drawn
   in-process (the screen is locked, or your shell has no Screen Recording
   permission), the sidebar's glass is a flat fill; the rest is right.

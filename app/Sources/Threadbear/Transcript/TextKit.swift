@@ -574,6 +574,14 @@ final class TranscriptTextView: NSTextView {
     // NSTextView sets the I-beam itself as the pointer moves (cursor rects
     // added in resetCursorRects lost to it), so the hand is set after it.
     override func mouseMoved(with event: NSEvent) {
+        if isOverPointerButton(event) {
+            // The click goes to the button, so the row under it isn't lit
+            // either, and NSTextView doesn't get to set its I-beam.
+            hoverRow(nil)
+            hoverChip(nil)
+            NSCursor.pointingHand.set()
+            return
+        }
         super.mouseMoved(with: event)
         let point = convert(event.locationInWindow, from: nil)
         let chip = chip(at: point)
@@ -588,13 +596,29 @@ final class TranscriptTextView: NSTextView {
         onAction != nil && character(at: point).flatMap { textStorage?.attribute(.tbAction, at: $0, effectiveRange: nil) } != nil
     }
 
+    /// A `PointerButton` laid over this text (the done card's "?") is what's
+    /// really under the pointer, but the text's tracking area still fires.
+    private func isOverPointerButton(_ event: NSEvent) -> Bool {
+        window.map { PointerButton.isUnderPointer(in: $0, at: event.locationInWindow) } ?? false
+    }
+
     override func cursorUpdate(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        if chip(at: point) != nil || isAction(at: point) || pictureChip(at: point) != nil || (onAction != nil && row(at: point) != nil) {
+        if isOverPointerButton(event) || chip(at: point) != nil || isAction(at: point) || pictureChip(at: point) != nil || (onAction != nil && row(at: point) != nil) {
             NSCursor.pointingHand.set()
         } else {
             super.cursorUpdate(with: event)
         }
+    }
+
+    // NSTextView answers an enter with its I-beam as well, and the text's
+    // area is entered from under the button just as from anywhere else.
+    override func mouseEntered(with event: NSEvent) {
+        if isOverPointerButton(event) {
+            NSCursor.pointingHand.set()
+            return
+        }
+        super.mouseEntered(with: event)
     }
 
     override func mouseExited(with event: NSEvent) {

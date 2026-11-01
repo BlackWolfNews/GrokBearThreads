@@ -634,9 +634,38 @@ final class TextRowCell: RowCellView {
 }
 
 /// A borderless button that shows the pointing hand, as the card's own
-/// rows (text, not views) do; a plain NSButton keeps the I-beam the text
-/// view under it sets (Mike, 1 Nov).
+/// rows (text, not views) do. A cursor rect alone doesn't hold: the text view
+/// under it sets its I-beam as the pointer moves, which `TranscriptTextView`
+/// now skips over one of these, and whenever AppKit works the cursor out again
+/// (a tip coming up, a click redrawing the card) it asks SwiftUI's view behind
+/// the card rather than this one, which answers with the arrow, and nothing
+/// corrects that until the pointer next moves (Mike, 1 Nov). So the hand goes
+/// back straight after each of those.
 final class PointerButton: NSButton {
+    private static let cursorWatch: Any? = NSEvent.addLocalMonitorForEvents(matching: .cursorUpdate) { event in
+        // After the event's been handled: this sees it first.
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                guard let window = event.window ?? NSApp.keyWindow,
+                      isUnderPointer(in: window, at: window.mouseLocationOutsideOfEventStream) else { return }
+                NSCursor.pointingHand.set()
+            }
+        }
+        return event
+    }
+
+    /// Is one of these what's really at `point`, in the window's coordinates?
+    /// Tracking areas fire for whatever's underneath as well.
+    static func isUnderPointer(in window: NSWindow, at point: NSPoint) -> Bool {
+        guard let content = window.contentView else { return false }
+        return content.hitTest(content.superview?.convert(point, from: nil) ?? point) is PointerButton
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        _ = Self.cursorWatch
+    }
+
     override func resetCursorRects() {
         addCursorRect(bounds, cursor: .pointingHand)
     }
