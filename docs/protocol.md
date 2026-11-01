@@ -1103,8 +1103,9 @@ removable volumes, which fits a release build at 21:54. Those builds run the
 unit tests, and that build's new test of `sample` sent `sample` hunting for
 debug symbols into a folder deep in the external drive. A prompt stays up after
 what asked has gone, and until it's answered it can hold up other apps' access
-to that folder or drive, whatever they've been granted. From 22:00 to 06:43 no
-other app could use Bruce's drive, with no turn running and nothing saying so.
+to that folder or drive, whatever they've been granted. From 22:00 to 06:43
+Sammy Cam and two backups were stuck on Bruce's drive, with no turn running and
+nothing saying so.
 So `sample` now runs in a sandbox that refuses those paths (`sampleSandbox`).
 Agents' own commands still set prompts off, on a Mac without Full Disk Access.
 
