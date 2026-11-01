@@ -19,7 +19,7 @@ import { parseWhen, relativeFuture, relativeTime } from './when.ts';
 
 export { parseWhen, relativeFuture, relativeTime };
 import { RUNNER_VERSION, expandHome } from './config.ts';
-import { ALREADY_ENDED, endTurnDescription, endTurnForm, END_TURN_TOOL, BULLETS_ONLY, ENDED, endedThisTurn, MAX_BYLINE, NARRATION_ONLY, NO_REPLY, needsFromTool, oneReplyAccepted, summaryFromTool, turnReply, type TurnReply } from './needs.ts';
+import { ALREADY_ENDED, endTurnDescription, endTurnForm, END_TURN_TOOL, BULLETS_ONLY, ENDED, endedThisTurn, MAX_BYLINE, NARRATION_ONLY, NO_REPLY, needsFromTool, oneReplyAccepted, oneReplyAlreadyWritten, summaryFromTool, turnReply, type TurnReply } from './needs.ts';
 import { asksForAppRestart, type AppRestarts } from './app-restarts.ts';
 import { PANEL_PLACES } from './panel-requests.ts';
 import { nudgedThisTurn, signInNudge, turnSignIns, uncovered } from './connectors.ts';
@@ -40,6 +40,7 @@ export type ThreadControl = {
   pin?: (...args: Parameters<Runner['pin']>) => Aw<ReturnType<Runner['pin']>>;
   unpin?: (...args: Parameters<Runner['unpin']>) => Aw<ReturnType<Runner['unpin']>>;
   showPanel?: (threadId: string, ask: Parameters<Runner['showPanel']>[1]) => ReturnType<Runner['showPanel']>;
+  endTurnNudged?: (threadId: string) => boolean;
 } & Async<Runner, 'list' | 'search' | 'get' | 'events' | 'create' | 'send' | 'update' | 'interrupt' | 'delete'>;
 
 // Messages a thread when the Mac app restarts onto a new build (app-restarts.ts).
@@ -691,6 +692,13 @@ export function buildThreadbearTools(
         if (needs === 'you' && appRestarts && asksForAppRestart(asks)) {
           if (!appRestarts.isWatching(selfId)) appRestarts.watch(selfId);
           restart = " You'll get a message here when the app restarts onto the new build.";
+        }
+        // Sent back by the Stop hook with its message written: that's the
+        // reply. Not if it wrote nothing since its last step, or only a
+        // narration block, which is just a paraphrase of what it wrote.
+        if (!codex && control.endTurnNudged?.(selfId)) {
+          const reply = await replied();
+          if (reply.replied && !reply.narrationOnly) return oneReplyAlreadyWritten(needs === 'you', restart);
         }
         return oneReplyAccepted(needs === 'you', restart);
       }),

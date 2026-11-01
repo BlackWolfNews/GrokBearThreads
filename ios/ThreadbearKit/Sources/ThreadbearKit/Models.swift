@@ -433,19 +433,23 @@ public struct PhoneMessage: Codable, Sendable, Hashable, Identifiable {
     public var toolKind: String?
     /// The turn's summary bullets from end_turn, its reply (backend API 14).
     public var summary: Bool
+    /// Which turn it's from (backend API 26), as a turn the CLI started by
+    /// itself has no message to mark where it starts. Absent on older rows.
+    public var turn: String?
     @FlexibleDate public var at: Date
 
-    public init(seq: Int, role: Role, text: String, origin: String? = nil, toolKind: String? = nil, summary: Bool = false, at: Date) {
+    public init(seq: Int, role: Role, text: String, origin: String? = nil, toolKind: String? = nil, summary: Bool = false, turn: String? = nil, at: Date) {
         self.seq = seq
         self.role = role
         self.text = text
         self.origin = origin
         self.toolKind = toolKind
         self.summary = summary
+        self.turn = turn
         self._at = FlexibleDate(wrappedValue: at)
     }
 
-    private enum Keys: String, CodingKey { case seq, role, text, origin, toolKind, summary, at }
+    private enum Keys: String, CodingKey { case seq, role, text, origin, toolKind, summary, turn, at }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
@@ -456,6 +460,7 @@ public struct PhoneMessage: Codable, Sendable, Hashable, Identifiable {
         origin = try c.decodeIfPresent(String.self, forKey: .origin)
         toolKind = try c.decodeIfPresent(String.self, forKey: .toolKind)
         summary = (try? c.decodeIfPresent(Bool.self, forKey: .summary)).flatMap { $0 } ?? false
+        turn = try? c.decodeIfPresent(String.self, forKey: .turn)
         _at = try c.decode(FlexibleDate.self, forKey: .at)
     }
 
@@ -467,6 +472,7 @@ public struct PhoneMessage: Codable, Sendable, Hashable, Identifiable {
         try c.encodeIfPresent(origin, forKey: .origin)
         try c.encodeIfPresent(toolKind, forKey: .toolKind)
         if summary { try c.encode(true, forKey: .summary) }
+        try c.encodeIfPresent(turn, forKey: .turn)
         try c.encode(_at, forKey: .at)
     }
 }

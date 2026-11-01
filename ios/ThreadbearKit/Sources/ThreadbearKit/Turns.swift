@@ -45,7 +45,7 @@ public enum Turns {
                 out += ThreadItem.group(body)
                 continue
             }
-            let reply = replyIndexes(body)
+            let reply = replies(body)
             if reply.isEmpty {
                 out += ThreadItem.group(body)
                 continue
@@ -62,6 +62,32 @@ public enum Turns {
             out += reply.sorted().map { .message(body[$0]) }
         }
         return out
+    }
+
+    /// Which of a finished stretch's messages are its replies, as the Mac
+    /// picks them (TranscriptReducer, replies(in:)): each turn has its own, so
+    /// one the runner or the CLI started doesn't fold away the answer before
+    /// it, unless a summary covers them. A summary from a turn the runner's
+    /// message started does, as its end_turn is told to. One from a wake-up
+    /// doesn't: nobody told it to, and it's usually "nothing's changed".
+    static func replies(_ body: [PhoneMessage]) -> [Int] {
+        var turns: [Range<Int>] = []
+        var start = 0
+        for i in body.indices.dropFirst() {
+            let newTurn = body[i].turn != nil && body[i].turn != body[i - 1].turn
+            if body[i].role == .user || newTurn {
+                turns.append(start..<i)
+                start = i
+            }
+        }
+        if !body.isEmpty { turns.append(start..<body.count) }
+        let covers = turns.lastIndex { turn in
+            let wakeUp = turn.lowerBound > 0 && body[turn.lowerBound].role != .user
+            return !wakeUp && body[turn].contains { $0.role == .assistant && $0.summary }
+        }
+        return turns[(covers ?? 0)...].flatMap { turn in
+            replyIndexes(Array(body[turn])).map { $0 + turn.lowerBound }
+        }
     }
 
     /// Which of a finished turn's messages are its reply, as the Mac picks

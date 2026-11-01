@@ -471,6 +471,17 @@ export function oneReplyAccepted(needsYou: boolean, restart = ''): string {
     : `${ENDED} is done. ${ONE_REPLY_NEXT}: it's the only text the user sees from this turn. Write nothing after it.`;
 }
 
+// For an end_turn the Stop hook asked for, in a turn that has its message:
+// the nudge said "your message above is the reply", and "Now write your reply"
+// after it got a second message, which took the first's place. On 1 Nov 2026
+// that was 13 of 84 one-reply turns, one trading 2,359 characters for 96, and
+// a real answer folded under "The bear picture test is still waiting on you".
+export function oneReplyAlreadyWritten(needsYou: boolean, restart = ''): string {
+  return needsYou
+    ? `${ENDED} will wait in Needs you.${restart} Stop here, with no more text: your message above is the reply, the asks go in a card under it, and nothing written now reaches the user.`
+    : `${ENDED} is done. Stop here, with no more text: your message above is the reply, and nothing written now reaches the user.`;
+}
+
 export function endTurnWantsReply(result: { ok: boolean; text: string }): boolean {
   return endTurnAccepted(result) && result.text.includes(ONE_REPLY_NEXT);
 }

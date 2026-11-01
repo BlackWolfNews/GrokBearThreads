@@ -92,6 +92,9 @@ export type AdapterOutput =
   | { kind: 'cliVersion'; version: string }
   // The CLI started a turn of its own; `note` says why, when it's known.
   | { kind: 'cliTurn'; note?: string }
+  // The Stop hook sent a turn back to call end_turn, as its message is the
+  // reply (end_turn's handler then doesn't ask for another).
+  | { kind: 'endTurnNudge' }
   // Background work the CLI is running (shells, async subagents). Replaces
   // the previous list.
   | { kind: 'tasks'; tasks: BackgroundTask[] }

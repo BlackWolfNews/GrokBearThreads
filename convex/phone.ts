@@ -19,7 +19,7 @@ const MAX_COMMAND_IMAGES = 6;
 
 const row = v.object({ ...threadFields, view: v.union(...views.map((x) => v.literal(x))) });
 const message = v.object({ seq: v.number(), role: v.union(v.literal('user'), v.literal('assistant')), text: v.string(), origin: v.optional(v.string()), at: v.string() });
-const pageMessage = v.object({ seq: v.number(), role: v.union(v.literal('user'), v.literal('assistant'), v.literal('tool')), text: v.string(), origin: v.optional(v.string()), toolKind: v.optional(v.string()), summary: v.optional(v.boolean()), at: v.string() });
+const pageMessage = v.object({ seq: v.number(), role: v.union(v.literal('user'), v.literal('assistant'), v.literal('tool')), text: v.string(), origin: v.optional(v.string()), toolKind: v.optional(v.string()), summary: v.optional(v.boolean()), turn: v.optional(v.string()), at: v.string() });
 // phone:thread's newest text messages for an old phone, and how far back it
 // looks past tool rows for them.
 const MESSAGES_SHOWN = 20;
@@ -182,7 +182,7 @@ export const messages = query({
   handler: async (ctx, { token, threadId, beforeSeq, limit, tools }) => {
     await checkPhoneToken(ctx, token);
     const want = Math.max(1, Math.min(PAGE_MAX, Math.floor(limit ?? PAGE_DEFAULT)));
-    const out: { seq: number; role: 'user' | 'assistant' | 'tool'; text: string; origin?: string; toolKind?: string; summary?: boolean; at: string }[] = [];
+    const out: { seq: number; role: 'user' | 'assistant' | 'tool'; text: string; origin?: string; toolKind?: string; summary?: boolean; turn?: string; at: string }[] = [];
     let hasMore = false;
     const q = ctx.db
       .query('messages')
@@ -194,7 +194,7 @@ export const messages = query({
         hasMore = true;
         break;
       }
-      out.push({ seq: m.seq, role: m.role, text: m.text, ...(m.origin ? { origin: m.origin } : {}), ...(m.toolKind ? { toolKind: m.toolKind } : {}), ...(m.summary ? { summary: true } : {}), at: m.at });
+      out.push({ seq: m.seq, role: m.role, text: m.text, ...(m.origin ? { origin: m.origin } : {}), ...(m.toolKind ? { toolKind: m.toolKind } : {}), ...(m.summary ? { summary: true } : {}), ...(m.turn ? { turn: m.turn } : {}), at: m.at });
     }
     out.reverse();
     const from = hasMore || beforeSeq !== undefined ? out[0]?.seq ?? 0 : 0;

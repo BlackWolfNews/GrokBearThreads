@@ -857,6 +857,60 @@ test("a Claude or Codex thread's instructions point at the guide", async () => {
   assert.ok(TOOL_GUIDANCE.includes(guidePath()), TOOL_GUIDANCE);
 });
 
+// A turn that wrote its message and stopped is nudged to call end_turn, told
+// "your message above is the reply". Asking for a reply after that got a
+// second one that took the first's place: thread 9bc89060's real answer folded
+// under "The bear picture test is still waiting on you", and a77c6b42's 2,359
+// characters under 96 (1 Nov 2026).
+test('one reply: an end_turn the Stop hook asked for keeps the message already written', async () => {
+  const h = makeHarness();
+  const { thread, s } = start(h);
+  const { call } = tools(h, thread.id, undefined, () => true);
+  toolCall(s, 'b1', 'Bash', { command: 'npm test' });
+  toolResult(s, 'b1');
+  s.text('m1', 'The tests pass, and here is what they cover in full.');
+  s.out({ kind: 'endTurnNudge' });
+  const input = { headline: 'Tests pass', needs: 'nothing' };
+  toolCall(s, 'e1', END_TURN, input);
+  const r = await call('end_turn', input);
+  assert.equal(r.error, false);
+  assert.doesNotMatch(r.text, /Now write your reply/);
+  assert.match(r.text, /^Noted: this thread is done/);
+  s.out({ kind: 'event', event: { type: 'tool.result', itemId: 'e1', ok: true, text: r.text, truncated: false, images: [] } });
+  assert.equal(h.runner.get(thread.id).preview, 'Tests pass');
+  // Anything it writes anyway is a repeat, and doesn't reach Mike.
+  s.text('m2', 'All done.');
+  assert.ok(!h.events(thread.id).some((e) => e.type === 'assistant.text' && e.itemId === 'm2'));
+  assert.ok(!h.events(thread.id).some((e) => e.type === 'assistant.text' && e.final));
+  s.result('completed');
+  await tick();
+  assert.equal(h.runner.get(thread.id).needs, 'nothing');
+});
+
+test('one reply: a nudged end_turn with no message to keep still asks for the reply', async () => {
+  const h = makeHarness();
+  // No words since its last step.
+  const first = start(h);
+  const one = tools(h, first.thread.id, undefined, () => true);
+  first.s.text('m1', 'Starting on it.');
+  toolCall(first.s, 'b1', 'Bash', { command: 'npm test' });
+  toolResult(first.s, 'b1');
+  first.s.out({ kind: 'endTurnNudge' });
+  toolCall(first.s, 'e1', END_TURN, {});
+  assert.match((await one.call('end_turn', {})).text, /Now write your reply/);
+  // Only a narration block, which is a paraphrase of what it wrote.
+  const second = start(h);
+  const two = tools(h, second.thread.id, undefined, () => true);
+  second.s.out({ kind: 'event', event: { type: 'assistant.text', itemId: 'n1', text: 'It explained the fix.', narration: true } });
+  second.s.out({ kind: 'endTurnNudge' });
+  toolCall(second.s, 'e2', END_TURN, {});
+  assert.match((await two.call('end_turn', {})).text, /Now write your reply/);
+  // A turn nudged earlier doesn't carry over to the next one.
+  second.s.result('completed');
+  await tick();
+  assert.equal(h.runner.endTurnNudged(second.thread.id), false);
+});
+
 // One reply (docs/protocol.md, "One reply"; 1 Nov 2026): end_turn carries
 // the card and a headline, and the message after it is the reply.
 test('one reply: end_turn takes the card, never asks for a message first, and says the reply comes next', async () => {

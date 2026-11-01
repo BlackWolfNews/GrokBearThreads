@@ -90,4 +90,8 @@
 // 25: phone:discardImage, for a photo the phone uploaded and never sent. A
 //    phone only ever calls it on a best-effort basis, so on an older backend
 //    the photo just stays in file storage, and an older phone never calls it.
-export const API_VERSION = 25;
+// 26: a message row can carry `turn`, which turn it's from, and phone:messages
+//    returns it, so the phone can tell a turn the CLI started itself from the
+//    one before. A runner sends it only to a backend of 26 or later, and a
+//    phone without it reads the rows as it always did.
+export const API_VERSION = 26;

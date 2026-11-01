@@ -984,12 +984,20 @@ public struct TranscriptModel: Sendable {
     /// runner's turns in it, each turn from the one with the last summary
     /// on (each turn, without one) has a reply, so a turn that ended on a
     /// line rather than a summary isn't folded away behind the one before.
+    /// Only a turn with a message of its own can take over like that: the
+    /// runner's are told their summary covers the stretch, but a wake-up
+    /// (the CLI's own turn, as a background job ended) isn't, and on 1 Nov
+    /// 2026 what one said was "still waiting on you".
     private func replies(in turn: Range<Int>) -> Set<Int> {
         // Items with no turn id (live text not yet given one) are a turn
         // of their own, "".
         var turns: [String] = []
         for k in turn where !turns.contains(items[k].turnId ?? "") { turns.append(items[k].turnId ?? "") }
-        let summary = turn.last { textItem($0)?.isSummary == true }
+        let messaged = Set(turn.compactMap { k -> String? in
+            if case .user = items[k].content { return items[k].turnId ?? "" }
+            return nil
+        })
+        let summary = turn.last { textItem($0)?.isSummary == true && messaged.contains(items[$0].turnId ?? "") }
         let from = summary.flatMap { turns.firstIndex(of: items[$0].turnId ?? "") } ?? 0
         var out: Set<Int> = []
         for id in turns[from...] { out.formUnion(reply(of: turn.filter { (items[$0].turnId ?? "") == id })) }

@@ -453,6 +453,11 @@ export class ThreadRouter implements ThreadControl {
     return this.runner.hello();
   }
 
+  // Always this runner's: it's asked by the session it runs itself.
+  endTurnNudged(threadId: string): boolean {
+    return this.runner.endTurnNudged(threadId);
+  }
+
   async list(include: Bucket[] = ['inbox']): Promise<ThreadSummary[]> {
     const local = this.runner.list(include);
     const e = this.elsewhere();

@@ -1524,7 +1524,13 @@ A turn the agent finished can say whether Mike has to do anything, so
   `CLAUDE_CODE_TERMINAL_MCP_TOOLS`, and its Stop hook asks once for the
   reply when the turn took `end_turn` and wrote nothing after it, or for
   `end_turn` alone (the message already written being the reply) when it
-  never called it. Codex calls it before its final answer as before, and
+  never called it. That second nudge is the adapter's `endTurnNudge`
+  output, and the `end_turn` it brings answers "Stop here" rather than "Now
+  write your reply", if the turn has words of its own since its last step
+  (`oneReplyAlreadyWritten`): told to write one anyway, agents wrote a second
+  message that took the first's place, in 13 of 84 turns on 1 Nov 2026, one
+  trading 2,359 characters for 96. Text after it is dropped, as with
+  any "Stop here". Codex calls it before its final answer as before, and
   its final answer is the reply. The setting is read when a session
   starts, as its tool is, so a live one keeps the tool it has until its
   CLI restarts; Bullet replies doesn't apply to a one-reply session. A
@@ -1585,7 +1591,15 @@ A turn the agent finished can say whether Mike has to do anything, so
   the notes between (their earlier summaries and the runner's messages
   too), one reply (the last summary, plus the last `assistant.text` of
   any later turn, each picked as above), one changes card and one footer with their time and
-  cost added up. A note from an edit (`thread.rewound`) stays out. The
+  cost added up. A note from an edit (`thread.rewound`) stays out.
+  A wake-up, a turn the CLI started itself as a background job ended, joins
+  the same way, but its summary doesn't take the last one's place: it
+  gets a reply of its own under the one before, as nothing tells it to cover the
+  stretch. On 1 Nov 2026 a wait that timed out woke an agent after its answer,
+  and "still waiting on you" replaced that answer on the phone (thread
+  9bc89060). A wake-up keeps the Stop hook's `end_turn` nudge, as it can
+  change what Mike needs. The phone tells a wake-up from the turn before by
+  its rows' `turn` (backend API 26); rows from before that read as one turn. The
   `end_turn` description tells the agent that in such a turn its summary
   takes the place of the last one, so it covers everything since Mike's
   message, and its work links can quote steps from those turns (Mike,

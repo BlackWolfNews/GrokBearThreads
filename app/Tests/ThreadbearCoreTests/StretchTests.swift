@@ -53,6 +53,66 @@ final class StretchTests: XCTestCase {
         XCTAssertNil(model.row(id: "cf:t2"), "a summarized stretch has no changes card")
     }
 
+    /// A background job ended after the agent had replied, and the CLI woke
+    /// it on its own: no message from anyone, so nothing replaced the reply
+    /// (1 Nov 2026, thread 9bc89060, where a timed-out wait put "still waiting
+    /// on you" in place of a picture he'd asked for).
+    static func final(_ seq: Int, _ item: String, _ text: String, turn: String) -> Event {
+        E.event(seq, "assistant.text", ["itemId": item, "text": text, "final": true], turn: turn)
+    }
+
+    static func text(_ seq: Int, _ item: String, _ words: String, turn: String) -> Event {
+        E.event(seq, "assistant.text", ["itemId": item, "text": words], turn: turn)
+    }
+
+    static func endTurn(_ seq: Int, _ id: String, turn: String) -> [Event] {
+        [E.call(seq, id, name: "mcp__threadbear__end_turn", input: ["needs": "you"]).withTurn(turn),
+         E.result(seq + 1, id, text: "Noted: this thread will wait in Needs you.").withTurn(turn)]
+    }
+
+    func testAWakeUpAfterAReplyLeavesTheReplyOnShow() {
+        let first: [Event] = [
+            Self.mike(1, "Draw a bear", turn: "t1"),
+            E.call(2, "c1", input: ["command": "swift draw.swift"]).withTurn("t1"), E.result(3, "c1").withTurn("t1"),
+        ] + Self.endTurn(4, "e1", turn: "t1") + [
+            Self.final(6, "m1", "Here's a test bear.", turn: "t1"),
+            E.done(7, turn: "t1"),
+        ]
+        // As it happened: the wake-up wrote a line, was sent back for end_turn
+        // and wrote another. And as it goes now: the line is that turn's reply.
+        let wrote: [Event] = first + [
+            E.event(8, "turn.started", [:], turn: "t2"),
+            E.event(9, "system.note", ["text": "Background command stopped"], turn: "t2"),
+            Self.text(10, "m2", "That wait hit its limit, which changes nothing.", turn: "t2"),
+        ] + Self.endTurn(11, "e2", turn: "t2")
+        let twice = wrote + [Self.final(13, "m3", "Still waiting on you.", turn: "t2"), E.done(14, turn: "t2")]
+        var rows = TranscriptModel(events: twice).rows.map(\.id)
+        XCTAssertTrue(rows.contains("a:m1"), "the real reply stays: \(rows)")
+        XCTAssertTrue(rows.contains("a:m3"), "\(rows)")
+        XCTAssertFalse(rows.contains("a:m2"), "\(rows)")
+        rows = TranscriptModel(events: wrote + [E.done(13, turn: "t2")]).rows.map(\.id)
+        XCTAssertTrue(rows.contains("a:m1"), "\(rows)")
+        XCTAssertTrue(rows.contains("a:m2"), "\(rows)")
+    }
+
+    /// The runner's own turns take the last summary's place, as their
+    /// end_turn is told to cover the stretch. A wake-up isn't one of them.
+    func testAWakeUpsSummaryDoesntTakeTheReplysPlace() {
+        let events: [Event] = [
+            Self.mike(1, "Fix it", turn: "t1"),
+            E.call(2, "c1", input: ["command": "make"]).withTurn("t1"), E.result(3, "c1").withTurn("t1"),
+            Self.summary(4, "e1.summary", "- Fixed it, and here's what was wrong.", turn: "t1"),
+            E.done(5, turn: "t1"),
+            E.event(6, "turn.started", [:], turn: "t2"),
+            E.event(7, "system.note", ["text": "Background command stopped"], turn: "t2"),
+            Self.summary(8, "e2.summary", "- Nothing changed.", turn: "t2"),
+            E.done(9, turn: "t2"),
+        ]
+        let rows = TranscriptModel(events: events).rows.map(\.id)
+        XCTAssertTrue(rows.contains("a:e1.summary"), "\(rows)")
+        XCTAssertTrue(rows.contains("a:e2.summary"), "\(rows)")
+    }
+
     /// Each event as it comes: the first turn shows as it did when it
     /// finished until the runner's turn is over, then the two become one.
     func testLiveTheStretchJoinsUpOnceTheRunnersTurnEnds() {

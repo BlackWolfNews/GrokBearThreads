@@ -344,6 +344,7 @@ class ClaudeSession implements AgentSession {
     // One reply: end_turn without words after it leaves no reply, so the
     // agent is asked for it, once (the hook's own guard, stop_hook_active).
     if (ended) return this.oneReply && !wrote ? { decision: 'block', reason: ONE_REPLY_WRITE_NUDGE } : {};
+    this.sink.output({ kind: 'endTurnNudge' });
     return { decision: 'block', reason: this.oneReply ? ONE_REPLY_END_TURN_NUDGE : END_TURN_NUDGE };
   }
 

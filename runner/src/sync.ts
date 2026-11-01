@@ -68,7 +68,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 25;
+export const BACKEND_API_VERSION = 26;
 // From this one a thread's row carries its open card of asks and a finished
 // turn's next steps, and a message row can be `summary` (end_turn's
 // bullets), so the phone shows end-of-turn cards. An older backend's
@@ -118,6 +118,10 @@ export const INDEX_STARTED_BY_API_VERSION = 23;
 // From this one the pictures in agents' replies and pinned pictures go to
 // file storage for the phone, for every thread (sync:addReplyImage).
 export const REPLY_IMAGES_API_VERSION = 24;
+// From this one a message row says which turn it's from (`turn`), so the phone
+// can tell a turn the CLI started itself, which no message marks, from the one
+// before. An older backend's validator would turn the write down.
+export const TURNS_API_VERSION = 26;
 // How far back a start looks for pictures, as new ones go up as they come.
 // Reading a whole log for each thread is too much to do for all of them on
 // every start, and it's the threads in use that Mike opens on the phone.
@@ -193,7 +197,7 @@ export type PhoneAsk = { action: string; why?: string; reply?: string; options?:
 
 // A text message, or one line for a tool call (role "tool", since backend
 // API 2): what the phone and the website show of a thread.
-export type MessageDoc = { threadId: string; seq: number; role: 'user' | 'assistant' | 'tool'; text: string; origin?: string; toolKind?: string; summary?: true; at: string; pagedAt?: number };
+export type MessageDoc = { threadId: string; seq: number; role: 'user' | 'assistant' | 'tool'; text: string; origin?: string; toolKind?: string; summary?: true; turn?: string; at: string; pagedAt?: number };
 
 // One call to the deployment's HTTP API; tests pass a fake.
 export type Post = (kind: 'mutation' | 'query', fn: string, args: Record<string, unknown>) => Promise<unknown>;
@@ -460,7 +464,10 @@ function forBackend(d: ThreadDoc, v: number): ThreadDoc {
 // A persisted user.message or assistant.text as a message row; anything
 // else is undefined.
 export function toMessageDoc(threadId: string, e: PersistedEvent): MessageDoc | undefined {
-  if (e.type === 'tool.call') return { threadId, seq: e.seq, role: 'tool', text: toolLine(e), toolKind: e.kind, at: e.ts };
+  // The start of the id tells a thread's turns apart, in a row sent for every
+  // message.
+  const turn = e.turnId ? { turn: e.turnId.slice(0, 8) } : {};
+  if (e.type === 'tool.call') return { threadId, seq: e.seq, role: 'tool', text: toolLine(e), toolKind: e.kind, ...turn, at: e.ts };
   if (e.type !== 'user.message' && e.type !== 'assistant.text') return undefined;
   const cut = e.text.length > MESSAGE_CHARS ? e.text.slice(0, MESSAGE_CHARS) + '\n\n[cut: the rest is on the Mac]' : e.text;
   // Mike's own pictures stay on the Mac, so the phone and website get a line saying
@@ -470,7 +477,7 @@ export function toMessageDoc(threadId: string, e: PersistedEvent): MessageDoc | 
   const pictures = e.type === 'user.message' ? unplacedPictures(e.text, e.images?.length ?? 0) : 0;
   const note = pictures === 1 ? '[1 picture]' : pictures ? `[${pictures} pictures]` : '';
   const text = note ? (cut ? `${cut}\n\n${note}` : note) : cut;
-  const doc: MessageDoc = { threadId, seq: e.seq, role: e.type === 'user.message' ? 'user' : 'assistant', text, at: e.ts };
+  const doc: MessageDoc = { threadId, seq: e.seq, role: e.type === 'user.message' ? 'user' : 'assistant', text, ...turn, at: e.ts };
   if (e.type === 'user.message' && e.origin) doc.origin = e.origin;
   if (e.type === 'assistant.text' && e.summary) doc.summary = true;
   return doc;
@@ -1348,6 +1355,7 @@ export class ConvexSync {
     let messages = v !== undefined && v < 2 ? all.filter((m) => m.role !== 'tool') : all;
     // Before API 14 the validator has no `summary`; the bullets go as text.
     if (v === undefined || v < ASKS_API_VERSION) messages = messages.map((m) => (m.summary ? (({ summary, ...rest }) => rest)(m) : m));
+    if (v === undefined || v < TURNS_API_VERSION) messages = messages.map((m) => (m.turn ? (({ turn, ...rest }) => rest)(m) : m));
     for (let i = 0; i < messages.length; i += MESSAGE_BATCH) {
       const batch = messages.slice(i, i + MESSAGE_BATCH);
       await this.post('mutation', 'sync:appendMessages', { key: this.deps.key, messages: batch });

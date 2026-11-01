@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
-import { ConvexSync, BACKEND_API_VERSION, ICONS_API_VERSION, RUNNER_ICON_API_VERSION, SCHEDULES_API_VERSION, SHARE_API_VERSION, WOKE_API_VERSION, STARTED_BY_API_VERSION, SECTIONS_API_VERSION, MODELS_API_VERSION, REPLY_IMAGES_API_VERSION, REPLY_IMAGES_LOOKBACK_MS, REPLY_IMAGES_SCANS_PER_FLUSH, toAccountDoc, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, convexUploader, pictureName, type ThreadDoc } from '../../src/sync.ts';
+import { ConvexSync, BACKEND_API_VERSION, TURNS_API_VERSION, ICONS_API_VERSION, RUNNER_ICON_API_VERSION, SCHEDULES_API_VERSION, SHARE_API_VERSION, WOKE_API_VERSION, STARTED_BY_API_VERSION, SECTIONS_API_VERSION, MODELS_API_VERSION, REPLY_IMAGES_API_VERSION, REPLY_IMAGES_LOOKBACK_MS, REPLY_IMAGES_SCANS_PER_FLUSH, toAccountDoc, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, convexUploader, pictureName, type ThreadDoc } from '../../src/sync.ts';
 import type { Project } from '../../src/protocol.ts';
 import type { ScheduleBackend } from '../../src/schedules.ts';
 import { nullLogger, type Logger } from '../../src/log.ts';
@@ -685,9 +685,29 @@ test('commands: stop unsubscribes and nothing is applied after', async () => {
   assert.equal(sync.status().commands?.state, 'off');
 });
 
+// A turn the CLI started itself (a background job ended) has no message from
+// anyone to show where it starts, and the phone has to tell it from the turn
+// before, so that turn's reply stays on show (1 Nov 2026, thread 9bc89060).
+test('a message row says which turn it is from, once the backend takes it', async () => {
+  const base = { seq: 4, ts: '2026-10-27T00:00:00.000Z', threadId: 't', turnId: 'ae376077-f070-4f05-b183-86fc231fd320' };
+  assert.equal(toMessageDoc('t', { ...base, type: 'assistant.text', itemId: 'i', text: 'hi' } as never)?.turn, 'ae376077');
+  assert.equal(toMessageDoc('t', { ...base, type: 'tool.call', itemId: 'i', name: 'Bash', kind: 'command', title: 'ls', input: {} } as never)?.turn, 'ae376077');
+  assert.equal(toMessageDoc('t', { ...base, turnId: undefined, type: 'assistant.text', itemId: 'i', text: 'hi' } as never)?.turn, undefined);
+  assert.equal(BACKEND_API_VERSION >= TURNS_API_VERSION, true);
+  for (const [backend, sent] of [[TURNS_API_VERSION - 1, false], [TURNS_API_VERSION, true]] as const) {
+    const { sync, calls } = setup({ answer: (fn) => (fn === 'sync:heartbeat' ? { apiVersion: backend } : null) });
+    sync.start();
+    await tick();
+    await (sync as never as { appendMessages(m: MessageDoc[]): Promise<void> }).appendMessages([{ threadId: 't', seq: 1, role: 'assistant', text: 'x', turn: 'ae376077', at: base.ts }]);
+    const row = messagesSent(calls)[0];
+    assert.equal('turn' in row, sent, `backend ${backend}`);
+    await sync.stop();
+  }
+});
+
 test('toMessageDoc keeps text and tool calls, nothing else, and a schedule origin', () => {
   const base = { seq: 4, ts: '2026-10-27T00:00:00.000Z', threadId: 't', turnId: 'u' };
-  assert.deepEqual(toMessageDoc('t', { ...base, type: 'user.message', text: 'hi', images: [], origin: 'schedule', scheduleId: 's1' } as never), { threadId: 't', seq: 4, role: 'user', text: 'hi', at: base.ts, origin: 'schedule' });
+  assert.deepEqual(toMessageDoc('t', { ...base, type: 'user.message', text: 'hi', images: [], origin: 'schedule', scheduleId: 's1' } as never), { threadId: 't', seq: 4, role: 'user', text: 'hi', turn: 'u', at: base.ts, origin: 'schedule' });
   assert.equal(toMessageDoc('t', { ...base, type: 'tool.call', itemId: 'i', name: 'Bash', kind: 'command', title: 'ls', input: {} } as never)?.role, 'tool');
   assert.equal(toMessageDoc('t', { ...base, type: 'tool.result', itemId: 'i', ok: true } as never), undefined);
   assert.equal(toMessageDoc('t', { ...base, type: 'reasoning', itemId: 'i', text: 'thinking' } as never), undefined);

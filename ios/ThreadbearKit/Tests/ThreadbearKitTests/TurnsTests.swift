@@ -4,8 +4,8 @@ import Testing
 
 @Suite struct TurnsTests {
     let t0 = Date(timeIntervalSince1970: 1_800_000_000)
-    func m(_ seq: Int, _ role: PhoneMessage.Role, _ text: String, at: Double, origin: String? = nil, summary: Bool = false) -> PhoneMessage {
-        PhoneMessage(seq: seq, role: role, text: text, origin: origin, toolKind: role == .tool ? "command" : nil, summary: summary, at: t0.addingTimeInterval(at))
+    func m(_ seq: Int, _ role: PhoneMessage.Role, _ text: String, at: Double, origin: String? = nil, summary: Bool = false, turn: String? = nil) -> PhoneMessage {
+        PhoneMessage(seq: seq, role: role, text: text, origin: origin, toolKind: role == .tool ? "command" : nil, summary: summary, turn: turn, at: t0.addingTimeInterval(at))
     }
 
     @Test func aFinishedTurnFoldsItsWorkAndShowsTheSummary() {
@@ -51,13 +51,68 @@ import Testing
             m(8, .tool, "Run", at: 21),
         ]
         let items = Turns.fold(messages, busy: true)
-        // Go, its work, its reply "Checked.", then the live turn as it comes.
+        // Go, its work and the runner's in one line, each turn's reply, then
+        // the live turn as it comes. As on the Mac, the runner's turn doesn't
+        // take the reply before it away.
         guard case let .worked(w) = items[1] else { Issue.record("expected the first turn folded"); return }
         #expect(w.title == "Worked for 9s")
-        guard case let .message(reply) = items[2] else { Issue.record("expected its reply"); return }
-        #expect(reply.seq == 6)
-        guard case .message(let next) = items[3], next.seq == 7, case .tools = items[4] else { Issue.record("expected the live turn unfolded"); return }
-        #expect(items.count == 5)
+        #expect(replies(items) == [1, 3, 6, 7])
+        #expect(items.count == 6)
+        guard case .tools = items[5] else { Issue.record("expected the live turn unfolded"); return }
+    }
+
+    /// The seqs of the messages left on show, Mike's included.
+    func replies(_ items: [ThreadItem]) -> [Int] {
+        items.compactMap { if case let .message(m) = $0 { m.seq } else { nil } }
+    }
+
+    // Thread 9bc89060, 1 Nov 2026: a background wait timed out after the reply,
+    // the CLI woke the agent, and its "still waiting on you" replaced a picture
+    // Mike had asked for. A wake-up has no message to mark where it starts, so
+    // the rows say which turn they're from.
+    @Test func aWakeUpAfterAReplyLeavesTheReplyOnShow() {
+        let messages = [
+            m(157, .user, "Generate an image", at: 0, turn: "a"),
+            m(160, .tool, "Draw it", at: 16, turn: "a"),
+            m(164, .tool, "threadbear: end_turn", at: 20, turn: "a"),
+            m(166, .assistant, "Here's a test bear", at: 23, turn: "a"),
+            m(170, .assistant, "That wait hit its limit", at: 56, turn: "b"),
+            m(171, .tool, "threadbear: end_turn", at: 58, turn: "b"),
+            m(173, .assistant, "Still waiting on you.", at: 60, turn: "b"),
+        ]
+        let items = Turns.fold(messages, busy: false)
+        #expect(replies(items) == [157, 166, 173])
+        guard case let .worked(w) = items[1] else { Issue.record("expected the work folded"); return }
+        #expect(w.items.contains { if case let .message(m) = $0 { m.seq == 170 } else { false } }, "the wake-up's first line is work")
+    }
+
+    @Test func aWakeUpsSummaryDoesntTakeTheReplysPlace() {
+        let wake = [
+            m(1, .user, "Fix it", at: 0, turn: "a"),
+            m(2, .tool, "Build", at: 1, turn: "a"),
+            m(3, .assistant, "- Fixed it", at: 2, summary: true, turn: "a"),
+            m(4, .assistant, "- Nothing changed", at: 9, summary: true, turn: "b"),
+        ]
+        #expect(replies(Turns.fold(wake, busy: false)) == [1, 3, 4])
+        // The runner's own turn does: its end_turn is told to cover the stretch.
+        let restart = [
+            m(1, .user, "Fix it", at: 0, turn: "a"),
+            m(2, .tool, "Build", at: 1, turn: "a"),
+            m(3, .assistant, "- Fixed it", at: 2, summary: true, turn: "a"),
+            m(4, .user, "The app restarted", at: 3, origin: "runner", turn: "c"),
+            m(5, .assistant, "- Fixed and checked", at: 9, summary: true, turn: "c"),
+        ]
+        #expect(replies(Turns.fold(restart, busy: false)) == [1, 5])
+    }
+
+    // Rows written before the backend took `turn` read as they always did.
+    @Test func rowsWithoutATurnAreOneTurn() {
+        let messages = [
+            m(1, .user, "Go", at: 0),
+            m(2, .assistant, "One.", at: 1),
+            m(3, .assistant, "Two.", at: 2),
+        ]
+        #expect(replies(Turns.fold(messages, busy: false)) == [1, 3])
     }
 
     @Test func aQuickAnswerHasNothingToFold() {

@@ -7,7 +7,7 @@ import type { SessionSink, AdapterOutput, ToolApprovalRequest } from '../../src/
 import { ProcessRegistry } from '../../src/proc.ts';
 import { nullLogger } from '../../src/log.ts';
 import { tmpDir } from '../helpers/fakes.ts';
-import { END_TURN_FULL_NAME, END_TURN_NUDGE } from '../../src/needs.ts';
+import { END_TURN_FULL_NAME, END_TURN_NUDGE, ONE_REPLY_END_TURN_NUDGE, ONE_REPLY_WRITE_NUDGE } from '../../src/needs.ts';
 
 test('"Always allow" keeps only allow rules, scoped to the session', () => {
   const { updates, rules } = alwaysAllow('Bash', [
@@ -122,6 +122,19 @@ test('Stop hook: a turn that skipped end_turn is sent back once to call it', asy
   assert.equal((await stop({ hook_event_name: 'Stop', stop_hook_active: false })).decision, 'block');
   // Background work it started will wake a turn that ends it.
   assert.deepEqual(await stop({ hook_event_name: 'Stop', stop_hook_active: false, background_tasks: [{ id: 'b1' }] }), {});
+  state.close!();
+});
+
+test('Stop hook: says when it sent a turn back for end_turn, so end_turn knows not to ask for a reply', async () => {
+  const { state, outputs } = start([], {}, { mcpServersFor: () => ({ threadbear: { type: 'sdk', name: 'threadbear' } }), oneReply: () => true });
+  const stop = state.options.hooks.Stop[0].hooks[0];
+  const nudges = () => outputs.filter((o: AdapterOutput) => o.kind === 'endTurnNudge').length;
+  assert.equal((await stop({ hook_event_name: 'Stop', stop_hook_active: false })).reason, ONE_REPLY_END_TURN_NUDGE);
+  assert.equal(nudges(), 1);
+  // Took end_turn and wrote nothing: that nudge asks for the reply instead.
+  await state.options.hooks.PostToolUse[0].hooks[0]({ hook_event_name: 'PostToolUse', tool_name: END_TURN_FULL_NAME });
+  assert.equal((await stop({ hook_event_name: 'Stop', stop_hook_active: false })).reason, ONE_REPLY_WRITE_NUDGE);
+  assert.equal(nudges(), 1);
   state.close!();
 });
 

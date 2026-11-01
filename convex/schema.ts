@@ -188,6 +188,7 @@ export default defineSchema({
     origin: v.optional(v.string()),
     toolKind: v.optional(v.string()), // the protocol's ToolKind, for a tool row
     summary: v.optional(v.boolean()), // end_turn's bullets, the turn's reply (since API 14)
+    turn: v.optional(v.string()), // the start of its turn's id (since API 26)
     at: v.string(),
     pagedAt: v.optional(v.number()),
   })

@@ -268,6 +268,9 @@ type Turn = {
   replyAfter?: boolean;
   headline?: boolean;
   replyNeeds?: Needs;
+  // The Stop hook sent this turn back to call end_turn, so what it already
+  // wrote is the reply (threadbear-mcp.ts, needs.ts oneReplyAlreadyWritten).
+  endTurnNudged?: boolean;
 };
 
 type Runtime = {
@@ -1504,6 +1507,12 @@ export class Runner {
     return sortByActivity(out).slice(0, Math.max(0, Math.floor(limit)));
   }
 
+  // For end_turn's handler: whether the Stop hook sent the running turn back
+  // to call it.
+  endTurnNudged(threadId: string): boolean {
+    return this.threads.get(threadId)?.rt.turn?.endTurnNudged === true;
+  }
+
   get(threadId: string): ThreadSummary {
     return this.summary(this.mustGet(threadId));
   }
@@ -2424,13 +2433,11 @@ export class Runner {
           }
           if (ev.type === 'tool.result' && ev.itemId === rt.turn.endTurnCall && endTurnAccepted(ev)) {
             rt.turn.ended = true;
-            if (endTurnWantsReply(ev)) {
-              rt.turn.replyAfter = true;
-              const headline = typeof rt.turn.endTurn?.headline === 'string' ? rt.turn.endTurn.headline.trim() : '';
-              if (headline) {
-                rt.turn.headline = true;
-                rec.preview = oneLine(headline, LIMITS.previewChars);
-              }
+            if (endTurnWantsReply(ev)) rt.turn.replyAfter = true;
+            const headline = typeof rt.turn.endTurn?.headline === 'string' ? rt.turn.endTurn.headline.trim() : '';
+            if (headline) {
+              rt.turn.headline = true;
+              rec.preview = oneLine(headline, LIMITS.previewChars);
             }
             const bullets = summaryFromTool(rt.turn.endTurn);
             rt.turn.owedReply = !bullets ? undefined : endTurnAsksForMessage(ev) ? 0 : endTurnOwesReply(ev) ? summaryMarkdown(bullets).length : undefined;
@@ -2543,6 +2550,9 @@ export class Runner {
         if (!rt.turn) this.openCliTurn(st);
         rt.turn!.cliStarted = true;
         if (o.note) this.emit(st, { type: 'system.note', text: o.note }, rt.turn!.turnId);
+        break;
+      case 'endTurnNudge':
+        if (rt.turn) rt.turn.endTurnNudged = true;
         break;
       case 'tasks': {
         const endedTasks = rt.tasks.filter((t) => !o.tasks.some((n) => n.id === t.id));
