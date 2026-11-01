@@ -142,7 +142,13 @@ struct ReplyPicture: View {
                     .accessibilityHint(loaded?.isVideo == true ? "Plays it full screen" : "Shows it full screen")
             }
         }
-        .task(id: url) { await load() }
+        .task(id: url) {
+            await load()
+            // `-ThreadbearViewPicture <alt>`: opens that picture full screen,
+            // for screenshots, as the simulator can't be tapped from a script.
+            let args = CommandLine.arguments
+            if loaded != nil, let i = args.firstIndex(of: "-ThreadbearViewPicture"), i + 1 < args.count, args[i + 1] == alt { fullScreen = true }
+        }
         .fullScreenCover(isPresented: $fullScreen) {
             PictureViewer(url: url, alt: alt, preview: loaded)
         }
@@ -302,7 +308,8 @@ struct PictureOnMac: View {
 }
 
 /// Full screen on black: pinch or double tap to zoom, drag about, share or
-/// save from the top bar. A video plays in the system's player instead.
+/// save from the top bar. It opens clear of the notch and the top bar, so all
+/// of a tall picture shows. A video plays in the system's player instead.
 struct PictureViewer: View {
     var url: URL
     var alt: String
@@ -311,6 +318,9 @@ struct PictureViewer: View {
     @Environment(\.dismiss) private var dismiss
     @State private var full: LoadedPicture?
 
+    /// The top bar's buttons, and a little air under them.
+    private static let barHeight: CGFloat = 52
+
     var body: some View {
         ZStack(alignment: .top) {
             Color.black.ignoresSafeArea()
@@ -318,7 +328,13 @@ struct PictureViewer: View {
                 if picture.isVideo, let file = picture.file {
                     VideoPane(file: file)
                 } else {
-                    ZoomableImage(picture: picture).ignoresSafeArea()
+                    // Read here, where the safe area still counts, as the
+                    // picture itself goes edge to edge once zoomed.
+                    GeometryReader { screen in
+                        let safe = screen.safeAreaInsets
+                        ZoomableImage(picture: picture, framing: PictureFraming(top: safe.top + Self.barHeight, left: safe.leading, bottom: safe.bottom, right: safe.trailing))
+                            .ignoresSafeArea()
+                    }
                 }
             } else {
                 ProgressView().tint(.white).frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -387,6 +403,7 @@ private struct VideoPane: View {
 /// picture with the same drag.
 private struct ZoomableImage: UIViewRepresentable {
     var picture: LoadedPicture
+    var framing: PictureFraming
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -408,40 +425,42 @@ private struct ZoomableImage: UIViewRepresentable {
 
     func updateUIView(_ scroll: FittingScrollView, context: Context) {
         scroll.imageView.show(picture)
+        scroll.framing = framing
         scroll.setNeedsLayout()
     }
 
     final class FittingScrollView: UIScrollView {
         let imageView = MovingImageView()
+        var framing = PictureFraming()
         private var fittedTo: CGSize = .zero
         private var fittedPicture: CGSize?
+        private var fittedFraming = PictureFraming()
 
         override func layoutSubviews() {
             super.layoutSubviews()
             // Fit once per size (a rotation) or picture size, never mid-zoom.
             // By its size, as a playing GIF is a new UIImage every frame, which
             // would snap a zoomed picture back.
-            if fittedTo != bounds.size || fittedPicture != imageView.image?.size {
+            if fittedTo != bounds.size || fittedPicture != imageView.image?.size || fittedFraming != framing {
                 fittedTo = bounds.size
                 fittedPicture = imageView.image?.size
+                fittedFraming = framing
                 zoomScale = 1
-                imageView.frame = fittedFrame()
+                imageView.frame = CGRect(origin: .zero, size: framing.fitted(imageView.image?.size ?? .zero, on: bounds.size))
                 contentSize = imageView.frame.size
+                center()
+                // From the top of the picture: insets alone leave the offset
+                // at zero, with the picture up under the notch.
+                contentOffset = CGPoint(x: -contentInset.left, y: -contentInset.top)
+            } else {
+                center()
             }
-            center()
         }
 
-        private func fittedFrame() -> CGRect {
-            guard let size = imageView.image?.size, size.width > 0, size.height > 0, bounds.width > 0 else { return bounds }
-            let fit = min(bounds.width / size.width, bounds.height / size.height)
-            return CGRect(x: 0, y: 0, width: size.width * fit, height: size.height * fit)
-        }
-
-        /// Centred while smaller than the screen.
+        /// Centred in the clear part of the screen while smaller than that.
         func center() {
-            let x = max(0, (bounds.width - contentSize.width) / 2)
-            let y = max(0, (bounds.height - contentSize.height) / 2)
-            contentInset = UIEdgeInsets(top: y, left: x, bottom: y, right: x)
+            let insets = framing.insets(showing: contentSize, on: bounds.size)
+            contentInset = UIEdgeInsets(top: insets.top, left: insets.left, bottom: insets.bottom, right: insets.right)
         }
     }
 
