@@ -213,6 +213,8 @@ public struct PhoneThread: Codable, Sendable, Hashable, Identifiable {
     /// Back from hibernating by itself and not opened yet: the row says
     /// "Woke up", as the Mac's does.
     public var woke: Woke?
+    /// Who started it, when Mike didn't: the row's second line says so.
+    public var startedBy: StartedBy?
     @OptionalFlexibleDate public var archivedAt: Date?
     public var costUsd: Double?
     public var projects: [ProjectRef]?
@@ -303,6 +305,40 @@ public struct PhoneThread: Codable, Sendable, Hashable, Identifiable {
     public var placeText: String {
         if let projects, !projects.isEmpty { return projects.map(\.title).joined(separator: ", ") }
         return folderName
+    }
+
+    /// Line 2 of the row of a thread Mike didn't start: who did, and why or
+    /// how it came out, as on the Mac sidebar. Nil for his own.
+    public var bylineText: String? {
+        guard let startedBy else { return nil }
+        let rest = startedBy.why.flatMap { $0.isEmpty ? nil : $0 } ?? placeText
+        return startedBy.label + " · " + rest
+    }
+}
+
+/// Who started a thread, when Mike didn't (the Mac's ThreadStartedBy).
+public struct StartedBy: Codable, Sendable, Hashable {
+    public var kind: String
+    public var label: String
+    public var icon: String?
+    public var why: String?
+
+    public init(kind: String, label: String, icon: String? = nil, why: String? = nil) {
+        self.kind = kind
+        self.label = label
+        self.icon = icon
+        self.why = why
+    }
+
+    /// The SF Symbol for its row, as the Mac's.
+    public var symbol: String {
+        switch kind {
+        case "schedule": "clock"
+        case "thread": "pawprint"
+        case "librarian": "books.vertical"
+        case "runner": "bell"
+        default: icon.flatMap { $0.isEmpty ? nil : $0 } ?? "wrench.and.screwdriver"
+        }
     }
 }
 

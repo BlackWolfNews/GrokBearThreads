@@ -1,5 +1,6 @@
 // tb: a small command line client for testing and scripting the runner.
 import { parseArgs } from 'node:util';
+import { startedByFlags } from './started-by-flags.ts';
 import path from 'node:path';
 import { loadConfig, readToken, runnerUrl } from './config.ts';
 import { RunnerClient } from './client.ts';
@@ -28,6 +29,8 @@ const OPTIONS = {
   archived: { type: 'boolean' },
   all: { type: 'boolean' },
   from: { type: 'string' },
+  why: { type: 'string' },
+  icon: { type: 'string' },
   to: { type: 'string' },
   'until-done': { type: 'boolean' },
   at: { type: 'string' },
@@ -61,8 +64,11 @@ const OPTIONS = {
 const HELP = `tb: talk to the Threadbear runner
 
   tb new "text" [--cwd DIR] [--pool ID | --account ID] [--model M] [--effort L] [--ask] [--image FILE]... [--wait]
+                [--from NAME] [--why WORDS] [--icon SYMBOL]
                                   --pool runs it on a pool (the login with room, moving when
-                                  one runs dry); --account pins it to one login
+                                  one runs dry); --account pins it to one login. --from says a
+                                  tool started it, --why says why in a few words and --icon is
+                                  an SF Symbol: the row shows them under the title
   tb send <threadId> "text" [--image FILE]... [--wait]
   tb list [--snoozed] [--archived] [--all] [--json]
   tb search "words" [--json]
@@ -116,7 +122,7 @@ ${DEV_HELP}`;
 // The flags each command reads. Any other is refused rather than ignored:
 // `tb events <id> --from 3` used to print every event as if it had worked.
 const COMMAND_FLAGS: Record<string, string[]> = {
-  new: ['cwd', 'account', 'pool', 'model', 'effort', 'ask', 'image', 'wait', 'json'],
+  new: ['cwd', 'account', 'pool', 'model', 'effort', 'ask', 'image', 'wait', 'json', 'from', 'why', 'icon'],
   send: ['image', 'wait', 'json'],
   list: ['snoozed', 'archived', 'all', 'json'],
   search: ['json'],
@@ -297,6 +303,8 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
       if (f.model) params.model = f.model;
       if (f.effort) params.effort = f.effort;
       if (f.ask) params.permissionMode = 'ask';
+      const startedBy = startedByFlags(f, process.env.THREADBEAR_THREAD_ID);
+      if (startedBy) params.startedBy = startedBy;
       const r = await client.call<{ thread: ThreadSummary; turnId: string }>('threads.create', params);
       console.log(r.thread.id);
       if (f.wait) return tail(client, r.thread.id, { from: 0, json: Boolean(f.json), untilTurn: r.turnId });

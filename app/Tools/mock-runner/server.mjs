@@ -2487,6 +2487,15 @@ The new hero is shorter, and every page now leads with what the app does.
         .map((rel) => `/Users/mike/dev/me/app/${rel}`),
     });
   }
+  // Threads Mike didn't start (docs/protocol.md, "Who started a thread").
+  for (const [id, startedBy] of [
+    ['demo_ci_slow', { kind: 'tool', label: 'Sentry', icon: 'ladybug', why: '1 event, 0 users' }],
+    ['demo_settings_tabs', { kind: 'thread', label: 'Agent', threadId: 'demo_upload_resume', threadTitle: 'Uploads', why: 'fixing a hook it hit' }],
+    ['demo_build_scripts', { kind: 'librarian', label: 'Librarian' }],
+  ]) {
+    const t = threads.get(id);
+    if (t) t.summary.startedBy = startedBy;
+  }
   const upload = threads.get('demo_upload_resume');
   if (upload) {
     const repo = upload.summary.cwd;

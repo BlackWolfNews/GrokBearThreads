@@ -321,7 +321,7 @@ struct ThreadRow: View {
                             .fill(Color.accentColor)
                             .frame(width: 7, height: 7)
                             .offset(x: -17)
-                            .accessibilityLabel("Unread")
+                            .accessibilityLabel("Needs you")
                     }
                 }
             VStack(alignment: .leading, spacing: 3) {
@@ -330,10 +330,18 @@ struct ThreadRow: View {
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(line2)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        if let startedBy = thread.startedBy {
+                            // Mike didn't start it; the words say who did.
+                            Image(systemName: UIImage(systemName: startedBy.symbol) == nil ? "wrench.and.screwdriver" : startedBy.symbol)
+                                .font(.footnote)
+                                .accessibilityHidden(true)
+                        }
+                        Text(line2)
+                            .font(.subheadline)
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(.secondary)
                     Spacer(minLength: 6)
                     trailing(kind)
                 }
@@ -344,17 +352,16 @@ struct ThreadRow: View {
     }
 
     /// The Mac's ThreadRowLook, as far as the phone's row knows: unread
-    /// with nothing waiting on Mike is "done" (a tick); unread and needing
-    /// him, a dot, unless the status already says so in words.
+    /// with nothing waiting on Mike is "done" (a tick); needing him, a dot.
     private var done: Bool { RowStatus.kind(thread) == .time && thread.unread && !thread.needsYou }
     private var unread: Bool {
         let kind = RowStatus.kind(thread)
-        return (thread.needsYou && kind != .needsYou && kind != .working) || done
+        return kind == .needsYou || (thread.needsYou && kind != .working) || done
     }
     private var emphasised: Bool { thread.needsYou || RowStatus.kind(thread) == .needsYou || done }
 
     private var line2: String {
-        var parts = [thread.placeText]
+        var parts = [thread.bylineText ?? thread.placeText]
         if let runner = model.runnerName(thread.runnerId) { parts.append(runner) }
         if let working = thread.working, thread.isBusy || thread.pendingApproval == nil { parts.append(working) }
         return parts.joined(separator: " · ")
@@ -380,7 +387,8 @@ struct ThreadRow: View {
             .font(.footnote.weight(.medium))
             .foregroundStyle(Color.accentColor)
         case .needsYou:
-            Text("Needs you").font(.footnote.weight(.medium)).foregroundStyle(Look.needsYou)
+            // The dot before the tile says it, as on the Mac.
+            Text(RelativeTime.short(thread.lastActivityAt, now: model.now)).font(.footnote).monospacedDigit().foregroundStyle(Look.faint)
         case .failed:
             Text("Failed").font(.footnote.weight(.medium)).foregroundStyle(Look.failed)
         case .stopped:

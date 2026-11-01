@@ -148,6 +148,8 @@ type ThreadSummary = {
   wakeWhen?: { said: string, topic?: string, pending?: true }
                         // hibernated in Mike's words (Hibernate in words);
                         // only while snoozedUntil is set
+  startedBy?: { kind, label, icon?, threadId?, threadTitle?, why? } // who
+                        // started it when Mike didn't (Who started a thread)
   woke?: { at: string, since?: string } // came back from hibernating by
                         // itself (its time, a restart, a topic) at `at`,
                         // put away at `since` when known; only until Mike
@@ -678,7 +680,7 @@ the summary and then the reply.
 | `hello` | `{ client: string, version: string, build?: { commit, short, tree } }` (`build`: the Mac app's own build, see App restarts) | `{ runnerVersion, protocol: 1, accounts: Account[], pools?: Pool[], defaults: { cwd, accountId, poolId?, model?, models?: { claude?, codex? }, efforts?: { claude?: EffortLevel, codex?: EffortLevel } }, clis?: CliStatus[], updates?: RunnerUpdates }`. `updates` is under Runner updates; `pools` and `defaults.poolId` under Pools. `defaults.accountId` is the account a `threads.create` with no `accountId` uses: the one with the most room among the last-used account's provider (skipping blocked ones, ones under 10% and ones with a note), worked out again as usage changes; a client keeps its own copy of the rule rather than asking again. `defaults.models[provider]` is the model a new thread on that provider gets when it names none (`runner.json`'s `defaults.models`; a dev runner sets the cheapest); `defaults.model` is the same for Claude, kept for older apps. Absent means the account's own default (`accounts[].defaultModel` names it, when known). `defaults.efforts[provider]` likewise for effort; absent means the model's own level. `runnerVersion` is `<package version>+<release id>` when the runner runs from a release, else `<package version>+source` |
 | `threads.list` | `{ include?: ("inbox" \| "snoozed" \| "archived")[] }` (default `["inbox"]`) | `{ threads: ThreadSummary[] }` newest activity first |
 | `threads.search` | `{ query: string, limit?: number }` | `{ threads: ThreadSummary[] }` matches title and preview across all threads, archived included |
-| `threads.create` | `{ text: string, images?: ImageRef[], cwd?: string, accountId?: string, poolId?: string, model?: string, effort?: EffortLevel, permissionMode?: "full" \| "ask", title?: string, worktree?: boolean }` | `{ thread: ThreadSummary }` (the first turn starts straight away). In a repo that asks for worktrees (see Worktrees) the thread gets one of its own before its first turn; `worktree: false` starts it in the folder as it is. The thread's `provider` is its account's. With no `model`, the thread gets `defaults.models[provider]` from `hello`, or `defaults.model` for Claude, or else the account's own default. With no `effort`, `defaults.efforts[provider]`, or else the model's own level. See "Models and effort across providers" |
+| `threads.create` | `{ text: string, images?: ImageRef[], cwd?: string, accountId?: string, poolId?: string, model?: string, effort?: EffortLevel, permissionMode?: "full" \| "ask", title?: string, worktree?: boolean, startedBy?: { kind, label, icon?, threadId?, why? } }` | `{ thread: ThreadSummary }` (the first turn starts straight away). In a repo that asks for worktrees (see Worktrees) the thread gets one of its own before its first turn; `worktree: false` starts it in the folder as it is. The thread's `provider` is its account's. With no `model`, the thread gets `defaults.models[provider]` from `hello`, or `defaults.model` for Claude, or else the account's own default. With no `effort`, `defaults.efforts[provider]`, or else the model's own level. See "Models and effort across providers" |
 | `threads.samples` | `{ cwd: string, remove?: boolean }` | `{ threads: ThreadSummary[] }`. The app's first-run tour's sample threads (`runner/src/samples.ts`): made up exchanges written as finished turns with no CLI, in `cwd` (the app's `~/ThreadbearThreads/Welcome`, where it writes an example patch), with `sample: true`; the first needs you, with a card of asks, and one is left unread. Asking again deletes any there are and makes them afresh (writing the patch again if it's gone, and trusting it as written). `remove: true` deletes them all, archived and hibernating ones too, and returns none. `threads.send` to a sample is `-32602` |
 | `threads.send` | `{ threadId, text, images?: ImageRef[], answers?: AskAnswer[], origin?: "phone" }` | `{ turnId }`. `text` can place the `images` among its words with `[Picture N]` markers (Pictures in a message). `origin: "phone"` is only for a phone command the primary passes on to a draining runner (Sync, "Commands"), so the message keeps its origin there; any other `origin` is `-32602`. If a turn is running and its CLI is live, the message goes into that turn straight away (a `user.message` under the running `turnId`, which is returned): the agent takes it at its next step, or right after its reply if that was already finishing, and the turn doesn't complete until it has been answered. If the thread was moved to another login (usually another provider) during the running turn, a message from Mike (or the phone) doesn't steer into the old CLI: the turn is stopped (`system.note` "Stopped here so <model> can take over.") and the message starts the next turn on the new login, with the handoff, as T3 Code does. If the agent is waiting on a card for its own tool call (an approval or a question, with an `itemId`), a message from Mike declines that card first (`approval.resolved` with `deny` and a `message` telling the agent he wrote instead), as the CLI reads nothing else until the card is answered; a background subagent's card is left open. Otherwise (the CLI is still starting or leaving, messages are already waiting, a move or fresh CLI is due on the next turn, Stop has been pressed, or the turn is only an approval for a background subagent) the message is queued and starts its own turn when the running one ends |
 | `threads.interrupt` | `{ threadId }` | `{}` |
@@ -1425,6 +1427,28 @@ stay), the librarian, and what the phone mirror sends from then on
 a client can show what was cut if it wants to. A later edit can cut back
 further, across an earlier `thread.rewound`.
 
+## Who started a thread
+
+A thread that turns up without Mike having started it leaves him with no
+idea why it exists. `ThreadSummary.startedBy` says who did; his own threads
+(the app, the phone) don't have one.
+
+| `kind` | `label` | From |
+| --- | --- | --- |
+| `tool` | what the tool calls itself ("Sentry") | `tb new --from NAME [--why WORDS] [--icon SYMBOL]`; `icon` is an SF Symbol |
+| `thread` | "Agent" | `create_thread`, or `tb new` from inside a thread; `threadId` and `threadTitle` name it |
+| `schedule` | "Schedule" | a schedule; `ThreadSummary.schedule` has the details |
+| `librarian` | "Librarian" | the librarian's fix threads; `threadId` and `threadTitle` name the thread Mike said it in |
+| `runner` | "Threadbear" | a notice from the runner itself, such as a dialog left on a Mac's screen |
+
+`why` is a few words the row shows after the label: why it was started, from
+the starter, until an `end_turn` with `byline` replaces it with how it came
+out. A `byline` in a thread with no `startedBy` is dropped. With no `why` the
+row shows its usual project or folder after the label. Threads from before
+this have none, and `tb new` outside a thread with no flags could be Mike at
+a terminal, so it has none either. Mirrored to the phone's row from backend
+API 22.
+
 ## Needs you
 
 A turn the agent finished can say whether Mike has to do anything, so
@@ -1433,7 +1457,8 @@ A turn the agent finished can say whether Mike has to do anything, so
 - **The tool.** Every thread's own agent (not its sub-agents) has
   `end_turn` in the `threadbear` tools: `{ needs?: "you" | "nothing",
   summary?: string[], asks?: { action, reply?, why?, options?,
-  suggested?, links? }[], next?: string[], archive?: boolean }`.
+  suggested?, links? }[], next?: string[], archive?: boolean,
+  byline?: string }`. `byline` is under "Who started a thread".
   The asks are the agent's "What I need from you" list, written there
   instead of in its message: each is one paragraph, `action` its first
   sentence (one concrete thing to do, or a question) and `why` the rest

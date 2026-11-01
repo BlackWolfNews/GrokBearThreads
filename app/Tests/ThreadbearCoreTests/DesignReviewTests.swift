@@ -114,7 +114,7 @@ final class DesignReviewTests: XCTestCase {
             XCTAssertTrue(sections.running.isEmpty)
             XCTAssertEqual(ThreadSections.urgency(thread), 0)
             XCTAssertEqual(ThreadRowLook(thread, section: .inbox),
-                           ThreadRowLook(status: .needsYou, unread: false, emphasised: true, labelled: true))
+                           ThreadRowLook(status: .needsYou, unread: true, emphasised: true, labelled: true))
             XCTAssertEqual(DockBadge.label(for: [thread], now: now), "1", "the badge counts threads, not pending reviews")
         }
         let archived = ThreadSummary(id: "archived", title: "Archived review", archivedAt: now, pendingReviews: 1)

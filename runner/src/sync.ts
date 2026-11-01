@@ -68,7 +68,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 21;
+export const BACKEND_API_VERSION = 22;
 // From this one a thread's row carries its open card of asks and a finished
 // turn's next steps, and a message row can be `summary` (end_turn's
 // bullets), so the phone shows end-of-turn cards. An older backend's
@@ -106,6 +106,10 @@ export const SECTIONS_API_VERSION = 15;
 // levels) and its own effort, for the phone's new thread pickers. An older
 // backend's validator would turn the list down, so it goes without.
 export const MODELS_API_VERSION = 20;
+
+// From this one a thread's row carries `startedBy`, for the phone's byline.
+// An older backend's validator would turn the row down, so it goes without.
+export const STARTED_BY_API_VERSION = 22;
 
 export type SyncStatus = {
   state: 'off' | 'ok' | 'error';
@@ -151,6 +155,7 @@ export type ThreadDoc = {
   snoozedUntil?: string;
   snoozedUntilRestart?: boolean;
   woke?: { at: string; since?: string };
+  startedBy?: { kind: string; label: string; icon?: string; why?: string };
   archivedAt?: string;
   costUsd?: number;
   projects?: { id: string; title: string }[];
@@ -363,6 +368,8 @@ export function toThreadDoc(t: ThreadSummary, runnerId: string, now: number, pen
   if (t.snoozedUntil) doc.snoozedUntil = t.snoozedUntil;
   if (t.snoozedUntilRestart) doc.snoozedUntilRestart = true;
   if (t.woke) doc.woke = { ...t.woke };
+  // Not the thread it came from: the phone's row has no tooltip to name it.
+  if (t.startedBy) doc.startedBy = { kind: t.startedBy.kind, label: t.startedBy.label, ...(t.startedBy.icon ? { icon: t.startedBy.icon } : {}), ...(t.startedBy.why ? { why: t.startedBy.why } : {}) };
   if (t.archivedAt) doc.archivedAt = t.archivedAt;
   // To the cent: a running thread's cost moves every turn and the phone
   // doesn't need a write for the fourth decimal.
@@ -418,7 +425,7 @@ function phoneAnswers(raw: unknown): AskAnswer[] | undefined {
 function forBackend(d: ThreadDoc, v: number): ThreadDoc {
   const asks = d.asks !== undefined || d.asksSeq !== undefined || d.next !== undefined;
   const sections = d.needs !== undefined || d.pendingReviews !== undefined || d.waitingForRoom !== undefined;
-  if ((v >= SHARE_API_VERSION || !d.share) && (v >= WOKE_API_VERSION || !d.woke) && (v >= ASKS_API_VERSION || !asks) && (v >= SECTIONS_API_VERSION || !sections)) return d;
+  if ((v >= SHARE_API_VERSION || !d.share) && (v >= WOKE_API_VERSION || !d.woke) && (v >= ASKS_API_VERSION || !asks) && (v >= SECTIONS_API_VERSION || !sections) && (v >= STARTED_BY_API_VERSION || !d.startedBy)) return d;
   const out = { ...d };
   if (v < SECTIONS_API_VERSION) {
     delete out.needs;
@@ -427,6 +434,7 @@ function forBackend(d: ThreadDoc, v: number): ThreadDoc {
   }
   if (v < SHARE_API_VERSION) delete out.share;
   if (v < WOKE_API_VERSION) delete out.woke;
+  if (v < STARTED_BY_API_VERSION) delete out.startedBy;
   if (v < ASKS_API_VERSION) {
     delete out.asks;
     delete out.asksSeq;
@@ -733,7 +741,7 @@ export class ConvexSync {
       const card = (t: ThreadSummary) => Boolean(t.asks?.length) || (t.needs === 'nothing' && t.status === 'idle' && !t.archivedAt);
       // Likewise needs, reviews and waiting for room, for the phone's sections.
       const sections = (t: ThreadSummary) => Boolean(t.needs || t.pendingReviews || t.waitingForRoom);
-      for (const t of this.deps.runner.list(ALL)) if (t.share || (t.woke && v >= WOKE_API_VERSION) || (v >= ASKS_API_VERSION && card(t)) || (v >= SECTIONS_API_VERSION && sections(t))) this.mark(t);
+      for (const t of this.deps.runner.list(ALL)) if (t.share || (t.woke && v >= WOKE_API_VERSION) || (t.startedBy && v >= STARTED_BY_API_VERSION) || (v >= ASKS_API_VERSION && card(t)) || (v >= SECTIONS_API_VERSION && sections(t))) this.mark(t);
       this.scheduleFlush();
     }
     // The pictures wait for the first heartbeat to say the backend takes them.

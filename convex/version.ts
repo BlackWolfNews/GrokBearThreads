@@ -76,4 +76,7 @@
 //    phone:create takes `effort`. A runner sends models only to a backend
 //    of 20 or later; an older runner ignores an effort.
 // 21: a Pocket card can have an `icon`; filing one again without keeps it.
-export const API_VERSION = 21;
+// 22: thread rows can carry `startedBy` ({ kind, label, icon?, why? }): who
+//    started it when Mike didn't, for the phone's byline. A runner sends it
+//    only to a backend of 22 or later; an older phone ignores it.
+export const API_VERSION = 22;

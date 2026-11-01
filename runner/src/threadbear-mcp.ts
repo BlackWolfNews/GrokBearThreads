@@ -19,7 +19,7 @@ import { parseWhen, relativeFuture, relativeTime } from './when.ts';
 
 export { parseWhen, relativeFuture, relativeTime };
 import { RUNNER_VERSION, expandHome } from './config.ts';
-import { ALREADY_ENDED, endTurnDescription, END_TURN_TOOL, BULLETS_ONLY, ENDED, endedThisTurn, NARRATION_ONLY, NO_REPLY, needsFromTool, summaryFromTool, turnReply, type TurnReply } from './needs.ts';
+import { ALREADY_ENDED, endTurnDescription, END_TURN_TOOL, BULLETS_ONLY, ENDED, endedThisTurn, MAX_BYLINE, NARRATION_ONLY, NO_REPLY, needsFromTool, summaryFromTool, turnReply, type TurnReply } from './needs.ts';
 import { asksForAppRestart, type AppRestarts } from './app-restarts.ts';
 import { PANEL_PLACES } from './panel-requests.ts';
 import { nudgedThisTurn, signInNudge, turnSignIns, uncovered } from './connectors.ts';
@@ -663,6 +663,10 @@ export function buildThreadbearTools(
           .max(3)
           .optional()
           .describe('With needs "nothing": follow-ups in this thread worth doing next, each the message the user would send to start it, about 8 words: "Show pictures and files from Bruce threads". Only ones that really came up; usually none. See the description.'),
+        byline: z
+          .string()
+          .optional()
+          .describe('Only in a thread the user did not start (a tool, a schedule or another thread did): how it came out in a few plain words, about 6 ("network blip, nothing to do"). The sidebar shows them under its title, so the user can tell at a glance how much it matters. Leave it out in a thread the user started.'),
         archive: z
           .boolean()
           .optional()
@@ -843,8 +847,9 @@ export function buildThreadbearTools(
         model: z.string().optional().describe("Model id, one of the account's (list_accounts shows them; Codex ones look like gpt-6-luna). With no account or pool, its provider picks the pool. Default: the runner's default model for the provider if it has one (a dev runner's is the cheapest), else the account's."),
         effort: effortEnum.optional().describe("Reasoning effort (ultra is Codex only). Default: the model's own level."),
         permissionMode: z.enum(['full', 'ask']).optional().describe('"full" (default) or "ask" before edits and commands.'),
+        why: z.string().optional().describe('A few plain words on why this thread exists, about 6 ("fixing a hook it hit"). The sidebar shows them under its title, as the user has none of your context for it.'),
       },
-      handle(async ({ text, title, folder: f, pool: p, account: acc, model, effort, permissionMode }) => {
+      handle(async ({ text, title, folder: f, pool: p, account: acc, model, effort, permissionMode, why }) => {
         const r = await control.create({
           text: (await from()) + text,
           title: title?.trim() || text.split('\n').map((l) => l.trim()).find(Boolean)?.slice(0, 200),
@@ -854,6 +859,7 @@ export function buildThreadbearTools(
           model,
           effort,
           permissionMode,
+          startedBy: { kind: 'thread', label: 'Agent', threadId: selfId, ...(why?.trim() ? { why: why.replace(/\s+/g, ' ').trim().slice(0, MAX_BYLINE) } : {}) },
         });
         const where = r.thread.poolId ? ` It's in the ${r.thread.poolId} pool, so it moves to another login if this one runs dry.` : '';
         return `Started thread ${r.thread.id} "${r.thread.title}" in ${r.thread.cwd} on ${r.thread.accountId}${r.thread.model ? ` (${r.thread.model})` : ''}.${where}`;

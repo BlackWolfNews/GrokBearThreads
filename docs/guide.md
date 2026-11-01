@@ -51,6 +51,10 @@ ones opened. The x clears it.
 Each row has the thread's title, with its project or folder under it. A
 title in bold needs you or has a reply you haven't read.
 
+A thread you didn't start says who did instead of its project: a tool such
+as Sentry, a schedule, another thread's agent or the librarian, with a few
+words on why it exists or how it came out ("Sentry · network blip, sorted").
+
 Before the title, in the gap at the left:
 
 - **A blue dot**: the thread has finished and is waiting on you, with a
@@ -66,10 +70,8 @@ At the right of the row:
   off.
 - A grey spinner with something like "2 sub-agents": the turn has ended
   but helpers or jobs it started are still going.
-- **Needs you**, in orange: the agent has stopped partway through to ask
-  you something, to get your OK for a command or an edit, or for you to
-  pick between some designs it showed you. Open the thread to answer.
-- A time: the thread is idle. After a while Threadbear stops an idle
+- A time: the thread is idle, or the blue dot on the left says it's
+  waiting on you. After a while Threadbear stops an idle
   thread's agent to save memory, and your next message starts it again
   where it left off.
 - **Failed**: the last turn ended with an error. Read the thread to see why,

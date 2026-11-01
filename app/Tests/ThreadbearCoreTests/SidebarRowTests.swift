@@ -96,23 +96,23 @@ final class SidebarRowTests: XCTestCase {
     /// Waiting on Mike says "Needs you" in words, so it gets no unread dot
     /// as well; a finished, unread thread gets the dot and the time.
     func testUnreadDotOnlyForFinishedThreads() {
-        XCTAssertEqual(look(.waiting, needsYou: true), ThreadRowLook(status: .needsYou, unread: false, emphasised: true))
-        XCTAssertEqual(look(.waiting), ThreadRowLook(status: .needsYou, unread: false, emphasised: true))
+        XCTAssertEqual(look(.waiting, needsYou: true), ThreadRowLook(status: .needsYou, unread: true, emphasised: true))
+        XCTAssertEqual(look(.waiting), ThreadRowLook(status: .needsYou, unread: true, emphasised: true))
         XCTAssertEqual(look(.idle, needsYou: true), ThreadRowLook(status: .time, unread: true, emphasised: true))
         XCTAssertEqual(look(.error, needsYou: true), ThreadRowLook(status: .failed, unread: true, emphasised: true))
         XCTAssertFalse(look(.running, needsYou: true).unread)
     }
 
     /// Under "Running" a working row doesn't say "Working" again; a row
-    /// whose state differs from its section still says its word. Waiting
-    /// rows in the inbox say "Needs you", since that's why they're on top.
+    /// whose state differs from its section still says its word. A waiting
+    /// row has the dot rather than a word.
     func testSectionWordsAreNotRepeated() {
         func look(_ status: ThreadStatus, needsYou: Bool = false, in section: InboxSection) -> ThreadRowLook {
             ThreadRowLook(ThreadSummary(id: "t", title: "t", status: status, needsYou: needsYou), section: section)
         }
         XCTAssertEqual(look(.running, in: .running), ThreadRowLook(status: .working, unread: false, emphasised: false, labelled: false))
         XCTAssertEqual(look(.starting, in: .running).labelled, false)
-        XCTAssertEqual(look(.waiting, in: .inbox), ThreadRowLook(status: .needsYou, unread: false, emphasised: true, labelled: true))
+        XCTAssertEqual(look(.waiting, in: .inbox), ThreadRowLook(status: .needsYou, unread: true, emphasised: true, labelled: true))
         XCTAssertEqual(look(.idle, needsYou: true, in: .inbox), ThreadRowLook(status: .time, unread: true, emphasised: true))
         XCTAssertTrue(look(.error, needsYou: true, in: .inbox).labelled)
         XCTAssertTrue(look(.stopped, in: .inbox).labelled)
@@ -227,5 +227,37 @@ final class DockBadgeTests: XCTestCase {
         XCTAssertEqual(DockBadge.label(for: [waiting, unread, running, snoozed, archived], now: now), "2")
         XCTAssertNil(DockBadge.label(for: [running], now: now))
         XCTAssertNil(DockBadge.label(needsYou: 0))
+    }
+
+    func testAThreadMikeDidNotStartSaysWhoDidInPlaceOfItsProject() {
+        var thread = ThreadSummary(id: "t", title: "t", cwd: "/x/misc", status: .idle)
+        XCTAssertNil(ThreadByline.line(thread), "his own row doesn't change")
+
+        thread.startedBy = ThreadStartedBy(kind: "tool", label: "Sentry", icon: "ladybug", why: "1 event, 0 users")
+        XCTAssertEqual(ThreadByline.line(thread), .init(symbol: "ladybug", text: "Sentry · 1 event, 0 users", tip: "Started by Sentry"))
+
+        // With nothing to say why, the place it would have shown.
+        thread.startedBy = ThreadStartedBy(kind: "thread", label: "Agent", threadTitle: "Poddle fix")
+        XCTAssertEqual(ThreadByline.line(thread), .init(symbol: "pawprint", text: "Agent · misc", tip: "Started by another thread: Poddle fix"))
+
+        thread.startedBy = ThreadStartedBy(kind: "librarian", label: "Librarian", why: "")
+        XCTAssertEqual(ThreadByline.line(thread)?.text, "Librarian · misc")
+
+        // A tool with no symbol, and a kind from a newer runner.
+        thread.startedBy = ThreadStartedBy(kind: "someday", label: "Thing")
+        XCTAssertEqual(ThreadByline.line(thread)?.symbol, ThreadByline.toolSymbol)
+
+        // A schedule's thread from before startedBy.
+        thread.startedBy = nil
+        thread.schedule = ThreadSchedule(id: "s", title: "Nightly")
+        XCTAssertEqual(ThreadByline.line(thread), .init(symbol: "clock", text: "Schedule · misc", tip: "Started by Schedule"))
+    }
+
+    func testStartedByDecodesFromTheRunnerAndABadOneIsIgnored() throws {
+        func decode(_ startedBy: String) throws -> ThreadSummary {
+            try JSONDecoder().decode(ThreadSummary.self, from: Data(#"{"id":"t","title":"t","startedBy":\#(startedBy)}"#.utf8))
+        }
+        XCTAssertEqual(try decode(#"{"kind":"tool","label":"Sentry","why":"2 events"}"#).startedBy, ThreadStartedBy(kind: "tool", label: "Sentry", why: "2 events"))
+        XCTAssertNil(try decode(#""nonsense""#).startedBy)
     }
 }

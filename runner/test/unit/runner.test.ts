@@ -1807,3 +1807,52 @@ test('sharing: a link that stays across off and on, and a new link on request', 
   assert.throws(() => h.runner.share(thread.id, { access: 'people' as 'link' }), RpcError);
   assert.equal(h.runner.get(thread.id).share!.access, 'link');
 });
+
+test('who started a thread: a row says so when it was not Mike, and end_turn says how it came out', () => {
+  const h = makeHarness();
+  // Mike's own has none, and a byline can't give it one.
+  const mine = create(h).thread;
+  assert.equal(mine.startedBy, undefined);
+  let s = h.adapter.last;
+  s.init();
+  s.text('m1', 'Done.');
+  endTurnCall(s, 't1', { needs: 'nothing', byline: 'should be dropped' });
+  s.result('completed');
+  assert.equal(h.runner.get(mine.id).startedBy, undefined);
+
+  // A tool's, with the starter's why until the thread's own end_turn.
+  const tool = create(h, { startedBy: { kind: 'tool', label: 'Sentry', icon: 'ladybug', why: '1 event, 0 users' } }).thread;
+  assert.deepEqual(tool.startedBy, { kind: 'tool', label: 'Sentry', icon: 'ladybug', why: '1 event, 0 users' });
+  assert.deepEqual(checkSummary(tool), []);
+  s = h.adapter.last;
+  s.init();
+  s.text('m2', 'A blip.');
+  endTurnCall(s, 't2', { needs: 'nothing', byline: '  network blip,\n nothing to do ' });
+  s.result('completed');
+  assert.equal(h.runner.get(tool.id).startedBy?.why, 'network blip, nothing to do');
+
+  // A stopped turn's end_turn says nothing, and no byline leaves it as it was.
+  s = h.adapter.last;
+  h.runner.send(tool.id, 'again', []);
+  s = h.adapter.last;
+  s.text('m3', 'Still a blip.');
+  endTurnCall(s, 't3', { needs: 'nothing' });
+  s.result('completed');
+  assert.equal(h.runner.get(tool.id).startedBy?.why, 'network blip, nothing to do');
+
+  // Another thread's names it, with its title then.
+  const agent = create(h, { startedBy: { kind: 'thread', label: 'Agent', threadId: mine.id } }).thread;
+  assert.equal(agent.startedBy?.threadTitle, mine.title);
+  assert.equal(agent.startedBy?.threadId, mine.id);
+});
+
+test('who started a thread: the librarian, the runner and a schedule each say so', () => {
+  const h = makeHarness();
+  const from = create(h).thread;
+  const id = h.runner.startFix({ fromThreadId: from.id, cwd: h.cfg.defaults.cwd, title: 'Fix it', text: 'Fix it please' })!;
+  assert.deepEqual(h.runner.get(id).startedBy, { kind: 'librarian', label: 'Librarian', threadId: from.id, threadTitle: from.title });
+  const notice = h.runner.noticeOnMac(undefined, 'A dialog', 'A dialog is waiting');
+  assert.deepEqual(h.runner.get(notice).startedBy, { kind: 'runner', label: 'Threadbear' });
+  const scheduled = create(h, { origin: 'schedule', scheduleId: 'sc1', title: 'Nightly' }).thread;
+  assert.deepEqual(scheduled.startedBy, { kind: 'schedule', label: 'Schedule' });
+});

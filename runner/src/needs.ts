@@ -110,6 +110,15 @@ export function archiveFromTool(input: unknown): boolean {
   return o.archive === true && needsFromTool(input)?.needs === 'nothing';
 }
 
+// end_turn's byline: a few words for the row of a thread Mike didn't start.
+export const MAX_BYLINE = 80;
+export function bylineFromTool(input: unknown): string | undefined {
+  if (!input || typeof input !== 'object') return undefined;
+  const v = (input as Record<string, unknown>).byline;
+  if (typeof v !== 'string') return undefined;
+  return v.replace(/\s+/g, ' ').trim().slice(0, MAX_BYLINE) || undefined;
+}
+
 function linksFrom(v: unknown): AskLink[] {
   const out: AskLink[] = [];
   for (const l of Array.isArray(v) ? v : []) {

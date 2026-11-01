@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
-import { ConvexSync, BACKEND_API_VERSION, ICONS_API_VERSION, RUNNER_ICON_API_VERSION, SCHEDULES_API_VERSION, SHARE_API_VERSION, WOKE_API_VERSION, SECTIONS_API_VERSION, MODELS_API_VERSION, toAccountDoc, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, convexUploader, pictureName, type ThreadDoc } from '../../src/sync.ts';
+import { ConvexSync, BACKEND_API_VERSION, ICONS_API_VERSION, RUNNER_ICON_API_VERSION, SCHEDULES_API_VERSION, SHARE_API_VERSION, WOKE_API_VERSION, STARTED_BY_API_VERSION, SECTIONS_API_VERSION, MODELS_API_VERSION, toAccountDoc, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, convexUploader, pictureName, type ThreadDoc } from '../../src/sync.ts';
 import type { Project } from '../../src/protocol.ts';
 import type { ScheduleBackend } from '../../src/schedules.ts';
 import { nullLogger, type Logger } from '../../src/log.ts';
@@ -1361,5 +1361,25 @@ test('commands: something that is not an image fails the command, and nothing is
   assert.equal(finished[0]!.ok, false);
   assert.match(String(finished[0]!.note), /not an image/);
   assert.deepEqual(applied, []);
+  await sync.stop();
+});
+
+test('a row carries who started it, once the backend takes it', async () => {
+  let backend = STARTED_BY_API_VERSION - 1;
+  const { h, sync, docs } = setup({ answer: (fn) => (fn === 'sync:heartbeat' ? { apiVersion: backend } : null) });
+  const a = h.runner.create({ text: 'one', cwd: h.cfg.defaults.cwd, accountId: 'claude-3', startedBy: { kind: 'tool', label: 'Sentry', why: '1 event' } }).thread;
+  sync.start();
+  await tick(20);
+  await sync.flushNow();
+  // An older backend would turn the row down with it on.
+  const old = docs().filter((d) => d.threadId === a.id);
+  assert.ok(old.length);
+  assert.ok(old.every((d) => d.startedBy === undefined));
+  backend = STARTED_BY_API_VERSION;
+  await sync.stop();
+  sync.start();
+  await tick(20);
+  await sync.flushNow();
+  assert.deepEqual(docs().filter((d) => d.threadId === a.id).at(-1)!.startedBy, { kind: 'tool', label: 'Sentry', why: '1 event' });
   await sync.stop();
 });

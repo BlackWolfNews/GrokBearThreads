@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { PersistedEvent } from '../../src/protocol.ts';
-import { archiveFromTool, CODEX_END_TURN_DESCRIPTION, END_TURN_DESCRIPTION, END_TURN_FULL_NAME, endTurnDescription, needsFromText, needsFromTool, summaryFromTool, summaryMarkdown, turnReply } from '../../src/needs.ts';
+import { archiveFromTool, bylineFromTool, CODEX_END_TURN_DESCRIPTION, END_TURN_DESCRIPTION, END_TURN_FULL_NAME, endTurnDescription, needsFromText, needsFromTool, summaryFromTool, summaryMarkdown, turnReply } from '../../src/needs.ts';
 import { END_TURN_TOOL } from '../../src/needs.ts';
 import { SERVER_NAME } from '../../src/threadbear-mcp.ts';
 import { ClaudeNormalizer, fileContext } from '../../src/adapters/claude/normalize.ts';
@@ -340,4 +340,12 @@ test('with bullet replies off, end_turn asks for a normal message first', () => 
     assert.doesNotMatch(endTurnDescription(provider, false), /the bullets are the reply|one short line/);
     assert.match(endTurnDescription(provider, false), /make those words a link to the same url/);
   }
+});
+
+test('a byline is one short line, or nothing', () => {
+  assert.equal(bylineFromTool({ byline: ' network blip,\n sorted ' }), 'network blip, sorted');
+  assert.equal(bylineFromTool({ byline: '   ' }), undefined);
+  assert.equal(bylineFromTool({ byline: 3 }), undefined);
+  assert.equal(bylineFromTool(undefined), undefined);
+  assert.equal(bylineFromTool({ byline: 'x'.repeat(200) })?.length, 80);
 });

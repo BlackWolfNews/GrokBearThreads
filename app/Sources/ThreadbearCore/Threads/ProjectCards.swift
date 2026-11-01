@@ -32,7 +32,8 @@ public struct ProjectCardStatus: Sendable, Equatable {
             case .failed: failed += 1
             case .time, .stopped: break
             }
-            if look.unread { unread += 1 }
+            // Its dot is an unread dot now, but it's already counted as needing him.
+            if look.unread && look.status != .needsYou { unread += 1 }
         }
     }
 

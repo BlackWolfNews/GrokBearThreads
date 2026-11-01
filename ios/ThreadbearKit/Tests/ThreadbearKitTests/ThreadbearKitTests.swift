@@ -490,3 +490,19 @@ private func properties(of data: Data) -> [CFString: Any] {
         #expect(PhotoPrep.jpeg(from: Data("hello".utf8)) == nil)
     }
 }
+
+@Test func aThreadMikeDidNotStartSaysWhoDid() {
+    let decoder = JSONDecoder()
+    let json = { (startedBy: String) in
+        #"{"threadId":"t","runnerId":"r","title":"t","cwd":"/x/misc","accountId":"a","provider":"claude","status":"idle","needsYou":false,"unread":false,"preview":"","createdAt":"2026-11-01T00:00:00.000Z","lastActivityAt":"2026-11-01T00:00:00.000Z"\#(startedBy)}"#
+    }
+    let mine = try? decoder.decode(PhoneThread.self, from: Data(json("").utf8))
+    #expect(mine != nil)
+    #expect(mine?.bylineText == nil)
+    let sentry = try? decoder.decode(PhoneThread.self, from: Data(json(#","startedBy":{"kind":"tool","label":"Sentry","icon":"ladybug","why":"1 event"}"#).utf8))
+    #expect(sentry?.bylineText == "Sentry · 1 event")
+    #expect(sentry?.startedBy?.symbol == "ladybug")
+    let agent = try? decoder.decode(PhoneThread.self, from: Data(json(#","startedBy":{"kind":"thread","label":"Agent"}"#).utf8))
+    #expect(agent?.bylineText == "Agent · misc")
+    #expect(agent?.startedBy?.symbol == "pawprint")
+}

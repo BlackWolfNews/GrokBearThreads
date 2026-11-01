@@ -40,6 +40,7 @@ import type {
   RewoundFiles,
   RunnerDefaults,
   Subagent,
+  ThreadStartedBy,
   ThreadStatus,
   ThreadSummary,
   TurnOutcome,
@@ -88,7 +89,7 @@ import { SAID_MAX, WAKE_SYSTEM, awayFor, hibernateNote, readWakeAnswer, wakeProm
 import { emptyHighlights, observe as observeHighlights, pinItem, remove as removeHighlight, unpin as unpinHighlight, upsert as upsertHighlight, view as highlightsView, absolute, type ThreadHighlights } from './highlights.ts';
 import { SERVER_NAME, approvalTitle } from './threadbear-mcp.ts';
 import { PANEL_ACK_WAIT_MS, PANEL_PLACES, resolvePanel } from './panel-requests.ts';
-import { archiveFromTool, END_TURN_TOOL, endTurnAccepted, endTurnAsksForMessage, endTurnOwesReply, endTurnTaken, needsFromText, needsFromTool, summaryFromTool, summaryMarkdown } from './needs.ts';
+import { archiveFromTool, bylineFromTool, END_TURN_TOOL, endTurnAccepted, endTurnAsksForMessage, endTurnOwesReply, endTurnTaken, needsFromText, needsFromTool, summaryFromTool, summaryMarkdown } from './needs.ts';
 import type { Needs } from './needs.ts';
 import { asksForAppRestart } from './app-restarts.ts';
 import type { ConnectorsStatus } from './connectors.ts';
@@ -1576,6 +1577,7 @@ export class Runner {
     // false: start in the folder as it is, even in a repo that asks for a
     // worktree per thread.
     worktree?: boolean;
+    startedBy?: ThreadStartedBy;
   }): { thread: ThreadSummary; turnId: string } {
     if (!params.text && !params.images?.length) throw new RpcError(ErrorCode.badParams, 'text or images required');
     checkImages(params.images ?? []);
@@ -1692,6 +1694,7 @@ export class Runner {
     origin?: MessageOrigin;
     scheduleId?: string;
     worktree?: boolean;
+    startedBy?: ThreadStartedBy;
   }): { st: ThreadState; notes: string[] } {
     this.checkAccepting();
     // New threads belong on the new release.
@@ -1744,6 +1747,13 @@ export class Runner {
     // files at all (most of them) starts its CLI straight away as before.
     if (params.worktree !== false && this.mayWantWorktree(cwd)) rec.worktreePending = true;
     if (params.origin === 'schedule' && params.scheduleId) rec.schedule = { id: params.scheduleId, title: params.title?.trim() || rec.title };
+    const startedBy = params.origin === 'schedule' && params.scheduleId ? { kind: 'schedule' as const, label: 'Schedule' } : params.startedBy;
+    if (startedBy) {
+      // Its title as it is now, for the row's tooltip: that thread may be
+      // renamed, archived or deleted later.
+      const from = startedBy.threadId ? this.threads.get(startedBy.threadId) : undefined;
+      rec.startedBy = { ...startedBy, ...(from ? { threadTitle: from.rec.title } : {}) };
+    }
     this.store.create(rec);
     const st: ThreadState = { rec, rt: newRuntime(this.clock.now()) };
     this.threads.set(id, st);
@@ -1961,7 +1971,7 @@ export class Runner {
   // folder, does. Its first message is the runner's, not his, and the
   // thread he said it in gets a note, so he knows it's in hand.
   startFix(p: { fromThreadId: string; cwd: string; title: string; text: string }): string | undefined {
-    const id = this.create({ text: p.text, cwd: p.cwd, title: p.title, origin: 'runner' }).thread.id;
+    const id = this.create({ text: p.text, cwd: p.cwd, title: p.title, origin: 'runner', startedBy: { kind: 'librarian', label: 'Librarian', threadId: p.fromThreadId } }).thread.id;
     if (this.threads.has(p.fromThreadId)) this.note(p.fromThreadId, `The librarian started a thread to fix that: ${p.title}.`);
     return id;
   }
@@ -2657,6 +2667,10 @@ export class Runner {
     if (outcome === 'completed') {
       if (said) rec.needs = { seq: ev.seq, needs: said.needs, ...(said.asks ? { asks: said.asks } : {}) };
       else delete rec.needs;
+      // How it came out replaces why it was started, on the row of a thread
+      // Mike didn't start. His own threads have no byline, so it's dropped.
+      const byline = bylineFromTool(turn.endTurn);
+      if (byline && rec.startedBy) rec.startedBy.why = byline;
     }
     // A pool thread whose login ran dry moves and carries on (afterTurn).
     const limitHit = outcome === 'failed' && r.errorKind === 'usageLimit' ? turn.turnId : undefined;
@@ -4188,6 +4202,7 @@ export class Runner {
       s.worktree = { branch: rec.worktree.branch, mainCheckout: rec.worktree.mainCheckout, path: rec.worktree.path };
     }
     if (rec.schedule) s.schedule = { ...rec.schedule };
+    if (rec.startedBy) s.startedBy = { ...rec.startedBy };
     if (rec.panelRequest) s.panelRequest = { ...rec.panelRequest };
     // A record from 28 Oct may say "people" (sharing with specific people,
     // since dropped): that's not shared.
@@ -5059,7 +5074,7 @@ export class Runner {
   // archived has been dealt with, so that gets a new one.
   noticeOnMac(threadId: string | undefined, title: string, text: string): string {
     let st = threadId ? this.threads.get(threadId) : undefined;
-    if (!st || st.rt.deleted || st.rec.archivedAt) st = this.makeThread({ text, title, worktree: false, origin: 'runner' }).st;
+    if (!st || st.rt.deleted || st.rec.archivedAt) st = this.makeThread({ text, title, worktree: false, origin: 'runner', startedBy: { kind: 'runner', label: 'Threadbear' } }).st;
     st.rec.forceUnread = true;
     st.rec.preview = oneLine(text, LIMITS.previewChars);
     this.emit(st, { type: 'system.note', text });

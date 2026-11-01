@@ -11,7 +11,7 @@ public enum ThreadRowStatus: Sendable, Hashable {
     /// spinner and what's running: "3 sub-agents"). `BackgroundWork.short`
     /// has the words; `label` is the generic one.
     case background
-    /// Waiting on an approval or a question ("Needs you" in orange).
+    /// Waiting on an approval or a question: the dot in the gutter says so.
     case needsYou
     /// The last turn failed.
     case failed
@@ -34,18 +34,18 @@ public enum ThreadRowStatus: Sendable, Hashable {
 /// rules are in one tested place rather than spread through the view.
 public struct ThreadRowLook: Sendable, Equatable {
     public var status: ThreadRowStatus
-    /// Finished and not looked at yet: a small accent dot before the title.
-    /// A thread waiting on Mike says so in words instead. Not while
-    /// sub-agents or jobs are still going either: a dot by the spinner
-    /// looked like two states at once, so it comes when they've finished.
+    /// Waiting on Mike: a small accent dot before the title, whether the turn
+    /// has finished or it's stopped partway to ask. One mark for one meaning:
+    /// it used to say so in orange words on the right as well, and Mike asked
+    /// for those to go (1 Nov), as the left side already says it. Not while
+    /// sub-agents or jobs are still going: a dot by the spinner looked like
+    /// two states at once, so it comes when they've finished.
     public var unread: Bool
     /// Semibold title: the thread needs Mike or is unread.
     public var emphasised: Bool
     /// The status is said in words. Under the Running heading a working
     /// row doesn't repeat it (the word took about 60 pt of the title line)
-    /// and shows just its spinner. Waiting rows keep "Needs you": since
-    /// Needs you merged into the inbox, the word is what says why a row
-    /// sits at the top.
+    /// and shows just its spinner.
     public var labelled: Bool
     /// Unread, and its last turn said nothing waits on Mike: a tick in the
     /// gutter instead of the dot, out of Needs you.
@@ -78,7 +78,7 @@ public struct ThreadRowLook: Sendable, Equatable {
         // A turn that said it needs nothing isn't in needsYou, but it's
         // still new: it gets a tick rather than nothing at all.
         done = status == .time && !thread.needsYou && thread.saidDone && thread.lastSeq > thread.lastSeenSeq
-        unread = (thread.needsYou && status != .needsYou && status != .working && status != .background) || done
+        unread = status == .needsYou || (thread.needsYou && status != .working && status != .background) || done
         emphasised = thread.needsYou || status == .needsYou || done
         labelled = !(status == .working && section == .running)
         woke = status == .time && thread.woke != nil
@@ -224,6 +224,47 @@ public enum AccountName {
     static func localPart(_ address: String) -> String {
         guard let at = address.firstIndex(of: "@") else { return address }
         return String(address[..<at])
+    }
+}
+
+/// The line under the title of a thread Mike didn't start, in place of its
+/// project (the tile shows that): who started it and, in a few words, why or
+/// how it came out. He has none of the reasoning behind these threads, so the
+/// row has to give it (1 Nov). Nil for his own threads, whose rows don't change.
+public enum ThreadByline {
+    public struct Line: Sendable, Equatable {
+        public var symbol: String
+        public var text: String
+        public var tip: String
+    }
+
+    public static let toolSymbol = "wrench.and.screwdriver"
+
+    public static func line(_ thread: ThreadSummary, under heading: String? = nil) -> Line? {
+        // A schedule's thread from before startedBy still says it's one.
+        let started = thread.startedBy ?? thread.schedule.map { _ in ThreadStartedBy(kind: "schedule", label: "Schedule") }
+        guard let started else { return nil }
+        let rest = started.why.flatMap { $0.isEmpty ? nil : $0 } ?? ProjectMark.place(thread, under: heading)
+        return Line(symbol: symbol(started), text: started.label + " · " + rest, tip: tip(started))
+    }
+
+    static func symbol(_ started: ThreadStartedBy) -> String {
+        switch started.kind {
+        case "schedule": return "clock"
+        case "thread": return "pawprint"
+        case "librarian": return "books.vertical"
+        case "runner": return "bell"
+        default: return started.icon.flatMap { $0.isEmpty ? nil : $0 } ?? toolSymbol
+        }
+    }
+
+    static func tip(_ started: ThreadStartedBy) -> String {
+        let from = started.threadTitle.flatMap { $0.isEmpty ? nil : $0 }
+        switch started.kind {
+        case "thread": return from.map { "Started by another thread: \($0)" } ?? "Started by another thread"
+        case "librarian": return from.map { "Started by the librarian, from: \($0)" } ?? "Started by the librarian"
+        default: return "Started by \(started.label)"
+        }
     }
 }
 

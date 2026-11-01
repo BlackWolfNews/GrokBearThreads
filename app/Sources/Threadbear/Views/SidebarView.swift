@@ -624,7 +624,8 @@ struct ThreadRowView: View {
                             .frame(width: zoomed(7), height: zoomed(7))
                             .transition(Juice.popIn)
                             .offset(x: -(SidebarMetrics.leading + zoomed(7)) / 2 - zoomed(1))
-                            .accessibilityLabel("Unread")
+                            .tip("Needs you")
+                            .accessibilityLabel("Needs you")
                     }
                 }
                 .animation(Juice.pop, value: look.unread)
@@ -644,22 +645,27 @@ struct ThreadRowView: View {
                 }
                 HStack(alignment: .firstTextBaseline, spacing: zoomed(6)) {
                     HStack(alignment: .firstTextBaseline, spacing: zoomed(4)) {
-                        if let origin = thread.schedule {
-                            // A schedule started it, rather than Mike: the
-                            // same clock as the Scheduled view's.
-                            Image(systemName: "clock")
+                        if let byline = ThreadByline.line(thread, under: heading) {
+                            // Mike didn't start it: who did, and why, in
+                            // place of the project the tile already shows.
+                            // A tool's symbol may not exist on this macOS.
+                            Image(systemName: NSImage(systemSymbolName: byline.symbol, accessibilityDescription: nil) == nil ? ThreadByline.toolSymbol : byline.symbol)
                                 .font(.system(size: TypeScale.sidebarMeta))
-                                .tip(StartedBySchedule.tip(origin, current: app.schedule(origin.id)))
-                                .accessibilityLabel("Scheduled")
+                                .tip(thread.schedule.map { StartedBySchedule.tip($0, current: app.schedule($0.id)) } ?? byline.tip)
+                                .accessibilityLabel(byline.tip)
+                            Text(byline.text)
+                                .font(.system(size: TypeScale.sidebarMeta + 1))
+                                .lineLimit(1)
+                        } else {
+                            Text(ProjectMark.place(thread, under: heading))
+                                .font(.system(size: TypeScale.sidebarMeta + 1))
+                                .lineLimit(1)
                         }
-                        Text(ProjectMark.place(thread, under: heading))
-                            .font(.system(size: TypeScale.sidebarMeta + 1))
-                            .lineLimit(1)
                     }
                     .foregroundStyle(.secondary)
                     Spacer(minLength: zoomed(6))
                     if !showsActions {
-                        // A new status ("Working" to "Needs you") blurs
+                        // A new status ("Working" to the time) blurs
                         // across rather than snapping.
                         trailing(look)
                             .id(look.status)
@@ -837,7 +843,8 @@ struct ThreadRowView: View {
             .foregroundStyle(.secondary)
             .tip(BackgroundWork.detail(thread.background))
         case .needsYou:
-            Text("Needs you").font(.system(size: TypeScale.sidebarMeta, weight: .medium)).foregroundStyle(Color(nsColor: Theme.needsYou))
+            // The dot in the gutter says it.
+            time.foregroundStyle(SidebarMetrics.faint)
         case .failed:
             Text("Failed").font(.system(size: TypeScale.sidebarMeta, weight: .medium)).foregroundStyle(Color(nsColor: Theme.failed))
                 .tip("The last turn failed")

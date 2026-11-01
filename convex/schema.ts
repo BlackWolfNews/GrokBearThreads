@@ -38,6 +38,9 @@ export const threadFields = {
   // Back from hibernating by itself and not opened yet: the row says
   // "Woke up" (docs/protocol.md, ThreadSummary.woke).
   woke: v.optional(v.object({ at: v.string(), since: v.optional(v.string()) })),
+  // Who started it, when that wasn't Mike: the row's byline
+  // (docs/protocol.md, "Who started a thread"). Since API 22.
+  startedBy: v.optional(v.object({ kind: v.string(), label: v.string(), icon: v.optional(v.string()), why: v.optional(v.string()) })),
   archivedAt: v.optional(v.string()),
   costUsd: v.optional(v.number()),
   projects: v.optional(v.array(v.object({ id: v.string(), title: v.string() }))),

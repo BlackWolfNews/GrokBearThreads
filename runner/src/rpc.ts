@@ -5,7 +5,8 @@ import { WebSocketServer, WebSocket } from 'ws';
 import type { Runner, Notification, CliControl } from './runner.ts';
 import type { Logger } from './log.ts';
 import { CLI_POLICIES, EFFORT_LEVELS, ErrorCode, PROVIDERS, RpcError, isEffortLevel, isProvider } from './protocol.ts';
-import type { ApprovalDecision, AskAnswer, CliPolicy, EffortLevel, ImageRef, PermissionMode, Provider, ShareAccess, ThreadSummary } from './protocol.ts';
+import type { ApprovalDecision, AskAnswer, CliPolicy, EffortLevel, ImageRef, PermissionMode, Provider, ShareAccess, ThreadStartedBy, ThreadSummary } from './protocol.ts';
+import { MAX_BYLINE } from './needs.ts';
 import { isMoved, mergeSummaries, type Bucket } from './handover.ts';
 
 type Conn = {
@@ -370,6 +371,7 @@ export class RpcServer {
           permissionMode: optMode(p),
           title: optString(p, 'title'),
           ...(p.worktree === false ? { worktree: false } : {}),
+          ...optStartedBy(p),
         });
         return { thread: res.thread, turnId: res.turnId };
       }
@@ -596,6 +598,24 @@ function stringArray(p: Record<string, unknown>, k: string): string[] {
   const v = p[k];
   if (!Array.isArray(v) || v.some((x) => typeof x !== 'string')) throw bad(`${k} must be an array of strings`);
   return v as string[];
+}
+
+// Who started a new thread (docs/protocol.md, "Who started a thread"). It's
+// shown on Mike's row, so it's cut to what a row can hold, on one line.
+const STARTED_BY_KINDS = new Set(['tool', 'thread', 'schedule', 'librarian', 'runner']);
+function optStartedBy(p: Record<string, unknown>): { startedBy?: ThreadStartedBy } {
+  const v = p.startedBy;
+  if (v === undefined || v === null) return {};
+  if (typeof v !== 'object') throw bad('startedBy must be an object');
+  const o = v as Record<string, unknown>;
+  if (typeof o.kind !== 'string' || !STARTED_BY_KINDS.has(o.kind)) throw bad('startedBy.kind must be tool, thread, schedule, librarian or runner');
+  const words = (x: unknown, max: number) => (typeof x === 'string' ? x.replace(/\s+/g, ' ').trim().slice(0, max) : '');
+  const label = words(o.label, 40);
+  if (!label) throw bad('startedBy.label required');
+  const icon = words(o.icon, 60);
+  const why = words(o.why, MAX_BYLINE);
+  const threadId = words(o.threadId, 60);
+  return { startedBy: { kind: o.kind as ThreadStartedBy['kind'], label, ...(icon ? { icon } : {}), ...(threadId ? { threadId } : {}), ...(why ? { why } : {}) } };
 }
 
 function optMode(p: Record<string, unknown>): PermissionMode | undefined {

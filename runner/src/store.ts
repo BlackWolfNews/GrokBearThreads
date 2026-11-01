@@ -1,7 +1,7 @@
 import type { HighlightState } from './highlights.ts';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { WaitingForRoom, Ask, AskAnswer, NeedsWho, DesignReview, ReviewDraft, EffortLevel, MessageOrigin, PanelRequest, PermissionMode, ThreadShare, PersistedEvent, Provider, Subagent, ThreadProject, ThreadSchedule, ThreadStatus, ImageRef } from './protocol.ts';
+import type { WaitingForRoom, Ask, AskAnswer, NeedsWho, DesignReview, ReviewDraft, EffortLevel, MessageOrigin, PanelRequest, PermissionMode, ThreadShare, PersistedEvent, Provider, Subagent, ThreadProject, ThreadSchedule, ThreadStartedBy, ThreadStatus, ImageRef } from './protocol.ts';
 import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 import { paths } from './config.ts';
 import type { WorktreeRecord } from './worktrees.ts';
@@ -102,6 +102,9 @@ export type ThreadRecord = {
   // The schedule that started the thread, with its title then (the
   // schedule may be renamed or deleted later).
   schedule?: ThreadSchedule;
+  // Who started it, when that wasn't Mike. Its why is the starter's, until
+  // the thread's own end_turn says how it came out.
+  startedBy?: ThreadStartedBy;
   // show_panel's request, until the app shows it or Mike sends a message.
   panelRequest?: PanelRequest;
   // The seq ranges edits of earlier messages cut out of the conversation

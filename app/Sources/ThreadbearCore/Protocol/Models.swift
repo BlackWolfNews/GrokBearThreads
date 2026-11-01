@@ -868,6 +868,29 @@ public struct ThreadWorktree: Sendable, Hashable, Codable {
     }
 }
 
+/// Who started a thread, when it wasn't Mike (protocol "Who started a thread").
+public struct ThreadStartedBy: Sendable, Hashable, Codable {
+    /// "tool", "thread", "schedule", "librarian" or "runner"; a kind from a
+    /// newer runner reads as a tool.
+    public var kind: String
+    public var label: String
+    /// An SF Symbol a tool asked for.
+    public var icon: String?
+    public var threadId: String?
+    public var threadTitle: String?
+    /// A few words: why it was started, then how it came out.
+    public var why: String?
+
+    public init(kind: String, label: String, icon: String? = nil, threadId: String? = nil, threadTitle: String? = nil, why: String? = nil) {
+        self.kind = kind
+        self.label = label
+        self.icon = icon
+        self.threadId = threadId
+        self.threadTitle = threadTitle
+        self.why = why
+    }
+}
+
 /// The schedule that started a thread (protocol "Schedules"), with its
 /// title as it was then: the schedule may since be renamed or deleted.
 public struct ThreadSchedule: Sendable, Hashable, Codable {
@@ -1016,6 +1039,9 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     /// The schedule that started it; nil for one a person or an agent
     /// started, and from a runner that predates this.
     public var schedule: ThreadSchedule?
+    /// Who started it, when it wasn't Mike. Nil for his own threads, and from
+    /// a runner that predates this.
+    public var startedBy: ThreadStartedBy?
     /// A panel the agent asked to show Mike, waiting for him to look at the
     /// thread. Nil when there's none, and from a runner older than this.
     public var panelRequest: PanelRequest?
@@ -1044,7 +1070,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         subagents: [Subagent] = [], projects: [ThreadProject] = [], pendingReviews: Int? = nil, worktree: ThreadWorktree? = nil, needs: String? = nil, asks: [Ask] = [], asksSeq: Int? = nil,
         highlightsAt: Date? = nil,
         schedule: ThreadSchedule? = nil, poolId: String? = nil, waitingForRoom: WaitingForRoom? = nil,
-        panelRequest: PanelRequest? = nil, share: ThreadShare? = nil
+        panelRequest: PanelRequest? = nil, share: ThreadShare? = nil, startedBy: ThreadStartedBy? = nil
     ) {
         self.id = id
         self.title = title
@@ -1091,6 +1117,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         self.asksSeq = asksSeq
         self.highlightsAt = highlightsAt
         self.schedule = schedule
+        self.startedBy = startedBy
         self.panelRequest = panelRequest
         self.share = share
     }
@@ -1149,6 +1176,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         asksSeq = (try? c.decodeIfPresent(Int.self, forKey: .asksSeq)) ?? nil
         highlightsAt = ((try? c.decodeIfPresent(String.self, forKey: .highlightsAt)) ?? nil).flatMap(ISO8601.parse)
         schedule = (try? c.decodeIfPresent(ThreadSchedule.self, forKey: .schedule)) ?? nil
+        startedBy = (try? c.decodeIfPresent(ThreadStartedBy.self, forKey: .startedBy)) ?? nil
         panelRequest = (try? c.decodeIfPresent(PanelRequest.self, forKey: .panelRequest)) ?? nil
         share = (try? c.decodeIfPresent(ThreadShare.self, forKey: .share)) ?? nil
     }
@@ -1201,6 +1229,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         try c.encodeIfPresent(asksSeq, forKey: .asksSeq)
         try c.encodeIfPresent(highlightsAt.map(ISO8601.format), forKey: .highlightsAt)
         try c.encodeIfPresent(schedule, forKey: .schedule)
+        try c.encodeIfPresent(startedBy, forKey: .startedBy)
         try c.encodeIfPresent(panelRequest, forKey: .panelRequest)
         try c.encodeIfPresent(share, forKey: .share)
     }
@@ -1209,7 +1238,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         case id, title, cwd, accountId, provider, model, effort, modelInUse, effortInUse, permissionMode, status, live, needsYou, pendingReviews
         case createdAt, updatedAt, lastActivityAt, snoozedUntil, snoozedUntilRestart, wakeWhen, woke, archivedAt, onOldRunner, preview
         case lastSeq, lastSeenSeq, nativeSessionId, contextTokens, contextWindow, costUsd, panels, actions, hooks, patches, background, subagents
-        case projects, worktree, needs, asks, asksSeq, highlightsAt, schedule, poolId, waitingForRoom, panelRequest, share, sample
+        case projects, worktree, needs, asks, asksSeq, highlightsAt, schedule, startedBy, poolId, waitingForRoom, panelRequest, share, sample
     }
 
     /// The first ask Mike hasn't ticked on the open card, if any: what the

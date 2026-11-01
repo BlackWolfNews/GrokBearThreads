@@ -191,6 +191,9 @@ export type ThreadSummary = {
   // The schedule that started it (docs/protocol.md, "Schedules"). Absent
   // for a thread a person or an agent started.
   schedule?: ThreadSchedule;
+  // Who started it, when that wasn't Mike (docs/protocol.md, "Who started
+  // a thread"). Absent for his own threads.
+  startedBy?: ThreadStartedBy;
   // A panel the agent asked to show Mike (show_panel), waiting for him to
   // look at the thread (docs/protocol.md, "Showing panels").
   panelRequest?: PanelRequest;
@@ -224,6 +227,15 @@ export type ThreadWorktree = { branch: string; mainCheckout: string; path: strin
 
 // The schedule's title as it was when it started the thread.
 export type ThreadSchedule = { id: string; title: string };
+export type ThreadStartedByKind = 'tool' | 'thread' | 'schedule' | 'librarian' | 'runner';
+export type ThreadStartedBy = {
+  kind: ThreadStartedByKind;
+  label: string; // "Sentry", "Agent", "Schedule"
+  icon?: string; // an SF Symbol a tool asked for (tool only)
+  threadId?: string; // the thread that started it (thread, librarian)
+  threadTitle?: string; // that thread's title then
+  why?: string; // a few words: why it exists, then how it came out
+};
 
 // Projects (docs/protocol.md, "Projects"): a grouping above folders that
 // carries goals, state and notes forward, made by the librarian, agents or
