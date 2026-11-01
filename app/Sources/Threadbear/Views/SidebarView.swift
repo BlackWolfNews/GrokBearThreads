@@ -1315,23 +1315,65 @@ enum WakeWhenPrompt {
     }
 }
 
-/// "Pick a time" for snoozing: a small sheet with a date picker.
+/// "Pick a time" for snoozing: a month calendar to click a day on, with
+/// a time field under it. Mike asked for a calendar (2 Nov): the stepper
+/// field alone meant typing or nudging a date digit by digit.
 @MainActor
 enum SnoozePicker {
     static func show(threadId: String, app: AppModel) {
-        let picker = NSDatePicker()
-        picker.datePickerStyle = .textFieldAndStepper
-        picker.datePickerElements = [.yearMonthDay, .hourMinute]
-        picker.dateValue = Date().addingTimeInterval(3 * 3600)
-        picker.minDate = Date()
-        picker.sizeToFit()
+        let start = Date().addingTimeInterval(3 * 3600)
+
+        let calendar = NSDatePicker()
+        calendar.datePickerStyle = .clockAndCalendar
+        calendar.datePickerElements = .yearMonthDay
+        calendar.isBezeled = false
+        calendar.drawsBackground = false
+        calendar.dateValue = start
+        // Today stays clickable: a later time today is fine, and the time
+        // field is checked against now below.
+        calendar.minDate = Calendar.current.startOfDay(for: Date())
+        calendar.sizeToFit()
+        calendar.setTip("Day to wake it")
+
+        // Its own picker, not the calendar's: with .hourMinute the
+        // graphical style draws an analogue clock face.
+        let time = NSDatePicker()
+        time.datePickerStyle = .textFieldAndStepper
+        time.datePickerElements = .hourMinute
+        time.dateValue = start
+        time.sizeToFit()
+        time.setTip("Time to wake it")
+
+        let stack = NSStackView(views: [calendar, time])
+        stack.orientation = .vertical
+        stack.alignment = .centerX
+        stack.spacing = 10
+        stack.frame = NSRect(origin: .zero, size: stack.fittingSize)
+
         let alert = NSAlert()
         alert.messageText = "Hibernate until"
-        alert.accessoryView = picker
+        alert.accessoryView = stack
         alert.addButton(withTitle: "Hibernate")
         alert.addButton(withTitle: "Cancel")
-        if alert.runModal() == .alertFirstButtonReturn {
-            app.snooze(threadId, until: picker.dateValue)
+        while alert.runModal() == .alertFirstButtonReturn {
+            let when = combine(day: calendar.dateValue, time: time.dateValue)
+            if when > Date() {
+                app.snooze(threadId, until: when)
+                return
+            }
+            // An earlier time today: ask again rather than hibernating
+            // into the past, which would wake it straight back up.
+            alert.informativeText = "That time has already gone. Pick a later one."
         }
+    }
+
+    /// The calendar's day at the time field's hour and minute.
+    static func combine(day: Date, time: Date) -> Date {
+        let cal = Calendar.current
+        var parts = cal.dateComponents([.year, .month, .day], from: day)
+        let clock = cal.dateComponents([.hour, .minute], from: time)
+        parts.hour = clock.hour
+        parts.minute = clock.minute
+        return cal.date(from: parts) ?? day
     }
 }
