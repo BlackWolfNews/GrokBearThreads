@@ -97,7 +97,7 @@ function SharedThread({ slug, token, data, loading, onMore }: { slug: string; to
             </div>
           ) : (
             <div key={g.m.seq} className={`msg ${g.m.role}`}>
-              <MessageText text={g.m.text} pictures={inText} />
+              <MessageText text={g.m.text} pictures={inText} seq={g.m.seq} rows={data.messages} />
               <Pictures items={picturesFor([g.m.seq])} />
               <div className="when muted small">{new Date(g.m.at).toLocaleString()}</div>
             </div>

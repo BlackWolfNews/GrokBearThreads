@@ -1654,7 +1654,10 @@ A turn the agent finished can say whether Mike has to do anything, so
   way from what it has, a step's one line: a command with a description
   comes as only the description, so a quote of the command finds nothing
   and the sheet opens with no step lit. A `review:` link says it opens on
-  the Mac.
+  the Mac. The website has the same one-line steps on the page: a work:
+  link scrolls to its step, and is only its words if it finds none; so is
+  a `review:` link, and a `thread:` link on a shared page, as whoever it's
+  shared with can't open the others.
 - **Needs from the asks.** `needs` may be left out: asks mean `you`,
   none mean `nothing`. Agents filling in a summary forgot it 2 times in
   9.

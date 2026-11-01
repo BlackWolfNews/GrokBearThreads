@@ -188,6 +188,8 @@ function ThreadView({ token, threadId }: { token: string; threadId: string }) {
   const data = useQuery(api.phone.thread, { token, threadId });
   const [limit, setLimit] = useState(FIRST_PAGE);
   const page = useQuery(api.phone.messages, { token, threadId, limit, tools: true });
+  // For thread: links, as agents may give only the start of an id.
+  const inbox = useQuery(api.phone.threads, { token, view: 'inbox' });
   const update = useMutation(api.phone.update);
   const [pending, setPending] = useState<Id<'commands'> | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
@@ -285,7 +287,13 @@ function ThreadView({ token, threadId }: { token: string; threadId: string }) {
           ) : (
             <div key={g.m.seq} className={`msg ${g.m.role}`}>
               {g.m.role === 'user' && g.m.origin && g.m.origin !== 'user' ? <div className="origin muted small">{originLabel(g.m.origin)}</div> : null}
-              <MessageText text={g.m.text} pictures={inText} />
+              <MessageText
+                text={g.m.text}
+                pictures={inText}
+                seq={g.m.seq}
+                rows={shown.messages}
+                threadPath={(id) => threadPath(inbox?.find((r) => r.threadId.startsWith(id))?.threadId ?? id)}
+              />
               <Pictures items={after.get(g.m.seq) ?? []} />
               <div className="when muted small">{new Date(g.m.at).toLocaleString()}</div>
             </div>

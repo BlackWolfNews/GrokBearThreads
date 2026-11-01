@@ -3,6 +3,8 @@
 
 import Markdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { go } from './route';
+import { escapeDestinations, findStep, readLink } from './thread-links';
 
 // A message or tool line, from phone:messages or share:view.
 export type PageMessage = { seq: number; role: 'user' | 'assistant' | 'tool'; text: string; origin?: string; toolKind?: string; at: string };
@@ -21,13 +23,28 @@ export function groupTools(messages: PageMessage[]): Group[] {
   return out;
 }
 
+function stepId(seq: number): string {
+  return `step-${seq}`;
+}
+
+// Where a work: link goes: its step, out of any fold and lit up for a moment.
+function showStep(seq: number) {
+  const el = document.getElementById(stepId(seq));
+  if (!el) return;
+  const fold = el.closest('details');
+  if (fold) fold.open = true;
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  el.classList.add('lit');
+  setTimeout(() => el.classList.remove('lit'), 2500);
+}
+
 // A run of tool calls: up to three shown as lines, more folded into "12 tool
 // calls" that opens to the lines. What they printed stays on the Mac.
 export function ToolRun({ items }: { items: PageMessage[] }) {
   const lines = (
     <ul className="tools">
       {items.map((m) => (
-        <li key={m.seq} title={new Date(m.at).toLocaleString()}>
+        <li key={m.seq} id={stepId(m.seq)} title={new Date(m.at).toLocaleString()}>
           <span className="tool-glyph" aria-hidden="true">
             {toolGlyph(m.toolKind)}
           </span>
@@ -69,18 +86,75 @@ export type Picture = { seq: number; src?: string; url: string; width?: number; 
 // A message's text as Markdown, its links opening in a new tab. A picture
 // written as a path on Mike's Mac shows from `pictures` (src to URL) when
 // it was uploaded for a shared thread, and as its alt text otherwise,
-// rather than a broken image.
-export function MessageText({ text, pictures }: { text: string; pictures?: Map<string, string> }) {
+// rather than a broken image. A link into the thread goes to its step, or
+// `threadPath` for another thread (Mike's own page only: whoever a thread's
+// shared with can't open the others). With nowhere to go it's just its words.
+export function MessageText({
+  text,
+  pictures,
+  seq,
+  rows,
+  threadPath,
+}: {
+  text: string;
+  pictures?: Map<string, string>;
+  seq?: number;
+  rows?: PageMessage[];
+  threadPath?: (id: string) => string;
+}) {
   return (
-    <div className="md">
+    <div className="md" id={seq === undefined ? undefined : stepId(seq)}>
       <Markdown
         remarkPlugins={[remarkGfm]}
         // The default keeps links safe (no javascript: and the like). A
         // file:// picture is let through only to be looked up in
         // `pictures`; it's never used as an address itself.
-        urlTransform={(url, key) => (key === 'src' && url.startsWith('file://') ? url : defaultUrlTransform(url))}
+        // work:, thread: and review: are never used as addresses either: the
+        // `a` below reads them and makes its own.
+        urlTransform={(url, key) => ((key === 'src' && url.startsWith('file://')) || (key === 'href' && readLink(url)) ? url : defaultUrlTransform(url))}
         components={{
-          a: (p) => <a {...p} target="_blank" rel="noreferrer" />,
+          a: ({ node: _, href, children, ...p }) => {
+            const link = href ? readLink(href) : undefined;
+            if (!link) {
+              return (
+                <a {...p} href={href} target="_blank" rel="noreferrer">
+                  {children}
+                </a>
+              );
+            }
+            if (link.kind === 'step' && seq !== undefined && rows) {
+              const step = findStep(link.quote, seq, rows);
+              if (step !== undefined) {
+                return (
+                  <a
+                    href={`#${stepId(step)}`}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      showStep(step);
+                    }}
+                  >
+                    {children}
+                  </a>
+                );
+              }
+            }
+            if (link.kind === 'thread' && threadPath) {
+              const path = threadPath(link.id);
+              return (
+                <a
+                  href={path}
+                  onClick={(e) => {
+                    if (e.metaKey || e.ctrlKey) return;
+                    e.preventDefault();
+                    go(path);
+                  }}
+                >
+                  {children}
+                </a>
+              );
+            }
+            return <>{children}</>;
+          },
           img: ({ src, alt }) => {
             const s = typeof src === 'string' ? src : '';
             const url = pictures?.get(s) ?? (/^https?:\/\//.test(s) ? s : undefined);
@@ -93,7 +167,7 @@ export function MessageText({ text, pictures }: { text: string; pictures?: Map<s
           },
         }}
       >
-        {text}
+        {escapeDestinations(text)}
       </Markdown>
     </div>
   );
