@@ -6,7 +6,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { makeHarness, tick } from '../helpers/fakes.ts';
 import { nullLogger } from '../../src/log.ts';
-import { FrozenClis, QUIET_MS, STOP_AFTER_MS, SWEEP_MS, fileCallInSample, parseProcs, realProbe, type FrozenProbe, type Proc } from '../../src/frozen-cli.ts';
+import { FrozenClis, QUIET_MS, STOP_AFTER_MS, SWEEP_MS, fileCallInSample, parseProcs, realProbe, sampleSandbox, type FrozenProbe, type Proc } from '../../src/frozen-cli.ts';
 
 class FakeProbe implements FrozenProbe {
   procs: Proc[] = [];
@@ -169,5 +169,12 @@ test('the real probe sees a process blocked in open', { skip: process.platform !
     cat.kill('SIGKILL');
     sleeper.kill('SIGKILL');
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('sample is kept away from what macOS asks about', () => {
+  const profile = sampleSandbox('/Users/me');
+  for (const p of ['/Volumes', '/Users/me/Downloads', '/Users/me/Documents', '/Users/me/Desktop', '/Users/me/Library/Mobile Documents']) {
+    assert.ok(profile.includes(`(subpath "${p}")`), p);
   }
 });

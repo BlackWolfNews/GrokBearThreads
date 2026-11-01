@@ -442,9 +442,8 @@ the thread runs on.
   Give Threadbear Runner Full Disk Access on that Mac, in System Settings >
   Privacy & Security, and the prompts stop. Do this when you set the Mac up:
   a waiting prompt can also hold up other apps using the same drive until
-  someone answers it, and a browser an agent starts is enough to set one off
-  if a removable drive is plugged in. The trade-off is that agents there can
-  read everything your account can. If a thread does get stuck like this, it
+  someone answers it. The trade-off is that agents there can read everything
+  your account can. If a thread does get stuck like this, it
   says so after a minute or two and goes in Needs you. Five minutes later
   Threadbear stops the turn, and your next message carries on from there.
 - **A thread called "... needs someone at its screen".** Threadbear starts one

@@ -10,13 +10,12 @@ import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 // "A dialog on a Mac's screen").
 //
 // macOS asks about a protected folder or a removable drive in the name of
-// Threadbear Runner, for anything under it: an agent's `find ~/Downloads`, or
-// a browser it starts, as Chromium looks over every mounted volume at launch.
-// Once a prompt is up it stays up, even after whatever asked has gone
-// (tried on Tinker Desk, 1 Nov 2026). And it holds up more than its asker: on
-// 31 Oct 2026 prompts waiting on Bruce's locked screen stopped Sammy Cam
-// getting at its external drive from 22:00 to 06:43, with its own permission
-// long granted, and nothing said so.
+// Threadbear Runner, for anything under it, an agent's `find ~/Downloads` or
+// a tool that goes looking on a drive. Once a prompt is up it stays up, even
+// after whatever asked has gone (tried on Tinker Desk, 1 Nov 2026). And it
+// holds up more than its asker: on 31 Oct 2026 a prompt waiting on Bruce's
+// locked screen stopped Sammy Cam getting at its external drive from 22:00 to
+// 06:43, with its own permission long granted, and nothing said so.
 //
 // frozen-cli.ts sees this only from inside a turn, and only if the CLI itself
 // is the one stuck. So this looks at the screen: the runner tells the prompt
@@ -166,7 +165,7 @@ export function goneText(machine: string): string {
 }
 
 export function accessText(machine: string): string {
-  return `Threadbear Runner doesn't have Full Disk Access on ${machine}, and nobody's likely to be at its screen. When an agent there touches Desktop, Documents, Downloads or a removable drive, or starts a browser, macOS waits for someone to answer a prompt, and that can hold up other apps using the same drive. In System Settings > Privacy & Security > Full Disk Access on ${machine}, turn on Threadbear Runner. Agents there can then read everything your account can.`;
+  return `Threadbear Runner doesn't have Full Disk Access on ${machine}, and nobody's likely to be at its screen. When an agent there touches Desktop, Documents, Downloads or a removable drive, macOS waits for someone to answer a prompt, and that can hold up other apps using the same drive. In System Settings > Privacy & Security > Full Disk Access on ${machine}, turn on Threadbear Runner. Agents there can then read everything your account can.`;
 }
 
 // Whether a file opens. Undefined when it isn't there, so can't say.

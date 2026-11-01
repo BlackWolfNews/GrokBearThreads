@@ -254,8 +254,8 @@ Before leaving a second Mac on its own, turn on Threadbear Runner in System
 Settings > Privacy & Security > Full Disk Access there (add
 `~/Applications/Threadbear Runner.app` with the + if it isn't listed). No program
 can do this for you. Without it, an agent touching Desktop, Documents, Downloads
-or a removable drive, or starting a browser, leaves a macOS prompt waiting, and
-it can hold up every other app using that drive until someone answers. That
+or a removable drive leaves a macOS prompt waiting, and it can hold up every
+other app using that drive until someone answers. That
 goes for a fork and an own-deployment install as much as Mike's.
 `install-runner.sh` says this at the end of an install and opens the pane on a
 Mac without the app, `tb status` says while it's missing, and a Mac without the

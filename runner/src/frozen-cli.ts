@@ -200,6 +200,24 @@ export function parseProcs(text: string): Proc[] {
   return out;
 }
 
+// sample hunts for debug symbols through Spotlight, wherever it says they
+// are. On Bruce that took it to a folder deep in an external drive, which
+// macOS asks about in Threadbear Runner's name: the very prompt this file is
+// looking for. It happened first at 21:54 on 31 Oct 2026, in the unit test of
+// this code that every release build runs, and that prompt then held up every
+// other app on that drive until 06:43 (docs/protocol.md, "A dialog on a Mac's
+// screen"). The sandbox refuses those paths before macOS thinks of asking.
+// The stacks it's after come from the system's own libraries, which it can
+// still read (tried on Bruce, 1 Nov 2026).
+export function sampleSandbox(home: string): string {
+  const paths = [
+    '/Volumes',
+    '/System/Volumes/Data/Volumes',
+    ...['Desktop', 'Documents', 'Downloads', 'Dropbox', 'Library/CloudStorage', 'Library/Mobile Documents'].map((d) => path.join(home, d)),
+  ];
+  return `(version 1)(allow default)(deny file* ${paths.map((p) => `(subpath ${JSON.stringify(p)})`).join(' ')})`;
+}
+
 export function realProbe(): FrozenProbe {
   return {
     async processes() {
@@ -209,7 +227,7 @@ export function realProbe(): FrozenProbe {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'threadbear-sample-'));
       const file = path.join(dir, 'sample.txt');
       try {
-        await run('/usr/bin/sample', [String(pid), '1', '-mayDie', '-file', file]);
+        await run('/usr/bin/sandbox-exec', ['-p', sampleSandbox(os.homedir()), '/usr/bin/sample', String(pid), '1', '-mayDie', '-file', file]);
         return fileCallInSample(fs.readFileSync(file, 'utf8'));
       } catch {
         // It ended, or macOS won't let it be sampled: nothing to go on.

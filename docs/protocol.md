@@ -1069,7 +1069,8 @@ behind a macOS privacy dialog nobody was at the Mac to click. The agent
 can't say so, as it isn't running. So every 30 seconds the runner
 (frozen-cli.ts) looks for Claude turns whose CLI has said nothing for a
 minute, leaving out any waiting on an approval, and runs macOS's `sample`
-for a second on the CLI (the process whose arguments carry its session id).
+for a second on the CLI (the process whose arguments carry its session id),
+in a sandbox that keeps it away from what macOS would ask about.
 A turn that seems fine is looked at less and less, up to every 5 minutes.
 Commands aren't sampled: the CLI moves one that blocks to the background
 after 2 minutes and tells the agent, which can say so.
@@ -1095,14 +1096,17 @@ the folder prompts altogether, which a Mac nobody sits at needs.
 
 ### A dialog on a Mac's screen
 
-Frozen CLIs only sees a CLI stuck in its own turn. The prompt isn't always
-that: on 31 Oct 2026 an agent's `find ~/Downloads` and a browser an agent
-started (Chromium looks over every mounted volume at launch) each left a
-prompt on Bruce's locked screen. A prompt stays up after what asked has gone,
-and until it's answered it can hold up other apps' access to that folder or
-drive, whoever they are and whatever they've been granted. That night it
-stopped another app using Bruce's external drive for nearly nine hours, with
-no turn running and nothing saying so.
+Frozen CLIs only sees a CLI stuck in its own turn. A prompt isn't always that.
+On 31 Oct 2026 two were waiting on Bruce's locked screen: Downloads, from an
+agent's `find ~/Downloads` at 11:06, whose CLI was stopped at 11:20, and
+removable volumes, which fits a release build at 21:54. Those builds run the
+unit tests, and that build's new test of `sample` sent `sample` hunting for
+debug symbols into a folder deep in the external drive. A prompt stays up after
+what asked has gone, and until it's answered it can hold up other apps' access
+to that folder or drive, whatever they've been granted. From 22:00 to 06:43 no
+other app could use Bruce's drive, with no turn running and nothing saying so.
+So `sample` now runs in a sandbox that refuses those paths (`sampleSandbox`).
+Agents' own commands still set prompts off, on a Mac without Full Disk Access.
 
 So the installed runner (mac-screen.ts, a dev runner only with
 `THREADBEAR_MAC_SCREEN=on`, and `off` stops it) does two things, on every
