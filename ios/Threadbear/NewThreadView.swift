@@ -117,8 +117,8 @@ struct NewThreadView: View {
         do {
             for try await status in backend.command(commandId) {
                 if let threadId = status?.threadId {
-                    dismiss()
                     onCreated(threadId)
+                    dismiss()
                     return
                 }
                 if status?.state == .failed {

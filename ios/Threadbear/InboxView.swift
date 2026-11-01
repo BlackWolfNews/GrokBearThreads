@@ -13,6 +13,8 @@ struct InboxView: View {
     @State private var olderArchived: [PhoneThread] = []
     @State private var pocketOpen = false
     @State private var afterPocket: PocketView.Next?
+    /// The thread a new thread sheet just made, to open once the sheet has gone.
+    @State private var afterCompose: String?
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -120,8 +122,15 @@ struct InboxView: View {
                     pocketOpen = true
                 }
             }
-            .sheet(isPresented: $composing, onDismiss: { composeText = "" }) {
-                NewThreadView(text: composeText) { threadId in path.append(threadId) }
+            .sheet(isPresented: $composing, onDismiss: {
+                composeText = ""
+                // Only once the sheet has gone, as with the Pocket's cover. Pushed while
+                // it was still sliding away with the keyboard, the thread could open
+                // blank on the phone until you went back and in again.
+                if let id = afterCompose { path.append(id) }
+                afterCompose = nil
+            }) {
+                NewThreadView(text: composeText) { afterCompose = $0 }
             }
             .onChange(of: model.composeText, initial: true) { _, text in
                 guard let text else { return }
