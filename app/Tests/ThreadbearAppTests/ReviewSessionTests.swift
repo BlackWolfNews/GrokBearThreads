@@ -155,9 +155,8 @@ final class ReviewSessionTests: XCTestCase {
         only.options = [only.options[0]]
         let service = ReviewService(load: { only }, save: { _, _ in only }, respond: { _, _ in only }, cancel: { _ in only })
         let session = ReviewSession(threadId: "thread", review: only, service: service, defaults: cache(), autosave: false)
-        session.show(0, slot: 1)
         session.browse(1)
-        session.mode = .single
+        XCTAssertEqual(session.mode, .single)
         XCTAssertEqual(session.visibleIndices, [0])
     }
 

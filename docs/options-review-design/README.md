@@ -1,5 +1,15 @@
 # Comparing design options
 
+**1 November 2026: the window was redone.** `4-all-plus-form.png` is the layout
+Mike picked (`~/dev/me/misc/threadbear-options-window` has the other two he
+compared). Every image stays on a stage, sized by how many columns make them
+biggest, with the question, the choices and their reasons, a note on any of
+them and Send on the right. Picking opens that choice's note box and puts the
+cursor in it. Click an image to enlarge it, and again or Esc to see them all.
+Grid, 2-up, the thumbnail strip and Later went; closing the window keeps the
+draft. The usage notes below describe the earlier window where they differ.
+The reply format didn't change.
+
 Design pass, 27 October 2026. Mike approved A, the separate comparison window.
 On 28 October he asked for it as a panel instead: a review now opens in the
 dock's Review panel beside its thread, with a button in its bar to pop it out
@@ -111,17 +121,14 @@ in the same thread. Existing Codex native sessions may retain the tools they
 started with; `tb rpc reviews.create '<JSON with threadId and the same fields>'`
 can create a review for such a session once the runner has updated.
 
-Click Compare images on the transcript card to open the window. Reviews with
-more than two images start in Grid; 2-up compares a pair and Single gives one
-image the whole canvas. Use either title menu or the thumbnail strip to
-change images. Fit shows the entire image; 100% shows one source pixel per
-screen pixel, with scrollbars. Left/right arrows browse outside the notes
-editor; Return toggles Single and 2-up. Reference images get notes but cannot
-be picked. The thread header also lists pending reviews, including those
+Click the transcript card to open the window. Click an image to enlarge it.
+Enlarged, the title bar's magnifier switches between fit and 100%, one source
+pixel per screen pixel with scrollbars. The arrow keys browse outside a note
+box, Return enlarges or goes back, Esc goes back and Cmd-Return sends.
+Reference images get notes but cannot be picked. The thread header also lists pending reviews, including those
 older than the transcript page currently loaded.
 
-Pick/unpick and notes save a draft. Review later or closing the window keeps
-it; Send reply commits all the notes and optional choice together. A local
+Pick/unpick and notes save a draft. Closing the window keeps it; Send commits all the notes and optional choice together. A local
 cache preserves text during a lost connection, including a rapid close and
 reopen. If another window has changed the server draft, local text is kept
 and an explicit Save my draft is needed before replacing it. Cancel review
@@ -132,6 +139,6 @@ Runner files: `runner/src/reviews.ts`, the review methods in `runner.ts`,
 and the shared MCP tool in `threadbear-mcp.ts`. App files: core review models
 and reduction, `ReviewSession.swift`, `ReviewRowCell.swift` and
 `Views/ReviewWindow.swift`. `app/Tools/screenshots.sh /tmp/review-shots --only 16`
-captures the card, grid, pair and readable-size views using the four original
-images. The mock fixture is `demo_design_review`. See the app README for the
+captures the card, all of them, a pick with a note, enlarged and 100% using the
+four original images. The mock fixture is `demo_design_review`. See the app README for the
 `review` automation command. HTML previews and overlays remain deferred.

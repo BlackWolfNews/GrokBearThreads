@@ -189,4 +189,42 @@ final class DesignReviewTests: XCTestCase {
         XCTAssertEqual(message.text, text)
         XCTAssertEqual(message.review?.lines, [.init(label: "Picker", text: "Picked A: Auto account")])
     }
+
+    // MARK: How the images share the stage
+
+    func testPhonesGoInOneRowSoTheyAreAsBigAsCanBe() {
+        let phones = Array(repeating: 940.0 / 1800.0, count: 3)
+        let layout = ReviewGalleryLayout.best(aspects: phones, width: 1200, height: 900, spacing: 12)
+        XCTAssertEqual(layout.columns, 3)
+        XCTAssertEqual(layout.rows, 1)
+    }
+
+    func testWideMockupsGoInTwoRows() {
+        let wide = Array(repeating: 2200.0 / 1520.0, count: 4)
+        let layout = ReviewGalleryLayout.best(aspects: wide, width: 1200, height: 900, spacing: 12)
+        XCTAssertEqual(layout.columns, 2)
+        XCTAssertEqual(layout.rows, 2)
+    }
+
+    func testOneImageGetsTheWholeStage() {
+        let layout = ReviewGalleryLayout.best(aspects: [1.5], width: 1200, height: 900, spacing: 12)
+        XCTAssertEqual(layout.columns, 1)
+        XCTAssertEqual(layout.cellWidth, 1200)
+        XCTAssertEqual(layout.cellHeight, 900)
+    }
+
+    func testAStageWithNoRoomYetDoesntGoNegative() {
+        let layout = ReviewGalleryLayout.best(aspects: [1, 1], width: 0, height: 0, spacing: 12, chromeWidth: 16, chromeHeight: 36)
+        XCTAssertEqual(layout.cellWidth, 0)
+        XCTAssertEqual(layout.cellHeight, 0)
+    }
+
+    func testFitKeepsTheImagesShape() {
+        let tall = ReviewGalleryLayout.fit(aspect: 0.5, width: 400, height: 400)
+        XCTAssertEqual(tall.width, 200)
+        XCTAssertEqual(tall.height, 400)
+        let wide = ReviewGalleryLayout.fit(aspect: 2, width: 400, height: 400)
+        XCTAssertEqual(wide.width, 400)
+        XCTAssertEqual(wide.height, 200)
+    }
 }

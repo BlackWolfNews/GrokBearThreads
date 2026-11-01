@@ -23,10 +23,11 @@ final class ReviewSession {
     private(set) var submitting = false
     private(set) var conflict = false
     var error: String?
-    var mode: ReviewMode
+    /// All of them on the stage, or one enlarged.
+    var mode = ReviewMode.all
     var actualSize = false
-    var left = 0
-    var right = 1
+    /// The one enlarged in .single.
+    private(set) var focused = 0
 
     @ObservationIgnored private let service: ReviewService
     @ObservationIgnored private let defaults: UserDefaults
@@ -50,8 +51,6 @@ final class ReviewSession {
         self.defaults = defaults
         self.autosave = autosave
         cacheKey = "reviewDraft.\(threadId).\(review.id)"
-        mode = review.options.count > 2 ? .grid : .pair
-        right = min(1, max(0, review.options.count - 1))
         if let data = defaults.data(forKey: cacheKey), let cached = try? JSONDecoder().decode(CachedDraft.self, from: data), cached.draft != draft {
             draft = cached.draft
             dirty = true
@@ -67,10 +66,17 @@ final class ReviewSession {
     var editable: Bool { review.isPending && !submitting }
     var visibleIndices: [Int] {
         switch mode {
-        case .grid: return Array(review.options.indices)
-        case .pair: return ([left] + (right == left ? [] : [right])).filter { review.options.indices.contains($0) }
-        case .single: return review.options.indices.contains(left) ? [left] : []
+        case .all: return Array(review.options.indices)
+        case .single: return review.options.indices.contains(focused) ? [focused] : []
         }
+    }
+
+    /// Says what will go, so a pick doesn't look like the end of it: until
+    /// now it read as done, with Send at the far end of the window (Mike, 1 Nov).
+    var sendLabel: String {
+        if submitting { return "Sending…" }
+        if let pickedId = draft.pickedId { return "Send \(pickedId)" }
+        return draft.hasNotes ? "Send notes" : "Send"
     }
 
     func setNote(_ text: String, for id: String) {
@@ -234,22 +240,24 @@ final class ReviewSession {
         } catch { self.error = "Couldn’t cancel the review. \(error.localizedDescription)" }
     }
 
-    func show(_ index: Int, slot: Int) {
+    func enlarge(_ index: Int) {
         guard review.options.indices.contains(index) else { return }
-        if slot == 0 {
-            if right == index { right = left }
-            left = index
-        } else {
-            if left == index { left = right }
-            right = index
-        }
+        focused = index
+        mode = .single
     }
 
+    /// Zoom only means anything on an enlarged image, so it doesn't outlive one.
+    func showAll() {
+        mode = .all
+        actualSize = false
+    }
+
+    /// The arrow keys. From all of them, the first press enlarges the one
+    /// last looked at; after that they step through.
     func browse(_ direction: Int) {
         let count = review.options.count
         guard count > 0 else { return }
-        if mode == .pair { show((right + direction + count) % count, slot: 1) }
-        else { show((left + direction + count) % count, slot: 0) }
+        enlarge(mode == .all ? min(focused, count - 1) : (focused + direction + count) % count)
     }
 
     /// The runner trims notes and drops blanks. A saved space at the end
@@ -263,5 +271,5 @@ final class ReviewSession {
 }
 
 enum ReviewMode: String, CaseIterable {
-    case grid = "Grid", pair = "2-up", single = "Single"
+    case all = "All", single = "Single"
 }

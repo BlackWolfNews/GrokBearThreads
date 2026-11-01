@@ -522,7 +522,8 @@ promptly, with the review's id and the `review:<id>` link that opens it
 from an ask or a message (see Needs you); the agent may finish its turn
 while Mike reviews the options.
 The app shows a compact card outside work groups. Opening it opens a
-resizable, modeless comparison window; arrival never steals focus.
+resizable, modeless window with every image on a stage and the choices,
+their notes and Send down the right; arrival never steals focus.
 
 ```ts
 type ReviewDraft = { pickedId?: string, notes: Record<string, string> }

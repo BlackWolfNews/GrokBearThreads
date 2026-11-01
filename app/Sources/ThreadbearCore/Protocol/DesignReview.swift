@@ -216,3 +216,45 @@ public struct ReviewAnswer: Sendable, Hashable {
         return option
     }
 }
+
+/// How a review's images share the stage: same-sized cells, as many columns
+/// as make the images biggest. Three phones want one row and four wide
+/// mockups want two; a fixed two columns left phones tiny in wide slots with
+/// a quarter of the window empty (Mike, 1 Nov).
+public struct ReviewGalleryLayout: Sendable, Hashable {
+    public var columns: Int
+    public var rows: Int
+    public var cellWidth: Double
+    public var cellHeight: Double
+
+    /// `aspects` is each image's width over height. `chromeWidth` and
+    /// `chromeHeight` are what a cell spends on anything but its image.
+    public static func best(aspects: [Double], width: Double, height: Double, spacing: Double,
+                            chromeWidth: Double = 0, chromeHeight: Double = 0) -> ReviewGalleryLayout {
+        let count = max(1, aspects.count)
+        var best: ReviewGalleryLayout?
+        var bestArea = -1.0
+        for columns in 1...count {
+            let rows = (count + columns - 1) / columns
+            let cellWidth = max(0, (width - spacing * Double(columns - 1)) / Double(columns))
+            let cellHeight = max(0, (height - spacing * Double(rows - 1)) / Double(rows))
+            let room = (max(0, cellWidth - chromeWidth), max(0, cellHeight - chromeHeight))
+            let area = aspects.reduce(0.0) { total, aspect in
+                let image = fit(aspect: aspect, width: room.0, height: room.1)
+                return total + image.width * image.height
+            }
+            // Ties keep the fewer columns, for the wider cells.
+            if area > bestArea {
+                bestArea = area
+                best = ReviewGalleryLayout(columns: columns, rows: rows, cellWidth: cellWidth, cellHeight: cellHeight)
+            }
+        }
+        return best ?? ReviewGalleryLayout(columns: 1, rows: 1, cellWidth: 0, cellHeight: 0)
+    }
+
+    /// The biggest size of that shape inside the room given.
+    public static func fit(aspect: Double, width: Double, height: Double) -> (width: Double, height: Double) {
+        guard aspect > 0, width > 0, height > 0 else { return (max(0, width), max(0, height)) }
+        return width / aspect <= height ? (width, width / aspect) : (height * aspect, height)
+    }
+}

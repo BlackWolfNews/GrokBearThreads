@@ -174,6 +174,15 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
         super.init(window: window)
         window.delegate = self
         window.contentView = NSHostingView(rootView: ReviewWindow(session: session, back: back, close: { [weak self] in self?.close() }))
+        // Up in the title bar rather than a row of their own, so the images
+        // and the choices get that height. Wide enough for all of them, as an
+        // accessory doesn't resize when some come and go.
+        let buttons = NSHostingView(rootView: ReviewTitlebarButtons(session: session, back: back))
+        buttons.frame.size = NSSize(width: 130, height: 28)
+        let accessory = NSTitlebarAccessoryViewController()
+        accessory.layoutAttribute = .trailing
+        accessory.view = buttons
+        window.addTitlebarAccessoryViewController(accessory)
         window.setFrame(frame, display: false)
     }
 
@@ -214,12 +223,17 @@ private final class ReviewNativeWindow: NSWindow {
     override func keyDown(with event: NSEvent) {
         // Text editors own their arrows and Return. Outside an editor,
         // browsing works immediately without first clicking the canvas.
-        if !(firstResponder is NSTextView), event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
-            if event.keyCode == 123 { reviewSession?.browse(-1); return }
-            if event.keyCode == 124 { reviewSession?.browse(1); return }
-            if event.keyCode == 36, let session = reviewSession {
-                session.mode = session.mode == .single ? .pair : .single
+        if !(firstResponder is NSTextView), event.modifierFlags.intersection([.command, .control, .option]).isEmpty, let session = reviewSession {
+            switch event.keyCode {
+            case 123, 126: session.browse(-1); return // left, up
+            case 124, 125: session.browse(1); return // right, down
+            case 36: // Return
+                if session.mode == .single { session.showAll() } else { session.browse(0) }
                 return
+            case 53 where session.mode == .single: // Esc
+                session.showAll()
+                return
+            default: break
             }
         }
         super.keyDown(with: event)
@@ -234,27 +248,66 @@ extension ReviewOption {
     }
 }
 
-/// The review: the images, a pick and notes on each, and Send. Shown in the
-/// dock's Review panel, or in a window of its own when popped out.
+/// The buttons in a review window's title bar.
+private struct ReviewTitlebarButtons: View {
+    @Bindable var session: ReviewSession
+    let back: () -> Void
+    @State private var confirmingCancel = false
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Spacer(minLength: 0)
+            if session.mode == .single {
+                icon("square.grid.2x2", "See them all (Esc)") { session.showAll() }
+                icon(session.actualSize ? "minus.magnifyingglass" : "plus.magnifyingglass",
+                     session.actualSize ? "Fit the image in its space" : "Show at full size and scroll") { session.actualSize.toggle() }
+            }
+            icon("arrow.up.backward", "Show the thread this came from", back)
+            if session.review.isPending {
+                Menu {
+                    Button("Cancel review", role: .destructive) { confirmingCancel = true }
+                } label: { Image(systemName: "ellipsis") }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().frame(width: 26)
+                    .tip("More")
+            }
+        }
+        .padding(.trailing, 10)
+        .foregroundStyle(.secondary)
+        .confirmationDialog("Cancel this review?", isPresented: $confirmingCancel) {
+            Button("Cancel review", role: .destructive) { Task { await session.cancelReview() } }
+        } message: { Text("The agent won\u{2019}t get a reply. You can still look at the images.") }
+    }
+
+    private func icon(_ symbol: String, _ tip: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).frame(width: 26, height: 24).contentShape(Rectangle())
+        }.buttonStyle(.plain).tip(tip)
+    }
+}
+
+/// The review: every image on the stage, and on the right the question, the
+/// choices with the agent's reasons, a note on any of them, and Send. Mike
+/// picked this layout on 1 Nov, over the grid of cards that hid the notes and
+/// reasons and put Pick and Send at opposite ends of the window.
 struct ReviewWindow: View {
     @Bindable var session: ReviewSession
     var inPanel = false
     let back: () -> Void
     let close: () -> Void
-    @State private var confirmingCancel = false
-    @State private var noteExpanded = false
+    @Environment(\.colorScheme) private var colorScheme
+    /// Choices with a box because the note icon was pressed. A pick or a
+    /// saved note opens one by itself.
+    @State private var openedNotes: Set<String> = []
+    @FocusState private var typingIn: String?
+
+    private static let railWidth: CGFloat = 340
+    private static let stageInset: CGFloat = 14
+    private static let cellSpacing: CGFloat = 12
+    private static let cellPadding: CGFloat = 8
+    private static let captionHeight: CGFloat = 20
 
     var body: some View {
         VStack(spacing: 0) {
-            toolbar
-            if let note = session.review.note, !note.isEmpty {
-                Text(note).font(.system(size: TypeScale.detail)).foregroundStyle(.secondary)
-                    .lineLimit(noteExpanded ? nil : 2)
-                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.bottom, 10)
-                    .contentShape(Rectangle())
-                    .onTapGesture { noteExpanded.toggle() }
-                    .tip(noteExpanded ? "Click to shorten" : "Click to read it all")
-            }
             if let error = session.error {
                 HStack {
                     Text(error).font(.system(size: TypeScale.detail)).textSelection(.enabled)
@@ -271,19 +324,14 @@ struct ReviewWindow: View {
             if session.review.options.isEmpty {
                 ContentUnavailableView("No images to compare", systemImage: "photo")
             } else {
-                canvases
-                if session.mode != .grid && session.review.options.count > session.visibleIndices.count { strip }
+                HStack(spacing: 0) {
+                    stage
+                    Divider()
+                    rail.frame(width: Self.railWidth)
+                }
             }
-            footer
         }
         .background(Color(nsColor: .windowBackgroundColor))
-        .onMoveCommand { direction in
-            if direction == .left { session.browse(-1) }
-            if direction == .right { session.browse(1) }
-        }
-        .confirmationDialog("Cancel this review?", isPresented: $confirmingCancel) {
-            Button("Cancel review", role: .destructive) { Task { await session.cancelReview() } }
-        } message: { Text("The agent won’t get a reply. You can still look at the images.") }
         .task {
             await session.refresh()
             // Keeps up with replies from elsewhere (the phone, a second
@@ -295,197 +343,228 @@ struct ReviewWindow: View {
         }
     }
 
-    private var toolbar: some View {
-        HStack(spacing: 10) {
-            Picker("View", selection: $session.mode) {
-                Image(systemName: "square.grid.2x2").tag(ReviewMode.grid)
-                Image(systemName: "rectangle.split.2x1").tag(ReviewMode.pair)
-                Image(systemName: "rectangle").tag(ReviewMode.single)
-            }.pickerStyle(.segmented).labelsHidden().fixedSize()
-                .tip("All of them, two side by side, or one at a time (← → to move)")
-            Spacer(minLength: 10)
-            Toggle(isOn: $session.actualSize) {
-                Image(systemName: session.actualSize ? "minus.magnifyingglass" : "plus.magnifyingglass")
-            }.toggleStyle(.button)
-                .tip(session.actualSize ? "Fit each image in its space" : "Show at full size and scroll")
-            if !inPanel {
-                Button { back() } label: { Image(systemName: "arrow.up.backward") }
-                    .tip("Show the thread this came from")
-            }
-        }.font(.system(size: TypeScale.work)).padding(.horizontal, 14).padding(.vertical, 10)
-    }
+    // MARK: The images
 
-    @ViewBuilder private var canvases: some View {
-        if session.mode == .grid {
-            GeometryReader { geo in
-                let columns = geo.size.width < 620 ? 1 : 2
-                let rows = max(1, Int(ceil(Double(session.review.options.count) / Double(columns))))
-                ScrollView {
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: columns), spacing: 12) {
-                        ForEach(session.visibleIndices, id: \.self) { index in
-                            option(index, slot: 0, grid: true)
-                                .frame(height: max(220, (geo.size.height - 12 * CGFloat(min(rows, 2) - 1)) / CGFloat(min(rows, 2))))
+    private var stage: some View {
+        GeometryReader { geo in
+            let room = CGSize(width: max(0, geo.size.width - Self.stageInset * 2), height: max(0, geo.size.height - Self.stageInset * 2))
+            Group {
+                if session.mode == .single, session.review.options.indices.contains(session.focused) {
+                    cell(session.focused, size: room)
+                } else {
+                    let layout = ReviewGalleryLayout.best(
+                        aspects: session.review.options.map(aspect), width: room.width, height: room.height, spacing: Self.cellSpacing,
+                        chromeWidth: Self.cellPadding * 2, chromeHeight: Self.cellPadding * 2 + Self.captionHeight)
+                    let indices = Array(session.review.options.indices)
+                    VStack(spacing: Self.cellSpacing) {
+                        ForEach(Array(stride(from: 0, to: indices.count, by: layout.columns)), id: \.self) { first in
+                            HStack(spacing: Self.cellSpacing) {
+                                ForEach(first..<min(first + layout.columns, indices.count), id: \.self) { index in
+                                    cell(index, size: CGSize(width: layout.cellWidth, height: layout.cellHeight))
+                                }
+                            }
                         }
-                    }.padding(.horizontal, 14).padding(.bottom, 6)
+                    }
                 }
             }
-        } else {
-            HStack(spacing: 12) {
-                ForEach(Array(session.visibleIndices.enumerated()), id: \.element) { slot, index in
-                    option(index, slot: slot, grid: false)
-                }
-            }.padding(.horizontal, 14)
+            .frame(width: geo.size.width, height: geo.size.height)
         }
+        // minWidth 0: the image view's own size mustn't push the rail away.
+        .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black.opacity(colorScheme == .dark ? 0.22 : 0.05))
     }
 
-    private func option(_ index: Int, slot: Int, grid: Bool) -> some View {
+    private func aspect(_ option: ReviewOption) -> Double {
+        guard let width = option.image.width, let height = option.image.height, width > 0, height > 0 else { return 1100.0 / 760.0 }
+        return Double(width) / Double(height)
+    }
+
+    private func cell(_ index: Int, size: CGSize) -> some View {
         let option = session.review.options[index]
         let picked = session.draft.pickedId == option.id
-        let hasNotes = session.draft.notes[option.id]?.isEmpty == false
-        return VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                if grid || session.review.options.count < 2 {
-                    Text(option.label).fontWeight(.medium).lineLimit(1)
-                        .tip(option.note ?? option.label)
-                } else {
-                    Picker("Image", selection: Binding(get: { index }, set: { session.show($0, slot: slot) })) {
-                        ForEach(Array(session.review.options.enumerated()), id: \.element.id) { i, item in
-                            Text(item.label).tag(i)
-                        }
-                    }.labelsHidden().frame(minWidth: 60, maxWidth: .infinity, alignment: .leading)
-                        .tip("Which one to show here")
-                }
-                Spacer(minLength: 4)
-                if grid && hasNotes {
-                    Image(systemName: "text.bubble").foregroundStyle(.secondary)
-                        .tip(session.draft.notes[option.id] ?? "")
-                }
-                if option.reference {
-                    Text("Reference").foregroundStyle(.secondary).font(.system(size: TypeScale.detail))
-                        .tip("Shown for context. It isn't one of the choices.")
-                } else {
-                    Button {
-                        session.pick(option.id)
-                    } label: {
-                        Label(picked ? "Picked" : "Pick", systemImage: picked ? "checkmark.circle.fill" : "circle")
-                            .foregroundStyle(picked ? Color.accentColor : Color.primary)
-                    }.disabled(!session.editable)
-                        .tip(picked ? "Click again to unpick" : "Pick this one")
-                }
-            }.font(.system(size: TypeScale.work)).padding(.horizontal, 10).padding(.vertical, 8)
-            Divider()
-            ZStack {
-                ReviewCanvas(image: option.image, actualSize: session.actualSize)
-                if grid {
-                    // In the grid, a click opens the image on its own, with
-                    // room for notes.
-                    Color.clear.contentShape(Rectangle())
-                        .onTapGesture {
-                            session.show(index, slot: 0)
-                            session.mode = .single
-                        }
-                        .tip("Click to open it on its own and add notes")
-                }
-            }
-            // minWidth 0: the image view's own size mustn't push two cards
-            // wider than a narrow panel.
-            .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
+        let enlarged = session.mode == .single
+        let scrolling = enlarged && session.actualSize
+        let room = CGSize(width: max(0, size.width - Self.cellPadding * 2), height: max(0, size.height - Self.cellPadding * 2 - Self.captionHeight))
+        let fit = ReviewGalleryLayout.fit(aspect: aspect(option), width: room.width, height: room.height)
+        return VStack(alignment: .leading, spacing: 0) {
+            Text(option.id)
+                .font(.system(size: TypeScale.detail, weight: .semibold))
+                .foregroundStyle(picked ? Color.accentColor : Color.secondary)
+                .lineLimit(1).frame(height: Self.captionHeight, alignment: .topLeading)
+            // At full size a click is for scrolling, so it does nothing.
+            ReviewCanvas(image: option.image, actualSize: scrolling, onClick: scrolling ? nil : {
+                if enlarged { session.showAll() } else { session.enlarge(index) }
+            })
+            .tip(scrolling ? "" : "\(option.id): click to \(enlarged ? "see them all" : "enlarge")")
+            .frame(width: scrolling ? room.width : fit.width, height: scrolling ? room.height : fit.height)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .accessibilityLabel("\(option.label). Scroll to inspect the image.")
-            if !grid {
-                Divider()
-                VStack(alignment: .leading, spacing: 6) {
-                    if let note = option.note { Text(note).foregroundStyle(.secondary).lineLimit(2) }
-                    ZStack(alignment: .topLeading) {
-                        TextEditor(text: Binding(get: { session.draft.notes[option.id] ?? "" }, set: { session.setNote($0, for: option.id) }))
-                            .font(.system(size: TypeScale.work)).scrollContentBackground(.hidden)
-                            .disabled(!session.editable)
-                            .accessibilityLabel("Notes on \(option.label)")
-                        if !hasNotes {
-                            Text(session.editable ? "Notes for the agent" : "No notes")
-                                .font(.system(size: TypeScale.work)).foregroundStyle(.tertiary)
-                                .padding(.leading, 5).allowsHitTesting(false)
-                        }
-                    }
-                    .padding(6).background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 6))
-                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator, lineWidth: 0.5))
-                    .frame(height: 64)
-                }.font(.system(size: TypeScale.detail)).padding(10)
+        }
+        .padding(Self.cellPadding)
+        .frame(width: size.width, height: size.height)
+        .overlay {
+            if picked {
+                RoundedRectangle(cornerRadius: 10).strokeBorder(Color.accentColor, lineWidth: 2).allowsHitTesting(false)
             }
         }
-        .frame(minWidth: 0, maxWidth: .infinity)
-        .background(Color.primary.opacity(0.025))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(picked ? Color.accentColor.opacity(0.75) : Color(nsColor: .separatorColor), lineWidth: picked ? 1.5 : 1))
     }
 
-    /// Thumbnails to step through the others in 2-up and single.
-    private var strip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(Array(session.review.options.enumerated()), id: \.element.id) { index, option in
-                    Button {
-                        session.show(index, slot: session.mode == .pair ? 1 : 0)
-                    } label: {
-                        ReviewThumbnail(path: option.image.path).frame(width: 64, height: 42)
-                            .clipShape(RoundedRectangle(cornerRadius: 5))
-                            .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(
-                                session.draft.pickedId == option.id ? Color.accentColor : session.visibleIndices.contains(index) ? Color.primary.opacity(0.5) : Color(nsColor: .separatorColor),
-                                lineWidth: session.visibleIndices.contains(index) || session.draft.pickedId == option.id ? 1.5 : 0.5))
-                            .overlay(alignment: .topLeading) {
-                                Text(option.id).font(.system(size: TypeScale.small, weight: .semibold))
-                                    .padding(.horizontal, 4).padding(.vertical, 1)
-                                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 3)).padding(3)
-                            }
-                    }.buttonStyle(.plain)
-                        .accessibilityLabel("Show \(option.label)")
-                        .tip(option.label)
-                }
-            }.padding(.horizontal, 14).padding(.vertical, 10)
-        }.fixedSize(horizontal: false, vertical: true)
-    }
+    // MARK: The answer
 
-    private var footer: some View {
-        HStack(spacing: 10) {
-            Text(status).font(.system(size: TypeScale.detail)).foregroundStyle(.secondary).lineLimit(1)
-                .tip(session.review.isPending ? (session.saving ? "Saving your draft" : "Your draft is kept. Nothing's sent until you press Send.") : "You can come back to these any time")
-            Spacer()
-            if session.review.isPending {
-                Menu {
-                    Button("Cancel review", role: .destructive) { confirmingCancel = true }
-                } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).fixedSize()
-                    .tip("More")
-                Button("Later") { close() }.disabled(session.submitting)
-                    .tip("Close it. Your draft is kept.")
-                Button(session.submitting ? "Sending…" : "Send") {
-                    Task {
-                        await session.submit()
-                        // Once it's sent there's nothing left to do here, so
-                        // it gets out of the way (Mike, 28 Oct). A failed send
-                        // stays open with its error and the notes kept.
-                        if session.review.status == "answered" { close() }
+    private var rail: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    if let note = session.review.note, !note.isEmpty {
+                        Text(note).font(.system(size: TypeScale.work)).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                            .padding(14)
+                        Divider()
+                    }
+                    ForEach(Array(session.review.options.enumerated()), id: \.element.id) { index, option in
+                        choice(option, index: index)
+                        Divider()
                     }
                 }
-                    .buttonStyle(.borderedProminent).disabled(!session.canSubmit)
-                    .tip("Send your pick and notes to the agent")
-            } else {
-                Button("Done") { close() }
-                    .tip("Close it")
             }
-        }.padding(.horizontal, 14).padding(.vertical, 10).overlay(alignment: .top) { Divider() }
+            Divider()
+            footer.padding(14)
+        }
+        .background(Color.primary.opacity(0.025))
     }
 
+    private func choice(_ option: ReviewOption, index: Int) -> some View {
+        let picked = session.draft.pickedId == option.id
+        let note = session.draft.notes[option.id] ?? ""
+        let hasNote = !note.isEmpty
+        let showsBox = session.editable && (picked || hasNote || openedNotes.contains(option.id))
+        let enlarged = session.mode == .single && session.focused == index
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 6) {
+                if session.editable && !option.reference {
+                    Button { choose(option, index: index) } label: { choiceText(option, picked: picked) }
+                        .buttonStyle(.plain)
+                        .tip(picked ? "Unpick \(option.id)" : "Pick \(option.id)")
+                } else {
+                    choiceText(option, picked: picked)
+                }
+                if session.editable && !showsBox {
+                    Button {
+                        openedNotes.insert(option.id)
+                        focusSoon(option.id)
+                    } label: {
+                        Image(systemName: "text.bubble").foregroundStyle(.secondary).frame(width: 24, height: 20).contentShape(Rectangle())
+                    }.buttonStyle(.plain)
+                        .accessibilityLabel("Add a note on \(option.label)")
+                        .tip("Add a note on \(option.id)")
+                }
+            }
+            if showsBox {
+                noteBox(option, note: note).padding(.leading, 25)
+            } else if !session.editable && hasNote {
+                Text(note).font(.system(size: TypeScale.work)).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true).padding(.leading, 25)
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(picked ? Color.accentColor.opacity(0.1) : enlarged ? Color.primary.opacity(0.05) : Color.clear)
+    }
+
+    private func choiceText(_ option: ReviewOption, picked: Bool) -> some View {
+        HStack(alignment: .top, spacing: 9) {
+            // A reference has no pick, and neither has a sent review's other
+            // choices; the gap keeps the text lined up all the same.
+            Group {
+                if picked {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.accentColor)
+                } else if session.editable && !option.reference {
+                    Image(systemName: "circle").foregroundStyle(.secondary)
+                } else {
+                    Color.clear
+                }
+            }.frame(width: 16, height: 16)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(option.label).font(.system(size: TypeScale.work, weight: .semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                if let reason = option.note, !reason.isEmpty {
+                    Text(reason).font(.system(size: TypeScale.detail)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .contentShape(Rectangle())
+    }
+
+    private func noteBox(_ option: ReviewOption, note: String) -> some View {
+        ZStack(alignment: .topLeading) {
+            // Grows with what's typed: the hidden copy sets the height.
+            Text(note + "\n").font(.system(size: TypeScale.work)).opacity(0)
+                .padding(.horizontal, 5).padding(.vertical, 1)
+            TextEditor(text: Binding(get: { session.draft.notes[option.id] ?? "" }, set: { session.setNote($0, for: option.id) }))
+                .font(.system(size: TypeScale.work)).scrollContentBackground(.hidden)
+                .scrollIndicators(.never)
+                .focused($typingIn, equals: option.id)
+                .accessibilityLabel("Note on \(option.label)")
+            if note.isEmpty {
+                Text("Add a note").font(.system(size: TypeScale.work)).foregroundStyle(.tertiary)
+                    .padding(.leading, 5).allowsHitTesting(false)
+            }
+        }
+        .frame(minHeight: 60, maxHeight: 220)
+        .padding(6)
+        .background(Color.black.opacity(colorScheme == .dark ? 0.2 : 0.03), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(typingIn == option.id ? Color.accentColor : Color(nsColor: .separatorColor), lineWidth: 1))
+    }
+
+    /// A pick goes straight to its note box, so adding detail is just typing.
+    private func choose(_ option: ReviewOption, index: Int) {
+        let picking = session.draft.pickedId != option.id
+        session.pick(option.id)
+        if session.mode == .single { session.enlarge(index) }
+        if picking { focusSoon(option.id) } else if typingIn == option.id { typingIn = nil }
+    }
+
+    /// The box only exists from the next update.
+    private func focusSoon(_ id: String) {
+        Task { @MainActor in typingIn = id }
+    }
+
+    @ViewBuilder private var footer: some View {
+        if session.review.isPending {
+            Button {
+                Task {
+                    await session.submit()
+                    // Once it's sent there's nothing left to do here, so
+                    // it gets out of the way (Mike, 28 Oct). A failed send
+                    // stays open with its error and the notes kept.
+                    if session.review.status == "answered" { close() }
+                }
+            } label: {
+                Text(session.sendLabel).fontWeight(.semibold).frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent).controlSize(.large)
+            .keyboardShortcut(.return, modifiers: .command)
+            .disabled(!session.canSubmit)
+            .tip("Send your pick and notes to the agent (\u{2318}\u{21A9}). Close the window to finish it later.")
+        } else {
+            HStack {
+                Text(status).font(.system(size: TypeScale.detail)).foregroundStyle(.secondary).lineLimit(1)
+                Spacer()
+                Button("Done") { close() }.tip("Close it")
+            }
+        }
+    }
+
+    /// Only for a review that's over, as one that's waiting says it on Send.
     private var status: String {
-        if session.review.status == "cancelled" { return "Cancelled" }
-        if !session.review.isPending && session.review.status != "answered" { return "Closed" }
-        let shown = session.review.isPending ? session.draft : (session.review.response ?? session.draft)
-        let picked = session.review.options.first { $0.id == shown.pickedId }
-        let notes = shown.notes.values.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count
-        var parts: [String] = []
-        if session.review.status == "answered" { parts.append("Sent") }
-        if let picked { parts.append("Picked \(picked.label)") }
-        if notes > 0 { parts.append("\(notes) note\(notes == 1 ? "" : "s")") }
-        if parts.isEmpty { return session.review.isPending ? (session.saving ? "Saving…" : "Pick one, or leave notes") : "Sent" }
-        return parts.joined(separator: " · ")
+        switch session.review.status {
+        case "answered": return "Sent"
+        case "cancelled": return "Cancelled"
+        case "superseded": return "Answered in the thread"
+        default: return "Closed"
+        }
     }
 }
 
@@ -495,28 +574,11 @@ struct ReviewWindow: View {
 private struct ReviewCanvas: NSViewRepresentable {
     let image: ImageRef
     let actualSize: Bool
+    let onClick: (() -> Void)?
     func makeNSView(context: Context) -> ReviewImageScroll { ReviewImageScroll() }
-    func updateNSView(_ view: ReviewImageScroll, context: Context) { view.show(image, actual: actualSize) }
-}
-
-/// A strip thumbnail, drawn in SwiftUI. It used to be a ReviewCanvas, and
-/// SwiftUI never handed a click over an AppKit view to the Button around
-/// it, even with the view saying no in hitTest (Mike, 29 and 30 Oct).
-private struct ReviewThumbnail: View {
-    let path: String
-    @State private var image: CGImage?
-
-    var body: some View {
-        ZStack {
-            Color(nsColor: .textBackgroundColor)
-            if let image { Image(decorative: image, scale: 2).resizable().aspectRatio(contentMode: .fit) }
-        }
-        .contentShape(Rectangle())
-        .task(id: path) {
-            image = nil
-            // 64x42 points at 2x, with room to spare for a tall image.
-            ThumbnailLoader.shared.load(path: path, maxPixels: 256) { image = $0 }
-        }
+    func updateNSView(_ view: ReviewImageScroll, context: Context) {
+        view.onClick = onClick
+        view.show(image, actual: actualSize)
     }
 }
 
@@ -527,6 +589,23 @@ private final class ReviewImageScroll: NSScrollView {
     private var loadedKey = ""
     private var resetScroll = true
     private var orientedSize: NSSize?
+    /// Taken here rather than by a SwiftUI gesture on top: SwiftUI doesn't
+    /// hand it a click over an AppKit view (ReviewWindowTests caught it).
+    var onClick: (() -> Void)?
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard onClick != nil else { return super.hitTest(point) }
+        return frame.contains(point) ? self : nil
+    }
+
+    // The first click counts even if the window wasn't in front, like a
+    // SwiftUI button beside it does.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { onClick != nil }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let onClick else { return super.mouseDown(with: event) }
+        onClick()
+    }
 
     override init(frame: NSRect) {
         super.init(frame: frame)

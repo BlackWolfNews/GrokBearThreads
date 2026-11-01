@@ -1917,10 +1917,10 @@ enum Automation {
         let controller = app.reviewWindows[key]
         guard let session = controller?.session ?? app.reviewPanel else { return "error couldn't open review" }
         await session.refresh()
-        if let mode = c["mode"] as? String, let view = ReviewMode(rawValue: mode) { session.mode = view }
+        if let mode = c["mode"] as? String, ReviewMode(rawValue: mode) == .all { session.showAll() }
+        if let mode = c["mode"] as? String, ReviewMode(rawValue: mode) == .single { session.enlarge(session.focused) }
+        if let show = c["show"] as? Int { session.enlarge(show) }
         if let actual = c["actual"] as? Bool { session.actualSize = actual }
-        if let left = c["left"] as? Int { session.show(left, slot: 0) }
-        if let right = c["right"] as? Int { session.show(right, slot: 1) }
         if let notes = c["notes"] as? [String: String] { for (id, text) in notes { session.setNote(text, for: id) } }
         if let pick = c["pick"] as? String { session.pick(pick) }
         if c["save"] as? Bool == true { await session.saveNow() }

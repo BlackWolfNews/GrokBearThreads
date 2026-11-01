@@ -333,15 +333,15 @@ enum ScreenshotRunner {
                 if let controller = app.reviewWindows["demo_design_review/" + review.id], let compare = controller.window {
                     let session = controller.session
                     compare.tuckBehind()
-                    session.mode = .grid
-                    await capture(compare, dir.appendingPathComponent("16b-design-review-grid.png"))
-                    session.mode = .pair
+                    await capture(compare, dir.appendingPathComponent("16b-design-review-all.png"))
                     session.pick("B")
                     session.setNote("Keep the account override easy to find.", for: "B")
                     await session.saveNow()
-                    await capture(compare, dir.appendingPathComponent("16c-design-review-pair.png"))
+                    await capture(compare, dir.appendingPathComponent("16c-design-review-picked.png"))
+                    session.enlarge(1)
+                    await capture(compare, dir.appendingPathComponent("16d-design-review-enlarged.png"))
                     session.actualSize = true
-                    await capture(compare, dir.appendingPathComponent("16d-design-review-100-percent.png"))
+                    await capture(compare, dir.appendingPathComponent("16e-design-review-100-percent.png"))
                     controller.close()
                 }
             }
