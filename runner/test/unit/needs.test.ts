@@ -394,3 +394,18 @@ test('one reply: a closing section comes off the reply, bold, # or a bare line',
   assert.equal(none.needs, undefined);
   assert.equal(none.reply, 'The script says nothing needed from you is wrong, so I fixed it.');
 });
+
+// Mike pressed ? on rows in the agent's shorthand, with no reason given
+// (~/dev/me/misc/end-turn-eval/next-rows). Every form of end_turn has to say
+// how to write one, as agents are on all of them.
+test('every form of end_turn says how to write a follow-up row', () => {
+  for (const provider of ['claude', 'codex'] as const) {
+    for (const [bullets, oneReply] of [[true, false], [false, false], [false, true]] as const) {
+      const d = endTurnDescription(provider, bullets, oneReply);
+      assert.match(d, /with this thread forgotten/);
+      assert.match(d, /No names from the code or your working/);
+      assert.match(d, /with the reason in the same line/);
+      assert.doesNotMatch(d, /about 8 words/);
+    }
+  }
+});

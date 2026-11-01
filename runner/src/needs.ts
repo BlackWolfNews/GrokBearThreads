@@ -357,6 +357,21 @@ const END_TURN_SUMMARY_LINKS =
   "When this turn started from a message the runner sent rather than one from the user (the app restarted, a hook ran, the resume after a restart), this summary takes the place of your last one, so cover everything since the user's last message, not just this turn; work: links can quote steps from those turns too. " +
   'Leave summary out only when the turn was a line or two of conversation, and write that as an ordinary message. ';
 
+// How to write a follow-up row. Mike kept pressing the ? on rows like
+// "Sandbox sample in the Mac app's HangWatch too" and "Stop Walkies being
+// blamed for the audio wakelock" (30 Oct to 1 Nov): the agent's shorthand,
+// with nothing to say why it came up. "Must make sense on its own" didn't
+// help: at least 113 of the 149 cards with rows came after that line landed,
+// and in replays of those turns it did no better than leaving it out. A cold reader got why a row
+// was there about twice as often with this (0.31 to 0.58 on Opus), so it asks
+// for the reason in the row instead of adding a field for it
+// (~/dev/me/misc/end-turn-eval/next-rows). The longer rows wrap on the card.
+const NEXT_ROW =
+  'Each is a row on the done card that the user reads hours later, with this thread forgotten and nothing else to go on, and ticking it sends it to you as their own message. ' +
+  'So write it in their voice, as an instruction: which app or thing it\'s about and what they\'d see change or get, in words they\'d use, with the reason in the same line if it isn\'t obvious. ' +
+  'No names from the code or your working (a class, a file, a tool, a nickname for something); describe what it does instead. ' +
+  '8 to 15 words: "Stop the Threadbear transcript jumping when a long reply arrives", not "Fix the ScrollAnchor drift". ';
+
 // What to put in it, the same for both providers.
 const END_TURN_ASKS =
   'needs "nothing" when the work is finished (or still going by itself) and nothing waits on the user. ' +
@@ -371,7 +386,7 @@ const END_TURN_ASKS =
   'For a step they have to do themselves, offer options like ["Done", "Can you do it?"] when you could plausibly do it yourself. ' +
   // Mike, 30 Oct: a follow-up in the closing prose, over a card that only
   // offered Archive, got buried and forgotten. Not make-work, though.
-  'next is for needs "nothing": up to 3 follow-ups in this thread worth doing, so they don\'t get lost: a piece still missing, a check that\'s due, something you or the user raised and didn\'t get to. Only ones that really came up; never invent work, and most turns have none, so leave it out then. Write each as the message the user would send to start it, about 8 words ("Show pictures and files from Bruce threads"). They are rows on the done card under "Or carry on": the user ticks one or more and they come to you as they are, as a list when there are several, with anything they add, so each must make sense on its own; don\'t also list them in your message. ' +
+  'next is for needs "nothing": up to 3 follow-ups in this thread worth doing, so they don\'t get lost: a piece still missing, a check that\'s due, something you or the user raised and didn\'t get to. Only ones that really came up; never invent work, and most turns have none, so leave it out then. ' + NEXT_ROW + 'Don\'t also list them in your message. ' +
   'archive: true archives this thread once the turn is over, with needs "nothing" only. Use it only when the user asks for this thread to be archived, or the message that started the thread says to; otherwise leave it out, as a thread that vanishes from their inbox when they hadn\'t finished with it is confusing. ' +
   'Sub-agents never call this; only the thread\'s own agent does.';
 
@@ -443,7 +458,8 @@ const ONE_REPLY_FIELDS =
   'options: for every decision or step, 2 to 4 answers, each a label of 1 to 4 words and does, what happens if they pick it, in at most 90 characters ("I deploy and watch the logs"). They can always write their own answer instead. suggested is the index of the one you\'d pick. ' +
   'For a step they have to do themselves, offer answers like Done and "Can you do it?" when you could plausibly do it yourself. ' +
   'links: up to 3 places to go to do it or judge it (the page to log in on, the PR, the preview, the file, or review:<id> for a show_options review), each a button titled as the action ("Open the PR"). ' +
-  'next is only for when nothing is needed: up to 3 follow-ups that really came up, each the message the user would send to start it, about 8 words; usually none. ' +
+  'next is only for when nothing is needed: up to 3 follow-ups that really came up and that you\'d tell the user are worth doing; usually none, and never something you\'d call optional or low priority. ' +
+  NEXT_ROW +
   'archive: true only when the user asked for this thread to be archived, or the message that started the thread says to. ' +
   'Sub-agents never call this; only the thread\'s own agent does.';
 

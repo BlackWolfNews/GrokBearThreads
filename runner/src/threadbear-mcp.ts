@@ -681,7 +681,7 @@ export function buildThreadbearTools(
           .array(z.string())
           .max(3)
           .optional()
-          .describe('With needs "nothing": follow-ups in this thread worth doing next, each the message the user would send to start it, about 8 words. Only ones that really came up; usually none.'),
+          .describe('With needs "nothing": follow-ups worth doing next, in the user\'s voice, which they read later with this thread forgotten: which app or thing, and what they\'d see change or get, in their words, 8 to 15 words. See the description. Only ones that really came up; usually none.'),
         byline: z
           .string()
           .optional()
@@ -761,7 +761,7 @@ export function buildThreadbearTools(
           .array(z.string())
           .max(3)
           .optional()
-          .describe('With needs "nothing": follow-ups in this thread worth doing next, each the message the user would send to start it, about 8 words: "Show pictures and files from Bruce threads". Only ones that really came up; usually none. See the description.'),
+          .describe('With needs "nothing": follow-ups worth doing next, in the user\'s voice, which they read later with this thread forgotten: which app or thing, and what they\'d see change or get, in their words, 8 to 15 words. See the description. Only ones that really came up; usually none.'),
         byline: z
           .string()
           .optional()
