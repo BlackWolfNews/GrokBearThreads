@@ -72,7 +72,9 @@ final class ChipCardWindow: NSPanel {
     static let radius: CGFloat = 8
     static let gap: CGFloat = 4
 
-    static func show(_ card: some View, below chip: NSRect, parent: NSWindow) -> ChipCardWindow {
+    /// `above`: over the chip when there's room, for the composer, where a
+    /// card under it would cover the box's own controls.
+    static func show(_ card: some View, below chip: NSRect, parent: NSWindow, above: Bool = false) -> ChipCardWindow {
         let host = NSHostingView(rootView: card)
         let size = host.fittingSize
         let window = ChipCardWindow(contentRect: NSRect(origin: .zero, size: size),
@@ -104,7 +106,7 @@ final class ChipCardWindow: NSPanel {
         // when there's no room below, and kept on the screen.
         let screen = (parent.screen ?? NSScreen.main)?.visibleFrame ?? .infinite
         var origin = NSPoint(x: chip.minX, y: chip.minY - gap - size.height)
-        if origin.y < screen.minY { origin.y = chip.maxY + gap }
+        if origin.y < screen.minY || (above && chip.maxY + gap + size.height <= screen.maxY) { origin.y = chip.maxY + gap }
         origin.x = min(max(origin.x, screen.minX + 4), screen.maxX - size.width - 4)
         window.setFrameOrigin(origin)
         parent.addChildWindow(window, ordered: .above)

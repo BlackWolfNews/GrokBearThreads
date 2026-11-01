@@ -412,6 +412,12 @@ final class TranscriptTextView: NSTextView {
             FileDrag.begin(link.peek.url, from: self, event: event)
             return
         }
+        // After the drag above: dragged, a chip's picture goes out as its
+        // file. A picture not here yet (another runner's) falls through.
+        if let chip = pictureChip(at: point), pictureGrid?.open(chip) == true {
+            closeChipCard()
+            return
+        }
         if let onAction, let action = row(at: point)?.action ?? character(at: point).flatMap({ textStorage?.attribute(.tbAction, at: $0, effectiveRange: nil) as? String }) {
             closeChipCard()
             onAction(action)
@@ -562,7 +568,7 @@ final class TranscriptTextView: NSTextView {
         let chip = chip(at: point)
         let row = onAction == nil ? nil : row(at: point)
         hoverRow(row?.range)
-        if chip != nil || row != nil || isAction(at: point) { NSCursor.pointingHand.set() }
+        if chip != nil || row != nil || isAction(at: point) || pictureChip(at: point) != nil { NSCursor.pointingHand.set() }
         if let chip { hoverChip(chip) } else { hoverPeek(peek(at: point)) }
     }
 
@@ -573,7 +579,7 @@ final class TranscriptTextView: NSTextView {
 
     override func cursorUpdate(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        if chip(at: point) != nil || isAction(at: point) || (onAction != nil && row(at: point) != nil) {
+        if chip(at: point) != nil || isAction(at: point) || pictureChip(at: point) != nil || (onAction != nil && row(at: point) != nil) {
             NSCursor.pointingHand.set()
         } else {
             super.cursorUpdate(with: event)
@@ -604,7 +610,8 @@ final class TranscriptTextView: NSTextView {
     /// everywhere in replies, and one shouldn't pop up under every pass of
     /// the pointer while Mike reads.
     private func hoverPeek(_ link: (range: NSRange, peek: LinkPeek)?) {
-        hover(link?.range, after: 0.5) { [weak self] in if let link { self?.showPeekCard(link) } }
+        // A picture's chip is only there to be pointed at, so it's as quick as a thread's.
+        hover(link?.range, after: link?.peek.pictureOnly == true ? 0.35 : 0.5) { [weak self] in if let link { self?.showPeekCard(link) } }
     }
 
     private func hover(_ range: NSRange?, after delay: TimeInterval, show: @escaping @MainActor () -> Void) {
@@ -644,6 +651,12 @@ final class TranscriptTextView: NSTextView {
         guard let storage = textStorage, index < storage.length else { return nil }
         var range = NSRange()
         if let peek = storage.attribute(.tbPeek, at: index, effectiveRange: &range) as? LinkPeek { return (range, peek) }
+        if let chip = storage.attribute(.tbPictureChip, at: index, effectiveRange: &range) as? NSNumber,
+           let link = storage.attribute(.link, at: index, effectiveRange: nil) as? URL {
+            // This Mac's copy of a picture on another runner, once there is one.
+            let file = pictureGrid?.localPath(chip.intValue).map { URL(fileURLWithPath: $0) } ?? link
+            return (range, LinkPeek(url: file, title: PictureChip.label(chip.intValue + 1), pictureOnly: true))
+        }
         // The longest range, as a link's words can change font part way
         // (a bold word in it) and the card belongs to the whole link.
         guard let link = storage.attribute(.link, at: index, longestEffectiveRange: &range,
@@ -653,6 +666,20 @@ final class TranscriptTextView: NSTextView {
         guard let url = link as? URL, url.isFileURL || FilePathRefs.text(of: url) != nil, let file = fileLinkTarget(url) else { return nil }
         // The file alone, for its thumbnail: a page's ?query isn't the file's.
         return (range, LinkPeek(url: URL(fileURLWithPath: file.path), title: words))
+    }
+
+    /// The index of the picture whose chip is under `point`, in Mike's bubble.
+    private func pictureChip(at point: NSPoint) -> Int? {
+        guard let index = character(at: point) else { return nil }
+        return (textStorage?.attribute(.tbPictureChip, at: index, effectiveRange: nil) as? NSNumber)?.intValue
+    }
+
+    /// The pictures over this text in its row, which a chip's number indexes.
+    private var pictureGrid: ImageGridView? {
+        var view: NSView? = superview
+        while let v = view, !(v is TextRowCell) { view = v.superview }
+        guard let grid = (view as? TextRowCell)?.images, !grid.isHidden else { return nil }
+        return grid
     }
 
     #if DEBUG
@@ -679,7 +706,7 @@ final class TranscriptTextView: NSTextView {
         for index in 0..<storage.length where !seen.contains(index) {
             guard let link = peek(atCharacter: index) else { continue }
             seen.formUnion(link.range.location..<NSMaxRange(link.range))
-            found.append((storage.attributedSubstring(from: link.range).string.trimmingCharacters(in: .whitespacesAndNewlines.union(.init(charactersIn: "\u{00A0}↗"))), link.peek.url))
+            found.append((debugWords(link, in: storage).trimmingCharacters(in: .whitespacesAndNewlines.union(.init(charactersIn: "\u{00A0}↗"))), link.peek.url))
         }
         return found
     }
@@ -691,11 +718,40 @@ final class TranscriptTextView: NSTextView {
         for index in 0..<storage.length {
             guard let link = peek(atCharacter: index),
                   // A button's title has no-break spaces.
-                  storage.attributedSubstring(from: link.range).string.replacingOccurrences(of: "\u{00A0}", with: " ").contains(words) else { continue }
+                  debugWords(link, in: storage).replacingOccurrences(of: "\u{00A0}", with: " ").contains(words) else { continue }
             closeChipCard()
             hoveredChip = link.range
             showPeekCard(link)
             return chipCard?.windowNumber
+        }
+        return nil
+    }
+
+    /// A link's words; a chip's are its label, as its text is one U+FFFC.
+    private func debugWords(_ link: (range: NSRange, peek: LinkPeek), in storage: NSTextStorage) -> String {
+        link.peek.pictureOnly ? link.peek.title ?? "" : storage.attributedSubstring(from: link.range).string
+    }
+
+    /// A real press and release on the picture chip labelled `words`,
+    /// through mouseDown: what opens, without Quick Look's panel coming up
+    /// over Mike's work.
+    func debugClickPictureChip(_ words: String) -> (paths: [String], index: Int)? {
+        guard let storage = textStorage, let window else { return nil }
+        for index in 0..<storage.length {
+            guard let link = peek(atCharacter: index), link.peek.pictureOnly, link.peek.title == words,
+                  let rect = chipRect(link.range) else { continue }
+            let spot = convert(NSPoint(x: rect.midX, y: rect.midY), to: nil)
+            func mouse(_ type: NSEvent.EventType) -> NSEvent? {
+                NSEvent.mouseEvent(with: type, location: spot, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                   windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+            }
+            guard let down = mouse(.leftMouseDown), let up = mouse(.leftMouseUp) else { return nil }
+            var opened: (paths: [String], index: Int)?
+            QuickLookCoordinator.shared.debugOpened = { opened = ($0, $1) }
+            defer { QuickLookCoordinator.shared.debugOpened = nil }
+            window.postEvent(up, atStart: true)
+            mouseDown(with: down)
+            return opened
         }
         return nil
     }

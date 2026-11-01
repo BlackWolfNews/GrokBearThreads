@@ -1074,19 +1074,23 @@ enum RowRenderer {
     /// the review's title small, then what he picked and his notes, not
     /// the review's id and the wording the agent gets (Mike, 29 Oct).
     static func userText(_ message: UserMessage) -> NSAttributedString {
-        pictureChips(userWords(message), imageCount: message.images.count)
+        pictureChips(userWords(message), images: message.images)
     }
 
     /// His [Picture N] markers drawn as the chips he pasted
     /// (docs/protocol.md, "Pictures in a message"), with the pictures
-    /// themselves over the words as before.
-    static func pictureChips(_ text: NSAttributedString, imageCount: Int) -> NSAttributedString {
-        let found = InlinePictures.markers(in: text.string, imageCount: imageCount)
+    /// themselves over the words as before. Each is a link to its picture,
+    /// which gives it the hover card, the drag and the right-click menu of
+    /// any file link; TranscriptTextView opens a click in Quick Look.
+    static func pictureChips(_ text: NSAttributedString, images: [ImageRef]) -> NSAttributedString {
+        let found = InlinePictures.markers(in: text.string, imageCount: images.count)
         guard !found.isEmpty else { return text }
         let out = NSMutableAttributedString(attributedString: text)
         for marker in found.reversed() {
             var attributes = out.attributes(at: marker.range.location, effectiveRange: nil)
             attributes[.attachment] = PictureChip.attachment(number: marker.index + 1, font: attributes[.font] as? NSFont ?? Theme.bodyFont)
+            attributes[.link] = URL(fileURLWithPath: images[marker.index].path)
+            attributes[.tbPictureChip] = marker.index as NSNumber
             out.replaceCharacters(in: marker.range, with: NSAttributedString(string: "\u{FFFC}", attributes: attributes))
         }
         return out

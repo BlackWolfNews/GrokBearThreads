@@ -317,6 +317,10 @@ extension NSAttributedString.Key {
     /// Where an asks card's link button goes, for its hover card: a
     /// `LinkPeek`. Text links are peeked from their `.link`.
     static let tbPeek = NSAttributedString.Key("tbPeek")
+    /// A picture's chip in Mike's bubble (RowRenderer.pictureChips): the
+    /// value is the picture's index in the message, an NSNumber, so a click
+    /// opens the same picture as the tile over the words.
+    static let tbPictureChip = NSAttributedString.Key("tbPictureChip")
     /// The room an open card leaves under an ask for its Something else
     /// box (an NSNumber, the ask's index): one line as tall as the box, with
     /// the box itself a text view the cell puts over it (AskAnswerBox).

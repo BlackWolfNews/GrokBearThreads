@@ -590,7 +590,102 @@ final class ComposerTextView: NSTextView {
         storage.endEditing()
     }
 
+    // MARK: A chip's hover card
+    //
+    // The picture over a chip in the box, as in Mike's bubble, to tell which
+    // is which. A click stays the cursor's (PictureChipCell), so here it's
+    // the hover alone.
+
+    private var chipTracking: NSTrackingArea?
+    private var chipCard: ChipCardWindow?
+    private var hoveredChip: PictureAttachment?
+    private var chipTimer: Timer?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        guard chipTracking == nil else { return }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .mouseMoved, .activeInKeyWindow, .inVisibleRect], owner: self)
+        addTrackingArea(area)
+        chipTracking = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        hoverChip(chipUnder(convert(event.locationInWindow, from: nil)))
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        hoverChip(nil)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        hoverChip(nil)
+        super.mouseDown(with: event)
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        super.viewWillMove(toWindow: newWindow)
+        if newWindow == nil { hoverChip(nil) }
+    }
+
+    private func hoverChip(_ chip: PictureAttachment?) {
+        guard chip !== hoveredChip else { return }
+        chipTimer?.invalidate()
+        chipTimer = nil
+        chipCard?.dismiss()
+        chipCard = nil
+        hoveredChip = chip
+        guard chip != nil else { return }
+        chipTimer = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.showChipCard() }
+        }
+    }
+
+    private func showChipCard() {
+        guard let chip = hoveredChip, let window, let rect = range(of: chip).flatMap(chipRect) else { return }
+        let peek = LinkPeek(url: URL(fileURLWithPath: chip.picture?.path ?? chip.source), title: PictureChip.label(chip.number), pictureOnly: true)
+        chipCard = ChipCardWindow.show(LinkPeekCard(peek: peek), below: window.convertToScreen(convert(rect, to: nil)), parent: window, above: true)
+    }
+
+    /// The chip at `point` in this view.
+    private func chipUnder(_ point: NSPoint) -> PictureAttachment? {
+        guard let layoutManager, let textContainer, let storage = textStorage, storage.length > 0 else { return nil }
+        let origin = textContainerOrigin
+        let glyph = layoutManager.glyphIndex(for: NSPoint(x: point.x - origin.x, y: point.y - origin.y), in: textContainer)
+        let index = layoutManager.characterIndexForGlyph(at: glyph)
+        guard index < storage.length, let chip = storage.attribute(.attachment, at: index, effectiveRange: nil) as? PictureAttachment,
+              chipRect(NSRange(location: index, length: 1))?.contains(point) == true else { return nil }
+        return chip
+    }
+
+    /// A chip's box in this view.
+    private func chipRect(_ range: NSRange) -> NSRect? {
+        guard let layoutManager, let textContainer else { return nil }
+        let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        let origin = textContainerOrigin
+        return layoutManager.boundingRect(forGlyphRange: glyphs, in: textContainer).offsetBy(dx: origin.x, dy: origin.y)
+    }
+
+    #if DEBUG
+    /// Rests the pointer on the chip numbered `number`, through the same
+    /// lookup as a real one; says the card's window number once it shows.
+    func debugHoverChip(_ number: Int) -> Int? {
+        var found: PictureAttachment?
+        textStorage?.enumerateAttribute(.attachment, in: whole) { value, _, _ in
+            if let chip = value as? PictureAttachment, chip.number == number { found = chip }
+        }
+        guard let found, let rect = range(of: found).flatMap(chipRect), chipUnder(NSPoint(x: rect.midX, y: rect.midY)) === found else { return nil }
+        hoverChip(found)
+        showChipCard()
+        return chipCard?.windowNumber
+    }
+
+    func debugEndHover() { hoverChip(nil) }
+    #endif
+
     override func keyDown(with event: NSEvent) {
+        hoverChip(nil)
         let isReturn = event.keyCode == 36 || event.keyCode == 76
         if isReturn, !hasMarkedText() {
             if event.modifierFlags.contains(.shift) || event.modifierFlags.contains(.option) {

@@ -15,15 +15,19 @@ final class LinkPeek: NSObject {
     let url: URL
     /// The words the link is on, or the button's title.
     let title: String?
+    /// A picture's chip: the card is just the picture, as its file name
+    /// and the runner's media folder mean nothing to Mike.
+    let pictureOnly: Bool
 
-    init(url: URL, title: String?) {
+    init(url: URL, title: String?, pictureOnly: Bool = false) {
         self.url = url
         self.title = title
+        self.pictureOnly = pictureOnly
     }
 
     override func isEqual(_ object: Any?) -> Bool {
         guard let other = object as? LinkPeek else { return false }
-        return url == other.url && title == other.title
+        return url == other.url && title == other.title && pictureOnly == other.pictureOnly
     }
 
     override var hash: Int { url.hashValue }
@@ -41,17 +45,36 @@ struct LinkPeekCard: View {
     private static let pictureSize = CGSize(width: 276, height: 170)
 
     var body: some View {
+        Group {
+            if peek.pictureOnly, exists {
+                pictureBox.padding(zoomed(6))
+            } else {
+                details
+                    .padding(.horizontal, zoomed(12))
+                    .padding(.vertical, zoomed(10))
+            }
+        }
+        .frame(width: peek.pictureOnly && exists ? nil : zoomed(300), alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
+        .task { await loadPicture() }
+    }
+
+    private var pictureBox: some View {
+        ZStack {
+            // No fill behind a chip's picture: alone in the card, its letterbox looks like a frame.
+            RoundedRectangle(cornerRadius: zoomed(4)).fill(Color.primary.opacity(peek.pictureOnly ? 0 : 0.05))
+            if let picture {
+                Image(nsImage: picture).resizable().aspectRatio(contentMode: .fit)
+                    .clipShape(RoundedRectangle(cornerRadius: zoomed(3)))
+            }
+        }
+        .frame(width: zoomed(Self.pictureSize.width), height: zoomed(Self.pictureSize.height))
+    }
+
+    private var details: some View {
         VStack(alignment: .leading, spacing: zoomed(3)) {
             if isFile, Self.showsPicture(peek.url), exists {
-                ZStack {
-                    RoundedRectangle(cornerRadius: zoomed(4)).fill(Color.primary.opacity(0.05))
-                    if let picture {
-                        Image(nsImage: picture).resizable().aspectRatio(contentMode: .fit)
-                            .clipShape(RoundedRectangle(cornerRadius: zoomed(3)))
-                    }
-                }
-                .frame(width: zoomed(Self.pictureSize.width), height: zoomed(Self.pictureSize.height))
-                .padding(.bottom, zoomed(5))
+                pictureBox.padding(.bottom, zoomed(5))
             }
             HStack(alignment: .top, spacing: zoomed(8)) {
                 if isFile, !Self.showsPicture(peek.url) || !exists {
@@ -74,11 +97,6 @@ struct LinkPeekCard: View {
                 .foregroundStyle(.tertiary)
                 .padding(.top, zoomed(3))
         }
-        .padding(.horizontal, zoomed(12))
-        .padding(.vertical, zoomed(10))
-        .frame(width: zoomed(300), alignment: .leading)
-        .fixedSize(horizontal: false, vertical: true)
-        .task { await loadPicture() }
     }
 
     private var isFile: Bool { peek.url.isFileURL }

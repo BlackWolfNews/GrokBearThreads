@@ -187,7 +187,9 @@ is (or where you drop it) as a small chip, "Picture 1", "Picture 2", with
 its thumbnail, and the agent gets each picture right there in your words.
 So "this one [Picture 1] should look like this one [Picture 2]" says which
 is which. The thumbnails show over the text too; the cross on one takes it
-and its chip out. Stop (⌘.) ends a turn that's running.
+and its chip out. Hover a chip to see its picture, in the composer or once
+it's sent; in the thread, clicking one opens the picture in Quick Look.
+Stop (⌘.) ends a turn that's running.
 
 A message shows in the thread as soon as you send it, faded, with a
 spinner beside it until the runner has it (a busy Mac can hold the runner

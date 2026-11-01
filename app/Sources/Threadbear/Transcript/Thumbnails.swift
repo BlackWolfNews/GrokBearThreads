@@ -71,7 +71,19 @@ final class QuickLookCoordinator: NSObject, QLPreviewPanelDataSource, QLPreviewP
     private var urls: [URL] = []
     private(set) var isActive = false
 
+    #if DEBUG
+    /// Set by the scripted app: it notes what would open, as the real panel
+    /// comes to the front of Mike's work.
+    var debugOpened: (([String], Int) -> Void)?
+    #endif
+
     func show(paths: [String], index: Int, from view: NSView) {
+        #if DEBUG
+        if let debugOpened {
+            debugOpened(paths, index)
+            return
+        }
+        #endif
         urls = paths.map { URL(fileURLWithPath: $0) }
         if let table = sequence(first: view, next: { $0.superview }).first(where: { $0 is TranscriptTableView }) {
             view.window?.makeFirstResponder(table)
@@ -133,7 +145,7 @@ final class ImageGridView: NSView {
     /// The file a tile draws and opens: the picture itself, or this Mac's
     /// copy of one on another runner's Mac. Nil while there's no copy, or
     /// when its runner sent only the start of it (too big to draw).
-    private func localPath(_ index: Int) -> String? {
+    func localPath(_ index: Int) -> String? {
         guard paths.indices.contains(index) else { return nil }
         guard let remote else { return paths[index] }
         guard let copy = remote.ready(paths[index]), !copy.truncated else { return nil }
@@ -293,9 +305,18 @@ final class ImageGridView: NSView {
             FileDrag.begin(URL(fileURLWithPath: path), from: self, event: event)
             return
         }
+        open(index)
+    }
+
+    /// Quick Look on one picture, for a click on its tile or its chip in
+    /// the words. False when there's nothing here yet to look at.
+    @discardableResult
+    func open(_ index: Int) -> Bool {
+        guard let path = localPath(index) else { return false }
         // Quick Look steps through the pictures there are copies of.
         let shown = paths.indices.compactMap { localPath($0) }
         QuickLookCoordinator.shared.show(paths: shown, index: shown.firstIndex(of: path) ?? 0, from: self)
+        return true
     }
 
     override func resetCursorRects() {

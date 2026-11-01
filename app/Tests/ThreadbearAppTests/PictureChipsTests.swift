@@ -194,6 +194,18 @@ final class PictureChipsTests: XCTestCase {
         XCTAssertGreaterThan(AskBoxMetrics.lines("Like \(m) \(m) \(m)", width: 200), 1)
     }
 
+    /// A chip links to its own picture, whichever order the words have them in,
+    /// so it hovers, drags and opens as that picture.
+    func testABubbleChipIsALinkToItsPicture() {
+        let text = RowRenderer.userText(UserMessage(text: "[Picture 2] then [Picture 1]", images: [red, blue]))
+        let first = text.attributes(at: 0, effectiveRange: nil)
+        XCTAssertEqual(first[.link] as? URL, URL(fileURLWithPath: blue.path))
+        XCTAssertEqual(first[.tbPictureChip] as? NSNumber, 1)
+        let second = text.attributes(at: text.length - 1, effectiveRange: nil)
+        XCTAssertEqual(second[.link] as? URL, URL(fileURLWithPath: red.path))
+        XCTAssertEqual(second[.tbPictureChip] as? NSNumber, 0)
+    }
+
     /// Editing a message puts its chips back where its markers were.
     func testEditingAMessagePutsItsChipsBack() {
         let app = AppModel()

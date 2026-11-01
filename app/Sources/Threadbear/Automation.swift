@@ -855,6 +855,13 @@ enum Automation {
             return "ok"
         case "peek":
             return peek(c, app: app)
+        case "composer-peek":
+            guard let composer = findComposer(in: window?.contentView) else { return "error no composer" }
+            guard let number = c["number"] as? Int else {
+                composer.debugEndHover()
+                return "ok"
+            }
+            return composer.debugHoverChip(number).map { "ok window \($0)" } ?? "error no chip \(number) with a card"
         case "select-text":
             return select(c, app: app)
         case "account-ids":
@@ -1468,6 +1475,10 @@ enum Automation {
         if c["show"] as? Bool == false {
             cell.textView.closeChipCard()
             return "ok"
+        }
+        if let words = c["words"] as? String, c["press"] as? Bool == true {
+            guard let opened = cell.textView.debugClickPictureChip(words) else { return "error no picture chip \(words) opened in \(row.id)" }
+            return "ok quicklook \(opened.index) of " + json(opened.paths)
         }
         if let words = c["words"] as? String, c["menu"] as? Bool == true || c["click"] != nil {
             guard let menu = cell.textView.debugLinkMenu(words) else { return "error no link with \(words) in \(row.id)" }
