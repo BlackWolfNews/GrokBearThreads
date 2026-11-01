@@ -66,7 +66,11 @@ struct PastableTextField: UIViewRepresentable {
         // Grows with the text up to its last line, then scrolls, like
         // TextField(axis: .vertical) with a lineLimit.
         let scrolls = fit > highest + 1
-        if view.isScrollEnabled != scrolls { DispatchQueue.main.async { view.isScrollEnabled = scrolls } }
+        // The HStack around it also asks at an infinite width, to learn how
+        // far it can stretch, and any text fits on one line there. Only the
+        // real width may decide: taking that answer too turned scrolling off
+        // (back to the top) and on (back to the cursor) on alternate keys.
+        if width.isFinite, view.isScrollEnabled != scrolls { DispatchQueue.main.async { view.isScrollEnabled = scrolls } }
         return CGSize(width: width, height: ceil(min(max(fit, lowest), highest)))
     }
 
