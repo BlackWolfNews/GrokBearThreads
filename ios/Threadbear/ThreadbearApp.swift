@@ -42,7 +42,10 @@ struct ThreadbearApp: App {
                 }
                 // The Camera opens threadbear://pair links from the QR code, and
                 // threadbear://quickask ones with the archive server for quick ask.
+                // threadbear://open is Voice Type's keyboard button: coming forward is all
+                // it wants, and passing it on would show a "not a pairing link" error.
                 .onOpenURL { url in
+                    if url.host() == "open" { return }
                     if quick.settings.apply(link: url) { quick.settingsChanged(); return }
                     Task { await model.pair(with: url) }
                 }
