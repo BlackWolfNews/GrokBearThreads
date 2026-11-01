@@ -1778,6 +1778,20 @@ A turn the agent finished can say whether Mike has to do anything, so
   asks again, so a thread doesn't go while Mike is still talking to it.
   The description tells agents to use it only when Mike asks, so a thread
   he hadn't finished with doesn't vanish from his inbox.
+- **Hibernating itself.** `end_turn` also takes `snooze?: string`: when
+  to wake, as `update_thread`'s `snooze` takes it (`30m`, `2h`, `1d`,
+  `tomorrow`, an ISO time, `restart`), or else words (`"when the phone
+  arrives"`), which go to `threads.hibernateWhen` as if Mike had typed
+  them into Wake when…. It applies on the same terms as `archive`: once a
+  completed turn with `needs: "nothing"` is over, with no message queued,
+  and a `system.note` says until when. `archive` wins if both are given.
+  A time that has passed, or words the model can't read, leave the
+  thread in the inbox with a note saying why. `"off"` and words over 300
+  characters are refused, so the agent can say it again. A repeat
+  `end_turn` that adds `snooze` gets through as one adding `archive`
+  does. On 2 Nov 2026 "let's hibernate this thread until it arrives" could
+  only be met by a helper thread, as `update_thread` and `tb snooze`
+  refuse to snooze the thread they run in.
 - **The fallback.** A completed turn with no `end_turn` call is read for
   the "What I need from you" section Mike's own instructions ask for: the
   last line near the end that is just that heading in bold, then its

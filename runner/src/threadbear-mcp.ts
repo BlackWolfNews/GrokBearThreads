@@ -16,10 +16,11 @@ import { AGENT_MESSAGE_PREFIX, EFFORT_LEVELS, MOVE_MESSAGE_PREFIX, sentByAgent }
 import type { Scheduler } from './schedules.ts';
 import type { Projects } from './projects.ts';
 import { parseWhen, relativeFuture, relativeTime } from './when.ts';
+import { SAID_MAX } from './wake-when.ts';
 
 export { parseWhen, relativeFuture, relativeTime };
 import { RUNNER_VERSION, expandHome } from './config.ts';
-import { ALREADY_ENDED, ARCHIVE_ADDED, endTurnDescription, endTurnForm, endTurnMisfit, END_TURN_TOOL, BULLETS_ONLY, ENDED, takenEndTurn, MAX_BYLINE, NARRATION_ONLY, NO_REPLY, needsFromTool, oneReplyAccepted, oneReplyAlreadyWritten, summaryFromTool, turnReply, type TurnReply } from './needs.ts';
+import { ALREADY_ENDED, ARCHIVE_ADDED, SNOOZE_ADDED, snoozeFromTool, endTurnDescription, endTurnForm, endTurnMisfit, END_TURN_TOOL, BULLETS_ONLY, ENDED, takenEndTurn, MAX_BYLINE, NARRATION_ONLY, NO_REPLY, needsFromTool, oneReplyAccepted, oneReplyAlreadyWritten, summaryFromTool, turnReply, type TurnReply } from './needs.ts';
 import { asksForAppRestart, type AppRestarts } from './app-restarts.ts';
 import { PANEL_PLACES } from './panel-requests.ts';
 import { nudgedThisTurn, signInNudge, turnSignIns, uncovered } from './connectors.ts';
@@ -629,11 +630,23 @@ export function buildThreadbearTools(
   // archive gets through, as it's the one thing nothing else can do from
   // inside a turn (update_thread refuses). Not for a card waiting on Mike,
   // which archiving would hide. Undefined when this isn't a repeat.
-  const repeatEndTurn = (events: PersistedEvent[], input: { needs?: unknown; archive?: unknown }): string | undefined => {
+  const repeatEndTurn = (events: PersistedEvent[], input: { needs?: unknown; archive?: unknown; snooze?: unknown }): string | undefined => {
     const taken = takenEndTurn(events, SERVER_NAME);
     if (!taken) return undefined;
-    if (input.archive === true && input.needs !== 'you' && needsFromTool(taken)?.needs !== 'you') return ARCHIVE_ADDED;
+    const waiting = input.needs === 'you' || needsFromTool(taken)?.needs === 'you';
+    if (input.archive === true && !waiting) return ARCHIVE_ADDED;
+    // So does snooze, for the same reason (needs.ts, snoozeFromTool).
+    if (snoozeFromTool({ ...input, needs: 'nothing' }) && !waiting) return SNOOZE_ADDED;
     throw new Error(ALREADY_ENDED);
+  };
+
+  // snooze is refused before anything else, so the agent can say it
+  // again: "off" means nothing here, and words past what Hibernate in
+  // words takes would fail once the turn was over, out of its sight.
+  const checkSnooze = (snooze: unknown): void => {
+    if (typeof snooze !== 'string') return;
+    if (snooze.trim().toLowerCase() === 'off') throw new Error('Not ended: snooze takes when this thread should wake (2h, tomorrow, an ISO time, "restart" or words like "when the phone arrives"). To keep it in the inbox, leave snooze out.');
+    if (snooze.trim().length > SAID_MAX) throw new Error(`Not ended: snooze is more than ${SAID_MAX} characters. Say when to wake more briefly.`);
   };
 
   // end_turn with one reply (docs/protocol.md, "One reply"): the card and
@@ -690,8 +703,13 @@ export function buildThreadbearTools(
           .boolean()
           .optional()
           .describe('true to archive this thread once the turn is over. Only when the user has asked for this thread to be archived or the message that started it says to, and only with needs "nothing". If they ask after you have called end_turn, call it again with this.'),
+        snooze: z
+          .string()
+          .optional()
+          .describe('Hibernate this thread once the turn is over, until 30m, 2h, 1d, tomorrow, an ISO time with its offset, "restart" (until the runner next starts), or words saying when ("when the phone arrives"). Only when the user has asked for this thread to be snoozed or hibernated, and only with needs "nothing". If they ask after you have called end_turn, call it again with this.'),
       },
       handle(async (input) => {
+        checkSnooze(input.snooze);
         const parsed = needsFromTool(input);
         const needs = parsed?.needs ?? 'nothing';
         const asks = parsed?.asks ?? [];
@@ -770,9 +788,17 @@ export function buildThreadbearTools(
           .boolean()
           .optional()
           .describe('true to archive this thread once the turn is over. Only when the user has asked for this thread to be archived or the message that started it says to, and only with needs "nothing". If they ask after you have called end_turn, call it again with this.'),
+        snooze: z
+          .string()
+          .optional()
+          .describe('Hibernate this thread once the turn is over, until 30m, 2h, 1d, tomorrow, an ISO time with its offset, "restart" (until the runner next starts), or words saying when ("when the phone arrives"). Only when the user has asked for this thread to be snoozed or hibernated, and only with needs "nothing". If they ask after you have called end_turn, call it again with this.'),
       },
       handle(async (args) => {
-        const { archive } = args;
+        checkSnooze(args.snooze);
+        // Archive wins over snooze in the runner, so only one is said.
+        const { archive: archived } = args;
+        const archive = archived || Boolean(args.snooze?.trim());
+        const away = archived ? 'archived' : 'hibernated';
         // Left out, needs follows the asks (needs.ts). Read through it, as
         // a session on the one-reply form asks a question, not an action.
         const parsed = needsFromTool(args);
@@ -827,19 +853,19 @@ export function buildThreadbearTools(
         if (needsMessage && reply?.narrationOnly) {
           return needs === 'you'
             ? `${ENDED} will wait in Needs you${archive ? ', and stays in the inbox, as it needs something from the user' : ''}.${restart} ${NARRATION_ONLY} Keep the asks out of it: they go in a card under it.`
-            : `${ENDED} is done${archive ? ', and will be archived once the turn is over' : ''}. ${NARRATION_ONLY}`;
+            : `${ENDED} is done${archive ? `, and will be ${away} once the turn is over` : ''}. ${NARRATION_ONLY}`;
         }
         if (owed) {
           return needs === 'you'
             ? `${ENDED} will wait in Needs you${archive ? ', and stays in the inbox, as it needs something from the user' : ''}.${restart} ${BULLETS_ONLY}, and the asks go in a card under them.`
-            : `${ENDED} is done${archive ? ', and will be archived once the turn is over' : ''}. ${BULLETS_ONLY}.`;
+            : `${ENDED} is done${archive ? `, and will be ${away} once the turn is over` : ''}. ${BULLETS_ONLY}.`;
         }
         // Not "lands as a second message": the runner drops it as a
         // repeat, and an agent told it would land wrote its answer there
         // (30 Oct 2026, thread 2a0a9c2c).
         return needs === 'you'
           ? `${ENDED} will wait in Needs you${archive ? ', and stays in the inbox, as it needs something from the user' : ''}.${restart} Stop here, with no more text: the user has your reply, the asks go in a card under it, and nothing written now reaches them.`
-          : `${ENDED} is done${archive ? ', and will be archived once the turn is over' : ''}. Stop here, with no more text: the user has your reply, and nothing written now reaches them.`;
+          : `${ENDED} is done${archive ? `, and will be ${away} once the turn is over` : ''}. Stop here, with no more text: the user has your reply, and nothing written now reaches them.`;
       }),
     );
 
@@ -1025,7 +1051,7 @@ export function buildThreadbearTools(
     ),
     tool(
       'update_thread',
-      "Changes a thread's title, model or permissions, snoozes it, or archives it. Leave threadId out for this thread. This thread can be renamed or have its model or permissions changed, but not snoozed or archived while it's working (that would stop this turn). If the user asks for this thread to be archived, pass archive: true to end_turn instead.",
+      "Changes a thread's title, model or permissions, snoozes it, or archives it. Leave threadId out for this thread. This thread can be renamed or have its model or permissions changed, but not snoozed or archived while it's working (that would stop this turn). If the user asks for this thread to be archived or snoozed, pass archive: true or snooze to end_turn instead.",
       {
         ...thisOrOther,
         title: z.string().optional(),
@@ -1040,7 +1066,7 @@ export function buildThreadbearTools(
       handle(async ({ threadId, id: alias, title, mikeAsked, model, effort, pool: p, permissionMode, snooze, archived }) => {
         const id = await resolve(threadId ?? alias);
         const stops = (snooze !== undefined && snooze.trim().toLowerCase() !== 'off') || archived === true;
-        if (id === selfId && stops) throw new Error("Can't snooze or archive this thread from inside its own turn. To archive it once the turn is over, call end_turn with archive: true (again, if you already have). To snooze it, ask the user to.");
+        if (id === selfId && stops) throw new Error("Can't snooze or archive this thread from inside its own turn. Do it once the turn is over by calling end_turn with needs \"nothing\" and archive: true, or snooze: and when to wake (the times this takes, or words like \"when the phone arrives\"), again if you already have.");
         const upd: Parameters<ThreadControl['update']>[0] = { threadId: id };
         if (title !== undefined) {
           upd.title = title;

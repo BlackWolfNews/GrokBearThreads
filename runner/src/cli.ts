@@ -686,7 +686,7 @@ async function modelsCommand(client: RunnerClient, args: string[], f: Flags): Pr
 // Inside a thread, tb won't stop the thread it runs in, as the threadbear
 // MCP tools won't (threadbear-mcp.ts): it would end this very turn.
 // THREADBEAR_THREAD_ID is only set in a thread's own CLI and what it runs.
-const STOPS_SELF = "Can't snooze or archive the thread this runs in from inside its own turn. To archive it once the turn is over, call end_turn with archive: true (again, if you already have). To snooze it, ask the user to.";
+const STOPS_SELF = "Can't snooze or archive the thread this runs in from inside its own turn. Do it once the turn is over by calling end_turn with needs \"nothing\" and archive: true, or snooze: and when to wake (30m, 2h, tomorrow, an ISO time, \"restart\", or words like \"when the phone arrives\"), again if you already have.";
 
 function notSelf(id: string, message: string): string {
   if (id === process.env.THREADBEAR_THREAD_ID) throw new Error(message);

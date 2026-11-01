@@ -153,3 +153,73 @@ test('a plain snooze clears the words, and a restart mid-answer brings the threa
   release();
   await call.catch(() => undefined);
 });
+
+// end_turn's snooze: a thread hibernates itself once its turn is over.
+const END_TURN = 'mcp__threadbear__end_turn';
+function turnWithSnooze(h: ReturnType<typeof makeHarness>, threadId: string, input: Record<string, unknown>, outcome: 'completed' | 'interrupted' = 'completed') {
+  h.runner.send(threadId, 'hibernate this until the parts arrive');
+  const s = h.adapter.last;
+  s.text('m1', 'Hibernating.');
+  s.out({ kind: 'event', event: { type: 'tool.call', itemId: 'e1', name: END_TURN, kind: 'mcp', title: 'end_turn', input } });
+  // Not mid-turn: snoozing stops the CLI.
+  assert.equal(h.runner.get(threadId).snoozedUntil, undefined);
+  s.result(outcome);
+}
+
+test('end_turn snooze: a time hibernates the thread once the turn is over, with a note', () => {
+  const { h, thread, asked } = setup(() => ok({}));
+  turnWithSnooze(h, thread.id, { needs: 'nothing', snooze: '2026-11-05T17:00:00+08:00' });
+  const t = h.runner.get(thread.id);
+  assert.equal(t.snoozedUntil, '2026-11-05T09:00:00.000Z');
+  assert.deepEqual(checkSummary(t), []);
+  assert.match(h.events(thread.id).at(-1).text, /^Hibernating until .*5 November.*, as the agent was asked to\.$/);
+  assert.equal(asked.length, 0, 'a time needs no model');
+});
+
+test('end_turn snooze: "restart" and relative times', () => {
+  const { h, thread } = setup(() => ok({}));
+  turnWithSnooze(h, thread.id, { needs: 'nothing', snooze: '2h' });
+  assert.equal(h.runner.get(thread.id).snoozedUntil, new Date(h.clock.now() + 2 * 3_600_000).toISOString());
+  const { h: h2, thread: t2 } = setup(() => ok({}));
+  turnWithSnooze(h2, t2.id, { needs: 'nothing', snooze: 'restart' });
+  assert.equal(h2.runner.get(t2.id).snoozedUntilRestart, true);
+});
+
+test('end_turn snooze: words are read as Hibernate in words reads them', async () => {
+  const { h, thread, asked } = setup(() => ok({ until: null, topic: 'the parts arriving', why: 'when they come' }));
+  turnWithSnooze(h, thread.id, { needs: 'nothing', snooze: 'when the parts arrive' });
+  await tick();
+  await tick();
+  assert.equal(asked.length, 1);
+  assert.match(asked[0].prompt, /when the parts arrive/);
+  const t = h.runner.get(thread.id);
+  assert.equal(t.snoozedUntil, NO_WAKE_TIME);
+  assert.deepEqual(t.wakeWhen, { said: 'when the parts arrive', topic: 'the parts arriving' });
+});
+
+test('end_turn snooze: words the model cannot read leave the thread in the inbox, saying why', async () => {
+  const { h, thread } = setup(() => ({ ok: false, reason: 'error', message: 'down' }));
+  turnWithSnooze(h, thread.id, { needs: 'nothing', snooze: 'whenever' });
+  await tick();
+  await tick();
+  assert.equal(h.runner.get(thread.id).snoozedUntil, undefined);
+  assert.match(h.events(thread.id).at(-1).text, /^Not hibernated, as the agent was asked to: Couldn't work out when to wake it/);
+});
+
+test('end_turn snooze: not with needs "you", an interrupted turn, a past time, or archive as well', () => {
+  const cases: [Record<string, unknown>, 'completed' | 'interrupted'][] = [
+    [{ needs: 'you', asks: [{ question: 'Order the parts?' }], snooze: '1d' }, 'completed'],
+    [{ needs: 'nothing', snooze: '1d' }, 'interrupted'],
+    [{ needs: 'nothing', snooze: '2020-01-01T00:00:00Z' }, 'completed'],
+  ];
+  for (const [input, outcome] of cases) {
+    const { h, thread } = setup(() => ok({}));
+    turnWithSnooze(h, thread.id, input, outcome);
+    assert.equal(h.runner.get(thread.id).snoozedUntil, undefined, JSON.stringify(input));
+  }
+  const { h, thread } = setup(() => ok({}));
+  turnWithSnooze(h, thread.id, { needs: 'nothing', archive: true, snooze: '1d' });
+  const t = h.runner.get(thread.id);
+  assert.ok(t.archivedAt);
+  assert.equal(t.snoozedUntil, undefined, 'archive wins');
+});

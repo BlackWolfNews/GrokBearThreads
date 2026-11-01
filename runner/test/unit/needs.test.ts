@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { PersistedEvent } from '../../src/protocol.ts';
-import { archiveFromTool, bylineFromTool, endedThisTurn, CODEX_END_TURN_DESCRIPTION, CODEX_ONE_REPLY_DESCRIPTION, END_TURN_DESCRIPTION, END_TURN_FULL_NAME, endTurnDescription, needsFromText, needsFromTool, ONE_REPLY_DESCRIPTION, splitReplySection, summaryFromTool, summaryMarkdown, turnReply } from '../../src/needs.ts';
+import { archiveFromTool, snoozeFromTool, bylineFromTool, endedThisTurn, CODEX_END_TURN_DESCRIPTION, CODEX_ONE_REPLY_DESCRIPTION, END_TURN_DESCRIPTION, END_TURN_FULL_NAME, endTurnDescription, needsFromText, needsFromTool, ONE_REPLY_DESCRIPTION, splitReplySection, summaryFromTool, summaryMarkdown, turnReply } from '../../src/needs.ts';
 import { END_TURN_TOOL } from '../../src/needs.ts';
 import { SERVER_NAME } from '../../src/threadbear-mcp.ts';
 import { ClaudeNormalizer, fileContext } from '../../src/adapters/claude/normalize.ts';
@@ -20,6 +20,11 @@ test('end_turn input: nothing, you with asks, and junk falls back', () => {
   assert.equal(archiveFromTool({ needs: 'nothing', archive: 'yes' }), false);
   assert.equal(archiveFromTool({ needs: 'nothing' }), false);
   assert.equal(archiveFromTool(undefined), false);
+  assert.equal(snoozeFromTool({ needs: 'nothing', snooze: ' 2h ' }), '2h');
+  assert.equal(snoozeFromTool({ needs: 'you', snooze: '2h' }), undefined);
+  assert.equal(snoozeFromTool({ needs: 'nothing', snooze: 'off' }), undefined);
+  assert.equal(snoozeFromTool({ needs: 'nothing', snooze: '' }), undefined);
+  assert.equal(snoozeFromTool({ snooze: 'when the phone arrives' }), 'when the phone arrives');
   assert.equal(needsFromTool(null), undefined);
   assert.equal(needsFromTool({ needs: 'you', asks: Array.from({ length: 20 }, (_, i) => ({ action: `a${i}` })) })!.asks!.length, 10);
 });

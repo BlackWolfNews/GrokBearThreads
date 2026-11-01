@@ -250,7 +250,10 @@ test('update renames and snoozes others, but will not stop its own turn', async 
   assert.match((await t.call('update_thread', { title: 'Renamed me' })).text, /title: Renamed me/);
   const own = await t.call('update_thread', { archived: true });
   assert.equal(own.error, true);
-  assert.match(own.text, /end_turn with archive: true/, 'says the way that works');
+  assert.match(own.text, /end_turn with needs "nothing" and archive: true, or snooze:/, 'says the way that works');
+  const ownSnooze = await t.call('update_thread', { snooze: '2h' });
+  assert.equal(ownSnooze.error, true);
+  assert.match(ownSnooze.text, /snooze: and when to wake/);
   assert.equal(h.runner.get(me.id).archivedAt, undefined);
   const snoozed = await t.call('update_thread', { threadId: other.id, snooze: '2h' });
   assert.match(snoozed.text, /snoozed until: 2026-10-26T14:00:00\.000Z/);
@@ -632,6 +635,46 @@ test('a repeat end_turn with no new message: archive is added and the card stand
   assert.equal(h.events(thread.id).filter((e) => e.type === 'assistant.text').length, n);
 });
 
+test('a repeat end_turn with no new message can add snooze, and the card stands', async () => {
+  const h = makeHarness();
+  const { thread, s } = start(h);
+  const { call } = tools(h, thread.id, undefined, () => true);
+  const send = async (itemId: string, input: Record<string, unknown>) => {
+    toolCall(s, itemId, END_TURN, input);
+    const r = await call('end_turn', input);
+    s.out({ kind: 'event', event: { type: 'tool.result', itemId, ok: !r.error, text: r.text, truncated: false, images: [] } });
+    return r;
+  };
+  await send('e1', { headline: 'Ordered', needs: 'nothing', next: ['Check the parts fit'] });
+  s.text('m1', 'Ordered the parts.');
+  const added = await send('e2', { headline: 'Hibernating', needs: 'nothing', snooze: '1d' });
+  assert.equal(added.error, false);
+  assert.match(added.text, /will hibernate/);
+  s.result('completed');
+  await tick();
+  const t = h.runner.get(thread.id);
+  assert.equal(t.snoozedUntil, new Date(h.clock.now() + 86_400_000).toISOString());
+  const done = h.events(thread.id).filter((e) => e.type === 'turn.completed').at(-1) as { next?: string[] };
+  assert.deepEqual(done.next, ['Check the parts fit']);
+});
+
+test('end_turn refuses snooze "off" and over-long words, in both forms, so the agent can say it again', async () => {
+  for (const oneReply of [true, false]) {
+    const h = makeHarness();
+    const { thread, s } = start(h);
+    s.text('m1', 'Done.');
+    const { call } = tools(h, thread.id, undefined, () => oneReply);
+    const off = await call('end_turn', { needs: 'nothing', summary: ['Done.'], snooze: 'off' });
+    assert.equal(off.error, true);
+    assert.match(off.text, /^Not ended: snooze takes when/);
+    const long = await call('end_turn', { needs: 'nothing', summary: ['Done.'], snooze: 'x'.repeat(301) });
+    assert.equal(long.error, true);
+    const fine = await call('end_turn', { needs: 'nothing', summary: ['Done.'], snooze: 'when the phone arrives' });
+    assert.equal(fine.error, false, fine.text);
+    if (!oneReply) assert.match(fine.text, /will be hibernated once the turn is over/);
+  }
+});
+
 test('a repeat end_turn cannot archive a turn that is waiting on Mike', async () => {
   const h = makeHarness();
   const { thread, s } = start(h);
@@ -980,7 +1023,7 @@ test("end_turn lists only today's form, whichever forms it takes", async () => {
   const h = makeHarness();
   const { thread } = start(h);
   const one = await mcpClient(h, thread.id, true).endTurnShown();
-  assert.deepEqual(Object.keys(one.inputSchema.properties).sort(), ['archive', 'asks', 'byline', 'headline', 'needs', 'next']);
+  assert.deepEqual(Object.keys(one.inputSchema.properties).sort(), ['archive', 'asks', 'byline', 'headline', 'needs', 'next', 'snooze']);
   assert.ok(!one.inputSchema.required?.length, 'every field is optional');
   const ask = (one.inputSchema.properties.asks as { items: { required: string[]; properties: Record<string, { description?: string; items?: { type?: string } }> } }).items;
   assert.deepEqual(ask.required, ['question']);
@@ -1000,7 +1043,7 @@ test("An end_turn that fits neither form hears today's shape and order in words"
   const one = await mcpClient(h, thread.id, true).endTurn(garbled);
   assert.equal(one.error, true);
   assert.match(one.text, /asks\[0\]\.options\[0\]/);
-  assert.match(one.text, /\{ headline\?, needs\?, asks\?: \{ question, options\?: \{ label, does\? \}\[\], suggested\?, links\? \}\[\], next\?, archive\? \}/);
+  assert.match(one.text, /\{ headline\?, needs\?, asks\?: \{ question, options\?: \{ label, does\? \}\[\], suggested\?, links\? \}\[\], next\?, archive\?, snooze\? \}/);
   assert.match(one.text, /then write your reply after it/);
   assert.doesNotMatch(one.text, /MCP error/);
   const old = await mcpClient(h, thread.id, false).endTurn({ needs: 'maybe' });

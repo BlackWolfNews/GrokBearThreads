@@ -262,6 +262,12 @@ there, puts one back.
 Hibernating or archiving a thread that's partway through a turn stops
 that turn. From the row's hover buttons, Threadbear asks first.
 
+You can also ask a thread to do it to itself ("hibernate this until
+Thursday", "archive this when you're done"). It finishes its reply first,
+then goes, with a note in the thread saying when it'll be back. A time
+works, or words like "until the phone arrives", read the same way as Wake
+when…. It won't put itself away while it's waiting on you.
+
 ## Panels
 <!-- slug: panels -->
 

@@ -136,6 +136,20 @@ export function archiveFromTool(input: unknown): boolean {
   return o.archive === true && needsFromTool(input)?.needs === 'nothing';
 }
 
+// When end_turn asked for its thread to hibernate once the turn is over:
+// update_thread's times ("2h", "tomorrow", an ISO time, "restart"), or
+// words like "when the phone arrives", read as Hibernate in words reads
+// Mike's (wake-when.ts). Like archive, only with needs "nothing", as a
+// hibernating thread would hide a card waiting on him. A thread can't
+// snooze itself mid-turn, as that stops the CLI, so on 2 Nov 2026 "let's
+// hibernate this thread until it arrives" took a helper thread.
+export function snoozeFromTool(input: unknown): string | undefined {
+  if (!input || typeof input !== 'object') return undefined;
+  const s = (input as Record<string, unknown>).snooze;
+  if (typeof s !== 'string' || !s.trim() || s.trim().toLowerCase() === 'off') return undefined;
+  return needsFromTool(input)?.needs === 'nothing' ? s.trim() : undefined;
+}
+
 // end_turn's byline: a few words for the row of a thread Mike didn't start.
 export const MAX_BYLINE = 80;
 export function bylineFromTool(input: unknown): string | undefined {
@@ -372,6 +386,10 @@ const NEXT_ROW =
   'No names from the code or your working (a class, a file, a tool, a nickname for something); describe what it does instead. ' +
   '8 to 15 words: "Stop the Threadbear transcript jumping when a long reply arrives", not "Fix the ScrollAnchor drift". ';
 
+// Hibernating itself, in every form's description (snoozeFromTool).
+const END_TURN_SNOOZE =
+  'snooze hibernates this thread once the turn is over, with needs "nothing" only, until a time ("2h", "1d", "tomorrow", an ISO time with its offset, or "restart") or words saying when ("when the phone arrives"). Use it only when the user asks for this thread to be snoozed or hibernated. ';
+
 // What to put in it, the same for both providers.
 const END_TURN_ASKS =
   'needs "nothing" when the work is finished (or still going by itself) and nothing waits on the user. ' +
@@ -388,6 +406,7 @@ const END_TURN_ASKS =
   // offered Archive, got buried and forgotten. Not make-work, though.
   'next is for needs "nothing": up to 3 follow-ups in this thread worth doing, so they don\'t get lost: a piece still missing, a check that\'s due, something you or the user raised and didn\'t get to. Only ones that really came up; never invent work, and most turns have none, so leave it out then. ' + NEXT_ROW + 'Don\'t also list them in your message. ' +
   'archive: true archives this thread once the turn is over, with needs "nothing" only. Use it only when the user asks for this thread to be archived, or the message that started the thread says to; otherwise leave it out, as a thread that vanishes from their inbox when they hadn\'t finished with it is confusing. ' +
+  END_TURN_SNOOZE +
   'Sub-agents never call this; only the thread\'s own agent does.';
 
 export const END_TURN_DESCRIPTION =
@@ -461,6 +480,7 @@ const ONE_REPLY_FIELDS =
   'next is only for when nothing is needed: up to 3 follow-ups that really came up and that you\'d tell the user are worth doing; usually none, and never something you\'d call optional or low priority. ' +
   NEXT_ROW +
   'archive: true only when the user asked for this thread to be archived, or the message that started the thread says to. ' +
+  END_TURN_SNOOZE +
   'Sub-agents never call this; only the thread\'s own agent does.';
 
 const ONE_REPLY_WHAT =
@@ -520,8 +540,8 @@ export function endTurnIsOneReply(result: { ok: boolean; text: string }): boolea
 // (thread 1b770c6a).
 export function endTurnMisfit(problem: string, oneReply: boolean): string {
   const shape = oneReply
-    ? '{ headline?, needs?, asks?: { question, options?: { label, does? }[], suggested?, links? }[], next?, archive? }, then write your reply after it, as ordinary text: that reply is the only text the user sees from the turn.'
-    : '{ needs?, summary?: string[], asks?: { action, why, reply?, options?: string[], suggested?, links? }[], next?, archive? }, after writing your reply as ordinary text, with nothing after the call.';
+    ? '{ headline?, needs?, asks?: { question, options?: { label, does? }[], suggested?, links? }[], next?, archive?, snooze? }, then write your reply after it, as ordinary text: that reply is the only text the user sees from the turn.'
+    : '{ needs?, summary?: string[], asks?: { action, why, reply?, options?: string[], suggested?, links? }[], next?, archive?, snooze? }, after writing your reply as ordinary text, with nothing after the call.';
   return `Not ended: those arguments don't fit end_turn.\n${problem}\nCall it with ${shape} Go by this rather than the tool's description, which can be out of date in a session this old, and reloading it won't change that.`;
 }
 
@@ -701,12 +721,19 @@ export const ALREADY_ENDED = 'Already ended: this turn has had its end_turn, and
 // take it for a new end_turn, and write its summary out a second time.
 export const ARCHIVE_ADDED = 'Added: this thread will be archived once the turn is over, and the rest of your end_turn stands. If you have written your reply, stop here with no more text.';
 
+// The same for a repeat that only adds snooze (or changes when to wake).
+export const SNOOZE_ADDED = 'Added: this thread will hibernate once the turn is over, and the rest of your end_turn stands. If you have written your reply, stop here with no more text.';
+
 export function endTurnRefusedRepeat(result: { text: string }): boolean {
   return result.text.startsWith(ALREADY_ENDED);
 }
 
 export function endTurnAddedArchive(result: { ok: boolean; text: string }): boolean {
   return result.ok && result.text === ARCHIVE_ADDED;
+}
+
+export function endTurnAddedSnooze(result: { ok: boolean; text: string }): boolean {
+  return result.ok && result.text === SNOOZE_ADDED;
 }
 
 // Whether the turn so far has given Mike a reply, for end_turn to check

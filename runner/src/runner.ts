@@ -85,11 +85,12 @@ import { fileContext } from './adapters/claude/normalize.ts';
 import { ASK_CODEX_MODEL, HAIKU, type Models } from './models/index.ts';
 import { EXPLAIN_SYSTEM, RECENT_CHARS, RECENT_MESSAGES, explainPrompt } from './explain.ts';
 import type { ExplainTurn } from './explain.ts';
-import { SAID_MAX, WAKE_SYSTEM, awayFor, hibernateNote, readWakeAnswer, wakePrompt } from './wake-when.ts';
+import { SAID_MAX, WAKE_SYSTEM, awayFor, hibernateNote, localWhen, readWakeAnswer, wakePrompt } from './wake-when.ts';
+import { parseWhen } from './when.ts';
 import { emptyHighlights, observe as observeHighlights, pinItem, remove as removeHighlight, unpin as unpinHighlight, upsert as upsertHighlight, view as highlightsView, absolute, type ThreadHighlights } from './highlights.ts';
 import { SERVER_NAME, approvalTitle } from './threadbear-mcp.ts';
 import { PANEL_ACK_WAIT_MS, PANEL_PLACES, resolvePanel } from './panel-requests.ts';
-import { archiveFromTool, bylineFromTool, END_TURN_TOOL, endTurnAccepted, endTurnAddedArchive, endTurnAsksForMessage, endTurnIsOneReply, endTurnOwesReply, endTurnRefusedRepeat, endTurnTaken, endTurnWantsReply, needsFromText, needsFromTool, splitReplySection, summaryFromTool, summaryMarkdown } from './needs.ts';
+import { archiveFromTool, bylineFromTool, END_TURN_TOOL, endTurnAccepted, endTurnAddedArchive, endTurnAddedSnooze, snoozeFromTool, endTurnAsksForMessage, endTurnIsOneReply, endTurnOwesReply, endTurnRefusedRepeat, endTurnTaken, endTurnWantsReply, needsFromText, needsFromTool, splitReplySection, summaryFromTool, summaryMarkdown } from './needs.ts';
 import type { Needs } from './needs.ts';
 import { asksForAppRestart } from './app-restarts.ts';
 import type { ConnectorsStatus } from './connectors.ts';
@@ -2517,6 +2518,7 @@ export class Runner {
           if (ev.type === 'tool.result' && ev.itemId === rt.turn.endTurnCall) {
             if (endTurnRefusedRepeat(ev)) rt.turn.endTurn = rt.turn.endTurnBefore;
             else if (endTurnAddedArchive(ev)) rt.turn.endTurn = { ...rt.turn.endTurnBefore, archive: true };
+            else if (endTurnAddedSnooze(ev)) rt.turn.endTurn = { ...rt.turn.endTurnBefore, snooze: rt.turn.endTurn?.snooze };
           }
           if (ev.type === 'tool.result' && ev.itemId === rt.turn.endTurnCall && endTurnAccepted(ev)) {
             rt.turn.ended = true;
@@ -2807,12 +2809,48 @@ export class Runner {
     // archive, which Mike asked it for). It can't archive itself mid-turn,
     // as that stops the CLI, so it happens here, once the turn is over, and
     // not if a message is already waiting for the next one.
-    const archive = outcome === 'completed' && !turn.auto && said?.needs === 'nothing' && archiveFromTool(turn.endTurn) && !rec.queue.length;
+    const away = outcome === 'completed' && !turn.auto && said?.needs === 'nothing' && !rec.queue.length;
+    const archive = away && archiveFromTool(turn.endTurn);
+    // Hibernating likewise (end_turn's snooze). Archive wins if it asked for both.
+    const snooze = away && !archive ? snoozeFromTool(turn.endTurn) : undefined;
     this.endTurn(st, ev.seq, outcome === 'failed' ? 'error' : 'idle', outcome, limitHit);
     if (archive && !rt.turn && !rec.archivedAt && !this.stopping) {
       this.emit(st, { type: 'system.note', text: 'Archived, as the agent was asked to once it had finished.' });
       this.update({ threadId: rec.id, archived: true });
     }
+    if (snooze && !rt.turn && !rec.archivedAt && !this.stopping) this.snoozeAfterTurn(st, snooze);
+  }
+
+  // end_turn's snooze, once the turn is over: a time as update_thread
+  // reads it, or else words, read as Hibernate in words reads Mike's.
+  private snoozeAfterTurn(st: ThreadState, when: string): void {
+    const { rec } = st;
+    let until: string | undefined;
+    if (when.toLowerCase() === 'restart') until = 'restart';
+    else {
+      try {
+        until = parseWhen(when, this.clock.now());
+      } catch {
+        until = undefined;
+      }
+    }
+    if (until === undefined) {
+      // A failure puts the thread back in the inbox (hibernateWhen), so
+      // Mike sees it, with a note saying why.
+      this.hibernateWhen({ threadId: rec.id, said: when }).catch((e: unknown) => {
+        if (st.rt.deleted) return;
+        this.emit(st, { type: 'system.note', text: `Not hibernated, as the agent was asked to: ${e instanceof Error ? e.message : String(e)}` });
+      });
+      return;
+    }
+    if (until !== 'restart' && Date.parse(until) <= this.clock.now()) {
+      this.emit(st, { type: 'system.note', text: `Not hibernated: the agent asked to wake at ${when}, which has passed.` });
+      return;
+    }
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const text = until === 'restart' ? 'Hibernating until the runner next starts, as the agent was asked to.' : `Hibernating until ${localWhen(Date.parse(until), timeZone)}, as the agent was asked to.`;
+    this.emit(st, { type: 'system.note', text });
+    this.update({ threadId: rec.id, snoozedUntil: until });
   }
 
   private endTurn(st: ThreadState, completedSeq: number, status: ThreadStatus, outcome?: TurnOutcome, limitHit?: string): void {
