@@ -93,7 +93,7 @@ test('a message queued during the turn moves across with the thread and starts o
   assert.equal(b.runner.get(t.id).status, 'starting');
 });
 
-test('a message to a kept thread with no turn waits for the new runner', async () => {
+test('a message to a thread that background work is holding starts at once on the old runner', async () => {
   const h = makeHarness();
   const t = create(h).thread;
   const s = h.adapter.last;
@@ -104,13 +104,55 @@ test('a message to a kept thread with no turn waits for the new runner', async (
   const handed: string[] = [];
   await h.runner.beginDrain([t.id], { onHandedOver: (id) => handed.push(id), backgroundMs: 30 * MIN });
   assert.deepEqual(handed, []);
+  // Waiting for the work to end could take half an hour, with Mike's answer
+  // unread and his card still open.
   h.runner.send(t.id, 'how did it go?');
-  // Queued, not started on the old release.
-  assert.equal(s.sent.length, 1);
-  assert.equal(h.runner.get(t.id).status, 'idle');
+  assert.equal(s.sent.length, 2);
+  assert.equal(s.sent[1].text, 'how did it go?');
+  assert.equal(h.runner.get(t.id).status, 'running');
+  // It still moves across once the turn and the work are over.
+  s.result('completed');
   s.out({ kind: 'tasks', tasks: [] });
   await tick();
   h.clock.advance(20_000); // past the wake grace
+  await tick();
+  assert.deepEqual(handed, [t.id]);
+  const b = primary(h, [t.id]);
+  b.runner.adopt(t.id);
+  b.runner.send(t.id, 'and then');
+  assert.equal(b.adapter.last.opts.resume, true);
+  assert.equal(b.adapter.last.opts.sessionId, s.opts.sessionId);
+});
+
+test('a message queued during the turn starts on the old runner if background work outlives the turn', async () => {
+  const h = makeHarness();
+  const t = create(h).thread;
+  const s = h.adapter.last;
+  s.init();
+  s.out({ kind: 'tasks', tasks: [{ id: 'b1', type: 'local_bash', kind: 'shell', description: 'npm test' }] });
+  const handed: string[] = [];
+  await h.runner.beginDrain([t.id], { onHandedOver: (id) => handed.push(id), backgroundMs: 30 * MIN });
+  h.runner.send(t.id, 'next thing', [], { queue: true });
+  s.result('completed');
+  await tick();
+  assert.deepEqual(handed, []);
+  assert.equal(s.sent.at(-1)?.text, 'next thing');
+});
+
+test('a message to a thread on its way across waits for the new runner', async () => {
+  const h = makeHarness();
+  const t = create(h).thread;
+  const s = h.adapter.last;
+  s.init();
+  s.out({ kind: 'tasks', tasks: [{ id: 'b1', type: 'local_bash', kind: 'shell', description: 'npm run dev' }] });
+  s.result('completed');
+  const handed: string[] = [];
+  await h.runner.beginDrain([t.id], { onHandedOver: (id) => handed.push(id), backgroundMs: 30 * MIN, checkMs: MIN });
+  // The limit passes: the runner starts letting go of it, which stops the
+  // work. Starting a turn now would be on a CLI that's leaving.
+  h.clock.advance(30 * MIN);
+  h.runner.send(t.id, 'how did it go?');
+  assert.equal(s.sent.length, 1);
   await tick();
   assert.deepEqual(handed, [t.id]);
   const b = primary(h, [t.id]);

@@ -996,7 +996,10 @@ restart wait for busy threads. It hands over instead:
   hold it until they finish, up to 4 hours: they end by themselves, and
   stopping one throws its work away. Messages queued for it at that moment move with it
   and the primary starts them, so a message sent during the turn runs on
-  the new release. The draining runner saves the thread, then sends the
+  the new release. The exception is a thread that background work is
+  holding: a message to it, or one still queued when its turn ends, starts
+  a turn on the draining runner straight away rather than wait out the
+  work, and the hold counts from the end of that turn. The draining runner saves the thread, then sends the
   primary `drain.handedOver { threadId }`; the primary loads it and carries
   on (the same seqs; a client's subscription keeps going). Once it keeps
   nothing, the draining runner exits.

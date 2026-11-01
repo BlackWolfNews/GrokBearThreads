@@ -147,6 +147,18 @@ final class NeedsYouTests: XCTestCase {
         XCTAssertNil(model.openCard)
     }
 
+    /// Sent is answered: the card doesn't wait for the runner to show the
+    /// message, which can sit queued for a while. A failed send brings it back.
+    func testTheOpenCardGoesOnceHisReplyIsOnItsWay() {
+        var model = TranscriptModel(events: [done(1, turn: "t1", needs: "you", asks: [["action": "Merge?", "options": ["Yes", "No"]]])])
+        XCTAssertEqual(model.openCard?.id, "ak:1")
+        let reply = PendingMessage(text: "Merge?\nYes", answers: [AskAnswer(action: "Merge?", answer: "Yes")], afterSeq: 1, queued: true)
+        _ = model.setPending([reply])
+        XCTAssertNil(model.openCard)
+        _ = model.setPending([])
+        XCTAssertEqual(model.openCard?.id, "ak:1")
+    }
+
     func testSummaryDecodesNeedsAndAsks() throws {
         let json = #"{"id":"a","title":"T","needsYou":true,"needs":"you","asksSeq":12,"asks":[{"action":"Paste the key","where":"Settings","reply":"done","ticked":true},{"action":"Pick one"},{"bad":1}]}"#
         let thread = try JSONDecoder().decode(ThreadSummary.self, from: Data(json.utf8))

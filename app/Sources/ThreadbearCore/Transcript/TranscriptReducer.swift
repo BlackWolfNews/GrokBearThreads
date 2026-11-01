@@ -173,8 +173,11 @@ public struct TranscriptModel: Sendable {
 
     /// The last finished turn's card while it's open (Needs you or Done):
     /// the app draws it in the composer, not the transcript, so the two
-    /// read as one box (Mike, 30 Oct).
-    public var openCard: TranscriptRow? { openAsksRow.flatMap { row(id: $0) } }
+    /// read as one box (Mike, 30 Oct). A message on its way is his reply
+    /// already, so the card goes as soon as he sends it, not when the runner
+    /// shows it, which behind a turn or a handover can be a good while. It
+    /// comes back if the send fails.
+    public var openCard: TranscriptRow? { pending.isEmpty ? openAsksRow.flatMap { row(id: $0) } : nil }
 
     /// An item, shown or folded away in a closed group.
     public func item(id: String) -> TranscriptRow? {

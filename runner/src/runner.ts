@@ -2094,7 +2094,8 @@ export class Runner {
     if (rt.turn || rec.queue.length || this.draining || rt.editing) {
       // Behind a running turn, or behind messages that couldn't start
       // earlier: they go first. On a draining runner a thread with no turn
-      // is about to move across, and the message goes with it.
+      // is usually about to move across, and the message goes with it
+      // (kickQueue starts it here if background work is holding the thread).
       rec.queue.push(msg);
       this.markDirty(st);
       this.kickQueue(st);
@@ -3750,8 +3751,14 @@ export class Runner {
   private kickQueue(st: ThreadState): boolean {
     if (st.rt.turn || st.rec.queue.length === 0 || this.stopping || st.rt.editing) return false;
     // A draining runner hands a thread over with its queue rather than
-    // start another turn on the old release; the primary starts it.
-    if (this.draining) {
+    // start another turn on the old release; the primary starts it. Not if
+    // background work is holding the thread here: that can be half an hour
+    // for a shell and hours for a subagent, with the message sitting unread
+    // and its card still open (Mike's "Done" on 1 Nov waited behind a
+    // 20-minute watcher). Its CLI is alive, so it answers now, and the
+    // thread moves across once the turn and the work are over.
+    const d = this.draining;
+    if (d && (st.rt.tasks.length === 0 || d.going.has(st.rec.id))) {
       this.queueHandoverCheck();
       return false;
     }
