@@ -9,7 +9,7 @@ import { ThreadIndex, runnerTokenFile, type RemoteThreads } from '../../src/thre
 import { nullLogger } from '../../src/log.ts';
 import type { Notification } from '../../src/runner.ts';
 
-function setup() {
+function setup(takesStartedBy?: () => boolean) {
   const h = makeHarness();
   const writes: { rows: { threadId: string; title: string; preview: string; status: string }[]; removed: string[]; keep?: string[] }[] = [];
   let onRemote: ((v: unknown) => void) | undefined;
@@ -34,6 +34,7 @@ function setup() {
     publish: (n: Notification) => n.method === 'remoteThreads.updated' && heard.push(n.params),
     clock: h.clock,
     log: nullLogger,
+    ...(takesStartedBy ? { takesStartedBy } : {}),
   });
   const flush = async () => {
     h.clock.advance(1500);
@@ -96,5 +97,23 @@ test('other runners’ threads reach the app, with a token file only when one wa
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, 'secret\n', { mode: 0o600 });
   assert.equal(index.list().runners[0]!.tokenFile, file);
+  index.stop();
+});
+
+test('a row carries who started the thread, once the backend takes it, and goes again when it does', async () => {
+  let takes = false;
+  const { h, index, writes, flush } = setup(() => takes);
+  const from = h.runner.create({ text: 'The parent', accountId: 'claude-3' }).thread;
+  const { thread } = h.runner.create({ text: 'Fix it', accountId: 'claude-3', startedBy: { kind: 'thread', label: 'Agent', threadId: from.id, why: 'fixing a hook' } });
+  index.start();
+  await flush();
+  const row = () => writes.flatMap((w) => w.rows).filter((r) => r.threadId === thread.id).at(-1) as unknown as { startedBy?: unknown };
+  assert.equal(row().startedBy, undefined, 'an older backend would turn the batch down');
+  takes = true;
+  const before = writes.length;
+  index.refresh();
+  await flush();
+  assert.ok(writes.length > before);
+  assert.deepEqual(row().startedBy, { kind: 'thread', label: 'Agent', threadTitle: 'The parent', why: 'fixing a hook' });
   index.stop();
 });

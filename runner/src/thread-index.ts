@@ -32,6 +32,7 @@ export type IndexRow = {
   lastActivityAt: string;
   snoozedUntil?: string;
   archivedAt?: string;
+  startedBy?: { kind: string; label: string; icon?: string; threadTitle?: string; why?: string };
 };
 
 // What the Mac app gets (docs/protocol.md, "Other runners' threads").
@@ -44,7 +45,7 @@ const BATCH = 50;
 // As on the phone: not heard from for this long is offline.
 const ONLINE_MS = 3 * 60_000;
 
-export function toIndexRow(t: ThreadSummary): IndexRow {
+export function toIndexRow(t: ThreadSummary, withStartedBy = true): IndexRow {
   const row: IndexRow = {
     threadId: t.id,
     title: t.title,
@@ -61,6 +62,11 @@ export function toIndexRow(t: ThreadSummary): IndexRow {
   if (t.model) row.model = t.model;
   if (t.snoozedUntil) row.snoozedUntil = t.snoozedUntil;
   if (t.archivedAt) row.archivedAt = t.archivedAt;
+  if (withStartedBy && t.startedBy) {
+    // Not the thread's id: only the row's tooltip uses this, by that title.
+    const { kind, label, icon, threadTitle, why } = t.startedBy;
+    row.startedBy = { kind, label, ...(icon ? { icon } : {}), ...(threadTitle ? { threadTitle } : {}), ...(why ? { why } : {}) };
+  }
   return row;
 }
 
@@ -87,6 +93,9 @@ export class ThreadIndex {
     publish?: (n: Notification) => void;
     clock: Clock;
     log: Logger;
+    // Whether the backend's validator knows startedBy (API 23). It would turn
+    // the whole batch down otherwise, and the sidebar would stop updating.
+    takesStartedBy?: () => boolean;
   };
   private running = false;
   private sent = new Map<string, string>(); // threadId -> writeKey as sent
@@ -142,8 +151,15 @@ export class ThreadIndex {
     return this.withTokens(this.remote);
   }
 
+  /** The backend got new enough for what rows held back: they go again. */
+  refresh(): void {
+    if (!this.running) return;
+    for (const t of this.deps.host.list(['inbox', 'snoozed', 'archived'])) this.mark(t);
+    this.schedule();
+  }
+
   private mark(t: ThreadSummary): void {
-    const row = toIndexRow(t);
+    const row = toIndexRow(t, this.deps.takesStartedBy?.() ?? true);
     if (this.sent.get(t.id) === writeKey(row)) {
       this.dirty.delete(t.id);
       return;

@@ -1593,6 +1593,7 @@ function remoteThreads(client) {
     ...(s.model ? { model: s.model } : {}), status: s.status, needsYou: Boolean(s.needsYou), unread: s.lastSeq > s.lastSeenSeq,
     preview: s.preview, createdAt: s.createdAt, lastActivityAt: s.lastActivityAt,
     ...(s.snoozedUntil ? { snoozedUntil: s.snoozedUntil } : {}), ...(s.archivedAt ? { archivedAt: s.archivedAt } : {}),
+    ...(s.startedBy ? { startedBy: s.startedBy } : {}),
   }));
   return {
     runners: [{
@@ -1691,6 +1692,8 @@ function addRemoteDemo() {
     needs: 'nothing',
   }]);
   // Its Highlights: the list it wrote, a path on bruce.
+  // Started by a tool on Bruce: its byline reaches this Mac's sidebar.
+  threads.get('bruce_backup').summary.startedBy = { kind: 'tool', label: 'Backup watch', icon: 'externaldrive', why: 'last backup 3 days old' };
   const media = threads.get('bruce_media');
   highlights.set('bruce_media', {
     highlights: [{ id: `file:${BRUCE_FILES.list}`, kind: 'file', title: 'duplicates.txt', path: BRUCE_FILES.list, how: 'written',

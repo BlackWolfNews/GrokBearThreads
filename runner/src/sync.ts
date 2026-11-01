@@ -68,7 +68,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 22;
+export const BACKEND_API_VERSION = 23;
 // From this one a thread's row carries its open card of asks and a finished
 // turn's next steps, and a message row can be `summary` (end_turn's
 // bullets), so the phone shows end-of-turn cards. An older backend's
@@ -110,6 +110,10 @@ export const MODELS_API_VERSION = 20;
 // From this one a thread's row carries `startedBy`, for the phone's byline.
 // An older backend's validator would turn the row down, so it goes without.
 export const STARTED_BY_API_VERSION = 22;
+
+// From this one a threadIndex row carries `startedBy` too, for the Mac's
+// byline on another runner's threads.
+export const INDEX_STARTED_BY_API_VERSION = 23;
 
 export type SyncStatus = {
   state: 'off' | 'ok' | 'error';
@@ -681,6 +685,7 @@ export class ConvexSync {
         publish: deps.publish,
         clock: deps.clock,
         log: deps.log,
+        takesStartedBy: () => (this.backendApiVersion ?? 0) >= INDEX_STARTED_BY_API_VERSION,
       });
     }
   }
@@ -733,6 +738,7 @@ export class ConvexSync {
     if (v < BACKEND_API_VERSION) {
       this.deps.log.warn('the convex backend is older than this runner', { backend: v, expected: BACKEND_API_VERSION, url: this.deps.config.url });
     }
+    if (v >= INDEX_STARTED_BY_API_VERSION) this.index?.refresh();
     // Shared threads held back their share from an older backend (or
     // before the first heartbeat said which): they go again now.
     if (v >= SHARE_API_VERSION && this.running) {

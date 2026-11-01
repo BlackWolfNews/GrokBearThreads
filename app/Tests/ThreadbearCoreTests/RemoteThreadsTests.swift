@@ -293,4 +293,11 @@ final class RemoteClientsTests: XCTestCase {
         }
         XCTAssertNil(remote.connected("r_bruce"))
     }
+
+    func testAnotherRunnersThreadCarriesItsBylineToTheRow() throws {
+        let json = #"{"runnerId":"r","threadId":"t","title":"t","cwd":"/x/misc","status":"idle","startedBy":{"kind":"tool","label":"Sentry","why":"2 events"}}"#
+        let summary = try JSONDecoder().decode(RemoteThread.self, from: Data(json.utf8)).summary
+        XCTAssertEqual(ThreadByline.line(summary)?.text, "Sentry · 2 events")
+        XCTAssertNil(RemoteThread(runnerId: "r", threadId: "t2").summary.startedBy)
+    }
 }

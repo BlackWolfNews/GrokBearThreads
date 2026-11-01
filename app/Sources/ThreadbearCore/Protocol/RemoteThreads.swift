@@ -87,10 +87,12 @@ public struct RemoteThread: Sendable, Hashable, Decodable {
     public var lastActivityAt: Date
     public var snoozedUntil: Date?
     public var archivedAt: Date?
+    /// Who started it, when it wasn't Mike: the row's byline.
+    public var startedBy: ThreadStartedBy?
 
     public init(runnerId: String, threadId: String, title: String = "", cwd: String = "", accountId: String = "", provider: String = "claude",
                 model: String? = nil, status: ThreadStatus = .idle, needsYou: Bool = false, unread: Bool = false, preview: String = "",
-                createdAt: Date = Date(), lastActivityAt: Date = Date(), snoozedUntil: Date? = nil, archivedAt: Date? = nil) {
+                createdAt: Date = Date(), lastActivityAt: Date = Date(), snoozedUntil: Date? = nil, archivedAt: Date? = nil, startedBy: ThreadStartedBy? = nil) {
         self.runnerId = runnerId
         self.threadId = threadId
         self.title = title
@@ -106,6 +108,7 @@ public struct RemoteThread: Sendable, Hashable, Decodable {
         self.lastActivityAt = lastActivityAt
         self.snoozedUntil = snoozedUntil
         self.archivedAt = archivedAt
+        self.startedBy = startedBy
     }
 
     public init(from decoder: Decoder) throws {
@@ -127,11 +130,12 @@ public struct RemoteThread: Sendable, Hashable, Decodable {
         lastActivityAt = text(.lastActivityAt).flatMap(ISO8601.parse) ?? createdAt
         snoozedUntil = text(.snoozedUntil).flatMap(ISO8601.parse)
         archivedAt = text(.archivedAt).flatMap(ISO8601.parse)
+        startedBy = (try? c.decodeIfPresent(ThreadStartedBy.self, forKey: .startedBy)) ?? nil
     }
 
     enum CodingKeys: String, CodingKey {
         case runnerId, threadId, title, cwd, accountId, provider, model, status, needsYou, unread, preview
-        case createdAt, lastActivityAt, snoozedUntil, archivedAt
+        case createdAt, lastActivityAt, snoozedUntil, archivedAt, startedBy
     }
 
     /// As a summary the sidebar's rows and sections take like a local one.
@@ -149,6 +153,7 @@ public struct RemoteThread: Sendable, Hashable, Decodable {
         // year 9999 (`threads.update` with "restart").
         if let snoozedUntil, snoozedUntil > Self.restartFarOff { summary.snoozedUntilRestart = true }
         summary.runnerId = runnerId
+        summary.startedBy = startedBy
         return summary
     }
 

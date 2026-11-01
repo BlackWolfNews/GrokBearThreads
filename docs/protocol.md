@@ -1450,7 +1450,7 @@ out. A `byline` in a thread with no `startedBy` is dropped. With no `why` the
 row shows its usual project or folder after the label. Threads from before
 this have none, and `tb new` outside a thread with no flags could be Mike at
 a terminal, so it has none either. Mirrored to the phone's row from backend
-API 22.
+API 22, and to another runner's sidebar row on a Mac from API 23.
 
 ## Needs you
 
@@ -2520,7 +2520,8 @@ runner itself. Runners never talk to each other.
 - **The sidebar table.** With a backend of API 12, each runner keeps one
   `threadIndex` row per thread there: `threadId, title, cwd, accountId,
   provider, model?, status, needsYou, unread, preview, createdAt,
-  lastActivityAt, snoozedUntil?, archivedAt?`. It writes a row when any
+  lastActivityAt, snoozedUntil?, archivedAt?, startedBy?` (`startedBy`
+  from API 23, without its `threadId`). It writes a row when any
   of those but `preview` and `lastActivityAt` changes (those two go along
   but never cause a write), and on its first write after starting it
   drops rows for threads it no longer has. A deleted thread's row goes.

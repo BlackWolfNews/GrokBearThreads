@@ -154,6 +154,8 @@ export default defineSchema({
     lastActivityAt: v.string(),
     snoozedUntil: v.optional(v.string()),
     archivedAt: v.optional(v.string()),
+    // Who started it, when that wasn't Mike: the row's byline. Since API 23.
+    startedBy: v.optional(v.object({ kind: v.string(), label: v.string(), icon: v.optional(v.string()), threadTitle: v.optional(v.string()), why: v.optional(v.string()) })),
   })
     .index('by_runnerId', ['runnerId'])
     .index('by_runner_thread', ['runnerId', 'threadId']),

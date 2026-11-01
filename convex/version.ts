@@ -79,4 +79,7 @@
 // 22: thread rows can carry `startedBy` ({ kind, label, icon?, why? }): who
 //    started it when Mike didn't, for the phone's byline. A runner sends it
 //    only to a backend of 22 or later; an older phone ignores it.
-export const API_VERSION = 22;
+// 23: threadIndex rows can carry `startedBy` too, so the Mac's sidebar shows
+//    the byline on another runner's threads. A runner sends it only to a
+//    backend of 23 or later.
+export const API_VERSION = 23;
