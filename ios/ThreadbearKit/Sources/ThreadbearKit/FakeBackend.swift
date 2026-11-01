@@ -1,4 +1,6 @@
+import CoreGraphics
 import Foundation
+import ImageIO
 
 /// An in-memory backend for the simulator, screenshots and previews, so the
 /// app can be built and looked at without a runner or a deployment. It
@@ -18,16 +20,81 @@ public final class FakeBackend: Backend, @unchecked Sendable {
     /// How long the thread lists take to answer the first time, to see the
     /// app's loading rows (`-ThreadbearSlowLoad`). Zero normally.
     private let listDelay: Duration
+    private var imagesById: [String: [MessageImage]] = [:]
 
-    public init(now: Date = .now, turnDelay: Duration = .seconds(2), runnerOnline: Bool = true, listDelay: Duration = .zero) {
+    public init(now: Date = .now, turnDelay: Duration = .seconds(2), runnerOnline: Bool = true, listDelay: Duration = .zero, pictures: Bool = false) {
         let sample = Self.sample(now: now)
         threadsById = Dictionary(uniqueKeysWithValues: sample.threads.map { ($0.threadId, $0) })
         messagesById = sample.messages
+        // Left out of the usual samples, which the App Store shots are of.
+        if pictures {
+            let thread = Self.pictureThread(now: now)
+            threadsById[thread.thread.threadId] = thread.thread
+            messagesById[thread.thread.threadId] = thread.messages
+            imagesById[thread.thread.threadId] = thread.images
+        }
         scheduleList = sample.schedules
         runnerList = [PhoneRunner(runnerId: "m5", name: "MacBook Pro", version: "0.1.0",
                                   lastSeenAt: runnerOnline ? now : now.addingTimeInterval(-3 * 3600))]
         self.turnDelay = turnDelay
         self.listDelay = listDelay
+    }
+
+    // MARK: A thread with pictures
+
+    /// `-ThreadbearPictures`: one thread with each way a picture can come:
+    /// wide in a reply, tall in a reply, pinned, and one only on the Mac.
+    private static func pictureThread(now: Date) -> (thread: PhoneThread, messages: [PhoneMessage], images: [MessageImage]) {
+        let ago = { (minutes: Double) in now.addingTimeInterval(-minutes * 60) }
+        let thread = PhoneThread(threadId: "pics", title: "Back panel screw layout", cwd: "~/dev/workbench", preview: "Here's where the screws go.", lastActivityAt: ago(2))
+        let wide = "/Users/you/guide/back-screws.png", tall = "/Users/you/guide/case-side.png"
+        let messages = [
+            PhoneMessage(seq: 1, role: .user, text: "Where do the back screws go?", at: ago(9)),
+            PhoneMessage(seq: 2, role: .tool, text: "Wrote guide/back-screws.png", toolKind: "write", at: ago(7)),
+            PhoneMessage(seq: 3, role: .tool, text: "threadbear: pin", toolKind: "mcp", at: ago(6)),
+            PhoneMessage(seq: 4, role: .assistant, text: """
+            Here's where the screws go, all round the outside edge:
+
+            ![Back screw layout](\(wide))
+
+            - **Top and bottom:** 5 screws each.
+            - **Each side:** 2 screws.
+
+            The side view, which is tall:
+
+            ![Side view](\(tall))
+
+            And the first go, which I haven't got any more:
+
+            ![First attempt](/Users/you/guide/first-go.png)
+            """, at: ago(2)),
+        ]
+        let images = [
+            MessageImage(seq: 3, pinned: true, url: samplePicture("pinned", width: 900, height: 900, hue: 0.33), width: 900, height: 900),
+            MessageImage(seq: 4, src: wide, url: samplePicture("wide", width: 1600, height: 900, hue: 0.58), width: 1600, height: 900),
+            MessageImage(seq: 4, src: tall, url: samplePicture("tall", width: 800, height: 2000, hue: 0.08), width: 800, height: 2000),
+        ]
+        return (thread, messages, images)
+    }
+
+    /// A drawn picture with a grid and a cross, so zooming and fitting show.
+    private static func samplePicture(_ name: String, width: Int, height: Int, hue: CGFloat) -> String {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("sample-\(name).png")
+        let space = CGColorSpace(name: CGColorSpace.sRGB)!
+        guard let c = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return file.absoluteString }
+        c.setFillColor(CGColor(red: 0.2 + hue, green: 0.55, blue: 1.1 - hue, alpha: 1))
+        c.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        c.setStrokeColor(CGColor(red: 1, green: 1, blue: 1, alpha: 0.7))
+        c.setLineWidth(3)
+        for x in stride(from: 0, through: width, by: 100) { c.strokeLineSegments(between: [CGPoint(x: x, y: 0), CGPoint(x: x, y: height)]) }
+        for y in stride(from: 0, through: height, by: 100) { c.strokeLineSegments(between: [CGPoint(x: 0, y: y), CGPoint(x: width, y: y)]) }
+        c.setLineWidth(12)
+        c.strokeLineSegments(between: [.zero, CGPoint(x: width, y: height), CGPoint(x: width, y: 0), CGPoint(x: 0, y: height)])
+        if let image = c.makeImage(), let out = CGImageDestinationCreateWithURL(file as CFURL, "public.png" as CFString, 1, nil) {
+            CGImageDestinationAddImage(out, image, nil)
+            CGImageDestinationFinalize(out)
+        }
+        return file.absoluteString
     }
 
     // MARK: Live reads
@@ -140,7 +207,8 @@ public final class FakeBackend: Backend, @unchecked Sendable {
     public func messages(_ threadId: String, limit: Int) -> AsyncThrowingStream<MessagePage, Error> {
         watch { [unowned self] in
             let all = lock.withLock { messagesById[threadId] ?? [] }
-            return MessagePage(messages: Array(all.suffix(limit)), hasMore: all.count > limit)
+            let images = lock.withLock { imagesById[threadId] ?? [] }
+            return MessagePage(messages: Array(all.suffix(limit)), hasMore: all.count > limit, images: images)
         }
     }
 

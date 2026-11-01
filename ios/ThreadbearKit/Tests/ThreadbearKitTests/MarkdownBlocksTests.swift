@@ -1,7 +1,42 @@
+import Foundation
 import Testing
 @testable import ThreadbearKit
 
 @Suite struct MarkdownBlocksTests {
+    @Test func aPictureOnItsOwnLineOrAmongWords() {
+        #expect(MarkdownBlock.parse("![Back screws](/Users/m/guide/back.png)") == [.image(alt: "Back screws", src: "/Users/m/guide/back.png")])
+        #expect(MarkdownBlock.parse("Before ![a](<~/a b.png> \"title\") after") == [
+            .paragraph("Before"), .image(alt: "a", src: "~/a b.png"), .paragraph("after"),
+        ])
+    }
+
+    @Test func aPictureInAListGoesUnderItsItem() {
+        #expect(MarkdownBlock.parse("""
+        - First ![a](/a.png)
+        - ![b](/b.png)
+        - Third
+
+          ![c](/c.png)
+        """) == [
+            .listItem(text: "First", marker: "•", depth: 0, task: nil),
+            .image(alt: "a", src: "/a.png"),
+            .image(alt: "b", src: "/b.png"),
+            .listItem(text: "Third", marker: "•", depth: 0, task: nil),
+            .image(alt: "c", src: "/c.png"),
+        ])
+    }
+
+    @Test func aPictureBeingTalkedAboutStaysWords() {
+        let inSpan = "Write `![alt](/a.png)` like that"
+        #expect(MarkdownBlock.parse(inSpan) == [.paragraph(inSpan)])
+        #expect(MarkdownBlock.parse("```\n![alt](/a.png)\n```") == [.code("![alt](/a.png)")])
+        #expect(MarkdownBlock.parse("A [link](/a.png) isn't one") == [.paragraph("A [link](/a.png) isn't one")])
+    }
+
+    @Test func aPictureInAQuoteStaysInTheQuote() {
+        #expect(MarkdownBlock.parse("> ![a](/a.png)") == [.quote([.image(alt: "a", src: "/a.png")])])
+    }
+
     @Test func tablesBecomeRowsAndCells() {
         let blocks = MarkdownBlock.parse("""
         Here's the spread:
@@ -115,5 +150,54 @@ import Testing
 
     @Test func anUnclosedFenceWhileStreamingIsStillCode() {
         #expect(MarkdownBlock.parse("Look:\n```\nlet a = 1") == [.paragraph("Look:"), .code("let a = 1")])
+    }
+}
+
+@Suite struct ThreadPicturesTests {
+    private let at = Date(timeIntervalSince1970: 0)
+    private func reply(_ seq: Int) -> ThreadItem { .message(PhoneMessage(seq: seq, role: .assistant, text: "", at: at)) }
+
+    @Test func aMessagesOwnPictureComesFirst() {
+        let old = MessageImage(seq: 5, src: "/a.png", url: "https://x/old")
+        let new = MessageImage(seq: 9, src: "/a.png", url: "https://x/new")
+        let pictures = ThreadPictures([old, new, MessageImage(seq: 9, src: "/b.png", url: "https://x/b")])
+        #expect(pictures.image(src: "/a.png", seq: 5) == old)
+        #expect(pictures.image(src: "/a.png", seq: 9) == new)
+        #expect(pictures.image(src: "/a.png", seq: 7) == old)
+        #expect(pictures.image(src: "/a.png", seq: 1) == new)
+        #expect(pictures.image(src: "/a.png", seq: nil) == new)
+        #expect(pictures.image(src: "/missing.png", seq: 9) == nil)
+    }
+
+    @Test func onlyAWebPictureNeedsNoUpload() {
+        #expect(ThreadPictures.webURL("https://x.io/a.png")?.host() == "x.io")
+        #expect(ThreadPictures.webURL("/Users/m/a.png") == nil)
+        #expect(ThreadPictures.webURL("http://x.io/a.png") == nil)
+    }
+
+    @Test func aPinGoesUnderTheNextReplyOnShow() {
+        let first = MessageImage(seq: 3, pinned: true, url: "https://x/first")
+        let second = MessageImage(seq: 8, pinned: true, url: "https://x/second")
+        let notYet = MessageImage(seq: 20, pinned: true, url: "https://x/late")
+        // A shared thread's tool picture is neither, and doesn't show.
+        let tool = MessageImage(seq: 4, url: "https://x/tool")
+        let items: [ThreadItem] = [
+            .message(PhoneMessage(seq: 1, role: .user, text: "", at: at)),
+            .tools([PhoneMessage(seq: 3, role: .tool, text: "", at: at)]),
+            reply(5),
+            .tools([PhoneMessage(seq: 8, role: .tool, text: "", at: at)]),
+            reply(10),
+        ]
+        let placed = ThreadPictures([first, tool, second, notYet]).pinned(in: items)
+        #expect(placed.under == [5: [first], 10: [second]])
+        #expect(placed.trailing == [notYet])
+    }
+
+    @Test func aPageFromAnOlderBackendHasNoPictures() throws {
+        let json = #"{"messages":[],"hasMore":false}"#
+        #expect(try JSONDecoder().decode(MessagePage.self, from: Data(json.utf8)).images == [])
+        let with = #"{"messages":[],"hasMore":false,"images":[{"seq":4,"src":"/a.png","url":"https://x/a","width":400,"height":300,"somethingNew":1}]}"#
+        let image = try JSONDecoder().decode(MessagePage.self, from: Data(with.utf8)).images.first
+        #expect(image == MessageImage(seq: 4, src: "/a.png", url: "https://x/a", width: 400, height: 300))
     }
 }

@@ -17,7 +17,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { ConvexClient } from 'convex/browser';
 import { phonePicture } from './project-icons.ts';
-import { imagesInEvent, readShareImage, type ShareImage } from './share-images.ts';
+import { imagesInEvent, readReplyImage, readShareImage, replyImagesInEvent, type ReplyImage, type ShareImage } from './share-images.ts';
 import { extForMediaType, sniffImage } from './media.ts';
 import { makeFunctionReference } from 'convex/server';
 import type { Clock, TimerHandle } from './clock.ts';
@@ -68,7 +68,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 23;
+export const BACKEND_API_VERSION = 24;
 // From this one a thread's row carries its open card of asks and a finished
 // turn's next steps, and a message row can be `summary` (end_turn's
 // bullets), so the phone shows end-of-turn cards. An older backend's
@@ -114,6 +114,16 @@ export const STARTED_BY_API_VERSION = 22;
 // From this one a threadIndex row carries `startedBy` too, for the Mac's
 // byline on another runner's threads.
 export const INDEX_STARTED_BY_API_VERSION = 23;
+
+// From this one the pictures in agents' replies and pinned pictures go to
+// file storage for the phone, for every thread (sync:addReplyImage).
+export const REPLY_IMAGES_API_VERSION = 24;
+// How far back a start looks for pictures, as new ones go up as they come.
+// Reading a whole log for each thread is too much to do for all of them on
+// every start, and it's the threads in use that Mike opens on the phone.
+export const REPLY_IMAGES_LOOKBACK_MS = 14 * 24 * 60 * 60 * 1000;
+// Logs read per flush, so a start with many threads doesn't hold the runner up.
+export const REPLY_IMAGES_SCANS_PER_FLUSH = 3;
 
 export type SyncStatus = {
   state: 'off' | 'ok' | 'error';
@@ -453,7 +463,7 @@ export function toMessageDoc(threadId: string, e: PersistedEvent): MessageDoc | 
   if (e.type === 'tool.call') return { threadId, seq: e.seq, role: 'tool', text: toolLine(e), toolKind: e.kind, at: e.ts };
   if (e.type !== 'user.message' && e.type !== 'assistant.text') return undefined;
   const cut = e.text.length > MESSAGE_CHARS ? e.text.slice(0, MESSAGE_CHARS) + '\n\n[cut: the rest is on the Mac]' : e.text;
-  // Pictures stay on the Mac, so the phone and website get a line saying
+  // Mike's own pictures stay on the Mac, so the phone and website get a line saying
   // there were some; a photo sent with no words would be an empty bubble.
   // One a [Picture N] marker places shows as a chip there instead, so the
   // line counts only the rest (docs/protocol.md, "Pictures in a message").
@@ -638,6 +648,14 @@ export class ConvexSync {
   private imagesDrop = new Set<string>();
   private pendingImages: (ShareImage & { threadId: string })[] = [];
   private imagesUp = new Map<string, Set<string>>();
+  // Reply pictures (REPLY_IMAGES_API_VERSION), for the phone: threads whose
+  // log has been looked through since this runner started, ones waiting to
+  // be, pictures waiting to go up, and what's up already per thread as
+  // "seq path", read from the mirror the first time a thread needs it.
+  private replyScanned = new Set<string>();
+  private replyDue = new Set<string>();
+  private pendingReplyImages: (ReplyImage & { threadId: string })[] = [];
+  private replyUp = new Map<string, Set<string>>();
   private flushTimer?: TimerHandle;
   private heartbeatTimer?: TimerHandle;
   private presenceTimer?: TimerHandle;
@@ -875,6 +893,9 @@ export class ConvexSync {
         this.pending.delete(id);
         this.earliest.delete(id);
         this.nexts.delete(id);
+        this.replyDue.delete(id);
+        this.replyUp.delete(id);
+        this.pendingReplyImages = this.pendingReplyImages.filter((i) => i.threadId !== id);
         this.removed.add(id);
         this.scheduleFlush();
         break;
@@ -915,6 +936,15 @@ export class ConvexSync {
       const found = imagesInEvent(e);
       if (found.length) {
         this.pendingImages.push(...found.map((i) => ({ ...i, threadId })));
+        this.scheduleFlush();
+      }
+    }
+    // Only to a backend that takes them: an older one would leave them
+    // queued, and a start looks through recent threads once it's new enough.
+    if ((this.backendApiVersion ?? 0) >= REPLY_IMAGES_API_VERSION) {
+      const found = replyImagesInEvent(e, this.cwdOf(threadId));
+      if (found.length) {
+        this.pendingReplyImages.push(...found.map((i) => ({ ...i, threadId })));
         this.scheduleFlush();
       }
     }
@@ -1036,7 +1066,7 @@ export class ConvexSync {
 
   private scheduleFlush(): void {
     if (!this.running || this.flushTimer) return;
-    if (!this.dirty.size && !this.removed.size && !this.messages.length && !this.dirtyLists.size && !this.full && !this.imagesDue.size && !this.imagesDrop.size && !this.pendingImages.length) return;
+    if (!this.dirty.size && !this.removed.size && !this.messages.length && !this.dirtyLists.size && !this.full && !this.imagesDue.size && !this.imagesDrop.size && !this.pendingImages.length && !this.replyDue.size && !this.pendingReplyImages.length) return;
     const now = this.deps.clock.now();
     let delay = Math.max(0, this.lastFlushAt + SYNC_COALESCE_MS - now);
     if (this.retryAt !== undefined) delay = Math.max(delay, this.retryAt - now);
@@ -1096,6 +1126,7 @@ export class ConvexSync {
       await this.appendMessages(messages);
       this.markFilled(filling);
       if (v >= SHARE_API_VERSION) await this.sendShareImages();
+      if (v >= REPLY_IMAGES_API_VERSION) await this.sendReplyImages();
       this.lastSyncAt = this.deps.clock.now();
       this.backoffMs = 0;
       this.retryAt = undefined;
@@ -1210,6 +1241,85 @@ export class ConvexSync {
       }
       this.pendingImages.shift();
     }
+  }
+
+  private cwdOf(threadId: string): string | undefined {
+    try {
+      return this.deps.runner.get(threadId).cwd;
+    } catch {
+      // A draining runner's thread that isn't here yet: only a relative
+      // pin needs it, and the look through on coming across finds that.
+      return undefined;
+    }
+  }
+
+  // Threads in use that haven't been looked through since this runner
+  // started. New pictures go up as they come; this catches ones from before
+  // the backend took them and any lost in a restart. On every heartbeat, as
+  // a handover brings threads across one at a time.
+  private lookForReplyImages(): void {
+    if ((this.backendApiVersion ?? 0) < REPLY_IMAGES_API_VERSION || !this.running) return;
+    const since = this.deps.clock.now() - REPLY_IMAGES_LOOKBACK_MS;
+    for (const t of this.deps.runner.list(ALL)) {
+      if (this.replyScanned.has(t.id) || t.archivedAt || Date.parse(t.lastActivityAt) < since) continue;
+      this.replyScanned.add(t.id);
+      this.replyDue.add(t.id);
+    }
+    this.scheduleFlush();
+  }
+
+  // A few logs' worth of looking, then the uploads. Each picture goes once
+  // per message. One that's gone, too big or not a picture is skipped with a
+  // line in the log, and the phone says it's on the Mac; a failed upload
+  // throws, so the flush retries from that picture.
+  private async sendReplyImages(): Promise<void> {
+    const key = this.deps.key;
+    for (const threadId of [...this.replyDue].slice(0, REPLY_IMAGES_SCANS_PER_FLUSH)) {
+      let found: ReplyImage[] = [];
+      try {
+        found = this.replyImagesOf(this.deps.runner.get(threadId));
+      } catch {
+        this.replyScanned.delete(threadId); // not here yet: a later heartbeat tries again
+      }
+      this.pendingReplyImages.push(...found.map((i) => ({ ...i, threadId })));
+      this.replyDue.delete(threadId);
+    }
+    while (this.pendingReplyImages.length) {
+      const { threadId, seq, path: file, src, pinned } = this.pendingReplyImages[0]!;
+      let up = this.replyUp.get(threadId);
+      if (!up) {
+        const rows = (await this.post('query', 'sync:replyImages', { key, threadId })) as { seq: number; path: string }[] | null;
+        up = new Set((rows ?? []).map((r) => `${r.seq} ${r.path}`));
+        this.replyUp.set(threadId, up);
+      }
+      const id = `${seq} ${file}`;
+      if (!up.has(id)) {
+        const read = readReplyImage(file);
+        if ('skip' in read) {
+          this.deps.log.debug('reply picture not sent', { threadId, path: file, why: read.skip });
+        } else {
+          const url = (await this.post('mutation', 'sync:iconUploadUrl', { key })) as string;
+          const storageId = await this.upload(url, read.bytes, read.mediaType);
+          const { mediaType, width, height } = read;
+          await this.post('mutation', 'sync:addReplyImage', { key, threadId, seq, path: file, ...(src ? { src } : {}), ...(pinned ? { pinned } : {}), storageId, mediaType, ...(width ? { width } : {}), ...(height ? { height } : {}) });
+        }
+        up.add(id);
+      }
+      this.pendingReplyImages.shift();
+    }
+  }
+
+  private replyImagesOf(t: ThreadSummary): ReplyImage[] {
+    const out: ReplyImage[] = [];
+    let after = 0;
+    while (t.lastSeq > after) {
+      const { events } = this.deps.runner.events(t.id, { afterSeq: after, limit: BACKFILL_EVENTS });
+      const next = events.at(-1)?.seq ?? after;
+      if (next <= after) break;
+      for (const e of events) if (e.seq > after) out.push(...replyImagesInEvent(e, t.cwd));
+      after = next;
+    }
+    return out;
   }
 
   // Every picture in a thread's history, read from its log a page at a time.
@@ -1388,6 +1498,7 @@ export class ConvexSync {
     void this.post('mutation', 'sync:heartbeat', { key: this.deps.key, runner }).then(
       (r) => {
         this.sawBackend(r);
+        this.lookForReplyImages();
         if ((this.backendApiVersion ?? 0) >= SCHEDULES_API_VERSION && this.running) void this.deps.schedules?.attach(this.scheduleBackend());
         if ((this.backendApiVersion ?? 0) >= THREAD_INDEX_API_VERSION && this.running) this.index?.start();
       },

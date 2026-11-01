@@ -158,7 +158,7 @@ struct WorkedView: View {
                     switch item {
                     case let .message(message):
                         if message.role == .assistant {
-                            MarkdownText(message.text)
+                            MarkdownText(message.text, seq: message.seq)
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .leading)

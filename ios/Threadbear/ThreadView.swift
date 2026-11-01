@@ -74,6 +74,8 @@ struct ThreadView: View {
         // until it arrives, and on an older backend, phone:thread's messages.
         let messages = page?.messages ?? detail.messages
         let items = Turns.fold(messages, busy: thread.isBusy)
+        let pictures = ThreadPictures(page?.images ?? [])
+        let pins = pictures.pinned(in: items)
         let paged = model.hasMessagePages && page != nil
         let canLoadMore = paged ? page?.hasMore == true : thread.hasEarlier(than: detail.messages.first?.seq)
         // Paged: a bigger page has been asked for and hasn't arrived yet.
@@ -94,11 +96,12 @@ struct ThreadView: View {
                     }
                     ForEach(items) { item in
                         switch item {
-                        case let .message(message): MessageView(message: message)
+                        case let .message(message): MessageView(message: message, pinned: pins.under[message.seq] ?? [])
                         case let .tools(run): ToolRunView(items: run)
                         case let .worked(worked): WorkedView(worked: worked)
                         }
                     }
+                    ForEach(pins.trailing) { PinnedPicture(image: $0) }
                     if let pending = thread.pendingApproval {
                         PendingCard(threadId: thread.threadId, pending: pending) { sent = ($0, nil) }
                     } else if thread.isBusy || thread.working != nil {
@@ -139,6 +142,7 @@ struct ThreadView: View {
             }
             .defaultScrollAnchor(.bottom)
             .scrollDismissesKeyboard(.interactively)
+            .environment(\.threadPictures, pictures)
             .onChange(of: messages.last?.seq) { proxy.scrollTo("bottom", anchor: .bottom) }
             // A voice follow-up's reply is read out once the turn's over, so it's the answer and
             // not a line the agent wrote on the way.
@@ -434,6 +438,8 @@ struct EarlierButton: View {
 
 struct MessageView: View {
     var message: PhoneMessage
+    /// Pictures the agent pinned during the turn this replies to.
+    var pinned: [MessageImage] = []
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.displayScale) private var displayScale
 
@@ -455,9 +461,12 @@ struct MessageView: View {
             .frame(maxWidth: .infinity, alignment: .trailing)
             .padding(.leading, 40)
         case .assistant:
-            MarkdownText(message.text)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 8) {
+                MarkdownText(message.text, seq: message.seq)
+                    .textSelection(.enabled)
+                ForEach(pinned) { PinnedPicture(image: $0) }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         case .tool:
             ToolRunView(items: [message])
         }
@@ -575,9 +584,19 @@ struct ToolRunView: View {
 /// Mac; inline markdown inside each.
 struct MarkdownText: View {
     let blocks: [MarkdownBlock]
+    /// The message's seq, which says which upload a picture's address means.
+    var seq: Int?
+    @Environment(\.threadPictures) private var pictures
 
-    init(_ text: String) { blocks = MarkdownBlock.parse(text) }
-    init(blocks: [MarkdownBlock]) { self.blocks = blocks }
+    init(_ text: String, seq: Int? = nil) {
+        blocks = MarkdownBlock.parse(text)
+        self.seq = seq
+    }
+
+    init(blocks: [MarkdownBlock], seq: Int? = nil) {
+        self.blocks = blocks
+        self.seq = seq
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -610,7 +629,7 @@ struct MarkdownText: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
         case let .quote(inner):
-            MarkdownText(blocks: inner)
+            MarkdownText(blocks: inner, seq: seq)
                 .foregroundStyle(.secondary)
                 .padding(.leading, 12)
                 .overlay(alignment: .leading) {
@@ -620,11 +639,30 @@ struct MarkdownText: View {
             Divider().padding(.vertical, 4)
         case let .table(header, alignments, rows):
             MarkdownTable(header: header, alignments: alignments, rows: rows)
+        case let .image(alt, src):
+            if let image = pictures.image(src: src, seq: seq), let url = URL(string: image.url) {
+                ReplyPicture(url: url, alt: alt, width: image.width, height: image.height)
+            } else if let url = ThreadPictures.webURL(src) {
+                ReplyPicture(url: url, alt: alt)
+            } else {
+                PictureOnMac(alt: alt)
+            }
         }
     }
 
     static func inline(_ text: String) -> AttributedString {
         (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
+    }
+}
+
+/// A picture the agent pinned rather than wrote into its reply.
+struct PinnedPicture: View {
+    var image: MessageImage
+
+    var body: some View {
+        if let url = URL(string: image.url) {
+            ReplyPicture(url: url, alt: "", width: image.width, height: image.height)
+        }
     }
 }
 

@@ -1,7 +1,8 @@
 // The live mirror the phone reads (docs/convex-backend.md, shape A). Every
 // row is "the current state of X" as the owning runner last wrote it; the
 // runner stays the source of truth and this is never read back by it.
-// Only what a phone needs: no transcripts, tool output or images.
+// Only what a phone needs: no transcripts or tool output, and the only images
+// are what an agent showed Mike on purpose (replyImages) or a shared thread's.
 import { defineSchema, defineTable } from 'convex/server';
 import { v } from 'convex/values';
 
@@ -176,8 +177,8 @@ export default defineSchema({
   // The last 20 text messages of each thread (step 2), plus pages the
   // phone asked for, which a cron deletes a day later.
   // Every text message of every thread, and one line per tool call (role
-  // "tool", since API 2; docs/setup-and-updates.md step 2). Tool output,
-  // diffs and images stay on the Mac. pagedAt marks rows an old phone asked
+  // "tool", since API 2; docs/setup-and-updates.md step 2). Tool output and
+  // diffs stay on the Mac; pictures are in replyImages and shareImages. pagedAt marks rows an old phone asked
   // for with loadEarlier, so phone:thread still shows them to it for a day.
   messages: defineTable({
     threadId: v.string(),
@@ -362,6 +363,24 @@ export default defineSchema({
     seq: v.number(),
     path: v.string(),
     src: v.optional(v.string()),
+    storageId: v.id('_storage'),
+    mediaType: v.string(),
+    width: v.optional(v.number()),
+    height: v.optional(v.number()),
+  }).index('by_thread_seq', ['threadId', 'seq']),
+
+  // Pictures an agent showed Mike, for the phone (API 24), from any thread:
+  // ones in its replies (`src`, the address it wrote, which the phone swaps)
+  // and image files it pinned (`pinned`). In file storage, uploaded by the
+  // runner, and gone with the thread (sync:removeThreads). Apart from
+  // shareImages, as stopping sharing drops those and readers of a shared
+  // page must only ever get what was uploaded for it.
+  replyImages: defineTable({
+    threadId: v.string(),
+    seq: v.number(),
+    path: v.string(),
+    src: v.optional(v.string()),
+    pinned: v.optional(v.boolean()),
     storageId: v.id('_storage'),
     mediaType: v.string(),
     width: v.optional(v.number()),

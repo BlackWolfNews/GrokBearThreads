@@ -265,8 +265,21 @@ finished, with a per-thread cooldown so a flapping status doesn't spam.
 messages", the phone writes a `page` command and the runner uploads the
 next 50 text messages of that thread into `messages` with a `pagedAt`
 stamp; a cron deletes paged rows after a day. That keeps the phone off
-Tailscale and keeps the steady-state table small. Tool output, diffs and
-images stay on the Mac.
+Tailscale and keeps the steady-state table small. Tool output and diffs
+stay on the Mac.
+
+**Pictures on the phone (API 24, 1 Nov).** An agent writing
+`![alt](/path/on/the/mac.png)` or pinning an image file showed nothing on
+the phone, which can't read the Mac's disk. So those two kinds, what an
+agent put in front of Mike on purpose, go to file storage from every
+thread (`replyImages`, `runner/src/share-images.ts`), at most 10 MB each and
+only if the file really is a picture. `phone:messages` hands them over in
+`images`: one with `src` replaces that image in the text, a `pinned` one
+goes under the turn's reply. They go as they're written, and each runner
+start looks through unarchived threads active in the last 14 days, so an
+older thread's pictures stay on the Mac and the phone says so. They're
+deleted with the thread. Mike's attachments and tools' screenshots stay on
+the Mac unless the thread is shared (`shareImages`), as they're many and big.
 
 ### Build order
 

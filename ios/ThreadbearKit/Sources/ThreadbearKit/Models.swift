@@ -491,9 +491,85 @@ public enum NotifyMode: String, CaseIterable, Sendable, Codable {
 public struct MessagePage: Codable, Sendable, Hashable {
     public var messages: [PhoneMessage]
     public var hasMore: Bool
-    public init(messages: [PhoneMessage], hasMore: Bool) {
+    /// The thread's pictures in file storage, from the page's first row on
+    /// (backend API 24 for the ones the phone shows).
+    public var images: [MessageImage]
+    public init(messages: [PhoneMessage], hasMore: Bool, images: [MessageImage] = []) {
         self.messages = messages
         self.hasMore = hasMore
+        self.images = images
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        messages = try c.decode([PhoneMessage].self, forKey: .messages)
+        hasMore = try c.decode(Bool.self, forKey: .hasMore)
+        images = try c.decodeIfPresent([MessageImage].self, forKey: .images) ?? []
+    }
+}
+
+/// A picture in file storage. `src` is the address the agent wrote in that
+/// message; `pinned` is one it pinned. A row with neither is a shared
+/// thread's attachment or tool picture, which the phone doesn't show.
+public struct MessageImage: Codable, Sendable, Hashable, Identifiable {
+    public var id: String { url }
+    public var seq: Int
+    public var src: String?
+    public var pinned: Bool?
+    public var url: String
+    public var width: Int?
+    public var height: Int?
+
+    public init(seq: Int, src: String? = nil, pinned: Bool? = nil, url: String, width: Int? = nil, height: Int? = nil) {
+        self.seq = seq
+        self.src = src
+        self.pinned = pinned
+        self.url = url
+        self.width = width
+        self.height = height
+    }
+}
+
+/// Where a thread's pictures go among its messages.
+public struct ThreadPictures: Sendable, Hashable {
+    public var images: [MessageImage]
+
+    public init(_ images: [MessageImage] = []) { self.images = images }
+
+    /// The picture for `src` in the message at `seq`. The same address in
+    /// another message may be a different picture by now, so that message's
+    /// own comes first; failing that, the latest with that address at or
+    /// before it, then any.
+    public func image(src: String, seq: Int?) -> MessageImage? {
+        let matching = images.filter { $0.src == src }
+        guard let seq else { return matching.last }
+        return matching.first { $0.seq == seq } ?? matching.last { $0.seq <= seq } ?? matching.last
+    }
+
+    /// A web picture needs nothing uploaded. Anything else unmatched is on
+    /// the Mac.
+    public static func webURL(_ src: String) -> URL? {
+        guard src.lowercased().hasPrefix("https://") else { return nil }
+        return URL(string: src)
+    }
+
+    /// Pinned pictures by the message they go under: the turn's reply, the
+    /// first message from the agent on show at or after the pin, as the pin's
+    /// own line is folded away with the work. `trailing` have no reply yet.
+    public func pinned(in items: [ThreadItem]) -> (under: [Int: [MessageImage]], trailing: [MessageImage]) {
+        let replies = items.compactMap { item -> Int? in
+            if case let .message(m) = item, m.role == .assistant { m.seq } else { nil }
+        }
+        var under: [Int: [MessageImage]] = [:]
+        var trailing: [MessageImage] = []
+        for image in images where image.pinned == true {
+            if let reply = replies.first(where: { $0 >= image.seq }) {
+                under[reply, default: []].append(image)
+            } else {
+                trailing.append(image)
+            }
+        }
+        return (under, trailing)
     }
 }
 
@@ -588,7 +664,7 @@ public enum BackendCompatibility {
     /// The newest backend API this app knows. From 2 a thread's messages come
     /// from phone:messages (every message and tool line, paged in Convex);
     /// an older backend still gets phone:thread and the runner's paging.
-    public static let currentAPIVersion = 21
+    public static let currentAPIVersion = 24
     public static let messagePagesAPIVersion = 2
     /// From 3 each phone chooses when it's notified (phone:setNotifications).
     public static let notificationSettingAPIVersion = 3

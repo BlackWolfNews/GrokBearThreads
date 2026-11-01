@@ -1,7 +1,8 @@
 import Foundation
 
 /// Assistant text split into the blocks the phone draws: paragraphs,
-/// headings, list items (with their depth), code, quotes, rules and tables.
+/// headings, list items (with their depth), code, quotes, rules, tables and
+/// pictures.
 /// The Mac renders the same text with react-markdown and remark-gfm, so this
 /// follows GitHub's rules for what agents actually write; the phone's own
 /// first parser knew only paragraphs, headings, flat bullets and code, and
@@ -17,12 +18,43 @@ public indirect enum MarkdownBlock: Sendable, Hashable {
     case quote([MarkdownBlock])
     case rule
     case table(header: [String], alignments: [Alignment], rows: [[String]])
+    /// `![alt](src)`, with src as the agent wrote it: mostly a path on the
+    /// Mac, which ThreadPictures swaps for what the runner uploaded.
+    case image(alt: String, src: String)
 
     public enum Alignment: Sendable, Hashable { case leading, center, trailing }
 
     public static func parse(_ text: String) -> [MarkdownBlock] {
         var parser = Parser(lines: text.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n"))
         return parser.run()
+    }
+}
+
+/// Finds `![alt](src)` and `![alt](<src> "title")`, as the runner does
+/// (MARKDOWN_IMAGE in runner/src/share-images.ts), so src is the same string
+/// on both sides. Not inside a code span, where it's only being talked about.
+enum InlineImages {
+    enum Piece: Equatable { case words(String), image(alt: String, src: String) }
+
+    static func split(_ text: String) -> [Piece] {
+        guard text.contains("![") else { return [.words(text)] }
+        var pieces: [Piece] = []
+        var from = text.startIndex
+        let codeSpans = text.ranges(of: /`+[^`]*`+/)
+        for match in text.matches(of: /!\[([^\]]*)\]\(\s*(?:<([^>\n]+)>|([^)\s]+))(?:\s+"[^"]*")?\s*\)/) {
+            if codeSpans.contains(where: { $0.overlaps(match.range) }) { continue }
+            guard let src = match.2 ?? match.3 else { continue }
+            add(text[from..<match.range.lowerBound], to: &pieces)
+            pieces.append(.image(alt: String(match.1), src: String(src)))
+            from = match.range.upperBound
+        }
+        add(text[from...], to: &pieces)
+        return pieces
+    }
+
+    private static func add(_ words: Substring, to pieces: inout [Piece]) {
+        let trimmed = words.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { pieces.append(.words(trimmed)) }
     }
 }
 
@@ -91,7 +123,14 @@ private struct Parser {
                     text.removeSubrange(box.range)
                 }
                 let marker = match.1.first?.isNumber == true ? String(match.1.dropLast()) + "." : "•"
-                blocks.append(.listItem(text: text, marker: marker, depth: depth(for: indent), task: task))
+                // A picture in a list item goes straight under it, as there's
+                // no drawing one among a line's words.
+                let (words, images) = Self.wordsAndImages(text)
+                let level = depth(for: indent)
+                if !words.isEmpty || images.isEmpty {
+                    blocks.append(.listItem(text: words, marker: marker, depth: level, task: task))
+                }
+                blocks.append(contentsOf: images)
                 lastWasListItem = true
                 i += 1
                 continue
@@ -101,7 +140,11 @@ private struct Parser {
             if case let .listItem(text, marker, depth, task) = blocks.last, paragraph.isEmpty,
                lastWasListItem || indent >= 2 {
                 let joiner = lastWasListItem ? " " : "\n\n"
-                blocks[blocks.count - 1] = .listItem(text: text + joiner + line, marker: marker, depth: depth, task: task)
+                let (words, images) = Self.wordsAndImages(line)
+                if !words.isEmpty {
+                    blocks[blocks.count - 1] = .listItem(text: text + joiner + words, marker: marker, depth: depth, task: task)
+                }
+                blocks.append(contentsOf: images)
                 lastWasListItem = true
                 i += 1
                 continue
@@ -130,9 +173,23 @@ private struct Parser {
                 text += " "
             }
         }
-        blocks.append(.paragraph(text))
+        for piece in InlineImages.split(text) {
+            switch piece {
+            case let .words(words): blocks.append(.paragraph(words))
+            case let .image(alt, src): blocks.append(.image(alt: alt, src: src))
+            }
+        }
         paragraph = []
         lastWasListItem = false
+    }
+
+    static func wordsAndImages(_ text: String) -> (words: String, images: [MarkdownBlock]) {
+        let pieces = InlineImages.split(text)
+        let words = pieces.compactMap { if case let .words(w) = $0 { w } else { nil } }.joined(separator: " ")
+        let images = pieces.compactMap { (piece: InlineImages.Piece) -> MarkdownBlock? in
+            if case let .image(alt, src) = piece { .image(alt: alt, src: src) } else { nil }
+        }
+        return (words, images)
     }
 
     mutating func depth(for indent: Int) -> Int {

@@ -67,6 +67,35 @@ export async function imagesFrom(ctx: QueryCtx, threadId: string, from: number) 
   return out;
 }
 
+// A thread's pictures for Mike's own phone (replyImages, API 24), never for
+// share:view: a shared page gets only what was uploaded for it. A file both
+// pinned and shown in a reply goes once, in the reply, and one pinned twice
+// goes at the first pin.
+export const phoneImage = v.object({
+  seq: v.number(),
+  src: v.optional(v.string()),
+  pinned: v.optional(v.boolean()),
+  url: v.string(),
+  width: v.optional(v.number()),
+  height: v.optional(v.number()),
+});
+
+export async function replyImagesFrom(ctx: QueryCtx, threadId: string, from: number) {
+  const rows = await ctx.db.query('replyImages').withIndex('by_thread_seq', (q) => q.eq('threadId', threadId).gte('seq', from)).collect();
+  const inReplies = new Set(rows.filter((r) => r.src).map((r) => r.path));
+  const out: { seq: number; src?: string; pinned?: boolean; url: string; width?: number; height?: number }[] = [];
+  for (const img of rows) {
+    if (img.pinned) {
+      if (inReplies.has(img.path)) continue;
+      inReplies.add(img.path);
+    }
+    const url = await ctx.storage.getUrl(img.storageId);
+    if (!url) continue;
+    out.push({ seq: img.seq, ...(img.src ? { src: img.src } : {}), ...(img.pinned ? { pinned: true } : {}), url, ...(img.width ? { width: img.width } : {}), ...(img.height ? { height: img.height } : {}) });
+  }
+  return out;
+}
+
 export const view = query({
   args: { slug: v.string(), token: v.optional(v.string()), limit: v.optional(v.number()) },
   returns: v.union(

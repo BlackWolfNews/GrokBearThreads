@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
-import { ConvexSync, BACKEND_API_VERSION, ICONS_API_VERSION, RUNNER_ICON_API_VERSION, SCHEDULES_API_VERSION, SHARE_API_VERSION, WOKE_API_VERSION, STARTED_BY_API_VERSION, SECTIONS_API_VERSION, MODELS_API_VERSION, toAccountDoc, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, convexUploader, pictureName, type ThreadDoc } from '../../src/sync.ts';
+import { ConvexSync, BACKEND_API_VERSION, ICONS_API_VERSION, RUNNER_ICON_API_VERSION, SCHEDULES_API_VERSION, SHARE_API_VERSION, WOKE_API_VERSION, STARTED_BY_API_VERSION, SECTIONS_API_VERSION, MODELS_API_VERSION, REPLY_IMAGES_API_VERSION, REPLY_IMAGES_LOOKBACK_MS, REPLY_IMAGES_SCANS_PER_FLUSH, toAccountDoc, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, convexUploader, pictureName, type ThreadDoc } from '../../src/sync.ts';
 import type { Project } from '../../src/protocol.ts';
 import type { ScheduleBackend } from '../../src/schedules.ts';
 import { nullLogger, type Logger } from '../../src/log.ts';
@@ -1382,4 +1382,146 @@ test('a row carries who started it, once the backend takes it', async () => {
   await sync.flushNow();
   assert.deepEqual(docs().filter((d) => d.threadId === a.id).at(-1)!.startedBy, { kind: 'tool', label: 'Sentry', why: '1 event' });
   await sync.stop();
+});
+
+// Reply pictures: for any thread, shared or not, once the backend takes them.
+function setupReplyImages(opts: { backend?: number } = {}) {
+  const h = makeHarness();
+  const dir = tmpDir();
+  const png = path.join(dir, 'guide.png');
+  const header = Buffer.alloc(24);
+  header.writeUInt32BE(0x89504e47, 0);
+  header.writeUInt32BE(0x0d0a1a0a, 4);
+  header.writeUInt32BE(400, 16);
+  header.writeUInt32BE(300, 20);
+  fs.writeFileSync(png, header);
+  const calls: Call[] = [];
+  const uploads: string[] = [];
+  const stored = new Map<string, { seq: number; path: string }[]>();
+  // A runner start is a new ConvexSync over the same mirror.
+  const fresh = () =>
+    new ConvexSync({
+      config: { enabled: true, url: 'https://x.convex.cloud', runnerId: 'r1' },
+      key: 'k',
+      runner: h.runner,
+      version: '0.1.0+test',
+      startedAt: '2026-11-01T00:00:00.000Z',
+      clock: h.clock,
+      log: nullLogger,
+      post: async (kind, fn, args) => {
+        calls.push({ kind, fn, args });
+        if (fn === 'sync:heartbeat') return { apiVersion: opts.backend ?? REPLY_IMAGES_API_VERSION };
+        if (fn === 'sync:replyImages') return stored.get(args.threadId as string) ?? [];
+        if (fn === 'sync:iconUploadUrl') return 'https://upload.example/u';
+        if (fn === 'sync:addReplyImage') stored.set(args.threadId as string, [...(stored.get(args.threadId as string) ?? []), { seq: args.seq as number, path: args.path as string }]);
+        return null;
+      },
+      upload: async (_url, _bytes, mediaType) => {
+        uploads.push(mediaType);
+        return `st_${uploads.length}`;
+      },
+    });
+  const added = () => calls.filter((c) => c.fn === 'sync:addReplyImage').map((c) => c.args);
+  const thread = (text: string) => {
+    const t = h.runner.create({ text: 'draw it', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+    const s = session(h, t.id);
+    s.init();
+    s.text('m1', text);
+    s.result('completed');
+    return { t, s };
+  };
+  const settle = async (sync: ConvexSync) => {
+    await tick(20);
+    await sync.flushNow();
+    // A flush looks through a few logs at a time; the rest follow.
+    for (let i = 0; i < 4; i++) await sync.flushNow();
+  };
+  return { h, fresh, calls, uploads, added, png, thread, settle };
+}
+
+test('reply pictures: from a thread that is not shared, with their size, new ones as they come', async () => {
+  const { fresh, uploads, added, png, thread, settle } = setupReplyImages();
+  const { t, s } = thread(`Here: ![Back](${png}) and ![gone](/nowhere/gone.png)`);
+  await tick();
+  const sync = fresh();
+  sync.start();
+  await settle(sync);
+  // The one from before this runner started, found in the thread's log.
+  assert.deepEqual(uploads, ['image/png']);
+  assert.deepEqual(added().map((a) => [a.threadId, a.path, a.src, a.pinned, a.width, a.height, a.storageId]), [[t.id, png, png, undefined, 400, 300, 'st_1']]);
+
+  // A new reply's goes up without another look through the log.
+  s.text('m2', `Again: ![Back](${png})`);
+  await tick();
+  await settle(sync);
+  assert.equal(uploads.length, 2);
+  assert.notEqual(added()[1]!.seq, added()[0]!.seq);
+  await sync.stop();
+});
+
+test('reply pictures: a restart sends nothing twice', async () => {
+  const { fresh, uploads, png, thread, settle } = setupReplyImages();
+  thread(`![Back](${png})`);
+  await tick();
+  const one = fresh();
+  one.start();
+  await settle(one);
+  await one.stop();
+  assert.equal(uploads.length, 1);
+  const two = fresh();
+  two.start();
+  await settle(two);
+  await two.stop();
+  assert.equal(uploads.length, 1);
+});
+
+test('reply pictures: many threads are looked through a few at a time, and all get done', async () => {
+  const { fresh, uploads, png, thread, settle } = setupReplyImages();
+  const count = REPLY_IMAGES_SCANS_PER_FLUSH * 2 + 1;
+  for (let i = 0; i < count; i++) thread(`![Back](${png})`);
+  await tick();
+  const sync = fresh();
+  sync.start();
+  await tick(20);
+  await sync.flushNow();
+  assert.ok(uploads.length <= REPLY_IMAGES_SCANS_PER_FLUSH * 2, `${uploads.length} after the first flushes`);
+  await settle(sync);
+  assert.equal(uploads.length, count);
+  await sync.stop();
+});
+
+test('reply pictures: old and archived threads are not looked through, and an older backend gets none', async () => {
+  const old = setupReplyImages();
+  old.thread(`![Back](${old.png})`);
+  await tick();
+  old.h.clock.advance(REPLY_IMAGES_LOOKBACK_MS + 1000);
+  const late = old.fresh();
+  late.start();
+  await old.settle(late);
+  await late.stop();
+  assert.deepEqual(old.uploads, []);
+
+  const archived = setupReplyImages();
+  const { t } = archived.thread(`![Back](${archived.png})`);
+  await tick();
+  archived.h.runner.update({ threadId: t.id, archived: true });
+  await tick();
+  const a = archived.fresh();
+  a.start();
+  await archived.settle(a);
+  await a.stop();
+  assert.deepEqual(archived.uploads, []);
+
+  const backend = setupReplyImages({ backend: REPLY_IMAGES_API_VERSION - 1 });
+  const { s } = backend.thread(`![Back](${backend.png})`);
+  await tick();
+  const b = backend.fresh();
+  b.start();
+  await backend.settle(b);
+  s.text('m2', `![Back](${backend.png})`);
+  await tick();
+  await backend.settle(b);
+  await b.stop();
+  assert.deepEqual(backend.uploads, []);
+  assert.equal(backend.calls.some((c) => c.fn === 'sync:replyImages'), false);
 });

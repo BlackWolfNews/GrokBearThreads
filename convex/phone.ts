@@ -9,7 +9,7 @@ import type { Doc, Id } from './_generated/dataModel';
 import { threadFields, views } from './schema';
 import { checkPhoneToken } from './lib';
 import { API_VERSION } from './version';
-import { imagesFrom, shareImage } from './share';
+import { imagesFrom, phoneImage, replyImagesFrom } from './share';
 
 // A runner not heard from for this long is offline, and a command with no
 // runnerId goes to the main one still online (mainRunner).
@@ -175,9 +175,10 @@ export const thread = query({
 // Since API 2; reads Convex alone, so it works while the Mac is asleep.
 export const messages = query({
   args: { token: v.string(), threadId: v.string(), beforeSeq: v.optional(v.number()), limit: v.optional(v.number()), tools: v.optional(v.boolean()) },
-  // images (API 8): a shared thread's uploaded pictures from the page's
-  // first row on (share.ts), so Mike's page shows what the shared one does.
-  returns: v.object({ messages: v.array(pageMessage), hasMore: v.boolean(), images: v.optional(v.array(shareImage)) }),
+  // images: from the page's first row on (share.ts), a shared thread's
+  // uploaded pictures (API 8), so Mike's page shows what the shared one
+  // does, and any thread's reply and pinned pictures (API 24).
+  returns: v.object({ messages: v.array(pageMessage), hasMore: v.boolean(), images: v.optional(v.array(phoneImage)) }),
   handler: async (ctx, { token, threadId, beforeSeq, limit, tools }) => {
     await checkPhoneToken(ctx, token);
     const want = Math.max(1, Math.min(PAGE_MAX, Math.floor(limit ?? PAGE_DEFAULT)));
@@ -196,7 +197,8 @@ export const messages = query({
       out.push({ seq: m.seq, role: m.role, text: m.text, ...(m.origin ? { origin: m.origin } : {}), ...(m.toolKind ? { toolKind: m.toolKind } : {}), ...(m.summary ? { summary: true } : {}), at: m.at });
     }
     out.reverse();
-    const images = tools && out.length ? await imagesFrom(ctx, threadId, hasMore || beforeSeq !== undefined ? out[0]!.seq : 0) : [];
+    const from = hasMore || beforeSeq !== undefined ? out[0]?.seq ?? 0 : 0;
+    const images = tools && out.length ? [...(await imagesFrom(ctx, threadId, from)), ...(await replyImagesFrom(ctx, threadId, from))] : [];
     return { messages: out, hasMore, ...(images.length ? { images } : {}) };
   },
 });

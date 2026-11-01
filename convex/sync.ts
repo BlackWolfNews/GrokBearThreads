@@ -78,7 +78,55 @@ export const removeThreads = mutation({
       if (row) await ctx.db.delete(row._id);
       for await (const m of ctx.db.query('messages').withIndex('by_thread_seq', (q) => q.eq('threadId', threadId))) await ctx.db.delete(m._id);
       await dropImages(ctx, threadId);
+      for await (const img of ctx.db.query('replyImages').withIndex('by_thread_seq', (q) => q.eq('threadId', threadId))) {
+        await ctx.storage.delete(img.storageId);
+        await ctx.db.delete(img._id);
+      }
     }
+    return null;
+  },
+});
+
+// ------------------------------------------------------------ reply pictures
+// What an agent showed Mike, for the phone (API 24; schema.ts, replyImages):
+// the runner asks what's up (replyImages), uploads each new file to an upload
+// URL (iconUploadUrl) and records it (addReplyImage).
+
+export const replyImages = query({
+  args: { key: v.string(), threadId: v.string() },
+  returns: v.array(v.object({ seq: v.number(), path: v.string() })),
+  handler: async (ctx, { key, threadId }) => {
+    checkRunnerKey(key);
+    const out = [];
+    for await (const img of ctx.db.query('replyImages').withIndex('by_thread_seq', (q) => q.eq('threadId', threadId))) out.push({ seq: img.seq, path: img.path });
+    return out;
+  },
+});
+
+export const addReplyImage = mutation({
+  args: {
+    key: v.string(),
+    threadId: v.string(),
+    seq: v.number(),
+    path: v.string(),
+    src: v.optional(v.string()),
+    pinned: v.optional(v.boolean()),
+    storageId: v.id('_storage'),
+    mediaType: v.string(),
+    width: v.optional(v.number()),
+    height: v.optional(v.number()),
+  },
+  returns: v.null(),
+  handler: async (ctx, { key, ...img }) => {
+    checkRunnerKey(key);
+    // Sent twice (a retry after a lost reply): keep the first, drop the copy.
+    const same = await ctx.db
+      .query('replyImages')
+      .withIndex('by_thread_seq', (q) => q.eq('threadId', img.threadId).eq('seq', img.seq))
+      .filter((q) => q.eq(q.field('path'), img.path))
+      .first();
+    if (same) await ctx.storage.delete(img.storageId);
+    else await ctx.db.insert('replyImages', img);
     return null;
   },
 });

@@ -42,5 +42,6 @@ shot approval -ThreadbearOpen a1
 shot question -ThreadbearOpen a2
 shot reply -ThreadbearOpen a3
 shot running -ThreadbearOpen a5
+shot pictures -ThreadbearPictures -ThreadbearOpen pics
 shot new-thread -ThreadbearCompose "Add a dark mode to the garden planner, matching the system setting"
 shot pair --unpaired

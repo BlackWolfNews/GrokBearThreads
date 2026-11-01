@@ -82,4 +82,9 @@
 // 23: threadIndex rows can carry `startedBy` too, so the Mac's sidebar shows
 //    the byline on another runner's threads. A runner sends it only to a
 //    backend of 23 or later.
-export const API_VERSION = 23;
+// 24: pictures for the phone, from every thread. sync:replyImages and
+//    sync:addReplyImage take the pictures in agents' replies and pinned
+//    pictures, and phone:messages' `images` carries them (a pinned one with
+//    `pinned`). Nothing changes for an older runner or phone, which just
+//    doesn't have them.
+export const API_VERSION = 24;
