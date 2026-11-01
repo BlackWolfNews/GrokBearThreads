@@ -13,6 +13,9 @@ final class Speaker {
     private let synthesizer = AVSpeechSynthesizer()
     private let delegate = SpeechDelegate()
     private var warmer: AVSpeechSynthesizer?
+    private var voicePicked = false
+    private var warmWanted = false
+    private var warmed = false
     private(set) var voice: AVSpeechSynthesisVoice?
     private var plan = FillerCut()
     /// Each utterance given to the synthesizer is one of the plan's numbered sentences.
@@ -59,13 +62,13 @@ final class Speaker {
         useVoice(id: Self.resolveVoice(preferred: id))
     }
 
-    /// Picks the voice in the background, then loads it so the first answer doesn't wait on it.
+    /// Picks the voice in the background. Loading it is `warmUpVoice`, as rendering speech at
+    /// launch is suspected of stopping other apps' audio (see QuickAskModel.prepare).
     func selectVoiceInBackground(id: String?) {
         Task.detached(priority: .userInitiated) {
             let resolved = Self.resolveVoice(preferred: id)
             await MainActor.run {
                 self.useVoice(id: resolved)
-                self.warmUp()
             }
         }
     }
@@ -73,7 +76,22 @@ final class Speaker {
     private func useVoice(id: String?) {
         let chosen = id.flatMap(AVSpeechSynthesisVoice.init(identifier:))
         voice = chosen
+        voicePicked = true
+        if warmWanted { warmUpVoice() }
         Log.speech.info("Voice: \(chosen?.name ?? "system", privacy: .public) \(chosen?.language ?? "", privacy: .public) quality \(chosen?.quality.rawValue ?? 0)")
+    }
+
+    /// Loads the voice once so the first answer doesn't wait on it, as soon as the voice is picked
+    /// (the Action button can get here first, on a cold launch).
+    func warmUpVoice() {
+        guard !warmed else { return }
+        guard voicePicked else {
+            warmWanted = true
+            return
+        }
+        warmed = true
+        warmWanted = false
+        warmUp()
     }
 
     /// Renders a word offline (no sound) so the voice is loaded before the first real answer.

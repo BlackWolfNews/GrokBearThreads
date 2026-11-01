@@ -115,14 +115,15 @@ final class QuickAskModel {
         prepare()
     }
 
-    /// The slow parts, ahead of the first question: the audio graph (not the session, which would
-    /// quieten other apps' audio for anyone just opening the inbox), the voice, SpeechAnalyzer's
-    /// model.
+    /// The slow parts that don't touch audio, ahead of the first question: picking the voice and
+    /// SpeechAnalyzer's model. This runs on every launch, for anyone just opening the inbox, so
+    /// nothing here may prepare the audio engine or render speech. Those did until 1 Nov, and a
+    /// playing podcast stopped on opening the app: the log showed Ask's session being interrupted
+    /// when it had never turned the mic on. `startListening` does them instead.
     @ObservationIgnored private var prepared = false
     private func prepare() {
         guard !prepared else { return }
         prepared = true
-        audio.prewarm(activate: false)
         audio.onInterrupted = { [weak self] in
             Task { @MainActor in self?.interrupted() }
         }
@@ -239,7 +240,7 @@ final class QuickAskModel {
         timing.pauseEndedAt = now
         self.timing = timing
         audio.resetSession()
-        audio.prewarm(activate: true)
+        audio.prewarm()
         switch makeStream(for: text, decidedAt: now) {
         case .failure(let failure):
             question = text
@@ -371,7 +372,7 @@ final class QuickAskModel {
         prepare()
         speaker.selectVoice(id: settings.voiceIdentifier)
         audio.resetSession()
-        audio.prewarm(activate: true)
+        audio.prewarm()
         speaker.beginAnswer()
         speaker.speak("Here's how answers will sound.")
     }
@@ -404,6 +405,8 @@ final class QuickAskModel {
         // while the recogniser's being set up is kept and handed over.
         if comingForwardAt == nil { audio.resetSession() }
         audio.startEarly()
+        // Someone's asking, so the audio's ours now: load the voice for the answer.
+        speaker.warmUpVoice()
         let transcriber = chooseTranscriber()
         self.transcriber = transcriber
         var timing = QuestionTiming(trigger: trigger, pressAt: pressAt)
@@ -827,7 +830,7 @@ final class QuickAskModel {
         guard !spoken.isEmpty, settings.speakAnswers, !inBackground else { return }
         prepare()
         audio.resetSession()
-        audio.prewarm(activate: true)
+        audio.prewarm()
         speaker.beginAnswer()
         var splitter = SentenceSplitter()
         for sentence in splitter.append(spoken) { speaker.speak(sentence) }

@@ -83,13 +83,13 @@ nonisolated final class AudioInput: @unchecked Sendable {
         })
     }
 
-    /// Ahead-of-time setup: category, engine graph, and (unless iOS is only prewarming the process)
-    /// activating the session, so the first question starts without waiting on any of it.
-    func prewarm(activate: Bool) {
+    /// Takes the audio session ahead of speaking, which stops other apps' audio, so it's only for
+    /// when the user has asked for sound. Never at launch (see QuickAskModel.prepare).
+    func prewarm() {
         queue.async { [self] in
             do {
                 try configureIfNeeded()
-                if activate { try activateIfNeeded() }
+                try activateIfNeeded()
                 _ = engine.inputNode
                 engine.prepare()
                 Log.audio.info("Prewarmed (session active: \(self.sessionActive))")
