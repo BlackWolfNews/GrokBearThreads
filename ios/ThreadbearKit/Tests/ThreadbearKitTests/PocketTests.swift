@@ -17,6 +17,35 @@ import Testing
         #expect(deck.last?.id == "old")
     }
 
+    @Test func nothingSeenYetMeansEveryCardIsNew() {
+        #expect(PocketDeck.hasNew([card("a", "2026-10-01")], seenUpTo: nil))
+        #expect(!PocketDeck.hasNew([], seenUpTo: nil))
+    }
+
+    @Test func onlyACardFiledOrChangedSinceIsNew() {
+        let seen = "2026-10-02"
+        #expect(!PocketDeck.hasNew([card("a", "2026-10-01"), card("b", seen)], seenUpTo: seen))
+        #expect(PocketDeck.hasNew([card("a", "2026-10-01"), card("b", "2026-10-03")], seenUpTo: seen))
+    }
+
+    @Test func lookingAtTheCardsLeavesNothingNew() {
+        let cards = [card("a", "2026-10-01"), card("b", "2026-10-03")]
+        let seen = PocketDeck.seenUpTo(cards, after: "2026-10-02")
+        #expect(seen == "2026-10-03")
+        #expect(!PocketDeck.hasNew(cards, seenUpTo: seen))
+    }
+
+    @Test func removingTheNewestCardDoesNotMakeAnOlderOneNew() {
+        let older = [card("a", "2026-10-01")]
+        let seen = PocketDeck.seenUpTo(older, after: "2026-10-03")
+        #expect(seen == "2026-10-03")
+        #expect(!PocketDeck.hasNew(older, seenUpTo: seen))
+    }
+
+    @Test func anEmptyPocketSeenForTheFirstTimeRemembersNothing() {
+        #expect(PocketDeck.seenUpTo([], after: nil) == nil)
+    }
+
     @Test func savedCardsComeBackWithNoBackend() throws {
         let store = PocketStore(file: FileManager.default.temporaryDirectory.appending(path: "pocket-\(UUID()).json"))
         #expect(store.load().isEmpty)

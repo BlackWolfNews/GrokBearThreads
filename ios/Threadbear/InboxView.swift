@@ -1,6 +1,26 @@
 import SwiftUI
 import ThreadbearKit
 
+/// How many cards are in the Pocket: grey once they've all been seen, the
+/// accent colour when one's been filed or changed since.
+private struct PocketBadge: View {
+    var count: Int
+    var hasNew: Bool
+
+    var body: some View {
+        if count > 0 {
+            Text(count, format: .number)
+                .font(.system(size: 10, weight: .bold))
+                .monospacedDigit()
+                .foregroundStyle(.white)
+                .padding(.horizontal, 4)
+                .frame(minWidth: 15, minHeight: 15)
+                .background(hasNew ? Color.accentColor : Color.gray, in: .capsule)
+                .allowsHitTesting(false)
+        }
+    }
+}
+
 struct InboxView: View {
     @Environment(AppModel.self) private var model
     @Environment(QuickAskModel.self) private var quick
@@ -15,6 +35,12 @@ struct InboxView: View {
     @State private var afterPocket: PocketView.Next?
     /// The thread a new thread sheet just made, to open once the sheet has gone.
     @State private var afterCompose: String?
+
+    private var pocketValue: String {
+        let count = model.pocket.count
+        guard count > 0 else { return "Empty" }
+        return "\(count) \(count == 1 ? "card" : "cards")\(model.pocketHasNew ? ", new since you last looked" : "")"
+    }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -89,8 +115,18 @@ struct InboxView: View {
                 }
                 if model.showsPocket {
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button { pocketOpen = true } label: { Image(systemName: "wallet.pass") }
-                            .accessibilityLabel("Pocket")
+                        Button { pocketOpen = true } label: {
+                            // A frame with room for the badge: the toolbar clips a
+                            // button's label to its bounds, so an offset badge lost its top.
+                            Image(systemName: "wallet.pass")
+                                .frame(width: 44, height: 36)
+                                .overlay(alignment: .topTrailing) {
+                                    PocketBadge(count: model.pocket.count, hasNew: model.pocketHasNew)
+                                }
+                                .compositingGroup()
+                        }
+                        .accessibilityLabel("Pocket")
+                        .accessibilityValue(pocketValue)
                     }
                 }
                 if quick.settings.isReady {

@@ -19,6 +19,10 @@ final class AppModel {
     /// show with no signal.
     private(set) var pocket: [PocketCard] = []
     var showsPocket: Bool { isFake || !pocket.isEmpty || (apiVersion ?? 0) >= BackendCompatibility.pocketAPIVersion }
+    /// The newest card's time when the Pocket was last open, for the badge
+    /// on its button. Kept on this phone only: it's about what this phone has shown.
+    private var pocketSeenUpTo = UserDefaults.standard.string(forKey: "pocketSeenUpTo")
+    var pocketHasNew: Bool { PocketDeck.hasNew(pocket, seenUpTo: pocketSeenUpTo) }
     /// `-ThreadbearPocket`: start with the Pocket open, for screenshots and
     /// for checking it on the phone, where nothing can tap the button.
     var opensPocketAtLaunch = false
@@ -359,6 +363,7 @@ final class AppModel {
     func leaveDemo() {
         stop()
         pocket = []
+        pocketSeenUpTo = UserDefaults.standard.string(forKey: "pocketSeenUpTo")
         backend = nil
         isFake = false
         runners = []
@@ -370,6 +375,14 @@ final class AppModel {
         wakes = [:]
         counts = nil
         loaded = []
+    }
+
+    func markPocketSeen() {
+        let seen = PocketDeck.seenUpTo(pocket, after: pocketSeenUpTo)
+        guard seen != pocketSeenUpTo else { return }
+        pocketSeenUpTo = seen
+        // The demo's cards aren't yours, so looking at them mustn't count.
+        if !isFake { UserDefaults.standard.set(seen, forKey: "pocketSeenUpTo") }
     }
 
     func removePocketCard(_ card: PocketCard) {
@@ -388,6 +401,8 @@ final class AppModel {
     func unpair() {
         PocketStore.standard.clear()
         pocket = []
+        UserDefaults.standard.removeObject(forKey: "pocketSeenUpTo")
+        pocketSeenUpTo = nil
         PairingStore.clear()
         stop()
         backend = nil

@@ -506,7 +506,9 @@ started with Ask and picks up from there.
 
 The Pocket is for what you'll want while you're out. Tell a thread you're
 heading to the post office and its agent can file a card with the address and
-what to take; the wallet button at the top of the inbox opens the deck. The
+what to take; the wallet button at the top of the inbox opens the deck, and
+its badge says how many cards there are, in colour when one's been filed or
+changed since you last opened it. The
 cards are saved on the phone, so they open straight away with no signal. Tap
 a card to bring it forward, then tap it again to fill the screen, black on
 white, for reading out or holding up at a counter. Swipe a card left to remove

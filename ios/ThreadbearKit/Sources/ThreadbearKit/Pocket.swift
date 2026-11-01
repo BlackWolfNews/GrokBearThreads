@@ -37,6 +37,21 @@ public enum PocketDeck {
             return a.updatedAt == b.updatedAt ? a.id < b.id : a.updatedAt < b.updatedAt
         }
     }
+
+    /// Whether a card has been filed or changed since the Pocket was last
+    /// open. A changed card counts: the librarian updates a card when the facts
+    /// change, and that's as worth a look as a new one. Nothing seen yet means
+    /// every card is new.
+    public static func hasNew(_ cards: [PocketCard], seenUpTo: String?) -> Bool {
+        guard let seenUpTo else { return !cards.isEmpty }
+        return cards.contains { $0.updatedAt > seenUpTo }
+    }
+
+    /// What `seenUpTo` becomes once these cards have been looked at. It only
+    /// goes forward: removing the newest card mustn't make an older one new.
+    public static func seenUpTo(_ cards: [PocketCard], after seenUpTo: String?) -> String? {
+        ([seenUpTo].compactMap { $0 } + cards.map(\.updatedAt)).max()
+    }
 }
 
 /// The cards as last seen, in a file, as the Pocket is for places with no

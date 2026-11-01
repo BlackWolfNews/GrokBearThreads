@@ -73,6 +73,8 @@ struct PocketView: View {
             }
         }
         .onDisappear { finishRemoving() }
+        // Anything that arrives while it's open has been seen too.
+        .onChange(of: model.pocket, initial: true) { _, _ in model.markPocketSeen() }
         .task(id: model.pocket.map(\.id)) {
             if !model.isFake { places.look(for: model.pocket) }
         }
