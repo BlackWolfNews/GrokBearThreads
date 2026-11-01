@@ -71,7 +71,8 @@ public struct ThreadSections: Sendable, Equatable {
     /// working (`reviewWaiting`). Inbox: everything else, by `order`: by default what most
     /// needs Mike first (see `urgency`), newest first within that. A question or approval goes in
     /// the inbox even with background work going, since the thread is stuck
-    /// until he answers. Running is newest activity first. Snoozed and
+    /// until he answers, and so does a turn that ended asking him for
+    /// something (`waitingOnMike`). Running is newest activity first. Snoozed and
     /// archived threads go in Hibernating and Archived, whatever their state.
     public static func build(_ threads: some Sequence<ThreadSummary>, now: Date, wakes: [String: Schedule] = [:], order: InboxOrder = .needsYou) -> ThreadSections {
         var sections = ThreadSections()
@@ -80,7 +81,7 @@ public struct ThreadSections: Sendable, Equatable {
                 sections.archived.append(thread)
             } else if thread.isSnoozed(at: now) {
                 sections.hibernating.append(thread)
-            } else if thread.reviewWaiting || thread.status == .waiting || (thread.needsYou && !thread.isWorkingInBackground) {
+            } else if thread.reviewWaiting || thread.status == .waiting || thread.waitingOnMike || (thread.needsYou && !thread.isWorkingInBackground) {
                 sections.inbox.append(thread)
             } else if thread.status == .running || thread.status == .starting || thread.isWorkingInBackground {
                 sections.running.append(thread)

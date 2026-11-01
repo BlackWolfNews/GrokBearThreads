@@ -55,6 +55,16 @@ final class SidebarRowTests: XCTestCase {
         XCTAssertEqual(ThreadRowStatus.background.label, "In the background")
     }
 
+    /// Waiting on Mike, the job it left going doesn't show on the row: the
+    /// dot when unread, as any other asking thread, and no spinner.
+    func testAnOpenAskHidesTheBackgroundSpinner() {
+        var thread = ThreadSummary(id: "t", title: "t", status: .idle, needsYou: true, background: [BackgroundTask(kind: .shell, description: "Watch")])
+        thread.needs = "you"
+        XCTAssertEqual(ThreadRowLook(thread), ThreadRowLook(status: .time, unread: true, emphasised: true))
+        thread.needsYou = false
+        XCTAssertEqual(ThreadRowLook(thread), ThreadRowLook(status: .time, unread: false, emphasised: false))
+    }
+
     func testBackgroundWords() {
         let agent = { (d: String) in BackgroundTask(kind: .agent, description: d) }
         let shell = { (d: String) in BackgroundTask(kind: .shell, description: d) }

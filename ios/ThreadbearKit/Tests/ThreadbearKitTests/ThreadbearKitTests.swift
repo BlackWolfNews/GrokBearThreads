@@ -249,6 +249,22 @@ import UniformTypeIdentifiers
         #expect(sections.inbox.map(\.threadId) == ["q"])
     }
 
+    @Test func anOpenAskStaysInTheInboxWhileBackgroundWorkRuns() {
+        func asking(_ id: String, ticked: Bool = false) -> PhoneThread {
+            var t = thread(id, 1, working: "1 job")
+            t.needs = "you"
+            t.asks = [PhoneAsk(action: "Put the card back", ticked: ticked)]
+            return t
+        }
+        var said = thread("said-nothing", 1, working: "1 job")
+        said.needs = "nothing"
+        var underway = asking("underway")
+        underway.status = .running
+        let sections = InboxSections.build([asking("open"), asking("ticked", ticked: true), said, underway], now: now)
+        #expect(sections.inbox.map(\.threadId) == ["open"])
+        #expect(Set(sections.running.map(\.threadId)) == ["ticked", "said-nothing", "underway"])
+    }
+
     @Test func searchLooksThroughEveryListLikeTheMac() {
         var dates = thread("Dates on small screens", 1)
         dates.preview = "The **picker** fits now"

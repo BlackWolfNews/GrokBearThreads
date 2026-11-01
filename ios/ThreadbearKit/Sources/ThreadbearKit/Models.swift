@@ -287,6 +287,15 @@ public struct PhoneThread: Codable, Sendable, Hashable, Identifiable {
     /// working, as the Mac's ThreadSummary.reviewWaiting.
     public var reviewWaiting: Bool { (pendingReviews ?? 0) > 0 && !isBusy && working == nil }
 
+    /// The last turn ended asking Mike for something and he hasn't done it
+    /// all yet, as the Mac's ThreadSummary.waitingOnMike: read or not, and
+    /// whatever it left running in the background.
+    public var waitingOnMike: Bool {
+        guard needs == "you", !isBusy else { return false }
+        let asks = asks ?? []
+        return asks.isEmpty || asks.contains { $0.ticked != true }
+    }
+
     /// Whether there are older text messages on the Mac than `oldestSeq`,
     /// the oldest the phone has. False when the runner doesn't say.
     public func hasEarlier(than oldestSeq: Int?) -> Bool {

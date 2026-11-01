@@ -1253,6 +1253,15 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     /// and no turn is underway to show for it.
     public var isWorkingInBackground: Bool { !background.isEmpty && !status.isBusy }
 
+    /// The last turn ended asking Mike for something and he hasn't done it
+    /// all yet. Read or not, and whatever it left running: an agent that sets
+    /// a job watching for what it just asked him to do (Mike's "put the SD
+    /// card back in the Pi", 1 Nov) would otherwise sit under Running, where
+    /// he doesn't look, while the job waits for him and he waits for it.
+    /// Ticking every ask hands it back. `InboxSections` on the phone has the
+    /// same rule as `PhoneThread.waitingOnMike`.
+    public var waitingOnMike: Bool { needs == "you" && !status.isBusy && (asks.isEmpty || asks.contains { !$0.ticked }) }
+
     public var hasPendingReviews: Bool { (pendingReviews ?? 0) > 0 }
 
     /// A design review waiting on Mike, and the thread has finished

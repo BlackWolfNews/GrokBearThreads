@@ -363,7 +363,7 @@ struct ThreadRow: View {
     private var line2: String {
         var parts = [thread.bylineText ?? thread.placeText]
         if let runner = model.runnerName(thread.runnerId) { parts.append(runner) }
-        if let working = thread.working, thread.isBusy || thread.pendingApproval == nil { parts.append(working) }
+        if let working = thread.working, thread.isBusy || (thread.pendingApproval == nil && !thread.waitingOnMike) { parts.append(working) }
         return parts.joined(separator: " · ")
     }
 

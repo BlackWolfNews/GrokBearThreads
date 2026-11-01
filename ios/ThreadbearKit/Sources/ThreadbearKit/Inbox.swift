@@ -105,8 +105,9 @@ public struct InboxSections: Sendable, Equatable {
         var sections = InboxSections()
         for thread in threads where thread.archivedAt == nil && !isSnoozed(thread, now: now) {
             // A question or approval goes in the inbox even while background
-            // work runs: the thread is stuck until he answers.
-            if thread.reviewWaiting || needsAnswer(thread) || (thread.needsYou && thread.working == nil) {
+            // work runs: the thread is stuck until he answers. So does a
+            // turn that ended asking him for something.
+            if thread.reviewWaiting || needsAnswer(thread) || thread.waitingOnMike || (thread.needsYou && thread.working == nil) {
                 sections.inbox.append(thread)
             } else if thread.isBusy || thread.working != nil {
                 sections.running.append(thread)

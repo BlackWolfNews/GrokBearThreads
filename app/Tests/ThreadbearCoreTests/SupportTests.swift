@@ -185,6 +185,36 @@ final class ThreadSectionsTests: XCTestCase {
         XCTAssertEqual(sections.running.map(\.id), ["bg-unread", "bg", "running"])
     }
 
+    /// A turn that ended asking Mike for something is waiting on him, even
+    /// with a job left watching for him to do it, and even once he's read
+    /// it. Ticking every ask hands it back to Running. A turn underway is
+    /// still Running, and so is a reply that asked for nothing.
+    func testAnOpenAskBeatsBackgroundWork() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let job = [BackgroundTask(kind: .shell, description: "Watch for the Pi")]
+        func asking(_ id: String, ticked: Bool = false) -> ThreadSummary {
+            var t = thread(id, minutesAgo: 1, background: job)
+            t.needs = "you"
+            t.asksSeq = 5
+            t.asks = [Ask(action: "Put the card back", ticked: ticked)]
+            return t
+        }
+        var read = asking("read")
+        read.needsYou = false
+        var unread = asking("unread")
+        unread.needsYou = true
+        var noCard = thread("no-card", minutesAgo: 1, background: job)
+        noCard.needs = "you"
+        var said = thread("said-nothing", minutesAgo: 1, background: job)
+        said.needs = "nothing"
+        var underway = asking("underway")
+        underway.status = .running
+        let sections = ThreadSections.build([read, unread, noCard, asking("ticked", ticked: true), said, underway], now: now)
+        XCTAssertEqual(Set(sections.inbox.map(\.id)), ["read", "unread", "no-card"])
+        XCTAssertEqual(Set(sections.running.map(\.id)), ["ticked", "said-nothing", "underway"])
+        XCTAssertEqual(sections.needsYou.map(\.id), ["unread"])
+    }
+
     /// One inbox, ordered by what needs Mike most: questions, then unread
     /// failures, unread replies, read failures, then the rest, newest first
     /// within each. Running threads are their own section.

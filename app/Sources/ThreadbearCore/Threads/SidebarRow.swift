@@ -72,7 +72,9 @@ public struct ThreadRowLook: Sendable, Equatable {
             case .running, .starting: status = .working
             case .error: status = .failed
             case .stopped: status = .stopped
-            case .idle: status = thread.background.isEmpty ? .time : .background
+            // Waiting on Mike, the row reads as any other asking thread's:
+            // a spinner beside it would say there's nothing to do yet.
+            case .idle: status = thread.background.isEmpty || thread.waitingOnMike ? .time : .background
             }
         }
         // A turn that said it needs nothing isn't in needsYou, but it's

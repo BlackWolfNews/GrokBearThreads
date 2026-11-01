@@ -36,7 +36,8 @@ working now. Waiting holds threads that have booked a message to themselves
 for later (an agent saying "I'll check again in 20 minutes") and have nothing
 for you until then: each says when it wakes, soonest first. When the time
 comes it runs again, and lands in the inbox when it's done. A thread that
-asks you something keeps its place in the inbox, wake-up or not.
+asks you something keeps its place in the inbox, wake-up or not, and so does
+one that has left a job running while it waits for you.
 Hibernating and Archived, at the foot, hold the threads you've put away
 (see [Hibernate and archive](#hibernate-and-archive)). They start folded,
 showing only how many; click a heading to open or fold it.
