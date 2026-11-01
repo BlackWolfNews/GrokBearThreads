@@ -7,7 +7,7 @@ import type { SessionSink, AdapterOutput, ToolApprovalRequest } from '../../src/
 import { ProcessRegistry } from '../../src/proc.ts';
 import { nullLogger } from '../../src/log.ts';
 import { tmpDir } from '../helpers/fakes.ts';
-import { END_TURN_FULL_NAME, END_TURN_NUDGE, ONE_REPLY_END_TURN_NUDGE, ONE_REPLY_WRITE_NUDGE } from '../../src/needs.ts';
+import { END_TURN_FULL_NAME, END_TURN_NUDGE, ONE_REPLY_END_TURN_NUDGE, ONE_REPLY_WRITE_NUDGE, oneReplyAlreadyWritten } from '../../src/needs.ts';
 
 test('"Always allow" keeps only allow rules, scoped to the session', () => {
   const { updates, rules } = alwaysAllow('Bash', [
@@ -175,6 +175,18 @@ test('Stop hook: says when it sent a turn back for end_turn, so end_turn knows n
   await state.options.hooks.PostToolUse[0].hooks[0]({ hook_event_name: 'PostToolUse', tool_name: END_TURN_FULL_NAME });
   assert.equal((await stop({ hook_event_name: 'Stop', stop_hook_active: false })).reason, ONE_REPLY_WRITE_NUDGE);
   assert.equal(nudges(), 1);
+  state.close!();
+});
+
+// A session on the older end_turn wrote its message first, and is told so:
+// asking for a reply would get a second that takes the first's place.
+test('Stop hook: no nudge for a reply when end_turn said the message above is it', async () => {
+  const { state } = start([], {}, { mcpServersFor: () => ({ threadbear: { type: 'sdk', name: 'threadbear' } }), oneReply: () => true });
+  const stop = state.options.hooks.Stop[0].hooks[0];
+  await state.frame!({ type: 'assistant', session_id: 's', message: { id: 'a', role: 'assistant', content: [{ type: 'tool_use', id: 'e1', name: END_TURN_FULL_NAME, input: {} }] } });
+  await state.options.hooks.PostToolUse[0].hooks[0]({ hook_event_name: 'PostToolUse', tool_name: END_TURN_FULL_NAME });
+  await state.frame!({ type: 'user', session_id: 's', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'e1', content: oneReplyAlreadyWritten(false) }] } });
+  assert.deepEqual(await stop({ hook_event_name: 'Stop', stop_hook_active: false }), {});
   state.close!();
 });
 

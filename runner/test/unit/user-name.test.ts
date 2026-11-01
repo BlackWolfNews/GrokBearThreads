@@ -24,7 +24,10 @@ test('nothing an agent reads names Mike, apart from the user line', () => {
   const named = USER_NAME ? userLine() : '';
   const strip = (s: string) => (named ? s.split(named).join('') : s);
   const h = makeHarness();
-  const tools = buildThreadbearTools(h.runner, 'self', Date.now);
+  // Codex's, as only those have a schema to write out (Claude's end_turn is
+  // listed by its MCP server); Claude's own descriptions are checked below.
+  const tools = buildThreadbearTools(h.runner, 'self', Date.now, undefined, undefined, undefined, { provider: 'codex' });
+  const claude = [false, true].flatMap((oneReply) => buildThreadbearTools(h.runner, 'self', Date.now, undefined, undefined, undefined, { oneReply: () => oneReply }).map((t) => t.description));
   const texts: [string, string][] = [
     ['SHOWING_THE_USER', SHOWING_THE_USER],
     ['FILING_PROJECTS', FILING_PROJECTS],
@@ -44,6 +47,7 @@ test('nothing an agent reads names Mike, apart from the user line', () => {
     ['WROTE_INSTEAD', WROTE_INSTEAD],
     // Every tool's description and its arguments', nested ones too.
     ['tools', JSON.stringify(dynamicToolSpecs(tools))],
+    ['Claude tools', claude.join('\n')],
   ];
   for (const [name, text] of texts) assert.doesNotMatch(strip(text), /\bMike\b/, name);
 });

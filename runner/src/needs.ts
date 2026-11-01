@@ -476,10 +476,37 @@ export function oneReplyAccepted(needsYou: boolean, restart = ''): string {
 // after it got a second message, which took the first's place. On 1 Nov 2026
 // that was 13 of 84 one-reply turns, one trading 2,359 characters for 96, and
 // a real answer folded under "The bear picture test is still waiting on you".
+const MESSAGE_STANDS = 'your message above is the reply';
 export function oneReplyAlreadyWritten(needsYou: boolean, restart = ''): string {
   return needsYou
-    ? `${ENDED} will wait in Needs you.${restart} Stop here, with no more text: your message above is the reply, the asks go in a card under it, and nothing written now reaches the user.`
-    : `${ENDED} is done. Stop here, with no more text: your message above is the reply, and nothing written now reaches the user.`;
+    ? `${ENDED} will wait in Needs you.${restart} Stop here, with no more text: ${MESSAGE_STANDS}, the asks go in a card under it, and nothing written now reaches the user.`
+    : `${ENDED} is done. Stop here, with no more text: ${MESSAGE_STANDS}, and nothing written now reaches the user.`;
+}
+
+// That answer, read back: the turn has its reply, so the Stop hook doesn't
+// ask for one (adapter.ts), and any summary bullets a session on the old
+// form sent don't take the message's place (runner.ts).
+export function endTurnMessageStands(result: { ok: boolean; text: string }): boolean {
+  return endTurnAccepted(result) && result.text.includes(MESSAGE_STANDS);
+}
+
+// An end_turn answered by the one-reply handler: the reply is a message, the
+// next one or the one above, so bullets from a session on the older form
+// don't stand in for it.
+export function endTurnIsOneReply(result: { ok: boolean; text: string }): boolean {
+  return endTurnWantsReply(result) || endTurnMessageStands(result);
+}
+
+// What a Claude end_turn that fits neither form hears. Says the shape in
+// words, as the agent can't look it up: a session keeps the definition it
+// first loaded, and ToolSearch shows that one too (threadbear-mcp.ts, endTurn).
+// An agent on 1 Nov 2026 got a bare zod error and had to read the source
+// (thread 1b770c6a).
+export function endTurnMisfit(problem: string, oneReply: boolean): string {
+  const shape = oneReply
+    ? '{ headline?, needs?, asks?: { question, options?: { label, does? }[], suggested?, links? }[], next?, archive? }, then write your reply after it, as ordinary text: that reply is the only text the user sees from the turn.'
+    : '{ needs?, summary?: string[], asks?: { action, why, reply?, options?: string[], suggested?, links? }[], next?, archive? }, after writing your reply as ordinary text, with nothing after the call.';
+  return `Not ended: those arguments don't fit end_turn.\n${problem}\nCall it with ${shape} Go by this rather than the tool's description, which can be out of date in a session this old, and reloading it won't change that.`;
 }
 
 export function endTurnWantsReply(result: { ok: boolean; text: string }): boolean {

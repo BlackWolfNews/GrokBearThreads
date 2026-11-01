@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { FakeAccounts, makeHarness, tick, tmpDir, withCodex } from '../helpers/fakes.ts';
 import { copySessionTranscript, projectDirName } from '../../src/transcripts.ts';
-import { buildThreadbearTools, parseWhen } from '../../src/threadbear-mcp.ts';
+import { buildThreadbearTools, parseWhen, threadbearMcpServer } from '../../src/threadbear-mcp.ts';
 import { needsFromTool } from '../../src/needs.ts';
 import { CodexTools, type ToolDefinition } from '../../src/adapters/codex/tools.ts';
 import { toolTitle } from '../../src/tools.ts';
@@ -456,7 +456,7 @@ test('end_turn only acknowledges; its description says when to call it', async (
   assert.match(t.description, /Sub-agents never call this/);
   s.text('m1', 'Yes or no?');
   toolCall(s, 'e1', END_TURN, { needs: 'you' });
-  const r = await call('end_turn', { needs: 'you', asks: [{ action: 'Say yes' }] });
+  const r = await call('end_turn', { needs: 'you', asks: [{ action: 'Say yes', why: 'It decides the rest.' }] });
   assert.equal(r.error, false);
   assert.match(r.text, /Needs you/);
   toolResult(s, 'e1');
@@ -676,7 +676,7 @@ test('a reply that came only as a summary: end_turn asks for it again, and the r
   const summary = "I've resent the full step-by-step setup instructions.";
   s.out({ kind: 'event', event: { type: 'assistant.text', itemId: 'm1:1', text: summary, narration: true } });
   toolCall(s, 'e1', END_TURN, { needs: 'you' });
-  const r = await call('end_turn', { needs: 'you', asks: [{ action: 'Do step 1' }] });
+  const r = await call('end_turn', { needs: 'you', asks: [{ action: 'Do step 1', why: 'It comes first.' }] });
   assert.equal(r.error, false, 'a summary is still a reply: no refusal loop');
   assert.match(r.text, /^Noted: this thread will wait in Needs you/);
   assert.match(r.text, /only a short summary of your last message/);
@@ -879,6 +879,134 @@ test("A Codex thread's end_turn is answered in the form the thread was given, wh
   // A new thread is only shown the setting's form.
   const shown = (oneReply: boolean) => buildThreadbearTools(h.runner, thread.id, Date.now, undefined, undefined, undefined, { provider: 'codex', oneReply: () => oneReply }).find((x) => x.name === 'end_turn')!.description;
   assert.notEqual(shown(true), shown(false));
+});
+
+// A resumed Claude session keeps the end_turn it first loaded, whatever the
+// server lists now, so a call in the older form reaches a server on the newer
+// one (1 Nov 2026, thread 1b770c6a: refused with a bare zod error). These go
+// through the real MCP server, as its own validation is what refused it.
+function mcpClient(h: ReturnType<typeof makeHarness>, selfId: string, oneReply: boolean) {
+  const server = threadbearMcpServer(h.runner, selfId, undefined, undefined, undefined, () => true, undefined, () => oneReply);
+  const waiting = new Map<number, (r: { result?: { tools?: { name: string; inputSchema: { properties: Record<string, unknown>; required?: string[] }; description: string }[]; content?: { text: string }[]; isError?: boolean } }) => void>();
+  const transport = {
+    onmessage: undefined as undefined | ((m: unknown) => void),
+    start: async () => {},
+    close: async () => {},
+    send: async (m: { id: number; result: never }) => void waiting.get(m.id)?.(m),
+  };
+  let id = 0;
+  const request = async (method: string, params: unknown) => {
+    await (server.instance as unknown as { connected?: boolean; connect: (t: unknown) => Promise<void> }).connect(transport).catch(() => {});
+    const n = ++id;
+    return new Promise<Parameters<NonNullable<ReturnType<typeof waiting.get>>>[0]>((resolve) => {
+      waiting.set(n, resolve);
+      transport.onmessage!({ jsonrpc: '2.0', id: n, method, params });
+    });
+  };
+  return {
+    endTurnShown: async () => (await request('tools/list', {})).result!.tools!.find((t) => t.name === 'end_turn')!,
+    endTurn: async (args: Record<string, unknown>) => {
+      const { result } = await request('tools/call', { name: 'end_turn', arguments: args });
+      return { text: result!.content!.map((c) => c.text).join('\n'), error: Boolean(result!.isError) };
+    },
+  };
+}
+
+const OLD_ASK = { summary: ['Worked out the story.'], needs: 'you', asks: [{ action: 'Which story should be the spine?', why: "Once you pick, I'll build it.", options: ['No state', 'One database'], suggested: 0 }] };
+
+test('A Claude session on the older end_turn, with its message written, is taken as it is, under one reply', async () => {
+  const h = makeHarness();
+  const { thread, s } = start(h);
+  const mcp = mcpClient(h, thread.id, true);
+  s.text('m1', 'Here is the whole story, as the old description said to write it first.');
+  toolCall(s, 'e1', END_TURN, OLD_ASK);
+  const r = await mcp.endTurn(OLD_ASK);
+  assert.equal(r.error, false, r.text);
+  assert.match(r.text, /Stop here/);
+  assert.match(r.text, /your message above is the reply/);
+  assert.doesNotMatch(r.text, /Now write your reply/);
+  s.out({ kind: 'event', event: { type: 'tool.result', itemId: 'e1', ok: true, text: r.text, truncated: false, images: [] } });
+  // Its message is the reply: the bullets don't come in over it.
+  assert.ok(!h.events(thread.id).some((e) => e.type === 'assistant.text' && e.summary));
+  s.result('completed');
+  await tick();
+  const card = h.runner.get(thread.id);
+  assert.equal(card.needs, 'you');
+  assert.equal(card.asks?.[0]?.action, 'Which story should be the spine?');
+  assert.deepEqual(card.asks?.[0]?.options, ['No state', 'One database']);
+  assert.equal(card.asks?.[0]?.suggested, 0);
+});
+
+test('A Claude session on the older end_turn with no message yet is asked for it, and that is the reply', async () => {
+  const h = makeHarness();
+  const { thread, s } = start(h);
+  const mcp = mcpClient(h, thread.id, true);
+  toolCall(s, 'b1', 'Bash', { command: 'npm test' });
+  toolResult(s, 'b1');
+  toolCall(s, 'e1', END_TURN, OLD_ASK);
+  const r = await mcp.endTurn(OLD_ASK);
+  assert.equal(r.error, false, r.text);
+  assert.match(r.text, /Now write your reply/);
+  s.out({ kind: 'event', event: { type: 'tool.result', itemId: 'e1', ok: true, text: r.text, truncated: false, images: [] } });
+  s.text('m1', 'The tests pass.');
+  const reply = h.events(thread.id).find((e) => e.type === 'assistant.text' && e.itemId === 'm1');
+  assert.ok(reply && reply.type === 'assistant.text' && reply.final);
+  assert.ok(!h.events(thread.id).some((e) => e.type === 'assistant.text' && e.summary));
+});
+
+// The other way round: One reply turned off. This CLI ends the turn at an
+// accepted end_turn (adapter.ts, terminalMcpTools), so "write your reply next"
+// would never be read: it's the bullets handler that has to answer.
+test('A Claude session on the one-reply end_turn, with One reply off, writes its reply first', async () => {
+  const h = makeHarness();
+  const { thread, s } = start(h);
+  const mcp = mcpClient(h, thread.id, false);
+  const input = { headline: 'Needs a pick', asks: [{ question: 'Which story?', options: [{ label: 'No state', does: 'I prototype it' }] }] };
+  toolCall(s, 'b1', 'Bash', { command: 'npm test' });
+  toolResult(s, 'b1');
+  toolCall(s, 'e1', END_TURN, input);
+  const refused = await mcp.endTurn(input);
+  assert.equal(refused.error, true);
+  assert.match(refused.text, /Please write the whole answer as ordinary text/);
+  s.text('m1', 'Three stories, here they are.');
+  toolCall(s, 'e2', END_TURN, input);
+  const r = await mcp.endTurn(input);
+  assert.equal(r.error, false, r.text);
+  assert.match(r.text, /^Noted: this thread will wait in Needs you/);
+  assert.doesNotMatch(r.text, /Now write your reply/);
+});
+
+test("end_turn lists only today's form, whichever forms it takes", async () => {
+  const h = makeHarness();
+  const { thread } = start(h);
+  const one = await mcpClient(h, thread.id, true).endTurnShown();
+  assert.deepEqual(Object.keys(one.inputSchema.properties).sort(), ['archive', 'asks', 'byline', 'headline', 'needs', 'next']);
+  assert.ok(!one.inputSchema.required?.length, 'every field is optional');
+  const ask = (one.inputSchema.properties.asks as { items: { required: string[]; properties: Record<string, { description?: string; items?: { type?: string } }> } }).items;
+  assert.deepEqual(ask.required, ['question']);
+  assert.equal(ask.properties.options.items?.type, 'object');
+  assert.match(ask.properties.question.description ?? '', /One sentence/);
+  assert.match((one.inputSchema.properties.headline as { description: string }).description, /for the sidebar/);
+  const bullets = await mcpClient(h, thread.id, false).endTurnShown();
+  assert.ok('summary' in bullets.inputSchema.properties);
+  assert.ok(!('headline' in bullets.inputSchema.properties));
+});
+
+test("An end_turn that fits neither form hears today's shape and order in words", async () => {
+  const h = makeHarness();
+  const { thread, s } = start(h);
+  const garbled = { asks: [{ question: 'Which one?', options: ['A string, in the wrong form'] }] };
+  toolCall(s, 'e1', END_TURN, garbled);
+  const one = await mcpClient(h, thread.id, true).endTurn(garbled);
+  assert.equal(one.error, true);
+  assert.match(one.text, /asks\[0\]\.options\[0\]/);
+  assert.match(one.text, /\{ headline\?, needs\?, asks\?: \{ question, options\?: \{ label, does\? \}\[\], suggested\?, links\? \}\[\], next\?, archive\? \}/);
+  assert.match(one.text, /then write your reply after it/);
+  assert.doesNotMatch(one.text, /MCP error/);
+  const old = await mcpClient(h, thread.id, false).endTurn({ needs: 'maybe' });
+  assert.equal(old.error, true);
+  assert.match(old.text, /\{ needs\?, summary\?: string\[\], asks\?: \{ action, why/);
+  assert.match(old.text, /after writing your reply/);
 });
 
 // The SDK runs the tool as soon as it reads the call, so the handler can run

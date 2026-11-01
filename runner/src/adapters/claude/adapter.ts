@@ -16,7 +16,7 @@ import { placePictures } from '../../pictures.ts';
 import { toolTitle, truncateInput } from '../../tools.ts';
 import { RUNNER_VERSION } from '../../config.ts';
 import { stripModelSuffix } from '../../accounts.ts';
-import { END_TURN_FULL_NAME, END_TURN_NUDGE, ONE_REPLY_END_TURN_NUDGE, ONE_REPLY_WRITE_NUDGE } from '../../needs.ts';
+import { END_TURN_FULL_NAME, END_TURN_NUDGE, endTurnMessageStands, ONE_REPLY_END_TURN_NUDGE, ONE_REPLY_WRITE_NUDGE } from '../../needs.ts';
 
 // Variables a parent Claude Code session sets for its own children. If the
 // runner was started from inside one (tests, a terminal in T3), they would
@@ -262,6 +262,9 @@ class ClaudeSession implements AgentSession {
   // the agent has written words since the turn's end_turn.
   private oneReply = false;
   private wroteAfterEnd = false;
+  // end_turn answered that the message before it is the reply, so asking
+  // for one would get a second that takes its place (needs.ts).
+  private messageStands = false;
   private pastEndTurn = false;
   private endTurnCall?: string;
 
@@ -327,7 +330,7 @@ class ClaudeSession implements AgentSession {
     if (isEffortLevel(level)) this.sink.output({ kind: 'effort', level });
     const stop = input as { stop_hook_active?: boolean; background_tasks?: unknown[] };
     const ended = this.endTurnTaken;
-    const wrote = this.wroteAfterEnd;
+    const wrote = this.wroteAfterEnd || this.messageStands;
     this.forgetEndTurn();
     // A turn that ended in plain text leaves the runner reading the card
     // from the prose (needs.ts, needsFromText), which drops what end_turn
@@ -348,6 +351,7 @@ class ClaudeSession implements AgentSession {
   private forgetEndTurn(): void {
     this.endTurnTaken = false;
     this.wroteAfterEnd = false;
+    this.messageStands = false;
     this.pastEndTurn = false;
     this.endTurnCall = undefined;
   }
@@ -383,7 +387,10 @@ class ClaudeSession implements AgentSession {
           if (out.kind === 'event') {
             const ev = out.event;
             if (ev.type === 'tool.call' && ev.name === END_TURN_FULL_NAME) this.endTurnCall = ev.itemId;
-            else if (ev.type === 'tool.result' && ev.itemId === this.endTurnCall && ev.ok) this.pastEndTurn = true;
+            else if (ev.type === 'tool.result' && ev.itemId === this.endTurnCall && ev.ok) {
+              this.pastEndTurn = true;
+              this.messageStands = endTurnMessageStands(ev);
+            }
             else if (this.pastEndTurn && ev.type === 'assistant.text' && !ev.itemId.includes('/') && ev.text.trim()) this.wroteAfterEnd = true;
           }
           if (out.kind === 'event' && out.event.type === 'tool.call') this.markToolSeen(out.event.itemId);

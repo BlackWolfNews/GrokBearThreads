@@ -185,7 +185,7 @@ test('show_options is shared with Codex dynamic tools and routes to the runner o
   const {dynamicToolSpecs}=await import('../../src/adapters/codex/tools.ts');
   const {ThreadRouter}=await import('../../src/handover.ts');
   const {h,thread,input}=fixture();
-  const tools=buildThreadbearTools(h.runner,thread.id);
+  const tools=buildThreadbearTools(h.runner,thread.id,Date.now,undefined,undefined,undefined,{provider:'codex'});
   const specs=dynamicToolSpecs(tools);
   assert.match(JSON.stringify(specs),/show_options/);
   const calls:{method:string;params:unknown}[]=[];

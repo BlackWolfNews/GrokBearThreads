@@ -403,7 +403,7 @@ test('ending the session expires every open card without replying', async () => 
 
 test('every threadbear tool converts to a dynamic tool with a JSON Schema', () => {
   // Typed against the runner's real tool list, so C's wiring type-checks.
-  const tools: ToolDefinition[] = buildThreadbearTools({} as never, 'self');
+  const tools: ToolDefinition[] = buildThreadbearTools({} as never, 'self', Date.now, undefined, undefined, undefined, { provider: 'codex' });
   const [ns] = dynamicToolSpecs(tools);
   assert.equal(ns.name, 'threadbear');
   // Codex refuses thread/start with a longer one, so no Codex thread starts.

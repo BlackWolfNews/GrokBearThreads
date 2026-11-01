@@ -19,6 +19,10 @@ static site with its own `package.json`; its comments say how to build it.
 
 - Test first for anything non-trivial. Runner: `npm test` in `runner/`.
   App: `swift test` in `app/`.
+- Changing a threadbear tool's arguments: keep taking the old ones. A resumed
+  Claude session keeps a tool's definition from when it first loaded it, and
+  ToolSearch shows that one too, so it goes on calling the old form
+  (docs/protocol.md, "One reply"; `end_turn` handles this).
 - The protocol is the contract. Change `docs/protocol.md` first, then both
   sides, and keep both sides tolerant of unknown fields and event types.
 - Only ever spawn the official `claude` (and later `codex`) binaries under

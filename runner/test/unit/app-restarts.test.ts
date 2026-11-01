@@ -131,17 +131,17 @@ test('end_turn asking for Restart to Update signs the thread up; wait_for_app_re
     const r = (await t.handler(args as never, {})) as { content: { text: string }[] };
     return r.content.map((c) => c.text).join('\n');
   };
-  const reply = await call('end_turn', { needs: 'you', asks: [{ action: 'Click Restart to Update', where: 'Threadbear menu' }] });
+  const reply = await call('end_turn', { needs: 'you', asks: [{ action: 'Click Restart to Update', why: 'To check the fix.' }] });
   assert.match(reply, /message here when the app restarts/);
   assert.equal(watcher.isWatching(thread.id), true);
   // Asks about something else don't.
   const { thread: other } = h.runner.create({ text: 'Other', accountId: 'claude-3' });
   const otherTools = buildThreadbearTools(h.runner, other.id, Date.now, undefined, undefined, watcher);
-  await otherTools.find((x) => x.name === 'end_turn')!.handler({ needs: 'you', asks: [{ action: 'Paste the key' }] } as never, {});
+  await otherTools.find((x) => x.name === 'end_turn')!.handler({ needs: 'you', asks: [{ action: 'Paste the key', why: 'The deploy needs it.' }] } as never, {});
   assert.equal(watcher.isWatching(other.id), false);
   // Every ask has to say why: a card with only an action and a place
   // left Mike guessing (28 Oct). The schema refuses one without.
-  const shape = (tools.find((x) => x.name === 'end_turn')!.inputSchema as any).asks;
+  const shape = (buildThreadbearTools(h.runner, thread.id, Date.now, undefined, undefined, watcher, { provider: 'codex' }).find((x) => x.name === 'end_turn')!.inputSchema as any).asks;
   assert.equal(shape.safeParse([{ action: 'Fix the Slack draft', where: 'Slack' }]).success, false);
   assert.equal(shape.safeParse([{ action: 'Fix the Slack draft', why: 'It says Hayden; he is Pete.', links: [{ title: 'Open the Slack message', url: 'https://x.slack.com/archives/C1/p1' }] }]).success, true);
   // The tool's text is what's sent.

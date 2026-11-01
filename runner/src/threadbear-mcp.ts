@@ -19,7 +19,7 @@ import { parseWhen, relativeFuture, relativeTime } from './when.ts';
 
 export { parseWhen, relativeFuture, relativeTime };
 import { RUNNER_VERSION, expandHome } from './config.ts';
-import { ALREADY_ENDED, ARCHIVE_ADDED, endTurnDescription, endTurnForm, END_TURN_TOOL, BULLETS_ONLY, ENDED, takenEndTurn, MAX_BYLINE, NARRATION_ONLY, NO_REPLY, needsFromTool, oneReplyAccepted, oneReplyAlreadyWritten, summaryFromTool, turnReply, type TurnReply } from './needs.ts';
+import { ALREADY_ENDED, ARCHIVE_ADDED, endTurnDescription, endTurnForm, endTurnMisfit, END_TURN_TOOL, BULLETS_ONLY, ENDED, takenEndTurn, MAX_BYLINE, NARRATION_ONLY, NO_REPLY, needsFromTool, oneReplyAccepted, oneReplyAlreadyWritten, summaryFromTool, turnReply, type TurnReply } from './needs.ts';
 import { asksForAppRestart, type AppRestarts } from './app-restarts.ts';
 import { PANEL_PLACES } from './panel-requests.ts';
 import { nudgedThisTurn, signInNudge, turnSignIns, uncovered } from './connectors.ts';
@@ -706,9 +706,11 @@ export function buildThreadbearTools(
           restart = " You'll get a message here when the app restarts onto the new build.";
         }
         // Sent back by the Stop hook with its message written: that's the
-        // reply. Not if it wrote nothing since its last step, or only a
-        // narration block, which is just a paraphrase of what it wrote.
-        if (!codex && control.endTurnNudged?.(selfId)) {
+        // reply. So too from a session on the older form, whose description
+        // said to write it first (endTurn below). Not if it wrote nothing
+        // since its last step, or only a narration block, which is just a
+        // paraphrase of what it wrote.
+        if (!codex && (control.endTurnNudged?.(selfId) || endTurnForm(input) === 'bullets')) {
           const reply = await replied();
           if (reply.replied && !reply.narrationOnly) return oneReplyAlreadyWritten(needs === 'you', restart);
         }
@@ -770,9 +772,12 @@ export function buildThreadbearTools(
           .describe('true to archive this thread once the turn is over. Only when the user has asked for this thread to be archived or the message that started it says to, and only with needs "nothing". If they ask after you have called end_turn, call it again with this.'),
       },
       handle(async (args) => {
-        const { asks, archive } = args;
-        // Left out, needs follows the asks (needs.ts).
-        const needs = needsFromTool(args)?.needs ?? 'nothing';
+        const { archive } = args;
+        // Left out, needs follows the asks (needs.ts). Read through it, as
+        // a session on the one-reply form asks a question, not an action.
+        const parsed = needsFromTool(args);
+        const needs = parsed?.needs ?? 'nothing';
+        const asks = parsed?.asks;
         // A summary is the reply (the runner writes it into the thread).
         // No reply yet: refused, so the agent writes one. An error result
         // also keeps the CLI from taking this call as the turn's end.
@@ -838,20 +843,41 @@ export function buildThreadbearTools(
       }),
     );
 
-  // The form today's setting picks, which a new thread is shown. A Codex
-  // thread keeps the tool list it started with, so it can call the other
-  // form: answered as that form, or an agent following its own tool's schema
-  // gets refused for leaving out a field it has never heard of (1 Nov 2026,
-  // thread d8c829e8). Claude's server is built per CLI, so its tool can't differ.
+  // The form today's setting picks, which a new thread is shown. A thread
+  // can hold on to the other one, and an agent following its own tool's schema
+  // mustn't be refused for leaving out a field it has never heard of.
+  // Codex's tool list is fixed at thread/start (1 Nov 2026, thread d8c829e8).
+  // Claude keeps each tool's definition from when the session first loaded
+  // it, through every resume, whatever the server lists by then. ToolSearch
+  // shows that one too, and tools/list_changed changes nothing, even live
+  // (tried on CLI 2.1.316, 1 Nov 2026, thread 1b770c6a; docs/protocol.md,
+  // "One reply").
   const endTurn = () => {
     const today = oneReply ? oneReplyEndTurn() : bulletsEndTurn();
-    if (!codex) return today;
     const other = oneReply ? bulletsEndTurn() : oneReplyEndTurn();
+    const otherForm = (args: unknown) => {
+      const form = endTurnForm(args);
+      return Boolean(form) && (form === 'oneReply') !== oneReply;
+    };
+    if (codex) return Object.assign(today, { formFor: (args: unknown) => (otherForm(args) ? other : today) });
+    // Unlike Codex, which runs the other form's handler, Claude's goes by
+    // how its CLI was started: it ends the turn at an accepted end_turn only
+    // with bullets (adapter.ts, terminalMcpTools), so only today's handler
+    // says the right thing next. It reads either form's asks.
+    //
+    // The server has one schema for both listing and checking, so this one
+    // publishes today's form and lets anything through (.catch leaves the
+    // published schema alone, and loose keeps fields it doesn't name), and the
+    // handler does the checking and says what's wrong in words.
+    const published = Object.fromEntries(Object.entries(today.inputSchema).map(([k, v]) => [k, (v as z.ZodType).catch((ctx: { input: unknown } | undefined) => ctx?.input)]));
+    const shapes = { today: today.inputSchema, other: other.inputSchema };
+    const run = today.handler as (args: unknown, extra: unknown) => Promise<Result>;
     return Object.assign(today, {
-      formFor: (args: unknown) => {
-        const form = endTurnForm(args);
-        return form && (form === 'oneReply') !== oneReply ? other : today;
-      },
+      inputSchema: z.looseObject(published) as never,
+      handler: (async (args: unknown, extra: unknown) => {
+        const fits = z.object((otherForm(args) ? shapes.other : shapes.today) as z.ZodRawShape).safeParse(args);
+        return fits.success ? run(fits.data, extra) : fail(endTurnMisfit(z.prettifyError(fits.error), oneReply));
+      }) as never,
     });
   };
 

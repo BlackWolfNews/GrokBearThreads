@@ -1535,15 +1535,29 @@ A turn the agent finished can say whether Mike has to do anything, so
   message that took the first's place, in 13 of 84 turns on 1 Nov 2026, one
   trading 2,359 characters for 96. Text after it is dropped, as with
   any "Stop here". Codex calls it before its final answer as before, and
-  its final answer is the reply. The setting is read when a session
-  starts, as its tool is, so a live one keeps the tool it has until its
-  CLI restarts; Bullet replies doesn't apply to a one-reply session. A
-  Codex thread's tool list is fixed at `thread/start`, restarts included,
-  so it may still be shown the other form of `end_turn` however the
-  setting stands now. The runner answers a Codex call by the form it was
-  written in (`endTurnForm`: `asks[].question` or `headline` is one
-  reply; `asks[].action` or `why`, or `summary`, is bullets; neither
-  follows the setting), and only threads started since get today's form.
+  its final answer is the reply. The setting is read when a CLI starts;
+  Bullet replies doesn't apply to a one-reply session. Neither provider's
+  agent is sure to be shown today's form of `end_turn`. A Codex thread's
+  tool list is fixed at `thread/start`, restarts included. A Claude
+  session keeps each tool's definition from when it first loaded it,
+  through every resume, whatever the server lists by then; `ToolSearch`
+  shows that one too, and `tools/list_changed` changes nothing, even live
+  (tried on CLI 2.1.316; thread 1b770c6a was refused with a bare zod error
+  on 1 Nov 2026, and could only find the shape in this file). So the
+  runner goes by the form a call was written in (`endTurnForm`:
+  `asks[].question` or `headline` is one reply; `asks[].action` or `why`,
+  or `summary`, is bullets; neither follows the setting), and only
+  threads started since get today's form. Codex's handler answers in that
+  form. Claude's CLI ends the turn at an accepted `end_turn` only with
+  bullets, so today's form answers, reading either form's asks: under one
+  reply, a call in the older form is told "Stop here" if its message is
+  already written (`oneReplyAlreadyWritten`, so the Stop hook doesn't ask
+  for another and its bullets don't replace it) and to write its reply if
+  not. With One reply off, a one-reply call is refused until it has
+  written a message (`NO_REPLY`). Claude's server lists today's form but
+  lets any arguments through its own validation, so the handler does the
+  checking: what fits neither form hears today's shape and order in words
+  (`endTurnMisfit`).
 - **Bullet replies off.** `Settings.bulletReplies: false` (Settings >
   General; Mike, 30 Oct 2026: he liked the folded working but not always
   the bullets in place of the agent's message). `end_turn`'s description
