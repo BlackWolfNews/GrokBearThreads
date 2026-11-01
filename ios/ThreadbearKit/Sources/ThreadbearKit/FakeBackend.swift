@@ -22,13 +22,19 @@ public final class FakeBackend: Backend, @unchecked Sendable {
     private let listDelay: Duration
     private var imagesById: [String: [MessageImage]] = [:]
 
-    public init(now: Date = .now, turnDelay: Duration = .seconds(2), runnerOnline: Bool = true, listDelay: Duration = .zero, pictures: Bool = false) {
+    public init(now: Date = .now, turnDelay: Duration = .seconds(2), runnerOnline: Bool = true, listDelay: Duration = .zero, pictures: Bool = false, long: Bool = false) {
         let sample = Self.sample(now: now)
         threadsById = Dictionary(uniqueKeysWithValues: sample.threads.map { ($0.threadId, $0) })
         messagesById = sample.messages
         // Left out of the usual samples, which the App Store shots are of.
         if pictures {
             let thread = Self.pictureThread(now: now)
+            threadsById[thread.thread.threadId] = thread.thread
+            messagesById[thread.thread.threadId] = thread.messages
+            imagesById[thread.thread.threadId] = thread.images
+        }
+        if long {
+            let thread = Self.longThread(now: now)
             threadsById[thread.thread.threadId] = thread.thread
             messagesById[thread.thread.threadId] = thread.messages
             imagesById[thread.thread.threadId] = thread.images
@@ -80,6 +86,44 @@ public final class FakeBackend: Backend, @unchecked Sendable {
             MessageImage(seq: 4, src: tall, url: samplePicture("tall", width: 800, height: 2000, hue: 0.08), width: 800, height: 2000),
             MessageImage(seq: 4, src: moving, url: sampleAnimation("moving", width: 720, height: 480), width: 720, height: 480),
         ]
+        return (thread, messages, images)
+    }
+
+    // MARK: A long thread
+
+    /// `-ThreadbearLong`: a build-along thread, "long": hundreds of rows of
+    /// long replies, tool lines and pictures, for opening a big thread.
+    private static func longThread(now: Date) -> (thread: PhoneThread, messages: [PhoneMessage], images: [MessageImage]) {
+        let ago = { (minutes: Double) in now.addingTimeInterval(-minutes * 60) }
+        let thread = PhoneThread(threadId: "long", title: "Drawer build along", cwd: "~/dev/workbench", preview: "On to the runners.", lastActivityAt: ago(1))
+        let picture = samplePicture("long", width: 1600, height: 1200, hue: 0.12)
+        var messages: [PhoneMessage] = []
+        var images: [MessageImage] = []
+        var seq = 0
+        let turns = 150
+        for turn in 0 ..< turns {
+            let at = ago(Double(turns - turn))
+            seq += 1
+            messages.append(PhoneMessage(seq: seq, role: .user, text: "Step \(turn): how does this look?", at: at))
+            for tool in 0 ..< 3 {
+                seq += 1
+                messages.append(PhoneMessage(seq: seq, role: .tool, text: "Read guide/step-\(turn)-\(tool).md", toolKind: "read", at: at))
+            }
+            seq += 1
+            let src = "/Users/you/guide/step-\(turn).png"
+            let body = String(repeating: "Keep the pieces clamped tight, then drill until the cone has cut a recess about as wide as the screw head. ", count: 4)
+            messages.append(PhoneMessage(seq: seq, role: .assistant, text: """
+            **Step \(turn).** \(body)
+
+            ![Step \(turn)](\(src))
+
+            - **Glue:** leave the clamps on for about an hour.
+            - **Screws:** evenly spaced and sitting flush.
+
+            \(body)
+            """, at: at))
+            images.append(MessageImage(seq: seq, src: src, url: picture, width: 1600, height: 1200))
+        }
         return (thread, messages, images)
     }
 
@@ -227,16 +271,35 @@ public final class FakeBackend: Backend, @unchecked Sendable {
     public func thread(_ threadId: String) -> AsyncThrowingStream<ThreadDetail?, Error> {
         watch { [unowned self] in
             lock.withLock {
-                threadsById[threadId].map { ThreadDetail(thread: $0, messages: messagesById[threadId] ?? []) }
+                threadsById[threadId].map { thread in
+                    let all = messagesById[threadId] ?? []
+                    // As phone:thread answers: only the newest text messages.
+                    return ThreadDetail(thread: thread, messages: threadId == "long" ? Array(all.filter { $0.role != .tool }.suffix(20)) : all)
+                }
             }
         }
     }
 
     public func messages(_ threadId: String, limit: Int) -> AsyncThrowingStream<MessagePage, Error> {
-        watch { [unowned self] in
+        let page = watch { [unowned self] in
             let all = lock.withLock { messagesById[threadId] ?? [] }
             let images = lock.withLock { imagesById[threadId] ?? [] }
             return MessagePage(messages: Array(all.suffix(limit)), hasMore: all.count > limit, images: images)
+        }
+        guard threadId == "long" else { return page }
+        // The long thread's page comes after phone:thread's answer, as it
+        // does over the network, so the view goes through the same swap.
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                try? await Task.sleep(for: .milliseconds(700))
+                do {
+                    for try await value in page { continuation.yield(value) }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
         }
     }
 

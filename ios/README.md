@@ -24,7 +24,7 @@ directly, so it works with the Mac asleep: whatever you send waits in
 - `Threadbear/`: the SwiftUI app. iOS 18, so the XS Max runs it too.
 - `scripts/sim-shots.sh [dir] [--dark]`: screenshots on sample data in the
   simulator (`-ThreadbearFake`, `-ThreadbearOpen <threadId>`,
-  `-ThreadbearCompose <text>`, `-ThreadbearSearch <text>`), on a 6.9" iPhone, so they're App Store sized.
+  `-ThreadbearCompose <text>`, `-ThreadbearSearch <text>`, `-ThreadbearLong` for a very long thread, "long"), on a 6.9" iPhone, so they're App Store sized.
 - `scripts/sim.sh [boot|stop]`: this worktree's own simulator, for
   `sim-shots.sh` and any repro of your own. It prints the id; use that
   rather than picking a simulator from `simctl list`, and `stop` it when

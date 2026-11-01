@@ -10,6 +10,9 @@ import UniformTypeIdentifiers
 extension EnvironmentValues {
     /// The open thread's pictures, for MarkdownText to find its images in.
     @Entry var threadPictures = ThreadPictures()
+    /// In the thread, whose rows are all built at once: a picture isn't
+    /// fetched until it's scrolled to, or opening a thread would fetch them all.
+    @Entry var picturesWaitUntilSeen = false
 }
 
 /// What a picture's address turned out to be. A class so a view can tell by
@@ -123,6 +126,8 @@ struct ReplyPicture: View {
     @State private var loaded: LoadedPicture?
     @State private var failed = false
     @State private var fullScreen = false
+    @Environment(\.picturesWaitUntilSeen) private var waitUntilSeen
+    @State private var seen = false
 
     private var size: CGSize? {
         if let size = loaded?.image.size { return size }
@@ -142,7 +147,9 @@ struct ReplyPicture: View {
                     .accessibilityHint(loaded?.isVideo == true ? "Plays it full screen" : "Shows it full screen")
             }
         }
-        .task(id: url) {
+        .onScrollVisibilityChange { if $0 { seen = true } }
+        .task(id: waitUntilSeen && !seen ? nil : url) {
+            guard !waitUntilSeen || seen else { return }
             await load()
             // `-ThreadbearViewPicture <alt>`: opens that picture full screen,
             // for screenshots, as the simulator can't be tapped from a script.

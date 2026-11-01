@@ -22,6 +22,9 @@ struct ThreadView: View {
     /// From API 2: the newest `limit` messages and tool lines, from Convex.
     @State private var page: MessagePage?
     @State private var limit = ThreadView.firstPage
+    /// The rows on screen when older ones were asked for, to stay on once they
+    /// arrive above them.
+    @State private var keepAbove: [Int]?
     /// Answers picked on the open card of asks (ask index to choice), until
     /// they're sent; the composer sends them along with what's typed.
     @State private var picks: [Int: Int] = [:]
@@ -85,9 +88,17 @@ struct ThreadView: View {
         let loadingMore = paged ? (page?.hasMore == true && messages.count < limit) : loadingBefore == detail.messages.first?.seq
         return ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
+                // Not a LazyVStack. Opening a long thread left the screen blank
+                // until a scroll, on the phone (1 Nov): a lazy stack guesses the
+                // height of rows it hasn't built and works out which to build
+                // from that, and these rows run from one line to several
+                // screens. Here every row is measured, so the bottom anchor is
+                // always on something real. A page is a few dozen rows once
+                // folded, and pictures wait until they're on screen.
+                VStack(alignment: .leading, spacing: 14) {
                     if canLoadMore {
                         EarlierButton(loading: loadingMore, fromMac: !paged) {
+                            keepAbove = items.map(\.id)
                             loadMore(thread, detail: detail, paged: paged)
                         }
                         // Scrolling up to it loads by itself, like any chat.
@@ -95,8 +106,12 @@ struct ThreadView: View {
                         // once and nobody asked. Rows, not messages: one long
                         // finished turn is dozens of messages folded into a
                         // line, and loading more threw the view off its reply.
-                        .onAppear {
-                            if items.count >= 20 { loadMore(thread, detail: detail, paged: paged) }
+                        // Not onAppear, which a VStack fires straight away
+                        // wherever the row is.
+                        .onScrollVisibilityChange { visible in
+                            guard visible, items.count >= 20 else { return }
+                            keepAbove = items.map(\.id)
+                            loadMore(thread, detail: detail, paged: paged)
                         }
                     }
                     ForEach(items) { item in
@@ -148,9 +163,22 @@ struct ThreadView: View {
             .defaultScrollAnchor(.bottom)
             .scrollDismissesKeyboard(.interactively)
             .environment(\.threadPictures, pictures)
+            .environment(\.picturesWaitUntilSeen, true)
             .environment(\.threadLink) { url, seq in follow(url, from: seq, in: items) }
             .sheet(item: $workLink) { WorkingSheet(link: $0).environment(\.threadPictures, pictures) }
             .onChange(of: messages.last?.seq) { proxy.scrollTo("bottom", anchor: .bottom) }
+            // The first page takes over from phone:thread's newest text
+            // messages, usually at a different height. Stay on the newest.
+            .onChange(of: page != nil) { proxy.scrollTo("bottom", anchor: .bottom) }
+            // Older rows have arrived above: back to the row that was at the
+            // top. The first one still here, as a turn cut off by the page's
+            // edge gets a new id once more of it has come.
+            .onChange(of: items.first?.id) {
+                guard let keep = keepAbove else { return }
+                keepAbove = nil
+                let now = Set(items.map(\.id))
+                if let row = keep.first(where: now.contains) { proxy.scrollTo(row, anchor: .top) }
+            }
             // A voice follow-up's reply is read out once the turn's over, so it's the answer and
             // not a line the agent wrote on the way.
             .onChange(of: "\(messages.last?.seq ?? 0):\(thread.isBusy)", initial: true) {
