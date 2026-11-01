@@ -198,7 +198,7 @@ test('end_turn snooze: words are read as Hibernate in words reads them', async (
 });
 
 test('end_turn snooze: words the model cannot read leave the thread in the inbox, saying why', async () => {
-  const { h, thread } = setup(() => ({ ok: false, reason: 'error', message: 'down' }));
+  const { h, thread } = setup(() => ({ ok: false, reason: 'provider', message: 'down' }));
   turnWithSnooze(h, thread.id, { needs: 'nothing', snooze: 'whenever' });
   await tick();
   await tick();
