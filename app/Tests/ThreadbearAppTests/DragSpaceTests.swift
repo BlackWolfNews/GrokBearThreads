@@ -27,4 +27,32 @@ final class DragSpaceTests: XCTestCase {
     func testAFullScreenSpaceIsADisplaysOwn() {
         XCTAssertEqual(DragSpace.strays(windowSpaces: [130], displaySpaces: displays.union([130])), [])
     }
+
+    // Filing: the window sits on the LG (Space 122), and the laptop (1) and
+    // the other monitor (123) are the other displays.
+
+    /// As an update restart in the background left it, 1 Nov: on the LG but
+    /// filed under the laptop's Space. Taken off that, it lands on the LG's.
+    func testAWindowFiledUnderAnotherDisplaysSpaceComesOffIt() {
+        XCTAssertEqual(DragSpace.misfiled(windowSpaces: [1], own: [122], others: [1, 123]), [1])
+    }
+
+    func testAWindowFiledUnderItsOwnDisplayIsLeftAlone() {
+        XCTAssertEqual(DragSpace.misfiled(windowSpaces: [122], own: [122], others: [1, 123]), [])
+    }
+
+    /// Mike put it on another of the LG's Desktops: it stays there.
+    func testAWindowOnAnotherOfItsOwnDisplaysDesktopsIsLeftAlone() {
+        XCTAssertEqual(DragSpace.misfiled(windowSpaces: [124], own: [122, 124], others: [1, 123]), [])
+    }
+
+    /// On its own display's Space as well, nothing's wrong with where it is.
+    func testAWindowAlsoOnItsOwnDisplaysSpaceIsLeftAlone() {
+        XCTAssertEqual(DragSpace.misfiled(windowSpaces: [1, 122], own: [122], others: [1, 123]), [])
+    }
+
+    /// Only on the drag Space (no display's), it's the drag Space repair's.
+    func testADragSpaceIsntAnotherDisplays() {
+        XCTAssertEqual(DragSpace.misfiled(windowSpaces: [31], own: [122], others: [1, 123]), [])
+    }
 }

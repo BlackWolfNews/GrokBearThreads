@@ -25,6 +25,17 @@ import AppKit
 /// does nothing. A test app showed it: on the drag Space its menus were made
 /// and ordered in but never drawn, every time, and drawn again once it was
 /// taken off (1 Nov).
+///
+/// It also heads the bug off. A window filed under another display's Space
+/// while it sits on this one (that's how the drag strands it) is taken off
+/// the other display's Space, and the window server puts it on its own
+/// display's current Space, where it is, as a drag would but without the
+/// drag Space. Update restarts that can't hand over leave the window like
+/// that: they relaunch the app in the background, and from the 27.2 reboot
+/// until 107bb5f the app never knew its main window, so none could hand
+/// over. Moving the window with SkyLight's own move call files it too, but
+/// shifts it to the display's top-left corner; nudging its frame in public
+/// AppKit doesn't refile it at all (test app, 1 Nov).
 @MainActor
 enum DragSpace {
     private static var installed = false
@@ -63,8 +74,11 @@ enum DragSpace {
         repair("launch")
     }
 
-    /// Half a second on, so a drag that's still settling isn't touched.
-    private static func soon(_ reason: String) {
+    /// Half a second on, so a drag that's still settling isn't touched. Also
+    /// when the main window turns up (MainWindowFrameTracker), so a window
+    /// launched onto the wrong display's Space is filed before Mike can drag
+    /// it (he did within 3 seconds of a launch, 31 Oct).
+    static func soon(_ reason: String) {
         moved?.cancel()
         let work = DispatchWorkItem { MainActor.assumeIsolated { repair(reason) } }
         moved = work
@@ -72,9 +86,10 @@ enum DragSpace {
     }
 
     /// Takes the app's own top-level windows off any Space that isn't a
-    /// display's own. True when one was found there. `beforeMenu`: a button
-    /// is about to open a menu, so a held mouse button is that click, not a
-    /// window being dragged.
+    /// display's own, and files a window under the display it's on when it's
+    /// filed under another's. True when a window was found on the drag
+    /// Space. `beforeMenu`: a button is about to open a menu, so a held mouse
+    /// button is that click, not a window being dragged.
     @discardableResult
     static func repair(_ reason: String, beforeMenu: Bool = false) -> Bool {
         guard SkyLight.available else { return false }
@@ -84,20 +99,57 @@ enum DragSpace {
             if reason != "timer" { soon(reason) }
             return false
         }
-        let displaySpaces = SkyLight.displaySpaces()
+        let displays = SkyLight.displays()
+        let displaySpaces = Set(displays.flatMap(\.spaces))
         guard !displaySpaces.isEmpty else { return false }
         var found = false
         for window in NSApp.windows where isTopLevel(window) {
-            let spaces = SkyLight.spaces(of: window.windowNumber)
+            let name = window.title.isEmpty ? String(describing: type(of: window)) : "\"\(window.title)\""
+            var spaces = SkyLight.spaces(of: window.windowNumber)
             let stray = strays(windowSpaces: spaces, displaySpaces: displaySpaces)
-            guard !stray.isEmpty else { continue }
-            SkyLight.remove(window.windowNumber, from: stray)
-            found = true
-            repairs += 1
-            let after = SkyLight.spaces(of: window.windowNumber)
-            AppLog.write("menu", "window \(window.windowNumber) (\(window.title.isEmpty ? String(describing: type(of: window)) : "\"\(window.title)\"")) was left on Space \(stray) after a drag (macOS 27.2), so its menus wouldn't show; took it off (\(reason)), now on \(after)")
+            if !stray.isEmpty {
+                SkyLight.remove(window.windowNumber, from: stray)
+                found = true
+                repairs += 1
+                spaces = SkyLight.spaces(of: window.windowNumber)
+                AppLog.write("menu", "window \(window.windowNumber) (\(name)) was left on Space \(stray) after a drag (macOS 27.2), so its menus wouldn't show; took it off (\(reason)), now on \(spaces)")
+            }
+            // Filed under another display's Space: off it, and the window
+            // server puts it on its own display's current Space. Only for a
+            // window that's almost all on one display, and only onto a
+            // Desktop, never a full-screen app's Space.
+            guard displays.count > 1, let screen = mostlyOn(window), let id = SkyLight.identifier(of: screen),
+                  let own = displays.first(where: { $0.identifier == id }), own.currentIsDesktop else { continue }
+            let others = displaySpaces.subtracting(own.spaces)
+            let wrong = misfiled(windowSpaces: spaces, own: own.spaces, others: others)
+            guard !wrong.isEmpty else { continue }
+            SkyLight.remove(window.windowNumber, from: wrong)
+            refiles += 1
+            AppLog.write("menu", "window \(window.windowNumber) (\(name)) was filed under another display's Space \(wrong) though it's on \(screen.localizedName), where a drag would strand it on the drag Space; filed it under \(screen.localizedName)'s (\(reason)), now on \(SkyLight.spaces(of: window.windowNumber))")
         }
         return found
+    }
+
+    /// How many times a window was filed under the display it's on, for the
+    /// automation.
+    private(set) static var refiles = 0
+
+    /// The Spaces to take a window off so it's filed under the display it
+    /// sits on: other displays' Spaces, when it's on none of its own
+    /// display's. A window on another of its own display's Desktops is left
+    /// there.
+    nonisolated static func misfiled(windowSpaces: [Int], own: Set<Int>, others: Set<Int>) -> [Int] {
+        guard !windowSpaces.contains(where: own.contains) else { return [] }
+        return windowSpaces.filter(others.contains)
+    }
+
+    /// The screen a window is three quarters or more on, if any: one
+    /// straddling two displays is left to the window server.
+    private static func mostlyOn(_ window: NSWindow) -> NSScreen? {
+        let frame = window.frame
+        guard let screen = window.screen, frame.width > 0, frame.height > 0 else { return nil }
+        let shared = screen.frame.intersection(frame)
+        return shared.width * shared.height >= 0.75 * frame.width * frame.height ? screen : nil
     }
 
     /// The Spaces a window is on that no display has: the drag Space a drag
@@ -140,18 +192,41 @@ enum SkyLight {
         mainConnection != nil && copySpaces != nil && copyDisplaySpaces != nil && removeFromSpaces != nil
     }
 
-    /// Every Space of every display, Desktops and full-screen apps alike.
-    static func displaySpaces() -> Set<Int> {
+    /// One display's Spaces as the window server has them: its Desktops and
+    /// full-screen apps, and the one showing.
+    struct Display {
+        /// The display's UUID, as `identifier(of:)` gives for its screen.
+        let identifier: String
+        let spaces: Set<Int>
+        /// Its current Space is a Desktop (type 0), not a full-screen app's.
+        let currentIsDesktop: Bool
+    }
+
+    static func displays() -> [Display] {
         guard let mainConnection, let copyDisplaySpaces,
               let displays = copyDisplaySpaces(mainConnection())?.takeRetainedValue() as? [[String: Any]] else { return [] }
-        var ids = Set<Int>()
-        for display in displays {
+        return displays.map { display in
+            var ids = Set<Int>()
             for space in display["Spaces"] as? [[String: Any]] ?? [] {
                 if let id = space["ManagedSpaceID"] as? Int { ids.insert(id) }
             }
-            if let current = (display["Current Space"] as? [String: Any])?["ManagedSpaceID"] as? Int { ids.insert(current) }
+            let current = display["Current Space"] as? [String: Any]
+            if let id = current?["ManagedSpaceID"] as? Int { ids.insert(id) }
+            return Display(identifier: display["Display Identifier"] as? String ?? "", spaces: ids,
+                           currentIsDesktop: (current?["type"] as? Int) == 0)
         }
-        return ids
+    }
+
+    /// Every Space of every display, Desktops and full-screen apps alike.
+    static func displaySpaces() -> Set<Int> {
+        Set(displays().flatMap(\.spaces))
+    }
+
+    /// A screen's display UUID, which the window server's Space list goes by.
+    static func identifier(of screen: NSScreen) -> String? {
+        guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID,
+              let uuid = CGDisplayCreateUUIDFromDisplayID(number)?.takeRetainedValue() else { return nil }
+        return CFUUIDCreateString(nil, uuid) as String
     }
 
     /// The Spaces a window is on, the system's own included (mask 0xFF;

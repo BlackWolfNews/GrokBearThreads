@@ -87,6 +87,9 @@ struct MainWindowFrameTracker: NSViewRepresentable {
         AppLog.write("window", MainWindowFrame.window == nil ? "main window found" : "main window changed")
         MainWindowFrame.window = window
         if !MainWindowFrame.scripted { MainWindowFrame.track(window) }
+        // A launch in the background can file it under another display's
+        // Space, which a drag then strands on the drag Space (DragSpace).
+        DragSpace.soon("window shown")
     }
 
     func makeNSView(context: Context) -> NSView {

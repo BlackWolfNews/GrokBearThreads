@@ -1644,14 +1644,27 @@ enum Automation {
 
     /// The drag Space bug (DragSpace): `add` puts the main window on that
     /// Space (31 on Mike's Mac), as a drag on macOS 27.2 leaves it, so a menu
-    /// opened next comes up unseen; `repair` runs the repair now. Says the
-    /// window's Spaces, the displays' own, and how many repairs have run.
+    /// opened next comes up unseen; `misfile` files it under another
+    /// display's current Space instead of its own, as an update restart in
+    /// the background did; `repair` runs the repair now. Says the window's
+    /// Spaces and frame, the displays' own, how many repairs and refiles have
+    /// run, and whether menus are stuck for another reason.
     private static func dragSpace(_ c: [String: Any]) -> String {
         guard let window = mainWindow else { return "error no window" }
         guard SkyLight.available else { return "error the window server calls aren't there" }
         if let space = c["add"] as? Int { SkyLight.add(window.windowNumber, to: [space]) }
+        if c["misfile"] as? Bool == true {
+            let displays = SkyLight.displays()
+            guard let screen = window.screen, let id = SkyLight.identifier(of: screen),
+                  let own = displays.first(where: { $0.identifier == id }),
+                  let other = displays.first(where: { $0.identifier != id }),
+                  let otherCurrent = other.spaces.sorted().first else { return "error needs two displays" }
+            let mine = SkyLight.spaces(of: window.windowNumber).filter(own.spaces.contains)
+            SkyLight.add(window.windowNumber, to: [otherCurrent])
+            SkyLight.remove(window.windowNumber, from: mine)
+        }
         if c["repair"] as? Bool == true { DragSpace.repair("automation") }
-        return "ok spaces \(SkyLight.spaces(of: window.windowNumber)) display spaces \(SkyLight.displaySpaces().sorted()) repairs \(DragSpace.repairs) stuck \(MenuWatch.stuck)"
+        return "ok spaces \(SkyLight.spaces(of: window.windowNumber)) frame \(NSStringFromRect(window.frame)) on \(window.screen?.localizedName ?? "-") display spaces \(SkyLight.displaySpaces().sorted()) repairs \(DragSpace.repairs) refiles \(DragSpace.refiles) stuck \(MenuWatch.stuck)"
     }
 
     private static func usage(_ c: [String: Any], app: AppModel) -> String {
