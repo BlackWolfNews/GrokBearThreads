@@ -1131,7 +1131,9 @@ start and every 2 minutes:
   worth knowing about on a Mac nobody's at too. Dialogs up for 5 minutes get
   a `system.note` in a thread of their own, "<machine> needs someone at its
   screen", in Needs you (`forceUnread`), with no turn and no model call. A
-  later note says when they've gone, and takes it out of Needs you.
+  later note says when they've gone, and archives the thread, unless someone
+  has written in it or it's still asking for Full Disk Access (below), when it
+  just leaves Needs you. The next dialog then gets a new thread.
 - Checks for Full Disk Access by opening macOS's permissions database,
   `~/Library/Application Support/com.apple.TCC/TCC.db`, and closing it. It's
   never read. Without the access macOS refuses at once, with no prompt. A Mac

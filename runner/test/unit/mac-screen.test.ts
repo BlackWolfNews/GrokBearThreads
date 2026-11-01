@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { makeHarness } from '../helpers/fakes.ts';
+import { makeHarness, tick } from '../helpers/fakes.ts';
 import { nullLogger } from '../../src/log.ts';
 import { LOOK_MS, MacScreen, TELL_AFTER_MS, canOpen, parseDialogCount, type ScreenProbe } from '../../src/mac-screen.ts';
 
@@ -54,7 +54,7 @@ test('a dialog left waiting gets a thread in Needs you, without starting a CLI',
   assert.equal(notes(t.id).length, 1, 'said once');
 });
 
-test('the thread stops needing you when the dialog goes, and a new dialog comes back to it', async () => {
+test('the thread archives itself when the dialog goes, and the next dialog gets a new one', async () => {
   const { h, probe, look, noticeThreads, notes } = setUp();
   probe.count = 2;
   await look();
@@ -62,14 +62,47 @@ test('the thread stops needing you when the dialog goes, and a new dialog comes 
   const id = noticeThreads()[0].id;
   probe.count = 0;
   await look();
-  assert.equal(h.runner.list().find((t) => t.id === id)!.needsYou, false);
   assert.match(notes(id)[1], /gone/);
+  assert.deepEqual(noticeThreads().map((t) => t.id), [], "nothing's left to do, so it leaves the inbox");
+  assert.equal(h.runner.list(['archived']).find((t) => t.id === id)?.needsYou, false);
   probe.count = 1;
   await look();
   await look(TELL_AFTER_MS);
   assert.equal(noticeThreads().length, 1);
-  assert.equal(notes(id).length, 3);
-  assert.equal(h.runner.list().find((t) => t.id === id)!.needsYou, true);
+  assert.notEqual(noticeThreads()[0].id, id);
+});
+
+test('a notice thread someone has written in stays when the dialog goes', async () => {
+  const { h, probe, look, noticeThreads } = setUp();
+  probe.count = 1;
+  await look();
+  await look(TELL_AFTER_MS);
+  const id = noticeThreads()[0].id;
+  h.runner.send(id, 'What was the dialog?');
+  const session = h.adapter.last;
+  session.init();
+  session.result();
+  await tick();
+  probe.count = 0;
+  await look();
+  const t = h.runner.list().find((x) => x.id === id);
+  // Its own unread reply may still want reading, so only where it is matters.
+  assert.ok(t, 'still in the inbox');
+});
+
+test('a notice thread still asking for Full Disk Access stays when the dialog goes', async () => {
+  const { probe, look, noticeThreads, notes } = setUp();
+  probe.app = false;
+  probe.access = false;
+  await look();
+  const id = noticeThreads()[0].id;
+  probe.count = 1;
+  await look();
+  await look(TELL_AFTER_MS);
+  probe.count = 0;
+  await look();
+  assert.equal(noticeThreads()[0]?.id, id);
+  assert.match(notes(id).at(-1)!, /gone/);
 });
 
 test('a dialog that goes before the wait is up is never mentioned', async () => {
