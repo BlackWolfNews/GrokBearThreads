@@ -68,4 +68,34 @@ final class HangSampleTests: XCTestCase {
         XCTAssertEqual(HangSample.heaviestMainThreadPath("Call graph:\n    5 Thread_1\n"), [])
         XCTAssertEqual(HangSample.heaviestMainThreadPath(""), [])
     }
+
+    func testSampleIsKeptAwayFromWhatMacOSAsksAbout() {
+        let profile = HangSample.sandboxProfile(home: "/Users/me")
+        for path in ["/Volumes", "/Users/me/Downloads", "/Users/me/Documents", "/Users/me/Desktop", "/Users/me/Library/Mobile Documents"] {
+            XCTAssertTrue(profile.contains("(subpath \"\(path)\")"), path)
+        }
+    }
+
+    /// The real thing: the profile has to parse, and sample still has to read
+    /// a stack from inside it, or HangWatch would quietly stop finding hangs.
+    func testSampleStillWorksInTheSandbox() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let target = Process()
+        target.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        target.arguments = ["20"]
+        try target.run()
+        defer { target.terminate() }
+        let file = dir.appendingPathComponent("s.sample")
+        let sample = Process()
+        sample.executableURL = URL(fileURLWithPath: "/usr/bin/sandbox-exec")
+        sample.arguments = ["-p", HangSample.sandboxProfile(home: NSHomeDirectory()), "/usr/bin/sample", String(target.processIdentifier), "1", "-file", file.path]
+        sample.standardOutput = FileHandle.nullDevice
+        sample.standardError = FileHandle.nullDevice
+        try sample.run()
+        sample.waitUntilExit()
+        XCTAssertEqual(sample.terminationStatus, 0)
+        XCTAssertFalse(HangSample.heaviestMainThreadPath(try String(contentsOf: file, encoding: .utf8)).isEmpty)
+    }
 }

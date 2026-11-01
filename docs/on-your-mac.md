@@ -28,7 +28,8 @@ File references are where to look.
   threads on your other Macs, at most 512 MB, unused ones go after 30 days);
   `~/Library/Logs/threadbear-runner.log` and `threadbear-update.log`;
   `~/Library/Logs/Threadbear/hangs` (the last 10 times the app froze: if its
-  main thread is stuck for 4 seconds it runs macOS's `sample` on itself, and
+  main thread is stuck for 4 seconds it runs macOS's `sample` on itself, in
+  a sandbox, and
   nothing else ever reads these); and `~/ThreadbearThreads`, the default
   folder for new threads. The runner also runs `ps`, and `sample` (in a
   sandbox, through `sandbox-exec`) on a thread's own CLI, when a turn has been quiet for a minute,

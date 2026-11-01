@@ -104,8 +104,9 @@ final class HangWatch: @unchecked Sendable {
         let path = folder.appendingPathComponent(name + ".sample").path
         AppLog.write("hang", "main thread stuck for \(Int(Self.stallAfter)) s, sampling to \(path)")
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/sample")
-        process.arguments = [String(ProcessInfo.processInfo.processIdentifier), String(Self.sampleSeconds), "-file", path]
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/sandbox-exec")
+        let profile = HangSample.sandboxProfile(home: FileManager.default.homeDirectoryForCurrentUser.path)
+        process.arguments = ["-p", profile, "/usr/bin/sample", String(ProcessInfo.processInfo.processIdentifier), String(Self.sampleSeconds), "-file", path]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         do {

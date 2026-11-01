@@ -23,7 +23,7 @@ import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 // which reads the same on a locked screen and needs no permission.
 //
 // It's on every Mac rather than only ones thought to be unattended: there's no
-// telling that from here (Tinker Desk has the app, and nobody at it), and five
+// telling that from here (a Mac can have the app and nobody at it), and five
 // minutes is long enough that someone at the Mac has already answered.
 
 // osascript costs about 0.2 seconds and 30 MB, gone straight after, so a look

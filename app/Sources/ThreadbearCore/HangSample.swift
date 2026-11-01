@@ -4,6 +4,19 @@ import Foundation
 /// frames the main thread spent most of its time in, and nothing else of the
 /// file. Symbols only: the file's image list has paths, and those stay here.
 public enum HangSample {
+    /// Runs `sample` through `sandbox-exec`, refused the places macOS would
+    /// ask about. It hunts for debug symbols through Spotlight wherever that
+    /// says they are, which on 31 Oct 2026 took the runner's copy of it deep
+    /// into a Mac's external drive: a prompt left waiting there held up other
+    /// apps on that drive for nearly nine hours (docs/protocol.md, "A dialog
+    /// on a Mac's screen"). The stack it's after doesn't need those places.
+    /// Same list as `sampleSandbox` in runner/src/frozen-cli.ts.
+    public static func sandboxProfile(home: String) -> String {
+        let paths = ["/Volumes", "/System/Volumes/Data/Volumes"]
+            + ["Desktop", "Documents", "Downloads", "Dropbox", "Library/CloudStorage", "Library/Mobile Documents"].map { "\(home)/\($0)" }
+        return "(version 1)(allow default)(deny file* \(paths.map { "(subpath \"\($0)\")" }.joined(separator: " ")))"
+    }
+
     /// The main thread's heaviest path, outermost frame first, each as
     /// "symbol (in Image)". Empty when the text has no main thread.
     ///
