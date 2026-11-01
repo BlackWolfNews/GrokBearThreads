@@ -8,6 +8,35 @@ import Testing
         PhoneMessage(seq: seq, role: role, text: text, origin: origin, toolKind: role == .tool ? "command" : nil, summary: summary, turn: turn, at: t0.addingTimeInterval(at))
     }
 
+    /// Work carried on after end_turn's bullets: the shape of a real thread
+    /// (30402425, 1 Nov) that crashed the phone each time it was opened, as
+    /// the range from the last step to the summary ran backwards.
+    @Test func workAfterTheSummaryShowsTheLastThingSaidAndDoesntCrash() {
+        let messages = [
+            m(1, .user, "Set up the API", at: 0),
+            m(2, .tool, "Make the keys", at: 5),
+            m(3, .tool, "threadbear: end_turn", at: 10),
+            m(4, .assistant, "- Keys made\n- Install the app next", at: 11, summary: true),
+            m(5, .tool, "Check for the app on the phone", at: 20),
+            m(6, .assistant, "Installing it myself.", at: 30),
+            m(7, .tool, "Tap Get", at: 40),
+            m(8, .tool, "threadbear: end_turn", at: 50),
+            m(9, .assistant, "It's installed, sign in and tell me.", at: 60),
+        ]
+        let items = Turns.fold(messages, busy: false)
+        guard case let .message(reply) = items.last else { Issue.record("expected the reply"); return }
+        #expect(reply.seq == 9)
+        #expect(Turns.replyIndexes(messages) == [8])
+    }
+
+    @Test func workAfterTheSummaryWithNothingSaidKeepsTheSummary() {
+        let body = [
+            m(1, .assistant, "- Done", at: 0, summary: true),
+            m(2, .tool, "One more check", at: 5),
+        ]
+        #expect(Turns.replyIndexes(body) == [0])
+    }
+
     @Test func aFinishedTurnFoldsItsWorkAndShowsTheSummary() {
         let messages = [
             m(1, .user, "Fix it", at: 0),

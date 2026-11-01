@@ -97,7 +97,12 @@ public enum Turns {
     static func replyIndexes(_ body: [PhoneMessage]) -> [Int] {
         let summary = body.lastIndex(where: { $0.role == .assistant && $0.summary })
         let lastStep = body.lastIndex(where: isStep) ?? -1
-        if let summary {
+        // An agent can carry on working after end_turn's bullets, and rows
+        // from before API 26 have no turn to split that off by. Those bullets
+        // are out of date then, so they fall through to the last thing it
+        // wrote. It has to be a check: a range from the last step to a summary
+        // before it traps, which crashed the phone on opening such a thread.
+        if let summary, lastStep < summary {
             let after = (lastStep + 1)..<summary
             let words = after.filter { body[$0].role == .assistant && !body[$0].summary }
             let length = words.reduce(0) { $0 + body[$1].text.count }
