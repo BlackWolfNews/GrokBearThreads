@@ -29,6 +29,9 @@ struct ThreadView: View {
     /// Follow-ups ticked on the done card, and the reply it's under.
     @State private var nextPicks: Set<Int> = []
     @State private var nextPickedFor: Int?
+    /// The working a work: link opened.
+    @State private var workLink: ThreadLinks.Hit?
+    @Environment(\.pushThread) private var pushThread
     static let firstPage = 80
     static let morePerPage = 200
 
@@ -89,9 +92,11 @@ struct ThreadView: View {
                         }
                         // Scrolling up to it loads by itself, like any chat.
                         // Not on a short thread, where it's on screen at
-                        // once and nobody asked.
+                        // once and nobody asked. Rows, not messages: one long
+                        // finished turn is dozens of messages folded into a
+                        // line, and loading more threw the view off its reply.
                         .onAppear {
-                            if messages.count >= 20 { loadMore(thread, detail: detail, paged: paged) }
+                            if items.count >= 20 { loadMore(thread, detail: detail, paged: paged) }
                         }
                     }
                     ForEach(items) { item in
@@ -143,6 +148,8 @@ struct ThreadView: View {
             .defaultScrollAnchor(.bottom)
             .scrollDismissesKeyboard(.interactively)
             .environment(\.threadPictures, pictures)
+            .environment(\.threadLink) { url, seq in follow(url, from: seq, in: items) }
+            .sheet(item: $workLink) { WorkingSheet(link: $0).environment(\.threadPictures, pictures) }
             .onChange(of: messages.last?.seq) { proxy.scrollTo("bottom", anchor: .bottom) }
             // A voice follow-up's reply is read out once the turn's over, so it's the answer and
             // not a line the agent wrote on the way.
@@ -160,6 +167,26 @@ struct ThreadView: View {
                 }
             }
         }
+    }
+
+    /// A link in a message. A work: link opens the turn's working over the
+    /// thread with the step lit. The Mac opens it in place; on this small
+    /// screen a sheet leaves your place in the reply alone. A review only opens
+    /// on the Mac, so that one says so rather than doing nothing.
+    private func follow(_ url: URL, from seq: Int?, in items: [ThreadItem]) -> OpenURLAction.Result {
+        switch ThreadLinks.target(of: url) {
+        case nil:
+            return .systemAction
+        case let .thread(id):
+            // Agents may give only the start of the id.
+            pushThread(model.inbox.first { $0.threadId.hasPrefix(id) }?.threadId ?? id)
+        case .review:
+            model.report(TransportError.server("That review opens on the Mac."))
+        case let .step(quote):
+            guard let hit = ThreadLinks.find(quote: quote, from: seq, in: items) else { return .discarded }
+            workLink = hit
+        }
+        return .handled
     }
 
     /// "Waiting for the Mac" while a command sits in the queue, so a
@@ -536,12 +563,14 @@ private struct PhoneMark: View {
 /// into "12 tool calls" that opens to them. What they printed stays on the Mac.
 struct ToolRunView: View {
     var items: [PhoneMessage]
+    @State private var open = false
+    @Environment(\.litStep) private var litStep
 
     var body: some View {
         if items.count <= 3 {
             lines
         } else {
-            DisclosureGroup {
+            DisclosureGroup(isExpanded: $open) {
                 lines.padding(.top, 4)
             } label: {
                 Text("\(items.count) tool calls")
@@ -549,6 +578,9 @@ struct ToolRunView: View {
             .font(.footnote)
             .foregroundStyle(.secondary)
             .tint(.secondary)
+            .onChange(of: litStep, initial: true) {
+                if items.contains(where: { $0.seq == litStep }) { open = true }
+            }
         }
     }
 
@@ -562,6 +594,7 @@ struct ToolRunView: View {
                 }
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+                .step(item.seq)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -588,6 +621,7 @@ struct MarkdownText: View {
     /// The message's seq, which says which upload a picture's address means.
     var seq: Int?
     @Environment(\.threadPictures) private var pictures
+    @Environment(\.threadLink) private var threadLink
 
     init(_ text: String, seq: Int? = nil) {
         blocks = MarkdownBlock.parse(text)
@@ -605,6 +639,7 @@ struct MarkdownText: View {
                 view(for: block)
             }
         }
+        .environment(\.openURL, OpenURLAction { threadLink($0, seq) })
     }
 
     @ViewBuilder private func view(for block: MarkdownBlock) -> some View {
@@ -652,8 +687,84 @@ struct MarkdownText: View {
     }
 
     static func inline(_ text: String) -> AttributedString {
-        (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
+        (try? AttributedString(markdown: ThreadLinks.escapeDestinations(text), options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
     }
+}
+
+/// A turn's working, from a work: link: scrolled to the step, which lights up
+/// for a moment.
+private struct WorkingSheet: View {
+    let link: ThreadLinks.Hit
+    @State private var lit: Int?
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    WorkedItems(worked: link.turn)
+                        .padding()
+                }
+                .task {
+                    guard let step = link.step else { return }
+                    lit = step
+                    // Once a folded run of tool calls has opened for it.
+                    try? await Task.sleep(for: .milliseconds(150))
+                    proxy.scrollTo(StepID(seq: step), anchor: .center)
+                    try? await Task.sleep(for: .seconds(2))
+                    withAnimation(.easeOut(duration: 0.6)) { lit = nil }
+                }
+            }
+            .navigationTitle(link.turn.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .environment(\.litStep, lit)
+    }
+}
+
+/// A step of a turn's working as a work: link finds it.
+private struct StepID: Hashable { var seq: Int }
+
+extension View {
+    /// Marks a line of a turn's working as step `seq`, for a work: link to
+    /// scroll to and light up.
+    func step(_ seq: Int) -> some View { modifier(StepLine(seq: seq)) }
+}
+
+private struct StepLine: ViewModifier {
+    let seq: Int
+    @Environment(\.litStep) private var litStep
+
+    func body(content: Content) -> some View {
+        content
+            .id(StepID(seq: seq))
+            .background {
+                // Past the text's edges, so the words don't touch the colour.
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(.tint)
+                    .opacity(litStep == seq ? 0.25 : 0)
+                    .padding(.horizontal, -6)
+                    .padding(.vertical, -3)
+            }
+    }
+}
+
+extension EnvironmentValues {
+    /// What a tap on a link in message `seq` does, set by the open thread.
+    /// Outside one, the system opens it.
+    @Entry var threadLink: @MainActor (URL, Int?) -> OpenURLAction.Result = { _, _ in .systemAction }
+    @Entry var litStep: Int?
+    /// Opens a thread on top of this one, so Back comes back here.
+    @Entry var pushThread: @MainActor (String) -> Void = { _ in }
+}
+
+extension ThreadLinks.Hit: Identifiable {
+    public var id: Self { self }
 }
 
 /// A picture the agent pinned rather than wrote into its reply.

@@ -153,30 +153,40 @@ struct WorkedView: View {
 
     var body: some View {
         DisclosureGroup {
-            VStack(alignment: .leading, spacing: 10) {
-                ForEach(worked.items) { item in
-                    switch item {
-                    case let .message(message):
-                        if message.role == .assistant {
-                            MarkdownText(message.text, seq: message.seq)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        } else {
-                            MessageView(message: message)
-                        }
-                    case let .tools(run): ToolRunView(items: run)
-                    case let .worked(inner): WorkedView(worked: inner)
-                    }
-                }
-            }
-            .padding(.top, 6)
+            WorkedItems(worked: worked)
+                .padding(.top, 6)
         } label: {
             Text(worked.title)
         }
         .font(.footnote)
         .foregroundStyle(.secondary)
         .tint(.secondary)
+    }
+}
+
+/// What a turn's working is made of, in its fold or a work: link's sheet.
+struct WorkedItems: View {
+    let worked: WorkedTurn
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(worked.items) { item in
+                switch item {
+                case let .message(message):
+                    if message.role == .assistant {
+                        MarkdownText(message.text, seq: message.seq)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .step(message.seq)
+                    } else {
+                        MessageView(message: message)
+                    }
+                case let .tools(run): ToolRunView(items: run)
+                case let .worked(inner): WorkedView(worked: inner)
+                }
+            }
+        }
     }
 }
 

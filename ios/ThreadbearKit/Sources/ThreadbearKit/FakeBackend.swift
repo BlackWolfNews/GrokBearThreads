@@ -497,7 +497,7 @@ public final class FakeBackend: Backend, @unchecked Sendable {
                 PhoneMessage(seq: 123, role: .assistant, text: "That fits now. Checking the other sizes.", at: ago(38)),
                 PhoneMessage(seq: 124, role: .tool, text: "Screenshot at three phone sizes", toolKind: "command", at: ago(30)),
                 PhoneMessage(seq: 125, role: .tool, text: "threadbear: end_turn", toolKind: "mcp", at: ago(25)),
-                PhoneMessage(seq: 126, role: .assistant, text: "- Fixed in `4700e57`: the picker fits on the smallest iPhone now\n- Checked it in the simulator at three sizes", summary: true, at: ago(25)),
+                PhoneMessage(seq: 126, role: .assistant, text: "- Fixed in `4700e57`: the [picker fits](work:Edited src/DatePicker.tsx) on the smallest iPhone now\n- [Checked it in the simulator](work:Screenshot at three phone sizes) at three sizes\n- The [nightly build](thread:a8) is still green", summary: true, at: ago(25)),
             ],
             "a4": [
                 PhoneMessage(seq: 1, role: .user, text: "Get rid of the feature flags nothing uses", at: ago(200)),

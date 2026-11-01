@@ -1645,7 +1645,12 @@ A turn the agent finished can say whether Mike has to do anything, so
   as the latest mention, that took the links from their steps (29 Oct
   2026). The agent can't see its tool calls' ids, so it quotes the step:
   models quoted the command, the command's description and their own
-  lines while working, and every quote landed in the tests.
+  lines while working, and every quote landed in the tests. The phone
+  opens the turn's working in a sheet instead, and picks the step the same
+  way from what it has, a step's one line: a command with a description
+  comes as only the description, so a quote of the command finds nothing
+  and the sheet opens with no step lit. A `review:` link says it opens on
+  the Mac.
 - **Needs from the asks.** `needs` may be left out: asks mean `you`,
   none mean `nothing`. Agents filling in a summary forgot it 2 times in
   9.

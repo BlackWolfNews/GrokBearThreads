@@ -155,6 +155,7 @@ struct InboxView: View {
                 model.openThreadId = nil
             }
         }
+        .environment(\.pushThread) { path.append($0) }
     }
 
     /// A heading and its rows, as on the Mac's sidebar: tap the heading to
