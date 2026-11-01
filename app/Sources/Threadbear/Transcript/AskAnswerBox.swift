@@ -33,12 +33,43 @@ enum AskBoxMetrics {
     /// Lines the text takes at `width`: one at least, `maxLines` at most.
     static func lines(_ text: String, width: CGFloat) -> Int {
         guard !text.isEmpty else { return 1 }
-        let rect = NSAttributedString(string: text, attributes: attributes)
+        let rect = measured(text)
             .boundingRect(with: NSSize(width: width, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin])
         var lines = Int((ceil(rect.height) / lineHeight).rounded())
         // A new line typed at the end isn't in the measured height yet.
         if text.hasSuffix("\n") { lines += 1 }
         return min(maxLines, max(1, lines))
+    }
+
+    /// The text as the box lays it out: each picture's mark (InlinePictures)
+    /// takes its chip's width, not a missing glyph's.
+    private static func measured(_ text: String) -> NSAttributedString {
+        let attributes = attributes
+        guard text.unicodeScalars.contains(InlinePictures.mark) else { return NSAttributedString(string: text, attributes: attributes) }
+        let metrics = PictureChip.Metrics(font: font)
+        let out = NSMutableAttributedString()
+        var run = ""
+        var number = 0
+        for scalar in text.unicodeScalars {
+            guard scalar == InlinePictures.mark else {
+                run.unicodeScalars.append(scalar)
+                continue
+            }
+            out.append(NSAttributedString(string: run, attributes: attributes))
+            run = ""
+            number += 1
+            let chip = NSTextAttachment()
+            let size = metrics.size(number)
+            // An empty picture of the chip's size: with no image or cell,
+            // TextKit lays an attachment out at no width at all.
+            chip.image = NSImage(size: size)
+            chip.bounds = NSRect(x: 0, y: metrics.baselineOffset, width: size.width, height: size.height)
+            var withChip = attributes
+            withChip[.attachment] = chip
+            out.append(NSAttributedString(string: InlinePictures.markString, attributes: withChip))
+        }
+        out.append(NSAttributedString(string: run, attributes: attributes))
+        return out
     }
 
     /// The box's height for what's in it, in a box `width` wide.
@@ -51,8 +82,9 @@ enum AskBoxMetrics {
 /// An ask's Something else box on the open card: a small composer of its
 /// own, under the ask's buttons, so each ask can have an answer in Mike's
 /// words (Mike, 30 Oct, option A of the review). Paste or drop pictures in
-/// it, or use its picture button, as in the composer; Return sends the lot,
-/// Shift-Return adds a line. The card leaves room for it (`.tbAnswerBox`)
+/// it, or use its picture button, as in the composer: each goes in as a
+/// chip where the cursor is (Mike, 1 Nov), its thumbnail over the words.
+/// Return sends the lot, Shift-Return adds a line. The card leaves room for it (`.tbAnswerBox`)
 /// and TextRowCell puts it there.
 final class AskAnswerBox: NSView {
     let textView = ComposerTextField.makeTextView()
@@ -63,10 +95,16 @@ final class AskAnswerBox: NSView {
     private var responderWatch: NSKeyValueObservation?
     private var zoomObserver: NSObjectProtocol?
 
-    /// What's in it changed: his words, or a picture taken out.
+    /// What's in it changed: his words, or a picture put in or taken out.
     var onChange: ((AskNote) -> Void)?
+    /// Pictures when there's no `pictures` to put them in as chips.
     var onImages: (([URL]) -> Void)?
     var onSend: (() -> Void)?
+    /// Pictures pasted, dropped or chosen go in as chips (ComposerTextView).
+    var pictures: ComposerTextView.Pictures? {
+        get { textView.pictures }
+        set { textView.pictures = newValue }
+    }
 
     override var isFlipped: Bool { true }
 
@@ -125,7 +163,8 @@ final class AskAnswerBox: NSView {
     func show(_ note: AskNote) {
         let oldImages = self.note.images
         self.note = note
-        if textView.string != note.text { textView.replaceText(note.text) }
+        let draft = Draft(text: note.text, images: note.images).normalized
+        if textView.draftNow != draft { textView.show(draft) }
         if oldImages != note.images || thumbs.count != note.images.count { rebuildThumbs() }
         needsLayout = true
     }
@@ -182,11 +221,12 @@ final class AskAnswerBox: NSView {
         }
     }
 
+    /// Through the words, so its chip goes too, as one undo.
     private func removeImage(at index: Int) {
         guard note.images.indices.contains(index) else { return }
-        var changed = note
-        changed.images.remove(at: index)
-        onChange?(changed)
+        if textView.removePicture(at: index) { return }
+        let rest = Draft(text: note.text, images: note.images).removingImage(at: index)
+        onChange?(AskNote(text: rest.text, images: rest.images))
     }
 
     @objc private func choosePictures() {
@@ -197,7 +237,9 @@ final class AskAnswerBox: NSView {
         panel.allowedContentTypes = [.image]
         panel.prompt = "Add"
         let finish = { [weak self] (response: NSApplication.ModalResponse) in
-            if response == .OK { self?.onImages?(panel.urls) }
+            guard response == .OK, let self else { return }
+            // Chips where the cursor was, as a paste would put them.
+            self.textView.insertPictures(panel.urls)
         }
         if let window { panel.beginSheetModal(for: window, completionHandler: finish) } else { finish(panel.runModal()) }
     }
@@ -205,9 +247,15 @@ final class AskAnswerBox: NSView {
 
 extension AskAnswerBox: NSTextViewDelegate {
     func textDidChange(_ notification: Notification) {
-        var changed = note
-        changed.text = textView.string
+        // His words and the pictures whose chips are in them, in order.
+        let draft = textView.draftNow
+        let changed = AskNote(text: draft.text, images: draft.images)
+        let pictures = changed.images != note.images
         note = changed
+        if pictures {
+            rebuildThumbs()
+            needsLayout = true
+        }
         onChange?(changed)
     }
 
@@ -228,7 +276,11 @@ extension AskAnswerBox {
 /// A picture in an answer box, with × to take it out while the pointer is
 /// over it, like the composer's.
 private final class AnswerThumb: NSView {
-    private let imageView = NSImageView()
+    /// A plain layer-backed view, not an NSImageView: one with no image of
+    /// its own cleared the contents put on its layer when it first drew, so
+    /// a thumbnail already decoded (set at once, before that) came out blank
+    /// whenever the strip was rebuilt for a second picture.
+    private let imageView = NSView()
     private let remove = NSButton()
     var onRemove: (() -> Void)?
 
@@ -241,7 +293,6 @@ private final class AnswerThumb: NSView {
         layer?.masksToBounds = true
         layer?.borderWidth = 0.5
         layer?.borderColor = NSColor.separatorColor.cgColor
-        imageView.imageScaling = .scaleProportionallyUpOrDown
         imageView.wantsLayer = true
         imageView.layer?.contentsGravity = .resizeAspectFill
         addSubview(imageView)
@@ -259,7 +310,6 @@ private final class AnswerThumb: NSView {
         ThumbnailLoader.shared.load(path: path, maxPixels: Int(AskBoxMetrics.thumb * 4)) { [weak self] image in
             guard let self, let image else { return }
             // Filled into the square, as the composer's are.
-            self.imageView.image = nil
             self.imageView.layer?.contents = image
         }
     }

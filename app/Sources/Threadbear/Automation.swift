@@ -384,7 +384,9 @@ enum Automation {
             }
             return "error sent, but no new thread showed up within \(Int(wait)) s"
         case "paste-image":
-            guard let path = c["path"] as? String, let composer = findComposer(in: window?.contentView) else { return "error no composer" }
+            // `"focused": true` pastes where the cursor is (an ask's box), as `type` does.
+            let target = c["focused"] as? Bool == true ? window?.firstResponder as? ComposerTextView : findComposer(in: window?.contentView)
+            guard let path = c["path"] as? String, let composer = target else { return "error no composer" }
             let board = pasteboard
             board.clearContents()
             board.writeObjects([URL(fileURLWithPath: path) as NSURL])

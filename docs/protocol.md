@@ -1352,15 +1352,18 @@ chip in the text where a picture was pasted. The Mac app's composer does
 the same: each picture pasted, dropped or added with + gets a marker
 where the cursor is (where it was dropped, for a drop), drawn as a chip
 with the picture's thumbnail, and his bubble draws the markers as chips
-too. The pictures still show over the text, as before.
+too. The pictures still show over the text, as before. The iPhone
+app's composer does the same with photos pasted, taken or chosen, and
+its bubbles draw any `[Picture N]` as a chip with the photo symbol, as
+the phone gets a message's words but not its pictures. An ask's
+Something else box on the Mac takes pictures as chips too (Needs you).
 
 The runner hands the agent the words and pictures in that order: each
 picture straight after the first marker that names it (Claude: an image
 block between text blocks; Codex: a `localImage` item between text
 items). The marker stays in the words, so the agent can say "picture 2"
 and mean the one Mike does. A picture no marker names goes before the
-words, as every picture did before (the phone's, an ask box's, an older
-app's). A marker naming no picture, or one already placed, is just
+words, as every picture did before (an older app's or phone's). A marker naming no picture, or one already placed, is just
 words. Text left with nothing but spaces between two pictures is left
 out, as the Claude API turns down a text block of only whitespace. A
 message of pictures and no words sends `text: ""`, the pictures in their
@@ -1681,9 +1684,12 @@ A turn the agent finished can say whether Mike has to do anything, so
   ask's question then its answer, numbered in the card's order, then
   whatever he wrote in the composer, and passes the picks as `answers` so
   the app can show them as answers. The boxes' pictures go first in the
-  message's `images`, in the card's order, then the composer's, and an
-  answer with pictures ends "See picture 1." (or "See pictures 2 and
-  3."), so the agent knows which are whose. A box he closes again keeps
+  message's `images`, in the card's order, then the composer's. A box
+  takes pictures as chips where the cursor is, as the composer does, so
+  each is a `[Picture N]` marker in its answer, numbered across the card
+  (Pictures in a message), and the agent gets it right there; one with
+  no chip goes at the end of its answer. Until 1 Nov 2026 an answer
+  ended "See picture 1." instead. A box he closes again keeps
   what's in it until the card is answered, but sends none of it. Words
   or pictures in a box hold up the app's restart onto a new build, as a
   draft does. The runner
@@ -2602,8 +2608,10 @@ the mirror back as state. The Mac app doesn't use it.
   file storage (`phone:imageUploadUrl`), when `text` may be empty: the
   runner fetches each, sends it as an ordinary `ImageRef`, and
   `sync:finishCommand` deletes them from storage, whether or not the send
-  worked. A message row with pictures gets a `[1 picture]` line, as the
-  pictures themselves stay on the Mac. `update` takes one
+  worked. The phone's text can place its photos with `[Picture N]`
+  markers, in `images`' order (Pictures in a message). A message row with
+  pictures no marker places gets a `[1 picture]` line, as the pictures
+  themselves stay on the Mac; the ones a marker places show as chips. `update` takes one
   of `{ snooze: { until?, untilRestart? } }`, `{ wake }`, `{ archive }`,
   `{ unarchive }`, `{ markSeen }` or `{ title }`; `respond` is
   `approvals.respond`'s decision, message and answers; `page` is

@@ -123,7 +123,8 @@ To answer a Needs you card, click its buttons: your picks show on the
 card and go with your next message. To answer an ask in your own
 words, click Something else under it and write in the box that opens
 there. You can paste or drop screenshots in that box too, or use its
-picture button. Each ask can have a box of its own. Return sends the lot
+picture button, and each goes in where the cursor is as a chip, as in
+the composer. Each ask can have a box of its own. Return sends the lot
 as one message, with anything you wrote in the message box at the end.
 
 When an ask is about pictures the agent put up to compare, its button can
@@ -465,7 +466,7 @@ fold into one Worked line above the reply, as on the Mac; tap it to see
 the work. The search at the top of the inbox finds any thread, hibernating
 and archived ones too, by its title, last reply or project. What a thread needs from you shows under its reply with the
 likely answers as buttons (type in the box to say something else), and
-a thread that's done offers its suggested next steps and Archive, which takes you back to the inbox as its row slides away. A new thread from the phone starts in your default folder; pick its model and effort under the message, or leave them on Default. Paste a photo straight into any message box, or add one with the photo button. It can send notifications too,
+a thread that's done offers its suggested next steps and Archive, which takes you back to the inbox as its row slides away. A new thread from the phone starts in your default folder; pick its model and effort under the message, or leave them on Default. Paste a photo straight into any message box, or add one with the photo button: it goes in where the cursor is as a chip, "Picture 1", as on the Mac, and pictures in your messages show as chips too. It can send notifications too,
 though you don't need them for any of that. It pairs with your Mac by scanning a
 QR code: on the Mac, Settings (⌘,) > Phone & browser > Show the code, then
 scan it with the iPhone app. Keep the code to yourself: anyone who scans it

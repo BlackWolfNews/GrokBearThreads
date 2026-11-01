@@ -17,6 +17,10 @@ protocol RowCellDelegate: AnyObject {
     /// in it changed, pictures were added to it, or Return sent.
     func askNoteChanged(_ card: AsksCard, ask: Int, note: AskNote)
     func askNoteImages(_ card: AsksCard, ask: Int, urls: [URL])
+    /// Pictures pasted, dropped or chosen in a box go in as chips: whether
+    /// this thread can take them (saying why not), and each one copied in.
+    func askPicturesAllowed(_ card: AsksCard) -> Bool
+    func askImportPicture(_ card: AsksCard, url: URL) async -> ImageRef?
     func sendAnswers(_ card: AsksCard)
     func openReview(_ review: DesignReview)
     /// The pencil by one of Mike's messages: edit it and carry on from
@@ -34,6 +38,8 @@ extension RowCellDelegate {
     var remoteImages: RemoteImages? { nil }
     func askNoteChanged(_ card: AsksCard, ask: Int, note: AskNote) {}
     func askNoteImages(_ card: AsksCard, ask: Int, urls: [URL]) {}
+    func askPicturesAllowed(_ card: AsksCard) -> Bool { false }
+    func askImportPicture(_ card: AsksCard, url: URL) async -> ImageRef? { nil }
     func sendAnswers(_ card: AsksCard) {}
     func openReview(_ review: DesignReview) {}
     func editMessage(rowId: String) {}
@@ -597,6 +603,15 @@ final class TextRowCell: RowCellView {
             guard let self, let card = self.answerCard else { return }
             self.delegate?.askNoteImages(card, ask: index, urls: urls)
         }
+        box.pictures = ComposerTextView.Pictures(
+            allowed: { [weak self] in
+                guard let self, let card = self.answerCard else { return false }
+                return self.delegate?.askPicturesAllowed(card) ?? false
+            },
+            importOne: { [weak self] url in
+                guard let self, let card = self.answerCard else { return nil }
+                return await self.delegate?.askImportPicture(card, url: url)
+            })
         box.onSend = { [weak self] in
             guard let self, let card = self.answerCard else { return }
             self.delegate?.sendAnswers(card)

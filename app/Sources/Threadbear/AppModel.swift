@@ -1215,9 +1215,11 @@ final class AppModel {
         Task {
             let refs = await importImages(urls)
             guard !refs.isEmpty, let current = threads[threadId] else { return }
-            var note = notes(for: current)[ask] ?? AskNote()
-            note.images += refs
-            setNote(thread: current, ask: ask, note: note)
+            let note = notes(for: current)[ask] ?? AskNote()
+            // Each with its chip at the end of the box's words.
+            var draft = Draft(text: note.text, images: note.images)
+            draft.append(refs)
+            setNote(thread: current, ask: ask, note: AskNote(text: draft.text, images: draft.images))
         }
     }
 

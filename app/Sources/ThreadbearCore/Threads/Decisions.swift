@@ -93,19 +93,20 @@ public enum Decisions {
     /// index on the card. A pick that isn't one of its ask's choices is
     /// left out, and so is "Something else" with nothing written or
     /// pasted. Pictures in the boxes are numbered across the card, in the
-    /// order `images` sends them, and the answer says which are its own.
+    /// order `images` sends them, each a [Picture N] marker where its chip
+    /// is in the box, so the agent gets it right there (docs/protocol.md,
+    /// "Pictures in a message"). One with no chip goes at the end.
     public static func answers(asks: [Ask], picks: [Int: Int], notes: [Int: AskNote] = [:]) -> [(index: Int, answer: AskAnswer)] {
         var picture = 0
         return asks.enumerated().compactMap { i, ask in
             guard let n = picks[i] else { return nil }
             if n == ownAnswer {
                 let note = notes[i] ?? AskNote()
-                let text = note.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !text.isEmpty || !note.images.isEmpty else { return nil }
+                let marked = InlinePictures.normalized(note.text, imageCount: note.images.count)
                 let first = picture + 1
                 picture += note.images.count
-                let pictures = note.images.isEmpty ? "" : picturesLine(first, picture)
-                let answer = [text, pictures].filter { !$0.isEmpty }.joined(separator: "\n")
+                let answer = InlinePictures.messageText(marked, first: first).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !answer.isEmpty else { return nil }
                 return (i, AskAnswer(action: ask.action, answer: answer))
             }
             let options = choices(for: ask)
@@ -118,13 +119,6 @@ public enum Decisions {
     /// numbered as `answers` says. The composer's own go after them.
     public static func images(asks: [Ask], picks: [Int: Int], notes: [Int: AskNote]) -> [ImageRef] {
         asks.indices.flatMap { i in picks[i] == ownAnswer ? notes[i]?.images ?? [] : [] }
-    }
-
-    /// "See picture 2." or "See pictures 1 and 2." for a box's pictures.
-    static func picturesLine(_ first: Int, _ last: Int) -> String {
-        if first == last { return "See picture \(first)." }
-        if last == first + 1 { return "See pictures \(first) and \(last)." }
-        return "See pictures \(first) to \(last)."
     }
 
     /// One ordinary message: each picked ask's question then its answer,

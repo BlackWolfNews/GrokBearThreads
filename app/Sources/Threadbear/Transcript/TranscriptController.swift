@@ -786,6 +786,21 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         app.addNoteImages(thread: thread, ask: ask, urls: urls)
     }
 
+    func askPicturesAllowed(_ card: AsksCard) -> Bool {
+        guard let session, let app = session.app, let thread = app.threads[session.threadId], thread.asksSeq == card.seq else { return false }
+        // A picture this Mac's runner keeps would be a path another
+        // runner hasn't got (as in the composer).
+        if let name = app.runnerName(of: thread) {
+            app.errorMessage = "Pictures can't go to \(name) from this Mac yet."
+            return false
+        }
+        return true
+    }
+
+    func askImportPicture(_ card: AsksCard, url: URL) async -> ImageRef? {
+        await session?.app?.importImages([url]).first
+    }
+
     /// Return in a Something else box sends, as it does in the composer:
     /// the picks, every box and whatever's in the composer, as one message.
     func sendAnswers(_ card: AsksCard) {

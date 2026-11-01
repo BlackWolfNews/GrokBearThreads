@@ -159,6 +159,41 @@ final class PictureChipsTests: XCTestCase {
         XCTAssertEqual(RowRenderer.userText(UserMessage(text: "[Picture 1]", images: [])).string, "[Picture 1]")
     }
 
+    /// An ask's Something else box takes pictures as chips too, and its
+    /// answer carries them as markers where they sit.
+    func testAnAnswerBoxTakesPicturesAsChips() async throws {
+        let box = AskAnswerBox(frame: NSRect(x: 0, y: 0, width: 400, height: 80))
+        let window = NSWindow(contentRect: box.frame, styleMask: [.titled], backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        window.contentView = box
+        windows.append(window)
+        var notes: [AskNote] = []
+        box.onChange = { notes.append($0) }
+        box.pictures = .init(allowed: { true }, importOne: { url in ImageRef(path: "/inbox/" + url.lastPathComponent, mediaType: "image/png") })
+        box.show(AskNote(text: "Like this"))
+        box.textView.setSelectedRange(NSRange(location: 9, length: 0))
+        box.textView.insertPictures([URL(fileURLWithPath: "/tmp/a.png")])
+        try await until { notes.last?.images.count == 1 }
+        let a = ImageRef(path: "/inbox/a.png", mediaType: "image/png")
+        XCTAssertEqual(notes.last, AskNote(text: "Like this \(m) ", images: [a]))
+        let ask = Ask(action: "Which layout?", why: "Pick one.")
+        let answer = Decisions.answers(asks: [ask], picks: [0: Decisions.ownAnswer], notes: [0: notes.last!]).first?.answer.answer
+        XCTAssertEqual(answer, "Like this [Picture 1]")
+        // The cross on its thumbnail takes the chip out too.
+        box.show(notes.last!)
+        notes.removeAll()
+        let thumbs = box.subviews.filter { !($0 is NSScrollView) && !($0 is NSButton) }
+        XCTAssertEqual(thumbs.count, 1)
+        XCTAssertTrue(box.textView.removePicture(at: 0))
+        XCTAssertEqual(notes.last, AskNote(text: "Like this ", images: []))
+    }
+
+    /// A box leaves room for its chips' width when it measures its lines.
+    func testABoxMeasuresChipsAtTheirWidth() {
+        XCTAssertEqual(AskBoxMetrics.lines("Like this one", width: 200), 1)
+        XCTAssertGreaterThan(AskBoxMetrics.lines("Like \(m) \(m) \(m)", width: 200), 1)
+    }
+
     /// Editing a message puts its chips back where its markers were.
     func testEditingAMessagePutsItsChipsBack() {
         let app = AppModel()

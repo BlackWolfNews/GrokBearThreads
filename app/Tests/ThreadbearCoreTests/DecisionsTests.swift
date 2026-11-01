@@ -149,18 +149,20 @@ final class DecisionsTests: XCTestCase {
         XCTAssertEqual(Decisions.message(asks: [events], picks: [:], notes: [0: AskNote(text: "Signups")], extra: "hi"), "hi")
     }
 
-    /// Pictures in the boxes go first, in the card's order, and each
-    /// answer says which are its own; a box can be just pictures.
+    /// Pictures in the boxes go first, in the card's order, numbered
+    /// across the card, each a marker where its chip is in the box; a box
+    /// can be just pictures, and one with no chip goes at the end.
     func testPicturesInTheBoxesAreNumberedAcrossTheCard() {
         let shot = { (name: String) in ImageRef(path: "/tmp/\(name).png", mediaType: "image/png") }
+        let m = InlinePictures.markString
         let picks = [0: Decisions.ownAnswer, 1: Decisions.ownAnswer, 2: Decisions.ownAnswer]
         let notes = [
-            0: AskNote(text: "Like this", images: [shot("a")]),
-            1: AskNote(text: "", images: [shot("b"), shot("c")]),
-            2: AskNote(text: "Three", images: [shot("d"), shot("e"), shot("f")]),
+            0: AskNote(text: "Like this \(m)", images: [shot("a")]),
+            1: AskNote(text: "\(m) \(m)", images: [shot("b"), shot("c")]),
+            2: AskNote(text: "\(m) beats \(m), and", images: [shot("d"), shot("e"), shot("f")]),
         ]
         let answers = Decisions.answers(asks: [merge, signIn, events], picks: picks, notes: notes).map(\.answer.answer)
-        XCTAssertEqual(answers, ["Like this\nSee picture 1.", "See pictures 2 and 3.", "Three\nSee pictures 4 to 6."])
+        XCTAssertEqual(answers, ["Like this [Picture 1]", "[Picture 2] [Picture 3]", "[Picture 4] beats [Picture 5], and [Picture 6]"])
         XCTAssertEqual(Decisions.images(asks: [merge, signIn, events], picks: picks, notes: notes).map(\.path),
                        ["a", "b", "c", "d", "e", "f"].map { "/tmp/\($0).png" })
         // A box whose Something else was taken back sends no pictures.
