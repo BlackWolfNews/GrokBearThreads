@@ -474,6 +474,7 @@ async function main(): Promise<void> {
   // Only once listening: a runner that can't listen exits, and the next
   // one should still find the resume.
   restarter.resumeAfterRestart();
+  runner.tellStoppedWork();
 
   let stopping = false;
   const stop = async (signal: string) => {

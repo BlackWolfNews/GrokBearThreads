@@ -848,6 +848,7 @@ export class Runner {
       this.stopSubagents(st);
       if (rt.tasks.length) {
         const what = rt.tasks.map((t) => t.description || t.type).join('; ');
+        this.rememberStoppedWork(st);
         rt.tasks = [];
         try {
           this.emit(st, { type: 'system.note', text: `Stopped background work when the runner stopped: ${what}` });
@@ -972,7 +973,10 @@ export class Runner {
     rt.idleTimer?.cancel();
     rt.idleTimer = undefined;
     this.flushDeltas(st);
-    if (rt.session && !rt.closing) this.releaseSession(st);
+    if (rt.session && !rt.closing) {
+      this.rememberStoppedWork(st);
+      this.releaseSession(st);
+    }
     if (rt.closing) await rt.closing;
     rt.deltaTimer?.cancel();
     rt.wakeTimer?.cancel();
@@ -1010,11 +1014,61 @@ export class Runner {
     else if (rec.queue.length && this.bucket(rec) === 'inbox') {
       this.kickQueue(st);
     }
+    this.tellOneStoppedWork(st);
     this.markDirty(st);
     this.armSnoozeTimer();
     this.armRoomTimer();
     this.log.info('adopted a thread', { threadId, crashed: Boolean(opts.crashed), queued: rec.queue.length });
     return this.summary(st);
+  }
+
+  // ---------------------------------------------------- stopped background work
+  // docs/protocol.md, "Stopped background work". A handover or restart stops
+  // work the thread is counting on, usually a wait it promised to report
+  // back from (1 Nov: Mike asked "Is this still going?" 4.5 hours later).
+  // The note alone wakes nobody, so the next runner tells the thread.
+
+  private rememberStoppedWork(st: ThreadState): void {
+    const { rec, rt } = st;
+    if (rt.tasks.length === 0) return;
+    const what = rt.tasks.map((t) => t.description || t.type);
+    rec.stoppedWork = { what: [...(rec.stoppedWork?.what ?? []), ...what], at: this.isoNow() };
+    this.markDirty(st);
+  }
+
+  // Once this runner is listening, for the threads it loaded at startup. A
+  // thread coming across from a draining runner is told as adopt() loads it.
+  tellStoppedWork(): void {
+    for (const st of this.threads.values()) this.tellOneStoppedWork(st);
+  }
+
+  private tellOneStoppedWork(st: ThreadState): void {
+    const { rec } = st;
+    const stopped = rec.stoppedWork;
+    if (!stopped) return;
+    delete rec.stoppedWork;
+    this.markDirty(st);
+    // Put away since: its next message would bring it back, and the note
+    // is there to read then. This one mustn't bring it back by itself.
+    if (this.bucket(rec) !== 'inbox') return;
+    const wakes = rec.stoppedWorkWakes ?? 0;
+    const why =
+      this.clock.now() - Date.parse(stopped.at) > STOPPED_WORK_WAKE_MAX_AGE_MS
+        ? 'the runner was away for more than a day'
+        : wakes >= STOPPED_WORK_WAKES
+          ? `it has already been woken ${STOPPED_WORK_WAKES} times for this since anyone last wrote to it`
+          : undefined;
+    try {
+      if (why) {
+        this.emit(st, { type: 'system.note', text: `Not waking this thread about its stopped background work: ${why}.` });
+        return;
+      }
+      rec.stoppedWorkWakes = wakes + 1;
+      this.sendTo(st, stoppedWorkMessage(stopped.what, wakes + 1 >= STOPPED_WORK_WAKES), [], { origin: 'runner', queue: true });
+      this.log.info('told a thread its background work was stopped', { threadId: rec.id, what: stopped.what });
+    } catch (e) {
+      this.log.error('could not tell a thread its background work was stopped', { threadId: rec.id, error: String(e) });
+    }
   }
 
   // From the moment a restart begins until the runner exits, a new turn
@@ -2034,7 +2088,10 @@ export class Runner {
 
   private sendTo(st: ThreadState, text: string, images: ImageRef[], opts: SendOptions = {}): string {
     const { rec, rt } = st;
-    if (opts.origin !== 'runner') rt.hookTurns = undefined;
+    if (opts.origin !== 'runner') {
+      rt.hookTurns = undefined;
+      delete rec.stoppedWorkWakes;
+    }
     // Copy images into the thread's own media folder now, so a queued
     // message still works if inbox/ is cleaned before it's sent.
     const media = this.store.mediaDir(rec.id);
@@ -5158,6 +5215,26 @@ export class Runner {
 }
 
 // answers: the asks the message answers (AskAnswer), for the app to show.
+// A wait started again can be stopped again by the next landing, so this
+// many wakes in a row at most, reset by anyone else writing to the thread.
+const STOPPED_WORK_WAKES = 3;
+// A runner that was away this long (a Mac left off for days) shouldn't wake
+// every thread that had something going when it went.
+const STOPPED_WORK_WAKE_MAX_AGE_MS = 24 * 60 * 60_000;
+
+function stoppedWorkMessage(what: string[], last: boolean): string {
+  const one = what.length === 1;
+  const lines = what.map((w) => `- ${w.length > 200 ? `${w.slice(0, 200)}...` : w}`);
+  return [
+    `Threadbear stopped ${one ? 'this background job' : 'these background jobs'} of yours when the runner restarted onto a new release, so nothing more will come from ${one ? 'it' : 'them'}:`,
+    '',
+    ...lines,
+    '',
+    `If you said you'd report back or carry on after ${one ? 'it' : 'them'}, check how far ${one ? 'it' : 'they'} got and do that now; work running elsewhere may have finished by itself. Start ${one ? 'it' : 'them'} again only if that's still needed. The runner updates often and background work only lasts about 30 minutes past your last turn when it does, so for a longer wait use schedule_message to come back and check. If it no longer matters, say so in a line.`,
+    ...(last ? ['', "Threadbear won't wake this thread for this again, so if Mike needs to step in, ask him in end_turn."] : []),
+  ].join('\n');
+}
+
 export type SendOptions = { origin?: MessageOrigin; scheduleId?: string; queue?: boolean; answers?: AskAnswer[]; editOf?: number };
 
 // Typed by Mike, at the Mac or on his phone: not the runner's, a

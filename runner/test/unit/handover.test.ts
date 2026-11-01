@@ -1,6 +1,8 @@
 // Handovers (docs/protocol.md): a draining runner lets go of idle threads
 // at once, keeps busy ones until nothing would be cut short, and a new
 // runner on the same data dir adopts each one it hands over.
+import fs from 'node:fs';
+import path from 'node:path';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { FakeAccounts, FakeAdapter, makeHarness, testConfig, tick, type Harness } from '../helpers/fakes.ts';
@@ -33,6 +35,10 @@ function primary(h: Harness, skip: string[]) {
   runner.onNotification((n) => notes.push(n));
   runner.start({ skip: new Set(skip) });
   return { runner, adapter, notes };
+}
+
+function threadFile(h: Harness, id: string): string {
+  return path.join(h.home, 'threads', id, 'thread.json');
 }
 
 test('a draining runner lets idle threads go at once and keeps a busy one until its turn ends', async () => {
@@ -179,6 +185,116 @@ test('background work holds a kept thread for backgroundMs after its turn, then 
   assert.equal(s.endedHard, true);
   const notes = h.events(t.id).filter((e) => e.type === 'system.note').map((e) => e.text);
   assert.ok(notes.some((n) => /Stopped background work.*npm run dev/.test(n)), notes.join('\n'));
+});
+
+// A kept thread whose background work has just been stopped at the limit,
+// and the new runner, which hasn't loaded it yet.
+async function stoppedAtTheLimit(h: Harness, description = 'Wait for the scan') {
+  const t = create(h).thread;
+  const s = h.adapter.last;
+  s.init();
+  s.out({ kind: 'tasks', tasks: [{ id: 'b1', type: 'local_bash', kind: 'shell', description }] });
+  s.result('completed');
+  const handed: string[] = [];
+  await h.runner.beginDrain([t.id], { onHandedOver: (id) => handed.push(id), backgroundMs: 30 * MIN, checkMs: MIN });
+  h.clock.advance(30 * MIN);
+  await tick();
+  assert.deepEqual(handed, [t.id]);
+  return { t, b: primary(h, [t.id]) };
+}
+
+test('a thread whose background work a handover stopped is woken once on the new runner', async () => {
+  const h = makeHarness();
+  const { t, b } = await stoppedAtTheLimit(h);
+  b.runner.adopt(t.id);
+  const sent = b.adapter.last.sent;
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].text, /stopped this background job/);
+  assert.match(sent[0].text, /Wait for the scan/);
+  const message = b.runner.events(t.id, {}).events.filter((e) => e.type === 'user.message').at(-1) as any;
+  assert.equal(message.origin, 'runner');
+  // Told, so a later start or look doesn't say it again.
+  b.adapter.last.init();
+  b.adapter.last.result('completed');
+  await tick();
+  b.runner.tellStoppedWork();
+  assert.equal(b.adapter.last.sent.length, 1);
+});
+
+test('a thread put away after its background work stopped is left alone', async () => {
+  const h = makeHarness();
+  const { t, b } = await stoppedAtTheLimit(h);
+  const rec = JSON.parse(fs.readFileSync(threadFile(h, t.id), 'utf8'));
+  rec.archivedAt = new Date(h.clock.now()).toISOString();
+  fs.writeFileSync(threadFile(h, t.id), JSON.stringify(rec));
+  b.runner.adopt(t.id);
+  assert.equal(b.adapter.sessions.length, 0);
+  assert.ok(b.runner.get(t.id).archivedAt, 'still archived');
+});
+
+test('a stopped wait started again wakes the thread at most three times until someone writes', async () => {
+  const h = makeHarness();
+  const { t, b } = await stoppedAtTheLimit(h);
+  const stopAgainOn = async (r: ReturnType<typeof primary>) => {
+    r.runner.adopt(t.id);
+    const texts = r.adapter.sessions.flatMap((s: any) => s.sent.map((m: any) => m.text as string));
+    const s = r.adapter.last;
+    if (!texts.length) return { texts, next: undefined };
+    s.init();
+    s.out({ kind: 'tasks', tasks: [{ id: 'b1', type: 'local_bash', kind: 'shell', description: 'Wait for the scan' }] });
+    s.result('completed');
+    await r.runner.shutdown();
+    return { texts, next: primary(h, [t.id]) };
+  };
+  const first = await stopAgainOn(b);
+  assert.equal(first.texts.length, 1);
+  assert.doesNotMatch(first.texts[0], /won't wake/);
+  const second = await stopAgainOn(first.next!);
+  assert.equal(second.texts.length, 1);
+  const third = await stopAgainOn(second.next!);
+  assert.equal(third.texts.length, 1);
+  assert.match(third.texts[0], /won't wake this thread for this again/);
+  const last = third.next!;
+  last.runner.adopt(t.id);
+  assert.equal(last.adapter.sessions.length, 0, 'not a fourth time');
+  const notes = last.runner.events(t.id, {}).events.filter((e) => e.type === 'system.note').map((e) => (e as any).text as string);
+  assert.match(notes.at(-1)!, /Not waking this thread/);
+  // Someone writing starts the count again (sendTo clears it).
+  last.runner.send(t.id, 'carry on');
+  await last.runner.shutdown();
+  assert.equal(JSON.parse(fs.readFileSync(threadFile(h, t.id), 'utf8')).stoppedWorkWakes, undefined);
+});
+
+test('a thread whose background work a plain restart stopped is told once the next runner is up', async () => {
+  const h = makeHarness();
+  const t = create(h).thread;
+  const s = h.adapter.last;
+  s.init();
+  s.out({ kind: 'tasks', tasks: [{ id: 'b1', type: 'local_bash', kind: 'shell', description: 'Wait for the scan' }] });
+  s.result('completed');
+  await h.runner.shutdown();
+  const b = primary(h, []);
+  assert.equal(b.adapter.sessions.length, 0, 'not before it is listening');
+  b.runner.tellStoppedWork();
+  assert.match(b.adapter.last.sent[0].text, /Wait for the scan/);
+});
+
+test('a runner away for more than a day leaves a note rather than waking the thread', async () => {
+  const h = makeHarness();
+  const t = create(h).thread;
+  const s = h.adapter.last;
+  s.init();
+  s.out({ kind: 'tasks', tasks: [{ id: 'b1', type: 'local_bash', kind: 'shell', description: 'Wait for the scan' }] });
+  s.result('completed');
+  await h.runner.shutdown();
+  const rec = JSON.parse(fs.readFileSync(threadFile(h, t.id), 'utf8'));
+  rec.stoppedWork.at = new Date(Date.parse(rec.stoppedWork.at) - 25 * 60 * MIN).toISOString();
+  fs.writeFileSync(threadFile(h, t.id), JSON.stringify(rec));
+  const b = primary(h, []);
+  b.runner.tellStoppedWork();
+  assert.equal(b.adapter.sessions.length, 0);
+  const notes = b.runner.events(t.id, {}).events.filter((e) => e.type === 'system.note').map((e) => (e as any).text as string);
+  assert.match(notes.at(-1)!, /Not waking this thread.*more than a day/);
 });
 
 test('an approval holds a kept thread until it is answered', async () => {

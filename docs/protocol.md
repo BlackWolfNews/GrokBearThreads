@@ -996,7 +996,8 @@ restart wait for busy threads. It hands over instead:
 - A kept thread moves across once nothing would be cut short: no turn,
   approval or question, background work or wake grace. Background shells
   and monitors hold it for 30 minutes after its last turn at most (a dev
-  server never ends), and are then stopped with the usual note. Subagents
+  server never ends), and are then stopped with the usual note, and the
+  thread is told when it comes across (Stopped background work). Subagents
   hold it until they finish, up to 4 hours: they end by themselves, and
   stopping one throws its work away. Messages queued for it at that moment move with it
   and the primary starts them, so a message sent during the turn runs on
@@ -1049,6 +1050,26 @@ restart wait for busy threads. It hands over instead:
 
 The methods between runners (`drain.hello`, `drain.stop`) and
 `drain.handedOver`, `drain.usage` and `drain.projects` are for runners only.
+
+### Stopped background work
+
+A handover's limit (above) or a runner stopping ends a thread's background
+shells, monitors and sub-agents. The `system.note` saying so wakes nobody,
+so a thread that promised to report back would just go quiet. So the runner
+saves what it stopped on the thread (`stoppedWork` in thread.json), and the
+next one tells the thread: when it comes across from a draining runner, or
+once a restarted runner is listening. That's a new turn whose `user.message`
+has `origin: "runner"`, naming the jobs and saying to check on them, report
+back if it said it would, and use `schedule_message` for a long wait.
+
+- Only those two kinds of stop count. Snoozing, archiving, moving or changing
+  a thread stops its work because someone asked, and the note is enough.
+- A thread archived or snoozed by the time it would be told is left alone.
+- A runner away for more than a day, or a thread woken 3 times for this since
+  a message came from anyone but the runner, gets a `system.note` "Not waking
+  this thread about its stopped background work: <why>." instead. The third
+  wake says it's the last.
+- A crash stops the work without saying what it was, so nothing is told then.
 
 ### Stuck background jobs
 
