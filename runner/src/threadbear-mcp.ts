@@ -19,7 +19,7 @@ import { parseWhen, relativeFuture, relativeTime } from './when.ts';
 
 export { parseWhen, relativeFuture, relativeTime };
 import { RUNNER_VERSION, expandHome } from './config.ts';
-import { ALREADY_ENDED, endTurnDescription, END_TURN_TOOL, BULLETS_ONLY, ENDED, endedThisTurn, MAX_BYLINE, NARRATION_ONLY, NO_REPLY, needsFromTool, oneReplyAccepted, summaryFromTool, turnReply, type TurnReply } from './needs.ts';
+import { ALREADY_ENDED, endTurnDescription, endTurnForm, END_TURN_TOOL, BULLETS_ONLY, ENDED, endedThisTurn, MAX_BYLINE, NARRATION_ONLY, NO_REPLY, needsFromTool, oneReplyAccepted, summaryFromTool, turnReply, type TurnReply } from './needs.ts';
 import { asksForAppRestart, type AppRestarts } from './app-restarts.ts';
 import { PANEL_PLACES } from './panel-requests.ts';
 import { nudgedThisTurn, signInNudge, turnSignIns, uncovered } from './connectors.ts';
@@ -696,11 +696,11 @@ export function buildThreadbearTools(
       }),
     );
 
-  return [
-    // Says what the turn needs from Mike. The runner reads it from the
-    // thread's own tool.call when the turn completes (needs.ts), so the
-    // handler only checks it; a sub-agent's call never reaches the thread.
-    oneReply ? oneReplyEndTurn() : tool(
+  // Says what the turn needs from Mike. The runner reads it from the
+  // thread's own tool.call when the turn completes (needs.ts), so the
+  // handler only checks it; a sub-agent's call never reaches the thread.
+  const bulletsEndTurn = () =>
+    tool(
       END_TURN_TOOL,
       endTurnDescription(codex ? 'codex' : 'claude', bulletReplies()),
       {
@@ -815,7 +815,27 @@ export function buildThreadbearTools(
           ? `${ENDED} will wait in Needs you${archive ? ', and stays in the inbox, as it needs something from the user' : ''}.${restart} Stop here, with no more text: the user has your reply, the asks go in a card under it, and nothing written now reaches them.`
           : `${ENDED} is done${archive ? ', and will be archived once the turn is over' : ''}. Stop here, with no more text: the user has your reply, and nothing written now reaches them.`;
       }),
-    ),
+    );
+
+  // The form today's setting picks, which a new thread is shown. A Codex
+  // thread keeps the tool list it started with, so it can call the other
+  // form: answered as that form, or an agent following its own tool's schema
+  // gets refused for leaving out a field it has never heard of (1 Nov 2026,
+  // thread d8c829e8). Claude's server is built per CLI, so its tool can't differ.
+  const endTurn = () => {
+    const today = oneReply ? oneReplyEndTurn() : bulletsEndTurn();
+    if (!codex) return today;
+    const other = oneReply ? bulletsEndTurn() : oneReplyEndTurn();
+    return Object.assign(today, {
+      formFor: (args: unknown) => {
+        const form = endTurnForm(args);
+        return form && (form === 'oneReply') !== oneReply ? other : today;
+      },
+    });
+  };
+
+  return [
+    endTurn(),
     ...(appRestarts
       ? [
           tool(

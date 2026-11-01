@@ -1524,7 +1524,13 @@ A turn the agent finished can say whether Mike has to do anything, so
   never called it. Codex calls it before its final answer as before, and
   its final answer is the reply. The setting is read when a session
   starts, as its tool is, so a live one keeps the tool it has until its
-  CLI restarts; Bullet replies doesn't apply to a one-reply session.
+  CLI restarts; Bullet replies doesn't apply to a one-reply session. A
+  Codex thread's tool list is fixed at `thread/start`, restarts included,
+  so it may still be shown the other form of `end_turn` however the
+  setting stands now. The runner answers a Codex call by the form it was
+  written in (`endTurnForm`: `asks[].question` or `headline` is one
+  reply; `asks[].action` or `why`, or `summary`, is bullets; neither
+  follows the setting), and only threads started since get today's form.
 - **Bullet replies off.** `Settings.bulletReplies: false` (Settings >
   General; Mike, 30 Oct 2026: he liked the folded working but not always
   the bullets in place of the agent's message). `end_turn`'s description

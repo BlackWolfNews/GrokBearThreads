@@ -10,7 +10,8 @@
 //    resume, and looked up by namespace and tool name;
 //  - a thread's tool list is frozen at thread/start, so a call for a tool
 //    this runner doesn't have (renamed or removed since) gets success: false
-//    and a sentence, never a JSON-RPC error.
+//    and a sentence, never a JSON-RPC error, and a tool whose arguments have
+//    changed takes the old ones too (formFor).
 import { z } from 'zod';
 import type { ToolApprovalAnswer, ToolApprovalRequest } from '../types.ts';
 import type { PermissionMode } from '../../protocol.ts';
@@ -29,6 +30,9 @@ export type ToolDefinition = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   handler: (args: any, extra: unknown) => Promise<{ content?: unknown[]; isError?: boolean }>;
   annotations?: { readOnlyHint?: boolean };
+  // A tool whose arguments have changed shape: the version of it this call
+  // was written for, as the thread's list may be older than this runner.
+  formFor?: (args: unknown) => ToolDefinition;
 };
 
 export const NAMESPACE = SERVER_NAME;
@@ -123,8 +127,8 @@ export class CodexTools {
   async call(params: DynamicToolCallParams, o: { fromChild: boolean; signal: AbortSignal }): Promise<DynamicToolCallResponse> {
     const ns = params?.namespace ?? null;
     const name = typeof params?.tool === 'string' ? params.tool : '';
-    const tool = ns === NAMESPACE ? this.byName.get(name) : undefined;
-    if (!tool) {
+    const known = ns === NAMESPACE ? this.byName.get(name) : undefined;
+    if (!known) {
       const shown = ns ? `${ns}.${name}` : name;
       return text(
         `Threadbear has no tool called ${shown || '(unnamed)'} any more. This thread's tool list was fixed when it started; the threadbear tools it has now are: ${[...this.byName.keys()].join(', ') || 'none'}.`,
@@ -132,6 +136,7 @@ export class CodexTools {
       );
     }
     const raw = params.arguments && typeof params.arguments === 'object' && !Array.isArray(params.arguments) ? (params.arguments as Record<string, unknown>) : {};
+    const tool = known.formFor?.(raw) ?? known;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const parsed = z.object(tool.inputSchema as any).safeParse(raw);
     if (!parsed.success) return text(`Those arguments don't fit ${name}: ${z.prettifyError(parsed.error)}`, false);

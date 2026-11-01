@@ -6,6 +6,7 @@ import { FakeAccounts, makeHarness, tick, tmpDir, withCodex } from '../helpers/f
 import { copySessionTranscript, projectDirName } from '../../src/transcripts.ts';
 import { buildThreadbearTools, parseWhen } from '../../src/threadbear-mcp.ts';
 import { needsFromTool } from '../../src/needs.ts';
+import { CodexTools, type ToolDefinition } from '../../src/adapters/codex/tools.ts';
 import { toolTitle } from '../../src/tools.ts';
 
 function start(h: ReturnType<typeof makeHarness>, text = 'Fix the tests', extra: Record<string, unknown> = {}) {
@@ -733,6 +734,51 @@ test("Codex's end_turn comes before the final answer: never refused, and the ans
   s.out({ kind: 'event', event: { type: 'tool.result', itemId: 'e1', ok: true, text: r.content[0].text, truncated: false, images: [] } });
   s.text('m1', 'Looks fine. Nothing needed from you.');
   assert.ok(h.events(thread.id).some((e) => e.type === 'assistant.text' && e.text === 'Looks fine. Nothing needed from you.'));
+});
+
+// A Codex thread's tool list is fixed when it starts, so what it was told
+// end_turn takes can be from before One reply changed (1 Nov 2026, thread
+// d8c829e8, refused for leaving out a question its schema never mentioned).
+test("A Codex thread's end_turn is answered in the form the thread was given, whichever the setting is now", async () => {
+  const h = makeHarness();
+  const { thread } = start(h);
+  const call = async (oneReply: boolean, args: Record<string, unknown>) => {
+    const list = buildThreadbearTools(h.runner, thread.id, Date.now, undefined, undefined, undefined, { provider: 'codex', oneReply: () => oneReply, sleep: async () => {} });
+    const codex = new CodexTools(list as ToolDefinition[], { requestApproval: async () => ({ decision: 'allow' }), cwd: () => '/tmp', mode: () => 'full', rules: () => [], addRules: () => {} });
+    const r = await codex.call({ threadId: 'n', turnId: 't', callId: 'c', namespace: 'threadbear', tool: 'end_turn', arguments: args }, { fromChild: false, signal: new AbortController().signal });
+    return { ok: r.success, text: r.contentItems.map((c) => ('text' in c ? c.text : '')).join('') };
+  };
+  const bulletsAsk = { needs: 'you', summary: ['Reopened the tab.'], asks: [{ action: 'Complete Google verification in Chrome.', why: 'The dashboard is behind it.', reply: 'done', options: ['Done'] }] };
+  const oneReplyAsk = { headline: 'Needs Google verification', needs: 'you', asks: [{ question: 'Complete Google verification in Chrome.', options: [{ label: 'Done', does: 'I carry on' }] }] };
+  const bullet = /Now write your final answer/;
+  const reply = /Now write your reply/;
+  for (const setting of [true, false]) {
+    let r = await call(setting, bulletsAsk);
+    assert.ok(r.ok, r.text);
+    assert.match(r.text, bullet, 'a thread with the old form hears the old form back');
+    r = await call(setting, oneReplyAsk);
+    assert.ok(r.ok, r.text);
+    assert.match(r.text, reply, "a one-reply call's reply is what the runner keeps");
+    // No asks and a summary: bullets, or its summary would be lost.
+    r = await call(setting, { needs: 'nothing', summary: ['Checked it.'] });
+    assert.match(r.text, bullet);
+    r = await call(setting, { headline: 'Checked it', needs: 'nothing' });
+    assert.match(r.text, reply);
+    // Written after being refused by an older runner: both at once.
+    r = await call(setting, { needs: 'you', summary: ['Reopened the tab.'], asks: [{ question: 'Complete Google verification.' }] });
+    assert.ok(r.ok, r.text);
+    assert.match(r.text, reply);
+    // Nothing to tell them apart: the setting's form.
+    r = await call(setting, { needs: 'nothing' });
+    assert.match(r.text, setting ? reply : bullet);
+    // Still checked against the form it's in.
+    r = await call(setting, { asks: [{ action: 'No why.' }] });
+    assert.equal(r.ok, false);
+    assert.match(r.text, /asks\[0\]\.why/);
+  }
+  // A new thread is only shown the setting's form.
+  const shown = (oneReply: boolean) => buildThreadbearTools(h.runner, thread.id, Date.now, undefined, undefined, undefined, { provider: 'codex', oneReply: () => oneReply }).find((x) => x.name === 'end_turn')!.description;
+  assert.notEqual(shown(true), shown(false));
 });
 
 // The SDK runs the tool as soon as it reads the call, so the handler can run

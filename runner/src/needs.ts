@@ -30,6 +30,23 @@ const MAX_NEXT_CHARS = 120;
 // other schemes) isn't something a button should open.
 const LINK_URL = /^(?:https?:\/\/|file:\/\/|\/|~\/|review:[\w-]+$)/i;
 
+// Which form of end_turn a call was written for, when it shows. A Codex
+// thread's tool list is fixed when it starts, so its agent may have the form
+// from before One reply changed, whatever the setting says now (docs/protocol.md).
+// An ask's own field comes first: a call with both, as an agent writes when
+// correcting itself, has its asks in that form.
+export function endTurnForm(input: unknown): 'oneReply' | 'bullets' | undefined {
+  if (!input || typeof input !== 'object') return undefined;
+  const o = input as Record<string, unknown>;
+  const asks: unknown[] = Array.isArray(o.asks) ? o.asks : [];
+  const has = (key: string) => asks.some((a) => a !== null && typeof a === 'object' && key in a);
+  if (has('question')) return 'oneReply';
+  if (has('action') || has('why')) return 'bullets';
+  if (o.summary !== undefined) return 'bullets';
+  if (o.headline !== undefined) return 'oneReply';
+  return undefined;
+}
+
 // end_turn's input, checked. Undefined when it isn't usable, so the turn
 // falls back to the text.
 export function needsFromTool(input: unknown): Needs | undefined {
