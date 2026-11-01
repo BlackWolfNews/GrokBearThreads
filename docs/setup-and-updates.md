@@ -248,6 +248,19 @@ Steps 1 and 2 are useful to Mike straight away. 3 to 5 are what make it installa
 other people. The landing page already says "Threadbear makes a Convex deployment in
 your own Convex account", which this now matches once step 4 is built.
 
+## A Mac nobody sits at
+
+Before leaving a second Mac on its own, turn on Threadbear Runner in System
+Settings > Privacy & Security > Full Disk Access there (add
+`~/Applications/Threadbear Runner.app` with the + if it isn't listed). No program
+can do this for you. Without it, an agent touching Desktop, Documents, Downloads
+or a removable drive, or starting a browser, leaves a macOS prompt waiting, and
+it can hold up every other app using that drive until someone answers. That
+goes for a fork and an own-deployment install as much as Mike's.
+`install-runner.sh` says this at the end of an install and opens the pane on a
+Mac without the app, `tb status` says while it's missing, and a Mac without the
+app gets a thread about it (docs/protocol.md, "A dialog on a Mac's screen").
+
 ## Research notes
 
 How things work today, from a read of the repo on 28 Oct:

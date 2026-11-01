@@ -541,3 +541,13 @@ trap - EXIT
 rm -f "$PREV" "$PREV_LAUNCH"
 rm -rf "$OLD_APP"
 echo "Restart it with: launchctl kickstart -k $DOMAIN/$LABEL"
+# Only a person can grant this, and a Mac nobody sits at needs it: a prompt left
+# waiting there can hold up other apps using the same drive
+# (docs/setup-and-updates.md, "A Mac nobody sits at"). Whether the runner has it
+# can't be asked from here, as this shell isn't the runner; tb status says.
+echo
+echo "If nobody sits at this Mac, give Threadbear Runner Full Disk Access:"
+echo "  System Settings > Privacy & Security > Full Disk Access, then add $RUNNER_APP"
+if [ "$SANDBOX" = 0 ] && [ ! -d "/Applications/Threadbear.app" ] && [ ! -d "$HOME/Applications/Threadbear.app" ]; then
+  open "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles" 2>/dev/null || true
+fi

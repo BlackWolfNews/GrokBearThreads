@@ -735,7 +735,7 @@ the summary and then the reply.
 | `devices.pair` | `{ kind: "phone" \| "browser", name?: string, days?: number }` | `{ device: Device, pairingLink?: string, signInLink?: string }`. Issues a phone token for a new phone or browser (see Devices) and returns the link that carries it: a `threadbear://pair?url=…&token=…` link for a phone, for the app to draw as a QR code, or the website's sign-in link (`<site>/#token=…`) for a browser, for the app to open. `days` is 1 to 365 (default 90). `-32000` while sync is off, or while the backend is older than this |
 | `devices.revoke` | `{ deviceId }` | `{ devices: Device[] }`. The phone or browser is signed out at its next request. `-32602` for an id that isn't there |
 | `models.run` | `{ job: "classify" \| "extract" \| "summarize" \| "generate", text: string, labels?: string[], fields?: Record<string, string>, maxWords?: number, system?: string, cwd?: string, maxTokens?: number }` | `{ ok: true, value, model }` or `{ ok: false, reason: "no-pool" \| "off" \| "private" \| "no-room" \| "timeout" \| "provider", message }`. One model call by hand (`tb models try`), on the pool like any other, with `feature: "tb"`. `maxTokens` (generate only, 1 to 8000, default 500) caps the answer, reasoning included; `classify` needs 2 or more `labels` and answers one of them; `extract` needs `fields` (name to a plain description) and answers an object of them, `null` where the text doesn't say |
-| `runner.status` | `{}` | `{ version, release?, branch?, pid, startedAt, home, logFile, liveClis, running: string[], background: { threadId, tasks: string[] }[], pendingRestart?: { when, reason?, release?, resumeThreadId?, requestedAt, backgroundUntil?, waitingFor: string[] }, rolledBack?: { from, at }, draining?: { pid, version, release?, since, threads: string[] }[], update?: { state, checkout?, reason?, checkedAt?, commit?, release?, logFile?, launcherChanged?, launcherReason? }, clis?: CliStatus[] }`. `running` lists the threads that are starting, running or waiting on an approval or a question; `background` the threads whose CLI is still running background shells or subagents (`tasks` describes each). A restart waits for both. `branch` is the branch the release was built from. `rolledBack` is set when this release is running because `launch.mjs` went back to it from `from`, which kept crashing at startup (and nobody has activated it on purpose since). `update` is the runner following main by itself (docs/dev-tools.md): `state` is `off` (`reason` says why), `idle`, `checking`, `building`, `waiting` (`release` is built and starts on the pending restart) or `failed` (`reason` is the error; `logFile` has the build's output); `commit` is main's tip at the last check (`checkedAt`) |
+| `runner.status` | `{}` | `{ version, release?, branch?, pid, startedAt, home, logFile, liveClis, running: string[], background: { threadId, tasks: string[] }[], pendingRestart?: { when, reason?, release?, resumeThreadId?, requestedAt, backgroundUntil?, waitingFor: string[] }, rolledBack?: { from, at }, draining?: { pid, version, release?, since, threads: string[] }[], update?: { state, checkout?, reason?, checkedAt?, commit?, release?, logFile?, launcherChanged?, launcherReason? }, macScreen?: { fullDiskAccess?, dialogs, dialogsSince? }, clis?: CliStatus[] }`. `running` lists the threads that are starting, running or waiting on an approval or a question; `background` the threads whose CLI is still running background shells or subagents (`tasks` describes each). A restart waits for both. `branch` is the branch the release was built from. `rolledBack` is set when this release is running because `launch.mjs` went back to it from `from`, which kept crashing at startup (and nobody has activated it on purpose since). `update` is the runner following main by itself (docs/dev-tools.md): `state` is `off` (`reason` says why), `idle`, `checking`, `building`, `waiting` (`release` is built and starts on the pending restart) or `failed` (`reason` is the error; `logFile` has the build's output); `commit` is main's tip at the last check (`checkedAt`) |
 | `runner.restart` | `{ when?: "idle" \| "now", resume?: { threadId, text }, reason?: string, release?: string, backgroundWaitMs?: number, cancel?: boolean }` | `{ scheduled: boolean, waitingFor: string[], background?: { threadId, tasks: string[] }[], note?: string, noResume?: string, handover?: { keeps: string[] } }`. See Restarts below; `handover` under Handovers. `scheduled` is true once the restart is saved; an empty `waitingFor` means it is happening now. `background` is the background work among `waitingFor`. `release` is the release the restart should come back on (the deploy script sets it). `backgroundWaitMs` limits how long background shells and subagents hold the restart. `cancel: true` withdraws a pending restart that hasn't begun and returns `scheduled: false` (`-32020` once it has begun), with a `note` when it also put `current` back. `noResume` says why the `resume` won't be sent as things stand (the thread has already been resumed 3 times in the last hour), so whoever asked can say so rather than wait for it. A runner older than this answers `-32601` |
 | `clis.list` | `{}` | `{ clis: CliStatus[] }` |
 | `clis.check` | `{ provider?: Provider }` | `{ clis: CliStatus[] }`. Starts a version check (both CLIs when `provider` is absent) and returns at once, with the state as it was when the call arrived; the result comes through `clis.updated` |
@@ -1092,6 +1092,40 @@ The prompt itself is about the runner: macOS blames the LaunchAgent's
 program, `Threadbear Runner.app`, for everything under it, CLI included, so
 answering once holds across CLI updates. Full Disk Access for that app stops
 the folder prompts altogether, which a Mac nobody sits at needs.
+
+### A dialog on a Mac's screen
+
+Frozen CLIs only sees a CLI stuck in its own turn. The prompt isn't always
+that: on 31 Oct 2026 an agent's `find ~/Downloads` and a browser an agent
+started (Chromium looks over every mounted volume at launch) each left a
+prompt on Bruce's locked screen. A prompt stays up after what asked has gone,
+and until it's answered it can hold up other apps' access to that folder or
+drive, whoever they are and whatever they've been granted. That night it
+stopped another app using Bruce's external drive for nearly nine hours, with
+no turn running and nothing saying so.
+
+So the installed runner (mac-screen.ts, a dev runner only with
+`THREADBEAR_MAC_SCREEN=on`, and `off` stops it) does two things, on every
+start and every 2 minutes:
+
+- Counts UserNotificationCenter's dialog windows with `osascript`. That's who
+  draws these prompts. It works on a locked screen and needs no permission.
+  It can't read what a dialog says, so it counts any left waiting, which is
+  worth knowing about on a Mac nobody's at too. Dialogs up for 5 minutes get
+  a `system.note` in a thread of their own, "<machine> needs someone at its
+  screen", in Needs you (`forceUnread`), with no turn and no model call. A
+  later note says when they've gone, and takes it out of Needs you.
+- Checks for Full Disk Access by opening macOS's permissions database,
+  `~/Library/Application Support/com.apple.TCC/TCC.db`, and closing it. It's
+  never read. Without the access macOS refuses at once, with no prompt. A Mac
+  without it and without `Threadbear.app` gets one note in the same thread:
+  that's the Mac nobody sits at, and granting it is the actual fix.
+
+What it knows goes in `runner.status` as `macScreen: { fullDiskAccess?,
+dialogs, dialogsSince? }`, and `tb status` says so. What's been said is kept in
+`mac-screen.json` in the data dir, so a restart neither says it again nor starts
+the 5 minutes over. macOS has no way for a program to grant this itself, so
+it's a person's click in System Settings.
 
 ## Settings and models
 

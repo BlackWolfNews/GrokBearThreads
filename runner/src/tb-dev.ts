@@ -449,6 +449,8 @@ export function formatStatus(s: RunnerStatus, threads: ThreadSummary[], now: num
   // Releases never touch the LaunchAgent (launch.mjs, the plist, Threadbear
   // Runner.app); only Mike's install-runner.sh does.
   if (u?.launcherChanged) lines.push(`${u.launcherReason ?? 'launch.mjs on main differs from the installed one.'} The user runs ${u.checkout ? `${u.checkout}/runner/` : 'runner/'}scripts/install-runner.sh once nothing is busy.`);
+  if (s.macScreen?.fullDiskAccess === false) lines.push('Threadbear Runner has no Full Disk Access here, so macOS can stop and wait for someone to answer a prompt. System Settings > Privacy & Security > Full Disk Access turns it on.');
+  if (s.macScreen?.dialogs) lines.push(`${plural(s.macScreen.dialogs, 'dialog', 'dialogs')} waiting on this Mac's screen${s.macScreen.dialogsSince ? `, for ${duration(now - Date.parse(s.macScreen.dialogsSince))}` : ''}. A privacy prompt can hold up other apps until someone answers it.`);
   return lines.join('\n') + '\n';
 }
 

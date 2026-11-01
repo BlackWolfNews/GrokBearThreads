@@ -5052,6 +5052,27 @@ export class Runner {
   note(threadId: string, text: string): void {
     this.emit(this.mustGet(threadId), { type: 'system.note', text });
   }
+
+  // Something about this Mac rather than any thread's work (mac-screen.ts):
+  // a note in a thread of its own, in Needs you, so it reaches the other
+  // Macs and the phone. No turn: nothing here needs a model. One that's been
+  // archived has been dealt with, so that gets a new one.
+  noticeOnMac(threadId: string | undefined, title: string, text: string): string {
+    let st = threadId ? this.threads.get(threadId) : undefined;
+    if (!st || st.rt.deleted || st.rec.archivedAt) st = this.makeThread({ text, title, worktree: false, origin: 'runner' }).st;
+    st.rec.forceUnread = true;
+    st.rec.preview = oneLine(text, LIMITS.previewChars);
+    this.emit(st, { type: 'system.note', text });
+    this.markDirty(st);
+    return st.rec.id;
+  }
+
+  noticeOverOnMac(threadId: string, text: string): void {
+    const st = this.mustGet(threadId);
+    st.rec.forceUnread = false;
+    this.emit(st, { type: 'system.note', text });
+    this.markDirty(st);
+  }
 }
 
 // answers: the asks the message answers (AskAnswer), for the app to show.

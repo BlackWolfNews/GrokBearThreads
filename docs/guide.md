@@ -440,9 +440,17 @@ the thread runs on.
 - **A Mac nobody's sitting at.** The agent waits for that answer, so on a
   second Mac a folder prompt can hold a thread up with nobody there to click.
   Give Threadbear Runner Full Disk Access on that Mac, in System Settings >
-  Privacy & Security, and the prompts stop. If a thread does get stuck like
-  this, it says so after a minute or two and goes in Needs you. Five minutes
-  later Threadbear stops the turn, and your next message carries on from there.
+  Privacy & Security, and the prompts stop. Do this when you set the Mac up:
+  a waiting prompt can also hold up other apps using the same drive until
+  someone answers it, and a browser an agent starts is enough to set one off
+  if a removable drive is plugged in. The trade-off is that agents there can
+  read everything your account can. If a thread does get stuck like this, it
+  says so after a minute or two and goes in Needs you. Five minutes later
+  Threadbear stops the turn, and your next message carries on from there.
+- **A thread called "... needs someone at its screen".** Threadbear starts one
+  when a macOS dialog has been waiting on a Mac for 5 minutes, or when a Mac
+  without the Threadbear app doesn't have Full Disk Access yet. Open Screen
+  Sharing to that Mac and answer the dialog. The thread says when it's gone.
 
 ## Your phone and a browser
 <!-- slug: phone-and-browser -->

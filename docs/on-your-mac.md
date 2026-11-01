@@ -33,7 +33,8 @@ File references are where to look.
   folder for new threads. The runner also runs `ps`, and `sample` on a
   thread's own CLI, when a turn has been quiet for a minute,
   to tell a CLI frozen on a macOS prompt from a long job. The sample is a
-  temp file, deleted straight after.
+  temp file, deleted straight after. `mac-screen.json` in the data folder
+  remembers what it's said about dialogs on the screen (below).
 
 ## What runs in the background
 
@@ -65,6 +66,10 @@ File references are where to look.
 - **Presence** (`runner/src/presence.ts`): reads how long the keyboard and
   mouse have been idle (`ioreg`), so your phone knows whether you're at
   the Mac.
+- **Dialogs on the screen** (`runner/src/mac-screen.ts`): every 2 minutes it
+  runs `osascript` to count the windows of macOS's UserNotificationCenter, so
+  it can tell you when a dialog has been left waiting. It sees how many, not
+  what they say. `THREADBEAR_MAC_SCREEN=off` stops it.
 - **Patches** (`.threadbear/patches/`): code from a folder runs only after
   you trust that folder (`runner/src/patch-trust.ts`).
 - **Menus on macOS 27.2** (`app/Sources/Threadbear/DragSpace.swift`): every
@@ -86,6 +91,11 @@ File references are where to look.
 - Your first name, from your Mac account's full name (`id -F`), so its
   agents know what to call you (`runner/src/user-name.ts`). It stays in
   the instructions your own threads get.
+- Whether it has Full Disk Access, by opening macOS's permissions database
+  (`~/Library/Application Support/com.apple.TCC/TCC.db`) and closing it
+  again. It never reads it. Without the access macOS refuses, with no prompt.
+- Whether `Threadbear.app` is in `/Applications` or `~/Applications`, as a Mac
+  without it is probably one nobody sits at.
 
 ## Who it talks to
 

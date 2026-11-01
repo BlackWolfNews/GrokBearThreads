@@ -1,0 +1,192 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { makeHarness } from '../helpers/fakes.ts';
+import { nullLogger } from '../../src/log.ts';
+import { LOOK_MS, MacScreen, TELL_AFTER_MS, canOpen, parseDialogCount, type ScreenProbe } from '../../src/mac-screen.ts';
+
+class FakeProbe implements ScreenProbe {
+  count: number | undefined = 0;
+  access: boolean | undefined = true;
+  app = true;
+  async dialogs() {
+    return this.count;
+  }
+  fullDiskAccess() {
+    return this.access;
+  }
+  hasApp() {
+    return this.app;
+  }
+}
+
+function setUp() {
+  const h = makeHarness();
+  const probe = new FakeProbe();
+  const stateFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'mac-screen-')), 'mac-screen.json');
+  const make = () => new MacScreen({ host: h.runner, clock: h.clock, log: nullLogger, machine: 'bruce', stateFile, probe });
+  const screen = make();
+  const look = async (ms = LOOK_MS, s = screen) => {
+    h.clock.advance(ms);
+    await s.look();
+  };
+  const noticeThreads = () => h.runner.list().filter((t) => /bruce/.test(t.title));
+  const notes = (id: string) => h.events(id).filter((e) => e.type === 'system.note').map((e) => String(e.text));
+  return { h, probe, screen, make, look, noticeThreads, notes };
+}
+
+test('a dialog left waiting gets a thread in Needs you, without starting a CLI', async () => {
+  const { h, probe, look, noticeThreads, notes } = setUp();
+  probe.count = 1;
+  await look();
+  assert.equal(noticeThreads().length, 0, 'someone may be about to answer it');
+  await look(TELL_AFTER_MS);
+  const [t] = noticeThreads();
+  assert.ok(t);
+  assert.equal(t.needsYou, true);
+  assert.match(notes(t.id)[0], /dialog has been waiting on bruce/);
+  assert.match(notes(t.id)[0], /Full Disk Access/);
+  assert.equal(h.adapter.sessions.length, 0, 'telling costs no model call');
+  await look();
+  await look();
+  assert.equal(notes(t.id).length, 1, 'said once');
+});
+
+test('the thread stops needing you when the dialog goes, and a new dialog comes back to it', async () => {
+  const { h, probe, look, noticeThreads, notes } = setUp();
+  probe.count = 2;
+  await look();
+  await look(TELL_AFTER_MS);
+  const id = noticeThreads()[0].id;
+  probe.count = 0;
+  await look();
+  assert.equal(h.runner.list().find((t) => t.id === id)!.needsYou, false);
+  assert.match(notes(id)[1], /gone/);
+  probe.count = 1;
+  await look();
+  await look(TELL_AFTER_MS);
+  assert.equal(noticeThreads().length, 1);
+  assert.equal(notes(id).length, 3);
+  assert.equal(h.runner.list().find((t) => t.id === id)!.needsYou, true);
+});
+
+test('a dialog that goes before the wait is up is never mentioned', async () => {
+  const { probe, look, noticeThreads } = setUp();
+  probe.count = 1;
+  await look();
+  probe.count = 0;
+  await look();
+  probe.count = 1;
+  await look(TELL_AFTER_MS - 1000);
+  assert.equal(noticeThreads().length, 0);
+});
+
+test('restarts neither reset the wait nor say it again', async () => {
+  const { probe, make, look, noticeThreads, notes } = setUp();
+  // Bruce's runner restarts on every commit to main, so a wait held only in
+  // memory might never reach its 5 minutes.
+  probe.count = 1;
+  await look(LOOK_MS, make());
+  await look(TELL_AFTER_MS, make());
+  const [t] = noticeThreads();
+  assert.ok(t);
+  await look(LOOK_MS, make());
+  assert.equal(noticeThreads().length, 1);
+  assert.equal(notes(t.id).length, 1);
+});
+
+test('not being able to look says nothing, either way', async () => {
+  const { probe, look, noticeThreads, notes } = setUp();
+  probe.count = undefined;
+  await look();
+  await look(TELL_AFTER_MS);
+  assert.equal(noticeThreads().length, 0);
+  probe.count = 1;
+  await look();
+  await look(TELL_AFTER_MS);
+  const [t] = noticeThreads();
+  probe.count = undefined;
+  await look();
+  assert.equal(notes(t.id).length, 1, "it isn't known to have gone");
+});
+
+test('a Mac with no Threadbear app and no Full Disk Access is told once, up front', async () => {
+  const { probe, make, look, noticeThreads, notes } = setUp();
+  probe.app = false;
+  probe.access = false;
+  await look(LOOK_MS, make());
+  const [t] = noticeThreads();
+  assert.ok(t);
+  assert.equal(t.needsYou, true);
+  assert.match(notes(t.id)[0], /doesn't have Full Disk Access on bruce/);
+  await look(LOOK_MS, make());
+  assert.equal(notes(t.id).length, 1);
+});
+
+test('a Mac with the app, or the access, is not nagged about it', async () => {
+  const a = setUp();
+  a.probe.app = true;
+  a.probe.access = false;
+  await a.look();
+  assert.equal(a.noticeThreads().length, 0);
+  const b = setUp();
+  b.probe.app = false;
+  b.probe.access = true;
+  await b.look();
+  assert.equal(b.noticeThreads().length, 0);
+  const c = setUp();
+  c.probe.app = false;
+  c.probe.access = undefined;
+  await c.look();
+  assert.equal(c.noticeThreads().length, 0);
+});
+
+test('an archived or deleted notice thread is left alone, and a new one made', async () => {
+  const { h, probe, look, noticeThreads } = setUp();
+  probe.count = 1;
+  await look();
+  await look(TELL_AFTER_MS);
+  const first = noticeThreads()[0].id;
+  h.runner.delete(first);
+  probe.count = 0;
+  await look();
+  probe.count = 1;
+  await look();
+  await look(TELL_AFTER_MS);
+  const [next] = noticeThreads();
+  assert.ok(next);
+  assert.notEqual(next.id, first);
+});
+
+test('status says what tb status shows', async () => {
+  const { h, probe, screen, look } = setUp();
+  assert.deepEqual(screen.status(), { dialogs: 0 });
+  probe.count = 2;
+  probe.access = false;
+  await look();
+  const at = new Date(h.clock.now()).toISOString();
+  assert.deepEqual(screen.status(), { fullDiskAccess: false, dialogs: 2, dialogsSince: at });
+});
+
+test('canOpen tells a file that opens from one that will not', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mac-screen-'));
+  const file = path.join(dir, 'x');
+  fs.writeFileSync(file, 'x');
+  assert.equal(canOpen(file), true);
+  assert.equal(canOpen(path.join(dir, 'missing')), undefined);
+  // Root can open anything, so there's no refusal to see when run as root.
+  if (process.getuid?.() !== 0) {
+    fs.chmodSync(file, 0o000);
+    assert.equal(canOpen(file), false);
+    fs.chmodSync(file, 0o600);
+  }
+});
+
+test('parseDialogCount reads what osascript prints', () => {
+  assert.equal(parseDialogCount('2\n'), 2);
+  assert.equal(parseDialogCount('0\n'), 0);
+  assert.equal(parseDialogCount(''), undefined);
+  assert.equal(parseDialogCount('error'), undefined);
+});

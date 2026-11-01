@@ -16,6 +16,7 @@ import { AppRestarts } from './app-restarts.ts';
 import { Scheduler, scheduleMethods } from './schedules.ts';
 import { StuckJobs } from './stuck-jobs.ts';
 import { FrozenClis } from './frozen-cli.ts';
+import { MacScreen } from './mac-screen.ts';
 import { Projects, drainProjectMethods, projectMethods } from './projects.ts';
 import { Librarian, librarianMethods } from './librarian.ts';
 import { ConnectorsMonitor, connectorsMethods } from './connectors.ts';
@@ -254,6 +255,15 @@ async function main(): Promise<void> {
   // A CLI frozen on something only a person can answer says so in its thread.
   const frozenClis = new FrozenClis({ host: runner, clock: realClock, log, machine: cfg.sync.name ?? defaultRunnerName() });
   frozenClis.start();
+  // A dialog waiting on this Mac's screen says so, from the installed runner
+  // only: a dev runner's Mac is the one you're sat at, and a throwaway data
+  // dir shouldn't get a thread about it. THREADBEAR_MAC_SCREEN=on to try it
+  // on a dev runner, off to stop it.
+  const macScreenSetting = process.env.THREADBEAR_MAC_SCREEN;
+  const macScreen = process.platform === 'darwin' && macScreenSetting !== 'off' && (macScreenSetting === 'on' || readRelease())
+    ? new MacScreen({ host: runner, clock: realClock, log, machine: cfg.sync.name ?? defaultRunnerName(), stateFile: path.join(cfg.home, 'mac-screen.json') })
+    : undefined;
+  macScreen?.start();
   // The Connectors gateway's /health, for the app's Connectors panel
   // (docs/protocol.md, "Connectors"). Off when there's no gateway.
   const connectors = new ConnectorsMonitor({
@@ -393,7 +403,7 @@ async function main(): Promise<void> {
   const restartStatus = methods['runner.status'];
   methods['runner.status'] = (p) => {
     const draining = peers.status();
-    return { ...(restartStatus(p) as Record<string, unknown>), clis: updates.list(), sync: sync.status(), upstream: upstream.status(), ...(draining.length ? { draining } : {}) };
+    return { ...(restartStatus(p) as Record<string, unknown>), clis: updates.list(), sync: sync.status(), upstream: upstream.status(), ...(draining.length ? { draining } : {}), ...(macScreen ? { macScreen: macScreen.status() } : {}) };
   };
   // tb updates (docs/protocol.md, "Mike's releases").
   methods['upstream.status'] = () => ({ upstream: upstream.status() });
@@ -484,6 +494,7 @@ async function main(): Promise<void> {
     librarian.stop();
     stuckJobs.stop();
     frozenClis.stop();
+    macScreen?.stop();
     connectors.stop();
     projects.stop();
     usage.stop();
@@ -527,6 +538,7 @@ async function main(): Promise<void> {
       librarian.stop();
       stuckJobs.stop();
       frozenClis.stop();
+      macScreen?.stop();
       connectors.stop();
       projects.freeze();
       updates.stop();
