@@ -509,6 +509,26 @@ test('hibernating until a restart stops the turn, holds the restart no longer, a
   assert.deepEqual(h2.runner.list().map((x) => x.id), [thread.id]);
 });
 
+test('a star stays through hibernating, archiving and a restart, keeps its time, and stops nothing', () => {
+  const h = makeHarness();
+  const { thread } = create(h);
+  const s = h.adapter.last;
+  s.init();
+  const first = h.runner.update({ threadId: thread.id, starred: true }).thread.starredAt;
+  assert.ok(first);
+  assert.equal(h.runner.get(thread.id).status, 'running', 'starring leaves the turn going');
+  assert.equal(s.interrupts, 0);
+  h.clock.advance(MIN);
+  assert.equal(h.runner.update({ threadId: thread.id, starred: true }).thread.starredAt, first, 'starred again: keeps its place');
+  h.runner.update({ threadId: thread.id, archived: true });
+  assert.equal(h.runner.get(thread.id).starredAt, first);
+  h.runner.update({ threadId: thread.id, archived: false });
+  h.runner.update({ threadId: thread.id, snoozedUntil: 'restart' });
+  const h2 = h.restart();
+  assert.equal(h2.runner.get(thread.id).starredAt, first, 'kept on disk');
+  assert.equal(h2.runner.update({ threadId: thread.id, starred: false }).thread.starredAt, undefined);
+});
+
 test('a dated snooze or a message clears an until-restart snooze', () => {
   const h = makeHarness();
   const { thread } = create(h);

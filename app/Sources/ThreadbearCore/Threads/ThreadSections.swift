@@ -10,11 +10,14 @@ import Foundation
 /// their own in the activity bar until Mike asked for them as sections
 /// here (29 Oct). The heading says Archived, not Archive, so it names a
 /// state like Running, Waiting and Hibernating (Mike asked 29 Oct).
+/// Starred is above them all: threads Mike wants in reach whatever they're
+/// doing (1 Nov).
 public enum InboxSection: String, Sendable, CaseIterable {
-    case inbox, running, waiting, hibernating, archived
+    case starred, inbox, running, waiting, hibernating, archived
 
     public var title: String {
         switch self {
+        case .starred: return "Starred"
         case .inbox: return "Inbox"
         case .running: return "Running"
         case .waiting: return "Waiting"
@@ -45,6 +48,8 @@ public enum InboxOrder: String, Sendable, CaseIterable {
 
 /// The sidebar's sections.
 public struct ThreadSections: Sendable, Equatable {
+    /// Oldest star first, so they stay put while Mike goes back and forth.
+    public var starred: [ThreadSummary] = []
     public var inbox: [ThreadSummary] = []
     public var running: [ThreadSummary] = []
     public var waiting: [ThreadSummary] = []
@@ -53,8 +58,9 @@ public struct ThreadSections: Sendable, Equatable {
     /// Most recently archived first.
     public var archived: [ThreadSummary] = []
 
-    public init(inbox: [ThreadSummary] = [], running: [ThreadSummary] = [], waiting: [ThreadSummary] = [],
+    public init(starred: [ThreadSummary] = [], inbox: [ThreadSummary] = [], running: [ThreadSummary] = [], waiting: [ThreadSummary] = [],
                 hibernating: [ThreadSummary] = [], archived: [ThreadSummary] = []) {
+        self.starred = starred
         self.inbox = inbox
         self.running = running
         self.waiting = waiting
@@ -74,11 +80,15 @@ public struct ThreadSections: Sendable, Equatable {
     /// until he answers, and so does a turn that ended asking him for
     /// something (`waitingOnMike`). Running is newest activity first. Snoozed and
     /// archived threads go in Hibernating and Archived, whatever their state.
+    /// Starred takes a starred thread from all of these but Archived: Mike
+    /// archived it, so it's done with.
     public static func build(_ threads: some Sequence<ThreadSummary>, now: Date, wakes: [String: Schedule] = [:], order: InboxOrder = .needsYou) -> ThreadSections {
         var sections = ThreadSections()
         for thread in threads {
             if thread.isArchived {
                 sections.archived.append(thread)
+            } else if thread.isStarred {
+                sections.starred.append(thread)
             } else if thread.isSnoozed(at: now) {
                 sections.hibernating.append(thread)
             } else if thread.reviewWaiting || thread.status == .waiting || thread.waitingOnMike || (thread.needsYou && !thread.isWorkingInBackground) {
@@ -93,6 +103,10 @@ public struct ThreadSections: Sendable, Equatable {
         }
         let newestFirst: (ThreadSummary, ThreadSummary) -> Bool = {
             $0.lastActivityAt != $1.lastActivityAt ? $0.lastActivityAt > $1.lastActivityAt : $0.id < $1.id
+        }
+        sections.starred.sort {
+            let (a, b) = ($0.starredAt ?? .distantFuture, $1.starredAt ?? .distantFuture)
+            return a != b ? a < b : $0.id < $1.id
         }
         switch order {
         case .needsYou:
@@ -139,14 +153,19 @@ public struct ThreadSections: Sendable, Equatable {
         return broken ? 3 : 4
     }
 
-    /// The inbox threads waiting on Mike or not read yet (the Dock badge).
-    public var needsYou: [ThreadSummary] { inbox.filter { $0.reviewWaiting || $0.status == .waiting || $0.needsYou } }
+    /// The threads waiting on Mike or not read yet (the Dock badge): a star
+    /// doesn't take one out of it, unless it's hibernating (the runner clears
+    /// `snoozedUntil` when it wakes), which it wouldn't count for either.
+    public var needsYou: [ThreadSummary] {
+        (starred.filter { $0.snoozedUntil == nil } + inbox).filter { $0.reviewWaiting || $0.status == .waiting || $0.needsYou }
+    }
 
     /// The live threads, not the ones put away.
-    public var all: [ThreadSummary] { inbox + running + waiting }
+    public var all: [ThreadSummary] { starred + inbox + running + waiting }
 
     public subscript(section: InboxSection) -> [ThreadSummary] {
         switch section {
+        case .starred: return starred
         case .inbox: return inbox
         case .running: return running
         case .waiting: return waiting
@@ -169,7 +188,7 @@ public struct ThreadSections: Sendable, Equatable {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return self }
         let keep: ([ThreadSummary]) -> [ThreadSummary] = { $0.filter { Self.matches($0, trimmed) } }
-        return ThreadSections(inbox: keep(inbox), running: keep(running), waiting: keep(waiting),
+        return ThreadSections(starred: keep(starred), inbox: keep(inbox), running: keep(running), waiting: keep(waiting),
                               hibernating: keep(hibernating), archived: keep(archived))
     }
 

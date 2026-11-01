@@ -141,6 +141,35 @@ import UniformTypeIdentifiers
         #expect(sections.needsYouCount == 3)
     }
 
+    /// The Mac's ThreadSectionsTests.testStarredThreadsStayAtTheTop, on the phone.
+    @Test func starredThreadsStayAtTheTop() {
+        func starred(_ thread: PhoneThread, _ minutesAgo: Double) -> PhoneThread {
+            var thread = thread
+            thread.starredAt = now.addingTimeInterval(-minutesAgo * 60)
+            return thread
+        }
+        var archived = starred(thread("archived", 0), 40)
+        archived.archivedAt = now
+        let sections = InboxSections.build([
+            starred(thread("second", 0), 10),
+            starred(thread("asleep", 0, needsYou: true, snoozed: true), 20),
+            starred(thread("first", 9, status: .running), 30),
+            starred(thread("asks", 0, needsYou: true), 5),
+            archived,
+            thread("plain", 0),
+        ], now: now)
+        #expect(sections.starred.map(\.threadId) == ["first", "asleep", "second", "asks"], "stays in the order they were starred")
+        #expect(sections.inbox.map(\.threadId) == ["plain"])
+        #expect(sections.running.isEmpty)
+        #expect(sections.needsYouCount == 1, "asks counts; asleep doesn't, as it's hibernating")
+        #expect(ThreadSearch("asks", sections: sections, hibernating: [], archived: []).starred.map(\.threadId) == ["asks"])
+    }
+
+    @Test func foldsLeaveStarredOpen() {
+        #expect(!SectionFolds(saved: nil).isFolded(.starred))
+        #expect(!SectionFolds(saved: ["running"]).isFolded(.starred))
+    }
+
     /// The Mac's ThreadSectionsTests.testBookedThreadsWait, on the phone: a
     /// thread that has booked itself a message for later, and has nothing
     /// for Mike, waits in its own section, soonest first, rather than

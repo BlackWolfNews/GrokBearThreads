@@ -987,6 +987,9 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     /// row says "Woke up" until then.
     public var woke: ThreadWoke?
     public var archivedAt: Date?
+    /// Mike starred it: the Starred section, oldest star first. Kept while
+    /// it's archived, so bringing it back stars it again.
+    public var starredAt: Date?
     /// Finishing a turn on the runner that handed over to a new release
     /// (protocol "Handovers"); it moves across when the turn ends.
     public var onOldRunner: Bool
@@ -1062,7 +1065,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         provider: String = "claude", model: String? = nil, permissionMode: PermissionMode = .full,
         status: ThreadStatus = .idle, live: Bool = false, needsYou: Bool = false,
         createdAt: Date = Date(), updatedAt: Date = Date(), lastActivityAt: Date = Date(),
-        snoozedUntil: Date? = nil, snoozedUntilRestart: Bool = false, wakeWhen: WakeWhen? = nil, woke: ThreadWoke? = nil, archivedAt: Date? = nil, onOldRunner: Bool = false, preview: String = "",
+        snoozedUntil: Date? = nil, snoozedUntilRestart: Bool = false, wakeWhen: WakeWhen? = nil, woke: ThreadWoke? = nil, archivedAt: Date? = nil, starredAt: Date? = nil, onOldRunner: Bool = false, preview: String = "",
         lastSeq: Int = 0, lastSeenSeq: Int = 0, nativeSessionId: String? = nil,
         contextTokens: Int? = nil, costUsd: Double? = nil,
         effort: String? = nil, modelInUse: String? = nil, effortInUse: String? = nil, contextWindow: Int? = nil,
@@ -1094,6 +1097,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         self.wakeWhen = wakeWhen
         self.woke = woke
         self.archivedAt = archivedAt
+        self.starredAt = starredAt
         self.onOldRunner = onOldRunner
         self.preview = preview
         self.lastSeq = lastSeq
@@ -1151,6 +1155,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         wakeWhen = (try? c.decodeIfPresent(WakeWhen.self, forKey: .wakeWhen)) ?? nil
         woke = (try? c.decodeIfPresent(ThreadWoke.self, forKey: .woke)) ?? nil
         archivedAt = try date(.archivedAt)
+        starredAt = try date(.starredAt)
         onOldRunner = ((try? c.decodeIfPresent(Bool.self, forKey: .onOldRunner)) ?? nil) ?? false
         preview = try c.decodeIfPresent(String.self, forKey: .preview) ?? ""
         lastSeq = try c.decodeIfPresent(Int.self, forKey: .lastSeq) ?? 0
@@ -1205,6 +1210,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         try c.encodeIfPresent(wakeWhen, forKey: .wakeWhen)
         try c.encodeIfPresent(woke, forKey: .woke)
         try c.encodeIfPresent(archivedAt.map(ISO8601.format), forKey: .archivedAt)
+        try c.encodeIfPresent(starredAt.map(ISO8601.format), forKey: .starredAt)
         if onOldRunner { try c.encode(true, forKey: .onOldRunner) }
         try c.encode(preview, forKey: .preview)
         try c.encode(lastSeq, forKey: .lastSeq)
@@ -1236,7 +1242,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id, title, cwd, accountId, provider, model, effort, modelInUse, effortInUse, permissionMode, status, live, needsYou, pendingReviews
-        case createdAt, updatedAt, lastActivityAt, snoozedUntil, snoozedUntilRestart, wakeWhen, woke, archivedAt, onOldRunner, preview
+        case createdAt, updatedAt, lastActivityAt, snoozedUntil, snoozedUntilRestart, wakeWhen, woke, archivedAt, starredAt, onOldRunner, preview
         case lastSeq, lastSeenSeq, nativeSessionId, contextTokens, contextWindow, costUsd, panels, actions, hooks, patches, background, subagents
         case projects, worktree, needs, asks, asksSeq, highlightsAt, schedule, startedBy, poolId, waitingForRoom, panelRequest, share, sample
     }
@@ -1271,6 +1277,8 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     public var reviewWaiting: Bool { hasPendingReviews && !status.isBusy && background.isEmpty }
 
     public var isArchived: Bool { archivedAt != nil }
+
+    public var isStarred: Bool { starredAt != nil }
 
     public func isSnoozed(at now: Date) -> Bool {
         guard let snoozedUntil else { return false }

@@ -213,7 +213,7 @@ struct InboxView: View {
                             putAwayRows(threads, from: view)
                         }
                     } else {
-                        rows(threads, running: section == .running, waiting: section == .waiting)
+                        rows(threads, running: section == .running, waiting: section == .waiting, starred: section == .starred)
                     }
                 }
             } header: {
@@ -236,6 +236,9 @@ struct InboxView: View {
             ContentUnavailableView.search(text: query.trimmingCharacters(in: .whitespaces))
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
+        }
+        if !search.starred.isEmpty {
+            Section { rows(search.starred, starred: true) } header: { SectionHeading(title: "Starred", icon: "star") }
         }
         if !search.inbox.isEmpty {
             Section { rows(search.inbox) } header: { SectionHeading(title: "Inbox", icon: "tray") }
@@ -266,12 +269,14 @@ struct InboxView: View {
         }
     }
 
-    @ViewBuilder private func rows(_ threads: [PhoneThread], running: Bool = false, waiting: Bool = false) -> some View {
+    @ViewBuilder private func rows(_ threads: [PhoneThread], running: Bool = false, waiting: Bool = false, starred: Bool = false) -> some View {
         ForEach(threads) { thread in
+            // Only under Starred can a row be asleep: elsewhere it's in Hibernating.
+            let asleep = starred && InboxSections.isSnoozed(thread, now: model.now)
             // A plain row, not a NavigationLink: the Mac's rows have no
             // chevron, and the status sits where it would go.
             Button { path.append(thread.threadId) } label: {
-                ThreadRow(thread: thread, underRunning: running, wake: waiting ? model.wakes[thread.threadId] : nil)
+                ThreadRow(thread: thread, underRunning: running, wake: waiting ? model.wakes[thread.threadId] : nil, asleep: asleep)
                     // Off to the left, the way a swipe to archive goes.
                     .offset(x: model.slidingOff.contains(thread.threadId) && !reduceMotion ? -500 : 0)
                     .opacity(model.slidingOff.contains(thread.threadId) ? 0 : 1)
@@ -284,16 +289,34 @@ struct InboxView: View {
                     .tint(.brown)
             }
             .swipeActions(edge: .leading) {
-                Button { hibernateTarget = thread } label: { Label("Hibernate", systemImage: "moon.zzz") }
-                    .tint(.indigo)
+                if asleep {
+                    Button { Task { await perform(thread, .wake) } } label: { Label("Wake", systemImage: "sun.max") }
+                        .tint(.accentColor)
+                } else {
+                    Button { hibernateTarget = thread } label: { Label("Hibernate", systemImage: "moon.zzz") }
+                        .tint(.indigo)
+                }
+                if model.canStar { starButton(thread).tint(.yellow) }
             }
             .contextMenu {
-                Button { hibernateTarget = thread } label: { Label("Hibernate…", systemImage: "moon.zzz") }
+                if model.canStar { starButton(thread) }
+                if asleep {
+                    Button { Task { await perform(thread, .wake) } } label: { Label("Wake", systemImage: "sun.max") }
+                } else {
+                    Button { hibernateTarget = thread } label: { Label("Hibernate…", systemImage: "moon.zzz") }
+                }
                 Button { model.archive(thread.threadId) } label: { Label("Archive", systemImage: "archivebox") }
                 if thread.unread || thread.needsYou {
                     Button { Task { await perform(thread, .markSeen) } } label: { Label("Mark as read", systemImage: "envelope.open") }
                 }
             }
+        }
+    }
+
+    private func starButton(_ thread: PhoneThread) -> some View {
+        let starred = thread.starredAt != nil
+        return Button { Task { await perform(thread, .star(!starred)) } } label: {
+            Label(starred ? "Remove Star" : "Star", systemImage: starred ? "star.slash" : "star")
         }
     }
 
@@ -344,6 +367,8 @@ struct ThreadRow: View {
     /// Under the Waiting heading, the schedule that messages it next: the
     /// row says when, where the time would be, as on the Mac.
     var wake: PhoneSchedule?
+    /// Under Starred and hibernating: a moon says so, as there's no heading to.
+    var asleep = false
 
     /// Room on the left for the gutter mark; the trailing edge like the Mac's.
     static let insets = EdgeInsets(top: 6, leading: 28, bottom: 6, trailing: 16)
@@ -389,6 +414,9 @@ struct ThreadRow: View {
                     }
                     .foregroundStyle(.secondary)
                     Spacer(minLength: 6)
+                    if asleep {
+                        Image(systemName: "moon.zzz").font(.footnote).foregroundStyle(Look.faint).accessibilityLabel("Hibernating")
+                    }
                     trailing(kind)
                 }
             }

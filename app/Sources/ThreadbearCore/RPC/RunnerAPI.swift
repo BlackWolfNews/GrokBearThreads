@@ -312,12 +312,13 @@ public struct ThreadUpdate: Sendable, Hashable {
     /// Wins over `snoozedUntil`.
     public var snoozeUntilRestart: Bool
     public var archived: Bool?
+    public var starred: Bool?
     /// A pool id moves the thread into that pool (and onto one of its
     /// logins at once if its current one isn't in it); `.some(nil)` sends
     /// null, which pins it to the login it's on. `accountId` pins too.
     public var poolId: String??
 
-    public init(title: String? = nil, cwd: String? = nil, accountId: String? = nil, model: String?? = nil, effort: String?? = nil, permissionMode: PermissionMode? = nil, snoozedUntil: Date?? = nil, snoozeUntilRestart: Bool = false, archived: Bool? = nil, poolId: String?? = nil) {
+    public init(title: String? = nil, cwd: String? = nil, accountId: String? = nil, model: String?? = nil, effort: String?? = nil, permissionMode: PermissionMode? = nil, snoozedUntil: Date?? = nil, snoozeUntilRestart: Bool = false, archived: Bool? = nil, starred: Bool? = nil, poolId: String?? = nil) {
         self.title = title
         self.cwd = cwd
         self.accountId = accountId
@@ -328,6 +329,7 @@ public struct ThreadUpdate: Sendable, Hashable {
         self.snoozedUntil = snoozedUntil
         self.snoozeUntilRestart = snoozeUntilRestart
         self.archived = archived
+        self.starred = starred
     }
 
     public var params: [String: JSONValue] {
@@ -344,6 +346,7 @@ public struct ThreadUpdate: Sendable, Hashable {
             params["snoozedUntil"] = snoozedUntil.map { .string(ISO8601.format($0)) } ?? .null
         }
         if let archived { params["archived"] = .bool(archived) }
+        if let starred { params["starred"] = .bool(starred) }
         if let poolId { params["poolId"] = poolId.map { .string($0) } ?? .null }
         return params
     }
@@ -371,6 +374,7 @@ public struct ThreadUpdate: Sendable, Hashable {
             if snoozedUntil == nil { thread.wakeWhen = nil }
         }
         if let archived { thread.archivedAt = archived ? (thread.archivedAt ?? now) : nil }
+        if let starred { thread.starredAt = starred ? (thread.starredAt ?? now) : nil }
         return thread
     }
 }

@@ -289,7 +289,7 @@ export function checkSummary(t: Obj): string[] {
   }
   const allowed = new Set([
     'id', 'title', 'cwd', 'accountId', 'provider', 'model', 'permissionMode', 'status', 'live', 'needsYou', 'createdAt', 'updatedAt',
-    'lastActivityAt', 'snoozedUntil', 'snoozedUntilRestart', 'archivedAt', 'preview', 'lastSeq', 'lastSeenSeq', 'nativeSessionId', 'contextTokens', 'costUsd',
+    'lastActivityAt', 'snoozedUntil', 'snoozedUntilRestart', 'archivedAt', 'starredAt', 'preview', 'lastSeq', 'lastSeenSeq', 'nativeSessionId', 'contextTokens', 'costUsd',
     'poolId', 'waitingForRoom', 'wakeWhen',
     'effort', 'modelInUse', 'effortInUse', 'contextWindow', 'panels', 'actions', 'hooks', 'patches', 'background', 'subagents', 'projects', 'worktree',
     'needs', 'asks', 'asksSeq', 'highlightsAt', 'panelRequest', 'share', 'startedBy',

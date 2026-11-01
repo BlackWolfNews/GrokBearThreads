@@ -68,7 +68,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 26;
+export const BACKEND_API_VERSION = 27;
 // From this one a thread's row carries its open card of asks and a finished
 // turn's next steps, and a message row can be `summary` (end_turn's
 // bullets), so the phone shows end-of-turn cards. An older backend's
@@ -122,6 +122,10 @@ export const REPLY_IMAGES_API_VERSION = 24;
 // can tell a turn the CLI started itself, which no message marks, from the one
 // before. An older backend's validator would turn the write down.
 export const TURNS_API_VERSION = 26;
+// From this one thread and threadIndex rows carry `starredAt` and phone:update
+// takes `star`. An older backend's validator would turn the row down, so it
+// goes without.
+export const STARS_API_VERSION = 27;
 // How far back a start looks for pictures, as new ones go up as they come.
 // Reading a whole log for each thread is too much to do for all of them on
 // every start, and it's the threads in use that Mike opens on the phone.
@@ -175,6 +179,7 @@ export type ThreadDoc = {
   woke?: { at: string; since?: string };
   startedBy?: { kind: string; label: string; icon?: string; why?: string };
   archivedAt?: string;
+  starredAt?: string;
   costUsd?: number;
   projects?: { id: string; title: string }[];
   working?: string;
@@ -244,7 +249,7 @@ type Host = {
 export type CommandHost = {
   send(threadId: string, text: string, images: ImageRef[], opts: { origin: 'phone'; answers?: AskAnswer[] }): unknown;
   respondApproval(p: { threadId: string; approvalId: string; decision: ApprovalDecision; message?: string; answers?: Record<string, string> }): unknown;
-  update(p: { threadId: string; title?: string; snoozedUntil?: string | null; archived?: boolean }): unknown;
+  update(p: { threadId: string; title?: string; snoozedUntil?: string | null; archived?: boolean; starred?: boolean }): unknown;
   // Seen up to the last event it has.
   markSeen(threadId: string): unknown;
   create(p: { text: string; images?: ImageRef[]; cwd?: string; accountId?: string; model?: string; effort?: EffortLevel; origin: 'phone' }): { thread: ThreadSummary };
@@ -365,6 +370,15 @@ export function defaultRunnerName(hostname = os.hostname()): string {
   return hostname.replace(/\.(local|localdomain|lan|home)$/i, '') || 'runner';
 }
 
+// Which of the phone's lists a thread's in. A starred one that's hibernating
+// stays in the inbox list: the phone has Starred at the top of its inbox, and
+// doesn't load Hibernating at all while that's folded.
+function threadView(t: Pick<ThreadSummary, 'archivedAt' | 'snoozedUntil' | 'starredAt'>, now: number): ThreadDoc['view'] {
+  if (t.archivedAt) return 'den';
+  if (t.starredAt) return 'inbox';
+  return t.snoozedUntil && Date.parse(t.snoozedUntil) > now ? 'hibernating' : 'inbox';
+}
+
 export function toThreadDoc(t: ThreadSummary, runnerId: string, now: number, pending?: PendingApproval, earliestSeq?: number, next?: string[]): ThreadDoc {
   const doc: ThreadDoc = {
     threadId: t.id,
@@ -380,7 +394,7 @@ export function toThreadDoc(t: ThreadSummary, runnerId: string, now: number, pen
     createdAt: t.createdAt,
     lastActivityAt: t.lastActivityAt,
     lastActivityMs: Date.parse(t.lastActivityAt) || 0,
-    view: t.archivedAt ? 'den' : t.snoozedUntil && Date.parse(t.snoozedUntil) > now ? 'hibernating' : 'inbox',
+    view: threadView(t, now),
   };
   if (t.model) doc.model = t.model;
   if (t.snoozedUntil) doc.snoozedUntil = t.snoozedUntil;
@@ -389,6 +403,7 @@ export function toThreadDoc(t: ThreadSummary, runnerId: string, now: number, pen
   // Not the thread it came from: the phone's row has no tooltip to name it.
   if (t.startedBy) doc.startedBy = { kind: t.startedBy.kind, label: t.startedBy.label, ...(t.startedBy.icon ? { icon: t.startedBy.icon } : {}), ...(t.startedBy.why ? { why: t.startedBy.why } : {}) };
   if (t.archivedAt) doc.archivedAt = t.archivedAt;
+  if (t.starredAt) doc.starredAt = t.starredAt;
   // To the cent: a running thread's cost moves every turn and the phone
   // doesn't need a write for the fourth decimal.
   if (t.costUsd !== undefined) doc.costUsd = Math.round(t.costUsd * 100) / 100;
@@ -440,10 +455,10 @@ function phoneAnswers(raw: unknown): AskAnswer[] | undefined {
 
 // The row as a backend of version v takes it: without the fields its
 // validator doesn't know yet.
-function forBackend(d: ThreadDoc, v: number): ThreadDoc {
+export function forBackend(d: ThreadDoc, v: number, now: number): ThreadDoc {
   const asks = d.asks !== undefined || d.asksSeq !== undefined || d.next !== undefined;
   const sections = d.needs !== undefined || d.pendingReviews !== undefined || d.waitingForRoom !== undefined;
-  if ((v >= SHARE_API_VERSION || !d.share) && (v >= WOKE_API_VERSION || !d.woke) && (v >= ASKS_API_VERSION || !asks) && (v >= SECTIONS_API_VERSION || !sections) && (v >= STARTED_BY_API_VERSION || !d.startedBy)) return d;
+  if ((v >= SHARE_API_VERSION || !d.share) && (v >= WOKE_API_VERSION || !d.woke) && (v >= ASKS_API_VERSION || !asks) && (v >= SECTIONS_API_VERSION || !sections) && (v >= STARTED_BY_API_VERSION || !d.startedBy) && (v >= STARS_API_VERSION || !d.starredAt)) return d;
   const out = { ...d };
   if (v < SECTIONS_API_VERSION) {
     delete out.needs;
@@ -453,6 +468,11 @@ function forBackend(d: ThreadDoc, v: number): ThreadDoc {
   if (v < SHARE_API_VERSION) delete out.share;
   if (v < WOKE_API_VERSION) delete out.woke;
   if (v < STARTED_BY_API_VERSION) delete out.startedBy;
+  if (v < STARS_API_VERSION && out.starredAt) {
+    // That backend's phones have no Starred section to show it in.
+    delete out.starredAt;
+    out.view = threadView(out, now);
+  }
   if (v < ASKS_API_VERSION) {
     delete out.asks;
     delete out.asksSeq;
@@ -711,6 +731,7 @@ export class ConvexSync {
         clock: deps.clock,
         log: deps.log,
         takesStartedBy: () => (this.backendApiVersion ?? 0) >= INDEX_STARTED_BY_API_VERSION,
+        takesStars: () => (this.backendApiVersion ?? 0) >= STARS_API_VERSION,
       });
     }
   }
@@ -772,7 +793,7 @@ export class ConvexSync {
       const card = (t: ThreadSummary) => Boolean(t.asks?.length) || (t.needs === 'nothing' && t.status === 'idle' && !t.archivedAt);
       // Likewise needs, reviews and waiting for room, for the phone's sections.
       const sections = (t: ThreadSummary) => Boolean(t.needs || t.pendingReviews || t.waitingForRoom);
-      for (const t of this.deps.runner.list(ALL)) if (t.share || (t.woke && v >= WOKE_API_VERSION) || (t.startedBy && v >= STARTED_BY_API_VERSION) || (v >= ASKS_API_VERSION && card(t)) || (v >= SECTIONS_API_VERSION && sections(t))) this.mark(t);
+      for (const t of this.deps.runner.list(ALL)) if (t.share || (t.woke && v >= WOKE_API_VERSION) || (t.startedBy && v >= STARTED_BY_API_VERSION) || (t.starredAt && v >= STARS_API_VERSION) || (v >= ASKS_API_VERSION && card(t)) || (v >= SECTIONS_API_VERSION && sections(t))) this.mark(t);
       this.scheduleFlush();
     }
     // The pictures wait for the first heartbeat to say the backend takes them.
@@ -999,7 +1020,7 @@ export class ConvexSync {
       this.mark(this.deps.runner.get(threadId));
       const doc = this.dirty.get(threadId);
       if (!doc) return;
-      const row = forBackend(doc, this.backendApiVersion ?? 0);
+      const row = forBackend(doc, this.backendApiVersion ?? 0, this.deps.clock.now());
       await this.post('mutation', 'sync:upsertThreads', { key: this.deps.key, threads: [row] });
       this.sent.set(threadId, JSON.stringify(row));
       if (this.dirty.get(threadId) === doc) this.dirty.delete(threadId);
@@ -1101,7 +1122,7 @@ export class ConvexSync {
       // it's new enough (sawBackend).
       const v = this.backendApiVersion ?? 0;
       for (let i = 0; i < docs.length; i += SYNC_BATCH) {
-        const batch = docs.slice(i, i + SYNC_BATCH).map((d) => forBackend(d, v));
+        const batch = docs.slice(i, i + SYNC_BATCH).map((d) => forBackend(d, v, this.deps.clock.now()));
         await this.post('mutation', 'sync:upsertThreads', { key, threads: batch });
         for (const d of batch) this.sent.set(d.threadId, JSON.stringify(d));
         this.written += batch.length;
@@ -1696,6 +1717,7 @@ export class ConvexSync {
         else if (a.archive) await host.update({ threadId: id, archived: true });
         else if (a.unarchive) await host.update({ threadId: id, archived: false });
         else if (a.markSeen) await host.markSeen(id);
+        else if (typeof a.star === 'boolean') await host.update({ threadId: id, starred: a.star });
         else if (typeof a.title === 'string') await host.update({ threadId: id, title: a.title });
         else throw new Error('nothing to change');
         return undefined;

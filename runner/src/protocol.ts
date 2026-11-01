@@ -161,6 +161,7 @@ export type ThreadSummary = {
   woke?: { at: string; since?: string }; // woke from hibernating by itself, not looked at yet
   onOldRunner?: boolean; // finishing a turn on a runner that handed over (Handovers)
   archivedAt?: string;
+  starredAt?: string; // in the Starred section above the Inbox, unless archived
   preview: string;
   lastSeq: number;
   lastSeenSeq: number;

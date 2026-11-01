@@ -111,7 +111,8 @@ private struct InboxList: View {
                         // Under the empty Inbox heading. Threads waiting on
                         // a schedule don't stop it: there's still nothing
                         // for Mike to do.
-                        if section == .inbox && !searching && sections.inbox.isEmpty && sections.running.isEmpty {
+                        // Nor do starred threads, unless one needs him.
+                        if section == .inbox && !searching && sections.inbox.isEmpty && sections.running.isEmpty && sections.needsYou.isEmpty {
                             InboxZero()
                         }
                     }
@@ -196,13 +197,13 @@ private struct ThreadSection: View {
             .environment(\.archiveLandings, section == .archived ? app.archiveLandings : nil)
             if !collapsed {
                 ForEach(threads.map { SectionRow(section: section.title, thread: $0) }) { row in
-                    ThreadRowView(thread: row.thread, mode: RowMode(section), section: section) { select(row.thread.id) }
+                    ThreadRowView(thread: row.thread, mode: RowMode(section, thread: row.thread, now: app.now), section: section) { select(row.thread.id) }
                         // The tour points at the samples' rows by title.
                         .tourTarget(.sampleRow(row.thread.title), when: row.thread.sample)
                         .transition(Juice.row)
                     // Put-away threads have nothing running to list.
                     if !section.isPutAway {
-                        SubagentList(thread: row.thread, section: section.title, finishedShown: section != .inbox)
+                        SubagentList(thread: row.thread, section: section.title, finishedShown: section != .inbox && section != .starred)
                     }
                 }
                 if section == .archived && more > 0 {
@@ -439,6 +440,7 @@ extension SectionHeading where Accessory == EmptyView {
 extension InboxSection {
     var icon: String {
         switch self {
+        case .starred: return "star"
         case .inbox: return "tray"
         case .running: return "bolt"
         case .waiting: return "clock"
@@ -535,8 +537,11 @@ private struct SelectionKey: Equatable {
 enum RowMode: Equatable {
     case inbox, hibernating, archive, projects
 
-    init(_ section: InboxSection) {
+    /// A starred thread reads as what it is: one that's hibernating says
+    /// when it wakes, and wakes rather than hibernates.
+    init(_ section: InboxSection, thread: ThreadSummary, now: Date) {
         switch section {
+        case .starred: self = thread.isSnoozed(at: now) ? .hibernating : .inbox
         case .hibernating: self = .hibernating
         case .archived: self = .archive
         case .inbox, .running, .waiting: self = .inbox
@@ -545,15 +550,15 @@ enum RowMode: Equatable {
 
     var rowActions: [RowAction] {
         switch self {
-        case .inbox, .projects: return [.snooze, .archive]
-        case .hibernating: return [.unsnooze, .archive]
+        case .inbox, .projects: return [.star, .snooze, .archive]
+        case .hibernating: return [.star, .unsnooze, .archive]
         case .archive: return [.unarchive]
         }
     }
 }
 
 enum RowAction {
-    case snooze, archive, unsnooze, unarchive
+    case star, snooze, archive, unsnooze, unarchive
 }
 
 struct ThreadRowView: View {
@@ -945,6 +950,12 @@ private struct RowActions: View {
         HStack(spacing: zoomed(2)) {
             ForEach(Array(actions.enumerated()), id: \.offset) { _, action in
                 switch action {
+                case .star:
+                    Button { app.setStarred(thread.id, !thread.isStarred) } label: {
+                        Image(systemName: thread.isStarred ? "star.fill" : "star")
+                    }
+                    .buttonStyle(RowIconButtonStyle())
+                    .tip(thread.isStarred ? "Remove star" : "Star: keep at the top")
                 case .snooze:
                     HibernateButton(threadId: thread.id)
                 case .archive:
@@ -1073,6 +1084,9 @@ struct ThreadMenu: View {
         }
         Divider()
         Button("Rename", systemImage: "pencil") { app.startRenaming(thread.id) }
+        Button(thread.isStarred ? "Remove Star" : "Star", systemImage: thread.isStarred ? "star.slash" : "star") {
+            app.setStarred(thread.id, !thread.isStarred)
+        }
         SnoozeMenu(threadId: thread.id)
         if thread.snoozedUntil != nil {
             Button("Wake", systemImage: "sun.max") { app.unsnooze(thread.id) }

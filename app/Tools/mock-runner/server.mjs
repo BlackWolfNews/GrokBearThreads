@@ -683,6 +683,8 @@ async function dispatch(client, method, p) {
         s.archivedAt = p.archived ? iso() : undefined;
         if (p.archived) s.live = false;
       }
+      if (p.starred === true) s.starredAt ??= iso();
+      else if (p.starred === false) delete s.starredAt;
       s.updatedAt = iso();
       broadcastSummary(s.id);
       return { thread: s };

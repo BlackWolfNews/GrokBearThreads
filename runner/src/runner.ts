@@ -3117,6 +3117,7 @@ export class Runner {
     permissionMode?: PermissionMode;
     snoozedUntil?: string | null; // an ISO time, or 'restart' for until the runner next starts
     archived?: boolean;
+    starred?: boolean;
   }): { thread: ThreadSummary } {
     const st = this.mustGet(params.threadId);
     const { rec, rt } = st;
@@ -3295,6 +3296,8 @@ export class Runner {
         stop = true;
       } else delete rec.archivedAt;
     }
+    if (params.starred === true) rec.starredAt ??= this.isoNow();
+    else if (params.starred === false) delete rec.starredAt;
     if (accountChanged && rt.turn && rt.session && !stop) {
       // The turn carries on where it started; say so, or the picker reads
       // as if the new model were already doing the work.
@@ -4228,6 +4231,7 @@ export class Runner {
     if (rec.wakeWhen && rec.snoozedUntil) s.wakeWhen = { ...rec.wakeWhen };
     if (rec.woke && rec.forceUnread) s.woke = { ...rec.woke };
     if (rec.archivedAt) s.archivedAt = rec.archivedAt;
+    if (rec.starredAt) s.starredAt = rec.starredAt;
     if (rec.nativeSessionId && rec.sessionUsed) s.nativeSessionId = rec.nativeSessionId;
     if (rec.contextTokens !== undefined) s.contextTokens = rec.contextTokens;
     if (rec.sample) s.sample = true;

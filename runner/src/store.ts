@@ -41,6 +41,7 @@ export type ThreadRecord = {
   snoozedAt?: string; // when it was last put away, for how long it slept; may be stale once awake
   woke?: { at: string; since?: string }; // woke by itself and not looked at yet (since = snoozedAt)
   archivedAt?: string;
+  starredAt?: string; // Mike starred it: the Starred section, oldest star first
   preview: string;
   lastSeq: number;
   lastSeenSeq: number;

@@ -259,7 +259,7 @@ enum Automation {
             let match = thread(c["id"], app)
             guard let id = match.id else { return match.error }
             if let thread = app.threads[id] {
-                if thread.isArchived { app.showArchive() } else if thread.isSnoozed(at: Date()) { app.showHibernating() } else { app.sidebarMode = .inbox }
+                if thread.isArchived { app.showArchive() } else if thread.isSnoozed(at: Date()), !thread.isStarred { app.showHibernating() } else { app.sidebarMode = .inbox }
             }
             app.select(id)
             let session = app.session(for: id)
@@ -417,6 +417,11 @@ enum Automation {
             let target = target(c, app)
             guard let id = target.id else { return target.error }
             app.archive(id)
+            return "ok \(id)"
+        case "star", "unstar":
+            let target = target(c, app)
+            guard let id = target.id else { return target.error }
+            app.setStarred(id, name == "star")
             return "ok \(id)"
         case "undo-archive":
             // The Archived note's Undo.
@@ -892,7 +897,7 @@ enum Automation {
             // the search's matches while it has text.
             let sections = app.sections.matching(app.searchQuery)
             let object: [String: Any] = [
-                "needsYou": sections.needsYou.map(\.id), "running": sections.running.map(\.id), "waiting": sections.waiting.map(\.id),
+                "starred": sections.starred.map(\.id), "needsYou": sections.needsYou.map(\.id), "running": sections.running.map(\.id), "waiting": sections.waiting.map(\.id),
                 "inbox": sections.inbox.map(\.id), "snoozed": sections.hibernating.count, "archived": sections.archived.count,
                 "hover": app.hoverOverride ?? "", "search": app.searchQuery,
             ]

@@ -3,10 +3,11 @@ import Foundation
 /// The inbox's headings, top to bottom, as on the Mac sidebar
 /// (app InboxSection).
 public enum PhoneSection: String, Sendable, CaseIterable {
-    case inbox, running, waiting, hibernating, archived
+    case starred, inbox, running, waiting, hibernating, archived
 
     public var title: String {
         switch self {
+        case .starred: "Starred"
         case .inbox: "Inbox"
         case .running: "Running"
         case .waiting: "Waiting"
@@ -17,6 +18,7 @@ public enum PhoneSection: String, Sendable, CaseIterable {
 
     public var icon: String {
         switch self {
+        case .starred: "star"
         case .inbox: "tray"
         case .running: "bolt"
         case .waiting: "clock"
@@ -37,8 +39,8 @@ public enum PhoneSection: String, Sendable, CaseIterable {
 }
 
 /// Which headings are folded, as the Mac's sidebar folds them. Everything
-/// but Inbox starts folded (Mike asked 30 Oct), so the inbox is what you
-/// see first. A folded Hibernating or Archived isn't loaded at all: its
+/// but Starred and Inbox starts folded (Mike asked 30 Oct), so those are what
+/// you see first. A folded Hibernating or Archived isn't loaded at all: its
 /// heading shows phone:counts' number, and its threads are fetched once
 /// it's opened, or while a search is on, since search looks in them too.
 public struct SectionFolds: Sendable, Equatable {
@@ -83,12 +85,16 @@ public struct SectionFolds: Sendable, Equatable {
 /// nothing for him until then. Hibernating and Archived are lists of their
 /// own from the menu, as the backend sends them separately.
 public struct InboxSections: Sendable, Equatable {
+    /// Oldest star first, so they stay put. Hibernating ones too: the runner
+    /// keeps them in the inbox list for this (backend API 27).
+    public var starred: [PhoneThread] = []
     public var inbox: [PhoneThread] = []
     public var running: [PhoneThread] = []
     /// Soonest to wake first.
     public var waiting: [PhoneThread] = []
 
-    public init(inbox: [PhoneThread] = [], running: [PhoneThread] = [], waiting: [PhoneThread] = []) {
+    public init(starred: [PhoneThread] = [], inbox: [PhoneThread] = [], running: [PhoneThread] = [], waiting: [PhoneThread] = []) {
+        self.starred = starred
         self.inbox = inbox
         self.running = running
         self.waiting = waiting
@@ -100,10 +106,16 @@ public struct InboxSections: Sendable, Equatable {
     /// Waiting: idle with a schedule due to message it (`wakes`), and
     /// nothing for Mike: no question, no design review, no unread reply
     /// that didn't say "nothing", no open asks, not waiting for a login
-    /// with room. Inbox: everything else.
+    /// with room. Inbox: everything else. Starred takes a starred thread
+    /// from all of these, whatever it's doing.
     public static func build(_ threads: some Sequence<PhoneThread>, now: Date, wakes: [String: PhoneSchedule] = [:]) -> InboxSections {
         var sections = InboxSections()
-        for thread in threads where thread.archivedAt == nil && !isSnoozed(thread, now: now) {
+        for thread in threads where thread.archivedAt == nil {
+            if thread.starredAt != nil {
+                sections.starred.append(thread)
+                continue
+            }
+            if isSnoozed(thread, now: now) { continue }
             // A question or approval goes in the inbox even while background
             // work runs: the thread is stuck until he answers. So does a
             // turn that ended asking him for something.
@@ -116,6 +128,10 @@ public struct InboxSections: Sendable, Equatable {
             } else {
                 sections.inbox.append(thread)
             }
+        }
+        sections.starred.sort {
+            let (a, b) = ($0.starredAt ?? .distantFuture, $1.starredAt ?? .distantFuture)
+            return a != b ? a < b : $0.threadId < $1.threadId
         }
         sections.inbox.sort {
             let (a, b) = (urgency($0), urgency($1))
@@ -155,7 +171,7 @@ public struct InboxSections: Sendable, Equatable {
         thread.pendingApproval != nil || thread.status == .waiting
     }
 
-    static func isSnoozed(_ thread: PhoneThread, now: Date) -> Bool {
+    public static func isSnoozed(_ thread: PhoneThread, now: Date) -> Bool {
         if thread.snoozedUntilRestart == true { return true }
         guard let until = thread.snoozedUntil else { return false }
         return until > now
@@ -165,18 +181,21 @@ public struct InboxSections: Sendable, Equatable {
         a.lastActivityAt != b.lastActivityAt ? a.lastActivityAt > b.lastActivityAt : a.threadId < b.threadId
     }
 
-    /// The badge: threads waiting on an answer or not read yet.
+    /// The badge: threads waiting on an answer or not read yet. A star doesn't
+    /// take one out of it, unless it's hibernating, which isn't counted either.
     public var needsYouCount: Int {
-        inbox.filter { Self.urgency($0) <= 2 }.count
+        let awake = starred.filter { $0.snoozedUntil == nil && $0.snoozedUntilRestart != true }
+        return (awake + inbox).filter { Self.urgency($0) <= 2 }.count
     }
 
-    public var isEmpty: Bool { inbox.isEmpty && running.isEmpty && waiting.isEmpty }
+    public var isEmpty: Bool { starred.isEmpty && inbox.isEmpty && running.isEmpty && waiting.isEmpty }
 }
 
 /// The search at the top of the inbox, as the Mac sidebar's
 /// (ThreadSections.matching): every thread, the put-away ones too, each
 /// section cut down to the matches in its usual order.
 public struct ThreadSearch: Sendable, Equatable {
+    public var starred: [PhoneThread] = []
     public var inbox: [PhoneThread] = []
     public var running: [PhoneThread] = []
     public var waiting: [PhoneThread] = []
@@ -195,6 +214,7 @@ public struct ThreadSearch: Sendable, Equatable {
         let keep: ([PhoneThread]) -> [PhoneThread] = { threads in
             threads.filter { Self.matches($0, query) && seen.insert($0.threadId).inserted }
         }
+        starred = keep(sections.starred)
         inbox = keep(sections.inbox)
         running = keep(sections.running)
         waiting = keep(sections.waiting)
@@ -210,7 +230,7 @@ public struct ThreadSearch: Sendable, Equatable {
         return [thread.title, thread.preview, thread.placeText].contains { $0.range(of: query, options: options) != nil }
     }
 
-    public var isEmpty: Bool { inbox.isEmpty && running.isEmpty && waiting.isEmpty && hibernating.isEmpty && archived.isEmpty }
+    public var isEmpty: Bool { starred.isEmpty && inbox.isEmpty && running.isEmpty && waiting.isEmpty && hibernating.isEmpty && archived.isEmpty }
 }
 
 /// What a row says at its right: the status while it means something, else

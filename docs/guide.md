@@ -42,6 +42,12 @@ Hibernating and Archived, at the foot, hold the threads you've put away
 (see [Hibernate and archive](#hibernate-and-archive)). They start folded,
 showing only how many; click a heading to open or fold it.
 
+To keep a thread at the very top, star it: hover its row and press the star,
+or use its right-click or ... menu. Starred threads sit in a Starred section
+above the Inbox, whatever they're doing, hibernating ones too, in the order you
+starred them, so they don't jump around. Archiving one moves it to Archived;
+bring it back and it's starred again.
+
 The search box at the top, beside the New thread button, looks through
 every thread, the put-away ones too. Type part of a title, or of a thread's
 last reply, and each section shows only the threads that match, with folded
@@ -466,8 +472,9 @@ the thread runs on.
 The Threadbear iPhone app is for when you're away from the Mac: ask a
 thread a question, steer it, answer the ones that need you, start new
 ones, and see how they're all getting on. Its inbox sorts threads the
-way the Mac's does, into Inbox, Running, Waiting, Hibernating and
-Archived. All but Inbox start folded, showing how many they hold; tap a
+way the Mac's does, into Starred, Inbox, Running, Waiting, Hibernating and
+Archived. To star a thread, swipe its row to the right, or use the menu when
+you press and hold it or the ... menu inside it. All but Starred and Inbox start folded, showing how many they hold; tap a
 heading to open or fold it, and the phone remembers. A folded Hibernating
 or Archived isn't loaded at all, so the phone fetches less. A thread's finished turns
 fold into one Worked line above the reply, as on the Mac; tap it to see

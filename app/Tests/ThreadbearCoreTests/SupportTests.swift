@@ -290,6 +290,37 @@ final class ThreadSectionsTests: XCTestCase {
     /// for Mike, waits in its own section at the bottom, soonest first,
     /// rather than sitting in the inbox (Mike asked 29 Oct). Anything it
     /// still wants from him keeps it in the inbox.
+    func testStarredThreadsStayAtTheTop() {
+        let now = Date()
+        func starred(_ id: String, _ minutesAgo: Double, status: ThreadStatus = .idle, needsYou: Bool = false, snoozed: Bool = false, archived: Bool = false) -> ThreadSummary {
+            ThreadSummary(id: id, title: id, status: status, needsYou: needsYou, snoozedUntil: snoozed ? now.addingTimeInterval(600) : nil,
+                          archivedAt: archived ? now : nil, starredAt: now.addingTimeInterval(-minutesAgo * 60))
+        }
+        let sections = ThreadSections.build([
+            starred("second", 10),
+            starred("asleep", 20, needsYou: true, snoozed: true),
+            starred("first", 30, status: .running),
+            starred("asks", 5, needsYou: true),
+            starred("archived", 40, archived: true),
+            ThreadSummary(id: "plain", title: "plain"),
+        ], now: now)
+        XCTAssertEqual(sections.starred.map(\.id), ["first", "asleep", "second", "asks"], "in the order they were starred, whatever they're doing")
+        XCTAssertEqual(sections.inbox.map(\.id), ["plain"])
+        XCTAssertTrue(sections.running.isEmpty)
+        XCTAssertTrue(sections.hibernating.isEmpty)
+        XCTAssertEqual(sections.archived.map(\.id), ["archived"], "archiving still puts one away")
+        XCTAssertEqual(sections.needsYou.map(\.id), ["asks"], "a star doesn't hide it from the badge, but hibernating does")
+        XCTAssertEqual(sections.all.first?.id, "first", "the arrow keys and archive's next thread start at the top")
+        XCTAssertEqual(sections.matching("asks").starred.map(\.id), ["asks"])
+
+        var thread = ThreadSummary(id: "t", title: "t")
+        thread = ThreadUpdate(starred: true).applied(to: thread, now: now)
+        XCTAssertEqual(thread.starredAt, now)
+        XCTAssertEqual(ThreadUpdate(starred: true).applied(to: thread, now: now.addingTimeInterval(9)).starredAt, now, "starred again keeps its place")
+        XCTAssertNil(ThreadUpdate(starred: false).applied(to: thread).starredAt)
+        XCTAssertEqual(ThreadUpdate(starred: true).params["starred"], .bool(true))
+    }
+
     func testBookedThreadsWait() {
         let now = Date(timeIntervalSince1970: 1_000_000)
         var said = thread("said-done-unread", needsYou: false, minutesAgo: 1)

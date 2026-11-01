@@ -360,6 +360,7 @@ export const update = mutation({
       v.object({ unarchive: v.literal(true) }),
       v.object({ markSeen: v.literal(true) }),
       v.object({ title: v.string() }),
+      v.object({ star: v.boolean() }),
     ),
   },
   returns: v.id('commands'),

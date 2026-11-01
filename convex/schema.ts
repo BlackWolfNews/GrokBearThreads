@@ -43,6 +43,8 @@ export const threadFields = {
   // (docs/protocol.md, "Who started a thread"). Since API 22.
   startedBy: v.optional(v.object({ kind: v.string(), label: v.string(), icon: v.optional(v.string()), why: v.optional(v.string()) })),
   archivedAt: v.optional(v.string()),
+  // Mike starred it: the phone's Starred section. Since API 27.
+  starredAt: v.optional(v.string()),
   costUsd: v.optional(v.number()),
   projects: v.optional(v.array(v.object({ id: v.string(), title: v.string() }))),
   working: v.optional(v.string()), // the working line: what the CLI is doing in the background
@@ -106,7 +108,8 @@ export const threadFields = {
 
 // Which list a thread is in on the phone, worked out by the runner so the
 // phone and the Mac app agree: "inbox", "hibernating" (snoozed) or "den"
-// (archived).
+// (archived). A starred thread that's snoozed stays in "inbox", as Starred
+// is at the top of the phone's inbox.
 export const views = ['inbox', 'hibernating', 'den'] as const;
 
 export default defineSchema({
@@ -155,6 +158,7 @@ export default defineSchema({
     lastActivityAt: v.string(),
     snoozedUntil: v.optional(v.string()),
     archivedAt: v.optional(v.string()),
+    starredAt: v.optional(v.string()), // since API 27
     // Who started it, when that wasn't Mike: the row's byline. Since API 23.
     startedBy: v.optional(v.object({ kind: v.string(), label: v.string(), icon: v.optional(v.string()), threadTitle: v.optional(v.string()), why: v.optional(v.string()) })),
   })

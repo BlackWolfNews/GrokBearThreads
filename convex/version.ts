@@ -94,4 +94,9 @@
 //    returns it, so the phone can tell a turn the CLI started itself from the
 //    one before. A runner sends it only to a backend of 26 or later, and a
 //    phone without it reads the rows as it always did.
-export const API_VERSION = 26;
+// 27: stars. Thread and threadIndex rows can carry `starredAt`, a starred
+//    thread that's hibernating stays in view "inbox", and phone:update takes
+//    `star`. A runner sends them only to a backend of 27 or later; an older
+//    phone doesn't show the section, and misses a thread that's both
+//    starred and hibernating until it's updated.
+export const API_VERSION = 27;

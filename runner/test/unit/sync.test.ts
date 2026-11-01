@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
-import { ConvexSync, BACKEND_API_VERSION, TURNS_API_VERSION, ICONS_API_VERSION, RUNNER_ICON_API_VERSION, SCHEDULES_API_VERSION, SHARE_API_VERSION, WOKE_API_VERSION, STARTED_BY_API_VERSION, SECTIONS_API_VERSION, MODELS_API_VERSION, REPLY_IMAGES_API_VERSION, REPLY_IMAGES_LOOKBACK_MS, REPLY_IMAGES_SCANS_PER_FLUSH, toAccountDoc, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, convexUploader, pictureName, type ThreadDoc } from '../../src/sync.ts';
+import { ConvexSync, forBackend, STARS_API_VERSION, BACKEND_API_VERSION, TURNS_API_VERSION, ICONS_API_VERSION, RUNNER_ICON_API_VERSION, SCHEDULES_API_VERSION, SHARE_API_VERSION, WOKE_API_VERSION, STARTED_BY_API_VERSION, SECTIONS_API_VERSION, MODELS_API_VERSION, REPLY_IMAGES_API_VERSION, REPLY_IMAGES_LOOKBACK_MS, REPLY_IMAGES_SCANS_PER_FLUSH, toAccountDoc, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, convexUploader, pictureName, type ThreadDoc } from '../../src/sync.ts';
 import type { Project } from '../../src/protocol.ts';
 import type { ScheduleBackend } from '../../src/schedules.ts';
 import { nullLogger, type Logger } from '../../src/log.ts';
@@ -129,6 +129,17 @@ test('view follows hibernate and den; cost is to the cent; working comes from ba
   assert.equal(toThreadDoc({ ...base, snoozedUntil: '2026-10-27T18:00:00.000Z' }, 'r', now).view, 'hibernating');
   assert.equal(toThreadDoc({ ...base, snoozedUntil: '2026-10-27T09:00:00.000Z' }, 'r', now).view, 'inbox', 'a snooze that has passed');
   assert.equal(toThreadDoc({ ...base, archivedAt: '2026-10-27T09:40:00.000Z' }, 'r', now).view, 'den');
+  // A star keeps a hibernating thread in the list the phone always loads, but
+  // not an archived one. A backend without stars gets it as an ordinary thread.
+  const starredAt = '2026-10-27T09:20:00.000Z';
+  const asleep = toThreadDoc({ ...base, starredAt, snoozedUntil: '2026-10-27T18:00:00.000Z' }, 'r', now);
+  assert.equal(asleep.view, 'inbox');
+  assert.equal(asleep.starredAt, starredAt);
+  assert.equal(toThreadDoc({ ...base, starredAt, archivedAt: '2026-10-27T09:40:00.000Z' }, 'r', now).view, 'den');
+  const older = forBackend(asleep, STARS_API_VERSION - 1, now);
+  assert.equal(older.view, 'hibernating');
+  assert.ok(!('starredAt' in older));
+  assert.equal(forBackend(asleep, STARS_API_VERSION, now), asleep);
   const woke = { at: '2026-10-27T10:00:00.000Z', since: '2026-10-26T10:00:00.000Z' };
   assert.deepEqual(toThreadDoc({ ...base, woke }, 'r', now).woke, woke);
   assert.ok(!('woke' in inbox));

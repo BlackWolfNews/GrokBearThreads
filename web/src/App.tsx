@@ -251,7 +251,7 @@ function ThreadView({ token, threadId }: { token: string; threadId: string }) {
         <div className="head-actions">
           <ShareControl token={token} threadId={threadId} share={t.share} />
           <CopyLink />
-          {t.view === 'hibernating' ? (
+          {t.view === 'hibernating' || t.snoozedUntil ? (
             <button onClick={() => act({ wake: true })}>Wake</button>
           ) : t.view === 'inbox' ? (
             <button onClick={() => act({ snooze: { untilRestart: true } })} title="Hibernate until you wake it">

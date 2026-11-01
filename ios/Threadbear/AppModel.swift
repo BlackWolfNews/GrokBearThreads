@@ -104,6 +104,7 @@ final class AppModel {
     var loadSamplePhoto: (@Sendable () async -> Data?)?
 
     /// Whether this backend takes photos. The demo does, so App Review sees it.
+    var canStar: Bool { isFake || (apiVersion ?? 0) >= BackendCompatibility.starsAPIVersion }
     var canSendPhotos: Bool { isFake || (apiVersion ?? 0) >= BackendCompatibility.photosAPIVersion }
 
     /// The models a new thread can start on; empty hides the pickers, as an
@@ -261,6 +262,7 @@ final class AppModel {
     /// else phone:counts'. Nil when neither knows.
     func count(_ section: PhoneSection) -> Int? {
         switch section {
+        case .starred: sections.starred.count
         case .inbox: sections.inbox.count
         case .running: sections.running.count
         case .waiting: sections.waiting.count
@@ -272,6 +274,7 @@ final class AppModel {
 
     func threads(_ section: PhoneSection) -> [PhoneThread] {
         switch section {
+        case .starred: sections.starred
         case .inbox: sections.inbox
         case .running: sections.running
         case .waiting: sections.waiting

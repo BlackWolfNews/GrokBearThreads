@@ -32,6 +32,7 @@ export type IndexRow = {
   lastActivityAt: string;
   snoozedUntil?: string;
   archivedAt?: string;
+  starredAt?: string;
   startedBy?: { kind: string; label: string; icon?: string; threadTitle?: string; why?: string };
 };
 
@@ -45,7 +46,7 @@ const BATCH = 50;
 // As on the phone: not heard from for this long is offline.
 const ONLINE_MS = 3 * 60_000;
 
-export function toIndexRow(t: ThreadSummary, withStartedBy = true): IndexRow {
+export function toIndexRow(t: ThreadSummary, withStartedBy = true, withStars = true): IndexRow {
   const row: IndexRow = {
     threadId: t.id,
     title: t.title,
@@ -62,6 +63,7 @@ export function toIndexRow(t: ThreadSummary, withStartedBy = true): IndexRow {
   if (t.model) row.model = t.model;
   if (t.snoozedUntil) row.snoozedUntil = t.snoozedUntil;
   if (t.archivedAt) row.archivedAt = t.archivedAt;
+  if (withStars && t.starredAt) row.starredAt = t.starredAt;
   if (withStartedBy && t.startedBy) {
     // Not the thread's id: only the row's tooltip uses this, by that title.
     const { kind, label, icon, threadTitle, why } = t.startedBy;
@@ -96,6 +98,7 @@ export class ThreadIndex {
     // Whether the backend's validator knows startedBy (API 23). It would turn
     // the whole batch down otherwise, and the sidebar would stop updating.
     takesStartedBy?: () => boolean;
+    takesStars?: () => boolean;
   };
   private running = false;
   private sent = new Map<string, string>(); // threadId -> writeKey as sent
@@ -159,7 +162,7 @@ export class ThreadIndex {
   }
 
   private mark(t: ThreadSummary): void {
-    const row = toIndexRow(t, this.deps.takesStartedBy?.() ?? true);
+    const row = toIndexRow(t, this.deps.takesStartedBy?.() ?? true, this.deps.takesStars?.() ?? true);
     if (this.sent.get(t.id) === writeKey(row)) {
       this.dirty.delete(t.id);
       return;

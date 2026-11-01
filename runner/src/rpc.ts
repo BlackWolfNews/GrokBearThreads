@@ -413,6 +413,10 @@ export class RpcServer {
           if (typeof p.archived !== 'boolean') throw bad('archived must be a boolean');
           upd.archived = p.archived;
         }
+        if (p.starred !== undefined) {
+          if (typeof p.starred !== 'boolean') throw bad('starred must be a boolean');
+          upd.starred = p.starred;
+        }
         return r.update(upd);
       }
       case 'threads.retitle': {

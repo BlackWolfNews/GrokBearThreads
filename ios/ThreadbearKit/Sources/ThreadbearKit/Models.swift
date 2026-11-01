@@ -216,6 +216,8 @@ public struct PhoneThread: Codable, Sendable, Hashable, Identifiable {
     /// Who started it, when Mike didn't: the row's second line says so.
     public var startedBy: StartedBy?
     @OptionalFlexibleDate public var archivedAt: Date?
+    /// Mike starred it: the Starred section at the top (backend API 27).
+    @OptionalFlexibleDate public var starredAt: Date?
     public var costUsd: Double?
     public var projects: [ProjectRef]?
     /// The working line ("Running npm test"), while a turn or background
@@ -246,7 +248,7 @@ public struct PhoneThread: Codable, Sendable, Hashable, Identifiable {
         threadId: String, runnerId: String = "m5", title: String, cwd: String = "~/dev/me/misc",
         accountId: String = "claude-3", provider: String = "claude", model: String? = nil,
         status: ThreadStatus = .idle, needsYou: Bool = false, unread: Bool = false, preview: String = "",
-        lastActivityAt: Date, snoozedUntil: Date? = nil, snoozedUntilRestart: Bool? = nil, woke: Woke? = nil, archivedAt: Date? = nil,
+        lastActivityAt: Date, snoozedUntil: Date? = nil, snoozedUntilRestart: Bool? = nil, woke: Woke? = nil, archivedAt: Date? = nil, starredAt: Date? = nil,
         costUsd: Double? = nil, projects: [ProjectRef]? = nil, working: String? = nil,
         pendingApproval: PendingApproval? = nil, earliestSeq: Double? = nil,
         asks: [PhoneAsk]? = nil, asksSeq: Double? = nil, next: [String]? = nil,
@@ -268,6 +270,7 @@ public struct PhoneThread: Codable, Sendable, Hashable, Identifiable {
         self.snoozedUntilRestart = snoozedUntilRestart
         self.woke = woke
         self._archivedAt = OptionalFlexibleDate(wrappedValue: archivedAt)
+        self._starredAt = OptionalFlexibleDate(wrappedValue: starredAt)
         self.costUsd = costUsd
         self.projects = projects
         self.working = working
@@ -670,7 +673,7 @@ public enum BackendCompatibility {
     /// The newest backend API this app knows. From 2 a thread's messages come
     /// from phone:messages (every message and tool line, paged in Convex);
     /// an older backend still gets phone:thread and the runner's paging.
-    public static let currentAPIVersion = 24
+    public static let currentAPIVersion = 27
     public static let messagePagesAPIVersion = 2
     /// From 3 each phone chooses when it's notified (phone:setNotifications).
     public static let notificationSettingAPIVersion = 3
@@ -706,6 +709,9 @@ public enum BackendCompatibility {
     /// From 20 accounts carry their models and phone:create takes an effort,
     /// for the new thread pickers. Older backends get neither picker.
     public static let modelsAPIVersion = 20
+    /// From 27 threads can be starred (phone:update's `star`). Older backends
+    /// would refuse it, so the phone doesn't offer it.
+    public static let starsAPIVersion = 27
 
     /// The line to show, or nil when the backend is fine.
     public static func problem(_ identity: PhoneIdentity) -> String? {
@@ -768,6 +774,7 @@ public enum ThreadChange: Sendable, Hashable {
     case unarchive
     case markSeen
     case rename(String)
+    case star(Bool)
 
     var json: JSONValue {
         switch self {
@@ -778,6 +785,7 @@ public enum ThreadChange: Sendable, Hashable {
         case .unarchive: ["unarchive": true]
         case .markSeen: ["markSeen": true]
         case let .rename(title): ["title": .string(title)]
+        case let .star(on): ["star": .bool(on)]
         }
     }
 }

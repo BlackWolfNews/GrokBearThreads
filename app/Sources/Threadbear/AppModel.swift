@@ -1016,7 +1016,7 @@ final class AppModel {
         guard let thread = threads[threadId] else { return }
         if thread.isArchived {
             showArchive()
-        } else if thread.isSnoozed(at: Date()) {
+        } else if thread.isSnoozed(at: Date()), !thread.isStarred {
             showHibernating()
         } else {
             sidebarMode = .inbox
@@ -1536,6 +1536,11 @@ final class AppModel {
                 show(error)
             }
         }
+    }
+
+    /// Stars it, or takes the star off (the Starred section above the Inbox).
+    func setStarred(_ threadId: String, _ starred: Bool) {
+        update(threadId, ThreadUpdate(starred: starred))
     }
 
     /// Archive (Mike calls it settling): leaves the inbox, stops its CLI.

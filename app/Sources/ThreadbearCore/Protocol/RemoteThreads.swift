@@ -87,6 +87,7 @@ public struct RemoteThread: Sendable, Hashable, Decodable {
     public var lastActivityAt: Date
     public var snoozedUntil: Date?
     public var archivedAt: Date?
+    public var starredAt: Date?
     /// Who started it, when it wasn't Mike: the row's byline.
     public var startedBy: ThreadStartedBy?
 
@@ -130,12 +131,13 @@ public struct RemoteThread: Sendable, Hashable, Decodable {
         lastActivityAt = text(.lastActivityAt).flatMap(ISO8601.parse) ?? createdAt
         snoozedUntil = text(.snoozedUntil).flatMap(ISO8601.parse)
         archivedAt = text(.archivedAt).flatMap(ISO8601.parse)
+        starredAt = text(.starredAt).flatMap(ISO8601.parse)
         startedBy = (try? c.decodeIfPresent(ThreadStartedBy.self, forKey: .startedBy)) ?? nil
     }
 
     enum CodingKeys: String, CodingKey {
         case runnerId, threadId, title, cwd, accountId, provider, model, status, needsYou, unread, preview
-        case createdAt, lastActivityAt, snoozedUntil, archivedAt, startedBy
+        case createdAt, lastActivityAt, snoozedUntil, archivedAt, starredAt, startedBy
     }
 
     /// As a summary the sidebar's rows and sections take like a local one.
@@ -146,7 +148,7 @@ public struct RemoteThread: Sendable, Hashable, Decodable {
         var summary = ThreadSummary(
             id: threadId, title: title, cwd: cwd, accountId: accountId, provider: provider, model: model,
             status: status, needsYou: needsYou, createdAt: createdAt, updatedAt: lastActivityAt, lastActivityAt: lastActivityAt,
-            snoozedUntil: snoozedUntil, archivedAt: archivedAt, preview: preview,
+            snoozedUntil: snoozedUntil, archivedAt: archivedAt, starredAt: starredAt, preview: preview,
             lastSeq: unread ? 1 : 0, lastSeenSeq: 0
         )
         // Hibernating until that runner restarts is kept as a date in the

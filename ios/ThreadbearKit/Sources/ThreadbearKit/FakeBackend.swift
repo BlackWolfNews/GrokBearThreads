@@ -204,8 +204,8 @@ public final class FakeBackend: Backend, @unchecked Sendable {
             return all.filter { t in
                 switch view {
                 case .den: t.archivedAt != nil
-                case .hibernating: t.archivedAt == nil && InboxSections.isSnoozed(t, now: now)
-                case .inbox: t.archivedAt == nil && !InboxSections.isSnoozed(t, now: now)
+                case .hibernating: t.archivedAt == nil && t.starredAt == nil && InboxSections.isSnoozed(t, now: now)
+                case .inbox: t.archivedAt == nil && (t.starredAt != nil || !InboxSections.isSnoozed(t, now: now))
                 }
             }.sorted { $0.lastActivityAt > $1.lastActivityAt }
         }
@@ -219,7 +219,7 @@ public final class FakeBackend: Backend, @unchecked Sendable {
         watch { [unowned self] in
             let all = lock.withLock { Array(threadsById.values) }
             let now = Date.now
-            return PhoneCounts(hibernating: all.filter { $0.archivedAt == nil && InboxSections.isSnoozed($0, now: now) }.count,
+            return PhoneCounts(hibernating: all.filter { $0.archivedAt == nil && $0.starredAt == nil && InboxSections.isSnoozed($0, now: now) }.count,
                                den: all.filter { $0.archivedAt != nil }.count)
         }
     }
@@ -343,6 +343,9 @@ public final class FakeBackend: Backend, @unchecked Sendable {
                 s.threadsById[threadId]?.unread = false
                 s.threadsById[threadId]?.needsYou = false
             case let .rename(title): s.threadsById[threadId]?.title = title
+            case let .star(on):
+                let starredAt = s.threadsById[threadId]?.starredAt
+                s.threadsById[threadId]?.starredAt = on ? (starredAt ?? .now) : nil
             }
         }
         return newCommand()

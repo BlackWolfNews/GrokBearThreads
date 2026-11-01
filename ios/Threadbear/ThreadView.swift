@@ -212,6 +212,12 @@ struct ThreadView: View {
                         Button { hibernateTarget = thread } label: { Label("Hibernate…", systemImage: "moon.zzz") }
                     }
                     Button { archive() } label: { Label("Archive", systemImage: "archivebox") }
+                    if model.canStar {
+                        let starred = thread.starredAt != nil
+                        Button { change(.star(!starred)) } label: {
+                            Label(starred ? "Remove Star" : "Star", systemImage: starred ? "star.slash" : "star")
+                        }
+                    }
                 }
                 Section {
                     Label(thread.cwd, systemImage: "folder")
