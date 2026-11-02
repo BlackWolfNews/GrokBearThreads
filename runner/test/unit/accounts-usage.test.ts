@@ -300,6 +300,26 @@ test("Claude's rate_limit_event becomes a limits reading the store keeps", () =>
   assert.equal(rateLimitReading(undefined), undefined);
 });
 
+test('a refused login fails the turn as auth, and its made-up reply is dropped', () => {
+  const n = normalizer();
+  // What Claude Code 2.1.316 sent on Tinker Desk (2 Nov 2026) for an
+  // expired login: a synthetic assistant message, then the result.
+  const said = n.handle({
+    type: 'assistant', error: 'authentication_failed', isApiErrorMessage: true,
+    message: { id: 'synthetic-1', model: '<synthetic>', role: 'assistant', content: [{ type: 'text', text: 'Failed to authenticate: OAuth session expired and could not be refreshed' }] },
+  });
+  assert.equal(said.some((o) => o.kind === 'event' && o.event.type === 'assistant.text'), false);
+  const [res] = n.handle({ type: 'result', subtype: 'success', is_error: true, result: 'Failed to authenticate: OAuth session expired and could not be refreshed', duration_ms: 851 });
+  assert.equal((res as any).result.outcome, 'failed');
+  assert.equal((res as any).result.errorKind, 'auth');
+  // Per turn, like the limit.
+  const [next] = n.handle({ type: 'result', subtype: 'error_during_execution', is_error: true, result: 'boom', duration_ms: 5 });
+  assert.equal((next as any).result.errorKind, undefined);
+  // The words alone are enough.
+  const [byText] = normalizer().handle({ type: 'result', subtype: 'success', is_error: true, result: 'Invalid API key · Please run /login', duration_ms: 5 });
+  assert.equal((byText as any).result.errorKind, 'auth');
+});
+
 test('a rejected rate limit blocks the account, fails the turn as usageLimit, and ends at the reset', () => {
   const n = normalizer();
   // The 5-hour window resets ten minutes after the fixture was written.

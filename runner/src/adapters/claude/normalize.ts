@@ -51,6 +51,7 @@ export class ClaudeNormalizer {
   private unanswered = 0;
   private pendingNote?: string; // a finished background task, shown with the turn it starts
   private limitRejected = false; // a rate_limit_event this turn said the login is at its limit
+  private authFailed = false; // this turn's login was refused (signed out, or its session ran out)
   private afterCompact = false;
   private agentTasks = new Set<string>(); // task ids that are sub-agents
 
@@ -271,6 +272,15 @@ export class ClaudeNormalizer {
     // commands (/cost, /context) that it kept; they're already shown.
     if (this.afterCompact && msg.local_command_source) return;
     this.turnStarting(out);
+    // A refused login: the CLI makes up an assistant message saying so
+    // (model <synthetic>, error authentication_failed), then says it again
+    // as the turn's result. Only the result is shown, as the error row, so
+    // the same sentence doesn't appear twice; errorKind auth gets it a Sign
+    // in button.
+    if (msg.error === 'authentication_failed') {
+      this.authFailed = true;
+      return;
+    }
     const msgId = typeof m.id === 'string' ? m.id : `msg-${msg.uuid ?? Math.random().toString(36).slice(2)}`;
     for (const block of m.content as AnyMsg[]) {
       // The CLI sends one frame per completed content block, in order, so
@@ -478,14 +488,21 @@ export class ClaudeNormalizer {
       const errors = Array.isArray(msg.errors) ? (msg.errors as string[]).filter((e) => !e.startsWith('[ede_diagnostic]')) : [];
       result.error = (typeof msg.result === 'string' && msg.result) || errors.join('\n') || `Turn ended: ${msg.subtype}`;
       if (this.limitRejected || USAGE_LIMIT_TEXT.test(result.error)) result.errorKind = 'usageLimit';
+      else if (this.authFailed || AUTH_TEXT.test(result.error)) result.errorKind = 'auth';
     }
     this.limitRejected = false;
+    this.authFailed = false;
     out.push({ kind: 'result', result });
   }
 }
 
 // What a failed turn says when the login ran out, for CLIs whose
 // rate_limit_event didn't come first.
+// A login the CLI couldn't use, when the made-up assistant message saying
+// so didn't come first: "Failed to authenticate: OAuth session expired and
+// could not be refreshed", "Invalid API key · Please run /login".
+export const AUTH_TEXT = /failed to authenticate|oauth (session|token) (has )?expired|authentication_error|invalid api key|please run \/login|not logged in/i;
+
 export const USAGE_LIMIT_TEXT = /hit your (usage )?limit|usage limit reached|rate_limit_error/i;
 
 // Claude's single-window rateLimitType names, as protocol windows.

@@ -56,6 +56,7 @@ struct DetailView: View {
             ConnectionBanner()
             ErrorBanner()
             if let thread { LimitBanner(thread: thread) }
+            if let thread { SignInBanner(thread: thread) }
             if let thread, thread.hasPendingReviews, subagentRef == nil {
                 PendingReviewsButton(thread: thread)
             }
@@ -756,6 +757,35 @@ struct LimitBanner: View {
                     }
                     .tip("Carry on this thread on that account, from where it is")
                 }
+            }
+            .font(.system(size: TypeScale.label))
+            .padding(.horizontal, zoomed(14))
+            .padding(.vertical, zoomed(7))
+            .overlay(alignment: .bottom) { Rectangle().fill(Color(nsColor: Theme.hairline)).frame(height: 0.5) }
+        }
+    }
+}
+
+/// The open thread's last turn failed because its login was refused:
+/// says so, with Sign in… (Terminal, on the CLI's own sign-in) and Send
+/// again for once that's done. Like LimitBanner, here rather than in the
+/// cached error row, which knows nothing of accounts.
+struct SignInBanner: View {
+    @Environment(AppModel.self) private var app
+    let thread: ThreadSummary
+
+    var body: some View {
+        if let account = app.signInAccount(for: thread) {
+            let name = account.provider == "codex" ? "Codex" : "Claude"
+            HStack(spacing: zoomed(8)) {
+                Image(systemName: "person.crop.circle.badge.exclamationmark").foregroundStyle(.orange)
+                Text("\(name) needs you to sign in again.").lineLimit(1)
+                    .tip("The login \(account.title) was refused: signed out, or its session ran out")
+                Spacer(minLength: zoomed(6))
+                Button("Sign in…") { app.signIn(account) }
+                    .tip("Opens Terminal on \(name)'s own sign-in for this login")
+                Button("Send again") { app.sendAgain(thread.id) }
+                    .tip("Send your last message again, once you've signed in")
             }
             .font(.system(size: TypeScale.label))
             .padding(.horizontal, zoomed(14))

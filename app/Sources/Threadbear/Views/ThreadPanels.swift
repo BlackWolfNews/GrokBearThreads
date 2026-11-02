@@ -92,6 +92,7 @@ struct PinnedThreadView: View {
         let session = app.session(for: threadId)
         VStack(spacing: 0) {
             if let thread { LimitBanner(thread: thread) }
+            if let thread { SignInBanner(thread: thread) }
             if let thread, thread.hasPendingReviews {
                 PendingReviewsButton(thread: thread)
             }

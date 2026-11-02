@@ -1510,7 +1510,7 @@ enum RowRenderer {
     static func errorAdvice(_ kind: TurnErrorKind?) -> String? {
         switch kind {
         case .contextWindow?: return "The conversation is too long for this model. Start a new thread to carry on."
-        case .auth?: return "This account's login has run out. Sign in again with its CLI, then send the message again."
+        case .auth?: return "Its login was refused. Sign in again from the line above, then send again."
         case .usageLimit?, nil: return nil
         }
     }
@@ -1527,7 +1527,10 @@ enum RowRenderer {
         }
         if let cost = CostText.format(completion.costUsd) { parts.append(cost) }
         var text = parts.joined(separator: " · ")
-        if let error = completion.error, !error.isEmpty { text += ": " + firstLine(error) }
+        // A failure the runner knows the cause of has its error row just
+        // above, with the same words and what to do; saying them a third
+        // time here was noise (Mike, 2 Nov 2026).
+        if let error = completion.error, !error.isEmpty, completion.errorKind == nil { text += ": " + firstLine(error) }
         return NSAttributedString(string: text, attributes: [
             .font: Theme.smallFont,
             .foregroundColor: completion.outcome == .failed ? NSColor.systemRed : Theme.faintText,

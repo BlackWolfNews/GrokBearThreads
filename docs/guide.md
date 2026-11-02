@@ -472,6 +472,11 @@ CLAUDE_CONFIG_DIR=~/Library/Application\ Support/Threadbear/accounts/claude-1 cl
 then type `/login` (for Codex, `CODEX_HOME=<the folder> codex login`). It
 shows up in the account menu within a few seconds.
 
+If a login stops working (you signed out, or its session ran out and
+couldn't be refreshed), the thread's turn fails and a line above its
+messages says so. Sign in… opens Terminal on that login's own sign-in, and
+Send again sends your last message again once you're done.
+
 Titles, the librarian and Wake when… run on a Claude login, so with only
 Codex they don't happen: threads keep the first line of their first message
 as their title.

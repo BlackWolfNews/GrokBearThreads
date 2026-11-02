@@ -272,6 +272,16 @@ enum Automation {
             // A beat for the table to lay out and draw.
             try? await Task.sleep(for: .milliseconds(150))
             return "ok \(id) \(session.displayCount) rows"
+        case "signin":
+            // The selected thread's Sign in… line (SignInBanner): which
+            // login it names, and with sendAgain its Send again button.
+            guard let id = app.selection, let thread = app.threads[id] else { return "error no thread selected" }
+            guard let account = app.signInAccount(for: thread) else { return "ok none" }
+            if c["sendAgain"] as? Bool == true {
+                app.sendAgain(id)
+                return "ok sent again for \(account.id)"
+            }
+            return "ok \(account.id) \(account.provider)"
         case "subagent":
             // Show a sub-agent's transcript, as a click on its sidebar row
             // does: {"thread": id or prefix, "id": the sub-agent's id}.

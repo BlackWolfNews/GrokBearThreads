@@ -270,7 +270,7 @@ for working on the app without the real runner. It serves the synthetic demo
 threads in `Tools/mock-runner/fixtures` (made up, safe to commit; regenerate
 with `node Tools/mock-runner/make-synthetic.mjs`) plus any private fixtures in
 `.fixtures/`, fakes a turn when you send a message (say "approval" or
-"question" in it to get a card), and has a `mock.stream` method that replays
+"question" in it to get a card, "signed out" for a turn the login refused), and has a `mock.stream` method that replays
 a 30 Hz stream for perf runs. `--fixtures DIR` (repeatable) serves only
 those: a folder of fixtures, or one `tb export` folder. The demo threads'
 times are moved at load so the newest is a minute old, as when they were
@@ -517,6 +517,7 @@ is an error. Commands marked "the open thread" act on `id` when it's given
 | cmd | fields | |
 |---|---|---|
 | `open` | `id`, `timeout` | selects a thread and waits until its rows are on screen |
+| `signin` | `sendAgain` | the selected thread's Sign in… line, shown when its last turn's login was refused: the login it names (`ok none` without one); `sendAgain` presses Send again |
 | `select` | `id` | selects it without waiting |
 | `subagent` | `thread` (default: the open one), `id`, `timeout` | shows a sub-agent's transcript, as clicking its row under the thread does, and waits until its rows are on screen |
 | `mouse-button` | `button` (`back`, `forward`) | a mouse's side-button click over the window, through the same handler as a real one; says the sidebar view, the thread and whether back and forward can go further |

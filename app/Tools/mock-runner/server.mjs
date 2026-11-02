@@ -1232,6 +1232,17 @@ async function fakeTurn(threadId, text, images, turnId = 'turn_' + crypto.random
   persist(threadId, { type: 'turn.started', turnId }, turnId);
   setStatus(threadId, 'running');
 
+  // Say "signed out" for a turn refused by the login, as Claude Code's
+  // expired OAuth session does: the error row and errorKind auth, which
+  // gets the thread its Sign in… line.
+  if (/signed out/i.test(text)) {
+    const error = 'Failed to authenticate: OAuth session expired and could not be refreshed';
+    persist(threadId, { type: 'error', message: error }, turnId);
+    persist(threadId, { type: 'turn.completed', turnId, outcome: 'failed', durationMs: 851, error, errorKind: 'auth' }, turnId);
+    t.interrupt = undefined;
+    setStatus(threadId, 'error');
+    return;
+  }
   const thinkId = 'r_' + crypto.randomBytes(4).toString('hex');
   persist(threadId, { type: 'reasoning', itemId: thinkId, text: 'Checking what the message asks for before answering.' }, turnId);
 

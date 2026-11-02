@@ -121,6 +121,46 @@ extension AppModel {
         return LimitAdvice(text: text + ".", target: AccountUsageText.switchTarget(accounts, from: thread.accountId))
     }
 
+    // MARK: Signed out
+
+    /// The open thread's last turn failed because its login was refused
+    /// (`errorKind` auth: signed out, or the session ran out and couldn't
+    /// be refreshed). The login to sign in again, for the sign-in line.
+    func signInAccount(for thread: ThreadSummary) -> Account? {
+        guard thread.status == .error, loadedSession(thread.id)?.lastTurnErrorKind == .auth else { return nil }
+        return account(thread.accountId)
+            ?? Account(id: thread.provider == "codex" ? "codex-main" : "claude-main", provider: thread.provider, title: thread.provider)
+    }
+
+    /// Opens Terminal on the CLI's own sign-in for that login, the same
+    /// way the runner starts it: claude-main with no CLAUDE_CONFIG_DIR (so
+    /// it's the login in the Keychain the runner reads), the others with
+    /// their folder, and Codex with CODEX_HOME. A .command file rather than
+    /// AppleScript, so macOS doesn't ask to let Threadbear control Terminal.
+    func signIn(_ account: Account) {
+        let path = clis.first { $0.provider == account.provider }?.path ?? ""
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("threadbear-sign-in-\(account.id).command")
+        do {
+            try SignIn.script(account, cliPath: path).write(to: url, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
+            NSWorkspace.shared.open(url)
+        } catch {
+            errorMessage = "Couldn't open Terminal to sign in: \(error.localizedDescription)"
+        }
+    }
+
+    /// Sends the thread's last message of his again, after signing in.
+    func sendAgain(_ threadId: String) {
+        guard let session = loadedSession(threadId) else { return }
+        for index in stride(from: session.displayCount - 1, through: max(0, session.displayCount - 80), by: -1) {
+            if case .user(let message) = session.displayRow(index).content, !message.isFromRunner {
+                drafts[threadId] = Draft(text: message.text, images: message.images)
+                send(threadId: threadId)
+                return
+            }
+        }
+    }
+
     /// Moves a thread to another account (the limit line's button).
     func switchAccount(_ threadId: String, to accountId: String) {
         setAccount(threadId, accountId)
@@ -158,4 +198,29 @@ enum AppWindow {
     /// fit in: a window reaching up near the top of the screen left the
     /// model picker's Effort row below the bottom of the screen.
     static var roomAboveAnchor: CGFloat?
+}
+
+/// The Terminal script behind Sign in… (AppModel.signIn).
+enum SignIn {
+    static func quoted(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
+
+    /// `cliPath` is the binary the runner starts for new sessions (Codex is
+    /// often Threadbear's own copy, not on the PATH); empty uses the PATH's.
+    static func script(_ account: Account, cliPath: String) -> String {
+        let codex = account.provider == "codex"
+        var env = ""
+        if codex, !account.configDir.isEmpty { env = "CODEX_HOME=\(quoted(account.configDir)) " }
+        if !codex, account.id != "claude-main", !account.configDir.isEmpty { env = "CLAUDE_CONFIG_DIR=\(quoted(account.configDir)) " }
+        let binary = cliPath.isEmpty ? (codex ? "codex" : "claude") : quoted(cliPath)
+        return """
+        #!/bin/zsh -l
+        export PATH="$HOME/.local/bin:$PATH"
+        echo "Signing in to \(codex ? "Codex" : "Claude") for Threadbear (\(account.title))."
+        echo
+        \(env)\(binary) \(codex ? "login" : "auth login")
+        echo
+        echo "Done. Go back to Threadbear and press Send again. You can close this window."
+
+        """
+    }
 }
