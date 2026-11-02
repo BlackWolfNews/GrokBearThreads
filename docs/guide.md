@@ -333,7 +333,8 @@ From the top, and only when there's something to show:
 - **Needs you**: what the agent's last reply asked you to do, each with a
   box to tick off as you go. Ticking one here ticks it in the thread too.
 - The thread's projects, each under its icon and name with its links,
-  such as a live site or an admin page. The ⓘ beside a project's name
+  such as a live site or an admin page, and its task board if it has one
+  (see [Projects](#projects)). The ⓘ beside a project's name
   says who put the thread there and why ("Shortlists photos for the
   calendar entry"). If the librarian guessed wrong, press Take out there
   and it won't put it back; Keep stops it ever taking the thread out.
@@ -399,8 +400,12 @@ an agent to. The page shows the board, read every few minutes, with a
 column per status and who and when on each card. Cards are moved in Notion,
 by you, anyone you share the page with, or the agents, who see the open
 cards and are told to keep them moving. A card whose Thread column names a
-thread links to it. A thread's Highlights shows a few of its projects'
-open cards under each project, its own card first. Boards are read through
+thread links to it. A thread's Highlights shows each of its projects' boards too, under the
+project: what's under way first, then what's to do, with Done folded to a
+strip you can click open. If the columns don't fit, drag the bar under them,
+use its arrows, or scroll sideways, or drag the panel wider. Click a card to
+mention it in your message, with a link the agent can read it from; the arrow
+on a card, or its right-click menu, opens it in Notion. Boards are read through
 a Connectors gateway (see [Connectors](#connectors)); without one, the
 project's page says so and nothing is read.
 

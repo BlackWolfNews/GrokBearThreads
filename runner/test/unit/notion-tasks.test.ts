@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { makeHarness, tmpDir } from '../helpers/fakes.ts';
-import { READS_AT_ONCE, TaskBoards, findGatewayClient, findSource, gatewayCaller, parseRpc, readSchema, readRows, readTasks, type CallTool } from '../../src/notion-tasks.ts';
+import { READS_AT_ONCE, TaskBoards, cleanTitle, findGatewayClient, findSource, gatewayCaller, parseRpc, readSchema, readRows, readTasks, type CallTool } from '../../src/notion-tasks.ts';
 import { Projects, checkNotion, projectMethods } from '../../src/projects.ts';
 import { buildThreadbearTools } from '../../src/threadbear-mcp.ts';
 import { FakeClock } from '../../src/clock.ts';
@@ -136,6 +136,13 @@ test('rows become cards: people as a list, a date range kept, untitled rows skip
   assert.equal(items.length, 3);
   assert.deepEqual(items[1], { id: '409fd70ecfa081509451d31e424fe69e', title: 'Fixes from the 30 Oct reply', url: 'https://app.notion.com/p/409fd70ecfa081509451d31e424fe69e', status: 'Doing', who: ['Mike'], thread: '60f772ab' });
   assert.deepEqual([items[2]!.due, items[2]!.dueEnd, items[2]!.who], ['2026-11-29', '2026-12-04', ['Zaran', 'Tracy']]);
+});
+
+test('a title wrapped in a paragraph loses the wrapper, and only that', () => {
+  assert.equal(cleanTitle('<p>\nWIN TV Book in TVC \n</p>'), 'WIN TV Book in TVC');
+  assert.equal(cleanTitle('  Plain title '), 'Plain title');
+  assert.equal(cleanTitle('Replace <p> with <div> in the footer'), 'Replace <p> with <div> in the footer');
+  assert.equal(cleanTitle('<p></p>'), '');
 });
 
 test('rows are read through a view, never straight, since straight queries have a workspace allowance', async () => {

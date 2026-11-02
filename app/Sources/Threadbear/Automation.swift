@@ -318,6 +318,53 @@ enum Automation {
             guard let edge = DockEdge(rawValue: c["edge"] as? String ?? "right") else { return "error edge is left, right, top or bottom" }
             app.dock.layout.move(panel, .window(edge))
             return "ok " + app.dock.layout.summary
+        case "point":
+            // Real events at a spot in the window, for SwiftUI controls with
+            // nothing to find them by: {"cmd":"point","x":956,"y":265} clicks
+            // (points from the window's top left), with "toX" drags there,
+            // and "scrollX"/"scrollY" is a wheel, in lines. They go straight
+            // to the window, so Mike's pointer stays where it is.
+            guard let window, let x = c["x"] as? Double, let y = c["y"] as? Double else { return "error point needs x and y" }
+            let at = { (px: Double) in NSPoint(x: px, y: window.frame.height - y) }
+            if c["scrollX"] != nil || c["scrollY"] != nil {
+                let lines = (Int32(c["scrollY"] as? Double ?? 0), Int32(c["scrollX"] as? Double ?? 0))
+                guard let cg = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 2, wheel1: lines.0, wheel2: lines.1, wheel3: 0) else { return "error no event" }
+                // A made-up wheel event has no window, so its location means
+                // nothing to `sendEvent`: hand it to the view under the spot.
+                guard let event = NSEvent(cgEvent: cg), let frame = window.contentView?.superview,
+                      let view = frame.hitTest(at(x)) else { return "error nothing there" }
+                view.scrollWheel(with: event)
+                try? await Task.sleep(for: .milliseconds(300))
+                // Says where each scroll view around the spot ended up, so a
+                // caller can see which of them took it.
+                var scrolls: [String] = []
+                var ancestor: NSView? = view
+                while let current = ancestor {
+                    if let scroll = current as? NSScrollView, let document = scroll.documentView {
+                        let clip = scroll.contentView.bounds
+                        scrolls.append("at \(Int(clip.minX)),\(Int(clip.minY)) of \(Int(document.frame.width))x\(Int(document.frame.height)) in \(Int(clip.width))x\(Int(clip.height))")
+                    }
+                    ancestor = current.superview
+                }
+                return "ok " + scrolls.joined(separator: "; ")
+            }
+            let mouse = { (type: NSEvent.EventType, point: NSPoint) in
+                NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                   windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+            }
+            guard let down = mouse(.leftMouseDown, at(x)) else { return "error no event" }
+            window.sendEvent(down)
+            try? await Task.sleep(for: .milliseconds(40))
+            let end = (c["toX"] as? Double) ?? x
+            if end != x {
+                for step in 1...8 {
+                    if let drag = mouse(.leftMouseDragged, at(x + (end - x) * Double(step) / 8)) { window.sendEvent(drag) }
+                    try? await Task.sleep(for: .milliseconds(16))
+                }
+            }
+            if let up = mouse(.leftMouseUp, at(end)) { window.sendEvent(up) }
+            try? await Task.sleep(for: .milliseconds(350))
+            return "ok"
         case "mouse-button":
             // A mouse's back or forward button over the window, as the
             // event AppKit gives MouseNavigation's monitor. A made-up event

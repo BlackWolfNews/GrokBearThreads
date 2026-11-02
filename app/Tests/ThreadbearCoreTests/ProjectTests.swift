@@ -60,19 +60,64 @@ final class ProjectTests: XCTestCase {
         XCTAssertNil(none.tasks)
     }
 
-    func testHighlightsPickThisThreadsCardThenUnderWayThenToDo() {
+    func testBoardPutsWhatsUnderWayFirstAndThisThreadsCardsFirstInAColumn() {
         let todo = TaskColumn(name: "To do", kind: .todo), doing = TaskColumn(name: "Doing", kind: .doing)
-        let waiting = TaskColumn(name: "Waiting", kind: .doing), done = TaskColumn(name: "Done", kind: .done)
+        let waiting = TaskColumn(name: "Waiting", kind: .doing), empty = TaskColumn(name: "Blocked", kind: .doing)
+        let done = TaskColumn(name: "Done", kind: .done)
         let card = { (id: String, status: String, thread: String?) in ProjectTask(id: id, title: id, url: "https://n/\(id)", status: status, thread: thread) }
-        let tasks = ProjectTasks(url: "https://n", columns: [todo, doing, waiting, done], items: [
+        let tasks = ProjectTasks(url: "https://n", columns: [todo, doing, empty, waiting, done], items: [
             card("a", "To do", nil), card("b", "To do", "85046057"), card("c", "Waiting", nil),
             card("d", "Doing", nil), card("e", "Done", "85046057"), card("f", "To do", "abc"),
         ])
-        let picks = tasks.highlights(threadId: "85046057-1df7-4169-bb7d-fca554331b4c", limit: 4)
-        XCTAssertEqual(picks.shown.map(\.task.id), ["b", "d", "c", "a"], "its own card, then Doing and Waiting in column order, then To do; Done never")
-        XCTAssertEqual(picks.shown.map(\.mine), [true, false, false, false])
-        XCTAssertEqual(picks.more, 1)
+        let board = tasks.board(threadId: "85046057-1df7-4169-bb7d-fca554331b4c")
+        XCTAssertEqual(board.map(\.id), ["Doing", "Waiting", "To do", "Done"], "under way, then to do, then done, and no empty columns")
+        XCTAssertEqual(board[2].cards.map(\.task.id), ["b", "a", "f"], "its own card first, the rest in Notion's order")
+        XCTAssertEqual(board[2].cards.map(\.mine), [true, false, false])
         XCTAssertFalse(card("x", "To do", "abc").isWorked(by: "abcdef12"), "a short Thread value matches nothing")
+    }
+
+    func testBoardIsEmptyWithNothingOpen() {
+        let done = TaskColumn(name: "Done", kind: .done)
+        let tasks = ProjectTasks(url: "https://n", columns: [TaskColumn(name: "To do", kind: .todo), done], items: [
+            ProjectTask(id: "a", title: "a", url: "https://n/a", status: "Done"),
+        ])
+        XCTAssertEqual(tasks.board(threadId: "t").count, 0)
+    }
+
+    func testBoardLayoutFillsThePanelOrScrollsAtTheNarrowestColumn() {
+        // Two columns and a folded strip fit a 340 panel: they share it.
+        let fits = BoardLayout.columnWidth(available: 340, columns: 2, folded: 1, spacing: 6, foldedWidth: 28, minimum: 146)
+        XCTAssertEqual(fits, 150)
+        // Three don't, so each stays at the narrowest and the board scrolls.
+        let scrolls = BoardLayout.columnWidth(available: 340, columns: 3, folded: 1, spacing: 6, foldedWidth: 28, minimum: 146)
+        XCTAssertEqual(scrolls, 146)
+        // Before the panel has been measured.
+        XCTAssertEqual(BoardLayout.columnWidth(available: 0, columns: 2, folded: 0, spacing: 6, foldedWidth: 28, minimum: 146), 146)
+    }
+
+    func testBoardLayoutPagesAColumnAtATimeAndStopsAtTheEnds() {
+        // Columns 146 wide with 6 between, so 152 a column.
+        XCTAssertEqual(BoardLayout.page(from: 0, by: 1, step: 152, maximum: 300), 152)
+        XCTAssertEqual(BoardLayout.page(from: 152, by: 1, step: 152, maximum: 300), 300, "stops at the end, not past it")
+        XCTAssertEqual(BoardLayout.page(from: 300, by: -1, step: 152, maximum: 300), 152, "back from the end lands on a column")
+        XCTAssertEqual(BoardLayout.page(from: 40, by: -1, step: 152, maximum: 300), 0)
+        XCTAssertEqual(BoardLayout.page(from: 160, by: 1, step: 152, maximum: 500), 304, "a part-scrolled board snaps to the next column")
+    }
+
+    func testCardReferenceIsALinkTheAgentCanRead() {
+        let card = ProjectTask(id: "a", title: "Fix [the] button", url: "https://notion.so/a", status: "Doing")
+        XCTAssertEqual(card.reference, "[Fix \\[the\\] button](https://notion.so/a)")
+        XCTAssertEqual(ProjectTask(id: "b", title: "No link", url: "", status: "Doing").reference, "No link")
+    }
+
+    func testAddingACardToADraft() {
+        let ref = "[Card](https://n/a)"
+        XCTAssertEqual(BoardLayout.adding(ref, to: ""), "[Card](https://n/a) ")
+        XCTAssertEqual(BoardLayout.adding(ref, to: "  \n"), "[Card](https://n/a) ", "only whitespace counts as empty")
+        XCTAssertEqual(BoardLayout.adding(ref, to: "Look at"), "Look at [Card](https://n/a) ")
+        XCTAssertEqual(BoardLayout.adding(ref, to: "Look at "), "Look at [Card](https://n/a) ")
+        XCTAssertEqual(BoardLayout.adding(ref, to: "One\n"), "One\n[Card](https://n/a) ")
+        XCTAssertEqual(BoardLayout.adding(ref, to: "See [Card](https://n/a) now"), "See [Card](https://n/a) now", "a second click doesn't add it twice")
     }
 
     func testProjectIcons() throws {

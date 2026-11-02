@@ -193,19 +193,30 @@ public struct ProjectTasks: Sendable, Hashable, Decodable {
         public var id: String { task.id }
     }
 
-    /// The open cards worth showing in a thread's Highlights, at most
-    /// `limit`: the thread's own first, then what's under way (Doing,
-    /// Waiting...) in Notion's column order, then what's to do. Done is
-    /// left out. `more` is how many open ones that leaves.
-    public func highlights(threadId: String, limit: Int) -> (shown: [Pick], more: Int) {
-        var picks: [Pick] = []
-        for column in columns where column.kind != .done {
-            for task in items(in: column) { picks.append(Pick(task: task, column: column, mine: task.isWorked(by: threadId))) }
-        }
-        let rank: (Pick) -> Int = { $0.mine ? 0 : $0.column.kind == .doing ? 1 : 2 }
-        // A stable sort, so each rank keeps Notion's order.
-        let sorted = picks.enumerated().sorted { (rank($0.element), $0.offset) < (rank($1.element), $1.offset) }.map(\.element)
-        return (Array(sorted.prefix(limit)), max(0, sorted.count - limit))
+    /// A column of the board in a thread's Highlights and its cards.
+    public struct BoardColumn: Sendable, Hashable, Identifiable {
+        public var column: TaskColumn
+        public var cards: [Pick]
+        public var id: String { column.name }
+    }
+
+    /// The board in a thread's Highlights: what's under way (Doing,
+    /// Waiting...) in Notion's order, then what's to do, then Complete
+    /// columns, leaving out empty ones. In each, the thread's own cards come
+    /// first. Nothing at all when no card is open, as a finished board has
+    /// nothing to look at while working.
+    public func board(threadId: String) -> [BoardColumn] {
+        guard openCount > 0 else { return [] }
+        let rank: (TaskColumn) -> Int = { $0.kind == .doing ? 0 : $0.kind == .todo ? 1 : 2 }
+        // Stable sorts, so columns and cards keep Notion's order within a rank.
+        return columns.enumerated()
+            .sorted { (rank($0.element), $0.offset) < (rank($1.element), $1.offset) }
+            .compactMap { _, column in
+                let cards = items(in: column).map { Pick(task: $0, column: column, mine: $0.isWorked(by: threadId)) }
+                guard !cards.isEmpty else { return nil }
+                let sorted = cards.enumerated().sorted { ($0.element.mine ? 0 : 1, $0.offset) < ($1.element.mine ? 0 : 1, $1.offset) }
+                return BoardColumn(column: column, cards: sorted.map(\.element))
+            }
     }
 
     /// Cards not in a Complete column.
@@ -237,6 +248,14 @@ public struct TaskColumn: Sendable, Hashable, Decodable, Identifiable {
 }
 
 public struct ProjectTask: Sendable, Hashable, Decodable, Identifiable {
+    /// How a click on a card mentions it in a message: a Markdown link, so
+    /// the agent gets the address it can read the card from, not only its
+    /// name.
+    public var reference: String {
+        let name = title.replacingOccurrences(of: "[", with: "\\[").replacingOccurrences(of: "]", with: "\\]")
+        return url.isEmpty ? name : "[\(name)](\(url))"
+    }
+
     public var id: String
     public var title: String
     public var url: String

@@ -63,4 +63,13 @@ extension AppModel {
         drafts[threadId] = draft
         focusComposer(threadId)
     }
+
+    /// A click on a card in Highlights: mentions it at the end of the
+    /// thread's draft, ready for Mike to say what about it.
+    func mentionInComposer(_ task: ProjectTask, in threadId: String) {
+        var draft = drafts[threadId] ?? Draft()
+        draft.text = BoardLayout.adding(task.reference, to: draft.text)
+        drafts[threadId] = draft
+        focusComposer(threadId)
+    }
 }

@@ -233,7 +233,7 @@ export function readRows(text: string, board: Board): { items: ProjectTask[]; mo
   const items: ProjectTask[] = [];
   for (const r of parsed.results ?? []) {
     const url = typeof r.url === 'string' ? cleanUrl(r.url) : undefined;
-    const title = asText(r[board.title]);
+    const title = cleanTitle(asText(r[board.title]));
     if (!url || !title) continue;
     const id = url.match(/([0-9a-f]{32})/)?.[1] ?? url;
     const t: ProjectTask = { id, title, url, status: board.status ? asText(r[board.status]) : '', who: board.who ? asList(r[board.who]) : [] };
@@ -300,6 +300,13 @@ export async function readTasks(
       ...(more ? { more: true } : {}),
     },
   };
+}
+
+// Notion sometimes hands back a title wrapped in a paragraph, which showed as
+// "<p> WIN TV Book in TVC </p>" on the card. Only the wrapper goes, so a title
+// about <div>s keeps its words.
+export function cleanTitle(title: string): string {
+  return title.replace(/^\s*<p(?:\s[^>]*)?>\s*([\s\S]*?)\s*<\/p>\s*$/i, '$1').trim();
 }
 
 function asText(v: unknown): string {

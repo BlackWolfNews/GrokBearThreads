@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 /// The pane's Highlights section: what the thread has made, shared and
 /// pinned, so it doesn't scroll away with the transcript. The librarian's
 /// line on where it's up to, the projects it's in (why, behind an ⓘ, and
-/// their links: live site, admin page), its schedules and sub-agents, then pins, files, links
+/// their links: live site, admin page, and Notion board), its schedules and sub-agents, then pins, files, links
 /// and commits, each under a grey heading like the sidebar's, and left out
 /// when empty. A click on a heading folds its rows away, for every thread.
 struct HighlightsView: View {
@@ -96,26 +96,19 @@ struct HighlightsView: View {
         // going back to for it, so the live site is one click from any of
         // its threads (28 Oct).
         ForEach(projects) { row in
-            // Its open Notion cards, this thread's own first, so what's
-            // next for the project is in the pane that's open by default
-            // (Mike asked 30 Oct). The board itself is on the project page.
-            let picks = row.project.tasks.flatMap { $0.loading ? nil : $0.highlights(threadId: thread.id, limit: HighlightSections.taskLimit) }
-            let cards = picks.map { $0.shown.count + $0.more } ?? 0
+            // Its Notion board, so what's next for the project is in the
+            // pane that's open by default (Mike asked 30 Oct; a board since
+            // 3 Nov, when he picked columns over a list).
+            let tasks = row.project.tasks.flatMap { $0.loading ? nil : $0 }
             let key = HighlightFold.project(row.project.id)
-            // A project with no links or cards has nothing to fold.
-            let count = row.project.links.count + cards
+            // A project with no links or open cards has nothing to fold.
+            let count = row.project.links.count + (tasks?.openCount ?? 0)
             SectionHeading(title: row.project.title, project: row.project, fold: count > 0 ? fold(key, count: count) : nil) {
                 ProjectWhyButton(row: row, threadId: thread.id)
             }
             if !isFolded(key) {
                 ForEach(row.project.links, id: \.url) { projectLink($0) }
-                if let picks {
-                    ForEach(picks.shown) { taskRow($0) }
-                    if picks.more > 0 {
-                        PaneRow(icon: "ellipsis", title: "\(picks.more) more on the board", quiet: true) { app.openProjectPage(row.project.id) }
-                            .tip("Open \(row.project.title)'s page")
-                    }
-                }
+                if let tasks { HighlightsBoard(tasks: tasks, thread: thread) }
             }
         }
         // What will message the thread later, and the helpers it started:
@@ -254,17 +247,6 @@ struct HighlightsView: View {
                 Divider()
                 Button("Remove", systemImage: "pin.slash") { app.removeHighlight(item, in: thread.id) }
             }
-    }
-
-    /// An open Notion card: its column and who, a click opens it in
-    /// Notion. The thread's own card has a filled bubble.
-    private func taskRow(_ pick: ProjectTasks.Pick) -> some View {
-        let icon = pick.mine ? "bubble.left.fill" : pick.column.kind == .doing ? "circle.lefthalf.filled" : "circle"
-        let detail = ([pick.column.name] + (pick.task.who.isEmpty ? [] : [pick.task.who.joined(separator: ", ")])).joined(separator: " · ")
-        return PaneRow(icon: icon, iconColor: TaskColors.color(pick.column.color), title: pick.task.title, detail: detail, titleTruncation: .tail, detailTruncation: .tail) {
-            if let url = URL(string: pick.task.url) { NSWorkspace.shared.open(url) }
-        }
-        .tip(pick.mine ? "This thread's card. Open it in Notion" : "Open in Notion")
     }
 
     private func projectLink(_ link: ProjectLink) -> some View {

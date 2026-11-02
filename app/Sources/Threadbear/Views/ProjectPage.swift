@@ -402,7 +402,7 @@ enum TaskColors {
 
 /// One card: its title, then who, when and the thread working on it. A
 /// click opens it in Notion; the thread chip opens the thread.
-private struct TaskCard: View {
+struct TaskCard: View {
     @Environment(AppModel.self) private var app
     let task: ProjectTask
     let done: Bool

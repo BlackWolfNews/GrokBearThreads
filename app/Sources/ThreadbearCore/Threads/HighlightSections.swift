@@ -19,7 +19,7 @@ public struct HighlightSections: Sendable, Hashable {
     public static let linkLimit = 10
     /// The runner keeps a thread's newest 20 sub-agents.
     public static let subagentLimit = 5
-    /// Open Notion cards under each project (its board is on its page).
+    /// Cards shown in a column of a project's board before "N more".
     public static let taskLimit = 4
 
     /// The first `limit` of a group (they come newest first), and how many
