@@ -10,7 +10,7 @@ import UniformTypeIdentifiers
 /// line on where it's up to, the projects it's in (why, behind an ⓘ, and
 /// their links: live site, admin page), its schedules and sub-agents, then pins, files, links
 /// and commits, each under a grey heading like the sidebar's, and left out
-/// when empty.
+/// when empty. A click on a heading folds its rows away, for every thread.
 struct HighlightsView: View {
     @Environment(AppModel.self) private var app
     let thread: ThreadSummary
@@ -81,10 +81,13 @@ struct HighlightsView: View {
         // The last turn's asks while its card is open, ticked here or in
         // the transcript alike (the same `threads.tickAsk`).
         if let asksSeq = openAsks {
-            SectionHeading(title: "Needs you", icon: "hand.raised")
-            ForEach(Array(thread.asks.enumerated()), id: \.offset) { index, ask in
-                AskRow(ask: ask) {
-                    app.session(for: thread.id).tickAsk(asksSeq: asksSeq, index: index, ticked: !ask.ticked)
+            // Folded, the count is what's still to do, not what's been ticked.
+            SectionHeading(title: "Needs you", icon: "hand.raised", fold: fold(HighlightFold.needsYou, count: thread.asks.filter { !$0.ticked }.count))
+            if !isFolded(HighlightFold.needsYou) {
+                ForEach(Array(thread.asks.enumerated()), id: \.offset) { index, ask in
+                    AskRow(ask: ask) {
+                        app.session(for: thread.id).tickAsk(asksSeq: asksSeq, index: index, ticked: !ask.ticked)
+                    }
                 }
             }
         }
@@ -93,19 +96,25 @@ struct HighlightsView: View {
         // going back to for it, so the live site is one click from any of
         // its threads (28 Oct).
         ForEach(projects) { row in
-            SectionHeading(title: row.project.title, project: row.project) {
-                ProjectWhyButton(row: row, threadId: thread.id)
-            }
-            ForEach(row.project.links, id: \.url) { projectLink($0) }
             // Its open Notion cards, this thread's own first, so what's
             // next for the project is in the pane that's open by default
             // (Mike asked 30 Oct). The board itself is on the project page.
-            if let tasks = row.project.tasks, !tasks.loading {
-                let picks = tasks.highlights(threadId: thread.id, limit: HighlightSections.taskLimit)
-                ForEach(picks.shown) { taskRow($0) }
-                if picks.more > 0 {
-                    PaneRow(icon: "ellipsis", title: "\(picks.more) more on the board", quiet: true) { app.openProjectPage(row.project.id) }
-                        .tip("Open \(row.project.title)'s page")
+            let picks = row.project.tasks.flatMap { $0.loading ? nil : $0.highlights(threadId: thread.id, limit: HighlightSections.taskLimit) }
+            let cards = picks.map { $0.shown.count + $0.more } ?? 0
+            let key = HighlightFold.project(row.project.id)
+            // A project with no links or cards has nothing to fold.
+            let count = row.project.links.count + cards
+            SectionHeading(title: row.project.title, project: row.project, fold: count > 0 ? fold(key, count: count) : nil) {
+                ProjectWhyButton(row: row, threadId: thread.id)
+            }
+            if !isFolded(key) {
+                ForEach(row.project.links, id: \.url) { projectLink($0) }
+                if let picks {
+                    ForEach(picks.shown) { taskRow($0) }
+                    if picks.more > 0 {
+                        PaneRow(icon: "ellipsis", title: "\(picks.more) more on the board", quiet: true) { app.openProjectPage(row.project.id) }
+                            .tip("Open \(row.project.title)'s page")
+                    }
                 }
             }
         }
@@ -114,36 +123,62 @@ struct HighlightsView: View {
         // under the thread, and Mike wanted them here (29 Oct).
         let scheduled = schedules
         if !scheduled.isEmpty {
-            SectionHeading(title: "Scheduled", icon: "clock")
-            ForEach(scheduled) { scheduleRow($0) }
+            SectionHeading(title: "Scheduled", icon: "clock", fold: fold(HighlightFold.scheduled, count: scheduled.count))
+            if !isFolded(HighlightFold.scheduled) {
+                ForEach(scheduled) { scheduleRow($0) }
+            }
         }
         if !thread.subagents.isEmpty {
             let all = SubagentRows.highlights(thread)
-            SectionHeading(title: "Sub-agents", icon: "person.2")
-            let subagents = HighlightSections.capped(all, limit: HighlightSections.subagentLimit, showAll: allSubagents)
-            ForEach(subagents.shown) { subagentRow($0) }
-            if subagents.more > 0 { showAll(all.count) { allSubagents = true } }
+            SectionHeading(title: "Sub-agents", icon: "person.2", fold: fold(HighlightFold.subagents, count: all.count))
+            if !isFolded(HighlightFold.subagents) {
+                let subagents = HighlightSections.capped(all, limit: HighlightSections.subagentLimit, showAll: allSubagents)
+                ForEach(subagents.shown) { subagentRow($0) }
+                if subagents.more > 0 { showAll(all.count) { allSubagents = true } }
+            }
         }
         if !sections.pinned.isEmpty {
-            SectionHeading(title: "Pinned", icon: "pin")
-            ForEach(sections.pinned) { row($0) }
+            SectionHeading(title: "Pinned", icon: "pin", fold: fold(HighlightFold.pinned, count: sections.pinned.count))
+            if !isFolded(HighlightFold.pinned) {
+                ForEach(sections.pinned) { row($0) }
+            }
         }
         if !sections.files.isEmpty {
-            SectionHeading(title: "Files", icon: "doc")
-            ForEach(sections.files) { row($0) }
+            SectionHeading(title: "Files", icon: "doc", fold: fold(HighlightFold.files, count: sections.files.count))
+            if !isFolded(HighlightFold.files) {
+                ForEach(sections.files) { row($0) }
+            }
         }
         if !sections.links.isEmpty {
-            SectionHeading(title: "Links", icon: "link")
-            let links = HighlightSections.capped(sections.links, limit: HighlightSections.linkLimit, showAll: allLinks)
-            ForEach(links.shown) { row($0) }
-            if links.more > 0 { showAll(sections.links.count) { allLinks = true } }
+            SectionHeading(title: "Links", icon: "link", fold: fold(HighlightFold.links, count: sections.links.count))
+            if !isFolded(HighlightFold.links) {
+                let links = HighlightSections.capped(sections.links, limit: HighlightSections.linkLimit, showAll: allLinks)
+                ForEach(links.shown) { row($0) }
+                if links.more > 0 { showAll(sections.links.count) { allLinks = true } }
+            }
         }
         if !sections.commits.isEmpty || !sections.edited.isEmpty {
-            SectionHeading(title: "Changes", icon: "arrow.triangle.branch")
-            let commits = HighlightSections.capped(sections.commits, limit: HighlightSections.commitLimit, showAll: allCommits)
-            ForEach(commits.shown) { row($0) }
-            if commits.more > 0 { showAll(sections.commits.count) { allCommits = true } }
-            if !sections.edited.isEmpty { edited(sections.edited) }
+            SectionHeading(title: "Changes", icon: "arrow.triangle.branch", fold: fold(HighlightFold.changes, count: sections.commits.count + sections.edited.count))
+            if !isFolded(HighlightFold.changes) {
+                let commits = HighlightSections.capped(sections.commits, limit: HighlightSections.commitLimit, showAll: allCommits)
+                ForEach(commits.shown) { row($0) }
+                if commits.more > 0 { showAll(sections.commits.count) { allCommits = true } }
+                if !sections.edited.isEmpty { edited(sections.edited) }
+            }
+        }
+    }
+
+    private func isFolded(_ key: String) -> Bool {
+        app.collapsedHighlights.contains(key)
+    }
+
+    /// A heading's fold, the same as the sidebar's.
+    private func fold(_ key: String, count: Int) -> SectionFold {
+        let folded = isFolded(key)
+        return .init(collapsed: folded, count: count) {
+            withAnimation(.snappy(duration: 0.2)) {
+                if folded { app.collapsedHighlights.remove(key) } else { app.collapsedHighlights.insert(key) }
+            }
         }
     }
 

@@ -351,6 +351,11 @@ From the top, and only when there's something to show:
 - **Changes**: its commits, and a line such as "4 files edited" that
   opens to the code it changed.
 
+Click a heading to fold that section away, and again to bring it back. A
+folded heading shows how many rows it's hiding. Threadbear remembers what
+you've folded, between launches and for every thread: fold Sub-agents once
+and it stays folded everywhere. A project's heading folds for that project.
+
 Click a file and it opens in the panel, with Back to return to the list
 (a text file there has Edit too). A link opens in your browser, unless you
 change Default in its right-click menu to open pages in the panel. An

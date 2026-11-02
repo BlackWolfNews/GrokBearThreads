@@ -452,6 +452,11 @@ final class AppModel {
     var collapsedScheduleSections: Set<ScheduleSection> = AppModel.storedCollapsedScheduleSections() {
         didSet { UserDefaults.standard.set(collapsedScheduleSections.map(\.rawValue).sorted(), forKey: Self.collapsedScheduleSectionsKey) }
     }
+    /// Highlights' folded headings (`HighlightFold`), remembered across
+    /// threads and launches.
+    var collapsedHighlights: Set<String> = AppModel.storedCollapsedHighlights() {
+        didSet { UserDefaults.standard.set(collapsedHighlights.sorted(), forKey: Self.collapsedHighlightsKey) }
+    }
     /// The Inbox section's order, from the sort menu on its heading,
     /// remembered across launches.
     var inboxOrder: InboxOrder = InboxOrder(rawValue: UserDefaults.standard.string(forKey: AppModel.inboxOrderKey) ?? "") ?? .needsYou {
@@ -560,6 +565,11 @@ final class AppModel {
     static func storedCollapsedScheduleSections(_ defaults: UserDefaults = .standard) -> Set<ScheduleSection> {
         guard let saved = defaults.stringArray(forKey: collapsedScheduleSectionsKey) else { return [.done] }
         return Set(saved.compactMap(ScheduleSection.init(rawValue:)))
+    }
+    static let collapsedHighlightsKey = "collapsedHighlights"
+
+    static func storedCollapsedHighlights(_ defaults: UserDefaults = .standard) -> Set<String> {
+        Set(defaults.stringArray(forKey: collapsedHighlightsKey) ?? [])
     }
     static let inboxOrderKey = "inboxOrder"
     /// The error banner text shown for a connection problem, so it can be

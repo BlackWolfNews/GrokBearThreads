@@ -325,6 +325,15 @@ private struct InboxOrderMenu: View {
     }
 }
 
+/// Out of the generic SectionHeading so a helper can make one for a heading
+/// with any accessory.
+struct SectionFold {
+    var collapsed: Bool
+    /// The rows under it, shown while they're folded away.
+    var count: Int
+    var toggle: () -> Void
+}
+
 struct SectionHeading<Accessory: View>: View {
     let title: String
     /// A small SF Symbol before the title, so the groups can be told apart
@@ -341,12 +350,7 @@ struct SectionHeading<Accessory: View>: View {
     @State private var hovering = false
     @Environment(\.archiveLandings) private var archiveLandings
 
-    struct Fold {
-        var collapsed: Bool
-        /// The rows under it, shown while they're folded away.
-        var count: Int
-        var toggle: () -> Void
-    }
+    typealias Fold = SectionFold
 
     var body: some View {
         HStack(spacing: zoomed(4)) {

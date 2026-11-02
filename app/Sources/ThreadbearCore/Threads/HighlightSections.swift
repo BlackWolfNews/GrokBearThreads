@@ -73,6 +73,20 @@ public struct HighlightSections: Sendable, Hashable {
     }
 }
 
+/// What each folding heading in Highlights is remembered as. A fold holds
+/// for every thread, so Sub-agents stays out of the way once Mike has put
+/// it away (asked 3 Nov); a project's is its own, as only its threads show it.
+public enum HighlightFold {
+    public static let needsYou = "needsYou"
+    public static let scheduled = "scheduled"
+    public static let subagents = "subagents"
+    public static let pinned = "pinned"
+    public static let files = "files"
+    public static let links = "links"
+    public static let changes = "changes"
+    public static func project(_ id: String) -> String { "project:\(id)" }
+}
+
 /// The links of the projects a thread is in, for the top of its
 /// Highlights: in the thread's order, leaving out archived projects and
 /// ones with no links.

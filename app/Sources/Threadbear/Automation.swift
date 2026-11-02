@@ -409,7 +409,22 @@ enum Automation {
             return composer.takeImages(from: board) ? "ok" : "error not an image"
         case "click":
             // A visible, enabled button in the transcript with this title,
-            // or this accessibility label for an icon-only one.
+            // or this accessibility label for an icon-only one. `tip` instead
+            // presses a SwiftUI control with that tooltip, through the window
+            // as a real click would go, without moving the pointer.
+            if let tip = c["tip"] as? String {
+                guard let window = mainWindow, let content = window.contentView,
+                      let anchor = all(TipAnchorView.self, in: content).last(where: { $0.text == tip && !$0.isHiddenOrHasHiddenAncestor })
+                else { return "error no control with the tip \(tip)" }
+                let center = anchor.convert(NSPoint(x: anchor.bounds.midX, y: anchor.bounds.midY), to: nil)
+                for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                    guard let event = NSEvent.mouseEvent(with: type, location: center, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                         windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+                    else { return "error no event" }
+                    window.sendEvent(event)
+                }
+                return "ok"
+            }
             guard let title = c["title"] as? String else { return "error no title" }
             let buttons = all(NSButton.self, in: app.transcript.tableView)
                 .filter { ($0.title == title || $0.accessibilityLabel() == title) && $0.isEnabled && !$0.isHiddenOrHasHiddenAncestor }
@@ -751,6 +766,11 @@ enum Automation {
             app.searchQuery = c["text"] as? String ?? ""
             return "ok"
         case "expand", "collapse":
+            if let key = c["highlightSection"] as? String {
+                // A Highlights heading, as clicking it does (`HighlightFold`).
+                if name == "expand" { app.collapsedHighlights.remove(key) } else { app.collapsedHighlights.insert(key) }
+                return "ok"
+            }
             if let raw = c["scheduleSection"] as? String {
                 // A Scheduled heading, as clicking it does.
                 guard let section = ScheduleSection(rawValue: raw) else {

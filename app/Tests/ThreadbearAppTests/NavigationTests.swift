@@ -140,6 +140,23 @@ final class NavigationTests: XCTestCase {
         XCTAssertEqual(app.collapsedSections, [])
     }
 
+    /// Highlights starts with nothing folded, and what Mike folds is there
+    /// on the next launch, a project's under its own id.
+    func testHighlightFoldsAreRemembered() {
+        let defaults = UserDefaults.standard
+        let saved = defaults.object(forKey: AppModel.collapsedHighlightsKey)
+        defer { defaults.set(saved, forKey: AppModel.collapsedHighlightsKey) }
+        defaults.removeObject(forKey: AppModel.collapsedHighlightsKey)
+        XCTAssertEqual(AppModel.storedCollapsedHighlights(), [])
+
+        let app = app()
+        app.collapsedHighlights = [HighlightFold.subagents, HighlightFold.project("p1")]
+        XCTAssertEqual(AppModel().collapsedHighlights, ["subagents", "project:p1"])
+
+        app.collapsedHighlights.remove(HighlightFold.subagents)
+        XCTAssertEqual(AppModel.storedCollapsedHighlights(), ["project:p1"])
+    }
+
     /// The two put-away sections start folded, once, then stay how Mike
     /// leaves them.
     func testPutAwaySectionsStartFolded() throws {

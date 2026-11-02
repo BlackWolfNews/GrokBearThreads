@@ -378,7 +378,8 @@ struct AppDump: Encodable {
         let parts = [("pinned", sections.pinned.count), ("files", sections.files.count), ("links", sections.links.count),
                      ("commits", sections.commits.count), ("edited", sections.edited.count)]
         let counts = parts.filter { $0.1 > 0 }.map { "\($0.1) \($0.0)" }
-        return ((sections.brief != nil ? ["a brief"] : []) + counts).joined(separator: ", ")
+        let folded = app.collapsedHighlights.isEmpty ? [] : ["folded: \(app.collapsedHighlights.sorted().joined(separator: " "))"]
+        return ((sections.brief != nil ? ["a brief"] : []) + counts + folded).joined(separator: ", ")
     }
 
     /// What the Usage panel says: each login's room by pool and provider
