@@ -160,6 +160,8 @@ public enum AccountUsageText {
     public static func extraLines(_ usage: AccountUsage?, notice: String?, now: Date, calendar: Calendar = .current) -> [String] {
         guard let usage else { return [] }
         let room = room(usage) ?? 100
+        // The panel shows the main windows' resets just above these lines.
+        let mainResets = mainWindows(usage).compactMap(\.resetsAt)
         var lines: [String] = []
         var money: [String] = []
         for window in extraWindows(usage) {
@@ -168,7 +170,9 @@ public enum AccountUsageText {
             if (window.detail ?? "").isEmpty && window.kind != "allowance" {
                 guard window.remainingPercent < room else { continue }
                 var line = "\(window.title) \(percent(window.remainingPercent)) left"
-                if let reset = window.resetsAt { line += ", resets " + resetTime(reset, now: now, calendar: calendar) }
+                if let reset = window.resetsAt, !mainResets.contains(where: { abs($0.timeIntervalSince(reset)) < 60 }) {
+                    line += ", resets " + resetTime(reset, now: now, calendar: calendar)
+                }
                 lines.append(line)
             } else if let detail = window.detail, !detail.isEmpty {
                 if !(notice ?? "").contains(detail) { money.append("\(window.title): \(detail)") }

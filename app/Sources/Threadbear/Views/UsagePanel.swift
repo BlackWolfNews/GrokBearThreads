@@ -108,12 +108,15 @@ private struct SpendSection: View {
         let hoursToday = max(1, now.timeIntervalSince(Calendar.current.startOfDay(for: now)) / 3600)
         VStack(alignment: .leading, spacing: zoomed(12)) {
             HStack(alignment: .top, spacing: zoomed(10)) {
+                // One short line under each number, the sentence in its tip:
+                // two lines of "Usually 120M by n..." in the docked panel
+                // read as clutter (Mike, 2 Nov).
                 StatTile(title: "Today", value: UsageStatsMath.tokens(today.total),
-                         detail: usual.map { "Usually " + UsageStatsMath.tokens($0) + " by now" },
-                         tip: UsageStatsMath.breakdown(today))
+                         detail: usual.map { "usually " + UsageStatsMath.tokens($0) },
+                         tip: (usual.map { "Usually " + UsageStatsMath.tokens($0) + " by this time of day. " } ?? "") + UsageStatsMath.breakdown(today))
                 StatTile(title: "Last hour", value: UsageStatsMath.tokens(lastHour),
-                         detail: UsageStatsMath.tokens(Int(Double(today.total) / hoursToday)) + " an hour today",
-                         tip: "Tokens in the last 60 minutes, across every login")
+                         detail: UsageStatsMath.tokens(Int(Double(today.total) / hoursToday)) + "/h today",
+                         tip: "Tokens in the last 60 minutes, across every login. Today has averaged " + UsageStatsMath.tokens(Int(Double(today.total) / hoursToday)) + " an hour.")
                 StatTile(title: "7 days", value: UsageStatsMath.tokens(week.total),
                          detail: UsageStatsMath.tokens(week.total / 7) + " a day",
                          tip: UsageStatsMath.breakdown(week))
@@ -143,12 +146,17 @@ private struct StatTile: View {
             Text(value)
                 .font(.system(size: zoomed(22), weight: .semibold))
                 .monospacedDigit()
-            // Two lines rather than "Usually 76..." when the dock is narrow.
-            Text(detail ?? " ")
-                .font(.system(size: zoomed(11)))
-                .foregroundStyle(.tertiary)
-                .lineLimit(2, reservesSpace: true)
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+            // The line, or nothing when it doesn't fit (a narrow panel):
+            // the tip says it either way.
+            ViewThatFits(in: .horizontal) {
+                Text(detail ?? " ")
+                Text(" ")
+            }
+            .font(.system(size: zoomed(11)))
+            .foregroundStyle(.tertiary)
+            .lineLimit(1)
         }
         .padding(zoomed(10))
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -497,8 +505,8 @@ private struct LoginRow: View {
 
 /// One window: its name and what's left, a bar, and how it's going: when
 /// it resets, or that it runs out first at this pace. The weekly window
-/// has a small chart of the week so far, with where this pace leads
-/// dashed on to the reset.
+/// has a small chart of the week so far instead of the bar, with where
+/// this pace leads dashed on to the reset.
 private struct WindowMeter: View {
     let window: UsageWindow
     let samples: [LimitSample]
@@ -520,17 +528,20 @@ private struct WindowMeter: View {
                     .monospacedDigit()
                     .foregroundStyle(short ? AnyShapeStyle(fill) : AnyShapeStyle(.primary))
             }
+            // The weekly chart already shows what's left (its line ends at
+            // it), so only the 5-hour window gets a bar.
             if window.kind == "weekly" {
                 WeekChart(window: window, samples: samples, pace: pace, colour: colour, now: now)
                     .frame(height: zoomed(34))
-            }
-            ZStack(alignment: .leading) {
-                Capsule().fill(Color.primary.opacity(0.08))
-                GeometryReader { geo in
-                    Capsule().fill(fill).frame(width: max(0, geo.size.width * window.remainingPercent / 100))
+            } else {
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.primary.opacity(0.08))
+                    GeometryReader { geo in
+                        Capsule().fill(fill).frame(width: max(0, geo.size.width * window.remainingPercent / 100))
+                    }
                 }
+                .frame(height: zoomed(4))
             }
-            .frame(height: zoomed(4))
             outlook(pace)
                 .font(.system(size: zoomed(11)))
                 .lineLimit(1)

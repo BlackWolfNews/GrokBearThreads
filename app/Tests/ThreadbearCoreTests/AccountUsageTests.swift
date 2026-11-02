@@ -215,6 +215,10 @@ final class AccountUsageTests: XCTestCase {
         tight.windows.append(UsageWindow(kind: "weekly_model", title: "Weekly Fable", remainingPercent: 5, resetsAt: at(day: 29, 13)))
         XCTAssertEqual(AccountUsageText.extraLines(tight, notice: nil, now: now, calendar: calendar), ["Weekly Fable 5% left, resets Thu 1 pm"])
         XCTAssertEqual(AccountUsageText.extraLines(usage(90, 60), notice: nil, now: now, calendar: calendar), [])
+        // Resetting with the weekly window, shown just above it: the reset isn't said twice.
+        var same = usage(nil, 60, weeklyReset: at(day: 29, 13))
+        same.windows.append(UsageWindow(kind: "weekly_model", title: "Weekly Fable", remainingPercent: 5, resetsAt: at(day: 29, 13)))
+        XCTAssertEqual(AccountUsageText.extraLines(same, notice: nil, now: now, calendar: calendar), ["Weekly Fable 5% left"])
         // Codex's credits come in the notice; a window repeating them doesn't say them again.
         var codex = usage(nil, 89)
         codex.windows.append(UsageWindow(kind: "other", title: "Credits", remainingPercent: 100, detail: "64,390 credits"))

@@ -94,8 +94,13 @@ let accounts = [
   {
     id: 'claude-main', provider: 'claude', title: 'mike@example.com', configDir: '~/.claude', defaultModel: 'claude-fable-5-1', models,
     email: 'mike@example.com', plan: 'Max',
-    usage: usage(89, 78, {
-      more: [{ kind: 'weekly_model', title: 'Weekly Fable', remainingPercent: 71, resetsAt: hoursFromNow(70) }],
+    // Max plans lost the 5-hour window at the end of Oct 2026; Team and
+    // Pro (below) still have it.
+    usage: usage(0, 78, {
+      windows: [
+        { kind: 'weekly', title: 'Weekly', remainingPercent: 78, resetsAt: hoursFromNow(70) },
+        { kind: 'weekly_model', title: 'Weekly Fable', remainingPercent: 71, resetsAt: hoursFromNow(70) },
+      ],
       notice: `${couldntCheck} · $48.85 extra usage spent`,
     }),
   },
