@@ -642,6 +642,9 @@ enum Automation {
         case "front":
             // Brings the window in front of everything, for frame timings.
             guard let window else { return "error no window" }
+            // Out of tuckBehind's level first: ordering front within it
+            // left the window under every normal one, so nobody saw it.
+            window.level = .normal
             NSApp.activate()
             window.orderFrontRegardless()
             return "ok"
