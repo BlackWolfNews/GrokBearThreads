@@ -7,11 +7,12 @@ import { checkSequence, checkSummary } from '../helpers/protocol-check.ts';
 import { makePng } from '../helpers/png.ts';
 import { RpcError } from '../../src/protocol.ts';
 import { UNTIL_RESTART, WROTE_INSTEAD } from '../../src/runner.ts';
+import { PATIENCE_MS } from '../helpers/patience.ts';
 
 const MIN = 60_000;
 
 // Hooks and actions run real shells, so a test waits for their events.
-async function until(check: () => boolean, what = 'the condition', ms = 5000): Promise<void> {
+async function until(check: () => boolean, what = 'the condition', ms = PATIENCE_MS): Promise<void> {
   const end = Date.now() + ms;
   while (!check()) {
     if (Date.now() > end) throw new Error(`Timed out waiting for ${what}`);

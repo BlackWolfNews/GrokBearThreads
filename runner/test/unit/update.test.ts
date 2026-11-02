@@ -8,6 +8,7 @@ import { FakeClock } from '../../src/clock.ts';
 import { nullLogger } from '../../src/log.ts';
 import { CHECK_INTERVAL_MS, FIRST_CHECK_MS, SOON_MS, RunnerUpdater, launcherDiffers, launchAgentBehind, launcherSourcesHash, appOfExecutable, updateDir, watchMainRef, decideUpdate, failedAlready, releaseTreeAt, syncClone, updateFilePath, type UpdateDeps } from '../../src/update.ts';
 import type { ReleaseJson } from '../../src/release.ts';
+import { patiently } from '../helpers/patience.ts';
 
 const running = { id: 'r1', tree: 'a+b+c+d' };
 const none = { pendingRestart: false, crashedTrees: new Set<string>() };
@@ -352,7 +353,7 @@ test('watchMainRef hears a commit on main, from a worktree too', async () => {
   const stop = watchMainRef(repo, () => heard++);
   try {
     commit('second', 'notes.md', 'hello');
-    for (let i = 0; i < 40 && !heard; i++) await new Promise((r) => setTimeout(r, 50));
+    await patiently(() => heard > 0);
     assert.ok(heard > 0, 'a commit in the checkout');
     const wt = path.join(tmpDir('tb-update-wt-'), 'wt');
     const added = spawnSync('git', ['-C', repo, 'worktree', 'add', '-q', '--detach', wt], { encoding: 'utf8' });
@@ -361,7 +362,7 @@ test('watchMainRef hears a commit on main, from a worktree too', async () => {
     const env = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@example.com' };
     spawnSync('git', ['-C', wt, 'commit', '-q', '--allow-empty', '-m', 'from a worktree'], { env });
     spawnSync('git', ['-C', wt, 'update-ref', 'refs/heads/main', 'HEAD'], { env });
-    for (let i = 0; i < 40 && !heard; i++) await new Promise((r) => setTimeout(r, 50));
+    await patiently(() => heard > 0);
     assert.ok(heard > 0, 'main moved from a worktree');
   } finally {
     stop();

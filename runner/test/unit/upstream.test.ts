@@ -7,6 +7,7 @@ import { tmpDir } from '../helpers/fakes.ts';
 import { FakeClock } from '../../src/clock.ts';
 import { nullLogger } from '../../src/log.ts';
 import { FETCH_INTERVAL_MS, FIRST_LOOK_MS, SETTLE_MS, Upstream, repoKey, signersPath, tagFor } from '../../src/upstream.ts';
+import { PATIENCE_MS } from '../helpers/patience.ts';
 
 // Commits and tags in the throwaway repos need a name, and must not pick
 // up a signing setup from whoever runs the tests.
@@ -197,7 +198,7 @@ test('publishing needs a signing key', async () => {
   assert.equal(await up.publishOnce(), undefined);
 });
 
-async function waitFor(ok: () => boolean, ms = 10_000): Promise<void> {
+async function waitFor(ok: () => boolean, ms = PATIENCE_MS): Promise<void> {
   const end = Date.now() + ms;
   while (!ok()) {
     if (Date.now() > end) throw new Error('timed out');

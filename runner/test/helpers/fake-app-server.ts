@@ -15,6 +15,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PATIENCE_MS } from './patience.ts';
 
 const SELF = fileURLToPath(import.meta.url);
 
@@ -261,7 +262,7 @@ export class FakeCodex {
   }
 
   // The next process the adapter starts.
-  next(ms = 5000): Promise<FakeConn> {
+  next(ms = PATIENCE_MS): Promise<FakeConn> {
     const c = this.conns.shift();
     if (c) return Promise.resolve(c);
     return new Promise((resolve, reject) => {

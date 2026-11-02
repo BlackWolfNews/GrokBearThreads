@@ -13,6 +13,7 @@ import { readToken } from '../../src/config.ts';
 import { nullLogger } from '../../src/log.ts';
 import type { PersistedEvent, ThreadSummary } from '../../src/protocol.ts';
 import type { RunnerStatus } from '../../src/restart.ts';
+import { patiently } from '../helpers/patience.ts';
 
 const TB = path.resolve(import.meta.dirname, '..', '..', 'bin', 'tb');
 // How tb prints itself: quoted when the checkout path has a space (the
@@ -258,7 +259,7 @@ test('the mock runner loads an export', { skip: !fs.existsSync(path.join(MOCK, '
   try {
     // Until it holds a port: an older mock wrote the file in two steps.
     const readPort = () => (fs.existsSync(ready) ? Number(fs.readFileSync(ready, 'utf8')) : 0);
-    for (let i = 0; i < 100 && !readPort(); i++) await new Promise((r) => setTimeout(r, 50));
+    await patiently(() => readPort() > 0);
     const port = readPort();
     const c = await RunnerClient.connect(`ws://127.0.0.1:${port}/rpc`, fs.readFileSync(path.join(data, 'secrets', 'runner-token'), 'utf8').trim());
     const list = await c.call('threads.list', { include: ['inbox'] });
@@ -520,11 +521,11 @@ test('tb logs prints the tail, filters by thread, and follows', async () => {
     // kept the Mac busy, the lines went in before tb had read the file's
     // size, and it (rightly) never printed them, which held up the runner's
     // updates. Up to 60 s now, since it's only slow when the Mac is.
-    for (let i = 0; i < 1200 && !f.out().includes('<=='); i++) await new Promise((res) => setTimeout(res, 50));
+    await patiently(() => f.out().includes('<=='));
     assert.match(f.out(), /<==/, 'tb logs -f started within a minute');
     await new Promise((res) => setTimeout(res, 300));
     fs.appendFileSync(log, 'five {"threadId":"t-2"}\nsix\nseven {"threadId":"t-2"}\n');
-    for (let i = 0; i < 400 && !f.out().includes('seven'); i++) await new Promise((res) => setTimeout(res, 50));
+    await patiently(() => f.out().includes('seven'));
     assert.equal(f.out(), `==> ${log} <==\nfive {"threadId":"t-2"}\nseven {"threadId":"t-2"}\n`);
   } finally {
     f.kill();

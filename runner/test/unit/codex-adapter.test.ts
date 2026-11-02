@@ -19,6 +19,7 @@ import { ProcessRegistry } from '../../src/proc.ts';
 import { nullLogger } from '../../src/log.ts';
 import type { Account } from '../../src/protocol.ts';
 import { FakeCodex, type FakeConn } from '../helpers/fake-app-server.ts';
+import { PATIENCE_MS } from '../helpers/patience.ts';
 
 const dirs: string[] = [];
 function tmp(prefix = 'tb-cxa-'): string {
@@ -184,7 +185,7 @@ function complete(h: Harness, turnId: string, status = 'completed', threadId = '
   h.conn.notify('turn/completed', { threadId, turn: { id: turnId, rootTurnId: turnId, status, error: null, durationMs: 1200, items: [] } });
 }
 
-async function waitFor(cond: () => boolean, ms = 3000): Promise<void> {
+async function waitFor(cond: () => boolean, ms = PATIENCE_MS): Promise<void> {
   const end = Date.now() + ms;
   while (!cond()) {
     if (Date.now() > end) throw new Error('timed out waiting');
@@ -592,7 +593,7 @@ test('a message behind an interrupted turn fails after the wait', async () => {
   h.conn.auto.set('turn/interrupt', () => ({}));
   await h.session.interrupt();
   h.session.send({ id: 'm2', text: 'next', images: [] });
-  await waitFor(() => h.rec.results().length === 1, 2000);
+  await waitFor(() => h.rec.results().length === 1);
   assert.deepEqual(h.rec.results()[0], { outcome: 'failed', error: 'Codex is still finishing the last turn', durationMs: 0, answers: 'm2', answered: ['m2'], queuedTurns: 0 });
   await h.session.end();
 });

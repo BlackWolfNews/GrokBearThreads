@@ -6,6 +6,7 @@ import { RunnerClient } from '../../src/client.ts';
 import { RpcError } from '../../src/protocol.ts';
 import { nullLogger } from '../../src/log.ts';
 import { checkSequence, checkSummary } from '../helpers/protocol-check.ts';
+import { patiently } from '../helpers/patience.ts';
 
 const TOKEN = 'test-token-0123456789';
 
@@ -82,10 +83,10 @@ test('subscribe replays the gap then streams; thread.updated goes to everyone', 
   h.clock.advance(40);
   s.text('m2:0', 'streamed');
   s.result('completed', 0.001);
-  // Up to 5 s for them to arrive: a fixed 50 ms wasn't always enough on a
+  // Wait for them to arrive: a fixed 50 ms wasn't always enough on a
   // busy Mac (29 Oct).
   const arrived = () => aNotes.filter((n) => n.method === 'thread.event').length >= 3 && bNotes.some((n) => n.method === 'thread.updated');
-  for (let i = 0; i < 500 && !arrived(); i++) await new Promise((r) => setTimeout(r, 10));
+  await patiently(arrived);
 
   const live = aNotes.filter((n) => n.method === 'thread.event').map((n) => n.params.event);
   assert.deepEqual(checkSequence([...sub.events, ...live], 1), []);
@@ -278,7 +279,7 @@ test('clis.* call CliUpdates and return at once; without it they are -32601; cli
   await assert.rejects(c.call('clis.check', { provider: 3 }), badParams);
   changed(status);
   // Wait for it, not a fixed time: the whole suite runs at once.
-  for (let i = 0; i < 200 && !got.some((n) => n.method === 'clis.updated'); i++) await new Promise((r) => setTimeout(r, 10));
+  await patiently(() => got.some((n) => n.method === 'clis.updated'));
   assert.deepEqual(got.find((n) => n.method === 'clis.updated')?.params, { clis: status });
   c.close();
   await server.close();

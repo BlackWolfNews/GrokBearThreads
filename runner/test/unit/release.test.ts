@@ -8,6 +8,7 @@ import { markGood, readState, runnerVersion, statePath, takeRollbackNotice, type
 import { restartPath } from '../../src/restart.ts';
 import { RunnerClient } from '../../src/client.ts';
 import { nullLogger } from '../../src/log.ts';
+import { PATIENCE_MS, patiently } from '../helpers/patience.ts';
 
 const RUNNER_DIR = path.join(import.meta.dirname, '..', '..');
 const PKG_VERSION = JSON.parse(fs.readFileSync(path.join(RUNNER_DIR, 'package.json'), 'utf8')).version as string;
@@ -121,13 +122,15 @@ test('a release reports its id, marks itself good, reports a rollback, and resta
   const dir = makeRelease(home, id);
   writeState(home, { current: id, previous: 'older', lastGood: 'older', boots: [{ release: id, at: new Date().toISOString() }], rolledBack: { from: 'broken', to: id, at: new Date().toISOString() } });
   // Long enough that a busy Mac still gets through the checks below before
-  // the release marks itself good.
-  const a = startRunner(path.join(dir, 'src', 'main.ts'), home, { THREADBEAR_GOOD_AFTER_MS: '3000' });
+  // the release marks itself good (3 s wasn't, at background priority).
+  const a = startRunner(path.join(dir, 'src', 'main.ts'), home, { THREADBEAR_GOOD_AFTER_MS: '10000' });
   try {
     const port = await a.listening;
     const { c, hello, notices } = await connect(home, port);
     assert.equal(hello.runnerVersion, `${PKG_VERSION}+${id}`);
-    assert.ok(notices.includes(`Release broken kept crashing at startup, so the runner went back to ${id}.`), notices.join('; '));
+    const rollback = `Release broken kept crashing at startup, so the runner went back to ${id}.`;
+    await patiently(() => notices.includes(rollback));
+    assert.ok(notices.includes(rollback), notices.join('; '));
     const status = await c.call('runner.status');
     assert.equal(status.release, id);
     assert.equal(status.version, `${PKG_VERSION}+${id}`);
@@ -135,7 +138,7 @@ test('a release reports its id, marks itself good, reports a rollback, and resta
     assert.deepEqual(status.running, []);
 
     assert.equal(readState(home)?.lastGood, 'older', 'not good yet');
-    for (const until = Date.now() + 15_000; readState(home)?.lastGood !== id && Date.now() < until; ) {
+    for (const until = Date.now() + PATIENCE_MS; readState(home)?.lastGood !== id && Date.now() < until; ) {
       await new Promise((r) => setTimeout(r, 100));
     }
     const s = readState(home)!;
@@ -201,7 +204,7 @@ function installLaunch(home: string, current: string): string {
 }
 
 // The port the nth runner the supervisor started listens on.
-async function nthListening(out: () => string, n: number, ms = 20_000): Promise<number> {
+async function nthListening(out: () => string, n: number, ms = PATIENCE_MS): Promise<number> {
   const end = Date.now() + ms;
   for (;;) {
     const ports = [...out().matchAll(/listening on (\d+)/g)].map((m) => Number(m[1]));
@@ -288,7 +291,7 @@ function ipcChild(code: string, env: Record<string, string> = { THREADBEAR_SUPER
   return { proc, out: () => out, messages, exited };
 }
 
-async function until(what: string, fn: () => boolean, ms = 10_000): Promise<void> {
+async function until(what: string, fn: () => boolean, ms = PATIENCE_MS): Promise<void> {
   const end = Date.now() + ms;
   while (!fn()) {
     if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);

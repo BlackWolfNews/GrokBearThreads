@@ -7,6 +7,7 @@ import { ProcessRegistry, groupAlive, groupSpawner, killGroup, processInfo } fro
 import { acquireLock } from '../../src/lock.ts';
 import { nullLogger } from '../../src/log.ts';
 import { tmpDir } from '../helpers/fakes.ts';
+import { PATIENCE_MS } from '../helpers/patience.ts';
 
 const RUNNER_DIR = path.join(import.meta.dirname, '..', '..');
 
@@ -18,7 +19,7 @@ function group(ignoreTerm = false): ChildProcess {
   return c;
 }
 
-async function until(fn: () => boolean, ms = 5000): Promise<boolean> {
+async function until(fn: () => boolean, ms = PATIENCE_MS): Promise<boolean> {
   const deadline = Date.now() + ms;
   while (Date.now() < deadline) {
     if (fn()) return true;

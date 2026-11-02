@@ -10,6 +10,7 @@ import os from 'node:os';
 import { loadConfig, readToken, runnerUrl } from '../../src/config.ts';
 import { nullLogger } from '../../src/log.ts';
 import { backgroundFlag } from '../../src/protocol.ts';
+import { patiently } from '../helpers/patience.ts';
 
 const TB = path.join(import.meta.dirname, '..', '..', 'bin', 'tb');
 
@@ -64,8 +65,8 @@ test('tb send --wait shows the new message and leaves the thread unread', async 
   const seenBefore = h.runner.get(thread.id).lastSeenSeq;
   const t = tb(h, url, ['send', thread.id, 'hello there', '--wait']);
   try {
-    // Up to 20 s: tb takes 5 s just to start on a Mac busy rendering.
-    for (let i = 0; i < 660 && s.sent.length < 2; i++) await new Promise((r) => setTimeout(r, 30));
+    // tb can take 5 s just to start on a Mac busy rendering.
+    await patiently(() => s.sent.length >= 2);
     assert.equal(s.sent.length, 2);
     s.text('m2:0', 'hi back');
     s.result();

@@ -14,6 +14,7 @@ import { RpcServer } from '../../src/rpc.ts';
 import { RunnerClient } from '../../src/client.ts';
 import { readToken } from '../../src/config.ts';
 import { nullLogger } from '../../src/log.ts';
+import { PATIENCE_MS } from '../helpers/patience.ts';
 
 // Commits need a name, and Mike's own git config (signing, hooks) mustn't
 // reach the temp repos. Each test file runs in its own process.
@@ -75,7 +76,7 @@ function capture() {
   return { out, err, opts: { out: (l: string) => out.push(l), err: (l: string) => err.push(l) } };
 }
 
-async function until(check: () => boolean, what: string, ms = 10_000): Promise<void> {
+async function until(check: () => boolean, what: string, ms = PATIENCE_MS): Promise<void> {
   const end = Date.now() + ms;
   while (!check()) {
     if (Date.now() > end) throw new Error(`Timed out waiting for ${what}`);

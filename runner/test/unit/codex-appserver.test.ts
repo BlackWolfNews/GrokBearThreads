@@ -22,6 +22,7 @@ import { ProcessRegistry } from '../../src/proc.ts';
 import { nullLogger } from '../../src/log.ts';
 import type { Account } from '../../src/protocol.ts';
 import { FakeCodex } from '../helpers/fake-app-server.ts';
+import { PATIENCE_MS } from '../helpers/patience.ts';
 
 const dirs: string[] = [];
 function tmp(prefix = 'tb-cx-'): string {
@@ -317,7 +318,7 @@ test('a 2.5 MB line reads whole; a line over the guard fails only itself', async
   conn.notify('turn/completed', { threadId: 't1', turn: { id: 'u1', status: 'completed' } });
   // 3.4 MB through a pipe and JSON.parse: the default 3 s timed out in
   // ./check.sh with the Mac's load average over 500 (29 Oct 2026).
-  await waitFor(() => notes.length === 2, 15_000);
+  await waitFor(() => notes.length === 2);
   assert.equal((notes[0][1] as { item: { result: string } }).item.result.length, 900_000);
   assert.equal(notes[1][0], 'turn/completed');
   assert.equal(big.length, 1);
@@ -410,7 +411,7 @@ test('a request Codex never answers times out', async () => {
   await p.close();
 });
 
-async function waitFor(cond: () => boolean, ms = 3000): Promise<void> {
+async function waitFor(cond: () => boolean, ms = PATIENCE_MS): Promise<void> {
   const end = Date.now() + ms;
   while (!cond()) {
     if (Date.now() > end) throw new Error('timed out waiting');
