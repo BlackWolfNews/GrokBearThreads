@@ -177,6 +177,9 @@ export default defineSchema({
     .index('by_threadId', ['threadId'])
     .index('by_share_slug', ['share.slug'])
     .index('by_runnerId', ['runnerId'])
+    // setPresence finds held pushes with this, rather than reading every
+    // thread the runner has ever had each time Mike leaves the Mac.
+    .index('by_runner_pushHeld', ['runnerId', 'pushHeldAt'])
     .index('by_view_activity', ['view', 'lastActivityMs'])
     // phone:search, for archived threads older than the phone's den list.
     .searchIndex('search_title', { searchField: 'title', filterFields: ['view'] })

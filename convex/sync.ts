@@ -56,8 +56,13 @@ export const setPresence = mutation({
       .unique();
     if (runner) await ctx.db.patch(runner._id, { atMac, atMacAt: Date.now() });
     if (atMac) return null;
-    for await (const t of ctx.db.query('threads').withIndex('by_runnerId', (q) => q.eq('runnerId', runnerId))) {
-      if (!t.pushHeldAt) continue;
+    // Only rows with a held push: reading all of them grew with every
+    // thread kept (docs/convex-backend.md, "Usage and the free plan").
+    const held = await ctx.db
+      .query('threads')
+      .withIndex('by_runner_pushHeld', (q) => q.eq('runnerId', runnerId).gt('pushHeldAt', 0))
+      .collect();
+    for (const t of held) {
       await ctx.db.patch(t._id, { pushHeldAt: undefined });
       if (t.needsYou) await ctx.scheduler.runAfter(0, internal.push.notify, { threadId: t.threadId, held: true });
     }
