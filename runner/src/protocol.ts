@@ -438,6 +438,7 @@ export type PatchInfo = {
   // version was. `hash` is the version patches.trust would trust.
   untrusted?: 'new' | 'changed';
   hash?: string;
+  helpers?: string[]; // with untrusted: the local files it imports, which the hash covers too
   icon?: string; // the patch file's icon, an SF Symbol
   iconFile?: string; // or its picture (absolute path: an image or a .app)
 };

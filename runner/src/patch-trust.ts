@@ -24,21 +24,32 @@
 // Always trusted: ~/.threadbear/patches (yours, like ~/.zshrc) and
 // Threadbear's own checkout (the code that's already running you).
 //
-// Only the patch file's own text is hashed. A patch that imports a helper
-// from elsewhere in the repo isn't asked about again when the helper
-// changes; worth knowing, not worth the complexity yet.
+// What's hashed is the patch file and every local file it imports, and
+// theirs in turn (relative or absolute specifiers: `./lib/ask.ts`), so a
+// pull that changes only a helper is asked about too. A patch with no
+// local imports hashes as its own text alone, as it did before helpers
+// counted. Packages (`node:fs`, `zod`) aren't followed: they're the
+// folder's dependencies, not its patch.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { atomicWriteFileSync } from './fsutil.ts';
 
-export type TrustVerdict = { trusted: true } | { trusted: false; reason: 'new' | 'changed'; hash: string };
+export type TrustVerdict = { trusted: true } | { trusted: false; reason: 'new' | 'changed'; hash: string; helpers?: string[] };
 
 // Hashes kept per folder: enough for a repo's patches across a few
 // branches and versions, without the file growing for ever.
 export const HASHES_KEPT = 200;
 
-type TrustFile = { version: 1; folders: Record<string, string[]> };
+// Version 1 hashed patch files alone. Its hashes are kept as `legacy`, so
+// a patch with helpers that was trusted before helpers counted isn't asked
+// about once more for that alone: the first look takes its version with
+// helpers as trusted (the runner was already running it) and drops the
+// old hash.
+type TrustFile = { version: 1 | 2; folders: Record<string, string[]>; legacy?: Record<string, string[]> };
+
+// At most this many helpers are followed from one patch file.
+const MAX_HELPERS = 100;
 
 export interface PatchGate {
   // Whether a project's patch file may load. `mtimeMs` keys the hash cache.
@@ -50,6 +61,9 @@ export interface PatchTrustStore extends PatchGate {
   readonly existed: boolean;
   trust(file: string, hash: string): boolean;
   trustCurrent(files: string[]): string[];
+  // Trusts, as they are now, the patch files that import `file` (an agent
+  // edited a helper). Only patches already looked at are known.
+  trustDependents(file: string): string[];
   save(): void;
 }
 
@@ -60,14 +74,18 @@ export const TRUST_ALL: PatchTrustStore = {
   check: async () => ({ trusted: true }),
   trust: () => true,
   trustCurrent: (files) => files,
+  trustDependents: () => [],
   save: () => {},
 };
 
 export class PatchTrust implements PatchTrustStore {
   private file?: string;
   private folders = new Map<string, string[]>();
+  private legacy = new Map<string, string[]>();
   private always: string[];
-  private hashes = new Map<string, { mtimeMs: number; hash: string }>();
+  // `trusted`: some version of this patch was trusted while this runner
+  // has run, so an agent's edit to one of its helpers may carry it on.
+  private hashes = new Map<string, HashEntry>();
   // Whether there was a trust file when this started. A runner from before
   // trust existed has none, and seeds it from what it was already running.
   readonly existed: boolean;
@@ -97,10 +115,14 @@ export class PatchTrust implements PatchTrustStore {
     this.loadedMtime = mtimeMs;
     try {
       const raw = JSON.parse(fs.readFileSync(this.file, 'utf8')) as Partial<TrustFile>;
-      this.folders.clear();
-      for (const [key, list] of Object.entries(raw.folders ?? {})) {
-        if (Array.isArray(list)) this.folders.set(key, list.filter((h): h is string => typeof h === 'string'));
-      }
+      const read = (from: unknown, into: Map<string, string[]>) => {
+        into.clear();
+        for (const [key, list] of Object.entries(from ?? {})) {
+          if (Array.isArray(list)) into.set(key, list.filter((h): h is string => typeof h === 'string'));
+        }
+      };
+      read(raw.folders, this.folders);
+      read(raw.version === 1 ? raw.folders : raw.legacy, this.legacy);
       return 'read';
     } catch {
       return 'broken';
@@ -111,10 +133,24 @@ export class PatchTrust implements PatchTrustStore {
     this.load();
     const key = folderKey(file);
     if (this.always.some((d) => isInside(key, d))) return { trusted: true };
-    const hash = await this.hashOf(file, mtimeMs);
+    const entry = this.hashOf(file, mtimeMs);
+    const { hash, own, deps } = entry;
     const known = this.folders.get(key);
-    if (known?.includes(hash)) return { trusted: true };
-    return { trusted: false, reason: known?.length ? 'changed' : 'new', hash };
+    if (known?.includes(hash)) {
+      entry.trusted = true;
+      return { trusted: true };
+    }
+    // Trusted before helpers were hashed: take this version as trusted
+    // once, and forget the old hash (see TrustFile).
+    const old = this.legacy.get(key);
+    if (old?.includes(own)) {
+      this.legacy.set(key, old.filter((h) => h !== own));
+      this.add(key, [hash]);
+      entry.trusted = true;
+      return { trusted: true };
+    }
+    const helpers = deps.map((d) => d.path);
+    return { trusted: false, reason: known?.length ? 'changed' : 'new', hash, ...(helpers.length ? { helpers } : {}) };
   }
 
   // Trusts one version of a patch file, by the hash the app showed. False
@@ -132,19 +168,29 @@ export class PatchTrust implements PatchTrustStore {
     const byKey = new Map<string, string[]>();
     for (const file of files) {
       if (!isPatchFile(file)) continue;
-      let text: Buffer;
+      let hash: string;
       try {
-        text = fs.readFileSync(file);
+        const entry = this.hashOf(file, fs.statSync(file).mtimeMs);
+        entry.trusted = true;
+        hash = entry.hash;
       } catch {
         continue;
       }
       const key = folderKey(file);
-      byKey.set(key, [...(byKey.get(key) ?? []), sha256(text)]);
+      byKey.set(key, [...(byKey.get(key) ?? []), hash]);
       done.push(file);
     }
     for (const [key, hashes] of byKey) this.add(key, hashes, false);
     if (byKey.size) this.save();
     return done;
+  }
+
+  // Only patches trusted before: editing a helper isn't a way to trust a
+  // patch that's still waiting.
+  trustDependents(file: string): string[] {
+    const target = realpath(path.resolve(file));
+    const dependents = [...this.hashes].filter(([, h]) => h.trusted && h.deps.some((d) => d.path === target)).map(([f]) => f);
+    return dependents.length ? this.trustCurrent(dependents) : [];
   }
 
   private add(key: string, hashes: string[], save = true): void {
@@ -159,17 +205,105 @@ export class PatchTrust implements PatchTrustStore {
   // next start doesn't seed again.
   save(): void {
     if (!this.file) return;
-    const out: TrustFile = { version: 1, folders: Object.fromEntries(this.folders) };
+    const legacy = [...this.legacy].filter(([, l]) => l.length);
+    const out: TrustFile = { version: 2, folders: Object.fromEntries(this.folders), ...(legacy.length ? { legacy: Object.fromEntries(legacy) } : {}) };
     atomicWriteFileSync(this.file, JSON.stringify(out, null, 2) + '\n');
     this.loadedMtime = fs.statSync(this.file).mtimeMs;
   }
 
-  private async hashOf(file: string, mtimeMs: number): Promise<string> {
+  // The patch's hash with its helpers'. Cached until the patch or one of
+  // its helpers changes (a stat each; patches are read every 15 seconds).
+  private hashOf(file: string, mtimeMs: number): HashEntry {
     const hit = this.hashes.get(file);
-    if (hit && hit.mtimeMs === mtimeMs) return hit.hash;
-    const hash = sha256(await fs.promises.readFile(file));
-    this.hashes.set(file, { mtimeMs, hash });
-    return hash;
+    if (hit && hit.mtimeMs === mtimeMs && hit.deps.every((d) => mtimeOf(d.path) === d.mtimeMs)) return hit;
+    const entry = { mtimeMs, ...patchHash(file), trusted: hit?.trusted };
+    this.hashes.set(file, entry);
+    return entry;
+  }
+}
+
+type Dep = { path: string; mtimeMs?: number };
+type HashEntry = { mtimeMs: number; hash: string; own: string; deps: Dep[]; trusted?: boolean };
+
+// A patch file's hash: its own text's alone when it imports no local
+// files, else one over its text and each helper's, by path relative to
+// the patch (so a worktree and its main checkout agree). A helper that's
+// missing counts as missing, so adding it later changes the hash.
+export function patchHash(file: string): { hash: string; own: string; deps: Dep[] } {
+  const text = fs.readFileSync(file);
+  const own = sha256(text);
+  const root = realpath(path.resolve(file));
+  const seen = new Set([root]);
+  const deps: Dep[] = [];
+  const queue: { from: string; text: string }[] = [{ from: root, text: text.toString('utf8') }];
+  while (queue.length && deps.length < MAX_HELPERS) {
+    const { from, text: src } = queue.shift()!;
+    for (const spec of localSpecifiers(src)) {
+      const target = resolveHelper(path.dirname(from), spec);
+      if (seen.has(target)) continue;
+      seen.add(target);
+      const mtimeMs = mtimeOf(target);
+      deps.push({ path: target, mtimeMs });
+      if (mtimeMs !== undefined && SCANNED.includes(path.extname(target))) {
+        try {
+          queue.push({ from: target, text: fs.readFileSync(target, 'utf8') });
+        } catch {
+          // unreadable: hashed as missing below
+        }
+      }
+      if (deps.length >= MAX_HELPERS) break;
+    }
+  }
+  if (!deps.length) return { hash: own, own, deps };
+  const dir = path.dirname(root);
+  const lines = deps
+    .map((d) => {
+      let h = 'missing';
+      try {
+        h = sha256(fs.readFileSync(d.path));
+      } catch {
+        // stays missing
+      }
+      return `${path.relative(dir, d.path)} ${h}`;
+    })
+    .sort();
+  return { hash: sha256(Buffer.from(['threadbear-patch-2', own, ...lines].join('\n'))), own, deps };
+}
+
+const SCANNED = ['.ts', '.mts', '.cts', '.js', '.mjs', '.cjs', '.tsx', '.jsx'];
+
+// The local specifiers in a module's source: static and dynamic imports,
+// re-exports and require calls whose specifier starts with ./, ../ or /.
+// A regex rather than a parser: a match inside a comment or string only
+// adds a file to the hash, which can't let anything through.
+export function localSpecifiers(src: string): string[] {
+  const out = new Set<string>();
+  const re = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)(['"`])((?:\.{1,2}\/|\/)[^'"`\n]*)\1/g;
+  for (let m; (m = re.exec(src)); ) out.add(m[2]);
+  return [...out];
+}
+
+// Where Node (or a bundler-ish habit) would find `spec`: as written, then
+// with a script extension, then as a folder's index. As written when none
+// is there, so it's hashed as missing.
+function resolveHelper(dir: string, spec: string): string {
+  const base = path.resolve(dir, spec.replace(/[?#].*$/, ''));
+  const tries = [base, ...[...SCANNED, '.json'].map((e) => base + e), ...SCANNED.map((e) => path.join(base, 'index' + e))];
+  for (const t of tries) {
+    try {
+      if (fs.statSync(t).isFile()) return realpath(t);
+    } catch {
+      // try the next
+    }
+  }
+  return base;
+}
+
+function mtimeOf(file: string): number | undefined {
+  try {
+    return fs.statSync(file).mtimeMs;
+  } catch {
+    return undefined;
   }
 }
 

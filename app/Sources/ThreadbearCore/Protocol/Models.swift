@@ -624,11 +624,15 @@ public struct PatchInfo: Sendable, Hashable, Codable, Identifiable {
     /// version was). `hash` is the version `patches.trust` would trust.
     public var untrusted: String?
     public var hash: String?
+    /// With `untrusted`: the local files it imports, which the hash covers
+    /// too, so Patches can say what else trusting it would run.
+    public var helpers: [String]?
 
     public init(id: String, source: String = "project", file: String? = nil, error: String? = nil, folder: String? = nil, projectId: String? = nil,
-                matched: [String]? = nil, liveError: String? = nil, untrusted: String? = nil, hash: String? = nil) {
+                matched: [String]? = nil, liveError: String? = nil, untrusted: String? = nil, hash: String? = nil, helpers: [String]? = nil) {
         self.untrusted = untrusted
         self.hash = hash
+        self.helpers = helpers
         self.matched = matched
         self.liveError = liveError
         self.id = id
@@ -653,6 +657,7 @@ public struct PatchInfo: Sendable, Hashable, Codable, Identifiable {
         iconFile = (try? c.decodeIfPresent(String.self, forKey: .iconFile)) ?? nil
         untrusted = (try? c.decodeIfPresent(String.self, forKey: .untrusted)) ?? nil
         hash = (try? c.decodeIfPresent(String.self, forKey: .hash)) ?? nil
+        helpers = (try? c.decodeIfPresent([String].self, forKey: .helpers)) ?? nil
     }
 }
 

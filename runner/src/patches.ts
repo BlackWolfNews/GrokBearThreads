@@ -375,7 +375,7 @@ async function loadPatchFile(file: string, source: 'home' | 'project', cache: Pa
     } catch (e) {
       return { info: { id, source, file, error: firstLine(e) }, panels: [], actions: [], hooks: [] };
     }
-    if (!verdict.trusted) return { info: { id, source, file, untrusted: verdict.reason, hash: verdict.hash }, panels: [], actions: [], hooks: [] };
+    if (!verdict.trusted) return { info: { id, source, file, untrusted: verdict.reason, hash: verdict.hash, ...(verdict.helpers ? { helpers: verdict.helpers } : {}) }, panels: [], actions: [], hooks: [] };
   }
   const hit = cache.get(file);
   if (hit && hit.mtimeMs === mtimeMs) return hit.loaded;

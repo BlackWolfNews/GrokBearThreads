@@ -693,7 +693,9 @@ Patches only run once you've trusted them. One the agent writes for you is
 trusted as it wrote it. One that arrives some other way, in a repo you've
 cloned or with a `git pull`, waits: a "patch to trust" chip shows above the
 composer, and Patches lists it as "Not run yet" (or "Changed since you
-trusted it") with a Trust button. Open its file to read it first. A
+trusted it") with a Trust button. Open its file to read it first, and
+any files it imports, which Patches lists under it: a change to one of
+those asks again too. A
 thread's worktree counts as its repo, and patches that were already in
 your folders when this arrived are trusted for you.
 

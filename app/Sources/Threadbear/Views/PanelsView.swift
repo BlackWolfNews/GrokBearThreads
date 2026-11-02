@@ -406,6 +406,22 @@ struct PatchesList: View {
                 }
                 .buttonStyle(.plain)
                 .tip("Open the file")
+                // What else trusting it would run: the files it imports.
+                if patch.untrusted != nil, let helpers = patch.helpers, !helpers.isEmpty {
+                    ForEach(helpers, id: \.self) { helper in
+                        Button {
+                            NSWorkspace.shared.open(URL(fileURLWithPath: helper))
+                        } label: {
+                            Text("Imports " + helper.abbreviatingHome)
+                                .font(.system(size: TypeScale.small))
+                                .foregroundStyle(Color(nsColor: Theme.faintText))
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        .buttonStyle(.plain)
+                        .tip("Open this file it imports. Trusting the patch runs it too.")
+                    }
+                }
             } else if let folder = patch.folder, patch.projectId != nil {
                 // A built-in from a project folder: which one.
                 Text(folder.abbreviatingHome)

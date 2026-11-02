@@ -2538,7 +2538,9 @@ export class Runner {
             if (typeof file === 'string') {
               rt.turn.edited.add(file);
               const full = path.resolve(rec.cwd, file);
-              if (isPatchFile(full)) (rt.turn.patchEdits ??= new Map()).set(ev.itemId, full);
+              // Patch files, and helpers a trusted patch may import:
+              // trusted as the agent leaves them (patch-trust.ts).
+              (rt.turn.patchEdits ??= new Map()).set(ev.itemId, full);
             }
           } else if (ev.type === 'tool.result' && rt.turn.patchEdits?.has(ev.itemId)) {
             const file = rt.turn.patchEdits.get(ev.itemId)!;
@@ -4601,10 +4603,10 @@ export class Runner {
 
   // Trusts patch files an agent wrote, as they are now (patch-trust.ts).
   // `reread` false when the caller reads them again itself.
+  // A helper the agent edited carries on the trusted patches importing it.
   private trustAgentPatches(files: string[], reread = true): void {
-    const patchFiles = files.filter(isPatchFile);
-    if (!patchFiles.length) return;
-    const done = this.patchTrust.trustCurrent(patchFiles);
+    const done = this.patchTrust.trustCurrent(files.filter(isPatchFile));
+    for (const file of files) if (!isPatchFile(file)) done.push(...this.patchTrust.trustDependents(file));
     if (done.length && reread) this.rereadAllPatches();
   }
 

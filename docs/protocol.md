@@ -272,6 +272,8 @@ type PatchInfo = {
                         // from its folder is trusted, "changed" when an earlier
                         // version was (see "Trusting a folder's patches")
   hash?: string         // with untrusted: the version patches.trust would trust
+  helpers?: string[]    // with untrusted: the local files it imports (absolute),
+                        // whose text the hash covers too
 }
 
 type Panel = {
@@ -2038,9 +2040,19 @@ panels or hooks, no live functions, and no worktree for new threads.
   the patch files of every thread's folder and every project's as they
   are, since it was already running them.
 
-Only the patch file's own text is hashed. A patch that imports a helper
-from elsewhere in its repo isn't asked about again when only the helper
-changes.
+The hash covers the patch file and the local files it imports, and
+theirs in turn (specifiers starting `./`, `../` or `/`, at most 100), so a
+pull that changes only a helper is asked about too, and `helpers` lists
+them so the app can say what else would run. A patch with no local imports
+hashes as its own text alone. Packages (`node:fs`, anything from
+`node_modules`) aren't followed: they're the folder's dependencies. An
+agent's Edit or Write to a helper carries on the trusted patches that
+import it, as it does for the patch file; it doesn't trust a patch that's
+still waiting. A trust file from before helpers counted (`version: 1`)
+keeps its hashes as `legacy`: the first look at a patch it trusted takes
+that patch's helpers as they are then, once. A changed helper is only
+imported again when the runner restarts (Node loads a module once per
+process); the patch file itself loads again when it changes.
 
 **Built in**, from the folder alone:
 
