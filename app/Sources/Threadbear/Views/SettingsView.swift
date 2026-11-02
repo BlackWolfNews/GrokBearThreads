@@ -93,35 +93,10 @@ private struct GeneralSettings: View {
                     Footnote("Where a new thread starts when you don't pick a folder.")
                 }
 
-                // One reply and Bullet replies left here on 2 Nov: one reply is
-                // the default, and anyone who wants bullets asks an agent to
-                // change runner.json (Mike wants as few settings as possible).
-
-                Section {
-                    LabeledContent("Release an idle CLI after") {
-                        Stepper(value: binding(settings.idleMinutes) { SettingsUpdate(idleMinutes: $0) }, in: 1...600, step: 5) {
-                            Text(settings.idleMinutes == 1 ? "1 minute" : "\(settings.idleMinutes) minutes")
-                                .monospacedDigit()
-                        }
-                        .tip("A thread's CLI is stopped after this long with nothing to do, and picks up where it left off when you next send")
-                    }
-                    LabeledContent("Most CLIs live at once") {
-                        Stepper(value: binding(settings.maxLiveCLIs) { SettingsUpdate(maxLiveCLIs: $0) }, in: 1...20) {
-                            Text("\(settings.maxLiveCLIs)")
-                                .monospacedDigit()
-                        }
-                        .tip("How many threads can have a CLI running at once")
-                    }
-                } footer: {
-                    Footnote("Each live CLI uses about 400 MB. Past the limit, the one that's been idle longest is released early.")
-                }
-
-                Section {
-                    Toggle("Follow main", isOn: binding(settings.followMain) { SettingsUpdate(followMain: $0) })
-                        .tip("Update the runner by itself from each new commit on main")
-                } footer: {
-                    Footnote("The runner builds each new commit on main and restarts onto it once no thread is busy. A change here takes effect when the runner next restarts.")
-                }
+                // One reply, Bullet replies, the two live-CLI steppers and
+                // Follow main left here on 2 Nov: Mike wants as few settings
+                // as possible, the defaults suit nearly everyone, and anyone
+                // who wants one changed asks an agent to edit runner.json.
 
                 Section {
                     Toggle(isOn: $activityLog) {
@@ -154,10 +129,6 @@ private struct GeneralSettings: View {
             .scrollIndicators(.never)
             .scrollDisabled(true)
         }
-    }
-
-    private func binding<T>(_ value: T, _ update: @escaping (T) -> SettingsUpdate) -> Binding<T> {
-        Binding(get: { value }, set: { app.updateSettings(update($0)) })
     }
 
     private func chooseFolder(from current: String) {

@@ -48,7 +48,8 @@ File references are where to look.
 - **Following your main** (`runner/src/update.ts`, `app/Sources/Threadbear/AppUpdate.swift`):
   every 5 minutes the runner and the app check your local `main`. When
   it has changed, they rebuild themselves from it and redeploy your
-  backend. Turn it off with `followMain: false` in `runner.json`.
+  backend. Turn it off with `followMain: false` in `runner.json` (ask any
+  thread to; it left Settings on 2 Nov).
 - **Mike's releases** (`runner/src/upstream.ts`): every 6 hours it fetches
   `upstream`'s signed `release/*` tags. It only tells you about them; it
   never changes your code.
