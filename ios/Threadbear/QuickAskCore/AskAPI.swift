@@ -18,7 +18,7 @@ nonisolated struct AskBody: Codable, Equatable, Sendable {
 }
 
 /// Everything about talking to the server that doesn't need a network: building requests and
-/// turning failures into plain words. The contract is in the README.
+/// turning failures into plain words. The contract is docs/ask-server.md.
 nonisolated enum AskAPI {
     static let pingPath = "/api/quick/ping"
     static let askPath = "/api/quick/ask"

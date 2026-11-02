@@ -614,10 +614,14 @@ used the keyboard or mouse in the last two minutes, and as away when the Mac
 is asleep. On the iPhone, Settings > Notify me changes it to Always or Never.
 
 Ask on the iPhone: press the Action button, say a question, and hear the
-answer from your Agent Archive server. Set it up in the iPhone's
-Settings > Ask (the archive server's address and a phone token from it;
-the phone needs Tailscale to reach it), then set the Action button to
-Threadbear's Ask shortcut. The waveform button in the inbox does the same.
+answer from an archive server of your own, one that knows your past
+threads. Mike's is Agent Archive, which isn't public yet: he'll be talking
+about it soon and releasing it then. Until then, any server that speaks
+[Ask's small protocol](https://github.com/mikecann/threadbear/blob/main/docs/ask-server.md)
+works. Set it up in the iPhone's Settings > Ask (the server's address and
+a token from it; the phone has to be able to reach it, over Tailscale for
+one on your own Mac), then set the Action button to Threadbear's Ask
+shortcut. The waveform button in the inbox does the same.
 Each answer is kept as a thread in your default folder, with the question,
 the answer and a note that Ask answered it. It shows as done and already
 read. Once it's kept, the phone opens that thread with a big mic at the
