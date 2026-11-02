@@ -188,6 +188,40 @@ test('a passed reset is back to 100%, and the store says so when it happens', ()
   }
 });
 
+// Anthropic dropped the 5-hour window from Max plans at the end of Oct
+// 2026 (Team kept it). The old reading has to go, not show as 100% left.
+test('a window that a reading after its reset leaves out is gone', () => {
+  const s = setup();
+  const store = s.make();
+  const nowhere = s.acct('claude-9', '/elsewhere');
+  const resets = new Date(s.clock.now() + 3600_000).toISOString();
+  store.record('claude-9', { windows: [{ kind: 'five_hour', title: '5-hour', remainingPercent: 40, resetsAt: resets }, { kind: 'weekly', title: 'Weekly', remainingPercent: 70 }] });
+  // A reading before the reset that leaves it out (the CLI's single-window
+  // fallback) doesn't drop it.
+  s.clock.advance(30 * 60_000);
+  store.record('claude-9', { windows: [{ kind: 'weekly', title: 'Weekly', remainingPercent: 69 }] });
+  assert.equal(pct(store.usageFor(nowhere), 'five_hour'), 40);
+  // Past the reset with nothing newer: full again.
+  s.clock.advance(60 * 60_000);
+  assert.equal(pct(store.usageFor(nowhere), 'five_hour'), 100);
+  // A reading after the reset without it: the login has no such window.
+  store.record('claude-9', { windows: [{ kind: 'weekly', title: 'Weekly', remainingPercent: 68 }] });
+  assert.deepEqual(store.usageFor(nowhere)!.windows.map((w) => w.kind), ['weekly']);
+  // Token Stats' newer file without it counts too: claude-main's old live
+  // 5-hour window goes once limits.json is read after its reset.
+  store.record('claude-main', { windows: [{ kind: 'five_hour', title: '5-hour', remainingPercent: 40, resetsAt: new Date(s.clock.now() + 60_000).toISOString() }] });
+  s.clock.advance(5 * 60_000);
+  const next = JSON.parse(LIMITS_FIXTURE);
+  next.generatedAt = new Date(s.clock.now()).toISOString();
+  const main = next.accounts.find((a: any) => a.label === '~/.claude');
+  main.usageReadAt = next.generatedAt;
+  main.windows = main.windows.filter((w: any) => w.kind !== 'five_hour');
+  s.write(JSON.stringify(next));
+  store.reload();
+  assert.equal(pct(store.usageFor(s.accounts.main), 'five_hour'), undefined);
+  assert.equal(pct(store.usageFor(s.accounts.main), 'weekly'), 13);
+});
+
 test("stale: Token Stats quiet for 15 minutes and no live reading in that time", () => {
   const s = setup();
   const store = s.make();

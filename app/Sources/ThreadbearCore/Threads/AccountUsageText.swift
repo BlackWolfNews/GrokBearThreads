@@ -14,7 +14,8 @@ public enum AccountUsageText {
     // MARK: Windows
 
     /// The 5-hour and weekly windows, the two that decide whether there's
-    /// room. Pro Lite has only a weekly one.
+    /// room. Codex Pro Lite and Claude Max (since the end of Oct 2026) have
+    /// only the weekly one.
     public static func mainWindows(_ usage: AccountUsage?) -> [UsageWindow] {
         guard let usage else { return [] }
         return ["five_hour", "weekly"].compactMap { kind in usage.windows.first { $0.kind == kind } }

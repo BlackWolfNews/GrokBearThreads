@@ -279,10 +279,20 @@ export class UsageStore {
     }
     const blocked = !!live?.blocked && (live.blockedUntil === undefined || now < live.blockedUntil);
     if (merged.size === 0 && !blocked) return undefined;
+    // When the account was last read at all, by either source.
+    const latest = Math.max(base?.readAt ?? 0, live?.at ?? 0);
     let newest = { at: 0, live: false };
     const windows: UsageWindow[] = [];
     for (const m of merged.values()) {
       if (m.at > newest.at) newest = { at: m.at, live: m.live };
+      // A reading taken after this window reset didn't mention it: the
+      // login has no such window any more. Anthropic dropped the 5-hour
+      // one from Max plans at the end of Oct 2026, and without this its
+      // last reading showed as "5-hour 100% left" forever. A reading before
+      // the reset can leave it out (the CLI's single-window fallback), so
+      // only one after it counts.
+      const reset = m.w.resetsAt ? Date.parse(m.w.resetsAt) : NaN;
+      if (reset <= now && latest > m.at && latest > reset) continue;
       windows.push(afterReset(m.w, now));
     }
     if (live && live.at > newest.at) newest = { at: live.at, live: true };
@@ -455,8 +465,9 @@ export function resetTime(iso: string, now: number): string {
   return `${d.getDate()} ${d.toLocaleDateString('en-AU', { month: 'short' })} ${clock}`;
 }
 
-// The two windows that decide the room: 5-hour and weekly. Pro Lite has
-// only the weekly one.
+// The two windows that decide the room: 5-hour and weekly. Codex Pro Lite
+// and Claude's Max plans (since the end of Oct 2026) have only the weekly
+// one; Claude Team still has both.
 function mainWindows(u: AccountUsage): UsageWindow[] {
   return u.windows.filter((w) => w.kind === 'five_hour' || w.kind === 'weekly');
 }
