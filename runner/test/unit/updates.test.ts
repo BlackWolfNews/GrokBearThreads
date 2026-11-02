@@ -126,8 +126,12 @@ function setup(o: { latest?: Partial<Record<Provider, string>>; env?: NodeJS.Pro
   const clock = new FakeClock();
   const notices: string[] = [];
   const env = o.env ?? { PATH: '/usr/bin:/bin', CLAUDE_CONFIG_DIR: '/should/not/leak' };
+  // No real process list unless a test brings its own: this Mac's has nothing
+  // to do with these temp folders, and at background priority ps can outlast
+  // cleanupCodex's 10 s limit, which skips the cleanup a test then checks (2 Nov).
+  const exec: Exec = o.exec ?? ((cmd, args, opts) => (cmd === '/bin/ps' ? Promise.resolve({ code: 0, stdout: '', stderr: '' }) : defaultExec(cmd, args, opts)));
   const make = () =>
-    new CliUpdates({ cfg, log: nullLogger, clock, hooks, env, execPath: npm.execPath, fetchText, exec: o.exec, random: () => 0, notice: (_l, m) => void notices.push(m), codex: { resolve, checkSurface, testedVersion: '0.164.0' } });
+    new CliUpdates({ cfg, log: nullLogger, clock, hooks, env, execPath: npm.execPath, fetchText, exec, random: () => 0, notice: (_l, m) => void notices.push(m), codex: { resolve, checkSurface, testedVersion: '0.164.0' } });
   const u = make();
   const changes: CliStatus[][] = [];
   u.onChange((c) => changes.push(c));
