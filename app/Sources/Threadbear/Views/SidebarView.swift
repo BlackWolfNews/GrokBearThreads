@@ -1260,6 +1260,10 @@ struct ModeHeader: View {
 struct SearchField: View {
     @Binding var text: String
     let prompt: String
+    /// Puts the cursor in it when it appears, for a page with nothing else
+    /// to type in.
+    var focusOnAppear = false
+    @FocusState private var focused: Bool
 
     var body: some View {
         // The glass and the prompt on the same columns as a
@@ -1272,6 +1276,8 @@ struct SearchField: View {
             TextField(prompt, text: $text)
                 .textFieldStyle(.plain)
                 .font(.system(size: TypeScale.sidebarButton))
+                .focused($focused)
+                .onAppear { if focusOnAppear { focused = true } }
                 .tip(prompt)
             if !text.isEmpty {
                 Button {

@@ -533,10 +533,11 @@ is an error. Commands marked "the open thread" act on `id` when it's given
 | `rename` | `title` | without `title`, makes the open thread's title in the header a field, as a click does; with it, saves that title as Mike's |
 | `paste-image` | `path`, `focused` | through the instance's own pasteboard; `focused` pastes where the cursor is (an ask's Something else box) |
 | `decide` | `pick` (`"ask:choice"`, both 1-based, choice 0 for "Something else"; picking the same again unpicks it), `clear`, `send` | the open thread's card of asks, picked as its buttons pick, waiting in the composer; `send` sends the composer with the picks. Says what's picked after |
+| `return`, `escape` at the cursor | `focused` (`return` only) | `return` with `focused: true`, or `escape`, presses the key in whichever text box has the cursor |
 | `click` | `title` | a button in the transcript: Allow, Always allow, Deny, an option, Send answer |
 | `expand`, `collapse` | `row`, `file`, `all`, `section`, `scheduleSection` | a group, tool, thinking block or settled approval (one folded in a closed group opens it); `file` (path or index) in a changes card; `all` for a whole diff; `section` (`inbox`, `running`) folds or opens an inbox heading, as clicking it does; `scheduleSection` (`active`, `paused`, `done`) a Scheduled one |
 | `sort` | `order` (`needsYou`, `newest`, `oldest`) | the Inbox section's order, as its heading's sort menu sets it |
-| `search` | `text` (`""` clears it) | the search at the top of the inbox, as typing in it does; `sidebar` then lists only its matches |
+| `search` | `text` (`""` clears it), `projects` | the search at the top of the inbox, as typing in it does; `sidebar` then lists only its matches. With `projects: true`, the Projects page's search instead; the result lists the cards it leaves, in order |
 | `scroll` | `to` (`top`, `bottom`) or `row`, `offset` | |
 | `hints` | `on` (default true) | shows the keys as if ⌘ were held, or hides them |
 | `setup` | `show`, `hidden` | Finish setting up: opens or closes its panel, or hides or unhides it; says what's left, `[x]` on each item done, and whether the icon and panel are up |

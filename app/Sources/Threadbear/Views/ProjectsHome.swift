@@ -10,25 +10,47 @@ struct ProjectsHome: View {
     @Environment(AppModel.self) private var app
 
     var body: some View {
+        @Bindable var app = app
         let sections = app.projectSections
-        let cards = ProjectCard.build(sections)
+        let all = ProjectCard.build(sections)
+        let cards = ProjectCard.matching(all, app.projectSearchQuery)
+        let searching = !app.projectSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         ScrollView {
             VStack(alignment: .leading, spacing: zoomed(22)) {
                 HStack(alignment: .firstTextBaseline, spacing: zoomed(10)) {
                     Text("Projects")
                         .font(.system(size: zoomed(24), weight: .semibold))
-                    Text(Self.summary(cards, overall: ProjectCard.overall(sections)))
+                        .fixedSize()
+                    // In a narrow window the summary is what gives way: one
+                    // line cut short, rather than wrapping under the title
+                    // or squeezing the search, whose width would otherwise
+                    // jump as the summary's length changes with each key.
+                    Text(searching ? ProjectCard.matchCount(cards.count, of: all.count)
+                                   : Self.summary(all, overall: ProjectCard.overall(sections)))
                         .font(.system(size: TypeScale.label))
                         .foregroundStyle(Color(nsColor: Theme.faintText))
                         .monospacedDigit()
-                    Spacer(minLength: zoomed(12))
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    SearchField(text: $app.projectSearchQuery, prompt: "Search projects", focusOnAppear: true)
+                        .frame(minWidth: zoomed(120), maxWidth: zoomed(240))
+                        .layoutPriority(1)
+                        // Return opens the top result, Escape clears, so a
+                        // project is a few keys away from this page.
+                        .onSubmit { if searching, let first = cards.first { app.openProjectPage(first.project.id) } }
+                        .onExitCommand { app.projectSearchQuery = "" }
                     Button { app.newProject(with: nil) } label: {
                         Label("New project", systemImage: "plus")
                     }
+                    .fixedSize()
                     .tip("Make a new project")
                 }
-                if cards.isEmpty {
+                if all.isEmpty {
                     Text("No projects yet. The librarian makes them as threads run, or you can make one.")
+                        .font(.system(size: TypeScale.label))
+                        .foregroundStyle(.secondary)
+                } else if cards.isEmpty {
+                    Text("No projects match that.")
                         .font(.system(size: TypeScale.label))
                         .foregroundStyle(.secondary)
                 } else {

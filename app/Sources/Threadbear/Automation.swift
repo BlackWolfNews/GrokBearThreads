@@ -347,7 +347,12 @@ enum Automation {
             return "ok"
         case "return":
             // `"shift": true` for Shift-Return (a new line, carrying a list on).
+            // `"focused": true` presses it where the cursor is, as `type` does.
+            if c["focused"] as? Bool == true { return pressAtCursor(window, characters: "\r", keyCode: 36) }
             return pressReturn(window, shift: c["shift"] as? Bool == true)
+        case "escape":
+            // The Escape key, where the cursor is.
+            return pressAtCursor(window, characters: "\u{1b}", keyCode: 53)
         case "rename":
             // No title: the open thread's title becomes a field, as a click
             // does. With one: saves it, as Return in that field does.
@@ -724,7 +729,12 @@ enum Automation {
             return "ok"
         case "search":
             // The search at the top of the inbox, as typing in it does; ""
-            // clears it.
+            // clears it. "projects": true is the Projects page's search
+            // instead, and answers with the cards it leaves, in order.
+            if c["projects"] as? Bool == true {
+                app.projectSearchQuery = c["text"] as? String ?? ""
+                return "ok " + json(ProjectCard.matching(app.projectCards, app.projectSearchQuery).map(\.project.title))
+            }
             app.searchQuery = c["text"] as? String ?? ""
             return "ok"
         case "expand", "collapse":
@@ -1214,6 +1224,18 @@ enum Automation {
                                            charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36)
         else { return "error no composer" }
         composer.keyDown(with: event)
+        return "ok"
+    }
+
+    /// A key event the text box with the cursor gets, as a real key press
+    /// would reach it, without the app coming to the front.
+    private static func pressAtCursor(_ window: NSWindow?, characters: String, keyCode: UInt16) -> String {
+        guard let field = window?.firstResponder as? NSTextView else { return "error the cursor isn't in a text box" }
+        guard let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                           windowNumber: window?.windowNumber ?? 0, context: nil, characters: characters,
+                                           charactersIgnoringModifiers: characters, isARepeat: false, keyCode: keyCode)
+        else { return "error no event" }
+        field.keyDown(with: event)
         return "ok"
     }
 

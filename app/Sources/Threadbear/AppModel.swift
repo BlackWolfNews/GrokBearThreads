@@ -200,6 +200,9 @@ final class AppModel {
     /// What's typed in the search at the top of the inbox, which cuts every
     /// section down to its matches (`ThreadSections.matching`).
     var searchQuery = ""
+    /// What's typed in the search on the Projects page. Here rather than in
+    /// the page, so backing out of a project finds the same results.
+    var projectSearchQuery = ""
     var errorMessage: String?
     /// Bumped to put the cursor in a composer, by its draft key (a thread's
     /// id, or "new"): with threads open in several panels, only that one's.

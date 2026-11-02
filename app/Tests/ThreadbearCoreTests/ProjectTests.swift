@@ -316,6 +316,36 @@ final class ProjectTests: XCTestCase {
         XCTAssertEqual(ProjectCard.overall(sections).working, 1, "but one thread working")
     }
 
+    func testSearchingCardsLooksThroughWhatAProjectIsAbout() {
+        let card = { (project: Project) in
+            ProjectCard(project: project, status: ProjectCardStatus(), lastActivityAt: .distantPast, recent: [])
+        }
+        let cards = [
+            card(Project(id: "state", title: "Sammy Cam", state: "The deterrent speaks through a Pi")),
+            card(Project(id: "folder", title: "Podcast site", folders: ["/Users/mike/dev/me/mike-pod-site"])),
+            card(Project(id: "goals", title: "Café", goals: "Sell coffee")),
+            card(Project(id: "notes", title: "Boat", notes: "Moored by the café")),
+            card(Project(id: "link", title: "Shop", links: [ProjectLink(title: "Admin", url: "https://example.com/x")])),
+            card(Project(id: "title", title: "The Deterrent")),
+        ]
+        let ids = { (query: String) -> [String] in ProjectCard.matching(cards, query).map(\.id) }
+
+        XCTAssertEqual(ids(""), cards.map(\.id), "nothing typed leaves every card, in order")
+        XCTAssertEqual(ids("  \n"), cards.map(\.id))
+        XCTAssertEqual(ids("deterrent"), ["title", "state"], "a title match goes above one in the state")
+        XCTAssertEqual(ids("DETERRENT sammy"), ["state"], "every word has to match, in any field")
+        XCTAssertEqual(ids("cafe"), ["goals", "notes"], "case and accents don't count")
+        XCTAssertEqual(ids("mike-pod"), ["folder"])
+        XCTAssertEqual(ids("users"), [], "a folder's name counts, not the path every project shares")
+        XCTAssertEqual(ids("admin"), ["link"])
+        XCTAssertEqual(ids("nothing like this"), [])
+    }
+
+    func testProjectsSummarySaysHowManyMatchWhileSearching() {
+        XCTAssertEqual(ProjectCard.matchCount(3, of: 76), "3 of 76 projects")
+        XCTAssertEqual(ProjectCard.matchCount(0, of: 1), "0 of 1 project")
+    }
+
     // MARK: The Patches tab
 
     func testPatchGroupsOwnFolderFirstThenEachProject() {

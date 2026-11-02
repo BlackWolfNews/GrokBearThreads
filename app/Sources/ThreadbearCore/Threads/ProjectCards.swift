@@ -95,4 +95,37 @@ public struct ProjectCard: Sendable, Equatable, Identifiable {
             )
         }
     }
+
+    /// The cards a search on the Projects page keeps. Every word has to be
+    /// somewhere in the project, case and accents aside, so "port lights"
+    /// finds Port Geo Lights Cruise. Goals and notes aren't on the card but
+    /// count, as you often remember what a project was for and not its name.
+    /// That casts a wide net, so cards with every word in the title go first;
+    /// each group stays newest activity first.
+    public static func matching(_ cards: [ProjectCard], _ query: String) -> [ProjectCard] {
+        let words = query.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard !words.isEmpty else { return cards }
+        let hit = { (text: String) in
+            words.allSatisfy { text.range(of: $0, options: [.caseInsensitive, .diacriticInsensitive]) != nil }
+        }
+        let found = cards.filter { hit($0.project.searchText) }
+        let inTitle = found.filter { hit($0.project.title) }
+        return inTitle + found.filter { !hit($0.project.title) }
+    }
+
+    /// The Projects page's count while its search has text.
+    public static func matchCount(_ shown: Int, of total: Int) -> String {
+        "\(shown) of \(total) \(total == 1 ? "project" : "projects")"
+    }
+}
+
+private extension Project {
+    /// Everything a search looks through. Folders by name only: the path
+    /// before it is the same for most projects, so "dev" would find them all.
+    var searchText: String {
+        ([title, state, goals, notes]
+            + folders.map { ($0 as NSString).lastPathComponent }
+            + links.map(\.title))
+            .joined(separator: "\n")
+    }
 }

@@ -376,7 +376,9 @@ in: an app you're building, a trip, a house move. Each has goals, a few
 lines on where it's up to, notes for later threads (decisions and
 gotchas), links (its live site, an admin page) and folders, the repos its
 work lives in. The Projects view lists them, with New project at the top;
-click one for its page, with its threads, state and notes.
+click one for its page, with its threads, state and notes. The search at
+the top of the Projects page looks through their names, state, goals, notes
+and folders: Return opens the top result and Escape clears it.
 
 A thread gets into a project in one of three ways: the librarian files it
 (below), its agent joins one, or you put it there, from Projects in its
