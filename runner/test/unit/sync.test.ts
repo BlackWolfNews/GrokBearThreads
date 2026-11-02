@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
-import { ConvexSync, forBackend, STARS_API_VERSION, BACKEND_API_VERSION, TURNS_API_VERSION, ICONS_API_VERSION, RUNNER_ICON_API_VERSION, SCHEDULES_API_VERSION, SHARE_API_VERSION, WOKE_API_VERSION, STARTED_BY_API_VERSION, SECTIONS_API_VERSION, MODELS_API_VERSION, REPLY_IMAGES_API_VERSION, REPLY_IMAGES_LOOKBACK_MS, REPLY_IMAGES_SCANS_PER_FLUSH, toAccountDoc, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, convexUploader, pictureName, type ThreadDoc } from '../../src/sync.ts';
+import { ConvexSync, forBackend, LINKS_API_VERSION, STARS_API_VERSION, BACKEND_API_VERSION, TURNS_API_VERSION, ICONS_API_VERSION, RUNNER_ICON_API_VERSION, SCHEDULES_API_VERSION, SHARE_API_VERSION, WOKE_API_VERSION, STARTED_BY_API_VERSION, SECTIONS_API_VERSION, MODELS_API_VERSION, REPLY_IMAGES_API_VERSION, REPLY_IMAGES_LOOKBACK_MS, REPLY_IMAGES_SCANS_PER_FLUSH, toAccountDoc, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, convexUploader, pictureName, type ThreadDoc } from '../../src/sync.ts';
 import type { Project } from '../../src/protocol.ts';
 import type { ScheduleBackend } from '../../src/schedules.ts';
 import { nullLogger, type Logger } from '../../src/log.ts';
@@ -150,6 +150,24 @@ test('view follows hibernate and den; cost is to the cent; working comes from ba
   assert.equal(older.view, 'hibernating');
   assert.ok(!('starredAt' in older));
   assert.equal(forBackend(asleep, STARS_API_VERSION, now), asleep);
+  // A patch's link buttons go up for the phone to open; its command and
+  // prompt chips don't, and nor does a picture icon (a file on the Mac).
+  const linked = toThreadDoc({
+    ...base,
+    actions: [
+      { id: 'x.site', title: 'Website', kind: 'url' as const, url: 'https://walkies.mikecann.app/', icon: 'safari', patch: 'x' },
+      { id: 'x.asc', title: 'App Store Connect', kind: 'url' as const, url: 'https://appstoreconnect.apple.com/apps', iconFile: '/x/asc.png', patch: 'x' },
+      { id: 'x.test', title: 'Test', kind: 'command' as const, command: 'npm test', patch: 'x' },
+      { id: 'x.ask', title: 'Ask', kind: 'prompt' as const, prompt: 'Hi', patch: 'x' },
+    ],
+  }, 'r', now);
+  assert.deepEqual(linked.links, [
+    { title: 'Website', url: 'https://walkies.mikecann.app/', icon: 'safari' },
+    { title: 'App Store Connect', url: 'https://appstoreconnect.apple.com/apps' },
+  ]);
+  assert.ok(!('links' in inbox));
+  assert.ok(!('links' in forBackend(linked, LINKS_API_VERSION - 1, now)));
+  assert.equal(forBackend(linked, LINKS_API_VERSION, now), linked);
   const woke = { at: '2026-10-27T10:00:00.000Z', since: '2026-10-26T10:00:00.000Z' };
   assert.deepEqual(toThreadDoc({ ...base, woke }, 'r', now).woke, woke);
   assert.ok(!('woke' in inbox));

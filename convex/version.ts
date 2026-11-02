@@ -99,4 +99,8 @@
 //    `star`. A runner sends them only to a backend of 27 or later; an older
 //    phone doesn't show the section, and misses a thread that's both
 //    starred and hibernating until it's updated.
-export const API_VERSION = 27;
+// 28: thread rows can carry `links` ({ title, url, icon? }[]): the thread's
+//    patch link buttons (url actions), which the phone shows and opens
+//    itself. A runner sends them only to a backend of 28 or later; an older
+//    phone ignores them.
+export const API_VERSION = 28;

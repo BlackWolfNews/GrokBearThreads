@@ -1,4 +1,5 @@
 import SwiftUI
+import ThreadbearKit
 
 /// The text box at the bottom of a thread: type, or use the keyboard's own
 /// dictation, add or paste photos, then send.
@@ -6,6 +7,9 @@ struct Composer: View {
     @Environment(AppModel.self) private var model
     @Binding var text: String
     var placeholder: String
+    /// The thread's patch link buttons, in a row over the box as the Mac
+    /// has its chips over its composer.
+    var links: [PhoneLink] = []
     /// Returns whether it went, so a failed send keeps the text.
     var onSend: (String, [PickedPhoto]) async -> Bool
     @State private var photos: [PickedPhoto] = []
@@ -18,6 +22,9 @@ struct Composer: View {
 
     var body: some View {
         VStack(spacing: 6) {
+            if !links.isEmpty {
+                LinkChips(links: links)
+            }
             if !photos.isEmpty || adding > 0 {
                 PhotoStrip(words: words)
             }
@@ -72,5 +79,34 @@ struct Composer: View {
             }
             sending = false
         }
+    }
+}
+
+/// A thread's patch link buttons: each opens its page in the browser here,
+/// with nothing sent to the Mac. A row that scrolls sideways when there are
+/// more than fit.
+struct LinkChips: View {
+    var links: [PhoneLink]
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(Array(links.enumerated()), id: \.offset) { _, link in
+                    if let page = link.page {
+                        Link(destination: page) {
+                            Label(link.title, systemImage: UIImage(systemName: link.icon ?? "") == nil ? "arrow.up.right.square" : link.icon!)
+                                .font(.footnote)
+                                .lineLimit(1)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(Color(.secondarySystemBackground), in: Capsule())
+                        }
+                        .tint(.primary)
+                        .accessibilityHint("Opens \(page.host() ?? "the page") in the browser")
+                    }
+                }
+            }
+        }
+        .scrollClipDisabled()
     }
 }

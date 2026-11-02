@@ -600,6 +600,17 @@ private func properties(of data: Data) -> [CFString: Any] {
     #expect(agent?.startedBy?.symbol == "pawprint")
 }
 
+@Test func aThreadsLinkButtonsOnlyOpenWebPages() throws {
+    let json = #"{"threadId":"t","runnerId":"r","title":"t","cwd":"/x","accountId":"a","provider":"claude","status":"idle","needsYou":false,"unread":false,"preview":"","createdAt":"2026-11-01T00:00:00.000Z","lastActivityAt":"2026-11-01T00:00:00.000Z","links":[{"title":"Website","url":"https://walkies.mikecann.app/","icon":"safari"},{"title":"Bad","url":"file:///etc/passwd"}]}"#
+    let thread = try JSONDecoder().decode(PhoneThread.self, from: Data(json.utf8))
+    #expect(thread.links?.count == 2)
+    #expect(thread.links?[0].page?.absoluteString == "https://walkies.mikecann.app/")
+    #expect(thread.links?[0].icon == "safari")
+    // Never a file or another app, even if one came through.
+    #expect(thread.links?[1].page == nil)
+    #expect(PhoneLink(title: "x", url: "javascript:alert(1)").page == nil)
+}
+
 @Test func agentMessagesAreToldApartFromMikes() {
     let at = Date(timeIntervalSince1970: 0)
     let fromThread = PhoneMessage(seq: 1, role: .user, text: "[Sent by the agent in the thread \"Fix \"it\" (now)\" (c4c2389d)]\nWork the card.", at: at)

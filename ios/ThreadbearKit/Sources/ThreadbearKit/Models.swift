@@ -243,6 +243,9 @@ public struct PhoneThread: Codable, Sendable, Hashable, Identifiable {
     public var pendingReviews: Double?
     /// Every login it could use is out of room until then (backend API 15).
     public var waitingForRoom: PhoneWaitingForRoom?
+    /// The thread's patch link buttons (backend API 28): pages the phone
+    /// opens itself, as the Mac's url chips do there.
+    public var links: [PhoneLink]?
 
     public init(
         threadId: String, runnerId: String = "m5", title: String, cwd: String = "~/dev/me/misc",
@@ -252,7 +255,8 @@ public struct PhoneThread: Codable, Sendable, Hashable, Identifiable {
         costUsd: Double? = nil, projects: [ProjectRef]? = nil, working: String? = nil,
         pendingApproval: PendingApproval? = nil, earliestSeq: Double? = nil,
         asks: [PhoneAsk]? = nil, asksSeq: Double? = nil, next: [String]? = nil,
-        needs: String? = nil, pendingReviews: Double? = nil, waitingForRoom: PhoneWaitingForRoom? = nil
+        needs: String? = nil, pendingReviews: Double? = nil, waitingForRoom: PhoneWaitingForRoom? = nil,
+        links: [PhoneLink]? = nil
     ) {
         self.threadId = threadId
         self.runnerId = runnerId
@@ -282,6 +286,7 @@ public struct PhoneThread: Codable, Sendable, Hashable, Identifiable {
         self.needs = needs
         self.pendingReviews = pendingReviews
         self.waitingForRoom = waitingForRoom
+        self.links = links
     }
 
     public var isBusy: Bool { status == .running || status == .starting }
@@ -331,6 +336,28 @@ public struct PhoneThread: Codable, Sendable, Hashable, Identifiable {
 }
 
 /// Who started a thread, when Mike didn't (the Mac's ThreadStartedBy).
+/// A patch's link button (an action with a url), as the runner sends it:
+/// the phone opens the page itself.
+public struct PhoneLink: Codable, Sendable, Hashable {
+    public var title: String
+    public var url: String
+    /// An SF Symbol, from the patch; nil for the default.
+    public var icon: String?
+
+    public init(title: String, url: String, icon: String? = nil) {
+        self.title = title
+        self.url = url
+        self.icon = icon
+    }
+
+    /// The page, only if it's http or https: never a file or another app.
+    public var page: URL? {
+        guard let page = URL(string: url), let scheme = page.scheme?.lowercased(),
+              scheme == "http" || scheme == "https", page.host?.isEmpty == false else { return nil }
+        return page
+    }
+}
+
 public struct StartedBy: Codable, Sendable, Hashable {
     public var kind: String
     public var label: String

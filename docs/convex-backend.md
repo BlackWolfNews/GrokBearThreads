@@ -468,7 +468,7 @@ Queries:
   needsYou, unread, preview, createdAt, lastActivityAt, lastActivityMs,
   snoozedUntil?, snoozedUntilRestart?, archivedAt?, costUsd?, projects?:
   [{ id, title }], working?, pendingApproval?, asks?, asksSeq?, next?,
-  needs?, pendingReviews?, waitingForRoom?, view`. `asks` and `asksSeq`
+  needs?, pendingReviews?, waitingForRoom?, links?, view`. `links` (API 28) are the thread's patch link buttons (`{ title, url, icon? }`, web pages only), which the phone shows over its message box and opens itself. `asks` and `asksSeq`
   (API 14) are the open card of the agent's
   end_turn asks (`{ action, why?, reply?, options?, suggested?, links?,
   ticked? }`, web links only), and `next` a finished turn's suggested

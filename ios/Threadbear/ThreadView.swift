@@ -189,7 +189,7 @@ struct ThreadView: View {
                 if quick.voiceThreadId == threadId, !typing {
                     VoiceBar(threadId: threadId, afterSeq: messages.last?.seq ?? 0, working: thread.isBusy) { typing = true }
                 } else {
-                    Composer(text: $draft, placeholder: thread.isBusy ? "Steer the agent" : "Reply") { text, photos in
+                    Composer(text: $draft, placeholder: thread.isBusy ? "Steer the agent" : "Reply", links: thread.links ?? []) { text, photos in
                         await send(text, photos: photos, to: thread)
                     }
                 }

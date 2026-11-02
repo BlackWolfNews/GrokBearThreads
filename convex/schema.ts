@@ -73,6 +73,10 @@ export const threadFields = {
   asksSeq: v.optional(v.number()),
   // A finished turn's suggested follow-ups (end_turn's `next`), since API 14.
   next: v.optional(v.array(v.string())),
+  // The thread's patch link buttons (url actions, docs/protocol.md
+  // "Patches"), since API 28: the phone shows them and opens them itself.
+  // icon is an SF Symbol.
+  links: v.optional(v.array(v.object({ title: v.string(), url: v.string(), icon: v.optional(v.string()) }))),
   // What the phone's sections need to match the Mac's (app ThreadSections),
   // since API 15: what the last turn said it needs, the design reviews
   // waiting on Mike, and whether it's waiting for a login with room.

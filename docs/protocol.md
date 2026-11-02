@@ -236,7 +236,8 @@ type Action = {
   prompt?: string       // kind "prompt": sent to the thread as a message by `actions.run`
   url?: string          // kind "url": an http or https page (normalised). The
                         // client opens it itself, on the device it was pressed
-                        // on: no RPC, nothing in the transcript. An older
+                        // on: no RPC, nothing in the transcript. The phone
+                        // gets these through Sync (`links`) An older
                         // client reads the unknown kind as a command and
                         // calls `actions.run`, which opens it on the runner's
                         // Mac and answers `{ ok: true, durationMs }`
@@ -2722,9 +2723,12 @@ the mirror back as state. The Mac app doesn't use it.
   `costUsd?` (to the cent), `projects?: { id, title }[]`,
   `working?` (the first unfinished background task's description),
   `pendingApproval?` (below), `earliestSeq?` (Messages, below), `share?` (see Sharing; API 8),
-  `asks?` and `asksSeq?` (the open card, below; API 14), `next?` (below; API 14) and `view` (`inbox`, `hibernating` or `den`,
+  `asks?` and `asksSeq?` (the open card, below; API 14), `next?` (below; API 14),
+  `links?: { title, url, icon? }[]` (API 28: the thread's url actions,
+  past their `when`, with only an SF Symbol `icon`, so the phone shows
+  them and opens them itself) and `view` (`inbox`, `hibernating` or `den`,
   worked out the way the app's lists are). Nothing else from
-  `ThreadSummary`: no `lastSeq`, context, panels, actions, hooks or
+  `ThreadSummary`: no `lastSeq`, context, panels, other actions, hooks or
   sub-agents, and never a tool result, diff or image. A `thread.updated`
   whose phone view differs from the last one written marks the thread
   dirty; dirty threads are written together, at most once every 2
