@@ -52,7 +52,13 @@ test('the Convex panel offers the embedded dashboard only for a cloud deployment
   // The name goes on a command line, so anything odd isn't offered.
   const odd = project(home, 'dev/odd', { convex: null, 'package.json': '{}', '.env.local': 'CONVEX_DEPLOYMENT=dev:x;rm -rf ~\nCONVEX_URL=https://x.convex.cloud\n' });
   assert.equal(projectPanels(odd, home)[0].convex, undefined);
-  for (const p of [vite, noUrl, local, anon, odd]) assert.deepEqual(checkPanel(projectPanels(p, home)[0] as never), []);
+  // The URL is handed a deploy key, and a cloned repo writes the env file:
+  // only the deployment's own convex.cloud address gets the dashboard.
+  const evil = ['https://evil.example', 'https://calm-cat-3.convex.cloud.evil.example', 'https://other-dog-4.convex.cloud',
+    'https://calm-cat-3.convex.cloud:8443', 'https://u:p@calm-cat-3.convex.cloud', 'https://xcalm-cat-3.convex.cloud']
+    .map((url, i) => project(home, `dev/evil${i}`, { convex: null, 'package.json': '{}', '.env.local': `CONVEX_DEPLOYMENT=dev:calm-cat-3\nCONVEX_URL=${url}\n` }));
+  for (const p of evil) assert.equal(projectPanels(p, home)[0].convex, undefined, fs.readFileSync(path.join(p, '.env.local'), 'utf8'));
+  for (const p of [vite, noUrl, local, anon, odd, ...evil]) assert.deepEqual(checkPanel(projectPanels(p, home)[0] as never), []);
 });
 
 test('a thread in a package of the project still gets the project panels; nothing above home', () => {

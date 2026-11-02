@@ -298,7 +298,11 @@ type Panel = {
   note?: string         // one line about it: the deployment, the project
   convex?: {            // the built-in Convex panel for a cloud deployment:
     deployment: string  // its name, "happy-otter-123"
-    deploymentUrl: string // "https://happy-otter-123.convex.cloud"
+    deploymentUrl: string // "https://happy-otter-123.convex.cloud": only
+                        // ever the deployment's own <name>[.<region>].convex.cloud,
+                        // as it's handed a deploy key and comes from an env
+                        // file a cloned repo writes; any other URL, a custom
+                        // domain included, gets no `convex`
     team?: string       // "mike" and "walkies": what `convex dev` notes
     project?: string    // after CONVEX_DEPLOYMENT in .env.local, if it did
   }                     // a client that knows it shows Convex's embedded

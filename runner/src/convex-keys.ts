@@ -11,7 +11,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import type { CommandOutcome } from './patches.ts';
-import { convexDeploymentName, findUp, isConvexProject, parseEnvValue, readEnvValue } from './patches.ts';
+import { convexCloudUrl, convexDeploymentName, findUp, isConvexProject, parseEnvValue, readEnvValue } from './patches.ts';
 import { ErrorCode, RpcError } from './protocol.ts';
 
 export type ConvexKey = { deployment: string; deploymentUrl: string; adminKey: string };
@@ -202,7 +202,7 @@ export class ConvexKeys {
       const check = this.opts.checkKey ?? checkAdminKey;
       // Only ever sent to the deployment's own convex.cloud address, never
       // to whatever URL a project's env file names.
-      const own = at.deploymentUrl && ownCloudUrl(deployment, at.deploymentUrl);
+      const own = at.deploymentUrl && convexCloudUrl(deployment, at.deploymentUrl);
       if (!own || await check(own, saved.adminKey) === 'ok') return saved.adminKey;
     }
     const busy = this.pending.get(deployment);
@@ -263,17 +263,6 @@ function readSaved(file: string): { name: string; adminKey: string } | undefined
 const SIGNED_OUT = /requires being logged in|not logged in|MissingAccessToken|AuthenticationFailed|access token is required|401 Unauthorized|npx convex login/i;
 // "You don't have access to the selected project."
 const NO_ACCESS = /(don't|do not) have access|not a member|403 Forbidden/i;
-
-function ownCloudUrl(deployment: string, url: string): string | undefined {
-  try {
-    const u = new URL(url);
-    const ok = u.protocol === 'https:' && !u.username && !u.password && !u.port
-      && new RegExp(`^${deployment}(\\.[a-z0-9-]+)?\\.convex\\.cloud$`).test(u.hostname);
-    return ok ? u.origin : undefined;
-  } catch {
-    return undefined;
-  }
-}
 
 // Asks the deployment whether a deploy key still works. Anything but a
 // clear no (offline, a slow answer) keeps the saved key: the dashboard

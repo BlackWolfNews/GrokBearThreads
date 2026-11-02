@@ -668,14 +668,25 @@ export function convexProjectOf(dir: string, dirs: FolderCache = new FolderCache
 export function convexEmbed(deployment: string | undefined, deploymentUrl: string | undefined): Panel['convex'] {
   const name = convexDeploymentName(deployment);
   if (!name || deployment!.startsWith('anonymous:') || !deploymentUrl) return undefined;
-  let parsed: URL;
+  const url = convexCloudUrl(name, deploymentUrl);
+  return url ? { deployment: name, deploymentUrl: url } : undefined;
+}
+
+// The deployment's own Convex cloud address (`<name>.convex.cloud`, or with
+// a region, `<name>.eu-west-1.convex.cloud`), or nothing. The panel hands
+// this URL a deploy key, and the URL comes from a project's env file, which
+// a cloned repo writes: one naming your deployment but someone else's
+// server would otherwise get your key sent there. A custom domain gets no
+// embedded dashboard, just the link to Convex's.
+export function convexCloudUrl(deployment: string, url: string): string | undefined {
   try {
-    parsed = new URL(deploymentUrl);
+    const u = new URL(url);
+    const own = u.protocol === 'https:' && !u.username && !u.password && !u.port
+      && new RegExp(`^${deployment}(\\.[a-z0-9-]+)?\\.convex\\.cloud$`).test(u.hostname);
+    return own ? u.origin : undefined;
   } catch {
     return undefined;
   }
-  if (parsed.protocol !== 'https:') return undefined;
-  return { deployment: name, deploymentUrl: parsed.origin };
 }
 
 // The name in a CONVEX_DEPLOYMENT ("dev:happy-otter-123"), if it looks like
