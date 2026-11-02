@@ -116,8 +116,8 @@ final class Tour {
         TourStep(targets: [.threads], title: "Threads", body: "Everything your agents are working on is listed here.", doc: "threads"),
         // Shown on a sample's row rather than pressed: pressing them was
         // a chore, and "it comes back by itself" read as a riddle (Mike, 30 Oct).
-        TourStep(targets: [.rowButtons, .sampleRow("Plan the weekend"), .threads], title: "Put threads away",
-                 body: "Hover a thread for these: the moon puts it away for later, the box archives it.",
+        TourStep(targets: [.rowButtons, .sampleRow("Plan the weekend"), .threads], title: "Star or put away",
+                 body: "Hover a thread: star it to keep it on top, or put it away with the moon or the box.",
                  hovers: "Plan the weekend", doc: "hibernate-and-archive"),
         TourStep(targets: [.activityBar], title: "Your views",
                  body: "These icons switch to schedules, projects and the librarian.", doc: "threads"),

@@ -116,8 +116,8 @@ async function main() {
 
   next('Threads');
   // Shown, not pressed: the sample's row drawn hovered, its moon and box out.
-  t = next('Put threads away');
-  check('it lights the moon and the box, not the whole row', t.lit && t.lit.h < 80 && t.lit.w < 120, t.raw);
+  t = next('Star or put away');
+  check('it lights the row's star, moon and box, not the whole row', t.lit && t.lit.h < 80 && t.lit.w < 120, t.raw);
   const hovered = threadsIn(dump()).find((th) => th.hovered);
   check('that row shows its hover buttons', hovered?.title === 'Plan the weekend', JSON.stringify(hovered?.title));
 
