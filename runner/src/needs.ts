@@ -390,6 +390,50 @@ const NEXT_ROW =
 const END_TURN_SNOOZE =
   'snooze hibernates this thread once the turn is over, with needs "nothing" only, until a time ("2h", "1d", "tomorrow", an ISO time with its offset, or "restart") or words saying when ("when the phone arrives"). Use it only when the user asks for this thread to be snoozed or hibernated. ';
 
+// Handing a step over, in every form's description. This used to say to offer
+// "Can you do it?" when the agent could plausibly do the step itself, which told
+// it to ask rather than try: the user was answering that button, in those words,
+// on steps like resolving a Sentry issue with the tool right there (29 Oct to
+// 2 Nov 2026). The button stays for what's left after a real try.
+export const TRY_IT_FIRST =
+  'Before you give the user a step, try it yourself with the tools you have, including any that drive their browser, apps or phone, and if it works there is no ask. ' +
+  'Hand it over only when it really needs them (a password or code, a payment, something physical, an approval that is theirs to give) or after a real attempt, and say in your reply what you tried and what stopped it. ' +
+  'If there is still something you could try, offer "Can you do it?" next to Done and say what in its answer: it lets them send the step back to you, and is no reason to skip trying. ';
+
+// What end_turn says, once a turn, to a card offering to take a step back. The
+// wording alone didn't get steps tried: in replays of real turns agents still
+// offered the button with no try at the step, and this note brought a real try
+// every time (6 of 6). It came up once in 15 runs on a sign-in or payment card,
+// and forced onto those, agents sent the card again unchanged, paying nothing
+// and signing in to nothing (~/dev/me/misc/end-turn-eval/try-first). Whether
+// a turn tried can't be read from its tool calls, as nearly all of them were
+// busy with something else (29 Oct to 1 Nov 2026), so it asks the agent, and an
+// agent that did try or can't only spends one more call.
+export const TRY_FIRST_NUDGE = 'Not ended: this card offers to have you do a step yourself.';
+export function tryFirstNudge(): string {
+  return `${TRY_FIRST_NUDGE} If you could try that step and haven't, try it now, then call end_turn again with whatever is left. If you already tried, or it really needs the user (a password or code, a payment, something physical, an approval that is theirs to give), call end_turn again as you were, and say in your reply what you tried or why it needs them: this note comes once a turn.`;
+}
+
+// An answer that hands a step back to the agent. By its label, as the wording
+// asks for these words and agents keep to them: "Can you do it?", "Can you do
+// it in Chrome?", "Connected, you do it", "Do it for me later".
+const TAKES_IT_BACK = /\b(?:can|could|would) you\b.*\b(?:do|try|handle|run)\b|\byou do it\b|\bdo (?:it|them|this|that) for me\b|\btry it yourself\b/i;
+export function offersToTakeItBack(asks: Ask[]): boolean {
+  return asks.some((a) => a.options?.some((o) => TAKES_IT_BACK.test(o)));
+}
+
+// Whether this turn has had the note (connectors.ts, nudgedThisTurn, is the same).
+export function triedFirstNudged(events: PersistedEvent[]): boolean {
+  let start = 0;
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i].type === 'turn.started') {
+      start = i + 1;
+      break;
+    }
+  }
+  return events.slice(start).some((e) => e.type === 'tool.result' && typeof e.text === 'string' && e.text.startsWith(TRY_FIRST_NUDGE));
+}
+
 // What to put in it, the same for both providers.
 const END_TURN_ASKS =
   'needs "nothing" when the work is finished (or still going by itself) and nothing waits on the user. ' +
@@ -401,7 +445,7 @@ const END_TURN_ASKS =
   // plain words over a "See the tab" button for the same screenshot.
   'The paragraph is markdown, so where action or why names the thing a link opens, make those words a link to the same url ("Look at [the pairing screenshot](/Users/you/shots/pair.png) and say whether to land it."): the user can hover them for a peek or click them, and the button stays as the next step. ' +
   'Every decision or yes/no question needs options: 2 to 4 short likely answers, e.g. ["Go", "Not yet"] or ["Merge", "Test locally first"], with suggested: the index of the one you would pick. "Say go for X, or name another" is a decision too: give ["Go", ...the other candidates]. The user can always write their own answer instead, so options never box them in. ' +
-  'For a step they have to do themselves, offer options like ["Done", "Can you do it?"] when you could plausibly do it yourself. ' +
+  TRY_IT_FIRST +
   // Mike, 30 Oct: a follow-up in the closing prose, over a card that only
   // offered Archive, got buried and forgotten. Not make-work, though.
   'next is for needs "nothing": up to 3 follow-ups in this thread worth doing, so they don\'t get lost: a piece still missing, a check that\'s due, something you or the user raised and didn\'t get to. Only ones that really came up; never invent work, and most turns have none, so leave it out then. ' + NEXT_ROW + 'Don\'t also list them in your message. ' +
@@ -476,7 +520,7 @@ const ONE_REPLY_FIELDS =
   'asks: each thing the user has to do or decide, most blocking first; usually one. ' +
   'question is one sentence of at most 160 characters, the question or the step to take, naming the thing ("Deploy the walkies-api fix to production?"). It shows right under your reply, so give no background. ' +
   'options: for every decision or step, 2 to 4 answers, each a label of 1 to 4 words and does, what happens if they pick it, in at most 90 characters ("I deploy and watch the logs"). They can always write their own answer instead. suggested is the index of the one you\'d pick. ' +
-  'For a step they have to do themselves, offer answers like Done and "Can you do it?" when you could plausibly do it yourself. ' +
+  TRY_IT_FIRST +
   'links: up to 3 places to go to do it or judge it (the page to log in on, the PR, the preview, the file, or review:<id> for a show_options review), each a button titled as the action ("Open the PR"). ' +
   'next is only for when nothing is needed: up to 3 follow-ups that really came up and that you\'d tell the user are worth doing; usually none, and never something you\'d call optional or low priority. ' +
   NEXT_ROW +

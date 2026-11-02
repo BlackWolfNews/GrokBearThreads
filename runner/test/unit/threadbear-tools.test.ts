@@ -747,6 +747,41 @@ test('a reply that came only as a summary: end_turn asks for it again, and the r
   assert.doesNotMatch(read.text, /resent the full/);
 });
 
+test('end_turn asks once for a try at a step a card offers to take back, in both forms', async () => {
+  const forms = [
+    { oneReply: true, offering: { asks: [{ question: 'Turn on the setting.', options: [{ label: 'Done' }, { label: 'Can you do it?' }] }] }, plain: { asks: [{ question: 'Sign in to the store.', options: [{ label: 'Signed in' }, { label: 'Hold off' }] }] } },
+    { oneReply: false, offering: { summary: ['Built it.'], asks: [{ action: 'Turn on the setting.', why: 'It stops it quitting.', options: ['Done', 'Can you do it?'] }] }, plain: { summary: ['Built it.'], asks: [{ action: 'Sign in to the store.', why: 'It needs your password.', options: ['Signed in', 'Hold off'] }] } },
+  ];
+  for (const { oneReply, offering, plain } of forms) {
+    const h = makeHarness();
+    const { thread, s } = start(h);
+    s.text('m1', 'Built it.');
+    const { call } = tools(h, thread.id, undefined, () => oneReply);
+    toolCall(s, 'e1', END_TURN, offering);
+    const refused = await call('end_turn', offering);
+    assert.equal(refused.error, true);
+    assert.match(refused.text, /^Not ended: this card offers/);
+    assert.match(refused.text, /a password or code, a payment, something physical/);
+    s.out({ kind: 'event', event: { type: 'tool.result', itemId: 'e1', ok: false, text: refused.text, truncated: false, images: [] } });
+    assert.equal(h.events(thread.id).filter((e) => e.type === 'tool.result' && e.itemId === 'e1').length, 1);
+
+    // Once a turn: called again as it was, the card stands, button and all.
+    s.text('m2', 'Tried it: it needs a code.');
+    toolCall(s, 'e2', END_TURN, offering);
+    const taken = await call('end_turn', offering);
+    assert.equal(taken.error, false, taken.text);
+    assert.deepEqual(needsFromTool(offering)?.asks?.[0].options, ['Done', 'Can you do it?']);
+
+    // A card with no such answer is never held up.
+    const other = makeHarness();
+    const o = start(other);
+    o.s.text('m1', 'Built it.');
+    toolCall(o.s, 'e1', END_TURN, plain);
+    const fine = await tools(other, o.thread.id, undefined, () => oneReply).call('end_turn', plain);
+    assert.equal(fine.error, false, fine.text);
+  }
+});
+
 test('bullet replies off: bullets alone are refused, and the summary gives way to the message', async () => {
   const h = makeHarness(undefined, { bulletReplies: false });
   const { thread, s } = start(h);

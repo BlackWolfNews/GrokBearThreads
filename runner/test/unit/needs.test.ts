@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { PersistedEvent } from '../../src/protocol.ts';
-import { archiveFromTool, snoozeFromTool, bylineFromTool, endedThisTurn, CODEX_END_TURN_DESCRIPTION, CODEX_ONE_REPLY_DESCRIPTION, END_TURN_DESCRIPTION, END_TURN_FULL_NAME, endTurnDescription, needsFromText, needsFromTool, ONE_REPLY_DESCRIPTION, splitReplySection, summaryFromTool, summaryMarkdown, turnReply } from '../../src/needs.ts';
+import { offersToTakeItBack, TRY_IT_FIRST, archiveFromTool, snoozeFromTool, bylineFromTool, endedThisTurn, CODEX_END_TURN_DESCRIPTION, CODEX_ONE_REPLY_DESCRIPTION, END_TURN_DESCRIPTION, END_TURN_FULL_NAME, endTurnDescription, needsFromText, needsFromTool, ONE_REPLY_DESCRIPTION, splitReplySection, summaryFromTool, summaryMarkdown, turnReply } from '../../src/needs.ts';
 import { END_TURN_TOOL } from '../../src/needs.ts';
 import { SERVER_NAME } from '../../src/threadbear-mcp.ts';
 import { ClaudeNormalizer, fileContext } from '../../src/adapters/claude/normalize.ts';
@@ -413,4 +413,21 @@ test('every form of end_turn says how to write a follow-up row', () => {
       assert.doesNotMatch(d, /about 8 words/);
     }
   }
+});
+
+test('every form of end_turn says to try a step first', () => {
+  for (const provider of ['claude', 'codex'] as const) {
+    for (const [bullets, oneReply] of [[true, false], [false, false], [true, true]]) {
+      const d = endTurnDescription(provider, bullets, oneReply);
+      assert.ok(d.includes(TRY_IT_FIRST), `${provider} ${bullets} ${oneReply}`);
+      assert.doesNotMatch(d, /when you could plausibly do it yourself/);
+    }
+  }
+});
+
+test('offersToTakeItBack knows the answers real cards used, and leaves others alone', () => {
+  const offers = (o: string) => offersToTakeItBack([{ action: 'x', options: [o] }]);
+  for (const o of ['Can you do it?', 'Can you do it in Chrome?', 'Connected, you do it', 'Do it for me later', 'Can you do the copies?', 'Try it yourself']) assert.ok(offers(o), o);
+  for (const o of ['Done', 'Signed in', 'Deploy it', "I can't do it", 'Not yet', 'Hold off']) assert.ok(!offers(o), o);
+  assert.ok(!offersToTakeItBack([{ action: 'Can you do it?' }]));
 });
