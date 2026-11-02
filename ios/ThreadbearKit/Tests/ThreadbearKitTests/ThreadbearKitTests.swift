@@ -599,3 +599,18 @@ private func properties(of data: Data) -> [CFString: Any] {
     #expect(agent?.bylineText == "Agent · misc")
     #expect(agent?.startedBy?.symbol == "pawprint")
 }
+
+@Test func agentMessagesAreToldApartFromMikes() {
+    let at = Date(timeIntervalSince1970: 0)
+    let fromThread = PhoneMessage(seq: 1, role: .user, text: "[Sent by the agent in the thread \"Fix \"it\" (now)\" (c4c2389d)]\nWork the card.", at: at)
+    #expect(fromThread.agentHeader?.title == "Fix \"it\" (now)")
+    #expect(fromThread.agentHeader?.threadId == "c4c2389d")
+    #expect(fromThread.agentHeader?.body == "Work the card.")
+    let move = PhoneMessage(seq: 2, role: .user, text: "[Sent by the agent before moving to ~/dev/me/x]\nCarry on.", at: at)
+    #expect(move.agentHeader?.movedTo == "~/dev/me/x")
+    #expect(move.agentHeader?.body == "Carry on.")
+    // Mike's own words, a schedule's and the assistant's never are.
+    #expect(PhoneMessage(seq: 3, role: .user, text: "Ship it", at: at).agentHeader == nil)
+    #expect(PhoneMessage(seq: 4, role: .user, text: move.text, origin: "schedule", at: at).agentHeader == nil)
+    #expect(PhoneMessage(seq: 5, role: .assistant, text: move.text, at: at).agentHeader == nil)
+}

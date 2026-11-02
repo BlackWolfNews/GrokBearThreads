@@ -507,6 +507,8 @@ struct MessageView: View {
 
     var body: some View {
         switch message.role {
+        case .user where message.agentHeader != nil:
+            AgentMessageCard(header: message.agentHeader!, seq: message.seq)
         case .user:
             VStack(alignment: .trailing, spacing: 4) {
                 userText
@@ -564,6 +566,43 @@ struct MessageView: View {
         case "runner": "From the runner"
         default: nil
         }
+    }
+}
+
+/// A message an agent wrote, not Mike: another thread's (its send_message
+/// or create_thread) or this thread's own before a move. Full width in a
+/// quiet card with who sent it on top, as the Mac draws it, so it never
+/// reads as his bubble.
+struct AgentMessageCard: View {
+    var header: AgentHeader
+    var seq: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label {
+                Text(from).lineLimit(2)
+            } icon: {
+                Image(systemName: header.movedTo == nil ? "arrow.turn.down.right" : "folder")
+            }
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            let body = header.body.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !body.isEmpty {
+                MarkdownText(body, seq: seq)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Look.tile.opacity(0.5), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Look.tile))
+    }
+
+    private var from: String {
+        if let folder = header.movedTo {
+            return "Left by this thread's agent when it moved to \((folder as NSString).abbreviatingWithTildeInPath)"
+        }
+        return "From the agent in \(header.title.isEmpty ? header.threadId : header.title)"
     }
 }
 

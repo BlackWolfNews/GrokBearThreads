@@ -583,6 +583,9 @@ public final class FakeBackend: Backend, @unchecked Sendable {
                 PhoneMessage(seq: 1, role: .user, text: "Keep an eye on the nightly build this week", at: ago(50)),
                 PhoneMessage(seq: 2, role: .tool, text: "Read the build log", toolKind: "read", at: ago(48)),
                 PhoneMessage(seq: 3, role: .assistant, text: "All green tonight. I'll look again in the morning.", at: ago(45)),
+                // Another thread's agent writing in: drawn as a card, not Mike's bubble.
+                PhoneMessage(seq: 4, role: .user, text: "[Sent by the agent in the thread \"Upgrade the router\" (a6)]\nThe router upgrade lands tonight and changes the build config. Watch for a slower build.", at: ago(44)),
+                PhoneMessage(seq: 5, role: .assistant, text: "Noted. I'll compare tonight's build time with last week's.", at: ago(43)),
             ],
         ]
         return (threads, messages, schedules)
