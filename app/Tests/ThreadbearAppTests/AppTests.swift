@@ -102,6 +102,69 @@ final class TextZoomTests: XCTestCase {
 
 /// The composer used to be built with no text storage, so typing did nothing.
 final class ComposerTests: XCTestCase {
+    /// Stands in for whatever's above the box and takes Esc (a SwiftUI
+    /// onExitCommand, a panel).
+    private final class EscapeCatcher: NSView {
+        var caught = 0
+        override func cancelOperation(_ sender: Any?) { caught += 1 }
+    }
+
+    private func pressEscape(on composer: NSTextView) throws {
+        let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                                   windowNumber: composer.window?.windowNumber ?? 0, context: nil, characters: "\u{1b}",
+                                                   charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53))
+        composer.keyDown(with: event)
+    }
+
+    private func composerInWindow() -> (NSWindow, EscapeCatcher, ComposerTextView) {
+        _ = NSApplication.shared
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 100), styleMask: [.titled], backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        let parent = EscapeCatcher(frame: window.contentLayoutRect)
+        window.contentView = parent
+        let composer = ComposerTextField.makeTextView()
+        composer.frame = parent.bounds
+        parent.addSubview(composer)
+        window.makeFirstResponder(composer)
+        return (window, parent, composer)
+    }
+
+    /// NSTextView has no cancelOperation:, so calling super on it threw and
+    /// the app died (THREADBEAR-K): Esc with no message being edited.
+    func testEscapeWithNothingToCancelDoesNotThrow() throws {
+        let (window, parent, composer) = composerInWindow()
+        composer.onEscape = { false }
+        try pressEscape(on: composer)
+        XCTAssertEqual(parent.caught, 1, "Esc the box doesn't want goes on up, to whatever's above it")
+        window.close()
+    }
+
+    /// With no `onEscape` at all: every Something else box on a card.
+    func testEscapeInAnAnswerBoxDoesNotThrow() throws {
+        let (window, parent, composer) = composerInWindow()
+        composer.onEscape = nil
+        composer.cancelOperation(nil)
+        XCTAssertEqual(parent.caught, 1)
+        window.close()
+    }
+
+    /// And with nothing above that wants it: no throw, and no complaint.
+    func testEscapeWithNothingAboveIsQuiet() {
+        _ = NSApplication.shared
+        let composer = ComposerTextField.makeTextView()
+        composer.cancelOperation(nil)
+    }
+
+    func testEscapeLeavingAnEditStopsAtTheBox() throws {
+        let (window, parent, composer) = composerInWindow()
+        var left = 0
+        composer.onEscape = { left += 1; return true }
+        try pressEscape(on: composer)
+        XCTAssertEqual(left, 1)
+        XCTAssertEqual(parent.caught, 0)
+        window.close()
+    }
+
     func testComposerKeepsWhatIsTyped() {
         let composer = ComposerTextView()
         XCTAssertNotNil(composer.textStorage)

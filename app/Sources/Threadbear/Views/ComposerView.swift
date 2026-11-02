@@ -712,7 +712,11 @@ final class ComposerTextView: NSTextView {
 
     override func cancelOperation(_ sender: Any?) {
         if onEscape?() == true { return }
-        super.cancelOperation(sender)
+        // Not super: NSTextView and NSResponder only declare cancelOperation:,
+        // so that call throws "unrecognized selector", and Sentry's
+        // uncaught-exception option makes that fatal (THREADBEAR-K). This
+        // offers Esc to whatever's above the box instead.
+        nextResponder?.tryToPerform(#selector(NSResponder.cancelOperation(_:)), with: sender)
     }
 
     override func paste(_ sender: Any?) {
