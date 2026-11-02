@@ -2312,7 +2312,8 @@ export class Runner {
     if (!rt.session) {
       const account = this.accounts.get(rec.accountId);
       if (!account) throw new Error(`Account ${rec.accountId} isn't available on this Mac.`);
-      if (!isDirectory(rec.cwd)) throw new Error(`Folder not found: ${rec.cwd}`);
+      // Said in the thread as the turn's failure, so it says how to carry on.
+      if (!isDirectory(rec.cwd)) throw new Error(`Folder not found: ${rec.cwd}. Pick another folder for this thread from the + menu by the message box, then send again.`);
       if (rec.handoff && this.carryTranscript(st, account)) {
         // A new folder, or another Claude login: the whole conversation
         // came along.
