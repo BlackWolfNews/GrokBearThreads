@@ -44,13 +44,10 @@ enum TourEdge {
     case right, left, below, above
 }
 
-/// Something the tour has them do rather than read about (Mike, 29 Oct:
-/// show what makes Threadbear interesting, hands-on).
+/// Something the tour has them do rather than read about. Moving a panel
+/// and pressing a patch's button were hands-on too, until Mike found the
+/// tour simpler with them told rather than done (2 Nov).
 enum TourTask: Equatable {
-    /// Drag a panel somewhere else; done when the dock's layout changes.
-    case movePanel
-    /// Press the Welcome thread's example chip; done once it has run.
-    case runPatch
     /// Send the first thread, its message written for them; sending it
     /// ends the tour.
     case sendFirst
@@ -76,6 +73,9 @@ struct TourStep: Equatable {
     var opensSample = false
     /// The sample whose row is drawn hovered, buttons showing, by title.
     var hovers: String? = nil
+    /// A view the step flips the window to (its sidebar list and its page),
+    /// to show what it's for.
+    var shows: SidebarMode? = nil
     /// The docs page its ⓘ opens (threadbear.mikecann.app/docs/<doc>), one
     /// of site/app-doc-slugs.json: the detail a one-sentence card leaves out.
     var doc: String? = nil
@@ -121,25 +121,26 @@ final class Tour {
                  hovers: "Plan the weekend", doc: "hibernate-and-archive"),
         TourStep(targets: [.activityBar], title: "Your views",
                  body: "These icons switch to schedules, projects and the librarian.", doc: "threads"),
+        TourStep(targets: [.mainPanel], title: "Projects",
+                 body: "Projects group threads by what they're for, with goals and where each is up to.",
+                 shows: .projects, doc: "projects"),
+        TourStep(targets: [.mainPanel], title: "The librarian",
+                 body: "The librarian files your threads into projects and keeps their notes up to date.",
+                 shows: .librarian, doc: "librarian"),
         // No card for Full access / Ask before edits: people know access
         // modes from other agent apps, and the chip says it (Mike, 30 Oct).
         TourStep(targets: [.highlights, .highlightsRail], title: "Highlights",
                  body: "The files, links and questions from a thread collect here.",
                  opensSample: true, doc: "highlights"),
         TourStep(targets: [.highlights, .mainPanel], title: "Move a panel",
-                 body: "Drag a panel by its title, or press and hold anywhere on it, then drag.",
-                 task: .movePanel, doneBody: "View › Reset Panel Layout puts it back.", doc: "panels"),
+                 body: "Drag a panel by its title to move it, or onto another to make tabs.",
+                 opensSample: true, doc: "panels"),
         TourStep(targets: [.actionChips], title: "Patches",
-                 body: "Patches add buttons like these, and panels, to your threads.",
+                 body: "Patches add buttons like these, and panels; ask any thread to make you one.",
                  edges: [.above, .right, .left, .below], opensSample: true, doc: "patches"),
         TourStep(targets: [.actionChips], title: "Per project or tool",
                  body: "Each patch belongs to a project, or to a tool wherever you use it.",
                  edges: [.above, .right, .left, .below], opensSample: true, doc: "patches"),
-        TourStep(targets: [.actionChips], title: "Try it",
-                 body: "Press Roll a die.",
-                 task: .runPatch, doneBody: "Ask any thread for a patch that does whatever you want.",
-                 // Under the button: the roll comes out just above it.
-                 edges: [.below, .above, .right, .left], opensSample: true, doc: "patches"),
         TourStep(targets: [.composer], title: "Your first thread",
                  body: "We've written its first message, so press Return to send it.",
                  task: .sendFirst, edges: [.above, .below, .right, .left], doc: "first-thread"),
@@ -170,8 +171,6 @@ final class Tour {
     /// Set at launch (AppDelegate). Tests leave it nil, so stepping
     /// through touches nothing.
     @ObservationIgnored weak var app: AppModel?
-    @ObservationIgnored private var layoutAtStart: DockLayout?
-    @ObservationIgnored private var sawChipRun = false
     @ObservationIgnored private var threadsAtStart: Set<String> = []
     /// The first thread the tour had them send.
     private(set) var firstThreadId: String?
@@ -233,16 +232,23 @@ final class Tour {
         step = index
         taskDone = false
         guard let app else { return }
+        // A view step flips to its view; any other puts the inbox back.
+        switch shown[index].shows {
+        case .projects?: app.showProjects()
+        case .librarian?: app.showLibrarian()
+        default:
+            if app.sidebarMode == .projects || app.sidebarMode == .librarian {
+                app.showsProjectsHome = false
+                app.showsLibrarianHome = false
+                app.sidebarMode = .inbox
+            }
+        }
         if shown[index].opensSample { app.openTourSample(sampleIds) }
         // The row's hover buttons, drawn without the pointer (as the
         // screenshot run does); nil puts the row back.
         app.hoverOverride = shown[index].hovers.flatMap { title in sampleIds.first { app.threads[$0]?.title == title } }
         guard let task = shown[index].task else { return }
         switch task {
-        case .movePanel:
-            layoutAtStart = app.dock.layout
-        case .runPatch:
-            sawChipRun = false
         case .sendFirst:
             threadsAtStart = Set(app.threads.keys)
             app.newThread()
@@ -253,39 +259,9 @@ final class Tour {
 
     /// Whether the step's task has been done, as the window changes
     /// (TourOverlay calls it).
-    /// Opens the roll's row, so it shows without a click. The run can
-    /// finish a moment before its row reaches the thread (it did once the
-    /// chips moved onto shelves, 30 Oct), so it looks again every 0.1s
-    /// for up to `tries` times rather than once.
-    private func openRoll(tries: Int) {
-        guard let app, let id = app.selection, sampleIds.contains(id) else { return }
-        if let row = app.session(for: id).model.items.last(where: { $0.id.hasPrefix("t:action:") }),
-           app.transcript.session?.threadId == id, let shown = app.transcript.session?.displayIndex(of: row.id),
-           let drawn = app.transcript.row(at: shown) {
-            guard !app.transcript.isExpanded(drawn) else { return }
-            app.transcript.toggleExpanded(rowId: row.id)
-            // Down to its output, once the opened row is laid out:
-            // opened in place, the roll sat under the composer.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [app] in app.transcript.scrollToBottom() }
-            return
-        }
-        guard tries > 1 else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in self?.openRoll(tries: tries - 1) }
-    }
-
     func check() {
         guard let app, let task = current?.task, !taskDone else { return }
         switch task {
-        case .movePanel:
-            if let layoutAtStart, app.dock.layout != layoutAtStart { taskDone = true }
-        case .runPatch:
-            // Running, then not: the command has finished and its output is
-            // in the thread.
-            let running = app.runningActions.contains { key in sampleIds.contains { key.hasPrefix($0) } }
-            if running { sawChipRun = true } else if sawChipRun {
-                taskDone = true
-                openRoll(tries: 30)
-            }
         case .sendFirst:
             if let id = app.threads.keys.first(where: { !threadsAtStart.contains($0) }) {
                 firstThreadId = id
@@ -441,8 +417,6 @@ private struct TourTargetModifier: ViewModifier {
 
 /// What a hands-on step watches for.
 private struct TourProgress: Equatable {
-    var layout: DockLayout
-    var running: Set<String>
     var threadCount: Int
 }
 
@@ -465,23 +439,15 @@ struct TourOverlay: View {
                 let origin = placed.origin
                 let shape = Spotlight(hole: hole ?? CGRect(x: bounds.midX, y: bounds.midY, width: 0, height: 0))
                 ZStack(alignment: .topLeading) {
-                    if step.task == .movePanel {
-                        // The whole window takes the drag, drop targets and
-                        // all, so this one only shades and never catches.
-                        shape
-                            .fill(Color.black.opacity(colorScheme == .dark ? 0.3 : 0.18), style: FillStyle(eoFill: true))
-                            .allowsHitTesting(false)
-                    } else {
-                        shape
-                            // Darker in dark mode, where 0.4 barely showed
-                            // against the dark panels.
-                            .fill(Color.black.opacity(colorScheme == .dark ? 0.55 : 0.35), style: FillStyle(eoFill: true))
-                            // Clicks on the window behind wait until the
-                            // tour's done, except in the lit part of a
-                            // hands-on step (the chip, the composer).
-                            .contentShape(step.task == nil ? AnyShape(Rectangle()) : AnyShape(shape), eoFill: step.task != nil)
-                            .onTapGesture {}
-                    }
+                    shape
+                        // Darker in dark mode, where 0.4 barely showed
+                        // against the dark panels.
+                        .fill(Color.black.opacity(colorScheme == .dark ? 0.55 : 0.35), style: FillStyle(eoFill: true))
+                        // Clicks on the window behind wait until the
+                        // tour's done, except in the lit part of a
+                        // hands-on step (the composer).
+                        .contentShape(step.task == nil ? AnyShape(Rectangle()) : AnyShape(shape), eoFill: step.task != nil)
+                        .onTapGesture {}
                     if let hole {
                         // A soft glow round the lit part, so the eye goes
                         // there (Mike, 30 Oct: the card alone didn't say
@@ -508,7 +474,7 @@ struct TourOverlay: View {
                 .animation(Juice.reduceMotion ? nil : .snappy(duration: 0.3), value: hole)
             }
             .transition(.opacity)
-            .onChange(of: TourProgress(layout: app.dock.layout, running: app.runningActions, threadCount: app.threads.count)) {
+            .onChange(of: TourProgress(threadCount: app.threads.count)) {
                 tour.check()
             }
         }

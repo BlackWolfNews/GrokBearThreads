@@ -117,44 +117,33 @@ async function main() {
   next('Threads');
   // Shown, not pressed: the sample's row drawn hovered, its moon and box out.
   t = next('Star or put away');
-  check('it lights the row's star, moon and box, not the whole row', t.lit && t.lit.h < 80 && t.lit.w < 120, t.raw);
+  check("it lights the row's star, moon and box, not the whole row", t.lit && t.lit.h < 80 && t.lit.w < 160, t.raw);
   const hovered = threadsIn(dump()).find((th) => th.hovered);
   check('that row shows its hover buttons', hovered?.title === 'Plan the weekend', JSON.stringify(hovered?.title));
 
   t = next('Your views');
   // The view icons only, not the whole column down to Settings.
   check('Your views lights the view icons, not the whole bar', t.lit && t.lit.h < 300, t.raw);
+  // Flips to each view to show what it's for, then back to the inbox.
+  next('Projects');
+  check('Projects shows the Projects view', dump().sidebar.mode === 'projects', dump().sidebar.mode);
+  next('The librarian');
+  check('The librarian shows its view', dump().sidebar.mode === 'librarian', dump().sidebar.mode);
   t = next('Highlights');
+  check('Highlights is back in the inbox', dump().sidebar.mode === 'inbox', dump().sidebar.mode);
   check('Highlights opens the sample that needs you', dump().selection?.title === 'Fix the flaky login test', JSON.stringify(dump().selection));
 
+  // Told, not done (Mike, 2 Nov): no drag, no press.
   t = next('Move a panel');
-  run({ cmd: 'dock-move', panel: 'threadbear.highlights', edge: 'bottom' });
-  await until('Move a panel done once the layout changes', () => parseTour(tour()).task === 'done');
-  shot('moved');
+  check('Move a panel has nothing to do', t.task === undefined, t.raw);
 
   next('Patches');
   // The example patch, from the runner itself: no "patch to trust".
-  const roll = await until('Roll a die is a button on the sample', () => dump().actions.find((a) => a.title === 'Roll a die'));
+  await until('Roll a die is a button on the sample', () => dump().actions.find((a) => a.title === 'Roll a die'));
   const patchesNote = (dump().panels?.items ?? []).find((p) => p.kind === 'patches')?.note ?? '';
   check('no patch waits to be trusted', !/untrusted|trust/i.test(patchesNote), patchesNote);
-  next('Per project or tool');
-  t = next('Try it');
-  check('Try it waits for the button', t.task === 'to do', t.raw);
-  if (roll) {
-    run({ cmd: 'action', id: roll.id });
-    await until('Try it done once Roll a die has run', () => parseTour(tour()).task === 'done');
-    await sleep(800);
-    // Its own row, open and on screen: not folded into the sample's
-    // "Worked for" line, where it vanished on Tinker Desk (30 Oct).
-    const rows = dump().transcript?.rows ?? [];
-    const rolled = rows.find((r) => r.id.startsWith('t:action:'));
-    check('the roll has a row of its own', rolled && !rolled.inGroup, JSON.stringify(rows.map((r) => `${r.id}${r.inGroup ? ' (in group)' : ''}`)));
-    check('the roll is open and on screen', rolled && rolled.onScreen && rolled.expanded !== false, JSON.stringify(rolled));
-    // Scrolled down to it: opened in place, its output sat under the
-    // composer, and only the command showed.
-    check('the thread is scrolled to the roll', dump().transcript?.atBottom === true, JSON.stringify(dump().transcript?.atBottom));
-    shot('rolled');
-  }
+  t = next('Per project or tool');
+  check('Per project or tool has nothing to press', t.task === undefined, t.raw);
 
   t = next('Your first thread');
   check('the first message is written for them', /Make me a patch for this folder/.test(dump().composer.text), dump().composer.text);

@@ -120,6 +120,10 @@ if [ "$APP_ONLY" = 0 ]; then
     step "runner packages" "$ROOT/runner" npm ci --no-audit --no-fund
   fi
   step "runner typecheck" "$ROOT/runner" npm run typecheck
+  # The app's Node tools (the tour's end-to-end test, the mock runner)
+  # aren't typechecked or run here: at least they have to parse. A quote
+  # slip in tour-e2e.mjs went unnoticed until it was next run (2 Nov).
+  step "app tools parse" "$ROOT/app/Tools" bash -c 'for f in *.mjs mock-runner/*.mjs; do node --check "$f" || exit 1; done'
   # The Convex functions (convex/), against the generated types in git.
   if [ ! -d "$ROOT/node_modules" ]; then
     step "convex packages" "$ROOT" npm ci --no-audit --no-fund

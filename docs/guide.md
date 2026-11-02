@@ -268,6 +268,37 @@ then goes, with a note in the thread saying when it'll be back. A time
 works, or words like "until the phone arrives", read the same way as Wake
 when…. It won't put itself away while it's waiting on you.
 
+## Projects
+<!-- slug: projects -->
+
+A project groups threads by what they're for, across folders: one for an
+app you're building, say, with the threads in its repo and the ones in a
+scratch folder that worked on it too. A thread can be in more than one.
+Each project keeps its goals, a line or two on where it's up to, and
+longer notes (decisions, commands, links), and an agent starting a thread
+in it is given that brief, so it picks up where things stand.
+
+You don't have to make them. The librarian (below) and the agents
+themselves create projects, file threads into them and keep them up to
+date. The Projects icon on the left shows a card for each, newest activity
+first, with where it's up to and what its threads are doing; click one for
+its page, where you can rename it, edit its goals and notes, or move a
+thread in or out. A project is also where patches come from: a thread gets
+the buttons and panels of every project it's in (see [Patches](#patches)).
+
+## The librarian
+<!-- slug: librarian -->
+
+The librarian is a small, cheap background job that looks after your
+projects. After a thread's first turn, and now and then as it works, it
+reads what the thread is about and files it into the right project, makes
+a new project when none fits, and updates the project's note on where it's
+up to. If it guesses wrong, take the thread out of the project and it
+won't put it back.
+
+The Librarian icon on the left shows what it's doing, what it will look at
+next and what it has done, with a way to pause it.
+
 ## Panels
 <!-- slug: panels -->
 
