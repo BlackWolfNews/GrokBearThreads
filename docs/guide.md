@@ -272,37 +272,6 @@ then goes, with a note in the thread saying when it'll be back. A time
 works, or words like "until the phone arrives", read the same way as Wake
 when…. It won't put itself away while it's waiting on you.
 
-## Projects
-<!-- slug: projects -->
-
-A project groups threads by what they're for, across folders: one for an
-app you're building, say, with the threads in its repo and the ones in a
-scratch folder that worked on it too. A thread can be in more than one.
-Each project keeps its goals, a line or two on where it's up to, and
-longer notes (decisions, commands, links), and an agent starting a thread
-in it is given that brief, so it picks up where things stand.
-
-You don't have to make them. The librarian (below) and the agents
-themselves create projects, file threads into them and keep them up to
-date. The Projects icon on the left shows a card for each, newest activity
-first, with where it's up to and what its threads are doing; click one for
-its page, where you can rename it, edit its goals and notes, or move a
-thread in or out. A project is also where patches come from: a thread gets
-the buttons and panels of every project it's in (see [Patches](#patches)).
-
-## The librarian
-<!-- slug: librarian -->
-
-The librarian is a small, cheap background job that looks after your
-projects. After a thread's first turn, and now and then as it works, it
-reads what the thread is about and files it into the right project, makes
-a new project when none fits, and updates the project's note on where it's
-up to. If it guesses wrong, take the thread out of the project and it
-won't put it back.
-
-The Librarian icon on the left shows what it's doing, what it will look at
-next and what it has done, with a way to pause it.
-
 ## Panels
 <!-- slug: panels -->
 
@@ -313,9 +282,9 @@ panel has a bar along its top with its title, and panels that share a
 space show as tabs in it. To begin with there are three side by side:
 the list, the thread and Highlights.
 
-To move a panel, drag it by its title, or by one of its tabs. You can also
-press and hold anywhere else on it (the empty part of its bar, or its
-background) for a moment, then drag. A quick drag on the empty part of a
+To move a panel, press and hold on it for a moment, then drag. That works
+anywhere on the panel: its title, one of its tabs, the empty part of its
+bar or its background. On a title or tab a plain drag works too. A quick drag on the empty part of a
 bar moves the whole window instead, as there's no title bar, and a
 double-click there zooms it. While you drag, the panel shrinks under the
 pointer and shows where it will go when you let go:
@@ -428,7 +397,8 @@ open cards under each project, its own card first. Boards are read through
 a Connectors gateway (see [Connectors](#connectors)); without one, the
 project's page says so and nothing is read.
 
-### The librarian
+## The librarian
+<!-- slug: librarian -->
 
 The librarian reads your threads as they go and keeps your projects tidy.
 It files each thread in a project, making one when none fits, keeps each
@@ -438,11 +408,22 @@ title (never one you named). It also looks after the Pocket cards threads
 filed.
 
 It looks after a thread's first message and when a turn ends, then catches
-up at most every 20 minutes while the thread keeps going. Each look is one
-call to the small model in Settings › Models, on your own Claude login, so
-with only Codex it waits. Threads in a private folder (Settings › Models)
-are never sent to it. The Librarian view lists what it did; turn off Look
-at threads there to pause it, and Runs on picks whose logins it uses.
+up at most every 20 minutes while the thread keeps going. A catch-up after
+only a quick reply is skipped without asking anything.
+
+Each look is one short call to Haiku, Claude's small, cheap model, rather
+than the model your threads run on. It runs on one of your own Claude
+logins: the one with the most room in the pool picked under Runs on (the
+same pool that writes thread titles, also in Settings › Models), and it
+counts towards that login's usage like any other call. When every login in
+the pool is out of room it waits, and with only Codex logins it doesn't
+run at all. Threads in a private folder (Settings › Models) are never sent
+to it.
+
+The Librarian view lists what it did and what it will look at next. Turn
+off Look at threads there to pause it; what's queued waits until you turn
+it back on. If it files a thread wrongly, take the thread out of the
+project and it won't put it back.
 
 ## Schedules
 <!-- slug: schedules -->

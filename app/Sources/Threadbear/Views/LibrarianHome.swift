@@ -37,7 +37,7 @@ private struct LibrarianAbout: View {
         }
     }
 
-    static let more = "It takes a look after a thread's first message and when a turn ends, then catches up at most every 20 minutes while the thread keeps going. A catch-up after only a quick reply is skipped without asking the model. Each look is one call to the small model in Settings › Models. A thread you take out of a project is never put back in it."
+    static let more = "It takes a look after a thread's first message and when a turn ends, then catches up at most every 20 minutes while the thread keeps going. A catch-up after only a quick reply is skipped without asking the model. Each look is one short call to Haiku, not the model your threads use, on the Claude login with the most room in the Runs on pool, and counts towards its usage. It waits when they're all out of room, and threads in a private folder are never sent. A thread you take out of a project is never put back in it."
 }
 
 /// What can be changed about the librarian, here rather than only in
