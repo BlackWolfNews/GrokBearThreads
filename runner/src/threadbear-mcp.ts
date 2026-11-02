@@ -261,7 +261,7 @@ export function buildThreadbearTools(
   const reviewTools = [
     tool(
       'show_options',
-      'Shows the user a set of images to compare side by side in a review window, with an optional pick and notes per image. Use this whenever you have two or more design alternatives (mockups, wireframes, screenshots of variants) for the user to choose between, instead of pinning them, listing them in your reply or reading every image into the transcript. Returns a review ID promptly; finish your turn and the user’s answer arrives later as a message. Images are copied into the thread. Reference images can receive notes but cannot be picked.',
+      'Shows the user a set of images in a review window, with an optional pick and notes per image. The window steps through them one at a time in the order given, then shows them all side by side to pick from, so order them as you want them seen, with each reference image straight after the option it belongs to. Use this whenever you have two or more design alternatives (mockups, wireframes, screenshots of variants) for the user to choose between, instead of pinning them, listing them in your reply or reading every image into the transcript. Returns a review ID promptly; finish your turn and the user’s answer arrives later as a message. Images are copied into the thread. Reference images can receive notes but cannot be picked.',
       {
         title: z.string().min(1).max(200).describe('What the user is reviewing.'),
         note: z.string().max(4000).optional().describe('A short explanation or question for the whole review.'),
@@ -1152,7 +1152,7 @@ function clip(text: string, max = 2000): string {
 // AGENTS.md, which those threads read, and other people's threads don't
 // get it (30 Oct).
 export const SHOWING_THE_USER =
-  'When you have design options, mockups or wireframes for the user to choose between, put them in front of them with show_options (a side-by-side review window where they pick one and leave notes), not as pins or a list in your reply; their answer comes back as a message. ' +
+  'When you have design options, mockups or wireframes for the user to choose between, put them in front of them with show_options (a review window that steps through them one at a time, then has them pick one and leave notes), not as pins or a list in your reply; their answer comes back as a message. ' +
   "For a single file or link they should look at (a doc, a screenshot, a preview URL, a PR), use pin, with show: true to open it in Threadbear's side pane rather than running `open`. " +
   "To put one of Threadbear's own panels in front of them (this thread's Highlights, a patch panel such as the Convex dashboard, Usage), use show_panel. " +
   "When they say they're heading out or will need a fact away from their Mac (an address, a booking code, what to take), file it on their phone with pocket.";

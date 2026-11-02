@@ -302,6 +302,16 @@ struct ReviewWindow: View {
     // MARK: The images
 
     private var stage: some View {
+        VStack(spacing: 0) {
+            images
+            stepper
+        }
+        // minWidth 0: the image view's own size mustn't push the rail away.
+        .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black.opacity(colorScheme == .dark ? 0.22 : 0.05))
+    }
+
+    private var images: some View {
         GeometryReader { geo in
             let room = CGSize(width: max(0, geo.size.width - Self.stageInset * 2), height: max(0, geo.size.height - Self.stageInset * 2))
             Group {
@@ -325,9 +335,61 @@ struct ReviewWindow: View {
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
-        // minWidth 0: the image view's own size mustn't push the rail away.
         .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black.opacity(colorScheme == .dark ? 0.22 : 0.05))
+    }
+
+    /// Back and next under the image, with a mark for each step between
+    /// them: one per image, then the grid where they're all side by side to
+    /// choose from. A mark takes you straight to its step.
+    private var stepper: some View {
+        HStack(spacing: 16) {
+            stepButton("chevron.left", tip: session.mode == .all ? "Back to the last one (\u{2190})" : "Previous (\u{2190})",
+                       enabled: session.canStepBack) { session.browse(-1) }
+            HStack(spacing: 2) {
+                ForEach(Array(session.review.options.enumerated()), id: \.element.id) { index, option in
+                    stepMark(index, option)
+                }
+                Button { session.showAll() } label: {
+                    Image(systemName: "square.grid.2x2")
+                        .font(.system(size: 13, weight: session.mode == .all ? .semibold : .regular))
+                        .foregroundStyle(session.mode == .all ? Color.primary : Color.secondary)
+                        .frame(width: 26, height: 26).contentShape(Rectangle())
+                }.buttonStyle(.plain).tip("See them all and choose (Esc)")
+            }
+            stepButton("chevron.right", tip: session.nextIsAll ? "See them all and choose (\u{2192})" : "Next (\u{2192})",
+                       enabled: session.canStepForward, prominent: true) { session.browse(1) }
+        }
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity)
+    }
+
+    private func stepMark(_ index: Int, _ option: ReviewOption) -> some View {
+        let current = session.mode == .single && session.focused == index
+        let picked = session.draft.pickedId == option.id
+        let colour = picked ? Color.accentColor : current ? Color.primary : Color.secondary.opacity(0.45)
+        return Button { session.enlarge(index) } label: {
+            Group {
+                // A reference is hollow: it's there to look at, not to pick.
+                if option.reference {
+                    Circle().strokeBorder(colour, lineWidth: 1.5)
+                } else {
+                    Circle().fill(colour)
+                }
+            }
+            .frame(width: current ? 11 : 8, height: current ? 11 : 8)
+            .frame(width: 18, height: 26).contentShape(Rectangle())
+        }.buttonStyle(.plain).tip(option.label)
+    }
+
+    private func stepButton(_ symbol: String, tip: String, enabled: Bool, prominent: Bool = false, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 15, weight: .semibold))
+                .frame(width: 56, height: 32)
+                .background(Color.primary.opacity(prominent && enabled ? 0.1 : 0.05), in: Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain).foregroundStyle(enabled ? Color.primary : Color.secondary.opacity(0.4))
+        .disabled(!enabled).tip(tip)
     }
 
     private func aspect(_ option: ReviewOption) -> Double {
@@ -369,7 +431,7 @@ struct ReviewWindow: View {
 
     private var rail: some View {
         VStack(spacing: 0) {
-            ScrollView {
+            ScrollViewReader { scroller in ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     if let note = session.review.note, !note.isEmpty {
                         Text(note).font(.system(size: TypeScale.work)).foregroundStyle(.secondary)
@@ -378,11 +440,15 @@ struct ReviewWindow: View {
                         Divider()
                     }
                     ForEach(Array(session.review.options.enumerated()), id: \.element.id) { index, option in
-                        choice(option, index: index)
+                        choice(option, index: index).id(option.id)
                         Divider()
                     }
                 }
             }
+            .onChange(of: session.focused) { _, index in
+                guard session.review.options.indices.contains(index) else { return }
+                withAnimation(.easeOut(duration: 0.2)) { scroller.scrollTo(session.review.options[index].id) }
+            } }
             Divider()
             footer.padding(14)
         }
@@ -393,17 +459,19 @@ struct ReviewWindow: View {
         let picked = session.draft.pickedId == option.id
         let note = session.draft.notes[option.id] ?? ""
         let hasNote = !note.isEmpty
-        let showsBox = session.editable && (picked || hasNote || openedNotes.contains(option.id))
-        let enlarged = session.mode == .single && session.focused == index
+        let current = session.mode == .single && session.focused == index
+        // The one on show has its box out, so a thought about it as you
+        // step through is just typing.
+        let showsBox = session.editable && (picked || hasNote || current || openedNotes.contains(option.id))
         return VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 6) {
-                if session.editable && !option.reference {
-                    Button { choose(option, index: index) } label: { choiceText(option, picked: picked) }
-                        .buttonStyle(.plain)
-                        .tip(picked ? "Unpick \(option.id)" : "Pick \(option.id)")
-                } else {
-                    choiceText(option, picked: picked)
-                }
+            HStack(alignment: .top, spacing: 9) {
+                pickMark(option, index: index, picked: picked)
+                // The whole row shows its image, references too: before,
+                // a row only picked, and one that couldn't be picked did
+                // nothing at all (Mike, 2 Nov).
+                Button { session.enlarge(index) } label: { choiceText(option) }
+                    .buttonStyle(.plain)
+                    .tip(current ? "Showing \(option.id)" : "Show \(option.id)")
                 if session.editable && !showsBox {
                     Button {
                         openedNotes.insert(option.id)
@@ -424,22 +492,31 @@ struct ReviewWindow: View {
         }
         .padding(.horizontal, 14).padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(picked ? Color.accentColor.opacity(0.1) : enlarged ? Color.primary.opacity(0.05) : Color.clear)
+        .background(picked ? Color.accentColor.opacity(0.1) : current ? Color.primary.opacity(0.06) : Color.clear)
+        .overlay(alignment: .leading) {
+            if current { Rectangle().fill(Color.primary.opacity(0.5)).frame(width: 3) }
+        }
     }
 
-    private func choiceText(_ option: ReviewOption, picked: Bool) -> some View {
-        HStack(alignment: .top, spacing: 9) {
-            // A reference has no pick, and neither has a sent review's other
-            // choices; the gap keeps the text lined up all the same.
-            Group {
-                if picked {
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.accentColor)
-                } else if session.editable && !option.reference {
-                    Image(systemName: "circle").foregroundStyle(.secondary)
-                } else {
-                    Color.clear
-                }
-            }.frame(width: 16, height: 16)
+    /// A reference has no pick, and neither has a sent review's other
+    /// choices; the gap keeps the text lined up all the same.
+    @ViewBuilder private func pickMark(_ option: ReviewOption, index: Int, picked: Bool) -> some View {
+        if session.editable && !option.reference {
+            Button { choose(option, index: index) } label: {
+                Image(systemName: picked ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(picked ? Color.accentColor : Color.secondary)
+                    .frame(width: 16, height: 16).padding(4).contentShape(Rectangle())
+            }.buttonStyle(.plain).padding(-4)
+                .tip(picked ? "Unpick \(option.id)" : "Pick \(option.id)")
+        } else if picked {
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.accentColor).frame(width: 16, height: 16)
+        } else {
+            Color.clear.frame(width: 16, height: 16)
+        }
+    }
+
+    private func choiceText(_ option: ReviewOption) -> some View {
+        HStack(alignment: .top, spacing: 0) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(option.label).font(.system(size: TypeScale.work, weight: .semibold))
                     .fixedSize(horizontal: false, vertical: true)
@@ -478,6 +555,7 @@ struct ReviewWindow: View {
     private func choose(_ option: ReviewOption, index: Int) {
         let picking = session.draft.pickedId != option.id
         session.pick(option.id)
+        // On the choosing step the pick stays among them all.
         if session.mode == .single { session.enlarge(index) }
         if picking { focusSoon(option.id) } else if typingIn == option.id { typingIn = nil }
     }

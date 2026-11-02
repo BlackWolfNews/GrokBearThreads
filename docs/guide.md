@@ -142,6 +142,12 @@ as one message, with anything you wrote in the message box at the end.
 When an ask is about pictures the agent put up to compare, its button can
 open that comparison window straight from the card.
 
+The comparison window starts on the first picture. Next and back (or the
+arrow keys) step through them one at a time, and after the last one they're
+all side by side for you to pick one. Click any one on the right, or a dot
+under the picture, to go straight to it. Each picture you're on has a box
+for a note, and Send takes your pick and notes back to the thread.
+
 Inside a thread, rest the pointer on a link for a moment, in a reply or on a
 Needs you card's buttons, to see where it goes: a picture of the file, or
 the page's address. Click it to open it. If an agent already has that page

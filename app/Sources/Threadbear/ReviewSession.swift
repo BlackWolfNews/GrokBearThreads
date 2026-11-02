@@ -23,8 +23,11 @@ final class ReviewSession {
     private(set) var submitting = false
     private(set) var conflict = false
     var error: String?
-    /// All of them on the stage, or one enlarged.
-    var mode = ReviewMode.all
+    /// All of them on the stage, or one enlarged. A review that's waiting
+    /// opens as a walkthrough, one image at a time from the first, ending on
+    /// all of them to choose from (Mike, 2 Nov); one that's over opens on
+    /// all of them, as there's nothing left to step towards.
+    var mode: ReviewMode
     var actualSize = false
     /// The one enlarged in .single.
     private(set) var focused = 0
@@ -52,6 +55,7 @@ final class ReviewSession {
         self.defaults = defaults
         self.autosave = autosave
         self.reconnectWait = reconnectWait
+        mode = review.isPending && !review.options.isEmpty ? .single : .all
         cacheKey = "reviewDraft.\(threadId).\(review.id)"
         if let data = defaults.data(forKey: cacheKey), let cached = try? JSONDecoder().decode(CachedDraft.self, from: data), cached.draft != draft {
             draft = cached.draft
@@ -282,13 +286,26 @@ final class ReviewSession {
         actualSize = false
     }
 
-    /// The arrow keys. From all of them, the first press enlarges the one
-    /// last looked at; after that they step through.
+    /// The arrow keys and the stage's back and next. The images in order,
+    /// then all of them to choose from; it stops at either end rather than
+    /// wrapping, so the walkthrough has a start and an end. From all of
+    /// them, back goes to the last image and 0 (Return) to the one last
+    /// looked at.
     func browse(_ direction: Int) {
         let count = review.options.count
         guard count > 0 else { return }
-        enlarge(mode == .all ? min(focused, count - 1) : (focused + direction + count) % count)
+        if mode == .all {
+            if direction < 0 { enlarge(count - 1) } else if direction == 0 { enlarge(min(focused, count - 1)) }
+            return
+        }
+        let next = focused + direction
+        if next >= count { showAll() } else if next >= 0 { enlarge(next) }
     }
+
+    var canStepBack: Bool { mode == .all ? !review.options.isEmpty : focused > 0 }
+    var canStepForward: Bool { mode == .single }
+    /// The next step is all of them, where the pick happens.
+    var nextIsAll: Bool { mode == .single && focused == review.options.count - 1 }
 
     /// The runner trims notes and drops blanks. A saved space at the end
     /// must not keep a draft dirty and trigger another save every 500 ms.
