@@ -103,4 +103,10 @@
 //    patch link buttons (url actions), which the phone shows and opens
 //    itself. A runner sends them only to a backend of 28 or later; an older
 //    phone ignores them.
-export const API_VERSION = 28;
+// 29: watching only what changed. threadIndex rows carry `updatedMs` and a
+//    gone thread's row stays a day as a `deleted` tombstone;
+//    sync:otherRunnersList and sync:threadIndexSince let a runner watch the
+//    other runners and only their rows changed since its last answer.
+//    sync:otherRunnersThreads skips tombstones, so an older runner sees no
+//    change.
+export const API_VERSION = 29;

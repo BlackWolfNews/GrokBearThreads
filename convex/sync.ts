@@ -3,7 +3,8 @@
 // twice is harmless, and a runner that was offline writes each changed
 // row once when it's back.
 import { ConvexError, v } from 'convex/values';
-import { internalMutation, mutation, query, type MutationCtx } from './_generated/server';
+import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from './_generated/server';
+import type { Doc } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import { threadFields, views } from './schema';
 import { API_VERSION } from './version';
@@ -870,6 +871,10 @@ export const pruneOld = internalMutation({
     for await (const m of ctx.db.query('messages').withIndex('by_pagedAt', (q) => q.gt('pagedAt', 0).lt('pagedAt', cutoff))) {
       await ctx.db.patch(m._id, { pagedAt: undefined });
     }
+    // Thread index tombstones (API 29), once watchers have had a day to see them.
+    for await (const t of ctx.db.query('threadIndex').withIndex('by_deleted_updated', (q) => q.eq('deleted', true).lt('updatedMs', cutoff))) {
+      await ctx.db.delete(t._id);
+    }
     return null;
   },
 });
@@ -905,52 +910,109 @@ export const setThreadIndex = mutation({
   returns: v.null(),
   handler: async (ctx, { key, runnerId, rows, removed, keep }) => {
     checkRunnerKey(key);
+    // One runner's writes come one at a time, so its rows' updatedMs only
+    // go up, which is what threadIndexSince relies on.
+    const updatedMs = Date.now();
     for (const row of rows) {
       const existing = await ctx.db
         .query('threadIndex')
         .withIndex('by_runner_thread', (q) => q.eq('runnerId', runnerId).eq('threadId', row.threadId))
         .unique();
-      if (existing) await ctx.db.replace(existing._id, { ...row, runnerId });
-      else await ctx.db.insert('threadIndex', { ...row, runnerId });
+      if (existing) await ctx.db.replace(existing._id, { ...row, runnerId, updatedMs });
+      else await ctx.db.insert('threadIndex', { ...row, runnerId, updatedMs });
     }
-    const gone = new Set(removed);
-    const kept = keep ? new Set([...keep, ...rows.map((r) => r.threadId)]) : undefined;
-    if (gone.size || kept) {
+    // A gone thread's row stays a day as a tombstone, so a watcher reading
+    // only what changed hears it went.
+    const bury = async (row: Doc<'threadIndex'>) => {
+      if (!row.deleted) await ctx.db.patch(row._id, { deleted: true, updatedMs });
+    };
+    for (const threadId of removed) {
+      const row = await ctx.db
+        .query('threadIndex')
+        .withIndex('by_runner_thread', (q) => q.eq('runnerId', runnerId).eq('threadId', threadId))
+        .unique();
+      if (row) await bury(row);
+    }
+    // The first write after a start says which threads it still has.
+    if (keep) {
+      const kept = new Set([...keep, ...rows.map((r) => r.threadId)]);
       for await (const row of ctx.db.query('threadIndex').withIndex('by_runnerId', (q) => q.eq('runnerId', runnerId))) {
-        if (gone.has(row.threadId) || (kept && !kept.has(row.threadId))) await ctx.db.delete(row._id);
+        if (!kept.has(row.threadId)) await bury(row);
       }
     }
     return null;
   },
 });
 
-// Every runner but this one, with its threads. Each runner's rows are read
-// through its own index range, so this one's writes never re-run the query;
-// the runners table does, about once a minute per runner (heartbeats), which
-// is also what keeps `lastSeenAt` fresh here.
+const remoteRunner = v.object({ runnerId: v.string(), name: v.string(), icon: v.optional(v.string()), lastSeenAt: v.number(), rpcUrl: v.optional(v.string()) });
+
+async function otherRunners(ctx: QueryCtx, runnerId: string) {
+  const runners = [];
+  for await (const r of ctx.db.query('runners')) {
+    if (r.runnerId === runnerId) continue;
+    runners.push({
+      runnerId: r.runnerId,
+      name: r.name,
+      lastSeenAt: r.lastSeenAt,
+      ...(r.icon !== undefined ? { icon: r.icon } : {}),
+      ...(r.rpcUrl !== undefined ? { rpcUrl: r.rpcUrl } : {}),
+    });
+  }
+  return runners;
+}
+
+// API 29: the other runners on their own, so a heartbeat re-runs only this
+// small read, not the read of their threads.
+export const otherRunnersList = query({
+  args: { key: v.string(), runnerId: v.string() },
+  returns: v.array(remoteRunner),
+  handler: async (ctx, { key, runnerId }) => {
+    checkRunnerKey(key);
+    return otherRunners(ctx, runnerId);
+  },
+});
+
+// API 29: the given runners' rows written at or after `since` (each
+// runner's own clock of updatedMs), tombstones included; with no `since`,
+// all of that runner's rows. A watching runner re-subscribes with the
+// newest updatedMs it has seen, so each re-run reads only what changed
+// rather than every row (docs/convex-backend.md, "Usage and the free plan").
+// At-or-after rather than after, so a row written in the same millisecond
+// as the last answer isn't missed; reading it again is harmless.
+export const threadIndexSince = query({
+  args: { key: v.string(), runners: v.array(v.object({ runnerId: v.string(), since: v.optional(v.number()) })) },
+  returns: v.array(v.object({ ...indexDoc.fields, runnerId: v.string(), updatedMs: v.optional(v.number()), deleted: v.optional(v.boolean()) })),
+  handler: async (ctx, { key, runners }) => {
+    checkRunnerKey(key);
+    const out = [];
+    for (const { runnerId, since } of runners) {
+      const rows =
+        since === undefined
+          ? ctx.db.query('threadIndex').withIndex('by_runner_updated', (q) => q.eq('runnerId', runnerId))
+          : ctx.db.query('threadIndex').withIndex('by_runner_updated', (q) => q.eq('runnerId', runnerId).gte('updatedMs', since));
+      for await (const t of rows) {
+        const { _id, _creationTime, ...rest } = t;
+        out.push(rest);
+      }
+    }
+    return out;
+  },
+});
+
 export const otherRunnersThreads = query({
   args: { key: v.string(), runnerId: v.string() },
   returns: v.object({
-    runners: v.array(
-      v.object({ runnerId: v.string(), name: v.string(), icon: v.optional(v.string()), lastSeenAt: v.number(), rpcUrl: v.optional(v.string()) }),
-    ),
+    runners: v.array(remoteRunner),
     threads: v.array(v.object({ ...indexDoc.fields, runnerId: v.string() })),
   }),
   handler: async (ctx, { key, runnerId }) => {
     checkRunnerKey(key);
-    const runners = [];
+    const runners = await otherRunners(ctx, runnerId);
     const threads = [];
-    for await (const r of ctx.db.query('runners')) {
-      if (r.runnerId === runnerId) continue;
-      runners.push({
-        runnerId: r.runnerId,
-        name: r.name,
-        lastSeenAt: r.lastSeenAt,
-        ...(r.icon !== undefined ? { icon: r.icon } : {}),
-        ...(r.rpcUrl !== undefined ? { rpcUrl: r.rpcUrl } : {}),
-      });
+    for (const r of runners) {
       for await (const t of ctx.db.query('threadIndex').withIndex('by_runnerId', (q) => q.eq('runnerId', r.runnerId))) {
-        const { _id, _creationTime, ...rest } = t;
+        if (t.deleted) continue;
+        const { _id, _creationTime, updatedMs: _u, deleted: _d, ...rest } = t;
         threads.push(rest);
       }
     }

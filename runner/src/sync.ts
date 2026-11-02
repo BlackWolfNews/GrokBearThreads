@@ -68,7 +68,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 28;
+export const BACKEND_API_VERSION = 29;
 // From this one a thread's row carries its open card of asks and a finished
 // turn's next steps, and a message row can be `summary` (end_turn's
 // bullets), so the phone shows end-of-turn cards. An older backend's
@@ -130,6 +130,10 @@ export const STARS_API_VERSION = 27;
 // the phone shows them as buttons that open there. An older backend's
 // validator would turn the row down, so it goes without.
 export const LINKS_API_VERSION = 28;
+// The other runners' rows can be watched from where the last answer left off
+// (sync:otherRunnersList and sync:threadIndexSince), rather than read whole
+// on every change.
+export const INDEX_SINCE_API_VERSION = 29;
 // How far back a start looks for pictures, as new ones go up as they come.
 // Reading a whole log for each thread is too much to do for all of them on
 // every start, and it's the threads in use that Mike opens on the phone.
@@ -750,6 +754,7 @@ export class ConvexSync {
         log: deps.log,
         takesStartedBy: () => (this.backendApiVersion ?? 0) >= INDEX_STARTED_BY_API_VERSION,
         takesStars: () => (this.backendApiVersion ?? 0) >= STARS_API_VERSION,
+        takesSince: () => (this.backendApiVersion ?? 0) >= INDEX_SINCE_API_VERSION,
         ...(deps.appConnected ? { appConnected: deps.appConnected } : {}),
       });
     }

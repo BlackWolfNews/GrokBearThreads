@@ -165,3 +165,88 @@ test('other runners’ threads are watched only while a Mac app is connected', a
   index.stop();
   assert.equal(watching(), false);
 });
+
+// A fake backend for API 29: the runners list and the rows by updatedMs,
+// answering each subscription from its own `since` the way
+// sync:threadIndexSince does, and re-running every live one on a write.
+function sinceBackend() {
+  const runners = [{ runnerId: 'r-bruce', name: 'bruce', lastSeenAt: Date.now() }];
+  const rows: { runnerId: string; threadId: string; title: string; updatedMs: number; deleted?: boolean }[] = [];
+  const subs = new Map<number, { fn: string; args: Record<string, unknown>; onUpdate: (v: unknown) => void }>();
+  let next = 0;
+  let reads = 0; // rows read by threadIndexSince, all runs
+  const answer = (s: { fn: string; args: Record<string, unknown> }) => {
+    if (s.fn === 'sync:otherRunnersList') return runners;
+    const out = [];
+    for (const a of s.args.runners as { runnerId: string; since?: number }[]) {
+      for (const r of rows) if (r.runnerId === a.runnerId && (a.since === undefined || r.updatedMs >= a.since)) out.push({ ...r, cwd: '/', accountId: 'a', provider: 'claude', status: 'idle', needsYou: false, unread: false, preview: '', createdAt: 'c', lastActivityAt: 'l' });
+    }
+    reads += out.length;
+    return out;
+  };
+  let clock = 1000;
+  const write = (threadId: string, title: string, deleted = false) => {
+    clock += 1;
+    const i = rows.findIndex((r) => r.threadId === threadId);
+    const row = { runnerId: 'r-bruce', threadId, title, updatedMs: clock, ...(deleted ? { deleted } : {}) };
+    if (i >= 0) rows[i] = row;
+    else rows.push(row);
+    for (const s of [...subs.values()]) if (s.fn === 'sync:threadIndexSince') s.onUpdate(answer(s));
+  };
+  const subscribe = (fn: string, args: Record<string, unknown>, onUpdate: (v: unknown) => void) => {
+    const id = next++;
+    const s = { fn, args, onUpdate };
+    subs.set(id, s);
+    queueMicrotask(() => subs.has(id) && onUpdate(answer(s)));
+    return () => void subs.delete(id);
+  };
+  return { subscribe, write, live: () => [...subs.values()].map((s) => s.fn), reads: () => reads, resetReads: () => void (reads = 0) };
+}
+
+test('with API 29 a re-run reads only the rows that changed, and hears deletions', async () => {
+  const b = sinceBackend();
+  for (let i = 0; i < 100; i++) b.write(`t${i}`, `Thread ${i}`);
+  const h = makeHarness();
+  const heard: RemoteThreads[] = [];
+  const index = new ThreadIndex({
+    post: async () => null,
+    subscribe: b.subscribe,
+    key: 'k',
+    runnerId: 'r-m5',
+    home: h.home,
+    host: h.runner,
+    publish: (n: Notification) => n.method === 'remoteThreads.updated' && heard.push(n.params),
+    clock: h.clock,
+    log: nullLogger,
+    takesSince: () => true,
+  });
+  index.start();
+  for (let i = 0; i < 5; i++) await tick();
+  assert.deepEqual(b.live().sort(), ['sync:otherRunnersList', 'sync:threadIndexSince']);
+  assert.equal(heard.at(-1)!.threads.length, 100);
+  assert.equal(heard.at(-1)!.runners[0]!.name, 'bruce');
+
+  // One thread renamed: a handful of rows read, not a hundred.
+  b.resetReads();
+  b.write('t7', 'Renamed');
+  for (let i = 0; i < 5; i++) await tick();
+  assert.ok(b.reads() <= 4, `read ${b.reads()} rows for one change`);
+  const after = heard.at(-1)!;
+  assert.equal(after.threads.length, 100);
+  assert.equal(after.threads.find((t) => t.threadId === 't7')!.title, 'Renamed');
+  assert.equal('updatedMs' in after.threads[0]!, false, 'the app gets rows as before');
+
+  // A tombstone takes it out.
+  b.write('t8', 'Thread 8', true);
+  for (let i = 0; i < 5; i++) await tick();
+  assert.equal(heard.at(-1)!.threads.length, 99);
+  assert.equal(heard.at(-1)!.threads.some((t) => t.threadId === 't8'), false);
+
+  // Watching again starts from a full read, so nothing missed meanwhile matters.
+  index.stop();
+  assert.deepEqual(b.live(), []);
+  index.start();
+  for (let i = 0; i < 5; i++) await tick();
+  assert.equal(heard.at(-1)!.threads.length, 99);
+  index.stop();
+});

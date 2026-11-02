@@ -686,10 +686,10 @@ below take that away.
 month. Someone using it like that needs Starter, where that's about US$1.50
 a month.
 
-**Two Macs, each with the app open** don't fit today: each one's watch
-re-reads all the other's index rows on every heartbeat and every index
-write, about 0.5 GB a day with 300 threads each. The `otherRunnersThreads`
-cuts below are needed before anyone runs a second Mac on the free plan.
+**Two Macs, each with the app open** didn't fit before API 29: each one's
+watch re-read all the other's index rows on every heartbeat and every index
+write, about 0.5 GB a day with 300 threads each. Now a change reads only the
+rows it touched (cut 2 below).
 
 ### Cuts
 
@@ -699,15 +699,18 @@ while a Mac app is connected, and for two minutes after it goes
 numbers that takes Mike's prod from about 1.25 GB of I/O a day to about
 0.2 GB, and about 18K calls a week off.
 
-Backend changes, which deploy prod when they land on main, so they wait for
-Mike's OK:
+Backend changes (these deploy prod when they land on main; Mike said yes to
+1 and 2 on 2 Nov):
 
-1. `setPresence`: find held pushes with an index on `pushHeldAt` instead of
-   reading every thread row. Takes the growth out of a typical user's I/O.
-2. `otherRunnersThreads`: split the runners list from the thread rows, so a
-   heartbeat doesn't re-run the read of every row, and then watch only rows
-   changed since the last answer (an `updatedAt` index and tombstones for
-   deleted rows). Needed for two Macs.
+1. Done: `setPresence` finds held pushes with an index on `pushHeldAt`
+   instead of reading every thread row. Takes the growth out of a typical
+   user's I/O.
+2. Done (API 29): the runners list is its own query
+   (`sync:otherRunnersList`), so a heartbeat doesn't re-run the read of the
+   rows, and the rows are watched from where the last answer left off
+   (`sync:threadIndexSince` on an index of `updatedMs`, with a day's
+   tombstones for deleted threads). A change now reads only the rows it
+   touched, so two Macs fit as well as one.
 3. `phone:counts`: keep the two counts on a small row the runner's writes
    update, rather than counting every hibernating and den thread.
 4. `setProjects`: write only the projects that changed, and have the runner

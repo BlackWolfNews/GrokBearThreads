@@ -2661,7 +2661,14 @@ runner itself. Runners never talk to each other.
   (`hello`'s client `threadbear-mac`), and for two minutes after the last
   one goes, since every re-run reads all the other runners' rows; a
   `remoteThreads.list` starts the watch at once, and the answer follows as
-  `remoteThreads.updated`. Until then the list is what was last heard:
+  `remoteThreads.updated`. Until then the list is what was last heard.
+  With a backend of API 29 it watches two smaller things instead:
+  `sync:otherRunnersList` (the runners, which heartbeats re-run) and
+  `sync:threadIndexSince` with, per runner, the newest `updatedMs` it has
+  heard (absent at first, for all of that runner's rows). Each answer moves
+  that on and it subscribes again, so a re-run reads only rows written since,
+  tombstones (`deleted`, kept a day) included. Watching again after a stop
+  starts from all rows. The app sees the same `RemoteThreads` either way:
 
 ```ts
 type RemoteThreads = { runners: RemoteRunner[], threads: RemoteThread[] }

@@ -41,6 +41,9 @@ export type RemoteRunner = { id: string; name: string; icon?: string; online: bo
 export type RemoteThread = IndexRow & { runnerId: string };
 export type RemoteThreads = { runners: RemoteRunner[]; threads: RemoteThread[] };
 
+type RawRunner = { runnerId: string; name: string; icon?: string; lastSeenAt: number; rpcUrl?: string };
+type SinceRow = RemoteThread & { updatedMs?: number; deleted?: boolean };
+
 const FLUSH_MS = 1000;
 const BATCH = 50;
 // As on the phone: not heard from for this long is offline.
@@ -107,6 +110,9 @@ export class ThreadIndex {
     // the whole batch down otherwise, and the sidebar would stop updating.
     takesStartedBy?: () => boolean;
     takesStars?: () => boolean;
+    // Whether the backend can answer with only the rows changed since the
+    // last answer (API 29). Without it, every re-run reads every row.
+    takesSince?: () => boolean;
     // Whether a Mac app is connected to this runner. Only an app shows the
     // other runners' threads, so with none there's nothing to watch them
     // for. Left out, they're always watched.
@@ -124,6 +130,15 @@ export class ThreadIndex {
   private remote: RemoteThreads = { runners: [], threads: [] };
   private watchTimer?: TimerHandle;
   private appGoneAt?: number;
+  // Watching only what changed (API 29): the other runners, their rows by
+  // thread, and per runner the newest updatedMs heard, which the rows
+  // subscription asks from. A runner with no entry gets all its rows.
+  private watchingSince = false;
+  private runnersHeard: RawRunner[] = [];
+  private rows = new Map<string, Map<string, RemoteThread>>();
+  private since = new Map<string, number>();
+  private rowsKey?: string;
+  private unsubRows?: () => void;
 
   constructor(deps: ThreadIndex['deps']) {
     this.deps = deps;
@@ -174,12 +189,15 @@ export class ThreadIndex {
 
   private watch(): void {
     if (this.unsubscribe || !this.deps.subscribe) return;
-    this.unsubscribe = this.deps.subscribe(
-      'sync:otherRunnersThreads',
-      { key: this.deps.key, runnerId: this.deps.runnerId },
-      (v) => this.onRemote(v),
-      (e) => this.deps.log.warn('the other runners’ threads subscription failed', { error: String(e) }),
-    );
+    const failed = (e: Error) => this.deps.log.warn('the other runners’ threads subscription failed', { error: String(e) });
+    this.watchingSince = this.deps.takesSince?.() ?? false;
+    if (this.watchingSince) {
+      // A heartbeat re-runs only this small read; the rows are watched
+      // apart, from where the last answer left off (resubscribeRows).
+      this.unsubscribe = this.deps.subscribe('sync:otherRunnersList', { key: this.deps.key, runnerId: this.deps.runnerId }, (v) => this.onRunners(v), failed);
+      return;
+    }
+    this.unsubscribe = this.deps.subscribe('sync:otherRunnersThreads', { key: this.deps.key, runnerId: this.deps.runnerId }, (v) => this.onRemote(v), failed);
   }
 
   // What was last heard stays, so an app connecting again sees the other
@@ -187,6 +205,67 @@ export class ThreadIndex {
   private unwatch(): void {
     this.unsubscribe?.();
     this.unsubscribe = undefined;
+    this.unsubRows?.();
+    this.unsubRows = undefined;
+    this.rowsKey = undefined;
+    this.since.clear();
+    this.rows.clear();
+    this.runnersHeard = [];
+  }
+
+  private onRunners(v: unknown): void {
+    this.runnersHeard = Array.isArray(v) ? (v as RawRunner[]) : [];
+    const ids = new Set(this.runnersHeard.map((r) => r.runnerId));
+    for (const id of [...this.rows.keys()]) if (!ids.has(id)) this.rows.delete(id);
+    for (const id of [...this.since.keys()]) if (!ids.has(id)) this.since.delete(id);
+    this.resubscribeRows();
+    this.publishHeard();
+  }
+
+  // Asks again from the newest row heard. The first answer after that is
+  // only the row(s) at that time, already had; a change re-runs it with
+  // just the changed rows, which moves `since` on and asks again.
+  private resubscribeRows(): void {
+    if (!this.deps.subscribe) return;
+    const asked = this.runnersHeard.map((r) => (this.since.has(r.runnerId) ? { runnerId: r.runnerId, since: this.since.get(r.runnerId)! } : { runnerId: r.runnerId }));
+    const key = JSON.stringify(asked);
+    if (key === this.rowsKey) return;
+    this.unsubRows?.();
+    this.unsubRows = undefined;
+    this.rowsKey = key;
+    if (!asked.length) return;
+    this.unsubRows = this.deps.subscribe(
+      'sync:threadIndexSince',
+      { key: this.deps.key, runners: asked },
+      (v) => {
+        if (this.rowsKey === key) this.onRows(v, asked);
+      },
+      (e) => this.deps.log.warn('the other runners’ threads subscription failed', { error: String(e) }),
+    );
+  }
+
+  private onRows(v: unknown, asked: { runnerId: string; since?: number }[]): void {
+    const got = Array.isArray(v) ? (v as SinceRow[]) : [];
+    for (const a of asked) {
+      const mine = got.filter((r) => r.runnerId === a.runnerId);
+      // All of its rows: what was held for it goes.
+      const rows = a.since === undefined ? new Map<string, RemoteThread>() : (this.rows.get(a.runnerId) ?? new Map<string, RemoteThread>());
+      let newest = this.since.get(a.runnerId) ?? 0;
+      for (const r of mine) {
+        const { updatedMs, deleted, ...row } = r;
+        if (updatedMs !== undefined && updatedMs > newest) newest = updatedMs;
+        if (deleted) rows.delete(row.threadId);
+        else rows.set(row.threadId, row);
+      }
+      this.rows.set(a.runnerId, rows);
+      this.since.set(a.runnerId, newest);
+    }
+    this.publishHeard();
+    this.resubscribeRows();
+  }
+
+  private publishHeard(): void {
+    this.onRemote({ runners: this.runnersHeard, threads: [...this.rows.values()].flatMap((m) => [...m.values()]) });
   }
 
   private checkWatch(): void {
@@ -211,6 +290,11 @@ export class ThreadIndex {
   /** The backend got new enough for what rows held back: they go again. */
   refresh(): void {
     if (!this.running) return;
+    // Now able to watch only what changed: start the watch over that way.
+    if (this.unsubscribe && !this.watchingSince && this.deps.takesSince?.()) {
+      this.unwatch();
+      this.watch();
+    }
     for (const t of this.deps.host.list(['inbox', 'snoozed', 'archived'])) this.mark(t);
     this.schedule();
   }
@@ -271,7 +355,7 @@ export class ThreadIndex {
   }
 
   private onRemote(v: unknown): void {
-    const value = v as { runners?: { runnerId: string; name: string; icon?: string; lastSeenAt: number; rpcUrl?: string }[]; threads?: RemoteThread[] } | null;
+    const value = v as { runners?: RawRunner[]; threads?: RemoteThread[] } | null;
     const now = this.deps.clock.now();
     this.remote = {
       runners: (value?.runners ?? [])

@@ -165,9 +165,17 @@ export default defineSchema({
     starredAt: v.optional(v.string()), // since API 27
     // Who started it, when that wasn't Mike: the row's byline. Since API 23.
     startedBy: v.optional(v.object({ kind: v.string(), label: v.string(), icon: v.optional(v.string()), threadTitle: v.optional(v.string()), why: v.optional(v.string()) })),
+    // Since API 29: when the backend last wrote the row, so a watching
+    // runner reads only rows changed since its last answer
+    // (sync:threadIndexSince), and `deleted` marks a thread that's gone,
+    // kept for a day so watchers hear of it (pruneOld drops it then).
+    updatedMs: v.optional(v.number()),
+    deleted: v.optional(v.boolean()),
   })
     .index('by_runnerId', ['runnerId'])
-    .index('by_runner_thread', ['runnerId', 'threadId']),
+    .index('by_runner_thread', ['runnerId', 'threadId'])
+    .index('by_runner_updated', ['runnerId', 'updatedMs'])
+    .index('by_deleted_updated', ['deleted', 'updatedMs']),
 
   // pushedAt is the mirror's own: when a push last went out for the thread
   // (push.ts), kept across the runner's writes.
