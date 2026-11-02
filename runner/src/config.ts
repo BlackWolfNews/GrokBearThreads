@@ -241,7 +241,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     accountsDir: path.join(home, 'accounts'),
     followMain: env.THREADBEAR_FOLLOW_MAIN ? env.THREADBEAR_FOLLOW_MAIN !== '0' : json.followMain !== false,
     bulletReplies: json.bulletReplies !== false,
-    oneReply: json.oneReply === true,
+    // On unless runner.json turns it off (2 Nov: Mike found it the right
+    // balance, and it's no longer in Settings).
+    oneReply: json.oneReply !== false,
     ...(json.releases?.publish === true ? { releases: { publish: true, ...(typeof json.releases.signingKey === 'string' ? { signingKey: expandHome(json.releases.signingKey) } : {}) } } : {}),
     models: modelSettingsFrom(json),
     ...(codexPath ? { codexPath: expandHome(codexPath) } : {}),

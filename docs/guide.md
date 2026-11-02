@@ -90,23 +90,18 @@ At the right of the row:
 
 ### Reading a reply
 
-When an agent finishes a piece of work, its reply is a few short bullets
-of what it did, with what it needs from you (or "Nothing needed from you")
-under them. When its last message says more than the bullets (an
-explanation you asked for, a report), that message is the reply instead,
-and the bullets fold away with the work. Everything it did to get there,
-its notes, thinking, commands and edits, is one line above the reply,
-"Worked for 2m 13s": click it to open it. Pictures it made stay out, as
-they're often the answer. When the agent carries on by itself after that
-(to check its change once the app restarts, say), the follow-up joins the
-same line and its bullets replace the earlier ones, so there's still one
-reply to read. If you'd rather read the agent's own message every time,
-turn off Bullet replies in Settings > General: agents write a normal message
-from their next turn, under the same "Worked" line, and the bullets only
-show in previews, notifications and on the phone. Or turn on One reply
-there: the agent sets up its card first, then writes its reply once,
-after it, so the reply is never lost or repeated on the card. The card
-only asks, and each answer says what happens if you pick it. A link with ↑ after it goes to the step it's about: click
+When an agent finishes a piece of work, its reply is the message it
+writes at the end: what it did and what it found. Everything it did to
+get there, its notes, thinking, commands and edits, is one line above the
+reply, "Worked for 2m 13s": click it to open it. Pictures it made stay
+out, as they're often the answer. When the agent carries on by itself
+after that (to check its change once the app restarts, say), the
+follow-up joins the same line, so there's still one reply to read. When
+it needs something from you, a card under the reply asks, and each answer
+says what happens if you pick it. If you'd rather have a few short
+bullets in place of the agent's message, ask a thread to turn off One
+reply (`"oneReply": false` in runner.json). A link with ↑ after it goes
+to the step it's about: click
 it and the work opens there, with that step lit up. A link to another
 thread opens that thread.
 

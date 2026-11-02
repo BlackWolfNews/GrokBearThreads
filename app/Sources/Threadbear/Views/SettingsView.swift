@@ -93,17 +93,9 @@ private struct GeneralSettings: View {
                     Footnote("Where a new thread starts when you don't pick a folder.")
                 }
 
-                Section {
-                    Toggle("One reply", isOn: binding(settings.oneReply) { SettingsUpdate(oneReply: $0) })
-                        .tip("The agent sets up the card, then writes its reply once, after it. The card only asks; each answer says what it does")
-                    Toggle("Bullet replies", isOn: binding(settings.bulletReplies) { SettingsUpdate(bulletReplies: $0) })
-                        .tip("Show a few short bullets as an agent's reply, rather than its own message")
-                        .disabled(settings.oneReply)
-                } footer: {
-                    Footnote(settings.oneReply
-                        ? "From each thread's next session. Bullet replies don't apply."
-                        : "Off, agents write a normal message under the Worked line. Previews, notifications and the phone still show bullets.")
-                }
+                // One reply and Bullet replies left here on 2 Nov: one reply is
+                // the default, and anyone who wants bullets asks an agent to
+                // change runner.json (Mike wants as few settings as possible).
 
                 Section {
                     LabeledContent("Release an idle CLI after") {

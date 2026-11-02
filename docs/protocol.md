@@ -510,7 +510,7 @@ type Settings = {
   bulletReplies: boolean // a turn's reply is end_turn's bullets; false: the
                         // agent's own message (see "The summary")
   oneReply: boolean     // end_turn first, then the agent's message as the
-                        // reply (see "Needs you", One reply); off by default
+                        // reply (see "Needs you", One reply); on by default
   models: {
     pool: string | null      // the pool whose Claude logins answer small
                              // jobs; "claude" by default, null: none, so
@@ -1522,8 +1522,9 @@ A turn the agent finished can say whether Mike has to do anything, so
   opened the stills the agent had put up to compare. The agent calls it last, after its final
   message. The tool's description says when, so a resumed session that
   kept its old system prompt still hears it.
-- **One reply.** `Settings.oneReply: true` (Settings > General, off by
-  default; 1 Nov 2026, docs/reply-card-design). Mike found the card
+- **One reply.** `Settings.oneReply: true` (1 Nov 2026,
+  docs/reply-card-design; on by default and out of Settings since 2 Nov,
+  when Mike found it struck the right balance). Mike found the card
   repeating the message above it (thread 6fb15afc), and in other turns
   carrying all the context because the bullets had replaced a message
   that came only as narration (77e7a0a6, and an explanation he asked for
@@ -1587,8 +1588,8 @@ A turn the agent finished can say whether Mike has to do anything, so
   lets any arguments through its own validation, so the handler does the
   checking: what fits neither form hears today's shape and order in words
   (`endTurnMisfit`).
-- **Bullet replies off.** `Settings.bulletReplies: false` (Settings >
-  General; Mike, 30 Oct 2026: he liked the folded working but not always
+- **Bullet replies off.** `Settings.bulletReplies: false` (runner.json
+  only since 2 Nov; Mike, 30 Oct 2026: he liked the folded working but not always
   the bullets in place of the agent's message). `end_turn`'s description
   has the agent write a normal message and treats the summary as the short
   version; a session reads that when its CLI starts. For a live one, the

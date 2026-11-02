@@ -284,7 +284,7 @@ let deviceSeq = devices.length;
 const deviceList = () => ({ devices: [...devices], site: DEMO_SITE });
 
 const settings = {
-  defaultCwd: defaults.cwd, idleMinutes: 30, maxLiveCLIs: 6, followMain: true, bulletReplies: true,
+  defaultCwd: defaults.cwd, idleMinutes: 30, maxLiveCLIs: 6, followMain: true, bulletReplies: true, oneReply: true,
   models: {
     pool: 'claude',
     privateFolders: ['~/dev/clients/acme'],
