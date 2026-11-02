@@ -90,6 +90,16 @@ public extension RPCClient {
         try await call("panels.convexDeployments", .object(["threadId": .string(threadId), "panelId": .string(panelId), "refresh": .bool(refresh)]), as: ConvexDeployments.self, timeout: .seconds(150))
     }
 
+    /// Starts signing the runner's Convex CLI in, or with `check`, says how
+    /// the sign-in going is getting on. Answers once the CLI has printed
+    /// the page to approve it on.
+    func convexPanelLogin(threadId: String, panelId: String, check: Bool = false, force: Bool = false) async throws -> ConvexLogin {
+        var params: [String: JSONValue] = ["threadId": .string(threadId), "panelId": .string(panelId)]
+        if check { params["check"] = .bool(true) }
+        if force { params["force"] = .bool(true) }
+        return try await call("panels.convexLogin", .object(params), as: ConvexLogin.self, timeout: .seconds(60))
+    }
+
     /// A deploy key for a Convex panel's embedded dashboard. Slow the first
     /// time for a deployment, while the runner has the Convex CLI make one.
     func convexPanelKey(threadId: String, panelId: String, deployment: String? = nil, renew: Bool = false) async throws -> ConvexPanelKey {

@@ -473,6 +473,22 @@ public struct ConvexDeployments: Sendable, Decodable {
     public var note: String?
 }
 
+/// `panels.convexLogin`'s answer: a sign-in to Convex on the runner's CLI.
+/// `url` is the page to approve it on, `code` what that page shows.
+public struct ConvexLogin: Sendable, Equatable, Decodable {
+    public var state: String // idle, waiting, done, failed
+    public var url: String?
+    public var code: String?
+    public var message: String?
+
+    public init(state: String, url: String? = nil, code: String? = nil, message: String? = nil) {
+        self.state = state
+        self.url = url
+        self.code = code
+        self.message = message
+    }
+}
+
 /// `panels.convexKey`'s answer. The key is admin of its deployment, so its
 /// description leaves it out, in case one ever lands in a log line.
 public struct ConvexPanelKey: Sendable, Hashable, Decodable, CustomStringConvertible {

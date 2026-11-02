@@ -58,6 +58,7 @@ const THREAD_METHODS = new Set([
   'panels.render',
   'panels.convexKey',
   'panels.convexDeployments',
+  'panels.convexLogin',
   'actions.run',
 ]);
 
@@ -505,6 +506,8 @@ export class RpcServer {
         return r.renderPanel(reqString(p, 'threadId'), reqString(p, 'panelId'));
       case 'panels.convexKey':
         return r.convexPanelKey(reqString(p, 'threadId'), reqString(p, 'panelId'), p.renew === true, optString(p, 'deployment'));
+      case 'panels.convexLogin':
+        return r.convexPanelLogin(reqString(p, 'threadId'), reqString(p, 'panelId'), p.check === true, p.force === true);
       case 'panels.convexDeployments':
         return r.convexPanelDeployments(reqString(p, 'threadId'), reqString(p, 'panelId'), p.refresh === true);
       case 'patches.trust': {

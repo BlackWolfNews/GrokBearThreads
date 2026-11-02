@@ -769,6 +769,8 @@ export const ErrorCode = {
   accountNotFound: -32010,
   busy: -32020,
   moved: -32030, // a draining runner has handed the thread over (Handovers)
+  convexSignedOut: -32040, // the runner's Convex CLI isn't signed in ("The Convex panel")
+  convexNoAccess: -32041, // its Convex login can't reach the deployment
   other: -32000,
 } as const;
 

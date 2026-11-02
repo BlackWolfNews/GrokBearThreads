@@ -671,6 +671,16 @@ folder, a house for `~/.threadbear`, a wrench for a tool patch (one that's
 there because of a file, like a video's `.tandem`) and a box for one built
 into Threadbear. Hover over the button to see it in words.
 
+A thread in a Convex project gets a built-in Convex panel: the
+deployment's own dashboard (data, functions, logs and so on), with a menu
+to switch between Development and Production. It uses the Convex CLI on
+the thread's Mac, signed in to your Convex account. If that isn't signed
+in, the panel says so and has a Sign in to Convex button: your browser
+opens Convex's page to approve it (for a thread on another of your Macs,
+it opens on the Mac you're at), and the dashboard loads by itself once you
+have. If the signed-in account can't reach the project, Sign in as someone
+else switches to one that can.
+
 You don't need to write one yourself. In a thread in that folder, ask
 "add a button that runs the tests" or "add a panel showing localhost:3000",
 and the agent writes the patch into the folder's `.threadbear/patches/`

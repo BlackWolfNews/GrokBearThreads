@@ -5,6 +5,7 @@ import path from 'node:path';
 import { tmpDir } from '../helpers/fakes.ts';
 import { execFileSync } from 'node:child_process';
 import { CONVEX_CLI, ConvexKeys, cliError, convexFolderFor } from '../../src/convex-keys.ts';
+import { ErrorCode, type RpcError } from '../../src/protocol.ts';
 import type { CommandOutcome } from '../../src/patches.ts';
 
 // Stands in for `convex deployment token create ... --save-env <file>`.
@@ -46,12 +47,31 @@ test('a deploy key is made once per deployment, kept private, and made again on 
   assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).name, /token create (\S+)/.exec(cli.calls[2].command)![1]);
 });
 
-test('a failed CLI call says why, without making a key file', async () => {
+// A login file the fake CLI is "signed in" with.
+function loginFile(signedIn = true) {
+  const file = path.join(tmpDir(), 'config.json');
+  if (signedIn) fs.writeFileSync(file, JSON.stringify({ accessToken: 'tok' }));
+  return file;
+}
+
+const failing = (text: string) => async (): Promise<CommandOutcome> => ({ ok: false, text, truncated: false, durationMs: 1 });
+
+test('a failed CLI call says why in plain words, with a code the panel acts on, and makes no key file', async () => {
   const dir = path.join(tmpDir(), 'convex-panels');
-  const keys = new ConvexKeys(dir, async () => ({ ok: false, text: '\x1b[31m✖ Error: You are not logged in. Run `npx convex login`.\x1b[0m\n', truncated: false, durationMs: 1 }));
-  await assert.rejects(keys.key('calm-cat-1', '/proj'), /Couldn't make a deploy key for calm-cat-1: Error: You are not logged in\. Run `npx convex login`\./);
+  // Real convex 1.48 output, signed out.
+  const out = new ConvexKeys(dir, failing('\x1b[31m✖ Creating a deploy key requires being logged in with a personal access token. Run npx convex login and try again.\x1b[0m\n'), 'bruce.tail1234.ts.net', { configFile: loginFile(false) });
+  await assert.rejects(out.key('calm-cat-1', '/proj'), (e: RpcError) => e.code === ErrorCode.convexSignedOut
+    && /The Convex CLI on bruce isn't signed in to Convex/.test(e.message) && !e.message.includes('tail1234'));
   assert.deepEqual(fs.readdirSync(dir), []);
-  await assert.rejects(keys.key('x; rm -rf ~', '/proj'), /isn't a Convex deployment name/);
+  // An expired login still has a token in the file: the CLI's 401 says so.
+  const expired = new ConvexKeys(dir, failing('✖ Error fetching GET https://api.convex.dev/api/x 401 Unauthorized: MissingAccessToken'), 'mac', { configFile: loginFile() });
+  await assert.rejects(expired.key('calm-cat-1', '/proj'), (e: RpcError) => e.code === ErrorCode.convexSignedOut);
+  const elsewhere = new ConvexKeys(dir, failing("✖ You don't have access to the selected project. Run `npx convex dev` to select a different project."), 'mac', { configFile: loginFile() });
+  await assert.rejects(elsewhere.key('calm-cat-1', '/proj', false, { team: 'acme' }), (e: RpcError) => e.code === ErrorCode.convexNoAccess
+    && /can't reach calm-cat-1, which is on the team acme\. Sign in with an account on that team/.test(e.message));
+  const odd = new ConvexKeys(dir, failing('✖ Something else broke'), 'mac', { configFile: loginFile() });
+  await assert.rejects(odd.key('calm-cat-1', '/proj'), (e: RpcError) => e.code === ErrorCode.other && /The Convex CLI said: Something else broke/.test(e.message));
+  await assert.rejects(odd.key('x; rm -rf ~', '/proj'), /isn't a Convex deployment name/);
   assert.equal(cliError(''), 'the Convex CLI gave no reason');
 });
 
@@ -100,7 +120,7 @@ test('deployment choices resolve dev and prod through the CLI without changing p
 test('unavailable choices leave the configured deployment usable and explain why', async () => {
   const folder = tmpDir();
   const configured = { deployment: 'calm-cat-1', deploymentUrl: 'https://calm-cat-1.convex.cloud' };
-  const keys = new ConvexKeys(path.join(folder, 'keys'), async () => ({ ok: false, text: 'No production deployment', truncated: false, durationMs: 1 }));
+  const keys = new ConvexKeys(path.join(folder, 'keys'), async () => ({ ok: false, text: 'No production deployment', truncated: false, durationMs: 1 }), 'mac', { configFile: loginFile() });
   const listed = await keys.deployments(folder, configured);
   assert.deepEqual(listed.deployments, [{ ...configured, label: 'Configured' }]);
   assert.match(listed.note!, /Production: No production deployment/);
@@ -120,4 +140,88 @@ test('the runner\'s own Convex CLI is used, not the project\'s older one', () =>
   assert.match(help('deployment token create'), /Creates a deploy key/);
   assert.match(help('deployment token delete'), /Usage: convex deployment token delete/);
   assert.match(help('run'), /--inline-query/);
+});
+
+test('signed out, the deployment list says so once instead of the CLI\'s error twice', async () => {
+  const folder = tmpDir();
+  const configured = { deployment: 'calm-cat-1', deploymentUrl: 'https://calm-cat-1.convex.cloud' };
+  const keys = new ConvexKeys(path.join(folder, 'keys'), failing('✖ 401 Unauthorized: MissingAccessToken'), 'mac', { configFile: loginFile(false) });
+  const listed = await keys.deployments(folder, configured);
+  assert.deepEqual(listed, { deployments: [{ ...configured, label: 'Configured' }], note: "Sign in to Convex to list the project's other deployments." });
+});
+
+test('a saved key that Convex says is revoked is replaced by itself; the check only goes to the deployment\'s own address', async () => {
+  const dir = path.join(tmpDir(), 'convex-panels');
+  const cli = fakeCli();
+  const checked: string[] = [];
+  let verdict: 'ok' | 'bad' = 'ok';
+  const keys = new ConvexKeys(dir, cli.run, 'mac', { configFile: loginFile(), checkKey: async (url) => { checked.push(url); return verdict; } });
+  const at = { deploymentUrl: 'https://calm-cat-1.ap-southeast-2.convex.cloud' };
+  await keys.key('calm-cat-1', '/proj', false, at);
+  assert.equal(cli.calls.length, 1);
+  assert.deepEqual(checked, [], 'a key just made isn\'t checked');
+  await keys.key('calm-cat-1', '/proj', false, at);
+  assert.deepEqual(checked, ['https://calm-cat-1.ap-southeast-2.convex.cloud']);
+  assert.equal(cli.calls.length, 1, 'a working key is kept');
+  verdict = 'bad';
+  await keys.key('calm-cat-1', '/proj', false, at);
+  assert.match(cli.calls[1].command, /deployment token delete threadbear-panel-mac-/);
+  assert.match(cli.calls[2].command, /deployment token create /);
+  // A project's env file could name any URL: the key never goes there.
+  await keys.key('calm-cat-1', '/proj', false, { deploymentUrl: 'https://evil.example' });
+  await keys.key('calm-cat-1', '/proj', false, { deploymentUrl: 'https://calm-cat-1.convex.cloud.evil.example' });
+  assert.equal(checked.length, 2);
+  assert.equal(cli.calls.length, 3);
+});
+
+// Stands in for `convex login --login-flow poll`: prints the page and code
+// like convex 1.48 does, then "approves" by writing the login file.
+function fakeLogin(config: string, { exit = 0, approveAfterMs = 150, write = true } = {}) {
+  const script = `
+    console.log('Visit https://auth.convex.dev/device?user_code=BRTV-XJWX to finish logging in.');
+    console.log('You should see the following code which expires in 299 seconds: BRTV-XJWX');
+    setTimeout(() => {
+      if (${write}) require('fs').writeFileSync(${JSON.stringify(config)}, JSON.stringify({ accessToken: 'new' }));
+      if (${exit}) console.error('✖ Login denied');
+      process.exit(${exit});
+    }, ${approveAfterMs});`;
+  return [process.execPath, '-e', script];
+}
+
+async function until(get: () => Promise<{ state: string }>, state: string) {
+  for (let i = 0; i < 100; i++) {
+    const s = await get();
+    if (s.state === state) return s;
+    await new Promise((r) => setTimeout(r, 30));
+  }
+  throw new Error(`never reached ${state}`);
+}
+
+test('a sign-in from the panel hands back the page and code, then finishes by itself and lists deployments again', async () => {
+  const config = loginFile(false);
+  let listings = 0;
+  const keys = new ConvexKeys(path.join(tmpDir(), 'keys'), async () => { listings++; return { ok: false, text: 'nope', truncated: false, durationMs: 1 }; }, 'mac', { configFile: config, login: fakeLogin(config) });
+  assert.deepEqual(await keys.login(true), { state: 'idle' });
+  const folder = tmpDir();
+  await keys.deployments(folder, { deployment: 'calm-cat-1', deploymentUrl: 'https://calm-cat-1.convex.cloud' });
+  const started = await keys.login();
+  assert.deepEqual(started, { state: 'waiting', url: 'https://auth.convex.dev/device?user_code=BRTV-XJWX', code: 'BRTV-XJWX' });
+  assert.equal((await keys.login()).state, 'waiting', 'a second click joins the sign-in going');
+  await until(() => keys.login(true), 'done');
+  assert.ok(keys.signedIn());
+  await keys.deployments(folder, { deployment: 'calm-cat-1', deploymentUrl: 'https://calm-cat-1.convex.cloud' });
+  assert.equal(listings, 4, 'the cached list went with the new login');
+});
+
+test('a sign-in that fails or is never approved says so, and can be tried again', async () => {
+  const config = loginFile(false);
+  const denied = new ConvexKeys(tmpDir(), failing(''), 'mac', { configFile: config, login: fakeLogin(config, { exit: 1, write: false }) });
+  await denied.login();
+  const failed = await until(() => denied.login(true), 'failed');
+  assert.match((failed as { message: string }).message, /The sign-in didn't finish\. The Convex CLI said: Login denied/);
+  const slow = new ConvexKeys(tmpDir(), failing(''), 'mac', { configFile: config, login: fakeLogin(config, { approveAfterMs: 60_000 }), loginTimeoutMs: 1500 });
+  await slow.login();
+  assert.equal(((await until(() => slow.login(true), 'failed')) as { message: string }).message, "The sign-in wasn't approved in time. Try again.");
+  assert.equal((await slow.login()).state, 'waiting', 'a new click starts again');
+  await slow.login(true);
 });

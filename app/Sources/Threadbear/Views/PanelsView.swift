@@ -496,6 +496,13 @@ private struct ConvexPanel: View {
     @ObservedObject private var pool = WebPanelPool.shared
     @State private var key: ConvexPanelKey?
     @State private var failure: String?
+    /// The runner's error code with `failure`: signed out and no access get
+    /// a sign-in instead of only Try again.
+    @State private var failureCode: Int?
+    /// A sign-in going on the runner's CLI, approved in the browser.
+    @State private var signIn: ConvexLogin?
+    @State private var signInFailure: String?
+    @State private var signInTask: Task<Void, Never>?
     @State private var choices: [ConvexDeploymentChoice] = []
     @State private var choicesNote: String?
     @State private var loadingChoices = true
@@ -565,21 +572,71 @@ private struct ConvexPanel: View {
         .task(id: refresh) { await loadChoices() }
         // A cancelled request must never put the previous deployment back.
         .task(id: "\(selected) \(pool.convexRenewals[selected, default: 0])") { await fetch() }
+        .onDisappear { stopSignIn() }
     }
 
     @ViewBuilder
     private var content: some View {
         if let key, key.deployment == selected {
             ConvexWebPage(key: key)
+        } else if let signIn, signIn.state == "waiting" {
+            VStack(spacing: zoomed(12)) {
+                ProgressView().controlSize(.small)
+                Text("Approve the sign-in in your browser.")
+                    .font(.system(size: TypeScale.label, weight: .medium))
+                if let code = signIn.code {
+                    Text("Convex shows the code \(code). The dashboard opens here once you've approved it.")
+                        .font(.system(size: TypeScale.label))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .textSelection(.enabled)
+                }
+                HStack(spacing: zoomed(8)) {
+                    if let url = signIn.url.flatMap(URL.init(string:)) {
+                        Button("Open the page again") { NSWorkspace.shared.open(url) }
+                            .tip("Open Convex's sign-in page in your browser")
+                    }
+                    Button("Cancel") { stopSignIn() }
+                        .tip("Stop waiting for the sign-in")
+                }
+            }
+            .padding(zoomed(24))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let failure {
             VStack(spacing: zoomed(12)) {
-                Text(failure)
-                    .font(.system(size: TypeScale.label))
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .textSelection(.enabled)
-                Button("Try again") { Task { await fetch() } }
-                    .tip("Ask the runner for a deploy key again")
+                if failureCode == RPCError.convexSignedOut {
+                    Text("Sign in to Convex to see this dashboard.")
+                        .font(.system(size: TypeScale.label, weight: .medium))
+                    Text("Your browser opens to approve it, then the dashboard loads here by itself.")
+                        .font(.system(size: TypeScale.label))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                } else {
+                    Text(failure)
+                        .font(.system(size: TypeScale.label))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .textSelection(.enabled)
+                }
+                if let signInFailure {
+                    Text(signInFailure)
+                        .font(.system(size: TypeScale.small))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .textSelection(.enabled)
+                }
+                HStack(spacing: zoomed(8)) {
+                    if failureCode == RPCError.convexSignedOut {
+                        Button("Sign in to Convex") { startSignIn(force: false) }
+                            .keyboardShortcut(.defaultAction)
+                            .tip("Sign the runner's Convex CLI in, in your browser")
+                    } else if failureCode == RPCError.convexNoAccess {
+                        Button("Sign in as someone else") { startSignIn(force: true) }
+                            .tip("Sign the runner's Convex CLI in with another Convex account")
+                    }
+                    Button("Try again") { Task { await fetch() } }
+                        .tip("Ask the runner for a deploy key again")
+                }
             }
             .padding(zoomed(24))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -616,9 +673,52 @@ private struct ConvexPanel: View {
         let result = await app.convexPanelKey(threadId: threadId, panelId: panelId, deployment: target, renew: renew)
         guard !Task.isCancelled, selected == target else { return }
         switch result {
-        case .success(let made): key = made
-        case .failure(let error): failure = error.localizedDescription
+        case .success(let made):
+            key = made
+            failureCode = nil
+            signInFailure = nil
+        case .failure(let error):
+            failure = error.localizedDescription
+            if case .server(let code, _) = error as? RPCError { failureCode = code } else { failureCode = nil }
         }
+    }
+
+    /// Starts the runner's Convex sign-in, opens its page in the browser on
+    /// this Mac (the runner may be another Mac's, which is fine: the page
+    /// can be approved anywhere), and waits for it, then loads the panel.
+    private func startSignIn(force: Bool) {
+        signInTask?.cancel()
+        signInFailure = nil
+        signIn = ConvexLogin(state: "waiting")
+        signInTask = Task {
+            var status = await app.convexPanelLogin(threadId: threadId, panelId: panelId, force: force)
+            if case .success(let started) = status, let url = started.url.flatMap(URL.init(string:)) {
+                NSWorkspace.shared.open(url)
+            }
+            while !Task.isCancelled, case .success(let now) = status, now.state == "waiting" {
+                signIn = now
+                try? await Task.sleep(for: .seconds(2))
+                guard !Task.isCancelled else { return }
+                status = await app.convexPanelLogin(threadId: threadId, panelId: panelId, check: true)
+            }
+            guard !Task.isCancelled else { return }
+            signIn = nil
+            switch status {
+            case .success(let done) where done.state == "done":
+                refresh += 1
+                await fetch()
+            case .success(let other):
+                signInFailure = other.message ?? "The sign-in didn't finish. Try again."
+            case .failure(let error):
+                signInFailure = error.localizedDescription
+            }
+        }
+    }
+
+    private func stopSignIn() {
+        signInTask?.cancel()
+        signInTask = nil
+        signIn = nil
     }
 }
 

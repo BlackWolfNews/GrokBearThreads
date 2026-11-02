@@ -1364,6 +1364,9 @@ test('panels.convexKey makes a deploy key in the project folder, for the panel o
   // The key is only in the answer: never in the thread's events or summary.
   assert.ok(!JSON.stringify(h.runner.get(thread.id)).includes('quick-fox-77|k'));
   assert.ok(!JSON.stringify(h.notes).includes('quick-fox-77|k'));
+  // Sign-in is offered through the panel, so only for a panel it has.
+  assert.deepEqual(await h.runner.convexPanelLogin(thread.id, 'convex.dashboard', true), { state: 'idle' });
+  await assert.rejects(h.runner.convexPanelLogin(thread.id, 'nope'), /no panel called nope/);
 });
 
 test('patch files give a thread actions; a command action runs in the folder and lands in the transcript', async () => {

@@ -2099,6 +2099,17 @@ final class AppModel {
         }
     }
 
+    /// Signs the thread's runner's Convex CLI in (`panels.convexLogin`).
+    func convexPanelLogin(threadId: String, panelId: String, check: Bool = false, force: Bool = false) async -> Result<ConvexLogin, Error> {
+        guard let client = client(for: threadId) else { return .failure(RPCError.disconnected(nil)) }
+        do {
+            return .success(try await client.convexPanelLogin(threadId: threadId, panelId: panelId, check: check, force: force))
+        } catch {
+            AppLog.write("panels", "convex sign-in for \(panelId) failed: \(error.localizedDescription)")
+            return .failure(error)
+        }
+    }
+
     /// A deploy key for the selected deployment, or the CLI's reason when
     /// it couldn't make one.
     func convexPanelKey(threadId: String, panelId: String, deployment: String? = nil, renew: Bool = false) async -> Result<ConvexPanelKey, Error> {

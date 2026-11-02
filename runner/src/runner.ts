@@ -8,7 +8,7 @@ import os from 'node:os';
 import { SAMPLE_THREADS, WELCOME_PATCH } from './samples.ts';
 import { reviewInput, reviewDraft, reviewReply, sameDraft, type ReviewInput } from './reviews.ts';
 import path from 'node:path';
-import { ConvexKeys, convexFolderFor, type ConvexKey, type ConvexDeployments } from './convex-keys.ts';
+import { ConvexKeys, convexFolderFor, type ConvexKey, type ConvexDeployments, type ConvexKeysOptions, type ConvexLogin } from './convex-keys.ts';
 import crypto from 'node:crypto';
 import type {
   Panel,
@@ -429,6 +429,7 @@ export type RunnerDeps = {
   // Runs the Convex CLI for the Convex panel's deploy keys (convex-keys.ts);
   // tests pass a fake that writes the key file the CLI would.
   convexKeyRun?: (command: string, cwd: string) => Promise<CommandOutcome>;
+  convexKeyOptions?: ConvexKeysOptions; // the CLI's login file, sign-in command and key check, for tests
   // The runner's own small-model calls (models/index.ts), for titles.
   // Absent in most tests, which then keep the first-line title.
   models?: Pick<Models, 'generate'>;
@@ -564,6 +565,8 @@ export class Runner {
     this.convexKeys = new ConvexKeys(
       path.join(paths.secrets(deps.config.home), 'convex-panels'),
       deps.convexKeyRun ?? ((command, cwd) => runCommand(command, { cwd, env: { ...process.env }, shell: this.actionShell, timeoutMs: 120_000 })),
+      undefined,
+      deps.convexKeyOptions,
     );
     this.models = deps.models;
     this.projects = deps.projects;
@@ -4676,7 +4679,16 @@ export class Runner {
       target = choice;
     }
     const { deployment, deploymentUrl } = target;
-    return { deployment, deploymentUrl, adminKey: await this.convexKeys.key(deployment, folder, renew) };
+    const team = deployment === convex.deployment ? convex.team : undefined;
+    return { deployment, deploymentUrl, adminKey: await this.convexKeys.key(deployment, folder, renew, { deploymentUrl, team }) };
+  }
+
+  // Signs this runner's Convex CLI in, for a panel that said it's signed
+  // out (or can't reach its deployment, with `force`). `check` only says
+  // how the sign-in going is getting on.
+  async convexPanelLogin(threadId: string, panelId: string, check = false, force = false): Promise<ConvexLogin> {
+    this.convexPanelContext(threadId, panelId);
+    return this.convexKeys.login(check, force);
   }
 
   private convexPanelContext(threadId: string, panelId: string) {
