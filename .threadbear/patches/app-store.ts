@@ -44,9 +44,9 @@ const WORDS: Record<string, string> = {
 export default {
   icon: "pawprint",
   actions: [
-    { title: "Website", icon: "safari", run: "open https://threadbear.mikecann.app/" },
-    { title: "App Store Connect", icon: "app.badge", run: `open ${CONNECT}` },
-    { title: "Sentry", icon: "exclamationmark.triangle", run: "open 'https://mikec.sentry.io/issues/?project=4512336956293120'" },
+    { title: "Website", icon: "safari", url: "https://threadbear.mikecann.app/" },
+    { title: "App Store Connect", icon: "app.badge", url: CONNECT },
+    { title: "Sentry", icon: "exclamationmark.triangle", url: "https://mikec.sentry.io/issues/?project=4512336956293120" },
     {
       title: "Release it",
       icon: "paperplane",
