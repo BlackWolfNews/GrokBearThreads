@@ -55,7 +55,9 @@ function proc(bin: string, extra: Partial<ConstructorParameters<typeof AppServer
     log: nullLogger,
     label: 'test',
     env: { THREADBEAR_THREAD_ID: 'tb-thread-1' },
-    timings: { spawnRetryMs: 100, spawnRetryForMs: 3000, closeWaitMs: 2000 },
+    // The retry window runs from the first spawn, so a slow first start used
+    // to use it all up and the retry a test waited for never came.
+    timings: { spawnRetryMs: 100, spawnRetryForMs: PATIENCE_MS, closeWaitMs: 2000 },
     ...extra,
   });
 }
@@ -333,7 +335,9 @@ test('a 2.5 MB line reads whole; a line over the guard fails only itself', async
 
 test('closing stdin ends the process; a pending request fails as exited', async () => {
   const f = await fake();
-  const p = proc(f.bin);
+  // The kill can't come within this test's limit, so finishing in time means
+  // closing stdin is what ended it, however busy the Mac is.
+  const p = proc(f.bin, { timings: { spawnRetryMs: 100, spawnRetryForMs: PATIENCE_MS, closeWaitMs: PATIENCE_MS } });
   const started = p.start();
   const conn = await f.next();
   await conn.init();
@@ -344,7 +348,7 @@ test('closing stdin ends the process; a pending request fails as exited', async 
   await conn.request('model/list');
   const t0 = Date.now();
   await p.close();
-  assert.ok(Date.now() - t0 < 1500, 'it exits when stdin closes, without the kill');
+  assert.ok(Date.now() - t0 < PATIENCE_MS, 'it exits when stdin closes, without the kill');
   await assert.rejects(pending, CodexExitedError);
   assert.equal(exitedWith, undefined, 'a close on purpose reports no error');
   assert.equal(p.alive, false);
@@ -491,7 +495,7 @@ test('checkSurface passes on the real 0.164.0 schema', { skip: !fs.existsSync(re
 
 test('close() during the spawn-retry wait never spawns again', async () => {
   const f = await fake();
-  const p = proc(f.bin, { timings: { spawnRetryMs: 300, spawnRetryForMs: 5000, closeWaitMs: 2000 } });
+  const p = proc(f.bin, { timings: { spawnRetryMs: 300, spawnRetryForMs: PATIENCE_MS, closeWaitMs: 2000 } });
   const started = p.start();
   const first = await f.next();
   await first.request('initialize');

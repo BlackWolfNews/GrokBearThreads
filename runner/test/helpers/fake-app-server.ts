@@ -266,11 +266,17 @@ export class FakeCodex {
     const c = this.conns.shift();
     if (c) return Promise.resolve(c);
     return new Promise((resolve, reject) => {
-      const t = setTimeout(() => reject(new Error('fake codex: no process started')), ms);
-      this.waiters.push((conn) => {
+      const waiter = (conn: FakeConn) => {
         clearTimeout(t);
         resolve(conn);
-      });
+      };
+      // A waiter left behind would swallow the next test's process, and that
+      // test would fail too: tests in a file share one fake.
+      const t = setTimeout(() => {
+        this.waiters = this.waiters.filter((w) => w !== waiter);
+        reject(new Error('fake codex: no process started'));
+      }, ms);
+      this.waiters.push(waiter);
     });
   }
 

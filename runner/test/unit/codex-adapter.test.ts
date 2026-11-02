@@ -132,7 +132,7 @@ async function open(o: Partial<StartSessionOptions> & { deps?: Partial<CodexAdap
       registry: new ProcessRegistry(home, nullLogger),
       log: nullLogger,
       normalizer: factory,
-      timings: { reinterruptMs: 100, finishWaitMs: 500, closingRetryStartMs: 20, closingRetryForMs: 1000, terminateMs: 500, closeWaitMs: 2000 },
+      timings: { reinterruptMs: 100, finishWaitMs: 500, closingRetryStartMs: 20, closingRetryForMs: 1000, terminateMs: 500, spawnRetryForMs: PATIENCE_MS, closeWaitMs: 2000 },
       ...o.deps,
     });
   const { deps: _d, adapter: _a, ...rest } = o;
@@ -1018,7 +1018,7 @@ test('end() while the process is still being retried leaves nothing running', as
     codexBinary: () => f.bin,
     registry: new ProcessRegistry(home, nullLogger),
     log: nullLogger,
-    timings: { spawnRetryMs: 300, spawnRetryForMs: 5000, closeWaitMs: 2000 },
+    timings: { spawnRetryMs: 300, spawnRetryForMs: PATIENCE_MS, closeWaitMs: 2000 },
   });
   const session = adapter.start(
     { threadId: 'tb-r', cwd: home, account, permissionMode: 'full', sessionId: 'x', resume: false, mediaDir: home, blobsDir: home, tmpDir: home },

@@ -180,7 +180,12 @@ test('a subscriber that stops reading loses deltas, then is disconnected', async
   const s = h.adapter.last;
   s.init();
   const big = 'x'.repeat(256 * 1024);
-  for (let i = 0; i < 400 && !stalled.closeInfo; i++) {
+  // Until the server drops it from its clients. The stalled client can't see
+  // its close while paused, and ws gives it 30 s to answer before cutting it
+  // off with a 1006, which more of these writes outlasted at background
+  // priority (2 Nov).
+  const clients = (server as any).conns as Set<unknown>;
+  for (let i = 0; i < 400 && clients.size === 2; i++) {
     s.text(`m${i}:0`, big);
     await new Promise((r) => setImmediate(r));
   }
