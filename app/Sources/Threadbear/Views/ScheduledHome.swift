@@ -13,7 +13,7 @@ struct ScheduledHome: View {
                  stats: app.schedulesSupported ? ScheduledStats.tiles(app.schedules, now: app.now) : []) {
             VStack(alignment: .leading, spacing: zoomed(12)) {
                 HomeTitle(title: "Scheduled",
-                          line: "Messages that send themselves later: once at a set time, or over and over, like every weekday at 9. Each goes to a thread, or starts a new thread each time. Agents book them too, to check back on something.",
+                          line: "Messages that send themselves later, once or on repeat.",
                           more: Self.more)
                 let next = ScheduledStats.next(app.schedules)
                 HomeStatusLine(text: next.map { "Next: \(ScheduledStats.title($0)), \(ScheduledStats.when($0, now: app.now))" } ?? "Nothing coming up",
@@ -22,7 +22,7 @@ struct ScheduledHome: View {
         }
     }
 
-    static let more = "Make one with New schedule in the list, from Schedule… in a composer, or by asking an agent. A schedule that sends to a thread puts it under Waiting until then. A schedule that starts a new thread can run on another of your Macs (Runs on). Schedules live in your Convex backend, so with no internet they wait."
+    static let more = "Once at a set time, or over and over, like every weekday at 9. Each goes to a thread, or starts a new thread each time. Agents book them too, to check back on something. Make one with New schedule in the list, from Schedule… in a composer, or by asking an agent. A schedule that sends to a thread puts it under Waiting until then. A schedule that starts a new thread can run on another of your Macs (Runs on). Schedules live in your Convex backend, so with no internet they wait."
 }
 
 /// The page's numbers, from the schedules the app already has.

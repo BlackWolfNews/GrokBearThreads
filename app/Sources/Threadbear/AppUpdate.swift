@@ -407,6 +407,10 @@ final class AppUpdater {
     /// if they're new.
     func check() {
         guard let running, build == nil else { return }
+        // followMain: false in runner.json stops the runner rebuilding, and
+        // the app too (on-your-mac.md promises both). Only an explicit false
+        // stops it: before the runner has said, it's the default, on.
+        guard AppModel.shared.runnerSettings?.followMain != false else { return }
         Task { @MainActor in
             let result = await Self.run("/usr/bin/git", AppUpdate.revParseArguments(checkout: running.checkout))
             guard result.status == 0 else {

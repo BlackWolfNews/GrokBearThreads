@@ -134,7 +134,16 @@ upload_debug_symbols() {
     echo "WARNING: debug symbols weren't uploaded to Sentry; crash reports from this build won't show function names."
   fi
 }
-if [[ "$BUILD_CONFIGURATION" == "release" \
-  && ( "$FINAL_DIR" == "$HOME/Applications/$APP_NAME.app" || "$FINAL_DIR" == "$HOME/Applications/.$APP_NAME.app.next" ) ]]; then
+# Only a build of Mike's own repo, like CrashReporting.swift: a fork's
+# machine might have a sentry-cli and token of its own, and its symbols
+# don't belong in Mike's project.
+is_mikes_repo() {
+  local key
+  key="$(printf '%s' "$ORIGIN" | tr '[:upper:]' '[:lower:]')"
+  key="${key#*://}"; key="${key#*@}"; key="${key/://}"; key="${key%/}"; key="${key%.git}"
+  [[ "$key" == "github.com/mikecann/threadbear" ]]
+}
+if [[ "$BUILD_CONFIGURATION" == "release" ]] && is_mikes_repo \
+  && [[ ( "$FINAL_DIR" == "$HOME/Applications/$APP_NAME.app" || "$FINAL_DIR" == "$HOME/Applications/.$APP_NAME.app.next" ) ]]; then
   upload_debug_symbols || true
 fi

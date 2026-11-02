@@ -48,11 +48,20 @@ File references are where to look.
 - **Agents get full access by default.** Claude runs with
   `bypassPermissions` and Codex with `danger-full-access`. "Ask before
   edits" is a choice for each thread.
+- **Your phone and browser can drive the Mac.** A paired iPhone or a
+  signed-in browser can start threads in any folder, send messages and
+  answer approvals, through your Convex deployment (`runner/src/sync.ts`).
+  Those threads start on full access like any other, so treat a pairing like
+  a login to the Mac, and so is admin access to your Convex deployment.
+  Pairings last 90 days unless set otherwise, at most 365
+  (`convex/tokens.ts`); Revoke in Settings › Phone & browser ends one.
 - **Following your main** (`runner/src/update.ts`, `app/Sources/Threadbear/AppUpdate.swift`):
-  every 5 minutes the runner and the app check your local `main`. When
-  it has changed, they rebuild themselves from it and redeploy your
-  backend. Turn it off with `followMain: false` in `runner.json` (ask any
-  thread to; it left Settings on 2 Nov).
+  the runner and the app watch your local `main`, and look again every 5
+  minutes. Within seconds of it changing, they rebuild themselves from it
+  and redeploy your backend, so whatever reaches your `main` runs, with no
+  signature check; only Mike's release tags are signed (below). Turn it
+  off for both with `followMain: false` in `runner.json` (ask any thread
+  to; it left Settings on 2 Nov).
 - **Mike's releases** (`runner/src/upstream.ts`): every 6 hours it fetches
   `upstream`'s signed `release/*` tags. It only tells you about them; it
   never changes your code.
@@ -115,7 +124,7 @@ File references are where to look.
 | Anthropic, OpenAI | yours | Your threads, through the official CLIs on your own logins |
 | Mike's push relay | Mike's | Only when a paired iPhone gets a notification. It's sent from your Convex deployment, not the Mac. The text is encrypted for the phone; the relay sees the device token and thread id (`convex/push.ts`, `docs/push-relay.md`). |
 | A Connectors gateway | whoever runs it | Only if one is set in `runner.json` or `~/.claude.json`. Its `/health` every few minutes, and for a project with a Notion page, a Notion read or two every 5 minutes for its task board (`runner/src/notion-tasks.ts`), signed with the header the `headersHelper` command in that `connectors` entry prints, which it runs for each read |
-| Sentry | Mike's | Nothing from your copy. Only a copy whose `origin` is Mike's own repo reports errors (`runner/src/sentry.ts`, `app/Sources/Threadbear/CrashReporting.swift`). The App Store iPhone app sends anonymous crash reports. |
+| Sentry | Mike's | Nothing from your copy. Only a copy whose `origin` is Mike's own repo reports errors or uploads the app's debug symbols (`runner/src/sentry.ts`, `app/Sources/Threadbear/CrashReporting.swift`, `app/build-app.sh`). The App Store iPhone app sends anonymous crash reports. |
 
 On the Mac itself, a web link you click in the app first goes to
 BrowserBear's socket (`~/Library/Application Support/BrowserBear/browserbear.sock`),
