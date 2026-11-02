@@ -528,8 +528,8 @@ The gateway is optional: it's a small server of your own
 service once for all your logins and Macs. Without one, agents use
 claude.ai's connectors alone, and Notion boards on projects aren't read.
 
-The Connectors icon (the plug) near the bottom of the left-hand rail opens a
-panel listing the gateway's services and whether each is signed in. A blue
+Once there's a gateway, the Connectors icon (the plug) near the bottom of
+the left-hand rail opens a panel listing the gateway's services and whether each is signed in. A blue
 dot on the icon means one is signed out: click Connect beside it, and its
 sign-in page opens in your browser. A grey dot means something's off that
 usually sorts itself out, such as the gateway not answering for a moment.
