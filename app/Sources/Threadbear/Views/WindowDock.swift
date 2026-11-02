@@ -248,8 +248,20 @@ struct RootView: View {
         // The automation's `settings` opens the Settings window; only a
         // SwiftUI view can (AppKit's showSettingsWindow: does nothing now).
         .onChange(of: app.settingsRequest) { openSettings() }
+        // A view's own intro the first time it's opened (Tour.intros),
+        // once its page is drawn for the card to point at.
+        .onChange(of: app.sidebarMode) { _, mode in introduceSoon(TourIntro.of(mode)) }
+        .onChange(of: app.usageShown) { _, shown in if shown { introduceSoon(.usage) } }
+        .onChange(of: app.updatesShown) { _, shown in if shown { introduceSoon(.updates) } }
+        .onChange(of: app.connectorsShown) { _, shown in if shown { introduceSoon(.connectors) } }
         // Saves where the window is, so the next launch opens it there.
         .background(MainWindowFrameTracker())
+    }
+
+    /// Once the page or panel is drawn, for the card to point at.
+    private func introduceSoon(_ intro: TourIntro?) {
+        guard let intro else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { Tour.shared.introduce(intro) }
     }
 
     private var windowTitle: String {
@@ -321,10 +333,10 @@ struct RootView: View {
             view: { panel in
                 switch panel {
                 case WindowDock.threads: AnyView(SidebarView().tourTarget(.threads, withBar: true))
-                case WindowDock.usage: AnyView(UsagePanel())
-                case WindowDock.updates: AnyView(UpdatesPanel())
+                case WindowDock.usage: AnyView(UsagePanel().tourTarget(.panel("usage"), withBar: true))
+                case WindowDock.updates: AnyView(UpdatesPanel().tourTarget(.panel("updates"), withBar: true))
                 case WindowDock.setup: AnyView(SetupPanel().tourTarget(.setupPanel, withBar: true))
-                case WindowDock.connectors: AnyView(ConnectorsPanel())
+                case WindowDock.connectors: AnyView(ConnectorsPanel().tourTarget(.panel("connectors"), withBar: true))
                 case WindowDock.main: AnyView(DetailView().tourTarget(.mainPanel, withBar: true))
                 case let id where WindowDock.pinnedThread(id) != nil:
                     AnyView(PinnedThreadView(threadId: WindowDock.pinnedThread(id)!).id(id))

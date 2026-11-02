@@ -31,7 +31,7 @@ final class TourTests: XCTestCase {
     /// sentence a card, and a step per idea.
     func testEveryCardIsOneShortSentence() {
         let ends = try! NSRegularExpression(pattern: #"[.!?](\s|$)"#)
-        for step in Tour.steps {
+        for step in Tour.steps + Array(Tour.intros.values) {
             for text in [step.body, step.doneBody, step.failBody].compactMap({ $0 }) {
                 let sentences = ends.numberOfMatches(in: text, range: NSRange(text.startIndex..., in: text))
                 XCTAssertLessThanOrEqual(sentences, 1, "one sentence: \(text)")
@@ -48,10 +48,27 @@ final class TourTests: XCTestCase {
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("site/app-doc-slugs.json")
         let slugs = try JSONDecoder().decode([String].self, from: Data(contentsOf: slugsFile))
-        for step in Tour.steps where step.title != "Welcome to Threadbear" {
+        for step in Tour.steps + Array(Tour.intros.values) where step.title != "Welcome to Threadbear" {
             XCTAssertNotNil(step.doc, "\(step.title) has no docs link")
             if let doc = step.doc { XCTAssertTrue(slugs.contains(doc), "\(doc) isn't in site/app-doc-slugs.json") }
         }
+    }
+
+    /// A page's intro: once the first time it opens, never again, and not
+    /// over a scripted run's pages.
+    func testAnIntroShowsOnceAndNotWhenOff() {
+        tour.introduce(.projects)
+        XCTAssertEqual(tour.current?.title, "Projects")
+        XCTAssertTrue(tour.isLast, "one card")
+        tour.finish()
+        XCTAssertNil(tour.step)
+        tour.introduce(.projects)
+        XCTAssertNil(tour.step, "only the first time")
+        XCTAssertFalse(defaults.bool(forKey: Tour.seenKey), "an intro isn't the tour")
+        tour.introsEnabled = false
+        tour.introduce(.librarian)
+        XCTAssertNil(tour.step)
+        XCTAssertEqual(Set(Tour.intros.keys), Set(TourIntro.allCases), "every intro has a card")
     }
 
     func testOnlyTheReplayCanBeSkipped() {

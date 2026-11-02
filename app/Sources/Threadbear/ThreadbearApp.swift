@@ -186,6 +186,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             // Before anything can start the tour: its samples and hands-on
             // steps need the model from its first step.
             Tour.shared.app = app
+            // Not over the pages a screenshot, perf or scripted run opens.
+            Tour.shared.introsEnabled = !scripted
             if !scripted { Notifier.setUp(delegate: self) }
             app.onThreadsLoaded = { [weak self] in
                 LaunchClock.threadsLoaded()

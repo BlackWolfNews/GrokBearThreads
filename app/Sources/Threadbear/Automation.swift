@@ -834,6 +834,9 @@ enum Automation {
             // {"do": "start"|"next"|"back"|"end"}, or nothing to just read
             // where it's at. Says the step, its title and what it lights up.
             let tour = Tour.shared
+            // {"intros": true}: the views' first-open intros, off in a
+            // scripted app so its pages aren't covered.
+            if let on = c["intros"] as? Bool { tour.introsEnabled = on }
             switch c["do"] as? String {
             // A scripted start is the first-run one (no Skip) unless
             // {"skippable": true}, as Help's replay is.

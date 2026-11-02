@@ -24,6 +24,9 @@ enum TourTarget: Hashable {
     case sampleRow(String)
     /// A sample row's hover buttons (hibernate and archive), while drawn.
     case rowButtons
+    /// A panel of the activity bar's (usage, updates, connectors), for its
+    /// first-open intro.
+    case panel(String)
     /// Finish setting up's panel, opened when the first thread's sent.
     case setupPanel
 
@@ -34,6 +37,21 @@ enum TourTarget: Hashable {
         switch self {
         case .threads, .highlights, .highlightsRail, .activityBar: true
         default: false
+        }
+    }
+}
+
+/// The pages and panels with a one-card intro the first time they open.
+enum TourIntro: String, CaseIterable {
+    case scheduled, projects, librarian, usage, updates, connectors
+
+    /// The intro for a sidebar view, if it has one.
+    static func of(_ mode: SidebarMode) -> TourIntro? {
+        switch mode {
+        case .scheduled: .scheduled
+        case .projects: .projects
+        case .librarian: .librarian
+        default: nil
         }
     }
 }
@@ -73,9 +91,6 @@ struct TourStep: Equatable {
     var opensSample = false
     /// The sample whose row is drawn hovered, buttons showing, by title.
     var hovers: String? = nil
-    /// A view the step flips the window to (its sidebar list and its page),
-    /// to show what it's for.
-    var shows: SidebarMode? = nil
     /// The docs page its ⓘ opens (threadbear.mikecann.app/docs/<doc>), one
     /// of site/app-doc-slugs.json: the detail a one-sentence card leaves out.
     var doc: String? = nil
@@ -121,12 +136,6 @@ final class Tour {
                  hovers: "Plan the weekend", doc: "hibernate-and-archive"),
         TourStep(targets: [.activityBar], title: "Your views",
                  body: "These icons switch to schedules, projects and the librarian.", doc: "threads"),
-        TourStep(targets: [.mainPanel], title: "Projects",
-                 body: "Projects group threads by what they're for, with goals and where each is up to.",
-                 shows: .projects, doc: "projects"),
-        TourStep(targets: [.mainPanel], title: "The librarian",
-                 body: "The librarian files your threads into projects and keeps their notes up to date.",
-                 shows: .librarian, doc: "librarian"),
         // No card for Full access / Ask before edits: people know access
         // modes from other agent apps, and the chip says it (Mike, 30 Oct).
         TourStep(targets: [.highlights, .highlightsRail], title: "Highlights",
@@ -148,6 +157,35 @@ final class Tour {
                  body: "While it works, pair your phone here to check in from anywhere.",
                  failBody: "Your first thread hit a snag, and its message says how to fix it.", doc: "finish-setting-up"),
     ]
+
+    /// A page's or panel's own one-card intro, shown the first time it's
+    /// opened rather than in the tour, which stays short (Mike, 2 Nov).
+    static let intros: [TourIntro: TourStep] = [
+        .scheduled: TourStep(targets: [.mainPanel], title: "Scheduled",
+                             body: "Schedules send a message at a set time, once or on repeat, to a thread or a new one.",
+                             doc: "schedules"),
+        .projects: TourStep(targets: [.mainPanel], title: "Projects",
+                            body: "Projects group threads by what they're for, with goals and where each is up to.",
+                            doc: "projects"),
+        .librarian: TourStep(targets: [.mainPanel], title: "The librarian",
+                             body: "The librarian files your threads into projects and keeps their notes up to date.",
+                             doc: "librarian"),
+        .usage: TourStep(targets: [.panel("usage")], title: "Usage",
+                         body: "How much room each of your logins has left before it hits its limits.",
+                         doc: "accounts"),
+        .updates: TourStep(targets: [.panel("updates")], title: "Updates",
+                           body: "What's on its way for the app, the runner and the agents' tools.",
+                           doc: "changing-threadbear"),
+        .connectors: TourStep(targets: [.panel("connectors")], title: "Connectors",
+                              body: "The services your agents can use, and whether each is signed in.",
+                              doc: "connectors"),
+    ]
+    static func introKey(_ intro: TourIntro) -> String { "tourIntro.\(intro.rawValue)" }
+    /// Off in scripted runs (screenshots, perf, a dev app) so a page they
+    /// open isn't covered; the automation's `tour` turns it on.
+    @ObservationIgnored var introsEnabled = true
+    /// The card on show is a page's intro, not the tour.
+    private(set) var isIntro: TourIntro?
 
     /// The step on show, as an index into `shown`; nil when the tour's
     /// not running.
@@ -218,9 +256,28 @@ final class Tour {
         go(to: step - 1)
     }
 
+    /// A page's or panel's intro, the first time it's opened (RootView
+    /// watches the sidebar's view and the panels). Not while the tour or
+    /// another intro is up.
+    func introduce(_ intro: TourIntro?) {
+        guard introsEnabled, step == nil, let intro, let card = Self.intros[intro], !defaults.bool(forKey: Self.introKey(intro)) else { return }
+        isIntro = intro
+        skippable = true
+        shown = [card]
+        step = 0
+        taskDone = false
+    }
+
     /// Done or skipped: either way it doesn't come up by itself again, and
     /// the samples go.
     func finish() {
+        if let intro = isIntro {
+            // An intro: once seen, never again; nothing else to undo.
+            step = nil
+            isIntro = nil
+            defaults.set(true, forKey: Self.introKey(intro))
+            return
+        }
         step = nil
         app?.hoverOverride = nil
         defaults.set(true, forKey: Self.seenKey)
@@ -232,17 +289,6 @@ final class Tour {
         step = index
         taskDone = false
         guard let app else { return }
-        // A view step flips to its view; any other puts the inbox back.
-        switch shown[index].shows {
-        case .projects?: app.showProjects()
-        case .librarian?: app.showLibrarian()
-        default:
-            if app.sidebarMode == .projects || app.sidebarMode == .librarian {
-                app.showsProjectsHome = false
-                app.showsLibrarianHome = false
-                app.sidebarMode = .inbox
-            }
-        }
         if shown[index].opensSample { app.openTourSample(sampleIds) }
         // The row's hover buttons, drawn without the pointer (as the
         // screenshot run does); nil puts the row back.
@@ -604,6 +650,8 @@ private struct TourCard: View {
                 .contentTransition(.opacity)
             HStack(spacing: zoomed(8)) {
                 // Where you are in it, as dots: the step on show is darker.
+                // No dots for a page's one-card intro: a lone dot says nothing.
+                if count > 1 {
                 HStack(spacing: zoomed(5)) {
                     ForEach(0..<count, id: \.self) { dot in
                         Circle()
@@ -616,6 +664,7 @@ private struct TourCard: View {
                 // The dots give way before a button's label does.
                 .layoutPriority(-1)
                 .clipped()
+                }
                 Spacer(minLength: zoomed(8))
                 if tour.skippable && step.task != .sendFirst && !tour.isLast {
                     Button("Skip") { withAnimation(.easeOut(duration: 0.2)) { tour.finish() } }

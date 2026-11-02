@@ -124,13 +124,7 @@ async function main() {
   t = next('Your views');
   // The view icons only, not the whole column down to Settings.
   check('Your views lights the view icons, not the whole bar', t.lit && t.lit.h < 300, t.raw);
-  // Flips to each view to show what it's for, then back to the inbox.
-  next('Projects');
-  check('Projects shows the Projects view', dump().sidebar.mode === 'projects', dump().sidebar.mode);
-  next('The librarian');
-  check('The librarian shows its view', dump().sidebar.mode === 'librarian', dump().sidebar.mode);
   t = next('Highlights');
-  check('Highlights is back in the inbox', dump().sidebar.mode === 'inbox', dump().sidebar.mode);
   check('Highlights opens the sample that needs you', dump().selection?.title === 'Fix the flaky login test', JSON.stringify(dump().selection));
 
   // Told, not done (Mike, 2 Nov): no drag, no press.
@@ -164,6 +158,34 @@ async function main() {
   check('no row left drawn hovered', !threadsIn(after).some((th) => th.hovered));
   check('the first thread is still there', threadsIn(after).some((th) => /Make me a patch/.test(th.title) || th.id !== undefined), '');
   shot('after');
+
+  // Pages explain themselves the first time they open, not in the tour
+  // (Mike, 2 Nov). A scripted app has them off; this turns them on.
+  run({ cmd: 'tour', intros: true });
+  for (const [mode, title] of [['projects', 'Projects'], ['librarian', 'The librarian'], ['scheduled', 'Scheduled']]) {
+    run({ cmd: 'mode', mode });
+    const intro = await until(`${title} explains itself on first open`, () => {
+      const s = parseTour(tour());
+      return s.title === title && s;
+    });
+    check(`${title}'s intro is one card that points at its page`, intro && intro.count === 1 && intro.lit !== null, intro?.raw);
+    shot(`intro-${mode}`);
+    run({ cmd: 'tour', do: 'next' });
+  }
+  run({ cmd: 'usage', show: true });
+  const usage = await until('Usage explains itself on first open', () => {
+    const s = parseTour(tour());
+    return s.title === 'Usage' && s;
+  });
+  check("Usage's intro points at its panel", usage && usage.lit !== null, usage?.raw);
+  shot('intro-usage');
+  run({ cmd: 'tour', do: 'next' });
+  run({ cmd: 'usage', show: false });
+  run({ cmd: 'mode', mode: 'inbox' });
+  run({ cmd: 'mode', mode: 'projects' });
+  await sleep(1000);
+  check('an intro only shows the first time', parseTour(tour()).off, tour());
+  run({ cmd: 'mode', mode: 'inbox' });
 
   // Again, from Help: fresh samples, and the patch still trusted.
   t = parseTour(run({ cmd: 'tour', do: 'start', skippable: true }));
