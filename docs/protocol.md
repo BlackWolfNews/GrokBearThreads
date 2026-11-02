@@ -2626,7 +2626,11 @@ runner itself. Runners never talk to each other.
 - **Watching the others.** The runner subscribes to
   `sync:otherRunnersThreads` (every runner but itself, with its threads)
   and gives the result to clients as `remoteThreads.list` and
-  `remoteThreads.updated`:
+  `remoteThreads.updated`. It watches only while a Mac app is connected
+  (`hello`'s client `threadbear-mac`), and for two minutes after the last
+  one goes, since every re-run reads all the other runners' rows; a
+  `remoteThreads.list` starts the watch at once, and the answer follows as
+  `remoteThreads.updated`. Until then the list is what was last heard:
 
 ```ts
 type RemoteThreads = { runners: RemoteRunner[], threads: RemoteThread[] }

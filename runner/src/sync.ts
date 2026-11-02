@@ -264,6 +264,9 @@ export type SyncDeps = {
   // sent to the backend when it changes, so his phone only buzzes while he's
   // away. Left out, presence isn't sent.
   presence?: () => boolean | Promise<boolean>;
+  // Whether the Mac app is connected, so the other runners' threads are
+  // watched only while something shows them (thread-index.ts).
+  appConnected?: () => boolean;
   // Where the sync keeps what it has sent once and for all (the full history
   // backfill), per deployment. Tests leave it out and get a backfill each start.
   statePath?: string;
@@ -732,6 +735,7 @@ export class ConvexSync {
         log: deps.log,
         takesStartedBy: () => (this.backendApiVersion ?? 0) >= INDEX_STARTED_BY_API_VERSION,
         takesStars: () => (this.backendApiVersion ?? 0) >= STARS_API_VERSION,
+        ...(deps.appConnected ? { appConnected: deps.appConnected } : {}),
       });
     }
   }

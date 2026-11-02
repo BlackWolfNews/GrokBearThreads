@@ -9,10 +9,11 @@ import { ThreadIndex, runnerTokenFile, type RemoteThreads } from '../../src/thre
 import { nullLogger } from '../../src/log.ts';
 import type { Notification } from '../../src/runner.ts';
 
-function setup(takesStartedBy?: () => boolean) {
+function setup(takesStartedBy?: () => boolean, appConnected?: () => boolean) {
   const h = makeHarness();
   const writes: { rows: { threadId: string; title: string; preview: string; status: string }[]; removed: string[]; keep?: string[] }[] = [];
   let onRemote: ((v: unknown) => void) | undefined;
+  let subscriptions = 0;
   const heard: RemoteThreads[] = [];
   const index = new ThreadIndex({
     post: async (_kind, fn, args) => {
@@ -23,6 +24,7 @@ function setup(takesStartedBy?: () => boolean) {
       assert.equal(fn, 'sync:otherRunnersThreads');
       assert.deepEqual(args, { key: 'k', runnerId: 'r-m5' });
       onRemote = onUpdate;
+      subscriptions++;
       return () => {
         onRemote = undefined;
       };
@@ -35,12 +37,13 @@ function setup(takesStartedBy?: () => boolean) {
     clock: h.clock,
     log: nullLogger,
     ...(takesStartedBy ? { takesStartedBy } : {}),
+    ...(appConnected ? { appConnected } : {}),
   });
   const flush = async () => {
     h.clock.advance(1500);
     await tick();
   };
-  return { h, index, writes, heard, flush, remote: (v: unknown) => onRemote?.(v) };
+  return { h, index, writes, heard, flush, remote: (v: unknown) => onRemote?.(v), watching: () => Boolean(onRemote), subscriptions: () => subscriptions };
 }
 
 test('the first write has every thread and prunes the rest; later ones only what a sidebar shows', async () => {
@@ -116,4 +119,49 @@ test('a row carries who started the thread, once the backend takes it, and goes 
   assert.ok(writes.length > before);
   assert.deepEqual(row().startedBy, { kind: 'thread', label: 'Agent', threadTitle: 'The parent', why: 'fixing a hook' });
   index.stop();
+});
+
+test('other runners’ threads are watched only while a Mac app is connected', async () => {
+  let app = false;
+  const { h, index, heard, remote, watching, subscriptions } = setup(undefined, () => app);
+  index.start();
+  assert.equal(watching(), false, 'no app (Bruce): nothing watched');
+  h.clock.advance(60_000);
+  await tick();
+  assert.equal(watching(), false);
+
+  // An app connecting asks for the list, which starts the watch at once.
+  app = true;
+  assert.deepEqual(index.list().threads, []);
+  assert.equal(watching(), true);
+  remote({ runners: [{ runnerId: 'r-bruce', name: 'bruce', lastSeenAt: h.clock.now() }], threads: [] });
+  assert.equal(heard.length, 1);
+
+  // A relaunch, gone for under two minutes, keeps the watch.
+  app = false;
+  h.clock.advance(60_000);
+  await tick();
+  assert.equal(watching(), true);
+  app = true;
+  h.clock.advance(15_000);
+  await tick();
+  app = false;
+  h.clock.advance(3 * 60_000);
+  await tick();
+  assert.equal(watching(), false, 'gone for good: the watch stops');
+  assert.equal(index.list().runners[0]!.name, 'bruce', 'what was heard stays for the next app');
+  assert.equal(watching(), true);
+  assert.equal(subscriptions(), 2);
+
+  // Connected without asking (the periodic check finds it).
+  app = false;
+  h.clock.advance(3 * 60_000);
+  await tick();
+  assert.equal(watching(), false);
+  app = true;
+  h.clock.advance(15_000);
+  await tick();
+  assert.equal(watching(), true);
+  index.stop();
+  assert.equal(watching(), false);
 });

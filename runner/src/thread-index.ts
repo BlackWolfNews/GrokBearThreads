@@ -45,6 +45,14 @@ const FLUSH_MS = 1000;
 const BATCH = 50;
 // As on the phone: not heard from for this long is offline.
 const ONLINE_MS = 3 * 60_000;
+// The other runners' threads are watched only while a Mac app is
+// connected, and for a while after it goes, so an app relaunching doesn't
+// start the watch again. Each re-run of that watch reads every one of the
+// other runners' rows, so a runner nobody looks at (Bruce, with no app)
+// watching a busy Mac's 500 threads was three quarters of the backend's
+// database reads (docs/convex-backend.md, "Usage and the free plan").
+const WATCH_CHECK_MS = 15_000;
+const UNWATCH_AFTER_MS = 2 * 60_000;
 
 export function toIndexRow(t: ThreadSummary, withStartedBy = true, withStars = true): IndexRow {
   const row: IndexRow = {
@@ -99,6 +107,10 @@ export class ThreadIndex {
     // the whole batch down otherwise, and the sidebar would stop updating.
     takesStartedBy?: () => boolean;
     takesStars?: () => boolean;
+    // Whether a Mac app is connected to this runner. Only an app shows the
+    // other runners' threads, so with none there's nothing to watch them
+    // for. Left out, they're always watched.
+    appConnected?: () => boolean;
   };
   private running = false;
   private sent = new Map<string, string>(); // threadId -> writeKey as sent
@@ -110,6 +122,8 @@ export class ThreadIndex {
   private unlisten?: () => void;
   private unsubscribe?: () => void;
   private remote: RemoteThreads = { runners: [], threads: [] };
+  private watchTimer?: TimerHandle;
+  private appGoneAt?: number;
 
   constructor(deps: ThreadIndex['deps']) {
     this.deps = deps;
@@ -131,27 +145,67 @@ export class ThreadIndex {
       this.schedule();
     });
     this.schedule(0);
-    this.unsubscribe = this.deps.subscribe?.(
-      'sync:otherRunnersThreads',
-      { key: this.deps.key, runnerId: this.deps.runnerId },
-      (v) => this.onRemote(v),
-      (e) => this.deps.log.warn('the other runners’ threads subscription failed', { error: String(e) }),
-    );
-    this.deps.log.info('thread index on', { threads: this.dirty.size });
+    this.appGoneAt = undefined;
+    if (this.deps.appConnected) this.checkWatch();
+    else this.watch();
+    this.deps.log.info('thread index on', { threads: this.dirty.size, watching: Boolean(this.unsubscribe) });
   }
 
   stop(): void {
     this.running = false;
     this.timer?.cancel();
     this.timer = undefined;
+    this.watchTimer?.cancel();
+    this.watchTimer = undefined;
     this.unlisten?.();
+    this.unwatch();
+  }
+
+  /** remoteThreads.list. Empty until the backend has answered. An app
+   * asks for it as it connects, so this starts the watch at once rather
+   * than at the next check; the answer comes as remoteThreads.updated. */
+  list(): RemoteThreads {
+    if (this.running) {
+      this.appGoneAt = undefined;
+      this.watch();
+    }
+    return this.withTokens(this.remote);
+  }
+
+  private watch(): void {
+    if (this.unsubscribe || !this.deps.subscribe) return;
+    this.unsubscribe = this.deps.subscribe(
+      'sync:otherRunnersThreads',
+      { key: this.deps.key, runnerId: this.deps.runnerId },
+      (v) => this.onRemote(v),
+      (e) => this.deps.log.warn('the other runners’ threads subscription failed', { error: String(e) }),
+    );
+  }
+
+  // What was last heard stays, so an app connecting again sees the other
+  // runners' threads straight away, and the watch then brings them up to date.
+  private unwatch(): void {
     this.unsubscribe?.();
     this.unsubscribe = undefined;
   }
 
-  /** remoteThreads.list. Empty until the backend has answered. */
-  list(): RemoteThreads {
-    return this.withTokens(this.remote);
+  private checkWatch(): void {
+    if (!this.running || !this.deps.appConnected) return;
+    const now = this.deps.clock.now();
+    if (this.deps.appConnected()) {
+      this.appGoneAt = undefined;
+      if (!this.unsubscribe) {
+        this.watch();
+        this.deps.log.info('watching the other runners’ threads: an app is connected');
+      }
+    } else if (this.unsubscribe) {
+      this.appGoneAt ??= now;
+      if (now - this.appGoneAt >= UNWATCH_AFTER_MS) {
+        this.unwatch();
+        this.deps.log.info('stopped watching the other runners’ threads: no app connected');
+      }
+    }
+    this.watchTimer = this.deps.clock.setTimeout(() => this.checkWatch(), WATCH_CHECK_MS);
   }
 
   /** The backend got new enough for what rows held back: they go again. */

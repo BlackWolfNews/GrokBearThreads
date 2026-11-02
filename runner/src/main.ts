@@ -293,6 +293,7 @@ async function main(): Promise<void> {
     key: readSyncKey(cfg.home),
     statePath: `${cfg.home}/sync-state.json`,
     presence: async () => (atMac = isAtMac(rpcServer?.appConnected() ?? false, await hidIdleMs())),
+    appConnected: () => rpcServer?.appConnected() ?? false,
     runner: {
       onNotification: (fn) => runner.onNotification(fn),
       list: (include) => runner.list(include),
