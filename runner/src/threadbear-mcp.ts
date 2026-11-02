@@ -386,7 +386,7 @@ export function buildThreadbearTools(
         runner: z
           .string()
           .optional()
-          .describe("With new_thread: the runner (machine) it runs on, by name, e.g. bruce. Default: this thread's runner. Only when the user asks for another machine; the folder and account are then that machine's (a path there, or left out for its default)."),
+          .describe("With new_thread: the runner (machine) it runs on, by name, e.g. studio-mac. Default: this thread's runner. Only when the user asks for another machine; the folder and account are then that machine's (a path there, or left out for its default)."),
       },
       handle(async ({ text, when, cron, timezone, title, threadId, id: alias, new_thread, folder: f, account: acc, model, effort, permissionMode, runner }) => {
         if ((when === undefined) === (cron === undefined)) throw new Error('Give exactly one of when (once) and cron (repeating).');
