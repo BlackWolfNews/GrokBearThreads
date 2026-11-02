@@ -1866,11 +1866,8 @@ test('who started a thread: a row says so when it was not Mike, and end_turn say
   assert.equal(agent.startedBy?.threadId, mine.id);
 });
 
-test('who started a thread: the librarian, the runner and a schedule each say so', () => {
+test('who started a thread: the runner and a schedule each say so', () => {
   const h = makeHarness();
-  const from = create(h).thread;
-  const id = h.runner.startFix({ fromThreadId: from.id, cwd: h.cfg.defaults.cwd, title: 'Fix it', text: 'Fix it please' })!;
-  assert.deepEqual(h.runner.get(id).startedBy, { kind: 'librarian', label: 'Librarian', threadId: from.id, threadTitle: from.title });
   const notice = h.runner.noticeOnMac(undefined, 'A dialog', 'A dialog is waiting');
   assert.deepEqual(h.runner.get(notice).startedBy, { kind: 'runner', label: 'Threadbear' });
   const scheduled = create(h, { origin: 'schedule', scheduleId: 'sc1', title: 'Nightly' }).thread;

@@ -2058,16 +2058,6 @@ export class Runner {
     return true;
   }
 
-  // The librarian heard Mike point out a problem with his tools in a
-  // thread and nobody started fixing it: a new thread, in the tool's
-  // folder, does. Its first message is the runner's, not his, and the
-  // thread he said it in gets a note, so he knows it's in hand.
-  startFix(p: { fromThreadId: string; cwd: string; title: string; text: string }): string | undefined {
-    const id = this.create({ text: p.text, cwd: p.cwd, title: p.title, origin: 'runner', startedBy: { kind: 'librarian', label: 'Librarian', threadId: p.fromThreadId } }).thread.id;
-    if (this.threads.has(p.fromThreadId)) this.note(p.fromThreadId, `The librarian started a thread to fix that: ${p.title}.`);
-    return id;
-  }
-
   // The first user.message's text and the first assistant.text after it,
   // read a page at a time from the start: both are nearly always within
   // the first few events, and a long thread's log is large.

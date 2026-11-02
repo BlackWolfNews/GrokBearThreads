@@ -59,9 +59,6 @@ export type LibrarianHost = {
   // (wake-when.ts), and waking one he just did.
   waitingTopics?(): { threadId: string; title: string; topic: string }[];
   wakeForTopic?(threadId: string, inThreadId: string): boolean;
-  // Starts a thread to fix a problem Mike ran into with his tools; returns
-  // its id.
-  startFix?(p: { fromThreadId: string; cwd: string; title: string; text: string }): string | undefined;
 };
 
 // How long after a turn ends before a look, so a quick follow-up turn
@@ -100,17 +97,6 @@ export const ICON_SOON_MS = 3_000;
 export const NOTES_SOON_MS = 60_000;
 // Old notes kept on disk per project, the newest first.
 const NOTES_KEPT = 5;
-// Fix threads: at most this many a day, so a look that gets it wrong
-// can't fill the inbox. Each look is shown the ones opened in the last
-// FIXES_SHOWN_MS, so the same problem isn't opened twice.
-export const FIXES_PER_DAY = 5;
-const FIXES_SHOWN_MS = 7 * 24 * 60 * 60_000;
-const FIXES_KEPT = 30;
-// Other threads a look is shown, so it can tell one already has the problem.
-const OTHERS_SHOWN = 20;
-const OTHERS_SHOWN_MS = 48 * 60 * 60_000;
-// A message this short with a picture says what's wrong only in the picture.
-const PICTURE_WORDS = 15;
 
 // New Pocket cards: at most this many a day, so a look that gets it wrong
 // can't fill the deck. A thread only ever gets one from the librarian, so
@@ -127,15 +113,11 @@ const RANK: Record<LibrarianReason, number> = { asked: 0, moved: 1, 'new-folder'
 // `early`: the look was from the first message alone, so the first turn's
 // end still gets a look of its own.
 type Look = { at: string; seq: number; early?: boolean };
-// A fix thread the librarian started, and the thread Mike ran into the
-// problem in.
-type Fix = { at: string; fromThreadId: string; threadId: string; title: string };
 
 // A Pocket card the librarian added.
 type PocketAdded = { at: string; threadId: string };
 
 type Saved = {
-  fixes?: Fix[];
   pocketAdded?: PocketAdded[];
   paused?: boolean;
   queue?: LibrarianJob[];
@@ -165,7 +147,6 @@ type Answer = {
   // New names for projects the thread is in, by id.
   retitle?: unknown;
   wake?: unknown;
-  fix?: unknown;
   pocket?: unknown;
   why?: unknown;
 };
@@ -182,7 +163,6 @@ export class Librarian {
   private queue = new Map<string, LibrarianJob>();
   private recent: LibrarianEntry[] = [];
   private looks: Record<string, Look> = {};
-  private fixes: Fix[] = [];
   private pocket?: () => LibrarianPocket | undefined;
   private pocketAdded: PocketAdded[] = [];
   private day: Day = { date: '', looks: 0 };
@@ -233,7 +213,6 @@ export class Librarian {
     for (const j of saved?.queue ?? []) if (j && typeof j.threadId === 'string') this.queue.set(j.threadId, j);
     this.recent = (saved?.recent ?? []).slice(0, RECENT_KEPT);
     this.looks = saved?.looks ?? {};
-    this.fixes = (saved?.fixes ?? []).slice(0, FIXES_KEPT);
     this.pocketAdded = saved?.pocketAdded ?? [];
     if (saved?.day) this.day = saved.day;
     if (!this.models) this.off = 'Model calls are off in this runner.';
@@ -611,16 +590,6 @@ export class Librarian {
       lines.push('', 'Hibernating threads waiting for the user to talk about something:');
       for (const w of waiting) lines.push(`- ${w.threadId.slice(0, 8)} "${w.title}": ${w.topic}`);
     }
-    const lately = this.fixesLately();
-    if (lately.length) {
-      lines.push('', 'Fix threads opened lately:');
-      for (const f of lately) lines.push(`- "${f.title}"`);
-    }
-    const others = this.otherThreads(rec, lately);
-    if (others.length) {
-      lines.push('', 'Other threads the user has going:');
-      for (const t of others) lines.push(`- "${t}"`);
-    }
     if (cards) {
       const own = cards.filter((c) => c.threadId === rec.id);
       lines.push('', 'Pocket cards from this thread:');
@@ -820,86 +789,9 @@ export class Librarian {
         bump('updated');
       }
     }
-    const fixed = this.startFix(job, rec, a.fix);
-    if (fixed) {
-      said.push(`Started ${fixed} to fix the tooling`);
-      bump('updated');
-    }
     const why = typeof a.why === 'string' ? a.why.trim().slice(0, 200) : '';
     const text = said.length ? said.join('. ') : why ? `Nothing to change: ${lowerFirst(why)}` : 'Nothing to change';
     this.note(job, outcome, text, [...ids]);
-  }
-
-  // Mike pointed out a problem with his tools, apart from the thread's
-  // task, and nobody started fixing it: a thread of its own does, so he
-  // doesn't have to ask for one (30 Oct 2026). Returns its title.
-  private startFix(job: LibrarianJob, rec: ThreadRecord, fix: unknown): string | undefined {
-    if (!fix || typeof fix !== 'object' || !this.host.startFix) return undefined;
-    const f = fix as { title?: unknown; folder?: unknown; problem?: unknown; said?: unknown };
-    const title = typeof f.title === 'string' ? f.title.trim().slice(0, 80) : '';
-    const problem = typeof f.problem === 'string' ? f.problem.trim().slice(0, 1500) : '';
-    const said = typeof f.said === 'string' ? f.said.trim().slice(0, 500) : '';
-    if (!title || !problem) return undefined;
-    // The first message alone is what the thread is for, not a side problem;
-    // and a fix thread's own complaints are its task.
-    if (job.reason === 'first-message' || this.fixes.some((x) => x.threadId === rec.id)) return undefined;
-    const today = new Date(this.clock.now()).toDateString();
-    if (this.fixes.filter((x) => new Date(x.at).toDateString() === today).length >= FIXES_PER_DAY) {
-      this.log.info('librarian skipped a fix: the day has had its share', { threadId: rec.id, title });
-      return undefined;
-    }
-    // One per thread a day: the next look would only see the same complaint.
-    if (this.fixes.some((x) => x.fromThreadId === rec.id && new Date(x.at).toDateString() === today)) return undefined;
-    // The repo of the tool at fault, else where the thread is.
-    const asked = typeof f.folder === 'string' && f.folder.trim() ? mainCheckout(this.expand(f.folder)) : '';
-    const cwd = asked && isInside(asked, this.home) && fs.existsSync(asked) && fs.statSync(asked).isDirectory() ? asked : mainCheckout(rec.cwd);
-    // The model has been told all this and still opened threads for it (two
-    // of its first three, 31 Oct 2026), so it's checked here too. Each thread
-    // cost Mike an inbox row to clear with nothing in it for him.
-    const editing = [...(this.edited.get(rec.id) ?? [])].some((r) => mainCheckout(r) === cwd);
-    const refused = editing ? 'the thread is editing that repo itself' : whyNoFix(said, problem, this.host.threadGist(rec.id));
-    if (refused) {
-      this.log.info('librarian skipped a fix', { threadId: rec.id, title, said, why: refused });
-      return undefined;
-    }
-    const text = [
-      `The librarian started this thread. In [${rec.title}](thread:${rec.id}) the user ran into a problem with their tools, apart from what that thread was doing:`,
-      '',
-      problem,
-      '',
-      `The user's words: "${said}"`,
-      '',
-      "Read that thread (read_thread) for the details, then find the underlying cause and fix it so it doesn't happen again. If the fix is reversible and you're confident it's right, make it and land it, then tell the user what you did. If it's already fixed, already being fixed in another thread (list_threads), or not a real problem, say so in a line and call end_turn with needs \"nothing\" and archive true. The user wants that: a thread they never asked for that changed nothing shouldn't sit in their inbox.",
-    ].join('\n');
-    let threadId: string | undefined;
-    try {
-      threadId = this.host.startFix({ fromThreadId: rec.id, cwd, title, text });
-    } catch (e) {
-      this.log.warn('librarian could not start a fix thread', { threadId: rec.id, title, error: String(e) });
-    }
-    if (!threadId) return undefined;
-    this.fixes.unshift({ at: new Date(this.clock.now()).toISOString(), fromThreadId: rec.id, threadId, title });
-    if (this.fixes.length > FIXES_KEPT) this.fixes.length = FIXES_KEPT;
-    this.log.info('librarian started a fix thread', { from: rec.id, threadId, title, cwd });
-    return title;
-  }
-
-  // The titles of what else has been going lately. Never a private folder's:
-  // the model is never sent anything from one.
-  private otherThreads(rec: ThreadRecord, lately: Fix[]): string[] {
-    const since = this.clock.now() - OTHERS_SHOWN_MS;
-    const fixes = new Set(lately.map((f) => f.threadId));
-    return this.host
-      .threadRecords()
-      .filter((t) => t.id !== rec.id && !fixes.has(t.id) && !t.sample && t.title && Date.parse(t.lastActivityAt) >= since && !this.models?.isPrivateFolder?.(t.cwd))
-      .sort((a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt))
-      .slice(0, OTHERS_SHOWN)
-      .map((t) => t.title);
-  }
-
-  private fixesLately(): Fix[] {
-    const since = this.clock.now() - FIXES_SHOWN_MS;
-    return this.fixes.filter((f) => Date.parse(f.at) >= since);
   }
 
   // The other threads waiting on a topic.
@@ -1163,7 +1055,7 @@ export class Librarian {
       }
       atomicWriteFileSync(
         this.file,
-        JSON.stringify({ paused: this.paused, queue, recent: this.recent, looks: this.looks, day: this.day, fixes: this.fixes, pocketAdded: this.pocketAdded } satisfies Saved),
+        JSON.stringify({ paused: this.paused, queue, recent: this.recent, looks: this.looks, day: this.day, pocketAdded: this.pocketAdded } satisfies Saved),
       );
     } catch (e) {
       this.log.warn('could not save librarian.json', { error: String(e) });
@@ -1337,7 +1229,6 @@ Reply with JSON only, no prose and no code fence:
  "title": null, or a new title when the thread's title no longer says what it's about (see below),
  "retitle": {"<project id>": "the project's new name"} for a project it's in whose name has gone out of date (see below), else {},
  "wake": ["<ids of hibernating threads the user is talking about here>"], or [] (see below),
- "fix": null, or {"title": "the fix in 2 to 6 words", "folder": "~/path of the repo of the tool at fault", "problem": "what went wrong", "said": "the user's words about it"} (see below),
  "pocket": null, or {"save": [{"title": "short name", "text": "the card", "place": "optional", "icon": "optional"}], "remove": ["title"]} (see below),
  "why": "one short line"}
 
@@ -1352,16 +1243,6 @@ Keep the thread's title (title null) unless it no longer says what the thread is
 Keep projects' names too, unless one the thread is in has gone out of date: the thing it's about was renamed (a tool renamed from Paws to BrowserBear leaves "Paws" or a vaguer "Chrome browser control" behind), or a project named for what it does now has a name of its own. Give the new name the user would say, keeping the old words in brackets when they still help: "BrowserBear (Chrome browser control)". A better wording of the same name is no reason, and never rename one marked as named by the user. Most looks rename none.
 
 Some hibernating threads are waiting for the user to talk about something again ("woodworking"). Put one in wake when the user's own messages in this thread are about that: they're working on it, planning it or asking about it. A passing mention, or only the agent bringing it up, isn't enough. Most looks wake none.
-
-Give fix when the user, in their own messages here, points out a problem with their tools or with how agents work, apart from the task the thread is about: a bug in Threadbear or another of their own apps or tools, a tool that misbehaved, a skill or instruction that led the agent wrong ("is this a bug in Threadbear?", "I couldn't see the tab you opened"). They shouldn't have to ask for a thread to fix it, and a thread in that tool's own repo can still run into one apart from what it's doing. The title says what to fix ("Show replies written after end_turn"). The folder is that tool's repo from the project list, or the thread's own folder when you can't tell. The problem says what happened and what the user said about it, with the names, for an agent who hasn't seen this thread. Said is the user's words about it, copied exactly from one of their messages.
-
-Give no fix (null) when:
-- the problem is in the first message, or is what the thread has been doing since: that's its task, and its agent is on it, so a second thread would only repeat it
-- the thread's agent is looking into it or fixing it, or fixed it there and then, or the messages say a thread to fix it was started or that another thread has it
-- it's covered by a fix thread opened lately or by one of the user's other threads in the lists above. If you'd write "another thread owns this" in the problem, there's no fix to give
-- it's a problem with the task itself or with someone else's website or service
-- you can't be sure what the problem is. You only get the words of a message, never its images: one marked as having an image, or leaning on "this", "that" or "it", may be about something you can't see. Don't guess, and don't settle on some other thing the thread mentions (its folder, say) as what they meant. Only go on when the words or the agent's replies spell the problem out.
-Most looks give none.
 
 The Pocket is a deck of short cards on the user's phone, to read at a counter when they're out. Keep this thread's cards true: save one with the same title when a fact on it has changed, and remove one when the messages say it's done with (the parcel's posted, the trip's over). Add a card only when the user, in their own messages here, says they're going somewhere or will need something while out, the messages hold the facts they'd want there, and this thread has no card. A plan for someday isn't enough. If the messages say a card was filed and it isn't listed, the user took it out: leave it. Copy addresses, codes and numbers exactly from the messages and never guess one. The text is only the facts, a line each, with no explanation. The place is what you'd search a map for ("post office"), only if the card is for somewhere. The icon is the closest of ${POCKET_ICONS.join(', ')}, left out if none fits. Most looks change nothing: pocket null.
 
@@ -1381,46 +1262,6 @@ export function tidiedNotes(text: string): string {
     .trim()
     .replace(/^```(?:markdown|md)?\n([\s\S]*?)\n```$/, '$1')
     .trim();
-}
-
-// A fix the look shouldn't have offered, and why. The cases are real ones
-// from 31 Oct 2026 (projects.test.ts has them): a thread whose whole task
-// was the complaint, a brief saying another thread owned the fix, and "it
-// often goes to this?" with a screenshot, read as being about a folder. The
-// one good fix so far came from a later question in a thread about something
-// else, and passes all of these. Exported for its tests.
-export function whyNoFix(said: string, problem: string, gist: ThreadGist): string | undefined {
-  if (!said) return "it didn't quote the user";
-  const first = gist.first ? words(gist.first).join(' ') : undefined;
-  const at = gist.recent.findIndex((m) => m.who === 'user' && words(m.text).join(' ') !== first && quotes(said, m.text));
-  if (at < 0) return gist.first && quotes(said, gist.first) ? "it's the first message: that's the thread's task, not a side problem" : "the quote isn't in the user's messages";
-  const m = gist.recent[at];
-  if (leansOnPicture(m)) return 'the message only makes sense with a picture the look cannot see';
-  if (saysInHand(problem)) return 'its own brief says someone else has it';
-  if (gist.recent.slice(at + 1).some((r) => r.who === 'assistant' && saysInHand(r.text))) return 'the agent says another thread has it';
-  return undefined;
-}
-
-function words(text: string): string[] {
-  return text.toLowerCase().match(/[\p{L}\p{N}']+/gu) ?? [];
-}
-
-// Whether a message holds the quote. A model tends to tidy what it copies, so
-// nearly all of the words will do, but a word or two proves nothing.
-function quotes(said: string, text: string): boolean {
-  const wanted = words(said);
-  if (wanted.length < 3) return false;
-  const have = new Set(words(text));
-  return wanted.filter((w) => have.has(w)).length >= wanted.length * 0.8;
-}
-
-function leansOnPicture(m: { text: string; images?: number }): boolean {
-  if (!m.images) return false;
-  return words(m.text).length <= PICTURE_WORDS && /\b(this|these|those|here)\b|\bthat\W*$/i.test(m.text);
-}
-
-function saysInHand(text: string): boolean {
-  return /\b(another|other|separate|different)\b[^.\n]{0,20}\bthreads?\b[^.\n]{0,40}\b(owns?|owning|fix(es|ing)?|handling|on it)\b|\bthreads?\b[^.\n]{0,40}\b(already|which) (owns?|fix(es|ing)?|has)\b|\balready (being )?(fixing|fixed|owns?|in hand)\b/i.test(text);
 }
 
 function attached(images?: number): string {
