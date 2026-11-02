@@ -112,7 +112,9 @@ final class AppModel {
     @ObservationIgnored private var queuedChecks: Set<String> = []
     var runnerVersion = ""
     var accounts: [Account] = []
-    var defaults = RunnerDefaults(cwd: NSString("~/dev/me/misc").expandingTildeInPath, accountId: "claude-main")
+    // Until the runner's hello says otherwise: setup's threads folder, and
+    // the login every Mac has (~/.claude), never a folder of Mike's.
+    var defaults = RunnerDefaults(cwd: NSString("~/ThreadbearThreads").expandingTildeInPath, accountId: "claude-main")
     /// The thread whose title is a field in the header just now (Rename,
     /// or a click on the title).
     var renamingThread: String?

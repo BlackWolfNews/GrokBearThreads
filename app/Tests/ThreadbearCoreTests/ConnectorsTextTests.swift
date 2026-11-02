@@ -39,7 +39,7 @@ final class ConnectorsTextTests: XCTestCase {
         XCTAssertFalse(ConnectorsText.needsYou(ConnectorsStatus(services: [fine])))
         XCTAssertFalse(ConnectorsText.quiet(ConnectorsStatus(services: [fine])))
         // Bruce away: grey, as it isn't a sign-in.
-        let away = ConnectorsStatus(state: "unreachable", url: "https://bruce.tail9ef766.ts.net:8443", error: "no answer in 5 seconds")
+        let away = ConnectorsStatus(state: "unreachable", url: "https://bruce.example.ts.net:8443", error: "no answer in 5 seconds")
         XCTAssertFalse(ConnectorsText.needsYou(away))
         XCTAssertTrue(ConnectorsText.quiet(away))
         XCTAssertFalse(ConnectorsText.needsYou(nil))
@@ -53,7 +53,7 @@ final class ConnectorsTextTests: XCTestCase {
         XCTAssertEqual(ConnectorsText.tooltip(ConnectorsStatus(services: [fine])), "Connectors\nEverything is signed in")
         XCTAssertEqual(ConnectorsText.tooltip(ConnectorsStatus(services: [out, fine])), "Connectors\nSentry needs signing in")
         XCTAssertEqual(ConnectorsText.tooltip(ConnectorsStatus(services: [out, out2])), "Connectors\nSentry and Gmail need signing in")
-        let away = ConnectorsStatus(state: "unreachable", url: "https://bruce.tail9ef766.ts.net:8443", error: "no answer in 5 seconds")
+        let away = ConnectorsStatus(state: "unreachable", url: "https://bruce.example.ts.net:8443", error: "no answer in 5 seconds")
         XCTAssertEqual(ConnectorsText.tooltip(away), "Connectors\nCan't reach the gateway")
         XCTAssertEqual(ConnectorsText.emptyLine(away), "Can't reach bruce: no answer in 5 seconds.")
         XCTAssertEqual(ConnectorsText.emptyLine(ConnectorsStatus(state: "off")), "No Connectors gateway is set up for this runner.")

@@ -182,7 +182,9 @@ public enum UpdatesText {
 
     /// The command for a changed launch.mjs.
     public static func installCommand(checkout: String?) -> String {
-        let root = checkout.map { ($0 as NSString).abbreviatingWithTildeInPath } ?? "~/dev/me/threadbear"
+        // An older runner doesn't say where its checkout is: the README's
+        // `gh repo fork --clone` puts it in ~/threadbear from the home folder.
+        let root = checkout.map { ($0 as NSString).abbreviatingWithTildeInPath } ?? "~/threadbear"
         return "\(root)/runner/scripts/install-runner.sh"
     }
 }

@@ -5286,7 +5286,7 @@ function stoppedWorkMessage(what: string[], last: boolean): string {
     ...lines,
     '',
     `If you said you'd report back or carry on after ${one ? 'it' : 'them'}, check how far ${one ? 'it' : 'they'} got and do that now; work running elsewhere may have finished by itself. Start ${one ? 'it' : 'them'} again only if that's still needed. An update only holds background work for about 4 hours past your last turn, so for a longer wait use schedule_message to come back and check. If it no longer matters, say so in a line.`,
-    ...(last ? ['', "Threadbear won't wake this thread for this again, so if Mike needs to step in, ask him in end_turn."] : []),
+    ...(last ? ['', "Threadbear won't wake this thread for this again, so if the user needs to step in, ask them in end_turn."] : []),
   ].join('\n');
 }
 

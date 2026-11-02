@@ -292,7 +292,9 @@ export class Projects {
   // knows to keep it moving: how many cards are open, and where.
   private tasksLine(p: ProjectRecord): string | undefined {
     const t = p.notion ? this.boards?.get(p.id, p.notion) : undefined;
-    if (!t || t.loading) return undefined;
+    // A board that has never read (no Connectors gateway, say) has nothing
+    // to keep moving, and the agent may have no Notion tools to move it with.
+    if (!t || t.loading || (t.error && t.columns.length === 0 && t.items.length === 0)) return undefined;
     const open = t.items.filter((i) => t.columns.find((c) => c.name === i.status)?.kind !== 'done').length;
     return `Tasks: a board in Notion (${t.url}), ${open} open. read_project lists them; move a card with the Notion tools when its work starts, stalls or is done.`;
   }

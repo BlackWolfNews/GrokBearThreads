@@ -215,6 +215,23 @@ test('no gateway: a board says why it is empty', async () => {
   assert.match(boards.get('p_1', PAGE)!.error!, /Connectors gateway/);
 });
 
+test('no gateway: the brief says nothing about a board the agent cannot read or move', async () => {
+  const home = tmpDir();
+  const projects = new Projects({ home, clock: new FakeClock(), log: nullLogger });
+  const h = makeHarness(home, {}, { projects });
+  projects.start(h.runner);
+  const boards = new TaskBoards({ home, log: nullLogger, setTimeout: () => ({ cancel() {} }), onChange: () => projects.boardChanged() });
+  projects.useTaskBoards(boards);
+  const p = projects.create({ title: 'Port Geo', by: 'mike' });
+  projects.update(p.id, { notion: PAGE });
+  await boards.refresh(p.id, PAGE);
+  const t = (await h.runner.create({ text: 'hi', cwd: home, accountId: 'claude-3' })).thread;
+  projects.changeMembership(t.id, { add: [p.id], by: 'agent' });
+  const brief = projects.brief(h.runner.threadRecords().find((x) => x.id === t.id)!) ?? '';
+  assert.match(brief, /Port Geo/);
+  assert.doesNotMatch(brief, /Tasks:/);
+});
+
 test("the gateway client comes from the main login's connectors entry; runner.json can name another helper", () => {
   const dir = tmpDir();
   const cj = path.join(dir, 'claude.json');

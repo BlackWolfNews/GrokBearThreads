@@ -60,8 +60,8 @@ public enum ConnectorsText {
         }
     }
 
-    /// The gateway's machine, as Mike calls it: "bruce" for
-    /// bruce.tail9ef766.ts.net.
+    /// The gateway's machine, as its owner calls it: "bruce" for
+    /// bruce.example.ts.net.
     public static func host(_ s: ConnectorsStatus?) -> String? {
         guard let host = s?.url.flatMap({ URL(string: $0)?.host }), !host.isEmpty else { return nil }
         return host.components(separatedBy: ".").first ?? host
