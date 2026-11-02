@@ -1119,6 +1119,16 @@ test('the guide line names the guide and the repo, and is left out when the guid
   assert.equal(guideLine('/nowhere/docs/guide.md', () => false), '');
 });
 
+test('the patches line sends button and panel asks to a patch file, by the protocol beside the guide', async () => {
+  const { patchesLine } = await import('../../src/threadbear-mcp.ts');
+  const line = patchesLine('/Users/someone/threadbear/docs/guide.md', () => true);
+  assert.match(line, /\.threadbear\/patches\/<name>\.ts/);
+  assert.match(line, /\/Users\/someone\/threadbear\/docs\/protocol\.md/);
+  assert.match(line, /Edit or Write/);
+  assert.match(line, /not a pin/);
+  assert.equal(patchesLine('/nowhere/docs/guide.md', () => false), '');
+});
+
 test("a Claude or Codex thread's instructions point at the guide", async () => {
   const { guidePath, threadbearMcpServer } = await import('../../src/threadbear-mcp.ts');
   const { TOOL_GUIDANCE } = await import('../../src/adapters/codex/tools.ts');

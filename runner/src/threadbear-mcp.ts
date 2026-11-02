@@ -1190,9 +1190,24 @@ export function guideLine(file = guidePath(), exists: (p: string) => boolean = f
   );
 }
 
+// Also in the instructions. Asked on a fresh install for a button that
+// sends a message, a web panel and a list panel, Haiku built a Claude Code
+// mod, pinned the page and wrote an npm script that made an HTML file:
+// nothing told it that in Threadbear those are a patch file (2 Nov).
+export function patchesLine(guide = guidePath(), exists: (p: string) => boolean = fs.existsSync): string {
+  const protocol = path.join(path.dirname(guide), 'protocol.md');
+  if (!exists(protocol)) return '';
+  return (
+    'When the user asks for a button above the message box (one that runs a command or sends you a message) or a panel beside the thread (a web page, or a list of rows), for this folder or a project, make it a Threadbear patch: a `.threadbear/patches/<name>.ts` file in that folder, as "Patches" in ' +
+    `${protocol} describes (actions with run or prompt, panels with a url or an items function). ` +
+    'Write it with Edit or Write, so it is trusted as you left it, then check it loaded in Patches with show_panel. Not a Claude Code plugin, hook, mod or slash command, and not a pin.'
+  );
+}
+
 export function threadbearMcpServer(control: ThreadControl, selfId: string, schedules?: ScheduleControl, projects?: ProjectControl, appRestarts?: AppRestartControl, bulletReplies: () => boolean = () => true, pocket?: () => PocketControl | undefined, oneReply: () => boolean = () => false): McpSdkServerConfigWithInstance {
   const one = oneReply();
   const guide = guideLine();
+  const patches = patchesLine();
   const server = createSdkMcpServer({
     name: SERVER_NAME,
     version: RUNNER_VERSION,
@@ -1200,6 +1215,7 @@ export function threadbearMcpServer(control: ThreadControl, selfId: string, sche
       `This session is a thread in Threadbear, the app the user runs agent threads in (thread id ${selfId}). ` +
       userLine() +
       (guide ? `${guide} ` : '') +
+      (patches ? `${patches} ` : '') +
       'These tools manage Threadbear itself: list and read threads, start new ones, message them, rename, snooze, archive, move and delete them, schedule messages for later (once or on a cron), and keep the user\'s projects (groupings above folders with goals, state and notes) up to date. ' +
       'Use move_thread when the work belongs in another folder (for example a repo), so this thread runs there from the next turn. ' +
       `${SHOWING_THE_USER} ` +

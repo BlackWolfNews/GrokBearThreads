@@ -849,6 +849,15 @@ enum Automation {
             guard let step = tour.step, let current = tour.current else { return "ok off" }
             let lit = tour.frame(for: current).map { "\(Int($0.minX)),\(Int($0.minY)) \(Int($0.width))x\(Int($0.height))" } ?? "nothing"
             return "ok \(step + 1)/\(tour.shown.count) \(current.title)\(current.task == nil ? "" : tour.taskDone ? " (done)" : " (to do)") lit: \(lit)"
+        case "trust":
+            // {"cmd":"trust"} does what Patches' Trust button does for every
+            // patch the selected thread has waiting; {"cmd":"trust","id":"tools"}
+            // for one.
+            guard let thread = app.selectedThread else { return "error no thread selected" }
+            let waiting = thread.patches.filter { $0.untrusted != nil && (c["id"] == nil || $0.id == c["id"] as? String) }
+            guard !waiting.isEmpty else { return "error nothing waiting to be trusted" }
+            app.trustPatches(waiting, in: thread.id)
+            return "ok " + waiting.map(\.id).joined(separator: " ")
         case "chip":
             return chip(c, app: app)
         case "link":
