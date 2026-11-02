@@ -395,6 +395,52 @@ writes and links it mentions show up by themselves, so pins are for the
 few things that matter most. To have something pinned, ask the thread
 ("pin the mockup for me").
 
+## Projects
+<!-- slug: projects -->
+
+A project gathers the threads about one thing, whatever folder they ran
+in: an app you're building, a trip, a house move. Each has goals, a few
+lines on where it's up to, notes for later threads (decisions and
+gotchas), links (its live site, an admin page) and folders, the repos its
+work lives in. The Projects view lists them, with New project at the top;
+click one for its page, with its threads, state and notes.
+
+A thread gets into a project in one of three ways: the librarian files it
+(below), its agent joins one, or you put it there, from Projects in its
+right-click menu. A thread can be in more than one. Its agent is told a
+little about each project it's in, and gets the panels and Patches from
+the projects' folders. If one is wrong, Take out in its Highlights keeps
+it out for good.
+
+A project can show a task board from Notion. Give it a Notion page with a
+Tasks database on it (a board grouped by Status): Add Notion page… under
+Tasks on its page, Notion Page… when you right-click it in Projects, or ask
+an agent to. The page shows the board, read every few minutes, with a
+column per status and who and when on each card. Cards are moved in Notion,
+by you, anyone you share the page with, or the agents, who see the open
+cards and are told to keep them moving. A card whose Thread column names a
+thread links to it. A thread's Highlights shows a few of its projects'
+open cards under each project, its own card first. Boards are read through
+a Connectors gateway (see [Connectors](#connectors)); without one, the
+project's page says so and nothing is read.
+
+### The librarian
+
+The librarian reads your threads as they go and keeps your projects tidy.
+It files each thread in a project, making one when none fits, keeps each
+project's state up to date, adds a repo to a project's folders once its
+threads work there, and renames threads that have wandered off from their
+title (never one you named). It also looks after the Pocket cards threads
+filed, and can start a thread to fix a problem with one of your tools (see
+[Changing Threadbear itself](#changing-threadbear)).
+
+It looks after a thread's first message and when a turn ends, then catches
+up at most every 20 minutes while the thread keeps going. Each look is one
+call to the small model in Settings › Models, on your own Claude login, so
+with only Codex it waits. Threads in a private folder (Settings › Models)
+are never sent to it. The Librarian view lists what it did; turn off Look
+at threads there to pause it, and Runs on picks whose logins it uses.
+
 ## Schedules
 <!-- slug: schedules -->
 
@@ -624,16 +670,6 @@ composer, and Patches lists it as "Not run yet" (or "Changed since you
 trusted it") with a Trust button. Open its file to read it first. A
 thread's worktree counts as its repo, and patches that were already in
 your folders when this arrived are trusted for you.
-
-A project can show a task board from Notion. Give it a Notion page with a
-Tasks database on it (a board grouped by Status): Add Notion page… under
-Tasks on its page, Notion Page… when you right-click it in Projects, or ask
-an agent to. The page shows the board, read every few minutes, with a
-column per status and who and when on each card. Cards are moved in Notion,
-by you, anyone you share the page with, or the agents, who see the open
-cards and are told to keep them moving. A card whose Thread column names a
-thread links to it. A thread's Highlights shows a few of its projects'
-open cards under each project, its own card first.
 
 A project's page has its own panels and Patches on the right-hand rail:
 the ones its folders give its threads.
