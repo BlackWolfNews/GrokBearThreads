@@ -133,6 +133,18 @@ test('Mike makes a project with a thread in it: pinned, in the summary, counted,
   assert.deepEqual(again.get(p.id).threadIds, [thread.id]);
 });
 
+test('a folder deleted since it was added does not block later folder changes', () => {
+  const { repo, projects } = setup();
+  const gone = repo('dev/gone');
+  const app = repo('dev/app');
+  const p = projects.create({ title: 'Tools', folders: [gone], by: 'mike' });
+  fs.rmSync(gone, { recursive: true });
+  // The librarian's addFolders keeps the old list and adds to it.
+  assert.deepEqual(projects.update(p.id, { folders: [gone, app] }).folders.length, 2);
+  // A new folder still has to exist.
+  assert.throws(() => projects.update(p.id, { folders: [gone, app, '/nope/not/here'] }), /Folder not found/);
+});
+
 // 30 Oct 2026: a catch-all thread checking Qantas bookings went into
 // Walkies. Replaying the look, Haiku listed a project 3 times in 6 with
 // no reason, or one like "Not that; ignore", while its why said nothing

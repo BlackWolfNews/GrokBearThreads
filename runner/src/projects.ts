@@ -352,7 +352,7 @@ export class Projects {
     const next = { ...rec };
     if (params.title !== undefined) next.title = checkTitle(params.title);
     if (next.title !== rec.title) next.titleBy = params.by ?? 'mike';
-    if (params.folders !== undefined) next.folders = this.checkFolders(params.folders);
+    if (params.folders !== undefined) next.folders = this.checkFolders(params.folders, rec.folders);
     if (params.goals !== undefined) next.goals = checkText('goals', params.goals, SHORT_MAX);
     if (params.state !== undefined) next.state = checkText('state', params.state, SHORT_MAX);
     if (params.notes !== undefined) next.notes = checkText('notes', params.notes, NOTES_MAX);
@@ -617,13 +617,17 @@ export class Projects {
     return this.host;
   }
 
-  private checkFolders(folders: string[]): string[] {
+  // `kept`: the project's folders before this change. Only new ones must
+  // exist: a repo deleted since it was added would otherwise refuse every
+  // later folder change, the librarian's addFolders included (30 Oct, a
+  // deleted ~/dev/me/quick-ask failed its looks).
+  private checkFolders(folders: string[], kept: string[] = []): string[] {
     if (!Array.isArray(folders)) throw bad('folders must be a list of paths');
     const out: string[] = [];
     for (const f of folders) {
       if (typeof f !== 'string' || !f.trim()) throw bad('folders must be a list of paths');
       const dir = path.resolve(expandHome(f.trim()));
-      if (!isDirectory(dir)) throw bad(`Folder not found: ${dir}`);
+      if (!kept.includes(dir) && !isDirectory(dir)) throw bad(`Folder not found: ${dir}`);
       if (!out.includes(dir)) out.push(dir);
     }
     return out;
