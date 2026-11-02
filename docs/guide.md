@@ -474,6 +474,22 @@ reads their passwords or tokens. The account and model a thread runs on are
 small menus on the composer. Whatever you picked last is what the next
 thread starts on.
 
+To add another login, such as a second Claude subscription, give it a
+folder of its own under `accounts` in Threadbear's data folder, named
+`claude-1` (then `claude-2` and so on, or `codex-1` for Codex), and sign in
+there in Terminal:
+
+```
+CLAUDE_CONFIG_DIR=~/Library/Application\ Support/Threadbear/accounts/claude-1 claude
+```
+
+then type `/login` (for Codex, `CODEX_HOME=<the folder> codex login`). It
+shows up in the account menu within a few seconds.
+
+Titles, the librarian and Wake when… run on a Claude login, so with only
+Codex they don't happen: threads keep the first line of their first message
+as their title.
+
 Logins are grouped into pools, one for Claude and one for Codex to begin
 with (Settings > Pools). A thread in a pool runs on whichever login has the
 most room. When the one it's on gets close to its limit, it moves to
@@ -507,6 +523,11 @@ Agents get services like Notion, Sentry and Cloudflare from your Connectors
 gateway, and Gmail, Drive and the like from claude.ai's connectors on each
 login. Now and then one needs signing in again.
 
+The gateway is optional: it's a small server of your own
+([plugbear](https://github.com/mikecann/plugbear)) that signs in to each
+service once for all your logins and Macs. Without one, agents use
+claude.ai's connectors alone, and Notion boards on projects aren't read.
+
 The Connectors icon (the plug) near the bottom of the left-hand rail opens a
 panel listing the gateway's services and whether each is signed in. A blue
 dot on the icon means one is signed out: click Connect beside it, and its
@@ -533,7 +554,10 @@ the thread runs on.
   Desktop, Documents, Downloads or Dropbox, macOS asks whether to allow it.
   Click Allow if you want agents working there, or Don't Allow if not. You
   can change your mind later in System Settings > Privacy & Security >
-  Files and Folders. Starting threads in `~/ThreadbearThreads` keeps these prompts
+  Files and Folders. iCloud Drive and removable drives ask too. The prompt
+  names Threadbear Runner when an agent asked, and Threadbear when the app
+  itself opens something there for you, such as a pinned picture on your
+  Desktop. Starting threads in `~/ThreadbearThreads` keeps these prompts
   away until you choose a folder that needs them.
 - **A Mac nobody's sitting at.** The agent waits for that answer, so on a
   second Mac a folder prompt can hold a thread up with nobody there to click.

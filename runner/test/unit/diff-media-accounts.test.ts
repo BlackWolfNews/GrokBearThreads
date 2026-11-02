@@ -118,6 +118,19 @@ test('account discovery reads only the login email', () => {
   assert.ok(!JSON.stringify(found).includes('SHOULD-NOT-APPEAR'));
 });
 
+test("without Token Stats, logins come from the data dir's accounts folder", () => {
+  const root = tmpDir();
+  const own = path.join(root, 'data', 'accounts');
+  fs.mkdirSync(path.join(own, 'claude-1'), { recursive: true });
+  const stats = path.join(root, 'Accounts');
+  fs.mkdirSync(path.join(stats, 'claude-1'), { recursive: true });
+  fs.mkdirSync(path.join(stats, 'claude-2'), { recursive: true });
+  const base = { claudeMainDir: path.join(root, 'none'), claudeMainJson: path.join(root, 'none.json') };
+  assert.deepEqual(discoverAccounts({ ...base, tokenStatsAccountsDir: path.join(root, 'no-stats'), accountsDir: own }).map((a) => [a.id, a.configDir]), [['claude-1', path.join(own, 'claude-1')]]);
+  // Both: Token Stats keeps an id it has.
+  assert.deepEqual(discoverAccounts({ ...base, tokenStatsAccountsDir: stats, accountsDir: own }).map((a) => [a.id, a.configDir]), [['claude-1', path.join(stats, 'claude-1')], ['claude-2', path.join(stats, 'claude-2')]]);
+});
+
 test("an account's default model: its settings.json, made exact by what the CLI says", () => {
   const root = tmpDir();
   const main = path.join(root, 'dot-claude');

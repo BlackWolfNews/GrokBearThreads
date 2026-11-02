@@ -84,7 +84,7 @@ export function isCodexLogin(dir: string): boolean {
 }
 
 export type DiscoveryConfig = Pick<Config, 'claudeMainDir' | 'claudeMainJson' | 'tokenStatsAccountsDir'> &
-  Partial<Pick<Config, 'codexMainDir' | 'accountNotes'>>;
+  Partial<Pick<Config, 'codexMainDir' | 'accountNotes' | 'accountsDir'>>;
 
 // claude-main is ~/.claude (its .claude.json sits at ~/.claude.json);
 // codex-main is ~/.codex. Token Stats' Accounts folder holds claude-N and
@@ -95,18 +95,25 @@ export function discoverAccounts(cfg: DiscoveryConfig): Account[] {
   if (isDirectory(cfg.claudeMainDir)) {
     out.push(claudeAccount('claude-main', cfg.claudeMainDir, readLoginEmail(cfg.claudeMainJson) ?? readLoginEmail(path.join(cfg.claudeMainDir, '.claude.json'))));
   }
-  let names: string[] = [];
-  try {
-    names = fs.readdirSync(cfg.tokenStatsAccountsDir);
-  } catch {
-    names = [];
+  // Token Stats' folder (Mike's app), then the data dir's own accounts
+  // folder, which is how anyone else adds a login; the first with an id wins.
+  const dirOf = new Map<string, string>();
+  for (const root of [cfg.tokenStatsAccountsDir, cfg.accountsDir]) {
+    if (!root) continue;
+    let names: string[] = [];
+    try {
+      names = fs.readdirSync(root);
+    } catch {
+      names = [];
+    }
+    for (const n of names) if (!dirOf.has(n)) dirOf.set(n, path.join(root, n));
   }
   const numbered = (prefix: string) =>
-    names
+    [...dirOf.keys()]
       .map((n) => new RegExp(`^${prefix}-(\\d+)$`).exec(n))
       .filter((m): m is RegExpExecArray => m !== null)
       .sort((a, b) => Number(a[1]) - Number(b[1]))
-      .map((m) => ({ id: m[0], dir: path.join(cfg.tokenStatsAccountsDir, m[0]) }));
+      .map((m) => ({ id: m[0], dir: dirOf.get(m[0])! }));
   for (const { id, dir } of numbered('claude')) {
     if (isDirectory(dir)) out.push(claudeAccount(id, dir, readLoginEmail(path.join(dir, '.claude.json'))));
   }

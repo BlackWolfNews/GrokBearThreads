@@ -89,7 +89,8 @@ File references are where to look.
   (`runner/src/accounts.ts`, `runner/src/token-tally.ts`;
   `THREADBEAR_TOKEN_TALLY=off` stops the counting). It never reads or
   copies login tokens or the Keychain.
-- Token Stats' files, if you have that app.
+- Token Stats' files, if you have that app, and any logins you've added
+  under `accounts` in its data folder (`claude-1`, `codex-1`...).
 - Your first name, from your Mac account's full name (`id -F`), so its
   agents know what to call you (`runner/src/user-name.ts`). It stays in
   the instructions your own threads get.
@@ -108,8 +109,7 @@ File references are where to look.
 | downloads.claude.ai, registry.npmjs.org | Anthropic, npm | CLI version checks and installs; `npm ci` |
 | Anthropic, OpenAI | yours | Your threads, through the official CLIs on your own logins |
 | Mike's push relay | Mike's | Only when a paired iPhone gets a notification. It's sent from your Convex deployment, not the Mac. The text is encrypted for the phone; the relay sees the device token and thread id (`convex/push.ts`, `docs/push-relay.md`). |
-| OpenRouter | theirs | Thread excerpts, only if you add a key |
-| A Connectors gateway | whoever runs it | Only if one is set in `runner.json` or `~/.claude.json`. Its `/health` every few minutes, and for a project with a Notion page, a Notion read or two every 5 minutes for its task board (`runner/src/notion-tasks.ts`) |
+| A Connectors gateway | whoever runs it | Only if one is set in `runner.json` or `~/.claude.json`. Its `/health` every few minutes, and for a project with a Notion page, a Notion read or two every 5 minutes for its task board (`runner/src/notion-tasks.ts`), signed with the header the `headersHelper` command in that `connectors` entry prints, which it runs for each read |
 | Sentry | Mike's | Nothing from your copy. Only a copy whose `origin` is Mike's own repo reports errors (`runner/src/sentry.ts`, `app/Sources/Threadbear/CrashReporting.swift`). The App Store iPhone app sends anonymous crash reports. |
 
 On the Mac itself, a web link you click in the app first goes to

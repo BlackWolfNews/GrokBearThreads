@@ -69,6 +69,9 @@ export type Config = {
   claudeMainDir: string;
   claudeMainJson: string;
   tokenStatsAccountsDir: string;
+  // <data dir>/accounts: more logins for anyone without Token Stats (the
+  // guide's "Adding another login"), claude-N and codex-N as there.
+  accountsDir?: string;
   // A Codex binary set by hand, used as is and never updated. Unset means
   // Threadbear's own copy (<home>/tools/codex/current), or until there is
   // one the codex next to the runner's Node; never ~/.local/bin/codex.
@@ -235,6 +238,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     tokenStatsAccountsDir: expandHome(
       env.THREADBEAR_ACCOUNTS_DIR || '~/Library/Application Support/Token Stats/Accounts',
     ),
+    accountsDir: path.join(home, 'accounts'),
     followMain: env.THREADBEAR_FOLLOW_MAIN ? env.THREADBEAR_FOLLOW_MAIN !== '0' : json.followMain !== false,
     bulletReplies: json.bulletReplies !== false,
     oneReply: json.oneReply === true,
