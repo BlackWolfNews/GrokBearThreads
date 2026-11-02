@@ -68,7 +68,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 29;
+export const BACKEND_API_VERSION = 30;
 // From this one a thread's row carries its open card of asks and a finished
 // turn's next steps, and a message row can be `summary` (end_turn's
 // bullets), so the phone shows end-of-turn cards. An older backend's
@@ -134,6 +134,9 @@ export const LINKS_API_VERSION = 28;
 // (sync:otherRunnersList and sync:threadIndexSince), rather than read whole
 // on every change.
 export const INDEX_SINCE_API_VERSION = 29;
+// Only the projects that changed go up (sync:upsertProjects), after the
+// whole list once per start.
+export const PROJECTS_DIFF_API_VERSION = 30;
 // How far back a start looks for pictures, as new ones go up as they come.
 // Reading a whole log for each thread is too much to do for all of them on
 // every start, and it's the threads in use that Mike opens on the phone.
@@ -683,6 +686,9 @@ export class ConvexSync {
   private nexts = new Map<string, { lastSeq: number; next?: string[] }>(); // threadId -> its done card's next steps, as of lastSeq
   private lists: { projects?: Project[]; schedules?: Schedule[]; accounts?: Account[] } = {};
   private dirtyLists = new Set<ListName>();
+  // Each project as the backend has it, id -> its doc as JSON, once the
+  // whole list has gone up since this start (API 30). Undefined until then.
+  private projectsSent?: Map<string, string>;
   // Project pictures (ICONS_API_VERSION): what the mirror has, projectId ->
   // picture name, read from it once; and whether the list has changed since
   // the pictures were last looked at.
@@ -771,6 +777,7 @@ export class ConvexSync {
       accounts: this.deps.runner.listAccounts?.(),
     };
     for (const name of ['projects', 'schedules', 'accounts'] as const) if (this.lists[name]) this.dirtyLists.add(name);
+    this.projectsSent = undefined;
     this.full = true;
     this.scheduleFlush();
     this.heartbeat();
@@ -1116,6 +1123,27 @@ export class ConvexSync {
     return seq;
   }
 
+  // The whole list once per start (and always, to an older backend), then
+  // only what changed: a turn moves its project's lastActivityAt, and
+  // rewriting every project for that was most of the projects' reads.
+  private async sendProjects(list: Project[], v: number): Promise<void> {
+    const key = this.deps.key;
+    const docs = list.map(toProjectDoc);
+    if (v < PROJECTS_DIFF_API_VERSION || !this.projectsSent) {
+      await this.post('mutation', 'sync:setProjects', { key, runnerId: this.runnerId, projects: docs });
+      this.projectsSent = v >= PROJECTS_DIFF_API_VERSION ? new Map(docs.map((d) => [d.id, JSON.stringify(d)])) : undefined;
+      return;
+    }
+    const sent = this.projectsSent;
+    const changed = docs.filter((d) => sent.get(d.id) !== JSON.stringify(d));
+    const ids = new Set(docs.map((d) => d.id));
+    const removed = [...sent.keys()].filter((id) => !ids.has(id));
+    if (!changed.length && !removed.length) return;
+    await this.post('mutation', 'sync:upsertProjects', { key, runnerId: this.runnerId, projects: changed, removed });
+    for (const d of changed) sent.set(d.id, JSON.stringify(d));
+    for (const id of removed) sent.delete(id);
+  }
+
   private scheduleFlush(): void {
     if (!this.running || this.flushTimer) return;
     if (!this.dirty.size && !this.removed.size && !this.messages.length && !this.dirtyLists.size && !this.full && !this.imagesDue.size && !this.imagesDrop.size && !this.pendingImages.length && !this.replyDue.size && !this.pendingReplyImages.length) return;
@@ -1156,7 +1184,11 @@ export class ConvexSync {
         const list = this.lists[name];
         if (!list) continue;
         if (name === 'schedules' && this.deps.schedules?.inBackend()) continue;
-        const rows = name === 'projects' ? (list as Project[]).map(toProjectDoc) : name === 'schedules' ? (list as Schedule[]).map(toScheduleDoc) : (list as Account[]).map((a) => toAccountDoc(a, v));
+        if (name === 'projects') {
+          await this.sendProjects(list as Project[], v);
+          continue;
+        }
+        const rows = name === 'schedules' ? (list as Schedule[]).map(toScheduleDoc) : (list as Account[]).map((a) => toAccountDoc(a, v));
         await this.post('mutation', `sync:set${name[0]!.toUpperCase()}${name.slice(1)}`, { key, runnerId: this.runnerId, [name]: rows });
       }
       if (this.picturesDue && (this.backendApiVersion ?? 0) >= ICONS_API_VERSION) await this.sendPictures();

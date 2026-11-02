@@ -129,6 +129,11 @@ export const counts = query({
   returns: v.object({ hibernating: v.number(), den: v.number() }),
   handler: async (ctx, { token }) => {
     await checkPhoneToken(ctx, token);
+    // API 30: a row per runner, kept by the thread writes, rather than
+    // reading every hibernating and den thread on every re-run. Counted the
+    // old way only until a runner has one.
+    const rows = await ctx.db.query('viewCounts').collect();
+    if (rows.length) return rows.reduce((a, r) => ({ hibernating: a.hibernating + r.hibernating, den: a.den + r.den }), { hibernating: 0, den: 0 });
     const count = async (view: 'hibernating' | 'den') => {
       let n = 0;
       for await (const _ of ctx.db.query('threads').withIndex('by_view_activity', (x) => x.eq('view', view))) n++;

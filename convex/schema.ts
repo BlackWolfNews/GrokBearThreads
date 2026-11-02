@@ -268,6 +268,19 @@ export default defineSchema({
     // put in projectIcons (the file's hash is in the name, so a changed
     // picture is a new name).
     icon: v.optional(v.object({ symbol: v.optional(v.string()), picture: v.optional(v.string()), by: v.string() })),
+  })
+    .index('by_runnerId', ['runnerId'])
+    // sync:upsertProjects (API 30) finds the one project it changes.
+    .index('by_runner_id', ['runnerId', 'id']),
+
+  // How many of a runner's threads are in each of the phone's tucked-away
+  // views (API 30), kept by the writes that move a thread between views, so
+  // phone:counts reads a row per runner rather than every thread. A runner's
+  // prune (each start) counts them again from scratch.
+  viewCounts: defineTable({
+    runnerId: v.string(),
+    hibernating: v.number(),
+    den: v.number(),
   }).index('by_runnerId', ['runnerId']),
 
   // The phone's Pocket: short cards agents file for when Mike's out

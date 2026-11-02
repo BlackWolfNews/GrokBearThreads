@@ -16,6 +16,33 @@ const KEEP_FINISHED_MS = 24 * 60 * 60_000;
 
 const threadDoc = v.object({ ...threadFields, view: v.union(...views.map((x) => v.literal(x))) });
 
+// ------------------------------------------------------------ view counts (API 30)
+type View = (typeof views)[number];
+
+// Counts a runner's threads from scratch: its first count, and each prune.
+async function recountViews(ctx: MutationCtx, runnerId: string): Promise<void> {
+  const counts = { hibernating: 0, den: 0 };
+  for await (const t of ctx.db.query('threads').withIndex('by_runnerId', (q) => q.eq('runnerId', runnerId))) {
+    if (t.view === 'hibernating' || t.view === 'den') counts[t.view]++;
+  }
+  const row = await ctx.db.query('viewCounts').withIndex('by_runnerId', (q) => q.eq('runnerId', runnerId)).unique();
+  if (row) {
+    if (row.hibernating !== counts.hibernating || row.den !== counts.den) await ctx.db.patch(row._id, counts);
+  } else await ctx.db.insert('viewCounts', { runnerId, ...counts });
+}
+
+// A thread written or deleted: called after the write, so a runner with no
+// count yet is counted from what's there now, this write included.
+async function moveView(ctx: MutationCtx, runnerId: string, from: View | undefined, to: View | undefined): Promise<void> {
+  if (from === to) return;
+  const row = await ctx.db.query('viewCounts').withIndex('by_runnerId', (q) => q.eq('runnerId', runnerId)).unique();
+  if (!row) return recountViews(ctx, runnerId);
+  const next = { hibernating: row.hibernating, den: row.den };
+  if (from === 'hibernating' || from === 'den') next[from] = Math.max(0, next[from] - 1);
+  if (to === 'hibernating' || to === 'den') next[to]++;
+  if (next.hibernating !== row.hibernating || next.den !== row.den) await ctx.db.patch(row._id, next);
+}
+
 // A push goes out when a thread starts needing Mike (needsYou goes from
 // false to true), at most one per thread this often, so a status that
 // flaps doesn't ring his phone over and over.
@@ -37,6 +64,10 @@ export const upsertThreads = mutation({
       const held = t.needsYou && existing?.pushHeldAt && !wantsPush ? { pushHeldAt: existing.pushHeldAt } : {};
       if (existing) await ctx.db.replace(existing._id, { ...t, ...(wantsPush ? { pushedAt: now } : existing.pushedAt ? { pushedAt: existing.pushedAt } : {}), ...held });
       else await ctx.db.insert('threads', t);
+      if (existing && existing.runnerId !== t.runnerId) {
+        await moveView(ctx, existing.runnerId, existing.view, undefined);
+        await moveView(ctx, t.runnerId, undefined, t.view);
+      } else await moveView(ctx, t.runnerId, existing?.view, t.view);
       if (wantsPush) await ctx.scheduler.runAfter(0, internal.push.notify, { threadId: t.threadId });
     }
     return null;
@@ -81,7 +112,10 @@ export const removeThreads = mutation({
         .query('threads')
         .withIndex('by_threadId', (q) => q.eq('threadId', threadId))
         .unique();
-      if (row) await ctx.db.delete(row._id);
+      if (row) {
+        await ctx.db.delete(row._id);
+        await moveView(ctx, row.runnerId, row.view, undefined);
+      }
       for await (const m of ctx.db.query('messages').withIndex('by_thread_seq', (q) => q.eq('threadId', threadId))) await ctx.db.delete(m._id);
       await dropImages(ctx, threadId);
       for await (const img of ctx.db.query('replyImages').withIndex('by_thread_seq', (q) => q.eq('threadId', threadId))) {
@@ -214,6 +248,7 @@ export const prune = mutation({
       await ctx.db.delete(row._id);
       n++;
     }
+    await recountViews(ctx, runnerId);
     return n;
   },
 });
@@ -246,6 +281,9 @@ export const heartbeat = mutation({
     // Presence is setPresence's to change; a heartbeat keeps it.
     if (existing) await ctx.db.replace(existing._id, { ...row, ...(existing.atMac !== undefined ? { atMac: existing.atMac, atMacAt: existing.atMacAt } : {}) });
     else await ctx.db.insert('runners', row);
+    // A runner from before view counts gets its count within a minute of
+    // this backend, without waiting for a thread to change.
+    if (!(await ctx.db.query('viewCounts').withIndex('by_runnerId', (q) => q.eq('runnerId', runner.runnerId)).unique())) await recountViews(ctx, runner.runnerId);
     return { apiVersion: API_VERSION };
   },
 });
@@ -493,6 +531,39 @@ export const setProjects = mutation({
       if (wanted.has(row.projectId)) continue;
       await ctx.storage.delete(row.storageId);
       await ctx.db.delete(row._id);
+    }
+    return null;
+  },
+});
+
+// API 30: only the projects that changed since the runner last wrote them,
+// and the ones gone. A project's lastActivityAt moves with every turn in it,
+// and setProjects rewrote every project (Mike's, with long notes, about
+// 460 KB a time) for each. The runner still sends the whole list with
+// setProjects once after it starts.
+export const upsertProjects = mutation({
+  args: { key: v.string(), runnerId: v.string(), projects: v.array(projectDoc), removed: v.array(v.string()) },
+  returns: v.null(),
+  handler: async (ctx, { key, runnerId, projects, removed }) => {
+    checkRunnerKey(key);
+    const one = (id: string) => ctx.db.query('projects').withIndex('by_runner_id', (q) => q.eq('runnerId', runnerId).eq('id', id)).unique();
+    // As setProjects: a picture goes when its project does, or has none now.
+    const dropIcon = async (projectId: string) => {
+      const icon = await ctx.db.query('projectIcons').withIndex('by_runner_project', (q) => q.eq('runnerId', runnerId).eq('projectId', projectId)).unique();
+      if (!icon) return;
+      await ctx.storage.delete(icon.storageId);
+      await ctx.db.delete(icon._id);
+    };
+    for (const p of projects) {
+      const existing = await one(p.id);
+      if (existing) await ctx.db.replace(existing._id, { ...p, runnerId });
+      else await ctx.db.insert('projects', { ...p, runnerId });
+      if (!p.icon?.picture) await dropIcon(p.id);
+    }
+    for (const id of removed) {
+      const existing = await one(id);
+      if (existing) await ctx.db.delete(existing._id);
+      await dropIcon(id);
     }
     return null;
   },

@@ -109,4 +109,10 @@
 //    other runners and only their rows changed since its last answer.
 //    sync:otherRunnersThreads skips tombstones, so an older runner sees no
 //    change.
-export const API_VERSION = 29;
+// 30: fewer reads. sync:upsertProjects takes only the projects that changed
+//    (and the ones gone), so a turn no longer rewrites every project; the
+//    runner still sends the whole list with setProjects once after it
+//    starts. phone:counts reads a viewCounts row per runner, kept by the
+//    thread writes, rather than every hibernating and den thread. Nothing
+//    changes for a phone or an older runner.
+export const API_VERSION = 30;

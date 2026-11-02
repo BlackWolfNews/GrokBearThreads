@@ -344,7 +344,7 @@ dashboard panel.
   `projects`, `schedules`, `accounts`, `tokens`, `devices`.
 - `convex/sync.ts`: the runner's mutations (`upsertThreads`,
   `removeThreads`, `prune`, `heartbeat`, `bye`, `appendMessages`,
-  `setProjects`, `setSchedules`, `setAccounts`, `takeCommand`,
+  `setProjects`, `upsertProjects`, `setSchedules`, `setAccounts`, `takeCommand`,
   `finishCommand`), its queries (`threadsOf`, `runnersList`,
   `messageHeads`, `pendingCommands`, which it holds as a live query) and
   `pruneOld` for `crons.ts`. Each takes `key`, which must equal the
@@ -700,7 +700,7 @@ numbers that takes Mike's prod from about 1.25 GB of I/O a day to about
 0.2 GB, and about 18K calls a week off.
 
 Backend changes (these deploy prod when they land on main; Mike said yes to
-1 and 2 on 2 Nov):
+1 and 2 on 2 Nov, and 3 and 4 on 3 Nov):
 
 1. Done: `setPresence` finds held pushes with an index on `pushHeldAt`
    instead of reading every thread row. Takes the growth out of a typical
@@ -711,10 +711,15 @@ Backend changes (these deploy prod when they land on main; Mike said yes to
    (`sync:threadIndexSince` on an index of `updatedMs`, with a day's
    tombstones for deleted threads). A change now reads only the rows it
    touched, so two Macs fit as well as one.
-3. `phone:counts`: keep the two counts on a small row the runner's writes
-   update, rather than counting every hibernating and den thread.
-4. `setProjects`: write only the projects that changed, and have the runner
-   send only those. Mostly Mike's own cost.
+3. Done (API 30): `phone:counts` adds up a `viewCounts` row per runner,
+   which `upsertThreads` and `removeThreads` keep as threads move between
+   views, rather than counting every hibernating and den thread. A runner's
+   `prune` (each start) counts again from scratch, so a count that drifted
+   puts itself right, and a heartbeat makes a runner's first row.
+4. Done (API 30): after the whole list once per start, the runner sends only
+   the projects that changed and the ones gone, with
+   `sync:upsertProjects`. Mostly Mike's own cost: his 70-odd projects with
+   long notes were about 460 KB each time a turn moved one.
 
 Not urgent: messages are kept forever, so storage grows about 10 MB a month
 for a typical user. Dropping the messages of threads archived more than a

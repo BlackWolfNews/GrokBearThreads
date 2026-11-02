@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
-import { ConvexSync, forBackend, LINKS_API_VERSION, STARS_API_VERSION, BACKEND_API_VERSION, TURNS_API_VERSION, ICONS_API_VERSION, RUNNER_ICON_API_VERSION, SCHEDULES_API_VERSION, SHARE_API_VERSION, WOKE_API_VERSION, STARTED_BY_API_VERSION, SECTIONS_API_VERSION, MODELS_API_VERSION, REPLY_IMAGES_API_VERSION, REPLY_IMAGES_LOOKBACK_MS, REPLY_IMAGES_SCANS_PER_FLUSH, toAccountDoc, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, convexUploader, pictureName, type ThreadDoc } from '../../src/sync.ts';
+import { ConvexSync, forBackend, LINKS_API_VERSION, PROJECTS_DIFF_API_VERSION, STARS_API_VERSION, BACKEND_API_VERSION, TURNS_API_VERSION, ICONS_API_VERSION, RUNNER_ICON_API_VERSION, SCHEDULES_API_VERSION, SHARE_API_VERSION, WOKE_API_VERSION, STARTED_BY_API_VERSION, SECTIONS_API_VERSION, MODELS_API_VERSION, REPLY_IMAGES_API_VERSION, REPLY_IMAGES_LOOKBACK_MS, REPLY_IMAGES_SCANS_PER_FLUSH, toAccountDoc, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, convexUploader, pictureName, type ThreadDoc } from '../../src/sync.ts';
 import type { Project } from '../../src/protocol.ts';
 import type { ScheduleBackend } from '../../src/schedules.ts';
 import { nullLogger, type Logger } from '../../src/log.ts';
@@ -896,7 +896,7 @@ test('project pictures: sent to file storage once the backend takes them, once p
   assert.equal(uploads[1]!.bytes, 'NEWBYTES');
   assert.equal(setIcons()[1]!.args.picture, 'p1-def456');
   // Back to a symbol only: nothing to upload, and the mirror drops the
-  // picture with setProjects.
+  // picture with setProjects (this backend is older than upsertProjects).
   change({ icon: { symbol: 'leaf', by: 'librarian', updatedAt: '2026-10-28T00:00:00.000Z' } });
   h.clock.advance(SYNC_COALESCE_MS);
   await tick(20);
@@ -1583,4 +1583,41 @@ test('reply pictures: old and archived threads are not looked through, and an ol
   await b.stop();
   assert.deepEqual(backend.uploads, []);
   assert.equal(backend.calls.some((c) => c.fn === 'sync:replyImages'), false);
+});
+
+test('projects: the whole list once per start, then only the ones that changed, and an older backend always gets the list', async () => {
+  const run = async (backend: number) => {
+    const p = setupPictures({ backend });
+    const two = (title: string) => [
+      { id: 'p1', title, folders: [], goals: '', state: '', notes: 'long notes', createdBy: 'mike', archived: false, createdAt: 'c', updatedAt: 'u', threadCount: 1 },
+      { id: 'p2', title: 'Other', folders: [], goals: '', state: '', notes: '', createdBy: 'mike', archived: false, createdAt: 'c', updatedAt: 'u', threadCount: 0 },
+    ];
+    p.sync.start();
+    await p.sync.flushNow();
+    await tick();
+    p.h.runner.publish({ method: 'projects.updated', params: { projects: two('Threadbear') as never } });
+    p.h.clock.advance(SYNC_COALESCE_MS);
+    await tick(20);
+    p.h.runner.publish({ method: 'projects.updated', params: { projects: two('Threadbear app') as never } });
+    p.h.clock.advance(SYNC_COALESCE_MS);
+    await tick(20);
+    p.h.runner.publish({ method: 'projects.updated', params: { projects: [two('Threadbear app')[0]!] as never } });
+    p.h.clock.advance(SYNC_COALESCE_MS);
+    await tick(20);
+    await p.sync.stop();
+    return p.calls.filter((c) => c.fn === 'sync:setProjects' || c.fn === 'sync:upsertProjects');
+  };
+  const now = await run(BACKEND_API_VERSION);
+  // The whole list until the backend's version is known and one list has
+  // gone to it; after that, only p1 renamed, then p2 gone.
+  assert.equal(now[0]!.fn, 'sync:setProjects');
+  const ups = now.filter((c) => c.fn === 'sync:upsertProjects').map((c) => ({ ids: (c.args.projects as { id: string }[]).map((x) => x.id), removed: c.args.removed }));
+  assert.deepEqual(ups, [
+    { ids: ['p1'], removed: [] },
+    { ids: [], removed: ['p2'] },
+  ]);
+
+  const old = await run(PROJECTS_DIFF_API_VERSION - 1);
+  assert.ok(old.every((c) => c.fn === 'sync:setProjects'));
+  assert.equal(old.length, 4);
 });
