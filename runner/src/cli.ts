@@ -440,7 +440,7 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
       }
       if (actions.length) {
         console.log('Actions:');
-        for (const a of actions) console.log(`  ${a.id.padEnd(32)} ${a.title}${a.kind === 'prompt' ? '  (prompt)' : `  $ ${a.command}`}`);
+        for (const a of actions) console.log(`  ${a.id.padEnd(32)} ${a.title}${a.kind === 'prompt' ? '  (prompt)' : a.kind === 'url' ? `  ${a.url}` : `  $ ${a.command}`}`);
       }
       if (panels.length) {
         console.log('Panels:');

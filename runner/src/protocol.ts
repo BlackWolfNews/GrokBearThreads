@@ -385,14 +385,16 @@ export type Subagent = {
 
 // An action a patch gives a thread: a chip above the composer that runs a
 // command in the thread's folder (its output goes into the transcript as an
-// action.run event) or sends a canned prompt.
-export type ActionKind = 'command' | 'prompt';
+// action.run event), sends a canned prompt, or opens a web page on the
+// device it was pressed on (no RPC, nothing in the transcript).
+export type ActionKind = 'command' | 'prompt' | 'url';
 export type Action = {
   id: string; // "<patch>.<slug of the title>"
   title: string;
   kind: ActionKind;
   command?: string; // kind "command"
   prompt?: string; // kind "prompt"
+  url?: string; // kind "url": an http or https page
   patch: string;
   folder?: string; // where the command runs; absent: the thread's folder
   projectId?: string; // the project whose folder gave it

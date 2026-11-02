@@ -3,6 +3,7 @@
 // server in rpc.ts is a thin layer over the public methods here.
 import type { UpstreamStatus } from './upstream.ts';
 import fs from 'node:fs';
+import { execFile } from 'node:child_process';
 import os from 'node:os';
 import { SAMPLE_THREADS, WELCOME_PATCH } from './samples.ts';
 import { reviewInput, reviewDraft, reviewReply, sameDraft, type ReviewInput } from './reviews.ts';
@@ -116,6 +117,7 @@ import {
   type Screenshot,
   worktreePatchFiles,
   projectPatchFiles,
+  webPage,
 } from './patches.ts';
 import { FolderCache } from './folder-cache.ts';
 
@@ -421,6 +423,9 @@ export type RunnerDeps = {
   // tests pass /bin/sh -c and a short limit.
   actionShell?: string[];
   actionTimeoutMs?: number;
+  // Opens a url action's page, for an app too old to open it itself
+  // (runAction); tests pass a fake rather than starting a browser.
+  openUrl?: (url: string) => Promise<void>;
   // Runs the Convex CLI for the Convex panel's deploy keys (convex-keys.ts);
   // tests pass a fake that writes the key file the CLI would.
   convexKeyRun?: (command: string, cwd: string) => Promise<CommandOutcome>;
@@ -496,6 +501,7 @@ export class Runner {
   private panelsRoot?: string;
   private actionShell?: string[];
   private actionTimeoutMs?: number;
+  private openUrl: (url: string) => Promise<void>;
   private convexKeys: ConvexKeys;
   private models?: Pick<Models, 'generate'>;
   private projects?: Projects;
@@ -554,6 +560,7 @@ export class Runner {
     this.patchTrust = deps.patchTrust ?? new PatchTrust({ file: path.join(deps.config.home, 'patch-trust.json') });
     this.actionShell = deps.actionShell;
     this.actionTimeoutMs = deps.actionTimeoutMs;
+    this.openUrl = deps.openUrl ?? openInBrowser;
     this.convexKeys = new ConvexKeys(
       path.join(paths.secrets(deps.config.home), 'convex-panels'),
       deps.convexKeyRun ?? ((command, cwd) => runCommand(command, { cwd, env: { ...process.env }, shell: this.actionShell, timeoutMs: 120_000 })),
@@ -4916,6 +4923,15 @@ export class Runner {
     const action = this.actionsOf(st, this.patchSet(st)).find((a) => a.id === actionId);
     if (!action) throw new RpcError(ErrorCode.badParams, `This thread has no action called ${actionId}`);
     if (action.kind === 'prompt') return this.send(threadId, action.prompt ?? '');
+    if (action.kind === 'url') {
+      // Apps that know url actions open the page themselves, on the device
+      // it was pressed on, and never call this. An older Mac app reads the
+      // unknown kind as a command and asks here, so open it on this Mac,
+      // with nothing in the transcript, which is where that app is.
+      const started = Date.now();
+      await this.openUrl(action.url ?? '');
+      return { ok: true, durationMs: Date.now() - started };
+    }
     const running = (st.rt.runningActions ??= new Set());
     if (running.has(actionId)) throw new RpcError(ErrorCode.busy, `${action.title} is already running.`);
     running.add(actionId);
@@ -5464,4 +5480,15 @@ export function matchAnswers(questions: Question[], answers: Record<string, stri
   });
   if (questions.length && Object.keys(out).length === 0) return null;
   return out;
+}
+
+// Opens a url action's page in the default browser. No shell: the url goes
+// to `open` as one argument, so nothing in it can be read as a command, and
+// it's checked again here as only a web page.
+function openInBrowser(url: string): Promise<void> {
+  const page = webPage(url);
+  if (!page) return Promise.reject(new RpcError(ErrorCode.badParams, `Not a web page: ${url}`));
+  return new Promise((resolve, reject) => {
+    execFile('/usr/bin/open', [page], (err) => (err ? reject(new RpcError(ErrorCode.other, `Couldn't open ${page}: ${err.message}`)) : resolve()));
+  });
 }

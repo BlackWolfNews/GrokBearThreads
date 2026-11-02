@@ -456,15 +456,19 @@ export function readPatchModule(id: string, source: 'home' | 'project', file: st
   if (v.actions !== undefined) {
     if (!Array.isArray(v.actions)) return problem('actions should be an array.');
     for (const [i, raw] of v.actions.entries()) {
-      const a = raw as { title?: unknown; run?: unknown; prompt?: unknown; note?: unknown; icon?: unknown; when?: unknown; badge?: unknown };
+      const a = raw as { title?: unknown; run?: unknown; prompt?: unknown; url?: unknown; note?: unknown; icon?: unknown; when?: unknown; badge?: unknown };
       if (!a || typeof a !== 'object' || typeof a.title !== 'string' || !a.title.trim()) return problem(`actions[${i}] needs a title.`);
       const run = typeof a.run === 'string' && a.run.trim() ? a.run : undefined;
       const prompt = typeof a.prompt === 'string' && a.prompt.trim() ? a.prompt : undefined;
-      if (!run && !prompt) return problem(`actions[${i}] ("${a.title}") needs run (a command) or prompt (a message).`);
-      if (run && prompt) return problem(`actions[${i}] ("${a.title}") should have run or prompt, not both.`);
-      const action: Action = { id: `${id}.${slug(a.title)}`, title: a.title.trim(), kind: run ? 'command' : 'prompt', patch: id };
+      const url = a.url === undefined ? undefined : webPage(a.url);
+      if (url === null) return problem(`actions[${i}] ("${a.title}") has a url that isn't an http or https page.`);
+      const given = [run, prompt, url].filter(Boolean).length;
+      if (!given) return problem(`actions[${i}] ("${a.title}") needs run (a command), prompt (a message) or url (a page to open).`);
+      if (given > 1) return problem(`actions[${i}] ("${a.title}") should have one of run, prompt or url, not more.`);
+      const action: Action = { id: `${id}.${slug(a.title)}`, title: a.title.trim(), kind: run ? 'command' : prompt ? 'prompt' : 'url', patch: id };
       if (run) action.command = run;
       if (prompt) action.prompt = prompt;
+      if (url) action.url = url;
       if (typeof a.note === 'string' && a.note.trim()) action.note = a.note.trim();
       const own = readIcon(a.icon, file);
       if (typeof own === 'string') return problem(`actions[${i}] ("${a.title}"): icon ${own}`);
@@ -530,6 +534,20 @@ export function readPatchModule(id: string, source: 'home' | 'project', file: st
   if (worktree) loaded.worktree = worktree;
   if (appliesTo) loaded.appliesTo = appliesTo;
   return loaded;
+}
+
+// An action's url, normalised, if it's an http or https page; null if not.
+// Only web pages: a url chip opens in the browser of whatever device it was
+// pressed on, and the runner hands it to `open` for older apps, so a file:
+// or app scheme here would be a way to run things.
+export function webPage(value: unknown): string | null {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  try {
+    const u = new URL(value.trim());
+    return (u.protocol === 'https:' || u.protocol === 'http:') && u.hostname ? u.href : null;
+  } catch {
+    return null;
+  }
 }
 
 // The patch that gives a thread in `cwd` its own worktree: the first patch

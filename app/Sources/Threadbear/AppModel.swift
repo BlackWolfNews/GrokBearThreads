@@ -2038,8 +2038,17 @@ final class AppModel {
     }
 
     /// Runs an action chip: the runner sends a prompt action as a message,
-    /// or runs a command action and puts its output in the transcript.
+    /// or runs a command action and puts its output in the transcript. A
+    /// url action opens its page in the browser here, without the runner.
     func runAction(_ action: Action, in threadId: String) {
+        if action.kind == .url {
+            if let page = action.webPage {
+                NSWorkspace.shared.open(page)
+            } else {
+                errorMessage = "\(action.title) has no web page to open."
+            }
+            return
+        }
         let key = Self.actionKey(threadId: threadId, actionId: action.id)
         guard !runningActions.contains(key), let client = client(for: threadId) else { return }
         runningActions.insert(key)

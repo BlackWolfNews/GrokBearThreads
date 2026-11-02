@@ -162,12 +162,12 @@ private struct ActionChip: View {
                 } else {
                     // The patch's own icon when it has one (which project or
                     // tool it's for); else the patch glyph for a command, a
-                    // bubble for a message.
+                    // bubble for a message, an arrow out for a page.
                     if let image = PatchImage.image(action.iconFile) {
                         // The tool's own icon, in colour.
                         Image(nsImage: image).resizable().aspectRatio(contentMode: .fit).frame(width: zoomed(13), height: zoomed(13))
                     } else {
-                        Image(systemName: action.icon ?? (action.kind == .prompt ? "text.bubble" : "square.dashed"))
+                        Image(systemName: action.icon ?? Self.glyph(for: action.kind))
                             .font(.system(size: zoomed(11), weight: .medium))
                             .foregroundStyle(.secondary)
                     }
@@ -199,8 +199,16 @@ private struct ActionChip: View {
 
     /// What it does, then where it's from: "From the checks patch, in
     /// threadbear", so a chip's origin is a hover away.
+    static func glyph(for kind: Action.Kind) -> String {
+        switch kind {
+        case .prompt: return "text.bubble"
+        case .url: return "arrow.up.right.square"
+        case .command: return "square.dashed"
+        }
+    }
+
     static func tip(for action: Action) -> String {
-        let what = action.note ?? action.command ?? action.prompt ?? action.title
+        let what = action.note ?? action.command ?? action.prompt ?? action.url ?? action.title
         guard !action.patch.isEmpty else { return what }
         let folder = action.folder.map { ", in \(URL(fileURLWithPath: $0).lastPathComponent)" } ?? ""
         return "\(what)\nFrom the \(action.patch) patch\(folder)"

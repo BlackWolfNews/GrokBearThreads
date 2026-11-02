@@ -1199,7 +1199,7 @@ export function patchesLine(guide = guidePath(), exists: (p: string) => boolean 
   if (!exists(protocol)) return '';
   return (
     'When the user asks for a button above the message box (one that runs a command or sends you a message) or a panel beside the thread (a web page, or a list of rows), for this folder or a project, make it a Threadbear patch: a `.threadbear/patches/<name>.ts` file in that folder, as "Patches" in ' +
-    `${protocol} describes (actions with run or prompt, panels with a url or an items function). ` +
+    `${protocol} describes (actions with run, prompt or url, panels with a url or an items function). ` +
     'Write it with Edit or Write, so it is trusted as you left it, then check it loaded in Patches with show_panel. Not a Claude Code plugin, hook, mod or slash command, and not a pin.'
   );
 }

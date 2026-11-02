@@ -1373,8 +1373,10 @@ test('patch files give a thread actions; a command action runs in the folder and
     { title: "Say hi", run: "echo hi from $PWD; echo thread $THREADBEAR_THREAD_ID" },
     { title: "Fail", run: "echo bad >&2; exit 2" },
     { title: "Explain", prompt: "Explain this folder." },
+    { title: "Docs", url: "https://example.com/docs" },
   ] };`);
-  const h = makeHarness(undefined, {}, { panelsRoot: root, actionShell: ['/bin/sh', '-c'], actionTimeoutMs: 5000 });
+  const opened: string[] = [];
+  const h = makeHarness(undefined, {}, { panelsRoot: root, actionShell: ['/bin/sh', '-c'], actionTimeoutMs: 5000, openUrl: async (u: string) => void opened.push(u) });
   const { thread } = create(h, { cwd: project });
   // The first summary has the built-in bits only; the files follow.
   assert.equal(thread.actions, undefined);
@@ -1382,7 +1384,7 @@ test('patch files give a thread actions; a command action runs in the folder and
   await h.runner.patchesIdle();
   const loaded = h.runner.get(thread.id);
   assert.deepEqual(checkSummary(loaded), []);
-  assert.deepEqual(loaded.actions?.map((a) => a.id), ['tools.say-hi', 'tools.fail', 'tools.explain']);
+  assert.deepEqual(loaded.actions?.map((a) => a.id), ['tools.say-hi', 'tools.fail', 'tools.explain', 'tools.docs']);
   assert.deepEqual(loaded.patches, [{ id: 'tools', source: 'project', file: path.join(project, '.threadbear/patches/tools.ts') }]);
   // No note for patches found on the first read.
   assert.ok(!h.events(thread.id).some((e) => e.type === 'system.note'));
@@ -1406,6 +1408,15 @@ test('patch files give a thread actions; a command action runs in the folder and
   const failed = h.events(thread.id).filter((e) => e.type === 'action.run').at(-1);
   assert.equal(failed.ok, false);
   assert.equal(failed.text.trim(), 'bad');
+
+  // A url action is opened (for an older app that asks the runner), with
+  // nothing added to the transcript.
+  const before = h.events(thread.id).length;
+  const page = await h.runner.runAction(thread.id, 'tools.docs');
+  assert.equal(page.ok, true);
+  assert.equal(page.seq, undefined);
+  assert.deepEqual(opened, ['https://example.com/docs']);
+  assert.equal(h.events(thread.id).length, before);
 
   // A prompt action is a message.
   const sent = await h.runner.runAction(thread.id, 'tools.explain');

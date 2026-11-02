@@ -673,8 +673,9 @@ on your Mac (`![a chart](/path/to/chart.png)`), rather than showing a link.
 <!-- slug: patches -->
 
 A patch adds buttons and panels (beside the thread) for the threads in a
-folder. A button can run a command, like your tests, or send the agent a
-message you use a lot. A panel can show a web page, such as your app
+folder. A button can run a command, like your tests, send the agent a
+message you use a lot, or open a web page in your browser (App Store
+Connect, say), without adding anything to the thread. A panel can show a web page, such as your app
 running on localhost, or a list.
 
 Buttons sit on shelves along the top edge of the message box, one shelf

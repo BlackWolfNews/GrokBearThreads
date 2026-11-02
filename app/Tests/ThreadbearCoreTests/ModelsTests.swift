@@ -2,6 +2,21 @@ import XCTest
 @testable import ThreadbearCore
 
 final class ModelsTests: XCTestCase {
+    func testUrlActionDecodesAndOnlyOpensWebPages() throws {
+        let json = #"{"id":"links.asc","title":"App Store Connect","kind":"url","url":"https://appstoreconnect.apple.com/apps","patch":"links"}"#
+        let action = try JSONDecoder().decode(Action.self, from: Data(json.utf8))
+        XCTAssertEqual(action.kind, .url)
+        XCTAssertEqual(action.webPage?.absoluteString, "https://appstoreconnect.apple.com/apps")
+        // Never anything but a web page, even if a runner sent one.
+        for bad in ["file:///etc/passwd", "javascript:alert(1)", "x-apple.systempreferences:", "https://"] {
+            XCTAssertNil(Action(id: "x", title: "x", kind: .url, url: bad).webPage, bad)
+        }
+        XCTAssertNil(Action(id: "x", title: "x", kind: .command, url: "https://a.dev").webPage)
+        // A kind from a later runner still reads as a command.
+        let later = try JSONDecoder().decode(Action.self, from: Data(#"{"id":"x","kind":"someday"}"#.utf8))
+        XCTAssertEqual(later.kind, .command)
+    }
+
     func testThreadSummaryWorktreeDecodesLeniently() throws {
         let json = #"{"id":"t1","title":"x","worktree":{"branch":"thread/ab12cd34","mainCheckout":"/Users/m/dev/me/threadbear","path":"/Users/m/dev/me/threadbear-threads/ab12cd34","later":1}}"#
         let thread = try JSONDecoder().decode(ThreadSummary.self, from: Data(json.utf8))

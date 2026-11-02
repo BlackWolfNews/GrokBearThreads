@@ -231,9 +231,15 @@ type ThreadProject = {
 type Action = {
   id: string            // "<patch>.<slug of the title>": "reseed.reseed-dev-db"
   title: string
-  kind: "command" | "prompt"
+  kind: "command" | "prompt" | "url"
   command?: string      // kind "command": run by `actions.run`, in `folder`
   prompt?: string       // kind "prompt": sent to the thread as a message by `actions.run`
+  url?: string          // kind "url": an http or https page (normalised). The
+                        // client opens it itself, on the device it was pressed
+                        // on: no RPC, nothing in the transcript. An older
+                        // client reads the unknown kind as a command and
+                        // calls `actions.run`, which opens it on the runner's
+                        // Mac and answers `{ ok: true, durationMs }`
   patch: string
   folder?: string       // where the command runs: the project folder the
                         // patch came from. Absent: the thread's own folder
@@ -708,7 +714,7 @@ the summary and then the reply.
 | `approvals.respond` | `{ threadId, approvalId, decision: "allow" \| "allowAlways" \| "deny" \| "answered", message?: string, answers?: Record<string, string> }` | `{}`. `allowAlways` allows matching requests for the rest of this thread only; it never changes the thread's permission mode or saves anything in the project. With `answered`, the app sends the chosen answers in one line as `message` too: the runner keeps it in `approval.resolved` (only `answers` goes to the CLI), so the transcript can show what was chosen |
 | `media.import` | `{ path: string }` | `{ image: ImageRef }` copies a file into `inbox/` and reads its size; HEIC becomes JPEG and TIFF or BMP becomes PNG |
 | `patches.trust` | `{ threadId, files: { file, hash }[] }` | `{ trusted: string[] }`. Trusts those versions of the thread's waiting patch files (each a `file` its `patches` lists with `untrusted`, and the `hash` given there), then every thread's patches are read again, so the answer comes once they have been. `-32602` for a file the thread isn't waiting on, or one whose hash has moved on since (look again). See "Trusting a folder's patches" |
-| `actions.run` | `{ threadId, actionId }` | For a prompt action, `{ turnId }`: its prompt was sent as a message (as `threads.send`). For a command action, `{ ok, exitCode?, durationMs, seq }` once the command has finished, with its output in the transcript as the `action.run` event at `seq`. The command runs in the thread's folder through a login shell with the thread's variables (`THREADBEAR_THREAD_ID` and the rest) and is stopped after 10 minutes. `-32602` for an action the thread doesn't have, `-32020` while the same action is still running |
+| `actions.run` | `{ threadId, actionId }` | For a prompt action, `{ turnId }`: its prompt was sent as a message (as `threads.send`). For a url action (only an older client calls it for one), `{ ok: true, durationMs }` once the page is opened on the runner's Mac, with nothing in the transcript. For a command action, `{ ok, exitCode?, durationMs, seq }` once the command has finished, with its output in the transcript as the `action.run` event at `seq`. The command runs in the thread's folder through a login shell with the thread's variables (`THREADBEAR_THREAD_ID` and the rest) and is stopped after 10 minutes. `-32602` for an action the thread doesn't have, `-32020` while the same action is still running |
 | `panels.render` | `{ threadId, panelId }` | `{ image?: ImageRef, items?: PanelItem[], note?: string }` draws an `image` panel or fills a `list` panel now. For `xcode.simulator`, a screenshot of the booted simulator (`xcrun simctl io booted screenshot`), written to the same file each time under the thread's `panels/`; with no device booted (or another failure) there's only `note`. For a `list` panel, the rows its patch's `items` function returned (at most 200), or `note` with the error when it threw or took over 20 seconds. Slow: it waits for the screenshot or the function. `-32602` for a panel the thread doesn't have |
 | `panels.convexDeployments` | `{ threadId, panelId, refresh?: boolean }` | `{ deployments: { deployment, deploymentUrl, label }[], note?: string }`. The configured cloud deployment and the project's Development and Production deployments, resolved through the runner's own Convex CLI, run in the project's folder, with read-only queries of `process.env.CONVEX_CLOUD_URL`. Duplicate names are combined; `note` explains unavailable choices. Cached for one minute; `refresh` bypasses the cache. Makes no deploy keys and changes no project settings. `-32602` for a missing or non-cloud panel |
 | `panels.convexKey` | `{ threadId, panelId, deployment?: string, renew?: boolean }` | `{ deployment, deploymentUrl, adminKey }`, a deploy key for a panel with `convex`, for Convex's embedded dashboard. `deployment` defaults to the panel's configured deployment; any other name must be one returned by `panels.convexDeployments` for this panel's project. The runner makes it the first time (`convex deployment token create` in the project's folder, with the runner's own Convex CLI, so an older `convex` package in the project doesn't matter, on Mike's Convex CLI login) and keeps it in `secrets/convex-panels/<deployment>.json`; `renew` deletes that one from Convex and makes a fresh one. Slow the first time. `-32602` for a panel the thread doesn't have or one without `convex`; an error with the CLI's message when it couldn't make one (not logged in, no access to the deployment) |
@@ -1914,6 +1920,7 @@ export default {
   actions: [
     { title: "Reseed dev DB", run: "npx convex run seed:reset && npx convex import --replace fixtures/dev.zip" },
     { title: "Explain the schema", prompt: "Read convex/schema.ts and explain it to me." },
+    { title: "App Store Connect", url: "https://appstoreconnect.apple.com/apps" },
   ],
   panels: [{ title: "Storybook", url: "http://localhost:6006", note: "while npm run storybook is up" }],
 }
@@ -1932,7 +1939,11 @@ recognisable at a glance. Chips
 are grouped by patch, and a chip's tooltip names its patch.
 
 `run` is a command for `actions.run` to run in the thread's folder,
-`prompt` a message it sends instead; one or the other. A panel needs a
+`prompt` a message it sends instead, and `url` a web page (http or https
+only) the app opens in the browser when the chip is pressed, with
+nothing added to the transcript; exactly one of the three. Use `url`,
+not `run: "open https://..."`, for a link: that leaves an `action.run` in
+the transcript on every press. A panel needs a
 `url` with a scheme, or an `items` function, which makes it a `list`
 panel: rows drawn natively, with no page to serve.
 

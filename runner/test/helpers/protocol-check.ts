@@ -393,12 +393,13 @@ export function checkPanel(p: Obj): string[] {
 export function checkAction(a: Obj): string[] {
   const problems: string[] = [];
   for (const k of ['id', 'title', 'patch']) if (!isStr(a[k])) problems.push(k);
-  if (a.kind !== 'command' && a.kind !== 'prompt') problems.push('kind');
+  if (a.kind !== 'command' && a.kind !== 'prompt' && a.kind !== 'url') problems.push('kind');
   if (a.kind === 'command' && !isStr(a.command)) problems.push('command (required for kind command)');
   if (a.kind === 'prompt' && !isStr(a.prompt)) problems.push('prompt (required for kind prompt)');
-  for (const k of ['command', 'prompt', 'note', 'folder', 'projectId', 'icon', 'iconFile']) if (a[k] !== undefined && !isStr(a[k])) problems.push(k);
+  if (a.kind === 'url' && !(isStr(a.url) && /^https?:\/\//.test(a.url as string))) problems.push('url (an http or https page, required for kind url)');
+  for (const k of ['command', 'prompt', 'url', 'note', 'folder', 'projectId', 'icon', 'iconFile']) if (a[k] !== undefined && !isStr(a[k])) problems.push(k);
   if (a.badge !== undefined && !(Number.isInteger(a.badge) && a.badge > 0)) problems.push('badge');
-  const allowed = new Set(['id', 'title', 'kind', 'command', 'prompt', 'patch', 'folder', 'projectId', 'note', 'badge', 'icon', 'iconFile']);
+  const allowed = new Set(['id', 'title', 'kind', 'command', 'prompt', 'url', 'patch', 'folder', 'projectId', 'note', 'badge', 'icon', 'iconFile']);
   for (const k of Object.keys(a)) if (!allowed.has(k)) problems.push(`unexpected field ${k}`);
   return problems;
 }

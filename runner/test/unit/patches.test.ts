@@ -114,7 +114,7 @@ test('rendering the Simulator panel: a screenshot becomes an image ref, no devic
   assert.equal(url.note, 'This panel has nothing to render.');
 });
 
-import { loadPatchSet, readPatchModule, runCommand, slug } from '../../src/patches.ts';
+import { loadPatchSet, readPatchModule, runCommand, slug, webPage } from '../../src/patches.ts';
 import { checkAction } from '../helpers/protocol-check.ts';
 import { tick } from '../helpers/fakes.ts';
 
@@ -166,7 +166,7 @@ test('a patch file that breaks is listed with its error and gives nothing; an ed
   assert.deepEqual(set.actions, []);
   assert.equal(set.patches.length, 2);
   assert.equal(set.patches[0].id, 'broken');
-  assert.equal(set.patches[0].error, 'actions[0] ("No command") needs run (a command) or prompt (a message).');
+  assert.equal(set.patches[0].error, 'actions[0] ("No command") needs run (a command), prompt (a message) or url (a page to open).');
   assert.equal(set.patches[1].id, 'syntax');
   assert.match(set.patches[1].error ?? '', /./);
   // Fixed: the file's mtime moves on, so it's read again.
@@ -179,13 +179,34 @@ test('a patch file that breaks is listed with its error and gives nothing; an ed
   assert.equal(set.patches[0].error, undefined);
 });
 
+test('readPatchModule: a url action is a page to open, kept as given', () => {
+  const loaded = readPatchModule('links', 'project', '/p/links.ts', {
+    icon: 'link',
+    actions: [
+      { title: 'App Store Connect', url: 'https://appstoreconnect.apple.com/apps', note: 'The app', badge: () => 2 },
+      { title: 'Local', url: " http://localhost:3000/a b?q='x'" },
+    ],
+  });
+  assert.equal(loaded.info.error, undefined);
+  assert.deepEqual(loaded.actions[0], { id: 'links.app-store-connect', title: 'App Store Connect', kind: 'url', url: 'https://appstoreconnect.apple.com/apps', patch: 'links', note: 'The app', icon: 'link' });
+  // Normalised, so what the app opens is exactly what the runner checked.
+  assert.equal(loaded.actions[1].url, 'http://localhost:3000/a%20b?q=%27x%27');
+  assert.equal(webPage('HTTPS://Example.com'), 'https://example.com/');
+  assert.equal(webPage('https://'), null);
+});
+
 test('readPatchModule: the shapes it refuses', () => {
   const read = (v: unknown) => readPatchModule('x', 'project', '/p/x.ts', v).info.error;
   assert.equal(read(undefined), 'The default export should be an object with actions and/or panels.');
   assert.equal(read([]), 'The default export should be an object with actions and/or panels.');
   assert.equal(read({ actions: {} }), 'actions should be an array.');
   assert.equal(read({ actions: [{ run: 'x' }] }), 'actions[0] needs a title.');
-  assert.equal(read({ actions: [{ title: 'Both', run: 'x', prompt: 'y' }] }), 'actions[0] ("Both") should have run or prompt, not both.');
+  assert.equal(read({ actions: [{ title: 'Both', run: 'x', prompt: 'y' }] }), 'actions[0] ("Both") should have one of run, prompt or url, not more.');
+  assert.equal(read({ actions: [{ title: 'Both', run: 'x', url: 'https://a.dev' }] }), 'actions[0] ("Both") should have one of run, prompt or url, not more.');
+  // Only web pages: a url chip must never be a way to run something.
+  for (const url of ['file:///etc/passwd', 'javascript:alert(1)', 'x-apple.systempreferences:', 'localhost:3000', 'not a url', '', 42]) {
+    assert.equal(read({ actions: [{ title: 'Bad', url }] }), 'actions[0] ("Bad") has a url that isn\'t an http or https page.', String(url));
+  }
   assert.equal(read({ panels: [{ title: 'No url' }] }), 'panels[0] ("No url") needs a url, or an items function.');
   assert.equal(read({ panels: [{ title: 'Bad', url: 'localhost:3000' }] }), 'panels[0] ("Bad") needs a url, or an items function.');
   assert.equal(read({ actions: [{ title: 'Same!', run: 'a' }, { title: 'same', run: 'b' }] }), 'Two entries would both be called x.same; give them different titles.');

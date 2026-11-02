@@ -490,10 +490,11 @@ public struct ConvexPanelKey: Sendable, Hashable, Decodable, CustomStringConvert
 }
 
 /// An action a patch gives a thread: a chip above the composer that runs
-/// a command in the thread's folder or sends a canned prompt.
+/// a command in the thread's folder, sends a canned prompt, or opens a web
+/// page in the browser here (no RPC, nothing in the transcript).
 public struct Action: Sendable, Hashable, Codable, Identifiable {
     public enum Kind: String, Sendable, Hashable, Codable {
-        case command, prompt
+        case command, prompt, url
 
         public init(from decoder: Decoder) throws {
             let raw = try decoder.singleValueContainer().decode(String.self)
@@ -506,6 +507,8 @@ public struct Action: Sendable, Hashable, Codable, Identifiable {
     public var kind: Kind
     public var command: String?
     public var prompt: String?
+    /// Kind url: the http or https page it opens.
+    public var url: String?
     public var patch: String
     public var note: String?
     /// Where the command runs: the project folder the patch came from. Nil
@@ -521,8 +524,9 @@ public struct Action: Sendable, Hashable, Codable, Identifiable {
     /// Or a picture for it, as Panel's.
     public var iconFile: String?
 
-    public init(id: String, title: String, kind: Kind = .command, command: String? = nil, prompt: String? = nil, patch: String = "", note: String? = nil,
+    public init(id: String, title: String, kind: Kind = .command, command: String? = nil, prompt: String? = nil, url: String? = nil, patch: String = "", note: String? = nil,
                 folder: String? = nil, projectId: String? = nil, badge: Int? = nil, icon: String? = nil) {
+        self.url = url
         self.badge = badge
         self.icon = icon
         self.id = id
@@ -543,6 +547,7 @@ public struct Action: Sendable, Hashable, Codable, Identifiable {
         kind = try c.decodeIfPresent(Kind.self, forKey: .kind) ?? .command
         command = try c.decodeIfPresent(String.self, forKey: .command)
         prompt = try c.decodeIfPresent(String.self, forKey: .prompt)
+        url = (try? c.decodeIfPresent(String.self, forKey: .url)) ?? nil
         patch = try c.decodeIfPresent(String.self, forKey: .patch) ?? ""
         note = try c.decodeIfPresent(String.self, forKey: .note)
         folder = (try? c.decodeIfPresent(String.self, forKey: .folder)) ?? nil
@@ -550,6 +555,15 @@ public struct Action: Sendable, Hashable, Codable, Identifiable {
         badge = (try? c.decodeIfPresent(Int.self, forKey: .badge)) ?? nil
         icon = (try? c.decodeIfPresent(String.self, forKey: .icon)) ?? nil
         iconFile = (try? c.decodeIfPresent(String.self, forKey: .iconFile)) ?? nil
+    }
+
+    /// The page a url action opens: only http or https, checked here as
+    /// well as by the runner, so a chip can never open a file or an app.
+    public var webPage: URL? {
+        guard kind == .url, let url, let page = URL(string: url),
+              let scheme = page.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              page.host?.isEmpty == false else { return nil }
+        return page
     }
 }
 
