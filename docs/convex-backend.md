@@ -580,3 +580,139 @@ checked in code, not left to the model: only that thread's cards, one added
 card per thread and five a day, and no digits or codes that weren't in what
 the look was shown. A thread with cards, or a message saying the user's going
 out, is never skipped as a quiet catch-up, since "posted it" is short.
+
+## Usage and the free plan (2 Nov 2026)
+
+Measured for release card 6b (thread 4b8626ed) before the repo goes public,
+since every fork runs its own deployment and most will be on the free plan.
+
+### The free plan
+
+From convex.dev/pricing and docs.convex.dev/production/state/limits, read on
+2 Nov 2026. The limits are per team, not per deployment.
+
+| | Free | Note |
+|---|---|---|
+| Function calls | 1M a month | |
+| Action compute | 20 GB-hours a month | |
+| Database storage | 0.5 GB | a total, not monthly |
+| Database I/O | 1 GB a month | "document and index data transferred between Convex functions and the underlying database" |
+| File storage | 1 GB | a total |
+| Data egress | 1 GB a month | |
+
+On the free plan the limits are hard: past them, "new mutations that attempt
+to commit more insertions or updates may fail", so the mirror stops. Starter
+has the same included amounts and then charges as it goes ($0.22 a GB of
+I/O, $2.20 a million calls, 1.3 times that outside US regions).
+
+### What Mike's prod used
+
+Dashboard, team usage page filtered to `threadbear`, last 7 days (26 Oct to
+2 Nov; the mirror went live on 28 Oct, so it's about 5 days), with
+per-call numbers from `npx convex logs --deployment mikec:threadbear:prod
+--success --jsonl`, whose `usageStats` give each call's database bytes.
+That's two runners (the M5 with about 500 threads and Bruce with 6), about
+330 turns a day on the M5 alone, and the phone in daily use.
+
+| | last 7 days | steady rate | a month at that rate | free limit |
+|---|---|---|---|---|
+| Function calls | 131K | 25K to 30K a day | about 850K | 1M |
+| Database I/O | 4.78 GB | 1.2 to 1.4 GB a day | about 40 GB | 1 GB |
+| Database storage | 67.7 MB | grows 8 to 10 MB a day | | 0.5 GB |
+| File storage | 16.2 MB | | | 1 GB |
+| Data egress | 46 MB | | about 200 MB | 1 GB |
+| Action compute | 0.099 GB-hours | | about 0.4 | 20 |
+
+Database I/O by function, last 7 days: `sync:otherRunnersThreads` 3.48 GB
+(73%), `sync:setProjects` 446 MB, `sync:upsertThreads` 182 MB,
+`phone:counts` 96 MB, `phone:threads` 80 MB, `sync:messageHeads` 69 MB,
+`sync:setThreadIndex` 68 MB, `sync:appendMessages` 63 MB,
+`sync:setAccounts` 63 MB, `sync:setPresence` 59 MB, `phone:projects` 53 MB,
+everything else under 31 MB each. Calls: `sync:appendMessages` 31K,
+`sync:otherRunnersThreads` 27K, `sync:upsertThreads` 22K, `sync:heartbeat`
+13K, `sync:setThreadIndex` 6.3K, `sync:setAccounts` 5.9K, `phone:threads`
+4.5K, `sync:setProjects` 1.6K, the rest under 1.5K each. Storage is 93%
+`messages` (55K rows; every message is kept). Push relay, Pocket, schedule
+lease polling (`sync:schedules`, `sync:claimSchedule`) and project task
+reads are all small: Notion reads never touch Convex.
+
+What each cost comes from:
+
+- **`otherRunnersThreads`**: the live query a runner holds on the other
+  runners' `threadIndex` rows. Every re-run reads all of them. Bruce's
+  re-read the M5's 500 rows (about 220 KB) on every M5 index write and
+  every heartbeat from either runner, about 400 times an hour, though
+  nothing on Bruce shows them: it has no Mac app. That was 99% of this
+  function's I/O. Fixed (below).
+- **`setProjects`**: any project change (a thread's activity moves its
+  project's `lastActivityAt`) rewrites every project row. Mike's 70-odd
+  projects with long notes are about 460 KB a call. Small for a typical user.
+- **Per turn**, from the log sample: about 20 `appendMessages` (1 KB each),
+  10 `upsertThreads` (3.4 KB), 5 `setThreadIndex` (1.7 KB), 2
+  `setAccounts` and 1 `setProjects`. That's about 38 calls and, with a
+  typical user's handful of small projects and one or two logins, about
+  80 KB of I/O.
+- **Always**, per runner: a heartbeat a minute (1.1 KB) and, while it
+  watches, a re-run of the other-runners query on each heartbeat. That's
+  about 2,900 calls a day whether or not anything happens.
+- **Growing with the thread count**: `setPresence` reads every thread row of
+  the runner (about 4 KB each) each time Mike walks away from the Mac,
+  looking for held pushes; `phone:counts` reads every hibernating and
+  den row on each re-run; `prune` reads every row on each runner start.
+
+### A typical user: one Mac, a few threads a day
+
+Assumed: one runner with the Mac app open all day, 5 threads and 15 turns a
+day, three small projects, one or two logins, a phone opened now and then,
+about 10 pushes a day.
+
+| | a month | share of the free limit |
+|---|---|---|
+| Function calls | about 110K (2,900 a day fixed, 600 from turns, 200 from the phone and pushes) | 11% |
+| Database I/O, first month | about 250 MB (fixed 2.5 MB a day, turns 1.3 MB, phone about 2 MB, presence 2.5 MB) | 25% |
+| Database I/O, after 6 months | about 650 MB, as presence and phone counts read 900 thread rows | 65% |
+| Database storage | grows about 10 MB a month | half the limit after 2 years |
+| File storage | a few MB (project pictures, shared and reply images) | under 1% |
+| Data egress | about 10 MB | 1% |
+| Action compute | about 0.03 GB-hours (pushes) | 0.2% |
+
+It fits on day one with room to spare. The one thing that doesn't stay
+comfortable is database I/O creeping up with the number of threads kept,
+from `setPresence` and `phone:counts` reading every row; the backend cuts
+below take that away.
+
+**A heavy single Mac** (Mike's M5 on its own): about 450K calls a month
+(45%), about 5.5 GB of I/O (5.5 times the limit) and 300 MB more storage a
+month. Someone using it like that needs Starter, where that's about US$1.50
+a month.
+
+**Two Macs, each with the app open** don't fit today: each one's watch
+re-reads all the other's index rows on every heartbeat and every index
+write, about 0.5 GB a day with 300 threads each. The `otherRunnersThreads`
+cuts below are needed before anyone runs a second Mac on the free plan.
+
+### Cuts
+
+Done (runner only, 3506d3b): a runner watches `otherRunnersThreads` only
+while a Mac app is connected, and for two minutes after it goes
+(`thread-index.ts`). Bruce stops watching altogether. On last week's
+numbers that takes Mike's prod from about 1.25 GB of I/O a day to about
+0.2 GB, and about 18K calls a week off.
+
+Backend changes, which deploy prod when they land on main, so they wait for
+Mike's OK:
+
+1. `setPresence`: find held pushes with an index on `pushHeldAt` instead of
+   reading every thread row. Takes the growth out of a typical user's I/O.
+2. `otherRunnersThreads`: split the runners list from the thread rows, so a
+   heartbeat doesn't re-run the read of every row, and then watch only rows
+   changed since the last answer (an `updatedAt` index and tombstones for
+   deleted rows). Needed for two Macs.
+3. `phone:counts`: keep the two counts on a small row the runner's writes
+   update, rather than counting every hibernating and den thread.
+4. `setProjects`: write only the projects that changed, and have the runner
+   send only those. Mostly Mike's own cost.
+
+Not urgent: messages are kept forever, so storage grows about 10 MB a month
+for a typical user. Dropping the messages of threads archived more than a
+month ago would hold it flat if it ever matters.
