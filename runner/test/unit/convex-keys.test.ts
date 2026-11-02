@@ -188,7 +188,7 @@ function fakeLogin(config: string, { exit = 0, approveAfterMs = 150, write = tru
   return [process.execPath, '-e', script];
 }
 
-async function until(get: () => Promise<{ state: string }>, state: string) {
+async function until<T extends { state: string }>(get: () => Promise<T>, state: string): Promise<T> {
   for (let i = 0; i < 100; i++) {
     const s = await get();
     if (s.state === state) return s;
@@ -218,10 +218,10 @@ test('a sign-in that fails or is never approved says so, and can be tried again'
   const denied = new ConvexKeys(tmpDir(), failing(''), 'mac', { configFile: config, login: fakeLogin(config, { exit: 1, write: false }) });
   await denied.login();
   const failed = await until(() => denied.login(true), 'failed');
-  assert.match((failed as { message: string }).message, /The sign-in didn't finish\. The Convex CLI said: Login denied/);
+  assert.match(failed.message!, /The sign-in didn't finish\. The Convex CLI said: Login denied/);
   const slow = new ConvexKeys(tmpDir(), failing(''), 'mac', { configFile: config, login: fakeLogin(config, { approveAfterMs: 60_000 }), loginTimeoutMs: 1500 });
   await slow.login();
-  assert.equal(((await until(() => slow.login(true), 'failed')) as { message: string }).message, "The sign-in wasn't approved in time. Try again.");
+  assert.equal((await until(() => slow.login(true), 'failed')).message, "The sign-in wasn't approved in time. Try again.");
   assert.equal((await slow.login()).state, 'waiting', 'a new click starts again');
   await slow.login(true);
 });
