@@ -120,6 +120,16 @@ test('view follows hibernate and den; cost is to the cent; working comes from ba
     background: [{ kind: 'shell' as const, description: 'npm test', finished: false }],
     projects: [{ id: 'p1', title: 'Threadbear', by: 'mike' as const, at: '2026-10-27T09:10:00.000Z' }],
   };
+  // The phone can't tell a sub-agent from a job, so "you" waits for agents
+  // to finish before it goes up. The asks go anyway, for the open thread.
+  const asks = { needs: 'you' as const, asks: [{ action: 'Pick one' }], asksSeq: 3 };
+  assert.equal(toThreadDoc({ ...base, ...asks }, 'r', now).needs, 'you', 'a shell job holds nothing back');
+  const heldBack = toThreadDoc({ ...base, ...asks, background: [{ kind: 'agent' as const, description: 'Sweep' }] }, 'r', now);
+  assert.equal(heldBack.needs, undefined);
+  assert.equal(heldBack.working, 'Sweep');
+  assert.deepEqual(heldBack.asks, [{ action: 'Pick one' }]);
+  assert.equal(toThreadDoc({ ...base, needs: 'nothing', background: [{ kind: 'agent' as const, description: 'Sweep' }] }, 'r', now).needs, 'nothing');
+
   const inbox = toThreadDoc(base, 'r', now);
   assert.equal(inbox.view, 'inbox');
   assert.equal(inbox.unread, true);

@@ -118,7 +118,8 @@ public struct InboxSections: Sendable, Equatable {
             if isSnoozed(thread, now: now) { continue }
             // A question or approval goes in the inbox even while background
             // work runs: the thread is stuck until he answers. So does a
-            // turn that ended asking him for something.
+            // turn that ended asking him for something, unless sub-agents
+            // are still at it (`waitingOnMike`).
             if thread.reviewWaiting || needsAnswer(thread) || thread.waitingOnMike || (thread.needsYou && thread.working == nil) {
                 sections.inbox.append(thread)
             } else if thread.isBusy || thread.working != nil {

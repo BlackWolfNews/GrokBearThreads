@@ -407,6 +407,7 @@ const END_TURN_ASKS =
   'next is for needs "nothing": up to 3 follow-ups in this thread worth doing, so they don\'t get lost: a piece still missing, a check that\'s due, something you or the user raised and didn\'t get to. Only ones that really came up; never invent work, and most turns have none, so leave it out then. ' + NEXT_ROW + 'Don\'t also list them in your message. ' +
   'archive: true archives this thread once the turn is over, with needs "nothing" only. Use it only when the user asks for this thread to be archived, or the message that started the thread says to; otherwise leave it out, as a thread that vanishes from their inbox when they hadn\'t finished with it is confusing. ' +
   END_TURN_SNOOZE +
+  'If you leave sub-agents running, the thread stays under Running and your asks don\'t reach the user\'s inbox until the sub-agents finish and you\'ve ended a later turn, so don\'t leave one waiting on the user. ' +
   'Sub-agents never call this; only the thread\'s own agent does.';
 
 export const END_TURN_DESCRIPTION =
@@ -481,6 +482,7 @@ const ONE_REPLY_FIELDS =
   NEXT_ROW +
   'archive: true only when the user asked for this thread to be archived, or the message that started the thread says to. ' +
   END_TURN_SNOOZE +
+  'If you leave sub-agents running, the thread stays under Running and your asks don\'t reach the user\'s inbox until the sub-agents finish and you\'ve ended a later turn, so don\'t leave one waiting on the user. ' +
   'Sub-agents never call this; only the thread\'s own agent does.';
 
 const ONE_REPLY_WHAT =

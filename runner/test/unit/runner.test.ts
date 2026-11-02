@@ -1665,6 +1665,36 @@ test('needs you: end_turn "nothing" keeps a finished thread out of Needs you; "y
   assert.deepEqual(t.asks![0], { action: 'Paste the key', where: 'Settings', reply: 'done' });
 });
 
+// What sub-agents find can change what the agent asks, so a card left open
+// while they work isn't Mike's yet (2 Nov). A job watching for him to do
+// something is the opposite (1 Nov), so it doesn't hold anything back.
+test('needs you: asks wait for sub-agents to finish, not for shell jobs', () => {
+  const h = makeHarness();
+  const { thread } = create(h);
+  const s = h.adapter.last;
+  s.init();
+  const agent = { id: 'a1', type: 'local_agent', kind: 'agent' as const, description: 'Sweep the messages' };
+  const shell = { id: 'b1', type: 'local_bash', kind: 'shell' as const, description: 'Watch for the Pi' };
+  s.out({ kind: 'tasks', tasks: [agent, shell] });
+  endTurnCall(s, 't1', { needs: 'you', asks: [{ action: 'Pick a format' }] });
+  s.result('completed');
+  let t = h.runner.get(thread.id);
+  assert.deepEqual(checkSummary(t), []);
+  assert.equal(t.needsYou, false, 'the sub-agent is still working');
+  assert.equal(t.needs, 'you', 'the card is still there to answer early');
+  assert.deepEqual(t.asks, [{ action: 'Pick a format' }]);
+
+  // The sub-agent finishes: still held while its result waits to be read.
+  s.out({ kind: 'tasks', tasks: [shell] });
+  assert.equal(h.runner.get(thread.id).needsYou, false, 'a result is about to be read');
+
+  // Nothing read it in time: only the watching job is left, so it's his move.
+  h.clock.advance(15_000);
+  t = h.runner.get(thread.id);
+  assert.deepEqual(t.background, [{ kind: 'shell', description: 'Watch for the Pi' }]);
+  assert.equal(t.needsYou, true);
+});
+
 test('needs you: text after an accepted end_turn is dropped, until Mike writes again mid-turn', () => {
   const h = makeHarness();
   const { thread } = create(h);

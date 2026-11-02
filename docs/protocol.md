@@ -134,7 +134,8 @@ type ThreadSummary = {
   status: ThreadStatus
   live: boolean         // a CLI process is attached right now
   needsYou: boolean     // waiting, or a turn finished after lastSeenSeq
-                        // that didn't end with needs "nothing" (Needs you)
+                        // that didn't end with needs "nothing", with no
+                        // sub-agents still working (Needs you)
   needs?: "you" | "nothing" // what the last completed turn said; absent
                         // when it said neither (see Needs you)
   asks?: OpenAsk[]      // that turn's asks, when needs is "you"
@@ -1492,6 +1493,18 @@ API 22, and to another runner's sidebar row on a Mac from API 23.
 
 A turn the agent finished can say whether Mike has to do anything, so
 "Needs you" only holds threads that are really waiting on him.
+
+A turn that left sub-agents or a workflow going (`background` entries of
+kind `agent` or `other`, finished ones included until they're read) isn't
+waiting on him yet, whatever it said: what they find can change what the
+agent asks (Mike, 2 Nov 2026). `needsYou` stays false, the sections keep it
+under Running, and the phone's thread document leaves `needs` out until
+they're done. `needs` and `asks` stay on the summary, so the card shows if
+he opens the thread and he can answer early. A question or approval the
+agent is stuck on (`status` "waiting") still counts straight away, and shell
+jobs and monitors don't hold anything back: one is often watching for Mike
+to do what he was asked. The stuck-job check (Stuck background jobs) wakes
+the thread if a sub-agent stalls, so an ask can't stay hidden for good.
 
 - **The tool.** Every thread's own agent (not its sub-agents) has
   `end_turn` in the `threadbear` tools: `{ needs?: "you" | "nothing",

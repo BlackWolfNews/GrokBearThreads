@@ -215,6 +215,29 @@ final class ThreadSectionsTests: XCTestCase {
         XCTAssertEqual(sections.needsYou.map(\.id), ["unread"])
     }
 
+    /// Sub-agents are the exception to an open ask keeping its place: what
+    /// they find can change what the thread asks, so it's Running until
+    /// they're done, finished-but-unread ones and workflows included. A
+    /// question the agent is stuck on still goes straight to the inbox.
+    func testAnOpenAskWaitsForSubagents() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        func asking(_ id: String, _ background: [BackgroundTask]) -> ThreadSummary {
+            var t = thread(id, minutesAgo: 1, background: background)
+            t.needs = "you"
+            t.asksSeq = 5
+            t.asks = [Ask(action: "Pick a format")]
+            return t
+        }
+        let agents = asking("agents", [BackgroundTask(kind: .agent, description: "Sweep"), BackgroundTask(kind: .shell, description: "Watch")])
+        let finished = asking("finished", [BackgroundTask(kind: .agent, description: "Sweep", finished: true)])
+        let workflow = asking("workflow", [BackgroundTask(kind: .other, description: "Review")])
+        var question = asking("question", [BackgroundTask(kind: .agent, description: "Sweep")])
+        question.status = .waiting
+        let sections = ThreadSections.build([agents, finished, workflow, question, asking("job", [BackgroundTask(kind: .shell, description: "Watch")])], now: now)
+        XCTAssertEqual(Set(sections.running.map(\.id)), ["agents", "finished", "workflow"])
+        XCTAssertEqual(Set(sections.inbox.map(\.id)), ["question", "job"])
+    }
+
     /// One inbox, ordered by what needs Mike most: questions, then unread
     /// failures, unread replies, read failures, then the rest, newest first
     /// within each. Running threads are their own section.

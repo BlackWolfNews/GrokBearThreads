@@ -65,6 +65,13 @@ final class SidebarRowTests: XCTestCase {
         XCTAssertEqual(ThreadRowLook(thread), ThreadRowLook(status: .time, unread: false, emphasised: false))
     }
 
+    /// Sub-agents still at it: the grey spinner, not a thread for Mike yet.
+    func testAnOpenAskKeepsTheSpinnerWhileSubagentsWork() {
+        var thread = ThreadSummary(id: "t", title: "t", status: .idle, needsYou: false, background: [BackgroundTask(kind: .agent, description: "Sweep")])
+        thread.needs = "you"
+        XCTAssertEqual(ThreadRowLook(thread).status, .background)
+    }
+
     func testBackgroundWords() {
         let agent = { (d: String) in BackgroundTask(kind: .agent, description: d) }
         let shell = { (d: String) in BackgroundTask(kind: .shell, description: d) }

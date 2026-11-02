@@ -37,7 +37,10 @@ for later (an agent saying "I'll check again in 20 minutes") and have nothing
 for you until then: each says when it wakes, soonest first. When the time
 comes it runs again, and lands in the inbox when it's done. A thread that
 asks you something keeps its place in the inbox, wake-up or not, and so does
-one that has left a job running while it waits for you.
+one that has left a job running while it waits for you. Sub-agents are
+different: while they're working the thread stays in Running, even if it has
+asked you something, as what they find can change what it asks. It comes to
+the inbox when they're done, and you can still open it and answer early.
 Hibernating and Archived, at the foot, hold the threads you've put away
 (see [Hibernate and archive](#hibernate-and-archive)). They start folded,
 showing only how many; click a heading to open or fold it.

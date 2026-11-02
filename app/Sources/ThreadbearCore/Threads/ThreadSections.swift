@@ -78,7 +78,8 @@ public struct ThreadSections: Sendable, Equatable {
     /// needs Mike first (see `urgency`), newest first within that. A question or approval goes in
     /// the inbox even with background work going, since the thread is stuck
     /// until he answers, and so does a turn that ended asking him for
-    /// something (`waitingOnMike`). Running is newest activity first. Snoozed and
+    /// something (`waitingOnMike`), unless sub-agents are still at it.
+    /// Running is newest activity first. Snoozed and
     /// archived threads go in Hibernating and Archived, whatever their state.
     /// Starred takes a starred thread from all of these but Archived: Mike
     /// archived it, so it's done with.

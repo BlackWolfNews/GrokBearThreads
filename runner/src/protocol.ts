@@ -479,6 +479,16 @@ export type BackgroundTask = {
   finished?: boolean;
 };
 
+// Agents are still working for this thread: sub-agents, or a workflow's
+// (kind "other"), including ones just finished whose result is still to be
+// read. What they find can change what the thread's agent asks Mike, so a
+// card it left open isn't his to answer yet (docs/protocol.md, "Needs you";
+// Mike, 2 Nov). Shells and monitors don't count: one is often a watcher
+// waiting for Mike to do what he was asked, as with the SD card on 1 Nov.
+export function agentsStillWorking(tasks: BackgroundTask[] | undefined): boolean {
+  return Boolean(tasks?.some((t) => t.kind === 'agent' || t.kind === 'other'));
+}
+
 // "2 sub-agents, 1 shell job in the background" for tb list's flags; '' with none.
 export function backgroundFlag(tasks: BackgroundTask[] | undefined): string {
   if (!tasks?.length) return '';

@@ -22,7 +22,7 @@ import { extForMediaType, sniffImage } from './media.ts';
 import { makeFunctionReference } from 'convex/server';
 import type { Clock, TimerHandle } from './clock.ts';
 import type { Logger } from './log.ts';
-import { ErrorCode, isEffortLevel } from './protocol.ts';
+import { agentsStillWorking, ErrorCode, isEffortLevel } from './protocol.ts';
 import type { Account, ApprovalDecision, ApprovalOption, AskAnswer, EffortLevel, ImageRef, OpenAsk, PersistedEvent, Project, Question, Schedule, ThreadSummary } from './protocol.ts';
 import type { Notification } from './runner.ts';
 import type { ScheduleBackend, StoredSchedule } from './schedules.ts';
@@ -422,7 +422,11 @@ export function toThreadDoc(t: ThreadSummary, runnerId: string, now: number, pen
     doc.asksSeq = t.asksSeq;
   }
   if (next?.length) doc.next = next;
-  if (t.needs) doc.needs = t.needs;
+  // The phone files a thread whose turn said "you" in the inbox whatever's
+  // running, and its working line can't tell a sub-agent from a shell job. So
+  // it isn't told until the agents are done, which goes for phones already
+  // out there too. The asks still go up: the card shows if he opens the thread.
+  if (t.needs && !(t.needs === 'you' && agentsStillWorking(t.background))) doc.needs = t.needs;
   if (t.pendingReviews) doc.pendingReviews = t.pendingReviews;
   if (t.waitingForRoom) doc.waitingForRoom = { until: t.waitingForRoom.until, ...(t.waitingForRoom.accountId ? { accountId: t.waitingForRoom.accountId } : {}) };
   return doc;

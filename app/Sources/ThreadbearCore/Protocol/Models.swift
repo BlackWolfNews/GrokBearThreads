@@ -1264,14 +1264,21 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     /// and no turn is underway to show for it.
     public var isWorkingInBackground: Bool { !background.isEmpty && !status.isBusy }
 
+    /// Agents are still working for this thread: sub-agents or a workflow's,
+    /// including ones just finished whose result is still to be read. Same
+    /// rule as the runner's `agentsStillWorking`.
+    public var agentsStillWorking: Bool { background.contains { $0.kind == .agent || $0.kind == .other } }
+
     /// The last turn ended asking Mike for something and he hasn't done it
-    /// all yet. Read or not, and whatever it left running: an agent that sets
-    /// a job watching for what it just asked him to do (Mike's "put the SD
-    /// card back in the Pi", 1 Nov) would otherwise sit under Running, where
-    /// he doesn't look, while the job waits for him and he waits for it.
-    /// Ticking every ask hands it back. `InboxSections` on the phone has the
-    /// same rule as `PhoneThread.waitingOnMike`.
-    public var waitingOnMike: Bool { needs == "you" && !status.isBusy && (asks.isEmpty || asks.contains { !$0.ticked }) }
+    /// all yet. Read or not, and whatever job it left running: an agent that
+    /// sets a job watching for what it just asked him to do (Mike's "put the
+    /// SD card back in the Pi", 1 Nov) would otherwise sit under Running,
+    /// where he doesn't look, while the job waits for him and he waits for it.
+    /// Sub-agents are different: what they find can change what the agent
+    /// asks next, so the thread isn't his move until they're done (Mike,
+    /// 2 Nov). Ticking every ask hands it back. `InboxSections` on the phone
+    /// has the same rule as `PhoneThread.waitingOnMike`.
+    public var waitingOnMike: Bool { needs == "you" && !status.isBusy && !agentsStillWorking && (asks.isEmpty || asks.contains { !$0.ticked }) }
 
     public var hasPendingReviews: Bool { (pendingReviews ?? 0) > 0 }
 

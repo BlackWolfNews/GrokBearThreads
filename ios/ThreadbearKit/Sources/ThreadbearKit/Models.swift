@@ -292,7 +292,9 @@ public struct PhoneThread: Codable, Sendable, Hashable, Identifiable {
 
     /// The last turn ended asking Mike for something and he hasn't done it
     /// all yet, as the Mac's ThreadSummary.waitingOnMike: read or not, and
-    /// whatever it left running in the background.
+    /// whatever job it left running. The Mac also waits for sub-agents to
+    /// finish; here the runner does that by leaving `needs` out until then
+    /// (toThreadDoc), as `working` can't tell a sub-agent from a job.
     public var waitingOnMike: Bool {
         guard needs == "you", !isBusy else { return false }
         let asks = asks ?? []

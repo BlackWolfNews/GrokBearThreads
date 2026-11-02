@@ -45,7 +45,7 @@ import type {
   ThreadSummary,
   TurnOutcome,
 } from './protocol.ts';
-import { ErrorCode, LIMITS, PROTOCOL_VERSION, RpcError, sentByAgent } from './protocol.ts';
+import { agentsStillWorking, ErrorCode, LIMITS, PROTOCOL_VERSION, RpcError, sentByAgent } from './protocol.ts';
 import type { LibrarianStatus, Project, Schedule } from './protocol.ts';
 import { Projects } from './projects.ts';
 import type { Settings } from './settings.ts';
@@ -4307,6 +4307,10 @@ export class Runner {
   summary(st: ThreadState): ThreadSummary {
     const { rec, rt } = st;
     const running = rec.status === 'running' || rec.status === 'starting';
+    const background = this.background(st);
+    // Not finished yet, as far as Mike's concerned: no dot, notification or
+    // phone push until they're done and the agent has had its say on them.
+    const unfinished = running || agentsStillWorking(background);
     const s: ThreadSummary = {
       id: rec.id,
       title: rec.title,
@@ -4320,7 +4324,7 @@ export class Runner {
       // (docs/protocol.md, "Needs you"). A pending design review only
       // counts once the turn ends: show_options doesn't block, and Mike
       // didn't want a "Needs you" (or a phone push) mid-turn.
-      needsYou: (!running && Boolean(rec.reviews?.some(r => r.status === 'pending'))) || rec.status === 'waiting' || Boolean(rec.forceUnread) || (!running && rec.lastTurnCompletedSeq > rec.lastSeenSeq && !this.saidNothing(rec)),
+      needsYou: (!unfinished && Boolean(rec.reviews?.some(r => r.status === 'pending'))) || rec.status === 'waiting' || Boolean(rec.forceUnread) || (!unfinished && rec.lastTurnCompletedSeq > rec.lastSeenSeq && !this.saidNothing(rec)),
       createdAt: rec.createdAt,
       updatedAt: rec.updatedAt,
       lastActivityAt: rec.lastActivityAt,
@@ -4362,7 +4366,6 @@ export class Runner {
     if (actions.length) s.actions = actions;
     if (set.hooks.length) s.hooks = set.hooks;
     if (patches.length) s.patches = patches;
-    const background = this.background(st);
     if (background.length) s.background = background;
     if (rec.subagents?.length) s.subagents = rec.subagents.map(publicSubagent);
     const projects = this.projects?.threadProjects(rec);
