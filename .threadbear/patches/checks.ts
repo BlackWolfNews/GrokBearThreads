@@ -1,9 +1,9 @@
-// Threadbear's own patch (docs/protocol.md, "Patches"): chips for the
-// checks an agent or Mike runs most in this repo. Output lands in the
-// thread's transcript.
+// Threadbear's own patch (docs/protocol.md, "Patches"): how threads work in
+// this repo, the worktrees panel and a typecheck after each turn. No buttons
+// for the checks, as Mike never pressed them and agents run ./check.sh anyway.
 export default {
-  // The bear's paw on each chip, so they read as Threadbear's own next to
-  // another patch's (Tandem's, say).
+  // The bear's paw, so its panel reads as Threadbear's own next to another
+  // patch's (Tandem's, say).
   icon: "pawprint",
   // A worktree per thread (docs/thread-worktrees.md): each new thread in
   // this repo works on a thread/<id8> branch in its own worktree, and
@@ -17,13 +17,6 @@ export default {
     check: "./check.sh --quick",
     keep: ["app/.build", "dock/.build"],
   },
-  actions: [
-    { title: "Quick check", run: "./check.sh --quick", note: "Runner typecheck and unit tests, about a minute" },
-    { title: "App check", run: "./check.sh --app", note: "App build and tests" },
-    { title: "Full check", run: "./check.sh", note: "Everything that could be affected by what changed from main" },
-    { title: "Runner status", run: "runner/bin/tb status" },
-    { title: "Releases", run: "runner/scripts/deploy-runner.sh --list" },
-  ],
   panels: [
     // Several threads work on this repo at once, each in its own worktree:
     // which ones have work that isn't on main yet, and which are dirty.
