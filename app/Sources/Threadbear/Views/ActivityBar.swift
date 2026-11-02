@@ -60,8 +60,10 @@ struct ActivityBar: View {
             Spacer(minLength: zoomed(8))
             // Only while something's left to set up and it isn't hidden.
             SetupActivityButton()
-            // Only once the runner has said it watches a gateway.
-            if app.connectors != nil {
+            // Only once the runner has said it watches a gateway. It says
+            // "off" when none is set up (most people, as the gateway is
+            // optional), and a panel saying only that is no use.
+            if let connectors = app.connectors, connectors.state != "off" {
                 ConnectorsActivityButton()
             }
             // Only while the app or the runner has an update on its way.
