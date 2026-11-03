@@ -175,6 +175,57 @@ final class ComposerTests: XCTestCase {
         XCTAssertEqual(composer.string, "Hello there!")
     }
 
+    /// A file that isn't a picture (a video, a folder) goes in as its full
+    /// path where it's pasted or dropped, not turned away (3 Nov).
+    func testOtherFilesGoInAsTheirPaths() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("composer-files-\(UUID().uuidString.prefix(6))", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let video = folder.appendingPathComponent("Screen Recording 1.mov")
+        try Data("not really a movie".utf8).write(to: video)
+
+        let composer = ComposerTextView()
+        composer.replaceText("look at")
+        composer.setSelectedRange(NSRange(location: 7, length: 0))
+        let board = NSPasteboard(name: NSPasteboard.Name("composer-files-test-\(UUID().uuidString)"))
+        defer { board.releaseGlobally() }
+        board.clearContents()
+        board.writeObjects([video as NSURL, folder as NSURL])
+
+        XCTAssertTrue(composer.takeImages(from: board))
+        let expected = "look at `\(video.standardizedFileURL.path)` `\(folder.standardizedFileURL.path)` "
+        XCTAssertEqual(composer.string, expected)
+        XCTAssertEqual(composer.selectedRange().location, (expected as NSString).length)
+
+        // Plain words on the clipboard are still a normal paste.
+        board.clearContents()
+        board.setString("hello", forType: .string)
+        XCTAssertFalse(composer.takeImages(from: board))
+    }
+
+    /// Dropping a video on the box is taken (a copy), and its path lands
+    /// in the words. A plain text view turned it away before (3 Nov).
+    func testDroppingAVideoPutsItsPathIn() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("composer-drop-\(UUID().uuidString.prefix(6))", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let video = folder.appendingPathComponent("clip.mp4")
+        try Data("not really a movie".utf8).write(to: video)
+
+        let (window, _, composer) = composerInWindow()
+        defer { window.close() }
+        let board = NSPasteboard(name: NSPasteboard.Name("composer-drop-test-\(UUID().uuidString)"))
+        defer { board.releaseGlobally() }
+        board.clearContents()
+        board.writeObjects([video as NSURL])
+        let drag = FakeDrag(pasteboard: board, window: window, location: composer.convert(NSPoint(x: 5, y: 5), to: nil))
+
+        XCTAssertEqual(composer.draggingEntered(drag), .copy)
+        XCTAssertEqual(composer.draggingUpdated(drag), .copy)
+        XCTAssertTrue(composer.performDragOperation(drag))
+        XCTAssertEqual(composer.string, "`\(video.standardizedFileURL.path)` ")
+    }
+
     /// The box is two lines tall when empty, grows a line at a time, and
     /// stops at ten lines (the rest scrolls).
     func testComposerGrowsFromTwoLinesToTen() throws {
@@ -681,3 +732,27 @@ final class AutomationTests: XCTestCase {
     }
 }
 #endif
+
+/// Just enough of a drag for the composer's drop methods.
+private final class FakeDrag: NSObject, NSDraggingInfo {
+    let draggingPasteboard: NSPasteboard
+    let draggingDestinationWindow: NSWindow?
+    let draggingLocation: NSPoint
+    init(pasteboard: NSPasteboard, window: NSWindow, location: NSPoint) {
+        draggingPasteboard = pasteboard
+        draggingDestinationWindow = window
+        draggingLocation = location
+    }
+    var draggingSourceOperationMask: NSDragOperation { .copy }
+    var draggedImageLocation: NSPoint { draggingLocation }
+    var draggedImage: NSImage? { nil }
+    var draggingSource: Any? { nil }
+    var draggingSequenceNumber: Int { 1 }
+    func slideDraggedImage(to screenPoint: NSPoint) {}
+    var draggingFormation: NSDraggingFormation = .default
+    var animatesToDestination = false
+    var numberOfValidItemsForDrop = 1
+    func enumerateDraggingItems(options enumOpts: NSDraggingItemEnumerationOptions = [], for view: NSView?, classes classArray: [AnyClass], searchOptions: [NSPasteboard.ReadingOptionKey: Any] = [:], using block: (NSDraggingItem, Int, UnsafeMutablePointer<ObjCBool>) -> Void) {}
+    var springLoadingHighlight: NSSpringLoadingHighlight { .none }
+    func resetSpringLoading() {}
+}

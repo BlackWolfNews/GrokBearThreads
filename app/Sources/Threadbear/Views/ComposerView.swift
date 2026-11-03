@@ -725,8 +725,16 @@ final class ComposerTextView: NSTextView {
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        if hasImages(sender.draggingPasteboard) { return .copy }
-        return super.draggingEntered(sender)
+        let operation = super.draggingEntered(sender)
+        return hasFiles(sender.draggingPasteboard) ? .copy : operation
+    }
+
+    /// Super's still runs, for the caret showing where it'll go, but a
+    /// plain text view turns a file other than a picture away, so a video
+    /// dropped on the box did nothing (3 Nov).
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        let operation = super.draggingUpdated(sender)
+        return hasFiles(sender.draggingPasteboard) ? .copy : operation
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
@@ -736,26 +744,33 @@ final class ComposerTextView: NSTextView {
         return super.performDragOperation(sender)
     }
 
-    private func imageURLs(_ pasteboard: NSPasteboard) -> [URL] {
-        let options: [NSPasteboard.ReadingOptionKey: Any] = [
-            .urlReadingFileURLsOnly: true,
-            .urlReadingContentsConformToTypes: [UTType.image.identifier],
-        ]
+    private func fileURLs(_ pasteboard: NSPasteboard) -> [URL] {
+        let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
         return pasteboard.readObjects(forClasses: [NSURL.self], options: options) as? [URL] ?? []
     }
 
-    private func hasImages(_ pasteboard: NSPasteboard) -> Bool {
-        !imageURLs(pasteboard).isEmpty || pasteboard.data(forType: .png) != nil || pasteboard.data(forType: .tiff) != nil
+    private func isImage(_ url: URL) -> Bool {
+        (try? url.resourceValues(forKeys: [.contentTypeKey]).contentType?.conforms(to: .image)) == true
     }
 
-    /// Image files go straight to `media.import`; raw image data (a
-    /// screenshot on the clipboard) is written to a temp PNG first. In the
-    /// composer they go in as chips in place of `range` (the selection, for
-    /// a paste).
+    private func hasFiles(_ pasteboard: NSPasteboard) -> Bool {
+        !fileURLs(pasteboard).isEmpty || pasteboard.data(forType: .png) != nil || pasteboard.data(forType: .tiff) != nil
+    }
+
+    /// Files pasted or dropped. Pictures go to `media.import` as chips;
+    /// raw image data (a screenshot on the clipboard) is written to a temp
+    /// PNG first. Any other file (a video, a PDF, a folder) goes in as its
+    /// full path, for the agent to open where it is: nothing's copied, so
+    /// a big one costs nothing. In the composer they go in place of
+    /// `range` (the selection, for a paste).
     func takeImages(from pasteboard: NSPasteboard, at range: NSRange? = nil) -> Bool {
-        let urls = imageURLs(pasteboard)
+        let urls = fileURLs(pasteboard)
         if !urls.isEmpty {
-            deliver(urls, at: range)
+            let images = urls.filter(isImage)
+            let others = urls.filter { !isImage($0) }
+            var at = range
+            if !others.isEmpty { at = insertPaths(others, replacing: range) }
+            if !images.isEmpty { deliver(images, at: at) }
             return true
         }
         // Text with an image flavour (rich text from a browser) stays text.
@@ -778,6 +793,33 @@ final class ComposerTextView: NSTextView {
         } catch {
             return false
         }
+    }
+
+    /// What a dropped file that isn't a picture puts in the words: its
+    /// full path in backticks, so one with spaces in its name (every
+    /// screen recording) still reads as one path.
+    static func pathText(for urls: [URL]) -> String {
+        urls.map { "`\($0.standardizedFileURL.path)`" }.joined(separator: " ")
+    }
+
+    /// `urls` as paths in place of `range` (the selection by default), with
+    /// a space either side, through `insertText` so it's one undo. Answers
+    /// where the cursor is after them, for any pictures dropped alongside.
+    private func insertPaths(_ urls: [URL], replacing range: NSRange?) -> NSRange {
+        let ns = string as NSString
+        let picked = range ?? selectedRange()
+        let location = min(picked.location, ns.length)
+        let replace = NSRange(location: location, length: min(picked.length, ns.length - location))
+        func isSpace(_ index: Int) -> Bool {
+            guard index >= 0, index < ns.length, let scalar = Unicode.Scalar(ns.character(at: index)) else { return false }
+            return CharacterSet.whitespacesAndNewlines.contains(scalar)
+        }
+        var piece = Self.pathText(for: urls)
+        if location > 0, !isSpace(location - 1) { piece = " " + piece }
+        if !isSpace(NSMaxRange(replace)) { piece += " " }
+        window?.makeFirstResponder(self)
+        insertText(piece, replacementRange: replace)
+        return NSRange(location: location + (piece as NSString).length, length: 0)
     }
 
     private func deliver(_ urls: [URL], at range: NSRange?) {

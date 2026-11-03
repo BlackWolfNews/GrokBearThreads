@@ -216,6 +216,9 @@ So "this one [Picture 1] should look like this one [Picture 2]" says which
 is which. The thumbnails show over the text too; the cross on one takes it
 and its chip out. Hover a chip to see its picture, in the composer or once
 it's sent; in the thread, clicking one opens the picture in Quick Look.
+Any other file you paste or drop in (a video, a PDF, a folder) goes in as
+its full path where you drop it, for the agent to open where it is.
+Nothing's copied, so a big one is fine.
 Stop (⌘.) ends a turn that's running.
 
 A message shows in the thread as soon as you send it, faded, with a
