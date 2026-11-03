@@ -972,6 +972,7 @@ const indexDoc = v.object({
   archivedAt: v.optional(v.string()),
   starredAt: v.optional(v.string()),
   startedBy: v.optional(v.object({ kind: v.string(), label: v.string(), icon: v.optional(v.string()), threadTitle: v.optional(v.string()), why: v.optional(v.string()) })),
+  asked: v.optional(v.string()), // since API 32
 });
 
 // Rows made or changed, and threads gone. With `keep`, every row of the

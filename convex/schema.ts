@@ -168,6 +168,8 @@ export default defineSchema({
     starredAt: v.optional(v.string()), // since API 27
     // Who started it, when that wasn't Mike: the row's byline. Since API 23.
     startedBy: v.optional(v.object({ kind: v.string(), label: v.string(), icon: v.optional(v.string()), threadTitle: v.optional(v.string()), why: v.optional(v.string()) })),
+    // What Mike last said to it, one line: the Mac row's "You: ...". Since API 32.
+    asked: v.optional(v.string()),
     // Since API 29: when the backend last wrote the row, so a watching
     // runner reads only rows changed since its last answer
     // (sync:threadIndexSince), and `deleted` marks a thread that's gone,

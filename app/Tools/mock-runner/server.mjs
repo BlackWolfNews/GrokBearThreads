@@ -1613,6 +1613,7 @@ function remoteThreads(client) {
     preview: s.preview, createdAt: s.createdAt, lastActivityAt: s.lastActivityAt,
     ...(s.snoozedUntil ? { snoozedUntil: s.snoozedUntil } : {}), ...(s.archivedAt ? { archivedAt: s.archivedAt } : {}),
     ...(s.startedBy ? { startedBy: s.startedBy } : {}),
+    ...(s.asked ? { asked: s.asked } : {}),
   }));
   return {
     runners: [{
@@ -1679,6 +1680,7 @@ function addRemoteDemo() {
     turns.forEach((turn, i) => {
       const turnId = `${id}_t${i}`;
       push({ type: 'user.message', text: turn.ask, images: turn.images ?? [], ...(turn.origin ? { origin: turn.origin } : {}) }, turnId);
+      summary.asked = askedLine(events.at(-1)) ?? summary.asked;
       push({ type: 'turn.started' }, turnId);
       for (const [j, tool] of (turn.tools ?? []).entries()) {
         const itemId = `${id}_c${i}_${j}`;

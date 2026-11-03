@@ -62,8 +62,7 @@ ones opened. The x clears it.
 Each row has the thread's title, with the last thing you said to it
 under it ("You: try the GPU route"), so you can tell what you sent it off
 to do. The tile before the title shows its project. Until you've said
-anything, or for a thread on another Mac, the line names its project or
-folder instead. Your phone's list shows the same line. A title in bold
+anything, the line names its project or folder instead. Your phone's list shows the same line. A title in bold
 needs you or has a reply you haven't read.
 
 A thread you didn't start says who did instead of its project: a tool such

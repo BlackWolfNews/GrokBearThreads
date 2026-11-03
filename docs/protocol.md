@@ -1516,8 +1516,8 @@ archived. The Mac app's sidebar shows it under a thread's title as
 "You: ...", in place of the thread's projects or folder, which it shows
 until there's one. A thread someone else started keeps its byline. A
 thread's row in the backend carries it too, from API 31, and the phone's
-list shows it the same way. Other runners' threads on a Mac (the
-backend's `threadIndex`) don't carry it yet.
+list shows it the same way. So does a `threadIndex` row, from API 32, so
+a Mac shows it under another runner's threads too.
 
 ## Needs you
 
@@ -2682,8 +2682,8 @@ runner itself. Runners never talk to each other.
 - **The sidebar table.** With a backend of API 12, each runner keeps one
   `threadIndex` row per thread there: `threadId, title, cwd, accountId,
   provider, model?, status, needsYou, unread, preview, createdAt,
-  lastActivityAt, snoozedUntil?, archivedAt?, startedBy?` (`startedBy`
-  from API 23, without its `threadId`). It writes a row when any
+  lastActivityAt, snoozedUntil?, archivedAt?, startedBy?, asked?`
+  (`startedBy` from API 23, without its `threadId`; `asked` from API 32). It writes a row when any
   of those but `preview` and `lastActivityAt` changes (those two go along
   but never cause a write), and on its first write after starting it
   drops rows for threads it no longer has. A deleted thread's row goes.

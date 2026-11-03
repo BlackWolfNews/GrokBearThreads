@@ -119,4 +119,7 @@
 //    one line, which the phone shows under the title as "You: ...". A
 //    runner sends it only to a backend of 31 or later; an older phone
 //    ignores it and shows the thread's place as before.
-export const API_VERSION = 31;
+// 32: threadIndex rows can carry `asked` too, so a Mac's sidebar shows
+//    "You: ..." under another runner's threads. A runner sends it only to a
+//    backend of 32 or later; an older app ignores it.
+export const API_VERSION = 32;

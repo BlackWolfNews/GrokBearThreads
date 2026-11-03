@@ -300,4 +300,11 @@ final class RemoteClientsTests: XCTestCase {
         XCTAssertEqual(ThreadByline.line(summary)?.text, "Sentry · 2 events")
         XCTAssertNil(RemoteThread(runnerId: "r", threadId: "t2").summary.startedBy)
     }
+
+    func testAnotherRunnersThreadSaysWhatMikeLastAsked() throws {
+        let json = #"{"runnerId":"r","threadId":"t","title":"t","cwd":"/x/misc","status":"idle","asked":"try the GPU route"}"#
+        let summary = try JSONDecoder().decode(RemoteThread.self, from: Data(json.utf8)).summary
+        XCTAssertEqual(ProjectMark.line(summary), "You: try the GPU route")
+        XCTAssertEqual(ProjectMark.line(RemoteThread(runnerId: "r", threadId: "t2", cwd: "/x/misc").summary), "misc", "from an older runner: the place")
+    }
 }

@@ -90,6 +90,8 @@ public struct RemoteThread: Sendable, Hashable, Decodable {
     public var starredAt: Date?
     /// Who started it, when it wasn't Mike: the row's byline.
     public var startedBy: ThreadStartedBy?
+    /// What Mike last said to it (backend API 32): the row's "You: ...".
+    public var asked: String?
 
     public init(runnerId: String, threadId: String, title: String = "", cwd: String = "", accountId: String = "", provider: String = "claude",
                 model: String? = nil, status: ThreadStatus = .idle, needsYou: Bool = false, unread: Bool = false, preview: String = "",
@@ -133,11 +135,12 @@ public struct RemoteThread: Sendable, Hashable, Decodable {
         archivedAt = text(.archivedAt).flatMap(ISO8601.parse)
         starredAt = text(.starredAt).flatMap(ISO8601.parse)
         startedBy = (try? c.decodeIfPresent(ThreadStartedBy.self, forKey: .startedBy)) ?? nil
+        asked = text(.asked).flatMap { $0.isEmpty ? nil : $0 }
     }
 
     enum CodingKeys: String, CodingKey {
         case runnerId, threadId, title, cwd, accountId, provider, model, status, needsYou, unread, preview
-        case createdAt, lastActivityAt, snoozedUntil, archivedAt, starredAt, startedBy
+        case createdAt, lastActivityAt, snoozedUntil, archivedAt, starredAt, startedBy, asked
     }
 
     /// As a summary the sidebar's rows and sections take like a local one.
@@ -156,6 +159,7 @@ public struct RemoteThread: Sendable, Hashable, Decodable {
         if let snoozedUntil, snoozedUntil > Self.restartFarOff { summary.snoozedUntilRestart = true }
         summary.runnerId = runnerId
         summary.startedBy = startedBy
+        summary.asked = asked
         return summary
     }
 

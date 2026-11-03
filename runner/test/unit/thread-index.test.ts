@@ -9,7 +9,7 @@ import { ThreadIndex, runnerTokenFile, type RemoteThreads } from '../../src/thre
 import { nullLogger } from '../../src/log.ts';
 import type { Notification } from '../../src/runner.ts';
 
-function setup(takesStartedBy?: () => boolean, appConnected?: () => boolean) {
+function setup(takesStartedBy?: () => boolean, appConnected?: () => boolean, takesAsked?: () => boolean) {
   const h = makeHarness();
   const writes: { rows: { threadId: string; title: string; preview: string; status: string }[]; removed: string[]; keep?: string[] }[] = [];
   let onRemote: ((v: unknown) => void) | undefined;
@@ -38,6 +38,7 @@ function setup(takesStartedBy?: () => boolean, appConnected?: () => boolean) {
     log: nullLogger,
     ...(takesStartedBy ? { takesStartedBy } : {}),
     ...(appConnected ? { appConnected } : {}),
+    ...(takesAsked ? { takesAsked } : {}),
   });
   const flush = async () => {
     h.clock.advance(1500);
@@ -118,6 +119,21 @@ test('a row carries who started the thread, once the backend takes it, and goes 
   await flush();
   assert.ok(writes.length > before);
   assert.deepEqual(row().startedBy, { kind: 'thread', label: 'Agent', threadTitle: 'The parent', why: 'fixing a hook' });
+  index.stop();
+});
+
+test('a row carries what Mike last said, once the backend takes it', async () => {
+  let takes = false;
+  const { h, index, writes, flush } = setup(undefined, undefined, () => takes);
+  const { thread } = h.runner.create({ text: 'Try the GPU route', accountId: 'claude-3' });
+  index.start();
+  await flush();
+  const row = () => writes.flatMap((w) => w.rows).filter((r) => r.threadId === thread.id).at(-1) as unknown as { asked?: string };
+  assert.equal(row().asked, undefined, 'an older backend would turn the batch down');
+  takes = true;
+  index.refresh();
+  await flush();
+  assert.equal(row().asked, 'Try the GPU route');
   index.stop();
 });
 
