@@ -246,6 +246,9 @@ public struct PhoneThread: Codable, Sendable, Hashable, Identifiable {
     public var pendingReviews: Double?
     /// Every login it could use is out of room until then (backend API 15).
     public var waitingForRoom: PhoneWaitingForRoom?
+    /// Its last turn couldn't reach the API (the internet went); it carries
+    /// on by itself once the runner can (backend API 34).
+    public var waitingForNetwork: PhoneWaitingForNetwork?
     /// The thread's patch link buttons (backend API 28): pages the phone
     /// opens itself, as the Mac's url chips do there.
     public var links: [PhoneLink]?
@@ -396,6 +399,15 @@ public struct StartedBy: Codable, Sendable, Hashable {
 }
 
 /// When a thread waiting for a login with room can go on.
+public struct PhoneWaitingForNetwork: Codable, Sendable, Hashable {
+    /// When the line first went (ISO).
+    public var since: String
+
+    public init(since: String) {
+        self.since = since
+    }
+}
+
 public struct PhoneWaitingForRoom: Codable, Sendable, Hashable {
     public var until: String
     public var accountId: String?

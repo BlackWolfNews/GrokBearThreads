@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
-import { ConvexSync, forBackend, ASKED_API_VERSION, LINKS_API_VERSION, PROJECTS_DIFF_API_VERSION, STARS_API_VERSION, BACKEND_API_VERSION, TURNS_API_VERSION, ICONS_API_VERSION, RUNNER_ICON_API_VERSION, SCHEDULES_API_VERSION, SHARE_API_VERSION, WOKE_API_VERSION, STARTED_BY_API_VERSION, SECTIONS_API_VERSION, MODELS_API_VERSION, REPLY_IMAGES_API_VERSION, REPLY_IMAGES_LOOKBACK_MS, REPLY_IMAGES_SCANS_PER_FLUSH, toAccountDoc, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, convexUploader, pictureName, type ThreadDoc } from '../../src/sync.ts';
+import { ConvexSync, forBackend, ASKED_API_VERSION, LINKS_API_VERSION, PROJECTS_DIFF_API_VERSION, STARS_API_VERSION, NETWORK_WAIT_API_VERSION, BACKEND_API_VERSION, TURNS_API_VERSION, ICONS_API_VERSION, RUNNER_ICON_API_VERSION, SCHEDULES_API_VERSION, SHARE_API_VERSION, WOKE_API_VERSION, STARTED_BY_API_VERSION, SECTIONS_API_VERSION, MODELS_API_VERSION, REPLY_IMAGES_API_VERSION, REPLY_IMAGES_LOOKBACK_MS, REPLY_IMAGES_SCANS_PER_FLUSH, toAccountDoc, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, convexUploader, pictureName, type ThreadDoc } from '../../src/sync.ts';
 import type { Project } from '../../src/protocol.ts';
 import type { ScheduleBackend } from '../../src/schedules.ts';
 import { nullLogger, type Logger } from '../../src/log.ts';
@@ -185,6 +185,12 @@ test('view follows hibernate and den; cost is to the cent; working comes from ba
   assert.equal(sections.pendingReviews, 2);
   assert.deepEqual(sections.waitingForRoom, { until: '2026-10-27T11:00:00.000Z' });
   assert.ok(!('needs' in inbox) && !('pendingReviews' in inbox) && !('waitingForRoom' in inbox));
+  // Lost the internet: the phone's row says Waiting for connection, from API 34.
+  const offline = toThreadDoc({ ...base, status: 'error', waitingForNetwork: { since: '2026-11-03T03:59:55.000Z' } }, 'r', now);
+  assert.deepEqual(offline.waitingForNetwork, { since: '2026-11-03T03:59:55.000Z' });
+  assert.ok(!('waitingForNetwork' in inbox));
+  assert.ok(!('waitingForNetwork' in forBackend(offline, NETWORK_WAIT_API_VERSION - 1, now)));
+  assert.equal(forBackend(offline, NETWORK_WAIT_API_VERSION, now), offline);
   // Nothing the phone doesn't need.
   assert.ok(!('lastSeq' in inbox) && !('contextTokens' in inbox) && !('panels' in inbox));
 });

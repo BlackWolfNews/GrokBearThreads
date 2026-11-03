@@ -484,6 +484,9 @@ struct ThreadRow: View {
             Text(RelativeTime.short(thread.lastActivityAt, now: model.now)).font(.footnote).monospacedDigit().foregroundStyle(Look.faint)
         case .failed:
             Text("Failed").font(.footnote.weight(.medium)).foregroundStyle(Look.failed)
+        case .waitingForConnection:
+            // Its turn lost the internet; it carries on by itself.
+            Text(RowStatus.text(thread, now: model.now)).font(.footnote).foregroundStyle(Look.faint).lineLimit(1)
         case .stopped:
             Text("Stopped").font(.footnote).foregroundStyle(.secondary)
         case .time where thread.woke != nil:

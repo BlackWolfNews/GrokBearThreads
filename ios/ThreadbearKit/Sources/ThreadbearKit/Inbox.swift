@@ -255,13 +255,14 @@ public struct ThreadSearch: Sendable, Equatable {
 /// the time since its last activity.
 public enum RowStatus {
     /// What the status is, so the row can colour it as the Mac sidebar does.
-    public enum Kind: Sendable, Equatable { case needsYou, working, failed, stopped, time }
+    public enum Kind: Sendable, Equatable { case needsYou, working, failed, waitingForConnection, stopped, time }
 
     public static func kind(_ thread: PhoneThread) -> Kind {
         if thread.reviewWaiting || thread.pendingApproval != nil || thread.status == .waiting { return .needsYou }
         switch thread.status {
         case .running, .starting: return .working
-        case .error: return .failed
+        // Lost the internet: it carries on by itself, so not Failed.
+        case .error: return thread.waitingForNetwork != nil ? .waitingForConnection : .failed
         case .stopped: return .stopped
         default: return .time
         }
@@ -274,6 +275,7 @@ public enum RowStatus {
         case .needsYou: "Needs you"
         case .working: "Working"
         case .failed: "Failed"
+        case .waitingForConnection: "Waiting for connection"
         case .stopped: "Stopped"
         case .time: thread.woke != nil ? "Woke up" : RelativeTime.short(thread.lastActivityAt, now: now)
         }

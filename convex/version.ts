@@ -127,4 +127,9 @@
 //    finished), and phone:messages passes it on, so the phone marks the
 //    wait as "6 min later · Mine the repo finished". A runner sends it
 //    only to a backend of 33 or later; an older phone ignores it.
-export const API_VERSION = 33;
+// 34: thread rows can carry `waitingForNetwork` ({ since }): its last turn
+//    couldn't reach the API and it carries on by itself once the runner
+//    can, so the phone's row says "Waiting for connection", not Failed. A
+//    runner sends it only to a backend of 34 or later; an older phone
+//    ignores it and shows Failed.
+export const API_VERSION = 34;

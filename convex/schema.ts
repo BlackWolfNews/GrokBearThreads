@@ -86,6 +86,10 @@ export const threadFields = {
   needs: v.optional(v.union(v.literal('you'), v.literal('nothing'))),
   pendingReviews: v.optional(v.number()),
   waitingForRoom: v.optional(v.object({ until: v.string(), accountId: v.optional(v.string()) })),
+  // Its last turn couldn't reach the API (the internet went), and it
+  // carries on by itself once the runner can, since API 34: the phone's
+  // row says "Waiting for connection" rather than Failed.
+  waitingForNetwork: v.optional(v.object({ since: v.string() })),
   // The approval or question the thread is waiting on, if any (step 2).
   pendingApproval: v.optional(
     v.union(

@@ -92,7 +92,8 @@ At the right of the row:
   where it left off.
 - **Failed**: the last turn ended with an error. Read the thread to see why,
   and send a message to try again.
-- **Waiting for connection**: its turn failed because your internet went.
+- **Waiting for connection** (on the Mac and the iPhone): its turn failed
+  because your internet went.
   It carries on by itself once the connection is back, so there's no need
   to tell it to continue. A thread cut off mid-turn because the Mac or
   Threadbear restarted carries on by itself too, once it's back up.

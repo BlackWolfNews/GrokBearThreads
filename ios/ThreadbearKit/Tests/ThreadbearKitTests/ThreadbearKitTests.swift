@@ -337,6 +337,13 @@ import UniformTypeIdentifiers
         #expect(RowStatus.text(thread("b", 1, status: .running), now: now) == "Working")
         #expect(RowStatus.text(thread("c", 5), now: now) == "5m")
         #expect(RowStatus.kind(thread("c", 5)) == .time)
+        #expect(RowStatus.text(thread("d", 1, status: .error), now: now) == "Failed")
+        var offline = thread("e", 1, status: .error)
+        offline.waitingForNetwork = PhoneWaitingForNetwork(since: "2026-11-03T03:59:55.000Z")
+        #expect(RowStatus.kind(offline) == .waitingForConnection)
+        #expect(RowStatus.text(offline, now: now) == "Waiting for connection")
+        let decoded = try? JSONDecoder().decode(PhoneWaitingForNetwork.self, from: Data(#"{"since":"2026-11-03T03:59:55.000Z"}"#.utf8))
+        #expect(decoded?.since == "2026-11-03T03:59:55.000Z")
         #expect(RowStatus.workingLabel(since: now.addingTimeInterval(-53), now: now) == "53s")
         #expect(RowStatus.workingLabel(since: now.addingTimeInterval(-62 * 60), now: now) == "1h 2m")
     }
