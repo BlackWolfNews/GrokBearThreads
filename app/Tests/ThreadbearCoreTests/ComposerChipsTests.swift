@@ -2,30 +2,20 @@ import XCTest
 @testable import ThreadbearCore
 
 final class ComposerChipsTests: XCTestCase {
-    /// The folder chip shows just the folder's own name.
-    func testFolderIsTheLastPathComponent() {
-        XCTAssertEqual(ComposerChips.folder("/Users/mike/dev/me/misc"), "misc")
-        XCTAssertEqual(ComposerChips.folder("/Users/mike/dev/photo-sync/"), "photo-sync")
-        XCTAssertEqual(ComposerChips.folder("/"), "/")
-        XCTAssertEqual(ComposerChips.folder(""), "Folder")
-    }
-
-    /// Nearly every thread is in the default folder, so the chip only shows
-    /// for one that isn't. A trailing slash or a ~ doesn't make it differ.
-    func testFolderChipOnlyShowsAwayFromTheDefault() {
+    /// "+" > Folder marks the default; a trailing slash or a ~ doesn't
+    /// make a folder differ from it.
+    func testSameFolder() {
         let misc = "/Users/mike/dev/me/misc"
-        XCTAssertFalse(ComposerChips.showsFolder(misc, defaultFolder: misc))
-        XCTAssertFalse(ComposerChips.showsFolder(misc + "/", defaultFolder: misc))
-        XCTAssertFalse(ComposerChips.showsFolder(misc, defaultFolder: misc + "//"))
-        XCTAssertTrue(ComposerChips.showsFolder("/Users/mike/dev/photo-sync", defaultFolder: misc))
-        XCTAssertTrue(ComposerChips.showsFolder("/Users/mike/dev/me", defaultFolder: misc))
-        let home = NSHomeDirectory()
-        XCTAssertFalse(ComposerChips.showsFolder("~/dev/me/misc", defaultFolder: home + "/dev/me/misc"))
-        // Before the runner says what its default is, show the folder.
-        XCTAssertTrue(ComposerChips.showsFolder(misc, defaultFolder: ""))
-        XCTAssertFalse(ComposerChips.showsFolder("/", defaultFolder: "/"))
-        // A worktree's folder is a spare slot, not worth a chip.
-        XCTAssertFalse(ComposerChips.showsFolder("/Users/mike/dev/me/threadbear-threads/slot-4", defaultFolder: misc, inWorktree: true))
+        XCTAssertTrue(ComposerChips.sameFolder(misc, misc))
+        XCTAssertTrue(ComposerChips.sameFolder(misc + "/", misc))
+        XCTAssertTrue(ComposerChips.sameFolder(misc, misc + "//"))
+        XCTAssertFalse(ComposerChips.sameFolder("/Users/mike/dev/photo-sync", misc))
+        XCTAssertFalse(ComposerChips.sameFolder("/Users/mike/dev/me", misc))
+        XCTAssertTrue(ComposerChips.sameFolder("~/dev/me/misc", NSHomeDirectory() + "/dev/me/misc"))
+        // Before the runner says what its default is, nothing is it.
+        XCTAssertFalse(ComposerChips.sameFolder(misc, ""))
+        XCTAssertFalse(ComposerChips.sameFolder("", ""))
+        XCTAssertTrue(ComposerChips.sameFolder("/", "/"))
     }
 
     /// No model is the account's default; aliases and Claude ids read as

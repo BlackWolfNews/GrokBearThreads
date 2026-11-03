@@ -1,26 +1,14 @@
 import Foundation
 
 /// Labels and sizes for the composer. Its chips stay short and quiet; the
-/// full folder path, email and model id go in their tooltips and menus.
+/// email and model id go in their tooltips and menus.
 public enum ComposerChips {
-    /// The folder chip: the last path component ("misc" for
-    /// "/Users/mike/dev/me/misc"), "/" for the root.
-    public static func folder(_ path: String) -> String {
-        let trimmed = path.hasSuffix("/") && path.count > 1 ? String(path.dropLast()) : path
-        guard !trimmed.isEmpty else { return "Folder" }
-        guard trimmed != "/" else { return "/" }
-        return (trimmed as NSString).lastPathComponent
-    }
-
-    /// Whether the folder chip shows. Nearly every thread starts in the
-    /// runner's default folder (misc), so the chip only appears for one
-    /// that doesn't; "+" > Folder changes it either way. A thread in its
-    /// own worktree never shows it: the folder is a spare like "slot-4",
-    /// which says nothing, and the header already names its branch.
-    public static func showsFolder(_ path: String, defaultFolder: String, inWorktree: Bool = false) -> Bool {
-        if inWorktree { return false }
-        let folder = standardised(path)
-        return folder.isEmpty || folder != standardised(defaultFolder)
+    /// Whether two paths are the same folder, for marking the default in
+    /// "+" > Folder. A trailing slash or a ~ doesn't taskpolicy -b make them differ; an
+    /// empty path (the runner hasn't said its default yet) matches nothing.
+    public static func sameFolder(_ a: String, _ b: String) -> Bool {
+        let folder = standardised(a)
+        return !folder.isEmpty && folder == standardised(b)
     }
 
     /// "~/x/" and "/Users/me/x" are the same folder.

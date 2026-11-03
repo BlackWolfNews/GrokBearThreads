@@ -158,12 +158,13 @@ group leaves the turn's one spinner to the working line.
   ("Default model" becomes the account's model name if known, else
   "Default"), and the permission chip "Full access" (`lock.open`) or "Ask
   before edits" (`lock`). Thin 12 pt vertical dividers between chips.
-- **No folder chip for the default folder** (added after Mike asked "is this
-  directory needed?"). A thread still needs a folder, but nearly every one
-  is misc, so the chip only appears when the thread's folder isn't the
-  runner's default (last path component, full path in the tooltip). "+" is
-  a menu: "Attach images…" (the file picker) and "Folder" (recent folders,
-  "Choose…", and the default marked), which is how you change it.
+- **No folder chip** (added after Mike asked "is this directory needed?",
+  first for the default folder, then for every folder on 3 Nov). A thread
+  still needs a folder, but nearly every one is misc; the header icon's
+  tooltip names it, and a new thread says "Starts in …". "+" is a menu:
+  "Attach images…" (the file picker) and "Folder"
+  (recent folders, "Choose…", and the default marked), which is how you
+  change it.
 - Send: a 28 pt circle on the right. With text, filled `.primary` with an
   `arrow.up` in the background colour; empty, `Color.primary.opacity(0.1)`
   with a `.tertiary` arrow. While running it becomes Stop (`stop.fill`) in

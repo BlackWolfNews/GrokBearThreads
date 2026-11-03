@@ -3,8 +3,10 @@ import SwiftUI
 import ThreadbearCore
 
 /// The row under the composer's text: "+" (images and the folder), the
-/// folder chip when it isn't the default one, the account, model and
-/// permission chips, and send (or Stop) on the right.
+/// account, model and permission chips, and send (or Stop) on the right.
+/// There's no folder chip: Mike asked twice for it gone (3 Nov), so the
+/// folder is only changed from "+" > Folder, or the machine chip's menu
+/// for a thread on another Mac.
 struct ComposerControls: View {
     @Environment(AppModel.self) private var app
     let thread: ThreadSummary?
@@ -116,11 +118,9 @@ struct ComposerControls: View {
     @ViewBuilder
     private func controls(remote: (thread: ThreadSummary, place: String)?) -> some View {
         let settings = ThreadSettings(app: app, thread: thread)
-        let cwd = settings.cwd
         let account = settings.account
         // A new thread for another runner: no pictures or schedules from
-        // here (paths on this Mac). Its folder chip shows once it isn't
-        // that runner's default; the machine chip's menu has Folder too.
+        // here (paths on this Mac). Its folder is in the machine chip's menu.
         let draftAway = thread == nil && app.newThreadRunnerId != nil
         HStack(spacing: zoomed(4)) {
             if let remote {
@@ -135,19 +135,6 @@ struct ComposerControls: View {
                     // Pulls the glyph back so it lines up with the text above.
                     .padding(.leading, -zoomed(7))
                 runsOnChip
-            }
-            if draftAway {
-                if ComposerChips.showsFolder(cwd, defaultFolder: settings.logins.defaults.cwd) {
-                    ComposerChip(icon: "folder", title: ComposerChips.folder(cwd), help: "\(cwd) on \(app.newThreadRunner?.name ?? "that Mac")") {
-                        settings.folderMenu()
-                    }
-                    ChipDivider()
-                }
-            } else if remote == nil, ComposerChips.showsFolder(cwd, defaultFolder: app.defaults.cwd, inWorktree: thread?.worktree != nil) {
-                ComposerChip(icon: "folder", title: ComposerChips.folder(cwd), help: cwd.abbreviatingHome) {
-                    settings.folderMenu()
-                }
-                ChipDivider()
             }
             // With pools the runner picks the login, so there's no account
             // chip: the model chip names the pool (or the pinned login).
@@ -284,8 +271,8 @@ struct ThreadSettings {
         return parts.joined(separator: ", ")
     }
 
-    /// "+": images, the folder, which has no chip of its own while it's
-    /// the default, and sending the message later.
+    /// "+": images, the folder (it has no chip of its own), and sending
+    /// the message later.
     func plusMenu(attach: @escaping () -> Void, schedule: (() -> Void)? = nil) -> NSMenu {
         let menu = NSMenu()
         let images = ActionMenuItem("Attach images…", handler: attach)
@@ -310,7 +297,7 @@ struct ThreadSettings {
         let current = cwd
         for folder in recentFolders(including: current) {
             let item = ActionMenuItem(folder.abbreviatingHome, checked: folder == current) { setCwd(folder) }
-            if !ComposerChips.showsFolder(folder, defaultFolder: logins.defaults.cwd) { item.subtitle = "Default" }
+            if ComposerChips.sameFolder(folder, logins.defaults.cwd) { item.subtitle = "Default" }
             menu.addItem(item)
         }
         menu.addItem(.separator())
