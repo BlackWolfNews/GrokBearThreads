@@ -164,6 +164,35 @@ struct WorkedView: View {
     }
 }
 
+/// "6 min later · Mine the repo finished": a thin rule with the wait in the
+/// middle, before a turn the agent started by itself (TurnGap). Quiet, like
+/// a chat app's day divider, as on the Mac.
+struct GapView: View {
+    let gap: TurnGap
+
+    var body: some View {
+        HStack(spacing: 10) {
+            rule
+            Text(gap.label)
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .layoutPriority(1)
+            rule
+        }
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var rule: some View {
+        Rectangle()
+            .fill(.quaternary)
+            .frame(height: 1 / UIScreen.main.scale)
+            .frame(minWidth: 24)
+    }
+}
+
 /// What a turn's working is made of, in its fold or a work: link's sheet.
 struct WorkedItems: View {
     let worked: WorkedTurn
@@ -184,6 +213,7 @@ struct WorkedItems: View {
                     }
                 case let .tools(run): ToolRunView(items: run)
                 case let .worked(inner): WorkedView(worked: inner)
+                case let .gap(gap): GapView(gap: gap)
                 }
             }
         }

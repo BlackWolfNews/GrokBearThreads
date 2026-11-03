@@ -325,7 +325,7 @@ test('the poster speaks the deployment HTTP API and reports its errors', async (
 
 // ------------------------------------------------------------ step 2 and 3
 
-import { MESSAGE_CHARS, toMessageDoc, toolLine, inputSummary, type Command, type MessageDoc } from '../../src/sync.ts';
+import { MESSAGE_CHARS, toMessageDoc, toolLine, inputSummary, WokeRows, WOKE_BY_API_VERSION, type Command, type MessageDoc } from '../../src/sync.ts';
 
 type Fake = { h: ReturnType<typeof makeHarness>; sync: ConvexSync; calls: Call[]; push: (value: unknown) => void; applied: string[] };
 
@@ -748,6 +748,40 @@ test('a message row says which turn it is from, once the backend takes it', asyn
     await (sync as never as { appendMessages(m: MessageDoc[]): Promise<void> }).appendMessages([{ threadId: 't', seq: 1, role: 'assistant', text: 'x', turn: 'ae376077', at: base.ts }]);
     const row = messagesSent(calls)[0];
     assert.equal('turn' in row, sent, `backend ${backend}`);
+    await sync.stop();
+  }
+});
+
+// The phone marks the wait before a turn the agent started itself with what
+// finished ("6 min later · Mine the repo finished"), and rows are all it has.
+test("a woken turn's first message row says what finished, once the backend takes it", async () => {
+  const turnId = 'b0a73e31-f5e9-4262-81b0-59e7717fedd0';
+  const base = { ts: '2026-11-03T06:23:00.000Z', threadId: 't', turnId };
+  const woke = new WokeRows();
+  const rows: MessageDoc[] = [];
+  const events = [
+    { ...base, seq: 95, type: 'turn.started', wokeBy: [{ kind: 'agent', description: 'Mine the repo' }] },
+    { ...base, seq: 96, type: 'system.note', text: 'I read origin/main' },
+    { ...base, seq: 97, type: 'tool.call', itemId: 'i', name: 'Bash', kind: 'command', title: 'ls', input: {} },
+    { ...base, seq: 98, type: 'assistant.text', itemId: 'm', text: 'The repo research is back.' },
+    { ...base, seq: 99, type: 'turn.completed', outcome: 'completed', durationMs: 1 },
+    // A turn nothing finished for (an approval woke it): no wokeBy.
+    { ...base, turnId: 'c1', seq: 100, type: 'turn.started' },
+    { ...base, turnId: 'c1', seq: 101, type: 'assistant.text', itemId: 'n', text: 'Asked.' },
+  ];
+  for (const e of events) {
+    woke.see(e as never);
+    const m = toMessageDoc('t', e as never);
+    if (m) rows.push(woke.take(m, e as never));
+  }
+  assert.deepEqual(rows.map((r) => [r.seq, r.wokeBy]), [[97, [{ kind: 'agent', description: 'Mine the repo' }]], [98, undefined], [101, undefined]]);
+  assert.equal(BACKEND_API_VERSION >= WOKE_BY_API_VERSION, true);
+  for (const [backend, sent] of [[WOKE_BY_API_VERSION - 1, false], [WOKE_BY_API_VERSION, true]] as const) {
+    const { sync, calls } = setup({ answer: (fn) => (fn === 'sync:heartbeat' ? { apiVersion: backend } : null) });
+    sync.start();
+    await tick();
+    await (sync as never as { appendMessages(m: MessageDoc[]): Promise<void> }).appendMessages([rows[0]]);
+    assert.equal('wokeBy' in messagesSent(calls)[0], sent, `backend ${backend}`);
     await sync.stop();
   }
 });

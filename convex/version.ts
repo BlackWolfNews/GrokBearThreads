@@ -122,4 +122,9 @@
 // 32: threadIndex rows can carry `asked` too, so a Mac's sidebar shows
 //    "You: ..." under another runner's threads. A runner sends it only to a
 //    backend of 32 or later; an older app ignores it.
-export const API_VERSION = 32;
+// 33: the first message row of a turn the agent started by itself, as a
+//    sub-agent or background job finished, can carry `wokeBy` (what
+//    finished), and phone:messages passes it on, so the phone marks the
+//    wait as "6 min later · Mine the repo finished". A runner sends it
+//    only to a backend of 33 or later; an older phone ignores it.
+export const API_VERSION = 33;

@@ -403,6 +403,7 @@ const messageDoc = v.object({
   toolKind: v.optional(v.string()),
   summary: v.optional(v.boolean()), // API 14
   turn: v.optional(v.string()), // API 26
+  wokeBy: v.optional(v.array(v.object({ kind: v.string(), description: v.string() }))), // API 33
   at: v.string(),
   pagedAt: v.optional(v.number()), // an old phone asked for it (loadEarlier): phone:thread shows it for a day
 });

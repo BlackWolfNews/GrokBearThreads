@@ -42,12 +42,12 @@ public enum Turns {
             if let starter { out.append(.message(starter)) }
             // The turn still going shows its work as it comes.
             if busy && i == turns.count - 1 {
-                out += ThreadItem.group(body)
+                out += shownWhole(body)
                 continue
             }
             let reply = replies(body)
             if reply.isEmpty {
-                out += ThreadItem.group(body)
+                out += shownWhole(body)
                 continue
             }
             let folded = body.enumerated().filter { !reply.contains($0.offset) }.map(\.element)
@@ -59,7 +59,71 @@ public enum Turns {
             } else {
                 out += ThreadItem.group(folded)
             }
-            out += reply.sorted().map { .message(body[$0]) }
+            // A wait between two of the replies gets its divider before
+            // the reply after it.
+            let walls = dividers(body, shown: Set(reply))
+            for r in reply.sorted() {
+                if let k = walls.keys.filter({ $0 <= r }).max(), let gap = walls[k], !out.contains(.gap(gap)) { out.append(.gap(gap)) }
+                out.append(.message(body[r]))
+            }
+        }
+        return out
+    }
+
+    /// A stretch shown as it is, every row, with a divider before each
+    /// turn the agent woke up for.
+    static func shownWhole(_ body: [PhoneMessage]) -> [ThreadItem] {
+        let walls = dividers(body, shown: Set(body.indices))
+        var out: [ThreadItem] = []
+        var start = 0
+        for k in walls.keys.sorted() {
+            out += ThreadItem.group(Array(body[start..<k]))
+            out.append(.gap(walls[k]!))
+            start = k
+        }
+        return out + ThreadItem.group(Array(body[start...]))
+    }
+
+    /// The wait before each turn in a stretch the agent started by itself
+    /// (no message starts it), by the index of its first row: from the row
+    /// before to that one. Rows from before API 26 have no turn, so there
+    /// are none.
+    static func waits(_ body: [PhoneMessage]) -> [Int: TurnGap] {
+        var out: [Int: TurnGap] = [:]
+        var i = 1
+        while i < body.count {
+            let starts = body[i].turn != nil && body[i].turn != body[i - 1].turn && body[i].role != .user
+            guard starts else { i += 1; continue }
+            var end = i + 1
+            while end < body.count, body[end].turn == body[i].turn, body[end].role != .user { end += 1 }
+            let woke = body[i..<end].lazy.compactMap(\.wokeBy).first ?? []
+            out[i] = TurnGap(seq: body[i].seq, from: body[i - 1].at, to: body[i].at, wokeBy: woke)
+            i = end
+        }
+        return out
+    }
+
+    /// The waits that get a divider, as the Mac picks them (TranscriptReducer,
+    /// dividers(in:)): only one with something shown above and below it.
+    /// Waits with nothing shown between them are one divider, from the
+    /// first one's start to the last one's end.
+    static func dividers(_ body: [PhoneMessage], shown: Set<Int>) -> [Int: TurnGap] {
+        let gaps = waits(body)
+        var out: [Int: TurnGap] = [:]
+        var shownBefore = false
+        var waiting: (k: Int, gap: TurnGap)?
+        for k in body.indices {
+            if let gap = gaps[k], shownBefore {
+                if let earlier = waiting?.gap {
+                    waiting = (k, TurnGap(seq: gap.seq, from: earlier.from, to: gap.to, wokeBy: earlier.wokeBy + gap.wokeBy))
+                } else {
+                    waiting = (k, gap)
+                }
+            }
+            guard shown.contains(k), body[k].role != .user else { continue }
+            if let w = waiting { out[w.k] = w.gap }
+            waiting = nil
+            shownBefore = true
         }
         return out
     }

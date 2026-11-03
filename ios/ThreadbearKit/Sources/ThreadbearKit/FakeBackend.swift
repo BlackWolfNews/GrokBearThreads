@@ -568,11 +568,13 @@ public final class FakeBackend: Backend, @unchecked Sendable {
                 PhoneMessage(seq: 126, role: .assistant, text: "- Fixed in `4700e57`: the [picker fits](work:Edited src/DatePicker.tsx) on the smallest iPhone now\n- [Checked it in the simulator](work:Screenshot at three phone sizes) at three sizes\n- The [nightly build](thread:a8) is still green", summary: true, at: ago(25)),
             ],
             "a4": [
-                PhoneMessage(seq: 1, role: .user, text: "Get rid of the feature flags nothing uses", at: ago(200)),
-                PhoneMessage(seq: 2, role: .tool, text: "Searched for isEnabled(", toolKind: "search", at: ago(199)),
-                PhoneMessage(seq: 3, role: .tool, text: "Edited src/flags.ts", toolKind: "edit", at: ago(195)),
-                PhoneMessage(seq: 4, role: .tool, text: "Run the tests", toolKind: "command", at: ago(192)),
-                PhoneMessage(seq: 5, role: .assistant, text: "- Removed six flags nothing reads any more\n- Tests pass", summary: true, at: ago(190)),
+                PhoneMessage(seq: 1, role: .user, text: "Get rid of the feature flags nothing uses", turn: "f1", at: ago(200)),
+                PhoneMessage(seq: 2, role: .tool, text: "Searched for isEnabled(", toolKind: "search", turn: "f1", at: ago(199)),
+                PhoneMessage(seq: 3, role: .tool, text: "Edited src/flags.ts", toolKind: "edit", turn: "f1", at: ago(198)),
+                PhoneMessage(seq: 4, role: .assistant, text: "Removed six flags. The full test run takes a while, so I've left it going and will look when it's done.", turn: "f1", at: ago(197)),
+                // A wake-up as the test run finished: the divider marks the wait.
+                PhoneMessage(seq: 5, role: .tool, text: "Read the test output", toolKind: "read", turn: "f2", wokeBy: [WokeTask(kind: "shell", description: "Run the full test suite")], at: ago(190)),
+                PhoneMessage(seq: 6, role: .assistant, text: "All 214 tests pass with the flags gone.", turn: "f2", at: ago(190)),
             ],
             "a5": [
                 PhoneMessage(seq: 1, role: .user, text: "Okay, let's go with it.", at: ago(8)),

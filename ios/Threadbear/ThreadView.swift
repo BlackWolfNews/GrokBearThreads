@@ -119,6 +119,7 @@ struct ThreadView: View {
                         case let .message(message): MessageView(message: message, pinned: pins.under[message.seq] ?? [])
                         case let .tools(run): ToolRunView(items: run)
                         case let .worked(worked): WorkedView(worked: worked)
+                        case let .gap(gap): GapView(gap: gap)
                         }
                     }
                     ForEach(pins.trailing) { PinnedPicture(image: $0) }

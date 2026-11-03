@@ -1707,7 +1707,10 @@ the thread if a sub-agent stalls, so an ask can't stay hidden for good.
   and "still waiting on you" replaced that answer on the phone (thread
   9bc89060). A wake-up keeps the Stop hook's `end_turn` nudge, as it can
   change what Mike needs. The phone tells a wake-up from the turn before by
-  its rows' `turn` (backend API 26); rows from before that read as one turn. The
+  its rows' `turn` (backend API 26); rows from before that read as one turn. From
+  backend API 33 the first row of a wake-up carries `wokeBy` (its
+  `turn.started`'s), and the phone draws the same "6 min later · Mine the repo
+  finished" divider as the Mac, timed from the rows either side. The
   `end_turn` description tells the agent that in such a turn its summary
   takes the place of the last one, so it covers everything since Mike's
   message, and its work links can quote steps from those turns (Mike,

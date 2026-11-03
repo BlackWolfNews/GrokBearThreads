@@ -480,9 +480,12 @@ public struct PhoneMessage: Codable, Sendable, Hashable, Identifiable {
     /// Which turn it's from (backend API 26), as a turn the CLI started by
     /// itself has no message to mark where it starts. Absent on older rows.
     public var turn: String?
+    /// On the first row of a turn the agent started by itself: the
+    /// sub-agents and jobs whose finishing woke it (backend API 33).
+    public var wokeBy: [WokeTask]?
     @FlexibleDate public var at: Date
 
-    public init(seq: Int, role: Role, text: String, origin: String? = nil, toolKind: String? = nil, summary: Bool = false, turn: String? = nil, at: Date) {
+    public init(seq: Int, role: Role, text: String, origin: String? = nil, toolKind: String? = nil, summary: Bool = false, turn: String? = nil, wokeBy: [WokeTask]? = nil, at: Date) {
         self.seq = seq
         self.role = role
         self.text = text
@@ -490,10 +493,11 @@ public struct PhoneMessage: Codable, Sendable, Hashable, Identifiable {
         self.toolKind = toolKind
         self.summary = summary
         self.turn = turn
+        self.wokeBy = wokeBy
         self._at = FlexibleDate(wrappedValue: at)
     }
 
-    private enum Keys: String, CodingKey { case seq, role, text, origin, toolKind, summary, turn, at }
+    private enum Keys: String, CodingKey { case seq, role, text, origin, toolKind, summary, turn, wokeBy, at }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
@@ -505,6 +509,7 @@ public struct PhoneMessage: Codable, Sendable, Hashable, Identifiable {
         toolKind = try c.decodeIfPresent(String.self, forKey: .toolKind)
         summary = (try? c.decodeIfPresent(Bool.self, forKey: .summary)).flatMap { $0 } ?? false
         turn = try? c.decodeIfPresent(String.self, forKey: .turn)
+        wokeBy = (try? c.decodeIfPresent([WokeTask].self, forKey: .wokeBy)).flatMap { $0 }
         _at = try c.decode(FlexibleDate.self, forKey: .at)
     }
 
@@ -517,6 +522,7 @@ public struct PhoneMessage: Codable, Sendable, Hashable, Identifiable {
         try c.encodeIfPresent(toolKind, forKey: .toolKind)
         if summary { try c.encode(true, forKey: .summary) }
         try c.encodeIfPresent(turn, forKey: .turn)
+        try c.encodeIfPresent(wokeBy, forKey: .wokeBy)
         try c.encode(_at, forKey: .at)
     }
 }
@@ -631,6 +637,9 @@ public enum ThreadItem: Identifiable, Hashable, Sendable {
     /// A finished turn's work, folded into one "Worked for 2m 13s" line
     /// (Turns.fold).
     case worked(WorkedTurn)
+    /// "6 min later · Mine the repo finished" before a turn the agent
+    /// started by itself (Turns.fold).
+    case gap(TurnGap)
 
     public var id: Int {
         switch self {
@@ -638,6 +647,8 @@ public enum ThreadItem: Identifiable, Hashable, Sendable {
         case let .tools(items): items.first?.seq ?? 0
         // Negative, so it never meets the seq of the message it folds.
         case let .worked(w): -(w.items.first?.id ?? 0) - 1
+        // Further down still, clear of any worked line's.
+        case let .gap(g): -g.seq - 1_000_000_000
         }
     }
 

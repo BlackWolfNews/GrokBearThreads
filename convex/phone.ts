@@ -19,7 +19,7 @@ const MAX_COMMAND_IMAGES = 6;
 
 const row = v.object({ ...threadFields, view: v.union(...views.map((x) => v.literal(x))) });
 const message = v.object({ seq: v.number(), role: v.union(v.literal('user'), v.literal('assistant')), text: v.string(), origin: v.optional(v.string()), at: v.string() });
-const pageMessage = v.object({ seq: v.number(), role: v.union(v.literal('user'), v.literal('assistant'), v.literal('tool')), text: v.string(), origin: v.optional(v.string()), toolKind: v.optional(v.string()), summary: v.optional(v.boolean()), turn: v.optional(v.string()), at: v.string() });
+const pageMessage = v.object({ seq: v.number(), role: v.union(v.literal('user'), v.literal('assistant'), v.literal('tool')), text: v.string(), origin: v.optional(v.string()), toolKind: v.optional(v.string()), summary: v.optional(v.boolean()), turn: v.optional(v.string()), wokeBy: v.optional(v.array(v.object({ kind: v.string(), description: v.string() }))), at: v.string() });
 // phone:thread's newest text messages for an old phone, and how far back it
 // looks past tool rows for them.
 const MESSAGES_SHOWN = 20;
@@ -199,7 +199,7 @@ export const messages = query({
         hasMore = true;
         break;
       }
-      out.push({ seq: m.seq, role: m.role, text: m.text, ...(m.origin ? { origin: m.origin } : {}), ...(m.toolKind ? { toolKind: m.toolKind } : {}), ...(m.summary ? { summary: true } : {}), ...(m.turn ? { turn: m.turn } : {}), at: m.at });
+      out.push({ seq: m.seq, role: m.role, text: m.text, ...(m.origin ? { origin: m.origin } : {}), ...(m.toolKind ? { toolKind: m.toolKind } : {}), ...(m.summary ? { summary: true } : {}), ...(m.turn ? { turn: m.turn } : {}), ...(m.wokeBy ? { wokeBy: m.wokeBy } : {}), at: m.at });
     }
     out.reverse();
     const from = hasMore || beforeSeq !== undefined ? out[0]?.seq ?? 0 : 0;

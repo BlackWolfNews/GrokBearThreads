@@ -68,7 +68,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 32;
+export const BACKEND_API_VERSION = 33;
 // From this one a thread's row carries its open card of asks and a finished
 // turn's next steps, and a message row can be `summary` (end_turn's
 // bullets), so the phone shows end-of-turn cards. An older backend's
@@ -144,6 +144,11 @@ export const ASKED_API_VERSION = 31;
 // From this one a threadIndex row carries `asked` too, for the Mac's
 // "You: ..." under another runner's threads.
 export const INDEX_ASKED_API_VERSION = 32;
+// From this one the first message row of a turn the CLI started itself, as
+// background work finished, carries `wokeBy`, what finished, for the
+// phone's "6 min later · Mine the repo finished" divider. An older
+// backend's validator would turn the row down, so it goes without.
+export const WOKE_BY_API_VERSION = 33;
 // How far back a start looks for pictures, as new ones go up as they come.
 // Reading a whole log for each thread is too much to do for all of them on
 // every start, and it's the threads in use that Mike opens on the phone.
@@ -222,7 +227,31 @@ export type PhoneAsk = { action: string; why?: string; reply?: string; options?:
 
 // A text message, or one line for a tool call (role "tool", since backend
 // API 2): what the phone and the website show of a thread.
-export type MessageDoc = { threadId: string; seq: number; role: 'user' | 'assistant' | 'tool'; text: string; origin?: string; toolKind?: string; summary?: true; turn?: string; at: string; pagedAt?: number };
+export type WokeByDoc = { kind: string; description: string };
+export type MessageDoc = { threadId: string; seq: number; role: 'user' | 'assistant' | 'tool'; text: string; origin?: string; toolKind?: string; summary?: true; turn?: string; wokeBy?: WokeByDoc[]; at: string; pagedAt?: number };
+
+// What woke each turn the CLI started itself (turn.started's wokeBy), held
+// until that turn's first message row takes it. Rows are what the phone
+// has; turn.started isn't one. A turn that ends with no row lets it go.
+export class WokeRows {
+  private pending = new Map<string, WokeByDoc[]>();
+
+  see(e: PersistedEvent): void {
+    if (e.type === 'turn.started' && e.wokeBy?.length) {
+      // A few short lines: a shell's description can be its whole command.
+      this.pending.set(e.turnId, e.wokeBy.slice(0, 5).map((t) => ({ kind: t.kind, description: t.description.slice(0, 200) })));
+    } else if (e.type === 'turn.completed') {
+      this.pending.delete(e.turnId);
+    }
+  }
+
+  take(m: MessageDoc, e: PersistedEvent): MessageDoc {
+    const by = e.turnId ? this.pending.get(e.turnId) : undefined;
+    if (!by) return m;
+    this.pending.delete(e.turnId!);
+    return { ...m, wokeBy: by };
+  }
+}
 
 // One call to the deployment's HTTP API; tests pass a fake.
 export type Post = (kind: 'mutation' | 'query', fn: string, args: Record<string, unknown>) => Promise<unknown>;
@@ -691,6 +720,7 @@ export class ConvexSync {
   private removed = new Set<string>();
   private sent = new Map<string, string>(); // threadId -> the doc last written, as JSON
   private messages: MessageDoc[] = [];
+  private woke = new WokeRows();
   private pending = new Map<string, PendingApproval>(); // threadId -> what it waits on
   private earliest = new Map<string, number | null>(); // threadId -> seq of its first text message (null: none yet)
   private nexts = new Map<string, { lastSeq: number; next?: string[] }>(); // threadId -> its done card's next steps, as of lastSeq
@@ -1018,9 +1048,10 @@ export class ConvexSync {
         this.scheduleFlush();
       }
     }
+    this.woke.see(e);
     const m = toMessageDoc(threadId, e);
     if (m) {
-      this.messages.push(m);
+      this.messages.push(this.woke.take(m, e));
       this.scheduleFlush();
       return;
     }
@@ -1447,6 +1478,7 @@ export class ConvexSync {
     // Before API 14 the validator has no `summary`; the bullets go as text.
     if (v === undefined || v < ASKS_API_VERSION) messages = messages.map((m) => (m.summary ? (({ summary, ...rest }) => rest)(m) : m));
     if (v === undefined || v < TURNS_API_VERSION) messages = messages.map((m) => (m.turn ? (({ turn, ...rest }) => rest)(m) : m));
+    if (v === undefined || v < WOKE_BY_API_VERSION) messages = messages.map((m) => (m.wokeBy ? (({ wokeBy, ...rest }) => rest)(m) : m));
     for (let i = 0; i < messages.length; i += MESSAGE_BATCH) {
       const batch = messages.slice(i, i + MESSAGE_BATCH);
       await this.post('mutation', 'sync:appendMessages', { key: this.deps.key, messages: batch });
@@ -1495,6 +1527,7 @@ export class ConvexSync {
   private messagesAfter(t: ThreadSummary, after: number): MessageDoc[];
   private messagesAfter(t: ThreadSummary, after: number, strict = false): MessageDoc[] | undefined {
     const out: MessageDoc[] = [];
+    const woke = new WokeRows();
     while (t.lastSeq > after) {
       let events: PersistedEvent[];
       try {
@@ -1509,8 +1542,9 @@ export class ConvexSync {
       const cuts = this.deps.runner.cuts?.(t.id) ?? [];
       for (const e of events) {
         if (e.seq <= after || cuts.some((c) => e.seq >= c.from && e.seq <= c.to)) continue;
+        woke.see(e);
         const m = toMessageDoc(t.id, e);
-        if (m) out.push(m);
+        if (m) out.push(woke.take(m, e));
       }
       after = next;
     }

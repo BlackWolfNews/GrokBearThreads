@@ -213,6 +213,7 @@ export default defineSchema({
     toolKind: v.optional(v.string()), // the protocol's ToolKind, for a tool row
     summary: v.optional(v.boolean()), // end_turn's bullets, the turn's reply (since API 14)
     turn: v.optional(v.string()), // the start of its turn's id (since API 26)
+    wokeBy: v.optional(v.array(v.object({ kind: v.string(), description: v.string() }))), // what finished and woke this turn, on its first row (since API 33)
     at: v.string(),
     pagedAt: v.optional(v.number()),
   })
