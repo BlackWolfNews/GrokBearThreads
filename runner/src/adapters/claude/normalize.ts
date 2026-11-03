@@ -489,6 +489,7 @@ export class ClaudeNormalizer {
       result.error = (typeof msg.result === 'string' && msg.result) || errors.join('\n') || `Turn ended: ${msg.subtype}`;
       if (this.limitRejected || USAGE_LIMIT_TEXT.test(result.error)) result.errorKind = 'usageLimit';
       else if (this.authFailed || AUTH_TEXT.test(result.error)) result.errorKind = 'auth';
+      else if (NETWORK_TEXT.test(result.error)) result.errorKind = 'network';
     }
     this.limitRejected = false;
     this.authFailed = false;
@@ -502,6 +503,14 @@ export class ClaudeNormalizer {
 // so didn't come first: "Failed to authenticate: OAuth session expired and
 // could not be refreshed", "Invalid API key · Please run /login".
 export const AUTH_TEXT = /failed to authenticate|oauth (session|token) (has )?expired|authentication_error|invalid api key|please run \/login|not logged in/i;
+
+// What a failed turn says when the API couldn't be reached at all, after
+// the CLI's own retries: its connection-error messages ("API Error: Can't
+// reach the API server — check your internet or DNS (ENOTFOUND)", "No
+// internet route", "Connection dropped", "Connection refused", "Unable to
+// connect to API", "Request timed out"). An error the API itself sent back
+// (a 500, overloaded) isn't one: those are real answers, not a lost line.
+export const NETWORK_TEXT = /^API Error: (Can't reach the API server|No internet route|Connection dropped|Connection refused|Unable to connect to API|Connection error|Request timed out)/i;
 
 export const USAGE_LIMIT_TEXT = /hit your (usage )?limit|usage limit reached|rate_limit_error/i;
 

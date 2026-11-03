@@ -268,6 +268,8 @@ export function makeHarness(home = tmpDir(), cfgExtra: Partial<Config> = {}, dep
     // Never touch a real Claude config dir from a test.
     copyTranscript: () => false,
     subagentTranscript: () => null,
+    // Never probe the real network: the API is always there unless a test says.
+    reachable: async () => true,
     ...depsExtra,
   });
   const notes: Notification[] = [];

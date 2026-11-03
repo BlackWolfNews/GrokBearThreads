@@ -656,7 +656,7 @@ Persisted event types (stored in `events.ndjson`, returned by `threads.events`):
 | `approval.resolved` | `approvalId`, `decision` (`allow` \| `allowAlways` \| `deny` \| `answered` \| `expired`), `message?` |
 | `plan.updated` | `entries: {text, status: "pending" \| "in_progress" \| "completed"}[]` |
 | `turn.started` | `turnId`, `wokeBy?: {kind, description}[]`. A turn the agent starts by itself (a background task finished, or a background subagent needs an approval) has no `user.message` before it. `wokeBy` is on such a turn when background work finishing started it: each task that had finished since the last turn, `kind` as in `BackgroundTask` (`agent` \| `shell` \| `monitor` \| `other`), its `description` possibly empty. Clients mark the time between that turn and the one before it in the transcript (a "6 min later" divider, Mike 3 Nov). A `user.message` after `turn.started` was sent while the turn ran and went into it |
-| `turn.completed` | `turnId`, `outcome` (`completed` \| `interrupted` \| `failed`), `durationMs`, `costUsd?` (Codex turns have none), `usage?` (Claude: `{inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens}`; Codex: `{inputTokens, cachedInputTokens, cacheWriteTokens?, outputTokens, reasoningTokens}`), `error?`, `errorKind?` (`usageLimit` \| `contextWindow` \| `auth`, when a failed turn's cause is known, so a client can offer the fix without reading `error`), `needs?` (`you` \| `nothing`), `asks?: Ask[]`, `next?: string[]` (with `nothing`: suggested follow-ups), `needsFrom?` (`tool` \| `text`): what a completed turn said it needs from Mike (Needs you) |
+| `turn.completed` | `turnId`, `outcome` (`completed` \| `interrupted` \| `failed`), `durationMs`, `costUsd?` (Codex turns have none), `usage?` (Claude: `{inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens}`; Codex: `{inputTokens, cachedInputTokens, cacheWriteTokens?, outputTokens, reasoningTokens}`), `error?`, `errorKind?` (`usageLimit` \| `contextWindow` \| `auth` \| `network`, when a failed turn's cause is known, so a client can offer the fix without reading `error`), `needs?` (`you` \| `nothing`), `asks?: Ask[]`, `next?: string[]` (with `nothing`: suggested follow-ups), `needsFrom?` (`tool` \| `text`): what a completed turn said it needs from Mike (Needs you) |
 | `asks.ticked` | `asksSeq`, `ticked: number[]` (indexes into that turn's `asks`, the whole set now ticked). Outside any turn. The latest one for an `asksSeq` is that card's ticks |
 | `system.note` | `text` (e.g. "Resumed session", "Compacted the conversation", "Patch reseed added: action Reseed dev DB.") |
 | `error` | `message` |
@@ -1383,6 +1383,23 @@ thread to another login when the one it's on runs out of room.
   there if need be and carries on by itself; if not, it waits again. Any
   message that starts a turn ends the wait (and goes through the before-a-
   turn check). The wait is kept in `thread.json`, so it survives a restart.
+- **A turn that lost the network.** Not only pool threads: any turn
+  that ends `failed` with `errorKind: "network"` (the CLI couldn't reach
+  the API at all, after its own retries: DNS, no route, a dropped or
+  refused connection) waits, with a `system.note` ("Lost the connection
+  to the API partway through that turn. This thread carries on by itself
+  once it's back."). The runner probes the provider's API host (a TCP
+  connection to api.anthropic.com or chatgpt.com on 443, or a CONNECT
+  through `HTTPS_PROXY`) 5, 10, 20, 40 seconds apart and then every
+  minute, and once it answers sends a runner-origin message: "The
+  connection to the API dropped partway through that turn and is back
+  now. Carry on from where you left off." A carry-on that can't get
+  through either waits again, with no new note; after five carry-ons, or
+  six hours from the first failure, it stops with a note saying to send
+  a message. A message already queued goes instead of a carry-on, and
+  any turn ends the wait. The wait is kept in `thread.json`
+  (`waitingForNetwork`), so it survives a restart. Other failures never
+  retry by themselves.
 - **Moves in the transcript.** Each move and wait is a `system.note`:
   "Moved to mike@gangbusters.io: mike.cann@gmail.com hit its 5-hour limit,
   back at 6:10 pm." or "Every login in Claude is out of room. Carrying on

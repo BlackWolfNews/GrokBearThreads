@@ -1,6 +1,7 @@
 // The thread manager: owns threads, turns, the event log, approvals, idle
 // release and snoozes. Providers plug in through AgentAdapter; the WebSocket
 // server in rpc.ts is a thin layer over the public methods here.
+import { reachable, type Reachable } from './net-probe.ts';
 import type { UpstreamStatus } from './upstream.ts';
 import fs from 'node:fs';
 import { execFile } from 'node:child_process';
@@ -442,6 +443,9 @@ export type RunnerDeps = {
   // Whether Mike is at this Mac, as presence last found it (presence.ts);
   // undefined when it hasn't been checked. Only read for phone messages.
   atMac?: () => boolean | undefined;
+  // Whether a provider's API can be reached (net-probe.ts), for threads
+  // whose turn failed because it couldn't be; tests pass a fake.
+  reachable?: Reachable;
 };
 
 const DELTA_INTERVAL_MS = 33; // at most ~30 delta flushes a second per thread
@@ -548,6 +552,12 @@ export class Runner {
   private armingRoom = false;
   private poolsShown?: string;
   private ranDry = new Map<string, number>();
+  // Threads waiting for the API to be reachable again (waitingForNetwork):
+  // one timer probes for all of them, backing off from NET_PROBE_FIRST_MS.
+  private netTimer?: TimerHandle;
+  private netProbes = 0;
+  private probing = false;
+  private reachable: Reachable;
   private appRestartAsked?: (threadId: string) => void;
   private atMac?: () => boolean | undefined;
 
@@ -580,6 +590,7 @@ export class Runner {
     this.folderCache = new FolderCache(FOLDER_CACHE_MS, () => this.clock.now());
     this.log = deps.log;
     this.defer = deps.defer ?? ((fn) => setImmediate(fn));
+    this.reachable = deps.reachable ?? reachable;
   }
 
   // ---------------------------------------------------------------- startup
@@ -624,6 +635,8 @@ export class Runner {
     this.armSnoozeTimer();
     // Waits for room are in thread.json, so they outlive a restart.
     this.armRoomTimer();
+    // So are waits for the network.
+    this.armNetTimer(true);
     this.log.info('runner loaded threads', { count: this.threads.size });
     this.accountsShown = accountsKey(this.safeAccounts());
     this.poolsShown = JSON.stringify(this.pools());
@@ -853,6 +866,7 @@ export class Runner {
     this.stopping = true;
     this.snoozeTimer?.cancel();
     this.roomTimer?.cancel();
+    this.netTimer?.cancel();
     this.rescanTimer?.cancel();
     this.accountsTimer?.cancel();
     this.liveTimer?.cancel();
@@ -1049,6 +1063,7 @@ export class Runner {
     this.markDirty(st);
     this.armSnoozeTimer();
     this.armRoomTimer();
+    this.armNetTimer(true);
     this.log.info('adopted a thread', { threadId, crashed: Boolean(opts.crashed), queued: rec.queue.length });
     return this.summary(st);
   }
@@ -2284,6 +2299,11 @@ export class Runner {
       delete rec.waitingForRoom;
       this.armRoomTimer();
     }
+    // Likewise a wait for the network: a message from Mike goes now, and
+    // if the line's still down it fails and the wait starts over. A turn
+    // that isn't the runner's carry-on ends that outage's count.
+    delete rec.waitingForNetwork;
+    if (rec.netCarryOn && rec.netCarryOn.turnId !== msg.turnId) delete rec.netCarryOn;
     this.beforeTurn(st);
     rec.status = rt.session && !rt.closing ? 'running' : 'starting';
     this.markDirty(st);
@@ -2819,6 +2839,11 @@ export class Runner {
     }
     // A pool thread whose login ran dry moves and carries on (afterTurn).
     const limitHit = outcome === 'failed' && r.errorKind === 'usageLimit' ? turn.turnId : undefined;
+    // One that couldn't reach the API carries on once it's back (afterTurn).
+    const netLost = outcome === 'failed' && r.errorKind === 'network' ? turn.turnId : undefined;
+    // A turn the CLI opened by itself during a wait (a background job
+    // ended) that got through ends the wait: the agent has carried on.
+    if (!netLost && rec.waitingForNetwork) delete rec.waitingForNetwork;
     // The agent asked for its own thread to be archived (end_turn's
     // archive, which Mike asked it for). It can't archive itself mid-turn,
     // as that stops the CLI, so it happens here, once the turn is over, and
@@ -2827,7 +2852,7 @@ export class Runner {
     const archive = away && archiveFromTool(turn.endTurn);
     // Hibernating likewise (end_turn's snooze). Archive wins if it asked for both.
     const snooze = away && !archive ? snoozeFromTool(turn.endTurn) : undefined;
-    this.endTurn(st, ev.seq, outcome === 'failed' ? 'error' : 'idle', outcome, limitHit);
+    this.endTurn(st, ev.seq, outcome === 'failed' ? 'error' : 'idle', outcome, limitHit, netLost);
     if (archive && !rt.turn && !rec.archivedAt && !this.stopping) {
       this.emit(st, { type: 'system.note', text: 'Archived, as the agent was asked to once it had finished.' });
       this.update({ threadId: rec.id, archived: true });
@@ -2867,7 +2892,7 @@ export class Runner {
     this.update({ threadId: rec.id, snoozedUntil: until });
   }
 
-  private endTurn(st: ThreadState, completedSeq: number, status: ThreadStatus, outcome?: TurnOutcome, limitHit?: string): void {
+  private endTurn(st: ThreadState, completedSeq: number, status: ThreadStatus, outcome?: TurnOutcome, limitHit?: string, netLost?: string): void {
     const { rec, rt } = st;
     const finished = rt.turn;
     rt.turn?.interruptTimer?.cancel();
@@ -2900,7 +2925,7 @@ export class Runner {
     const waiters = rt.turnEndWaiters ?? [];
     rt.turnEndWaiters = undefined;
     for (const w of waiters) w();
-    this.afterTurn(st, limitHit);
+    this.afterTurn(st, limitHit, netLost);
   }
 
   // A turn that ended without a result from the CLI (spawn failure, crash).
@@ -2923,7 +2948,7 @@ export class Runner {
     this.endTurn(st, ev.seq, interrupted ? 'idle' : 'error');
   }
 
-  private afterTurn(st: ThreadState, limitHit?: string): void {
+  private afterTurn(st: ThreadState, limitHit?: string, netLost?: string): void {
     if (this.stopping) return;
     if (limitHit) {
       try {
@@ -2932,6 +2957,7 @@ export class Runner {
         this.log.error('could not move a thread off a login at its limit', { threadId: st.rec.id, error: String(e) });
       }
     }
+    if (netLost) this.onNetworkLost(st, netLost);
     // A snoozed or archived thread keeps its queue until it comes back.
     if (this.bucket(st.rec) === 'inbox' && this.kickQueue(st)) return;
     this.scheduleIdle(st);
@@ -3120,6 +3146,102 @@ export class Runner {
       this.roomTimer = this.clock.setTimeout(() => this.armRoomTimer(), Math.min(next - now, 3_600_000));
     } finally {
       this.armingRoom = false;
+    }
+  }
+
+  // ------------------------------------------------- the network dropping
+
+  // A turn failed because the API couldn't be reached (errorKind network,
+  // after the CLI's own retries): the thread waits, with a note, and
+  // carries on by itself once a probe reaches the API again (3 Nov 2026:
+  // Mike's internet went for five minutes and six threads stopped dead
+  // until he told each one to continue). A carry-on that can't get
+  // through either waits again, up to NET_CARRY_ON_MAX times or
+  // NET_WAIT_MAX_MS from the first failure; then it's left to him. Only
+  // the network: limits, the login and real errors never retry by
+  // themselves. A message already queued goes next instead.
+  private onNetworkLost(st: ThreadState, turnId: string): void {
+    const { rec } = st;
+    // The same outage if this was the runner's carry-on, or a turn the CLI
+    // opened by itself during the wait (a background job ended).
+    const chain = rec.netCarryOn?.turnId === turnId ? rec.netCarryOn : rec.waitingForNetwork;
+    delete rec.netCarryOn;
+    delete rec.waitingForNetwork;
+    this.markDirty(st);
+    if (this.bucket(rec) !== 'inbox' || rec.queue.length) return;
+    const since = chain?.since ?? this.isoNow();
+    const tries = chain?.tries ?? 0;
+    if (tries >= NET_CARRY_ON_MAX || this.clock.now() - Date.parse(since) > NET_WAIT_MAX_MS) {
+      this.emit(st, { type: 'system.note', text: "Still can't reach the API, so this thread has stopped trying by itself. Send a message to carry on." });
+      return;
+    }
+    rec.waitingForNetwork = { since, tries };
+    if (!chain) this.emit(st, { type: 'system.note', text: "Lost the connection to the API partway through that turn. This thread carries on by itself once it's back." });
+    this.markDirty(st);
+    this.armNetTimer(true);
+  }
+
+  // One timer for every thread waiting for the network. `restart` starts
+  // the backoff again (a new wait, a restart); otherwise a pending probe
+  // is left be. A draining runner's waits are the next runner's.
+  private armNetTimer(restart = false): void {
+    if (this.stopping || this.draining) return;
+    const waiting = [...this.threads.values()].some((st) => st.rec.waitingForNetwork);
+    if (!waiting) {
+      this.netTimer?.cancel();
+      this.netTimer = undefined;
+      this.netProbes = 0;
+      return;
+    }
+    if (restart) this.netProbes = 0;
+    else if (this.netTimer) return;
+    this.netTimer?.cancel();
+    const delay = Math.min(NET_PROBE_MAX_MS, NET_PROBE_FIRST_MS * 2 ** this.netProbes);
+    this.netTimer = this.clock.setTimeout(() => {
+      this.netTimer = undefined;
+      void this.probeNetwork();
+    }, delay);
+  }
+
+  // Tries each waiting provider's API once; the threads whose API answers
+  // carry on, the rest wait for the next probe.
+  private async probeNetwork(): Promise<void> {
+    if (this.probing) return;
+    this.probing = true;
+    try {
+      const waiting = [...this.threads.values()].filter((st) => st.rec.waitingForNetwork);
+      const up = new Map<Provider, boolean>();
+      for (const provider of new Set(waiting.map((st) => st.rec.provider))) {
+        up.set(provider, await this.reachable(provider).catch(() => false));
+      }
+      if (this.stopping || this.draining) return;
+      for (const st of waiting) if (st.rec.waitingForNetwork && up.get(st.rec.provider)) this.endNetWait(st);
+      this.netProbes++;
+    } catch (e) {
+      this.log.error('could not check the network', { error: String(e) });
+    } finally {
+      this.probing = false;
+    }
+    this.armNetTimer();
+  }
+
+  // The API answers again: carry on, unless the thread's moved on by
+  // itself meanwhile (a turn, a message waiting, archived or snoozed).
+  private endNetWait(st: ThreadState): void {
+    const { rec, rt } = st;
+    const w = rec.waitingForNetwork;
+    if (!w) return;
+    if (this.refusing) return; // a restart is coming; the next runner carries on
+    delete rec.waitingForNetwork;
+    this.markDirty(st);
+    if (rt.deleted || rt.turn || rec.queue.length || this.bucket(rec) !== 'inbox') return;
+    try {
+      const turnId = this.sendTo(st, CARRY_ON_NETWORK, [], { origin: 'runner', queue: true });
+      rec.netCarryOn = { turnId, since: w.since, tries: w.tries + 1 };
+      this.markDirty(st);
+      this.log.info('carried on after the network came back', { threadId: rec.id, tries: w.tries + 1 });
+    } catch (e) {
+      this.log.error('could not carry on after the network came back', { threadId: rec.id, error: String(e) });
     }
   }
 
@@ -5363,6 +5485,14 @@ export const WROTE_INSTEAD = "The user didn't answer this; they wrote you a mess
 // What a pool thread is told when it carries on by itself after its login
 // ran dry (docs/protocol.md, "Pools").
 export const CARRY_ON_MOVED = 'Your last login hit its usage limit partway through that turn, so this thread has moved to another one. Carry on from where you left off.';
+export const CARRY_ON_NETWORK = "The connection to the API dropped partway through that turn and is back now. Carry on from where you left off.";
+// How a thread waits for the network: probes 5s, 10s, 20s... apart, at
+// most a minute; a carry-on that can't get through either counts as a
+// try; after five, or six hours from the first failure, it's left to Mike.
+const NET_PROBE_FIRST_MS = 5_000;
+const NET_PROBE_MAX_MS = 60_000;
+const NET_CARRY_ON_MAX = 5;
+const NET_WAIT_MAX_MS = 6 * 3_600_000;
 export const CARRY_ON_BACK = 'Your login hit its usage limit partway through that turn and has room again now. Carry on from where you left off.';
 
 // How many sub-agents a thread keeps in its summary.

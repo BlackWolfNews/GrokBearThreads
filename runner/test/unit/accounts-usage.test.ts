@@ -320,6 +320,21 @@ test('a refused login fails the turn as auth, and its made-up reply is dropped',
   assert.equal((byText as any).result.errorKind, 'auth');
 });
 
+test("a turn that couldn't reach the API fails as network; an answer from the API doesn't", () => {
+  const kind = (result: string) => (normalizer().handle({ type: 'result', subtype: 'success', is_error: true, result, duration_ms: 5 })[0] as any).result.errorKind;
+  // What Mike's threads ended with when his internet went down (3 Nov 2026).
+  assert.equal(kind("API Error: Can't reach the API server — check your internet or DNS"), 'network');
+  assert.equal(kind("API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)"), 'network');
+  assert.equal(kind('API Error: No internet route — check your connection or VPN (ENETUNREACH)'), 'network');
+  assert.equal(kind('API Error: Connection dropped (ECONNRESET)'), 'network');
+  assert.equal(kind('API Error: Unable to connect to API. Check your internet connection'), 'network');
+  assert.equal(kind('API Error: Request timed out.'), 'network');
+  assert.equal(kind('API Error: 500 Internal server error'), undefined);
+  assert.equal(kind('API Error: 529 Overloaded'), undefined);
+  // Words quoted from somewhere else in a reply aren't the turn's failure.
+  assert.equal(kind("The build said: API Error: Can't reach the API server"), undefined);
+});
+
 test('a rejected rate limit blocks the account, fails the turn as usageLimit, and ends at the reset', () => {
   const n = normalizer();
   // The 5-hour window resets ten minutes after the fixture was written.

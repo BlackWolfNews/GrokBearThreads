@@ -546,7 +546,9 @@ export type TurnOutcome = 'completed' | 'interrupted' | 'failed';
 
 // Why a failed turn failed, when it's known, so a client can offer the fix
 // (another account, a new thread, signing in) without reading `error`.
-export type TurnErrorKind = 'usageLimit' | 'contextWindow' | 'auth';
+// network: the API couldn't be reached (DNS, no route, a dropped or refused
+// connection), so the runner carries the turn on once it's back.
+export type TurnErrorKind = 'usageLimit' | 'contextWindow' | 'auth' | 'network';
 
 // turn.completed's `usage`, per provider.
 export type ClaudeTurnUsage = { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number };

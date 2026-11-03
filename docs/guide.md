@@ -91,7 +91,9 @@ At the right of the row:
   thread's agent to save memory, and your next message starts it again
   where it left off.
 - **Failed**: the last turn ended with an error. Read the thread to see why,
-  and send a message to try again.
+  and send a message to try again. If it failed because your internet
+  went (it says "Lost the connection to the API"), you don't need to: it
+  carries on by itself once the connection is back.
 - **Stopped**: the runner restarted while the thread was busy.
 - **Waiting for room**, with a time: every login it could use has hit its
   limit (see [Accounts, pools and Usage](#accounts)). It carries on by

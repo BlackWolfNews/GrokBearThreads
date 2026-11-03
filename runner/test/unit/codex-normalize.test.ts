@@ -511,11 +511,11 @@ test('errors: a retry noted once per turn; a usage-limit failure gets its errorK
   assert.deepEqual(events(outs).map((x) => x.text), ['Retrying: stream disconnected']);
   const [r] = results(outs);
   assert.deepEqual([r.outcome, r.error, r.errorKind], ['failed', 'You have hit your usage limit.', 'usageLimit']);
-  const kinds = ['contextWindowExceeded', 'unauthorized', { httpConnectionFailed: { httpStatusCode: 502 } }].map((info, i) => {
+  const kinds = ['contextWindowExceeded', 'unauthorized', { httpConnectionFailed: { httpStatusCode: 502 } }, { httpConnectionFailed: { httpStatusCode: null } }, { responseStreamDisconnected: {} }].map((info, i) => {
     n.handle('turn/started', { threadId: 'th', turn: { id: `k${i}` } });
     return results(n.handle('turn/completed', { threadId: 'th', turn: { id: `k${i}`, status: 'failed', error: { message: 'x', codexErrorInfo: info } } }))[0].errorKind;
   });
-  assert.deepEqual(kinds, ['contextWindow', 'auth', undefined]);
+  assert.deepEqual(kinds, ['contextWindow', 'auth', undefined, 'network', 'network']);
 });
 
 test('plan updates: steps and statuses, a new explanation noted', () => {

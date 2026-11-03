@@ -983,6 +983,13 @@ function errorKind(info: unknown): TurnResult['errorKind'] {
   if (name === 'usageLimitExceeded' || name === 'rateLimitExceeded') return 'usageLimit';
   if (name === 'contextWindowExceeded') return 'contextWindow';
   if (name === 'unauthorized') return 'auth';
+  // The connection failed or dropped without the server answering; one
+  // with an httpStatusCode got an answer, so it isn't the network's fault.
+  if (name === 'httpConnectionFailed' || name === 'responseStreamConnectionFailed' || name === 'responseStreamDisconnected') {
+    const detail = info && typeof info === 'object' ? (info as Record<string, unknown>)[name] : undefined;
+    const status = detail && typeof detail === 'object' ? (detail as Record<string, unknown>).httpStatusCode : undefined;
+    return typeof status === 'number' ? undefined : 'network';
+  }
   return undefined;
 }
 

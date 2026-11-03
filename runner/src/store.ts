@@ -25,6 +25,14 @@ export type ThreadRecord = {
   // The id of the runner's own carry-on turn after a login ran dry, so a
   // carry-on that runs dry straight away waits rather than move again.
   autoCarryOn?: string;
+  // A turn failed because the API couldn't be reached (errorKind network):
+  // the thread carries on by itself once a probe reaches it again
+  // (Runner.onNetworkLost). `since` is when the line first went, `tries`
+  // the carry-ons sent since. Kept here so the wait survives a restart.
+  waitingForNetwork?: { since: string; tries: number };
+  // The runner's own carry-on after that, so if it can't get through
+  // either the thread waits again, counting on from the same outage.
+  netCarryOn?: { turnId: string; since: string; tries: number };
   // Background work a handover or a restart stopped, until the runner that
   // comes next tells the thread (Runner.tellStoppedWork). Kept here because
   // the stop and the telling happen in different runners.
