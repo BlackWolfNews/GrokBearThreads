@@ -186,13 +186,17 @@ final class SidebarRowTests: XCTestCase {
         XCTAssertEqual(ProjectMark.place(thread, under: "a"), "misc")
     }
 
-    func testRowLineIsWhatMikeLastAskedElseThePlace() throws {
+    func testRowLineIsWhatItCameToWithWhatMikeAskedAsItsTip() throws {
         var thread = ThreadSummary(id: "t", title: "t", cwd: "/Users/mike/dev/me/misc")
-        XCTAssertEqual(ProjectMark.line(thread), "misc", "nothing asked yet: the folder")
-        thread.asked = ""
-        XCTAssertEqual(ProjectMark.line(thread), "misc")
+        XCTAssertEqual(ProjectMark.line(thread), "misc", "nothing to say yet: the folder")
+        XCTAssertEqual(ProjectMark.lineTip(thread), "misc")
+        thread.preview = "GPU route 3x faster"
+        XCTAssertEqual(ProjectMark.line(thread), "GPU route 3x faster")
+        thread.preview = "## 0.4 - **Uploads** resume"
+        XCTAssertEqual(ProjectMark.line(thread), "0.4 - Uploads resume", "a reply's markdown reads as plain words")
+        XCTAssertEqual(ProjectMark.lineTip(thread), "misc", "nothing asked: the tip names the place")
         thread.asked = "try the GPU route"
-        XCTAssertEqual(ProjectMark.line(thread), "You: try the GPU route")
+        XCTAssertEqual(ProjectMark.lineTip(thread), "You: try the GPU route")
         // A runner's summary carries it as `asked`.
         let json = #"{"id":"t","title":"t","asked":"ship it"}"#
         let decoded = try JSONDecoder().decode(ThreadSummary.self, from: Data(json.utf8))

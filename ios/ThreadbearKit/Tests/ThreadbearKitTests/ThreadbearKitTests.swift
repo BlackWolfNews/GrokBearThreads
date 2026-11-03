@@ -610,14 +610,14 @@ private func properties(of data: Data) -> [CFString: Any] {
     #expect(agent?.startedBy?.symbol == "pawprint")
 }
 
-@Test func aRowSaysWhatMikeLastAsked() {
-    let json = { (asked: String) in
-        #"{"threadId":"t","runnerId":"r","title":"t","cwd":"/x/misc","accountId":"a","provider":"claude","status":"idle","needsYou":false,"unread":false,"preview":"","createdAt":"2026-11-01T00:00:00.000Z","lastActivityAt":"2026-11-01T00:00:00.000Z"\#(asked)}"#
+@Test func aRowSaysWhatTheThreadCameTo() {
+    let json = { (preview: String) in
+        #"{"threadId":"t","runnerId":"r","title":"t","cwd":"/x/misc","accountId":"a","provider":"claude","status":"idle","needsYou":false,"unread":false,"preview":"\#(preview)","createdAt":"2026-11-01T00:00:00.000Z","lastActivityAt":"2026-11-01T00:00:00.000Z","asked":"try it"}"#
     }
-    let before = try? JSONDecoder().decode(PhoneThread.self, from: Data(json("").utf8))
-    #expect(before?.askedText == "misc", "from an older runner: the place")
-    let asked = try? JSONDecoder().decode(PhoneThread.self, from: Data(json(#","asked":"try the GPU route""#).utf8))
-    #expect(asked?.askedText == "You: try the GPU route")
+    let none = try? JSONDecoder().decode(PhoneThread.self, from: Data(json("").utf8))
+    #expect(none?.resultText == "misc", "nothing to say yet: the place")
+    let done = try? JSONDecoder().decode(PhoneThread.self, from: Data(json("GPU route 3x faster").utf8))
+    #expect(done?.resultText == "GPU route 3x faster")
 }
 
 @Test func aThreadsLinkButtonsOnlyOpenWebPages() throws {

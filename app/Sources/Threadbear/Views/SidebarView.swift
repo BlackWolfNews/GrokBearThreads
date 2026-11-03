@@ -669,6 +669,7 @@ struct ThreadRowView: View {
                             Text(ProjectMark.line(thread, under: heading))
                                 .font(.system(size: TypeScale.sidebarMeta + 1))
                                 .lineLimit(1)
+                                .tip(ProjectMark.lineTip(thread, under: heading))
                         }
                     }
                     .foregroundStyle(.secondary)

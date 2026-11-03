@@ -1512,12 +1512,14 @@ schedule's, and another agent's (`sentByAgent`). A design review's reply
 is his notes, joined, or "Picked <option title>" when he left none. It's
 absent until he's sent something. A thread from a runner before it learns
 it from the last 300 events of its log when the runner starts, unless it's
-archived. The Mac app's sidebar shows it under a thread's title as
-"You: ...", in place of the thread's projects or folder, which it shows
-until there's one. A thread someone else started keeps its byline. A
-thread's row in the backend carries it too, from API 31, and the phone's
-list shows it the same way. So does a `threadIndex` row, from API 32, so
-a Mac shows it under another runner's threads too.
+archived. The Mac app's sidebar shows it as the tooltip of the line under a
+thread's title ("You: ..."). That line itself is the thread's `preview`,
+what its last turn came to, or its projects or folder until it has one;
+Mike tried `asked` there for an afternoon (3 Nov) and didn't like it. A
+thread someone else started keeps its byline. A thread's row in the
+backend carries `asked` too, from API 31, and so does a `threadIndex` row,
+from API 32, so a Mac's tooltip has it for another runner's threads. The
+phone's rows show the preview the same way, with no tooltip.
 
 ## Needs you
 

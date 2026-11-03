@@ -330,11 +330,12 @@ public struct PhoneThread: Codable, Sendable, Hashable, Identifiable {
         return folderName
     }
 
-    /// Line 2 of the row of a thread Mike started: what he last said to it
-    /// ("You: try the GPU route"), as on the Mac sidebar, else its place.
-    public var askedText: String {
-        guard let asked, !asked.isEmpty else { return placeText }
-        return "You: " + asked
+    /// Line 2 of the row of a thread Mike started: what it came to (the
+    /// preview: the last turn's headline), as on the Mac sidebar, else its
+    /// place.
+    public var resultText: String {
+        let plain = PreviewText.plain(preview)
+        return plain.isEmpty ? placeText : plain
     }
 
     /// Line 2 of the row of a thread Mike didn't start: who did, and why or

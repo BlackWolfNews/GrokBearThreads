@@ -59,10 +59,12 @@ ones opened. The x clears it.
 
 ### What a row tells you
 
-Each row has the thread's title, with the last thing you said to it
-under it ("You: try the GPU route"), so you can tell what you sent it off
-to do. The tile before the title shows its project. Until you've said
-anything, the line names its project or folder instead. Your phone's list shows the same line. A title in bold
+Each row has the thread's title, with what it came to under it: the
+agent's one line at the end of its last turn, like "1.0.7 in App Review,
+manual release" (while it's working, its latest words). Hover the line to
+see the last thing you said to it. The tile before the title shows its
+project, and until the thread has anything to say the line names its
+project or folder instead. Your phone's list shows the same line. A title in bold
 needs you or has a reply you haven't read.
 
 A thread you didn't start says who did instead of its project: a tool such

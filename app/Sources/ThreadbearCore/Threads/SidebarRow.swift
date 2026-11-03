@@ -288,12 +288,20 @@ public enum ProjectMark {
         return projects.map { title($0) }.joined(separator: ", ")
     }
 
-    /// The line under the title of a thread Mike started: what he last
-    /// said to it ("You: try the GPU route"), so he can tell what he sent
-    /// it off to do; its place until he's said anything, or from a runner
-    /// that doesn't send it. The tile still shows the project (Mike picked
-    /// this over the place, which said the tile's project twice, 3 Nov).
+    /// The line under the title of a thread Mike started: what it came to,
+    /// the preview (the last turn's end_turn headline, else its reply's
+    /// first line; while a turn runs, the agent's latest words). Its place
+    /// until it has one. The tile still shows the project, so the place
+    /// said it twice. Mike picked this on 3 Nov, after trying "You: <his
+    /// last message>" and not liking it.
     public static func line(_ thread: ThreadSummary, under heading: String? = nil) -> String {
+        let preview = PreviewText.plain(thread.preview)
+        return preview.isEmpty ? place(thread, under: heading) : preview
+    }
+
+    /// That line's tooltip: what Mike last said to it ("You: try the GPU
+    /// route"), else the place, which the line no longer names.
+    public static func lineTip(_ thread: ThreadSummary, under heading: String? = nil) -> String {
         guard let asked = thread.asked, !asked.isEmpty else { return place(thread, under: heading) }
         return "You: " + asked
     }

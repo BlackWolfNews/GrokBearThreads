@@ -454,7 +454,7 @@ struct ThreadRow: View {
     private var emphasised: Bool { thread.needsYou || RowStatus.kind(thread) == .needsYou || done }
 
     private var line2: String {
-        var parts = [thread.bylineText ?? thread.askedText]
+        var parts = [thread.bylineText ?? thread.resultText]
         if let runner = model.runnerName(thread.runnerId) { parts.append(runner) }
         if let working = thread.working, thread.isBusy || (thread.pendingApproval == nil && !thread.waitingOnMike) { parts.append(working) }
         return parts.joined(separator: " · ")
