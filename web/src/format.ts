@@ -65,3 +65,17 @@ export function sentences(md: string): string {
     .filter(Boolean);
   return lines.map((l, i) => (i < lines.length - 1 && !/[.!?:…]$/.test(l) ? `${l}.` : l)).join(' ');
 }
+
+// The line a message starts with when a schedule or an agent sent it, not
+// Mike (runner/src/protocol.ts AGENT_MESSAGE_PREFIX and schedules.ts; the
+// apps' AgentHeader): a word for who sent it, and the message without it.
+export function sender(m: { role: string; origin?: string; text: string }): { who: string; body: string } | undefined {
+  if (m.role !== 'user') return undefined;
+  const nl = m.text.indexOf('\n');
+  const first = (nl < 0 ? m.text : m.text.slice(0, nl)).trim();
+  const body = nl < 0 ? '' : m.text.slice(nl + 1).replace(/^\n+/, '');
+  if (m.origin === 'schedule' && first.startsWith('[Scheduled: ') && first.endsWith(']')) return { who: 'Scheduled', body };
+  if (!m.origin && first.startsWith('[Sent by the agent in the thread "') && first.endsWith(')]')) return { who: 'From another thread', body };
+  if (!m.origin && first.startsWith('[Sent by the agent before moving to ') && first.endsWith(']')) return { who: 'The agent’s note before moving', body };
+  return undefined;
+}

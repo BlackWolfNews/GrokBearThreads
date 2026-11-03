@@ -14,7 +14,7 @@ import { MessageText, Pictures, picturesByRow, ToolRun, Worked, type PageMessage
 import { CommandState } from './command-state';
 import { previewOf, ShareControl, SharePage } from './share';
 import { duration, fold, splitTurns, type Item } from './turns';
-import { ago, folderName, plain } from './format';
+import { ago, folderName, plain, sender } from './format';
 import * as Icon from './icons';
 
 type Row = NonNullable<ReturnType<typeof useQuery<typeof api.phone.threads>>>[number];
@@ -343,10 +343,11 @@ function ThreadView({ token, threadId }: { token: string; threadId: string }) {
       );
     }
     const m = item.m;
+    const from = sender(m);
     return (
       <div key={m.seq} className={`msg ${m.role}`}>
-        {m.role === 'user' && m.origin && m.origin !== 'user' && m.origin !== 'phone' ? <div className="origin">{originLabel(m.origin)}</div> : null}
-        {text(m)}
+        {from ? <div className="origin">{from.who}</div> : m.role === 'user' && m.origin && m.origin !== 'user' && m.origin !== 'phone' ? <div className="origin">{originLabel(m.origin)}</div> : null}
+        {from ? <MessageText text={from.body} pictures={inText} seq={m.seq} rows={messages} threadPath={linkTo} /> : text(m)}
         <Pictures items={after.get(m.seq) ?? []} />
       </div>
     );

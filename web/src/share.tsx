@@ -12,10 +12,12 @@ import type { Id } from '../../convex/_generated/dataModel';
 import { MessageText, Pictures, picturesByRow, ToolRun, Worked, type PageMessage, type Picture } from './messages';
 import { CommandState } from './command-state';
 import { fold, splitTurns, duration, roughly, type Item, type Turn } from './turns';
-import { day, modelLabel, plain, sentences } from './format';
+import { day, modelLabel, plain, sender, sentences } from './format';
 import * as Icon from './icons';
 
-const FIRST_PAGE = 80;
+// Big enough that most threads arrive whole: the outline and byline only
+// know the turns that have loaded.
+const FIRST_PAGE = 400;
 const MORE = 200;
 const SITE = 'https://threadbear.mikecann.app';
 
@@ -96,7 +98,7 @@ function WriteUp({ slug, token, data, loading, onMore }: { slug: string; token: 
                     <li key={i}>
                       <a href={`#turn-${i + 1}`} className={i === active ? 'on' : ''}>
                         <span className="n">{asked.indexOf(t) + 1}</span>
-                        <span className="ask">{plain(t.starter.text)}</span>
+                        <span className="ask">{askText(t.starter)}</span>
                       </a>
                     </li>
                   ) : null,
@@ -176,11 +178,11 @@ function TurnSection({ id, turn, busy, after, inText, rows }: { id: string; turn
         }
         const m = item.m;
         if (m === turn.starter) {
-          const who = m.origin === 'schedule' ? 'Scheduled' : m.origin === 'agent' ? 'From another thread' : undefined;
+          const from = sender(m);
           return (
-            <div key={m.seq} className={`asked ${who ? 'from' : ''}`}>
-              {who ? <span className="who">{who}</span> : null}
-              {text(m)}
+            <div key={m.seq} className={`asked ${from ? 'from' : ''}`}>
+              {from ? <span className="who">{from.who}</span> : null}
+              {from ? <MessageText text={from.body} pictures={inText} seq={m.seq} rows={rows} /> : text(m)}
               <Pictures items={after.get(m.seq) ?? []} />
             </div>
           );
@@ -200,6 +202,13 @@ function TurnSection({ id, turn, busy, after, inText, rows }: { id: string; turn
       ) : null}
     </section>
   );
+}
+
+// An ask as the outline shows it: plain text, without the line a schedule
+// or another thread's agent starts it with.
+function askText(m: PageMessage): string {
+  const from = sender(m);
+  return plain(from ? `${from.who}: ${from.body}` : m.text);
 }
 
 // The outline on a narrow screen: "3 turns" in the bar, opening to the asks.
@@ -231,7 +240,7 @@ function TurnsMenu({ turns, active }: { turns: Turn<PageMessage>[]; active: numb
             t.starter ? (
               <a key={i} href={`#turn-${i + 1}`} className={i === active ? 'on' : ''}>
                 <span className="n">{asked.indexOf(t) + 1}</span>
-                <span>{plain(t.starter.text).slice(0, 120)}</span>
+                <span>{askText(t.starter).slice(0, 120)}</span>
                 {t.ms && t.ms >= 1000 ? <span className="took">Worked for {duration(t.ms)}</span> : null}
               </a>
             ) : null,
