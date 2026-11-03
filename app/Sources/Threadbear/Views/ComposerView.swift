@@ -520,6 +520,9 @@ struct ComposerTextField: NSViewRepresentable {
 }
 
 final class ComposerTextView: NSTextView {
+    // Clicks count while Threadbear isn't the app in front (FirstClick.swift).
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     /// One of a card's Something else boxes (AskAnswerBox), not the
     /// composer: lookups for the composer skip it.
     var inAnswerBox = false

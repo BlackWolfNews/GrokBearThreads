@@ -690,6 +690,9 @@ struct QuickLookView: NSViewRepresentable {
 /// here instead. A press that's let go without moving is a click as
 /// before, and the video's controls keep their own presses.
 final class FilePreviewView: NSView {
+    // Clicks count while Threadbear isn't the app in front (FirstClick.swift).
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     private enum Content {
         case picture(NSImageView)
         case video(AVPlayerView)

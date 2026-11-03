@@ -34,6 +34,9 @@ struct ThreadbearApp: App {
         Window("Threadbear", id: "main") {
             RootView()
                 .environment(app)
+                // A click counts while another app is in front, rather than
+                // only bringing the window forward (FirstClick.swift).
+                .allowsWindowActivationEvents()
                 .frame(minWidth: 760, minHeight: 480)
                 .onAppear { LaunchClock.windowShown() }
         }

@@ -49,6 +49,9 @@ extension RowCellDelegate {
 /// Base for transcript cells: flipped, so layout reads top-down.
 class RowCellView: NSTableCellView {
     weak var delegate: RowCellDelegate?
+    // The header, group and changes rows open on a press of their own: those
+    // count while Threadbear isn't the app in front too (FirstClick.swift).
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     var rowId = ""
 
     override var isFlipped: Bool { true }
@@ -126,6 +129,9 @@ class RowCellView: NSTableCellView {
 /// A rounded box drawn in `draw(_:)`, so its dynamic colours follow light
 /// and dark mode by themselves (layer colours have to be re-resolved).
 final class FillView: NSView {
+    // Clicks count while Threadbear isn't the app in front (FirstClick.swift).
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     var fill: NSColor? { didSet { needsDisplay = true } }
     var stroke: NSColor? { didSet { needsDisplay = true } }
     var radius: CGFloat = 8 { didSet { needsDisplay = true } }
@@ -207,7 +213,7 @@ enum Symbols {
     }
 
     static func makeView() -> NSImageView {
-        let view = NSImageView()
+        let view = FirstClickImageView()
         view.imageScaling = .scaleNone
         view.imageAlignment = .alignCenter
         return view
@@ -675,6 +681,9 @@ final class PointerButton: NSButton {
 /// it is: the spinner turns in the render server, so nothing redraws while
 /// a slow runner keeps it waiting.
 final class PendingMark: NSView {
+    // Clicks count while Threadbear isn't the app in front (FirstClick.swift).
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     private let spinner = SpinnerView()
     private let clock = Symbols.makeView()
     private(set) var state: UserMessage.Pending?

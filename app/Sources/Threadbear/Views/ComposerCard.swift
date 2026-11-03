@@ -220,6 +220,8 @@ private struct CardCollapseButton: View {
         .buttonStyle(RowIconButtonStyle())
         .accessibilityLabel(collapsed ? "Expand" : "Collapse")
         .tip(collapsed ? "Expand" : "Collapse")
+        // Its own hosting view, outside RootView's (FirstClick.swift).
+        .allowsWindowActivationEvents()
     }
 }
 

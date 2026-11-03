@@ -431,6 +431,9 @@ final class TextFileController: NSObject, NSTextViewDelegate {
 /// full path), as the transcript's links do; a web link goes to the
 /// browser.
 final class FileTextView: NSTextView {
+    // Clicks count while Threadbear isn't the app in front (FirstClick.swift).
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     /// The file's folder, which relative links are from.
     var base: URL?
 

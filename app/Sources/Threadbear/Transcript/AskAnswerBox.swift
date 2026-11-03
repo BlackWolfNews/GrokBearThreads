@@ -87,6 +87,9 @@ enum AskBoxMetrics {
 /// Return sends the lot, Shift-Return adds a line. The card leaves room for it (`.tbAnswerBox`)
 /// and TextRowCell puts it there.
 final class AskAnswerBox: NSView {
+    // Clicks count while Threadbear isn't the app in front (FirstClick.swift).
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     let textView = ComposerTextField.makeTextView()
     private let scroll = OverlayScrollView()
     private let addButton = NSButton()
@@ -276,6 +279,9 @@ extension AskAnswerBox {
 /// A picture in an answer box, with × to take it out while the pointer is
 /// over it, like the composer's.
 private final class AnswerThumb: NSView {
+    // Clicks count while Threadbear isn't the app in front (FirstClick.swift).
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     /// A plain layer-backed view, not an NSImageView: one with no image of
     /// its own cleared the contents put on its layer when it first drew, so
     /// a thumbnail already decoded (set at once, before that) came out blank

@@ -8,6 +8,9 @@ import SwiftUI
 /// colour effect left most of its spokes faint in any one frame, so the
 /// one live signal on screen read as a smudge.
 final class SpinnerView: NSView {
+    // Clicks count while Threadbear isn't the app in front (FirstClick.swift).
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     var color: NSColor = .secondaryLabelColor {
         didSet { if color != oldValue { updateColor() } }
     }

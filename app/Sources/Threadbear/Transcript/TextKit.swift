@@ -196,6 +196,9 @@ final class TextMeasurer {
 
 /// A read-only, selectable TextKit 1 text view for transcript text.
 final class TranscriptTextView: NSTextView {
+    // Clicks count while Threadbear isn't the app in front (FirstClick.swift).
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     /// A mockup, doc or picture previews in the pane beside the transcript
     /// (AppModel.openTranscriptFileLink); ⌘-click and other files open in
     /// the app macOS associates with them.

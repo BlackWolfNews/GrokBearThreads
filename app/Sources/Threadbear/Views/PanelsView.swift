@@ -859,7 +859,7 @@ final class WebPanelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUI
     }
 
     private func makeView(_ config: WKWebViewConfiguration) -> WKWebView {
-        let view = WKWebView(frame: .zero, configuration: config)
+        let view = FirstClickWebView(frame: .zero, configuration: config)
         view.navigationDelegate = self
         view.uiDelegate = self
         view.allowsBackForwardNavigationGestures = true

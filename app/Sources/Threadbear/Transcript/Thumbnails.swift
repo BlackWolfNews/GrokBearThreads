@@ -119,6 +119,9 @@ final class QuickLookCoordinator: NSObject, QLPreviewPanelDataSource, QLPreviewP
 /// Thumbnails laid out from precomputed frames, drawn as layers. Click one
 /// to open it in Quick Look.
 final class ImageGridView: NSView {
+    // Clicks count while Threadbear isn't the app in front (FirstClick.swift).
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     private var paths: [String] = []
     private var frames: [NSRect] = []
     private var tiles: [CALayer] = []

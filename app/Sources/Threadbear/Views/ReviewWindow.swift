@@ -130,11 +130,11 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
         // whatever the last one was dragged to.
         super.init(window: window)
         window.delegate = self
-        window.contentView = NSHostingView(rootView: ReviewWindow(session: session, back: back, close: { [weak self] in self?.close() }))
+        window.contentView = NSHostingView(rootView: ReviewWindow(session: session, back: back, close: { [weak self] in self?.close() }).allowsWindowActivationEvents())
         // Up in the title bar rather than a row of their own, so the images
         // and the choices get that height. Wide enough for all of them, as an
         // accessory doesn't resize when some come and go.
-        let buttons = NSHostingView(rootView: ReviewTitlebarButtons(session: session, back: back))
+        let buttons = NSHostingView(rootView: ReviewTitlebarButtons(session: session, back: back).allowsWindowActivationEvents())
         buttons.frame.size = NSSize(width: 130, height: 28)
         let accessory = NSTitlebarAccessoryViewController()
         accessory.layoutAttribute = .trailing
