@@ -636,6 +636,37 @@ export function splitReplySection(reply: string): { reply: string; needs?: Needs
   return { reply };
 }
 
+// A reply under a card of asks, without a closing section that writes the
+// card out again. Opus does this despite the description and end_turn's result
+// both saying not to, and the repeat reads as the card not having been used
+// (thread 7ac017b7, 3 Nov 2026). A section listing more than the card has
+// stays, as the extra ask is nowhere else: better a repeat than a lost request.
+// Prose after the list stays too: three of that thread's six had a follow-up
+// there, and a card of asks doesn't show follow-ups.
+export function replyWithoutRepeat(reply: string, card: Needs): string {
+  const whole = reply.replace(/\r\n/g, '\n');
+  const split = splitReplySection(whole);
+  const asked = split.needs?.needs === 'you' ? split.needs.asks?.length ?? 0 : 0;
+  if (!asked || asked > (card.asks?.length ?? 0)) return reply;
+  const after = proseAfterList(whole.slice(split.reply.length).split('\n'));
+  return after ? `${split.reply}\n\n${after}` : split.reply;
+}
+
+// What follows a section's list, by the same reading as needsFromText, which
+// stops there as it isn't an ask.
+function proseAfterList(lines: string[]): string {
+  let seen = false;
+  let inItem = false;
+  let inFence = false;
+  for (const [i, line] of lines.entries()) {
+    if (/^\s*```/.test(line)) inFence = !inFence;
+    if (!inFence && ITEM.test(line)) seen = inItem = true;
+    else if (!line.trim()) inItem = false;
+    else if (seen && !inItem && !inFence && !/^\s{2,}\S/.test(line)) return lines.slice(i).join('\n').trimEnd();
+  }
+  return '';
+}
+
 // What end_turn says when the turn has no reply yet. An error result, so
 // the CLI doesn't take the call as the end of the turn (adapter.ts,
 // CLAUDE_CODE_TERMINAL_MCP_TOOLS) and the agent reads it. Ask for the whole

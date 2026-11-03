@@ -587,6 +587,26 @@ test('one reply: a message that arrives after end_turn can have the thread archi
   assert.ok(h.runner.get(thread.id).archivedAt, 'archived once the turn is over');
 });
 
+// Thread 7ac017b7 (3 Nov 2026), from the card through to the event the app draws.
+test('one reply: a reply that writes its card out again keeps the card and loses the repeat', async () => {
+  const h = makeHarness();
+  const { thread, s } = start(h);
+  const { call } = tools(h, thread.id, undefined, () => true);
+  const input = { headline: 'Ready', asks: [{ question: 'Press Bring Them In on Tinker Desk.' }] };
+  toolCall(s, 'e1', END_TURN, input);
+  const r = await call('end_turn', input);
+  s.out({ kind: 'event', event: { type: 'tool.result', itemId: 'e1', ok: !r.error, text: r.text, truncated: false, images: [] } });
+  s.text('m1', 'It is ready.\n\n**What I need from you**\n1. Press Bring Them In, then tell me how it went.');
+  s.result('completed');
+  const reply = h.events(thread.id).find((e: { type: string; itemId?: string }) => e.type === 'assistant.text' && e.itemId === 'm1');
+  assert.equal(reply.text, 'It is ready.');
+  assert.equal(reply.final, true);
+  const t = h.runner.get(thread.id);
+  assert.equal(t.needs, 'you');
+  assert.deepEqual(t.asks?.map((a: { action: string }) => a.action), ['Press Bring Them In on Tinker Desk.']);
+  assert.equal(h.events(thread.id).at(-1).needsFrom, 'tool');
+});
+
 test('a message after end_turn takes back an archive it asked for', async () => {
   const h = makeHarness();
   const { thread, s } = start(h);

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { PersistedEvent } from '../../src/protocol.ts';
-import { offersToTakeItBack, TRY_IT_FIRST, archiveFromTool, snoozeFromTool, bylineFromTool, endedThisTurn, CODEX_END_TURN_DESCRIPTION, CODEX_ONE_REPLY_DESCRIPTION, END_TURN_DESCRIPTION, END_TURN_FULL_NAME, endTurnDescription, needsFromText, needsFromTool, ONE_REPLY_DESCRIPTION, splitReplySection, summaryFromTool, summaryMarkdown, turnReply } from '../../src/needs.ts';
+import { offersToTakeItBack, TRY_IT_FIRST, archiveFromTool, snoozeFromTool, bylineFromTool, endedThisTurn, CODEX_END_TURN_DESCRIPTION, CODEX_ONE_REPLY_DESCRIPTION, END_TURN_DESCRIPTION, END_TURN_FULL_NAME, endTurnDescription, needsFromText, needsFromTool, ONE_REPLY_DESCRIPTION, replyWithoutRepeat, splitReplySection, summaryFromTool, summaryMarkdown, turnReply } from '../../src/needs.ts';
 import { END_TURN_TOOL } from '../../src/needs.ts';
 import { SERVER_NAME } from '../../src/threadbear-mcp.ts';
 import { ClaudeNormalizer, fileContext } from '../../src/adapters/claude/normalize.ts';
@@ -398,6 +398,25 @@ test('one reply: a closing section comes off the reply, bold, # or a bare line',
   const none = splitReplySection('The script says nothing needed from you is wrong, so I fixed it.');
   assert.equal(none.needs, undefined);
   assert.equal(none.reply, 'The script says nothing needed from you is wrong, so I fixed it.');
+});
+
+// Thread 7ac017b7 (3 Nov 2026): six of eight replies under a card went on to
+// write the card out again, and that looked like not using the card at all.
+test('one reply: a section repeating the card comes off the reply, and one saying more stays', () => {
+  const card = { needs: 'you' as const, asks: [{ action: 'Press Bring Them In.' }] };
+  const repeat = 'It is ready.\n\n**What I need from you**\n1. On Tinker Desk, press Bring Them In, then tell me.';
+  assert.equal(replyWithoutRepeat(repeat, card), 'It is ready.');
+  // What comes after the list isn't on the card, so it stays.
+  assert.equal(replyWithoutRepeat(`${repeat}\n  Say how it went.\n\nOne follow-up: try a clash next.`, card), 'It is ready.\n\nOne follow-up: try a clash next.');
+  // Two things asked and one on the card: the second is only in the reply.
+  const more = 'It is ready.\n\n**What I need from you**\n1. Press Bring Them In.\n2. Send me the log.';
+  assert.equal(replyWithoutRepeat(more, card), more);
+  // Saying nothing is needed under a card isn't a repeat of it.
+  const nothing = 'It is ready. Nothing needed from you right now.';
+  assert.equal(replyWithoutRepeat(nothing, card), nothing);
+  // No section, and no asks on the card: left alone.
+  assert.equal(replyWithoutRepeat('It is ready.', card), 'It is ready.');
+  assert.equal(replyWithoutRepeat(repeat, { needs: 'nothing', next: ['Try it'] }), repeat);
 });
 
 // Mike pressed ? on rows in the agent's shorthand, with no reason given

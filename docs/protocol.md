@@ -1579,7 +1579,12 @@ the thread if a sub-agent stalls, so an ask can't stay hidden for good.
   "Nothing needed from you" line, under an `end_turn` with no asks or
   next of its own, loses it, and the card comes from it instead
   (`splitReplySection`): Sonnet wrote one there in a quarter of its eval
-  sessions. Claude's session doesn't name `end_turn` in
+  sessions. Under an `end_turn` that has asks, a "What I need from you"
+  section loses its place too, and the card stays `end_turn`'s, so a reply
+  can't say what the card under it says (`replyWithoutRepeat`; Mike took
+  thread 7ac017b7's repeats on 3 Nov 2026 for it not having used the card).
+  A section listing more asks than the card is left in, as it says
+  something the card doesn't, and so is any prose after its list. Claude's session doesn't name `end_turn` in
   `CLAUDE_CODE_TERMINAL_MCP_TOOLS`, and its Stop hook asks once for the
   reply when the turn took `end_turn` and wrote nothing after it, or for
   `end_turn` alone (the message already written being the reply) when it

@@ -91,7 +91,7 @@ import { parseWhen } from './when.ts';
 import { emptyHighlights, observe as observeHighlights, pinItem, remove as removeHighlight, unpin as unpinHighlight, upsert as upsertHighlight, view as highlightsView, absolute, type ThreadHighlights } from './highlights.ts';
 import { SERVER_NAME, approvalTitle } from './threadbear-mcp.ts';
 import { PANEL_ACK_WAIT_MS, PANEL_PLACES, resolvePanel } from './panel-requests.ts';
-import { archiveFromTool, bylineFromTool, END_TURN_TOOL, endTurnAccepted, endTurnAddedArchive, endTurnAddedSnooze, snoozeFromTool, endTurnAsksForMessage, endTurnIsOneReply, endTurnOwesReply, endTurnRefusedRepeat, endTurnTaken, endTurnWantsReply, needsFromText, needsFromTool, splitReplySection, summaryFromTool, summaryMarkdown } from './needs.ts';
+import { archiveFromTool, bylineFromTool, END_TURN_TOOL, endTurnAccepted, endTurnAddedArchive, endTurnAddedSnooze, snoozeFromTool, endTurnAsksForMessage, endTurnIsOneReply, endTurnOwesReply, endTurnRefusedRepeat, endTurnTaken, endTurnWantsReply, needsFromText, needsFromTool, replyWithoutRepeat, splitReplySection, summaryFromTool, summaryMarkdown } from './needs.ts';
 import type { Needs } from './needs.ts';
 import { asksForAppRestart } from './app-restarts.ts';
 import type { ConnectorsStatus } from './connectors.ts';
@@ -2469,7 +2469,9 @@ export class Runner {
           // One reply: this is the reply (or the thinking before it, which
           // folds into the work), not text to drop. A "What I need from
           // you" section comes off it when end_turn brought no card of its
-          // own, and becomes the card (needs.ts, splitReplySection).
+          // own, and becomes the card (needs.ts, splitReplySection). When
+          // end_turn did bring asks, one repeating them just comes off
+          // (replyWithoutRepeat).
           if (ev.type === 'assistant.text') {
             const tool = rt.turn.endTurn ? needsFromTool(rt.turn.endTurn) : undefined;
             const split = !tool?.asks?.length && !tool?.next?.length ? splitReplySection(ev.text) : undefined;
@@ -2477,7 +2479,8 @@ export class Runner {
               rt.turn.replyNeeds = split.needs;
               this.log.info('took the card from the reply', { threadId: rec.id, needs: split.needs.needs, asks: split.needs.asks?.length ?? 0 });
             }
-            ev = { type: 'assistant.text', itemId: ev.itemId, text: split?.needs ? split.reply : ev.text, final: true, ...(ev.narration ? { narration: true as const } : {}) };
+            const text = split?.needs ? split.reply : tool?.asks?.length ? replyWithoutRepeat(ev.text, tool) : ev.text;
+            ev = { type: 'assistant.text', itemId: ev.itemId, text, final: true, ...(ev.narration ? { narration: true as const } : {}) };
           }
         } else if (ev.type === 'assistant.text' && rt.turn?.ended && !ev.itemId.includes('/') && rt.turn.narrationItem && !rt.turn.summarized && ev.text.trim()) {
           rt.inProgress.delete(ev.itemId);
