@@ -1056,6 +1056,9 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     /// Every login in its pool is out of room: it carries on by itself at
     /// `until`.
     public var waitingForRoom: WaitingForRoom?
+    /// Its last turn couldn't reach the API (the internet went): it carries
+    /// on by itself once the runner reaches it again. Since when.
+    public var waitingForNetwork: Date?
     /// Its own worktree, when the repo gives each thread one; nil for most
     /// threads, and from a runner that predates worktrees.
     public var worktree: ThreadWorktree?
@@ -1211,6 +1214,9 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         projects = c.lossyArray(ThreadProject.self, forKey: .projects)
         poolId = ((try? c.decodeIfPresent(String.self, forKey: .poolId)) ?? nil).flatMap { $0.isEmpty ? nil : $0 }
         waitingForRoom = (try? c.decodeIfPresent(WaitingForRoom.self, forKey: .waitingForRoom)) ?? nil
+        waitingForNetwork = (try? c.nestedContainer(keyedBy: NetworkWaitKeys.self, forKey: .waitingForNetwork))
+            .flatMap { try? $0.decode(String.self, forKey: .since) }
+            .flatMap(ISO8601.parse)
         // A malformed one is as good as none, rather than losing the thread.
         worktree = (try? c.decodeIfPresent(ThreadWorktree.self, forKey: .worktree)) ?? nil
         sample = (try? c.decodeIfPresent(Bool.self, forKey: .sample)) ?? false
@@ -1267,6 +1273,10 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         if !projects.isEmpty { try c.encode(projects, forKey: .projects) }
         try c.encodeIfPresent(poolId, forKey: .poolId)
         try c.encodeIfPresent(waitingForRoom, forKey: .waitingForRoom)
+        if let since = waitingForNetwork {
+            var w = c.nestedContainer(keyedBy: NetworkWaitKeys.self, forKey: .waitingForNetwork)
+            try w.encode(ISO8601.format(since), forKey: .since)
+        }
         try c.encodeIfPresent(worktree, forKey: .worktree)
         if sample { try c.encode(true, forKey: .sample) }
         try c.encodeIfPresent(needs, forKey: .needs)
@@ -1284,8 +1294,10 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         case id, title, cwd, accountId, provider, model, effort, modelInUse, effortInUse, permissionMode, status, live, needsYou, pendingReviews
         case createdAt, updatedAt, lastActivityAt, snoozedUntil, snoozedUntilRestart, wakeWhen, woke, archivedAt, starredAt, onOldRunner, preview
         case lastSeq, lastSeenSeq, nativeSessionId, contextTokens, contextWindow, costUsd, panels, actions, hooks, patches, background, subagents
-        case projects, worktree, needs, asks, asksSeq, highlightsAt, schedule, startedBy, asked, poolId, waitingForRoom, panelRequest, share, sample
+        case projects, worktree, needs, asks, asksSeq, highlightsAt, schedule, startedBy, asked, poolId, waitingForRoom, waitingForNetwork, panelRequest, share, sample
     }
+
+    enum NetworkWaitKeys: String, CodingKey { case since }
 
     /// The first ask Mike hasn't ticked on the open card, if any: what the
     /// sidebar and a notification show instead of the last line of prose.

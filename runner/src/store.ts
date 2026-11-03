@@ -33,6 +33,11 @@ export type ThreadRecord = {
   // The runner's own carry-on after that, so if it can't get through
   // either the thread waits again, counting on from the same outage.
   netCarryOn?: { turnId: string; since: string; tries: number };
+  // The turn a restart (or a crash, or the Mac restarting) cut off, until
+  // the runner that comes next carries it on (Runner.carryOnStopped).
+  stoppedMidTurn?: { turnId: string; at: string };
+  // That carry-on's turn id: if it's cut off too, it isn't carried on again.
+  restartCarryOn?: string;
   // Background work a handover or a restart stopped, until the runner that
   // comes next tells the thread (Runner.tellStoppedWork). Kept here because
   // the stop and the telling happen in different runners.

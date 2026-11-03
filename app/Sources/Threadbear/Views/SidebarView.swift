@@ -777,6 +777,14 @@ struct ThreadRowView: View {
                 .font(.system(size: TypeScale.sidebarMeta))
                 .foregroundStyle(SidebarMetrics.faint)
                 .lineLimit(1)
+        } else if mode != .hibernating, thread.waitingForNetwork != nil, !thread.isArchived {
+            // Its turn lost the internet; it carries on once it's back,
+            // so it isn't Failed in the sense of needing Mike.
+            Text("Waiting for connection")
+                .font(.system(size: TypeScale.sidebarMeta))
+                .foregroundStyle(SidebarMetrics.faint)
+                .lineLimit(1)
+                .tip("The internet dropped during its turn. It carries on by itself once the connection is back.")
         } else {
             trailingStatus(look)
         }

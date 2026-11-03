@@ -620,7 +620,9 @@ export class Runner {
       this.recoverReviews(st);
       if (this.recover(st)) stopped++;
     }
-    if (stopped) this.startupNotice('info', `${stopped === 1 ? 'A thread was' : `${stopped} threads were`} mid-turn when the runner stopped; send a message to carry on.`);
+    // carryOnStopped (main.ts, once listening) carries most of them on and
+    // says so; this notice is for a runner that never gets that far.
+    if (stopped) this.startupNotice('info', `${stopped === 1 ? 'A thread was' : `${stopped} threads were`} mid-turn when the runner stopped.`);
     // Hibernating until the runner restarts: this is the restart. Before
     // the restart's resume (main.ts), so a thread put away while its own
     // restart waited still gets carried on.
@@ -824,6 +826,9 @@ export class Runner {
           rec.turnId,
         );
         rec.lastTurnCompletedSeq = ev.seq;
+        // When it was last doing something: a crash or a power cut leaves
+        // no time of its own.
+        rec.stoppedMidTurn = { turnId: rec.turnId, at: rec.lastActivityAt };
       }
       rec.turnId = undefined;
       rec.status = 'stopped';
@@ -1051,7 +1056,8 @@ export class Runner {
     if (rec.asked === undefined && !rec.archivedAt) this.backfillAsked(rec);
     this.recoverReviews(st);
     if (opts.crashed) {
-      if (this.recover(st)) this.notice('info', `The old runner stopped while "${rec.title}" was mid-turn; send a message to carry on.`);
+      // main.ts carries it on (carryOnStopped), after any resume of its own.
+      if (this.recover(st)) this.notice('info', `The old runner stopped while "${rec.title}" was mid-turn.`);
     }
     // Hibernating until the runner restarts: for this thread, coming across
     // is the restart.
@@ -1115,6 +1121,48 @@ export class Runner {
     } catch (e) {
       this.log.error('could not tell a thread its background work was stopped', { threadId: rec.id, error: String(e) });
     }
+  }
+
+  // Threads a restart, a crash or the Mac restarting cut off mid-turn
+  // carry on by themselves with the runner's own message, as Mike would
+  // otherwise have to tell each one to (30 Oct 2026, after a reboot:
+  // "sorry I had to reboot, please continue"). main.ts calls this once
+  // listening, after the restart's own resume and tellStoppedWork, so a
+  // thread one of those already sent a message to isn't told twice. Not
+  // a thread put away, one with a message waiting, one stopped more than
+  // STOPPED_CARRY_ON_MAX_AGE_MS ago, or a carry-on that was itself cut
+  // off (a turn that crashes the runner mustn't loop). If the network
+  // isn't back yet, the carry-on waits for it (onNetworkLost).
+  // `threadId`: just that one (a thread a crashed draining runner had).
+  carryOnStopped(threadId?: string): void {
+    let carried = 0;
+    let left = 0;
+    for (const st of this.threads.values()) {
+      if (threadId && st.rec.id !== threadId) continue;
+      const { rec, rt } = st;
+      const stopped = rec.stoppedMidTurn;
+      if (!stopped) continue;
+      delete rec.stoppedMidTurn;
+      this.markDirty(st);
+      if (rt.deleted || rec.status !== 'stopped' || rt.turn || rec.queue.length || this.bucket(rec) !== 'inbox') continue;
+      const old = !(this.clock.now() - Date.parse(stopped.at) <= STOPPED_CARRY_ON_MAX_AGE_MS);
+      if (old || rec.restartCarryOn === stopped.turnId) {
+        left++;
+        continue;
+      }
+      try {
+        rec.restartCarryOn = this.sendTo(st, CARRY_ON_RESTART, [], { origin: 'runner', queue: true });
+        carried++;
+        this.log.info('carried on a thread the runner stopped mid-turn', { threadId: rec.id });
+      } catch (e) {
+        left++;
+        this.log.error('could not carry on a thread the runner stopped mid-turn', { threadId: rec.id, error: String(e) });
+      }
+    }
+    // At startup the app is rarely connected yet, so it hears later.
+    const say = (m: string) => (threadId ? this.notice('info', m) : this.startupNotice('info', m));
+    if (carried) say(`${carried === 1 ? 'A thread the runner stopped mid-turn is' : `${carried} threads the runner stopped mid-turn are`} carrying on by ${carried === 1 ? 'itself' : 'themselves'}.`);
+    if (left) say(`${left === 1 ? 'A thread was' : `${left} threads were`} mid-turn when the runner stopped; send a message to carry on.`);
   }
 
   // From the moment a restart begins until the runner exits, a new turn
@@ -1237,6 +1285,7 @@ export class Runner {
     rec.turnId = undefined;
     rec.lastTurnCompletedSeq = ev.seq;
     rec.status = 'stopped';
+    rec.stoppedMidTurn = { turnId: turn.turnId, at: this.isoNow() };
     rec.lastActivityAt = this.isoNow();
     this.markDirty(st);
   }
@@ -3283,15 +3332,23 @@ export class Runner {
       // own app, a missing rollout or a moved CODEX_HOME, part way through
       // a conversation. Start a fresh session once.
       const notFound = err && (err instanceof SessionNotFoundError || err.name === 'SessionNotFoundError' || (/no conversation found/i.test(err.message) && rec.status === 'starting'));
-      if (notFound && rt.resumed && !rt.retriedFresh) {
+      // The other way round: a session started fresh whose id the CLI
+      // already has. Its first turn was cut off (a restart) after the CLI
+      // wrote the transcript but before its init reached the runner, so
+      // sessionUsed never got set. Resume it instead, once (4 Nov 2026).
+      const inUse = Boolean(err && !rt.resumed && /Session ID \S+ is already in use/i.test(err.message));
+      if (((notFound && rt.resumed) || inUse) && !rt.retriedFresh) {
         rt.retriedFresh = true;
-        rec.sessionUsed = false;
-        rec.nativeSessionId = crypto.randomUUID();
-        rec.sessionCostTotal = 0;
-        delete rec.cliVersion;
+        if (inUse) rec.sessionUsed = true;
+        else {
+          rec.sessionUsed = false;
+          rec.nativeSessionId = crypto.randomUUID();
+          rec.sessionCostTotal = 0;
+          delete rec.cliVersion;
+        }
         const account = this.accounts.get(rec.accountId);
         if (account && rt.turn) {
-          this.emit(st, { type: 'system.note', text: "Couldn't resume the earlier session, so this is a new one." }, rt.turn.turnId);
+          if (!inUse) this.emit(st, { type: 'system.note', text: "Couldn't resume the earlier session, so this is a new one." }, rt.turn.turnId);
           const turn = rt.turn;
           const log = this.store.log(rec.id);
           const msgs = log.read(Math.max(1, log.lastSeq - 200), log.lastSeq).filter((e) => e.type === 'user.message' && e.turnId === turn.turnId);
@@ -3303,7 +3360,7 @@ export class Runner {
             // not-found one.
             let text = this.forAgent(first);
             const earlier = rec.lastTurnCompletedSeq > 0;
-            if (rt.carried || earlier) {
+            if (!inUse && (rt.carried || earlier)) {
               rec.handoff = rt.carried ?? { fromCwd: rec.cwd, fromAccountId: rec.accountId, lost: true };
               text = this.handoffNote(st, account) + text;
               delete rec.handoff;
@@ -4481,6 +4538,7 @@ export class Runner {
     };
     if (rec.poolId) s.poolId = rec.poolId;
     if (rec.waitingForRoom) s.waitingForRoom = { ...rec.waitingForRoom };
+    if (rec.waitingForNetwork) s.waitingForNetwork = { since: rec.waitingForNetwork.since };
     if (rec.needs && rec.needs.seq === rec.lastTurnCompletedSeq) {
       s.needs = rec.needs.needs;
       if (rec.needs.asks) {
@@ -5485,6 +5543,10 @@ export const WROTE_INSTEAD = "The user didn't answer this; they wrote you a mess
 // What a pool thread is told when it carries on by itself after its login
 // ran dry (docs/protocol.md, "Pools").
 export const CARRY_ON_MOVED = 'Your last login hit its usage limit partway through that turn, so this thread has moved to another one. Carry on from where you left off.';
+export const CARRY_ON_RESTART = 'The runner stopped partway through that turn (Threadbear or the Mac restarted) and is back now. Carry on from where you left off.';
+// Past this, a cut-off turn is left for Mike: the Mac was off for a while,
+// and he may have moved on.
+const STOPPED_CARRY_ON_MAX_AGE_MS = 12 * 3_600_000;
 export const CARRY_ON_NETWORK = "The connection to the API dropped partway through that turn and is back now. Carry on from where you left off.";
 // How a thread waits for the network: probes 5s, 10s, 20s... apart, at
 // most a minute; a carry-on that can't get through either counts as a

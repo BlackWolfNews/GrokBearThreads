@@ -305,7 +305,9 @@ public enum TurnOutcome: String, Sendable, Hashable, Codable {
 /// Why a failed turn failed, when the runner knows, so the app can offer
 /// the fix without reading the message.
 public enum TurnErrorKind: String, Sendable, Hashable, Codable {
-    case usageLimit, contextWindow, auth
+    /// `network`: the API couldn't be reached (the internet went); the
+    /// runner carries the turn on by itself once it can.
+    case usageLimit, contextWindow, auth, network
 }
 
 public struct TurnCompletion: Sendable, Hashable, Decodable {

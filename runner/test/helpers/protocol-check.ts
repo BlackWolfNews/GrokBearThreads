@@ -185,6 +185,10 @@ export function checkSummary(t: Obj): string[] {
     const ok = w && typeof w === 'object' && isIso(w.until) && (w.accountId === undefined || isStr(w.accountId)) && Object.keys(w).every((k) => ['until', 'accountId'].includes(k));
     if (!ok) problems.push('waitingForRoom');
   }
+  if (t.waitingForNetwork !== undefined) {
+    const w = t.waitingForNetwork;
+    if (!(w && typeof w === 'object' && isIso(w.since) && Object.keys(w).every((k) => k === 'since'))) problems.push('waitingForNetwork');
+  }
   if (t.snoozedUntilRestart !== undefined && (t.snoozedUntilRestart !== true || !isStr(t.snoozedUntil))) problems.push('snoozedUntilRestart');
   if (t.wakeWhen !== undefined) {
     const w = t.wakeWhen;
@@ -291,7 +295,7 @@ export function checkSummary(t: Obj): string[] {
   const allowed = new Set([
     'id', 'title', 'cwd', 'accountId', 'provider', 'model', 'permissionMode', 'status', 'live', 'needsYou', 'createdAt', 'updatedAt',
     'lastActivityAt', 'snoozedUntil', 'snoozedUntilRestart', 'archivedAt', 'starredAt', 'preview', 'lastSeq', 'lastSeenSeq', 'nativeSessionId', 'contextTokens', 'costUsd',
-    'poolId', 'waitingForRoom', 'wakeWhen',
+    'poolId', 'waitingForRoom', 'waitingForNetwork', 'wakeWhen',
     'effort', 'modelInUse', 'effortInUse', 'contextWindow', 'panels', 'actions', 'hooks', 'patches', 'background', 'subagents', 'projects', 'worktree',
     'needs', 'asks', 'asksSeq', 'highlightsAt', 'panelRequest', 'share', 'startedBy', 'asked',
   ]);

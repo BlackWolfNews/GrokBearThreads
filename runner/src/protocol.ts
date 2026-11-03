@@ -138,6 +138,9 @@ export type ThreadSummary = {
   accountId: string;
   poolId?: string; // absent: pinned to accountId
   waitingForRoom?: WaitingForRoom;
+  // Its last turn couldn't reach the API; it carries on by itself once
+  // the runner reaches it again (Runner.onNetworkLost).
+  waitingForNetwork?: { since: string };
   provider: Provider;
   model?: string;
   effort?: EffortLevel;

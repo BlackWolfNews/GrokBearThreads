@@ -209,6 +209,8 @@ async function main(): Promise<void> {
         if (draining) return undefined;
         const t = runner.adopt(threadId, o);
         restarter?.resumeAdopted(threadId);
+        // Cut off mid-turn if the old runner crashed with it: carried on.
+        if (o?.crashed) runner.carryOnStopped(threadId);
         // Told now if the app restarted while it was over there.
         if (t) appRestarts?.adopted(threadId);
         return t;
@@ -476,6 +478,7 @@ async function main(): Promise<void> {
   // one should still find the resume.
   restarter.resumeAfterRestart();
   runner.tellStoppedWork();
+  runner.carryOnStopped();
 
   let stopping = false;
   const stop = async (signal: string) => {

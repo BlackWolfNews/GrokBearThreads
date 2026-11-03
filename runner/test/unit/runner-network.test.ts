@@ -6,6 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeHarness, tick } from '../helpers/fakes.ts';
+import { checkSummary } from '../helpers/protocol-check.ts';
 import { CARRY_ON_NETWORK } from '../../src/runner.ts';
 import type { Provider } from '../../src/protocol.ts';
 
@@ -30,6 +31,10 @@ test('a turn that lost the API waits, probes with backoff, and carries on once i
   await tick();
   const store = () => h.store.load(thread.id)!;
   assert.equal(store().waitingForNetwork?.tries, 0);
+  // Clients see it, so the row can say it's waiting rather than Failed.
+  const summary = h.runner.get(thread.id);
+  assert.deepEqual(checkSummary(summary), []);
+  assert.equal(summary.waitingForNetwork?.since, store().waitingForNetwork?.since);
   assert.deepEqual(notes(h, thread.id), ["Lost the connection to the API partway through that turn. This thread carries on by itself once it's back."]);
   // Probes at 5s, then 10s after that, while it's still down.
   h.clock.advance(4_000);
@@ -50,6 +55,7 @@ test('a turn that lost the API waits, probes with backoff, and carries on once i
   assert.equal(s.sent.at(-1)?.text, CARRY_ON_NETWORK);
   assert.equal(runnerMessages(h, thread.id).length, 1);
   assert.equal(store().waitingForNetwork, undefined);
+  assert.equal(h.runner.get(thread.id).waitingForNetwork, undefined);
   assert.equal(store().netCarryOn?.tries, 1);
   // It finishes: nothing more happens, and the count is gone with the next turn.
   s.result('completed');

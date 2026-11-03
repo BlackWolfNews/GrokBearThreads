@@ -289,6 +289,15 @@ final class PoolsTests: XCTestCase {
         XCTAssertEqual(again.waitingForRoom, thread.waitingForRoom)
     }
 
+    func testThreadSummaryWaitingForNetwork() throws {
+        let thread = try JSONDecoder().decode(ThreadSummary.self, from: Data(#"{"id":"th1","accountId":"claude-1","waitingForNetwork":{"since":"2026-11-03T03:59:55Z"}}"#.utf8))
+        XCTAssertEqual(thread.waitingForNetwork, ISO8601.parse("2026-11-03T03:59:55Z"))
+        let again = try JSONDecoder().decode(ThreadSummary.self, from: JSONEncoder().encode(thread))
+        XCTAssertEqual(again.waitingForNetwork, thread.waitingForNetwork)
+        let bad = try JSONDecoder().decode(ThreadSummary.self, from: Data(#"{"id":"th2","accountId":"claude-1","waitingForNetwork":{"since":"soon"}}"#.utf8))
+        XCTAssertNil(bad.waitingForNetwork, "a time it can't read is no wait at all")
+    }
+
     func testRequestsCarryThePool() {
         XCTAssertEqual(ThreadUpdate(poolId: .some(nil)).params["poolId"], .null, "null pins")
         XCTAssertEqual(ThreadUpdate(poolId: "convex").params["poolId"], .string("convex"))

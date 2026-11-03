@@ -245,7 +245,7 @@ struct AppDump: Encodable {
             return Thread(id: summary.id, title: summary.title, status: summary.status.rawValue, needsYou: summary.needsYou,
                           unread: look.unread, hovered: app.hoverOverride == summary.id,
                           background: look.status == .background ? BackgroundWork.short(summary.background) : nil,
-                          waiting: summary.waitingForRoom.map { Pools.waitingLine($0, now: app.now) },
+                          waiting: summary.waitingForRoom.map { Pools.waitingLine($0, now: app.now) } ?? (summary.waitingForNetwork != nil ? "Waiting for connection" : nil),
                           subagents: subagents, runner: app.runnerPlace(of: summary))
         }
         let sections: [Section]

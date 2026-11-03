@@ -125,6 +125,10 @@ type ThreadSummary = {
   waitingForRoom?: { until: string, accountId?: string } // every login in its
                         // pool is out of room; it carries on by itself at
                         // `until`. accountId: the login it's waiting on
+  waitingForNetwork?: { since: string } // its last turn couldn't reach the
+                        // API; it carries on by itself once the runner
+                        // reaches it again (Pools, "A turn that lost the
+                        // network"). since: when the line first went
   provider: Provider    // always the account's provider
   model?: string        // undefined means the account's default
   effort?: EffortLevel  // undefined means the model's own level
@@ -1397,8 +1401,9 @@ thread to another login when the one it's on runs out of room.
   through either waits again, with no new note; after five carry-ons, or
   six hours from the first failure, it stops with a note saying to send
   a message. A message already queued goes instead of a carry-on, and
-  any turn ends the wait. The wait is kept in `thread.json`
-  (`waitingForNetwork`), so it survives a restart. Other failures never
+  any turn ends the wait. The thread's summary has
+  `waitingForNetwork: { since }` while it waits, kept in `thread.json`
+  so it survives a restart. Other failures never
   retry by themselves.
 - **Moves in the transcript.** Each move and wait is a `system.note`:
   "Moved to mike@gangbusters.io: mike.cann@gmail.com hit its 5-hour limit,

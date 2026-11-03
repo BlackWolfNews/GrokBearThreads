@@ -1536,6 +1536,7 @@ enum RowRenderer {
         switch kind {
         case .contextWindow?: return "The conversation is too long for this model. Start a new thread to carry on."
         case .auth?: return "Its login was refused. Sign in again from the line above, then send again."
+        case .network?: return "The internet dropped. This thread carries on by itself once the connection is back."
         case .usageLimit?, nil: return nil
         }
     }
