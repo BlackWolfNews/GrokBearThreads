@@ -24,6 +24,7 @@ struct NewThreadView: View {
     @State private var photos: [PickedPhoto] = []
     @State private var adding = 0
     @State private var cursor = TextCursor()
+    @State private var dictation = Dictation()
 
     /// Each photo a chip in the words where it was put in, as on the Mac.
     private var words: PhotoWords { PhotoWords(text: $text, photos: $photos, adding: $adding, cursor: cursor) }
@@ -35,12 +36,26 @@ struct NewThreadView: View {
                     PastableTextField(text: $text, placeholder: "What should it do?", lines: 4...12,
                                       onPasteImages: model.canSendPhotos ? { words.addPasted($0, model: model) } : nil,
                                       photos: $photos, cursor: cursor)
-                    if model.canSendPhotos {
-                        PhotoMenu(words: words) {
-                            Label("Add a photo", systemImage: "photo")
+                    HStack {
+                        if model.canSendPhotos {
+                            PhotoMenu(words: words) {
+                                Label("Add a photo", systemImage: "photo")
+                            }
                         }
-                        if !photos.isEmpty || adding > 0 { PhotoStrip(words: words) }
+                        Spacer()
+                        Button(action: toggleDictation) {
+                            Label(dictation.isListening ? "Stop" : "Dictate",
+                                  systemImage: dictation.isListening ? "stop.circle.fill" : "mic")
+                        }
+                        .tint(dictation.isListening ? .red : nil)
                     }
+                    // Two buttons in one Form row: without this a tap anywhere
+                    // in the row fires both.
+                    .buttonStyle(.borderless)
+                    if let problem = dictation.problem {
+                        Text(problem).font(.footnote).foregroundStyle(.secondary)
+                    }
+                    if model.canSendPhotos, !photos.isEmpty || adding > 0 { PhotoStrip(words: words) }
                 }
                 if !models.isEmpty {
                     Section {
@@ -78,6 +93,7 @@ struct NewThreadView: View {
                     }
                 }
             }
+            .onDisappear { dictation.stop() }
             .task(id: "\(commandId ?? ""):\(model.connection)") { await waitForThread() }
             .task {
                 if photos.isEmpty, let load = model.loadSamplePhoto { words.add([load], model: model) }
@@ -88,8 +104,16 @@ struct NewThreadView: View {
     private var models: [PhoneModelChoice] { model.newThreadModels }
     private var chosenModel: PhoneModelChoice? { models.first { $0.id == modelId } }
 
+    /// Adds to what's typed, after a space.
+    private func toggleDictation() {
+        if dictation.isListening { dictation.stop(); return }
+        let before = text.isEmpty || text.hasSuffix(" ") || text.hasSuffix("\n") ? text : text + " "
+        Task { await dictation.start { text = before + $0 } }
+    }
+
     private func start() {
         guard let backend = model.backend else { return }
+        dictation.stop()
         let message = words.message
         let photos = photos
         starting = Task {
