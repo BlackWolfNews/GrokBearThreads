@@ -112,6 +112,9 @@ final class UpdatesTextTests: XCTestCase {
         XCTAssertEqual(UpdatesText.iconTooltip(app: Side(), runner: updates, clis: []), "Updates\n12 new changes from Mike")
         XCTAssertEqual(UpdatesText.upstreamLine(updates.upstream), "Mike's release of 30 Oct has 12 new changes.")
         XCTAssertTrue(UpdatesText.bringInPrompt(updates.upstream!.release!).contains("docs/bringing-in-updates.md"))
+        let discuss = UpdatesText.discussPrompt(updates.upstream!.release!)
+        XCTAssertTrue(discuss.contains("release/2026-10-30 has 12 new changes"))
+        XCTAssertTrue(discuss.contains("Don't change anything yet"))
 
         let upToDate = RunnerUpdates(upstream: .init(state: "idle", release: .init(tag: "release/2026-10-30", changes: 0)))
         XCTAssertFalse(UpdatesText.needsYou(app: Side(), runner: upToDate))

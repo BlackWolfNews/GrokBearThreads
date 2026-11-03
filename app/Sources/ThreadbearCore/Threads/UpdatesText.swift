@@ -107,6 +107,13 @@ public enum UpdatesText {
         "Bring in Mike's release \(r.tag) (\(r.changes) new change\(r.changes == 1 ? "" : "s")) to this copy of Threadbear. Follow docs/bringing-in-updates.md, and ask me before it lands."
     }
 
+    /// Let's Discuss: the same release, talked through before anything
+    /// changes (Mike, 4 Nov 2026), for someone who wants to know what it
+    /// does to their own changes first.
+    public static func discussPrompt(_ r: RunnerUpdates.Upstream.Release) -> String {
+        "Mike's release \(r.tag) has \(r.changes) new change\(r.changes == 1 ? "" : "s") for this copy of Threadbear. Before bringing any of it in, talk me through it: what's in it that I'd notice, anything that touches or clashes with the changes I've made in this copy, and anything risky. Section 1 of docs/bringing-in-updates.md says how to see both sides. Don't change anything yet; once we've talked it over, I'll say whether to bring it in, and then follow that doc."
+    }
+
     /// The icon's tooltip. A failure is said, as it shares the grey dot
     /// with an update on its way.
     public static func tooltip(app: AppSide, runner: RunnerUpdates?) -> String {

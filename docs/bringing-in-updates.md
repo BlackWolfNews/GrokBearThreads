@@ -2,6 +2,8 @@
 
 You're an agent in a thread started by Bring Them In (the app's Updates
 panel, From Mike), or someone asked you to bring in Mike's latest release.
+A thread started by Let's Discuss uses section 1 to talk the release
+through first, and goes on to section 2 only once they say to.
 This copy of Threadbear is their fork of `mikecann/threadbear`: `origin` is
 theirs and `upstream` is Mike's. Their `main` has their own changes on it,
 and your job is to add Mike's release to it without losing any of theirs.

@@ -1446,12 +1446,15 @@ final class AppModel {
     /// Updates panel, From Mike: a new thread in the repo the runner
     /// follows that merges Mike's release in (docs/bringing-in-updates.md),
     /// on the composer's account or pool and model.
-    func bringInUpstream(_ upstream: RunnerUpdates.Upstream) {
+    /// Bring Them In, or with `discuss` Let's Discuss: a thread in the
+    /// checkout about Mike's newest release, that merges it, or talks it
+    /// through first and changes nothing until he says.
+    func bringInUpstream(_ upstream: RunnerUpdates.Upstream, discuss: Bool = false) {
         guard let client, let release = upstream.release, !creatingThread else { return }
-        var request = newThreadRequest(text: UpdatesText.bringInPrompt(release), images: [])
+        var request = newThreadRequest(text: discuss ? UpdatesText.discussPrompt(release) : UpdatesText.bringInPrompt(release), images: [])
         request.cwd = upstream.checkout ?? AppUpdater.shared.running?.checkout ?? request.cwd
         request.permissionMode = .full
-        request.title = "Bring in Mike's release \(UpdatesText.releaseDate(release.tag))"
+        request.title = (discuss ? "Discuss" : "Bring in") + " Mike's release \(UpdatesText.releaseDate(release.tag))"
         creatingThread = true
         Task {
             defer { creatingThread = false }

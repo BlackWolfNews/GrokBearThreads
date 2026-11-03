@@ -757,7 +757,9 @@ every few hours, and only trusts releases signed with the key setup saved.
 When there's one your copy doesn't have, the Updates icon gets a coloured
 dot, and its From Mike section lists what's new. Bring Them In starts a
 thread that merges Mike's changes with your own, sorts out any clashes,
-runs the checks and asks you before it lands. From a thread, `tb updates`
+runs the checks and asks you before it lands. Let's Discuss starts one that
+talks the release through first, what's in it and what it means for your
+own changes, and changes nothing until you say. From a thread, `tb updates`
 says the same, and `tb updates check` looks again now.
 
 ### The activity log

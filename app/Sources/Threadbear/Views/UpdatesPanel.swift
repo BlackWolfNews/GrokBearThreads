@@ -149,9 +149,13 @@ struct UpdatesPanel: View {
                                     .foregroundStyle(.secondary)
                                     .lineLimit(1)
                             }
-                            Button("Bring Them In") { app.bringInUpstream(upstream) }
-                                .disabled(app.creatingThread)
-                                .tip("Start a thread that merges Mike's release into your main. It asks before it lands.")
+                            HStack(spacing: zoomed(8)) {
+                                Button("Bring Them In") { app.bringInUpstream(upstream) }
+                                    .tip("Start a thread that merges Mike's release into your main. It asks before it lands.")
+                                Button("Let's Discuss") { app.bringInUpstream(upstream, discuss: true) }
+                                    .tip("Start a thread that talks the release through against your own changes first, and changes nothing until you say")
+                            }
+                            .disabled(app.creatingThread)
                         }
                     }
                 }
