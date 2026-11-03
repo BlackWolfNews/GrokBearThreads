@@ -61,6 +61,8 @@ public enum RowDebug {
             return BackgroundWork.lineWithDetail(status.tasks)
         case .changes(let card):
             return card.title
+        case .gap(let gap):
+            return gap.label
         }
     }
 

@@ -1,0 +1,30 @@
+/* Colours taken from the live transcript (Mike's screenshot, 3 Nov). */
+*{box-sizing:border-box;margin:0}
+body{background:#1e1e1e;font:15px/1.55 -apple-system,"SF Pro Text",system-ui;color:#e6e4e1;padding:24px;width:900px}
+.win{background:#1f1f1f;padding:10px 26px 20px 86px}
+.user{background:#253043;border-radius:16px;padding:10px 16px;margin:0 0 22px 380px;font-size:14.5px}
+.user .q{color:#9aa3b2;font-size:12.5px}
+.work{color:#9a9894;font-size:14px;margin-bottom:8px}
+.work .ch{color:#6f6d69;margin-left:6px}
+p{margin-bottom:14px}
+.rev{border:1px solid #3a3a3a;border-left:3px solid #e08a3c;border-radius:10px;padding:12px 16px;margin:6px 0 16px;background:#252525}
+.rev .t{font-weight:600;font-size:14.5px}
+.rev .s{color:#9a9894;font-size:13px;margin:2px 0 8px}
+.rev .b{display:inline-block;border:1px solid #474747;border-radius:14px;padding:3px 12px;font-size:13.5px}
+.fadeout{color:#8a8884}
+/* A: divider */
+.gap{display:flex;align-items:center;gap:12px;color:#7d7b77;font-size:12.5px;margin:6px 0 14px}
+.gap:before,.gap:after{content:"";flex:1;border-top:1px solid #353535}
+/* B: wait row */
+.wait{display:flex;align-items:center;gap:8px;color:#8f8d89;font-size:13px;margin:2px 0 14px;padding:6px 10px;border-radius:8px;background:#242424;border:1px solid #2f2f2f;width:fit-content}
+.wait .ic{color:#6f6d69}
+.wait .ok{color:#7cc78a}
+.wait .dot{color:#555}
+/* C: stale message folds */
+.stale{display:flex;align-items:baseline;gap:8px;color:#7d7b77;font-size:13.5px;margin:0 0 14px}
+.stale s{text-decoration:none;font-style:italic}
+.stale .d{color:#6a6864}
+/* D: time gutter */
+.row{display:grid;grid-template-columns:52px 1fr;margin-left:-60px}
+.row .tm{color:#6f6d69;font-size:12px;padding-top:3px;text-align:right;padding-right:10px}
+.note{color:#6f6d69;font-size:12.5px;margin-top:18px;border-top:1px solid #2c2c2c;padding-top:10px}

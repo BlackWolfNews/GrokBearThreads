@@ -104,6 +104,9 @@ reply, "Worked for 2m 13s": click it to open it. Pictures it made stay
 out, as they're often the answer. When the agent carries on by itself
 after that (to check its change once the app restarts, say), the
 follow-up joins the same line, so there's still one reply to read. When
+it picks up again because a sub-agent or a background job finished, a
+thin line between its messages says how long it waited and what finished
+("6 min later · Mine the repo finished"). When
 it needs something from you, a card under the reply asks, and each answer
 says what happens if you pick it. If you'd rather have a few short
 bullets in place of the agent's message, ask a thread to turn off One

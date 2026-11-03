@@ -450,7 +450,8 @@ public enum EventPayload: Sendable, Hashable {
     case reviewUpdated(DesignReview)
     case approvalResolved(ApprovalResolution)
     case planUpdated([PlanEntry])
-    case turnStarted
+    /// `wokeBy`: what finished and started a turn the agent began by itself.
+    case turnStarted(wokeBy: [BackgroundTask] = [])
     case turnCompleted(TurnCompletion)
     case systemNote(String)
     case error(String)
@@ -600,7 +601,8 @@ public struct Event: Sendable, Hashable, Decodable {
         case "plan.updated":
             return .planUpdated(try PlanFields(from: decoder).entries)
         case "turn.started":
-            return .turnStarted
+            let c = try decoder.container(keyedBy: TurnStartedFields.self)
+            return .turnStarted(wokeBy: (try? c.decodeIfPresent([BackgroundTask].self, forKey: .wokeBy)) ?? [])
         case "turn.completed":
             return .turnCompleted(try TurnCompletion(from: decoder))
         case "system.note":
@@ -630,6 +632,7 @@ public struct Event: Sendable, Hashable, Decodable {
     }
 
     private enum ReviewFields: String, CodingKey { case review }
+    private enum TurnStartedFields: String, CodingKey { case wokeBy }
 }
 
 /// Result of `threads.events`.

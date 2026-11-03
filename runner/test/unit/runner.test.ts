@@ -1086,6 +1086,34 @@ test('a task that ends during a turn is finished in the summary only after the t
   assert.equal(h.runner.get(thread.id).background, undefined);
 });
 
+test('a turn background work woke says what finished, sub-agents and shells alike', () => {
+  const h = makeHarness();
+  const { thread } = create(h);
+  const s = h.adapter.last;
+  s.init();
+  s.out({ kind: 'tasks', tasks: [
+    { id: 'a1', type: 'local_agent', kind: 'agent', description: 'Mine the repo for stories' },
+    { id: 'b1', type: 'local_bash', kind: 'shell', description: 'npm test' },
+    { id: 'a2', type: 'local_agent', kind: 'agent', description: 'Prior art' },
+  ] });
+  s.result();
+  s.out({ kind: 'tasks', tasks: [{ id: 'a2', type: 'local_agent', kind: 'agent', description: 'Prior art' }] });
+  s.out({ kind: 'cliTurn', note: 'Agent "Mine the repo for stories" completed' });
+  let started = h.events(thread.id).filter((e) => e.type === 'turn.started');
+  assert.equal(started.length, 2);
+  assert.equal(started[0].wokeBy, undefined, "Mike's own turn wasn't woken");
+  assert.deepEqual(started[1].wokeBy, [
+    { kind: 'agent', description: 'Mine the repo for stories' },
+    { kind: 'shell', description: 'npm test' },
+  ]);
+  s.result();
+  // A background sub-agent asking for an approval starts a turn too, but
+  // nothing finished: no wokeBy.
+  (h.runner as any).openCliTurn((h.runner as any).threads.get(thread.id));
+  started = h.events(thread.id).filter((e) => e.type === 'turn.started');
+  assert.equal(started.at(-1).wokeBy, undefined);
+});
+
 test('releasing or losing the CLI clears the background list', async () => {
   const h = makeHarness();
   const { thread } = create(h);

@@ -273,6 +273,7 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         case .group: return "group"
         case .working: return "working"
         case .background: return "background"
+        case .gap: return "gap"
         case .changes: return "changes"
         }
     }
@@ -291,6 +292,7 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         case "group": cell = GroupRowCell(frame: .zero)
         case "working": cell = WorkingRowCell(frame: .zero)
         case "background": cell = BackgroundRowCell(frame: .zero)
+        case "gap": cell = GapRowCell(frame: .zero)
         case "changes": cell = ChangesRowCell(frame: .zero)
         default: cell = QuestionRowCell(frame: .zero)
         }

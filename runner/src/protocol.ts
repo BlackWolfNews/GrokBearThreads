@@ -613,7 +613,8 @@ export type EventBody =
   | { type: 'question.requested'; approvalId: string; itemId?: string; questions: Question[] }
   | { type: 'approval.resolved'; approvalId: string; decision: ApprovalDecision; message?: string }
   | { type: 'plan.updated'; entries: PlanEntry[] }
-  | { type: 'turn.started'; turnId: string }
+  // wokeBy: the background work that finished and started this turn (docs/protocol.md)
+  | { type: 'turn.started'; turnId: string; wokeBy?: { kind: BackgroundKind; description: string }[] }
   | {
       type: 'turn.completed';
       turnId: string;

@@ -105,7 +105,9 @@ final class ModelsTests: XCTestCase {
                        .approvalResolved(ApprovalResolution(approvalId: "ap1", decision: .allowAlways)))
         XCTAssertEqual(E.event(10, "plan.updated", ["entries": [["text": "Step", "status": "in_progress"]]]).payload,
                        .planUpdated([PlanEntry(text: "Step", status: .in_progress)]))
-        XCTAssertEqual(E.event(11, "turn.started", ["turnId": "t1"]).payload, .turnStarted)
+        XCTAssertEqual(E.event(11, "turn.started", ["turnId": "t1"]).payload, .turnStarted())
+        XCTAssertEqual(E.event(11, "turn.started", ["turnId": "t1", "wokeBy": [["kind": "agent", "description": "Mine the repo"]]]).payload,
+                       .turnStarted(wokeBy: [BackgroundTask(kind: .agent, description: "Mine the repo")]))
         guard case .turnCompleted(let done) = E.event(12, "turn.completed", ["turnId": "t1", "outcome": "failed", "durationMs": 10, "error": ["message": "Overloaded"]]).payload
         else { return XCTFail() }
         XCTAssertEqual(done.outcome, .failed)

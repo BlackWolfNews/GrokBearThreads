@@ -2741,9 +2741,13 @@ export class Runner {
     const { rec, rt } = st;
     rt.wakeTimer?.cancel();
     rt.wakeTimer = undefined;
+    // What finished and woke the CLI, so the transcript can mark the wait
+    // between this turn and the last one with what ended it (Mike, 3 Nov:
+    // "still waiting" and "it's back" read as one breath).
+    const wokeBy = rt.finished.map((t) => ({ kind: t.kind, description: t.description }));
     rt.finished = [];
     const turnId = crypto.randomUUID();
-    this.emit(st, { type: 'turn.started', turnId }, turnId);
+    this.emit(st, wokeBy.length ? { type: 'turn.started', turnId, wokeBy } : { type: 'turn.started', turnId }, turnId);
     rt.idleTimer?.cancel();
     rt.idleTimer = undefined;
     rt.turn = { turnId, startedAt: this.clock.now(), interruptRequested: false, auto: true, messages: [], edited: new Set() };

@@ -28,7 +28,9 @@ final class PendingMessageTests: XCTestCase {
         // The runner shows it: the real row takes its place in one change.
         change = model.apply([E.event(5, "turn.started", ["turnId": "t2"], turn: "t2"), E.event(6, "user.message", ["text": "Ship it", "images": []], turn: "t2")])
         XCTAssertTrue(model.pending.isEmpty)
-        XCTAssertEqual(model.rows.map(\.id), ["u:2", "a:m1", "f:t1", "u:6", "w:t2"])
+        // The turn started before his message reached it, so it's one the
+        // agent woke up for, and the wait before it is marked.
+        XCTAssertEqual(model.rows.map(\.id), ["u:2", "a:m1", "f:t1", "gap:t2", "u:6", "w:t2"])
         XCTAssertTrue(change.removed.contains(3))
     }
 

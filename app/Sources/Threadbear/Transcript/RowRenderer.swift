@@ -63,6 +63,8 @@ enum RowMetrics {
     static var runnerBottom: CGFloat { zoomed(18) }
     static var changesHeader: CGFloat { zoomed(42) }
     static var changesFile: CGFloat { zoomed(34) }
+    /// The "6 min later" divider before a turn the agent woke up for.
+    static var gapHeight: CGFloat { zoomed(34) }
 
     /// The reading column for a given table width: (x, width).
     static func column(tableWidth: CGFloat) -> (x: CGFloat, width: CGFloat) {
@@ -151,7 +153,7 @@ final class RenderCache: @unchecked Sendable {
     static func effectiveExpanded(_ row: TranscriptRow, _ expanded: Bool) -> Bool {
         switch row.content {
         case .group(let group): return group.isExpanded
-        case .changes, .working, .background: return false
+        case .changes, .working, .background, .gap: return false
         default: return expanded
         }
     }
@@ -456,6 +458,9 @@ enum RowRenderer {
 
         case .working, .background:
             return RowRender(height: RowMetrics.workingHeight)
+
+        case .gap:
+            return RowRender(height: RowMetrics.gapHeight)
 
         case .changes(let card):
             return changesRender(card, width: width, measurer: measurer)

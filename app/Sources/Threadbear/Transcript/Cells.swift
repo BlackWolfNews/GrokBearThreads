@@ -1046,6 +1046,61 @@ final class BackgroundRowCell: RowCellView {
     }
 }
 
+// MARK: - Wait divider
+
+/// "6 min later · Mine the repo finished": a thin rule across the column
+/// with the wait in the middle, between a turn and the one the agent
+/// started by itself after it (`TurnGap`, Mike picked it 3 Nov). Quiet on
+/// purpose, like a chat app's day divider: it only says time went by.
+final class GapRowCell: RowCellView {
+    let label = makeLabel()
+    let left = FillView()
+    let right = FillView()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        label.alignment = .center
+        for rule in [left, right] { rule.set(fill: Theme.hairline, stroke: nil, radius: 0) }
+        [left, right, label].forEach(addSubview)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func configure(row: TranscriptRow, render: RowRender, tableWidth: CGFloat, expanded: Bool) {
+        super.configure(row: row, render: render, tableWidth: tableWidth, expanded: expanded)
+        guard case .gap(let gap) = row.content else { return }
+        let (x, width) = RowMetrics.column(for: row, tableWidth: tableWidth)
+        label.font = Theme.smallFont
+        label.textColor = Theme.faintText
+        label.stringValue = gap.label
+        label.setTip(Self.tip(gap))
+        let space = zoomed(12)
+        // The words never take more than the column less a short rule each side.
+        // The field draws its text inset from its frame on each side; without
+        // that back, the last word was cut off with room to spare.
+        let fit = min(ceil(label.intrinsicContentSize.width) + RowMetrics.labelInset * 2 + 2, max(0, width - zoomed(48) * 2 - space * 2))
+        let height = ceil(label.intrinsicContentSize.height)
+        let labelX = x + floor((width - fit) / 2)
+        label.frame = NSRect(x: labelX, y: floor((render.height - height) / 2), width: fit, height: height)
+        let ruleY = floor(render.height / 2)
+        let rule: CGFloat = 1 / max(1, window?.backingScaleFactor ?? 2)
+        left.frame = NSRect(x: x, y: ruleY, width: max(0, labelX - space - x), height: rule)
+        right.frame = NSRect(x: label.frame.maxX + space, y: ruleY, width: max(0, x + width - label.frame.maxX - space), height: rule)
+    }
+
+    /// The times either side, and everything that finished when the line
+    /// only had room for the first.
+    static func tip(_ gap: TurnGap) -> String {
+        let time = DateFormatter()
+        time.dateStyle = .none
+        time.timeStyle = .short
+        var lines = ["Waited from \(time.string(from: gap.from)) to \(time.string(from: gap.to))"]
+        let names = gap.wokeBy.map(\.description).filter { !$0.isEmpty }
+        if !names.isEmpty { lines.append("Finished: " + names.joined(separator: ", ")) }
+        return lines.joined(separator: "\n")
+    }
+}
+
 // MARK: - Changed files card
 
 /// "Edited 3 files": each file with its folder and line counts. Clicking a

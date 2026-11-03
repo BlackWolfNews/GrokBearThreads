@@ -105,6 +105,8 @@ public enum MarkdownExport {
         case .changes(let card):
             let files = card.files.map { "- `\($0.path)` +\($0.added) −\($0.removed)" }
             return ([card.title + ":"] + files).joined(separator: "\n")
+        case .gap(let gap):
+            return "_\(gap.label)_"
         }
     }
 

@@ -108,6 +108,11 @@ public struct TranscriptModel: Sendable {
     /// Each turn's last error row, to learn the turn's `errorKind`.
     private var errorRowForTurn: [String: String] = [:]
     private var turnStarts: [String: Date] = [:]
+    /// When the last turn ended, and the turns Mike's (or anyone's) message
+    /// started: a turn with no message is one the agent started itself,
+    /// and the wait before it gets a divider (`TurnGap`).
+    private var lastTurnEnd: Date?
+    private var messagedTurns: Set<String> = []
     /// Turns whose `turn.started` has been seen: a message after it went
     /// into that turn, so it can't be edited on its own.
     private var startedTurns: Set<String> = []
@@ -420,6 +425,8 @@ public struct TranscriptModel: Sendable {
         openAsksRow = nil
         errorRowForTurn = [:]
         turnStarts = [:]
+        lastTurnEnd = nil
+        messagedTurns = []
         startedTurns = []
         hidden = Self.hiddenRanges(events)
         completedTurns = []
@@ -557,6 +564,7 @@ public struct TranscriptModel: Sendable {
             // Only one that started its own turn can be cut back to; one
             // sent into a running turn went into that turn.
             message.editable = message.isMike && turnId.map { !startedTurns.contains($0) } == true
+            if let turnId { messagedTurns.insert(turnId) }
             append(TranscriptRow(id: "u:\(seq)", seq: seq, turnId: turnId, content: .user(message)))
 
         case .threadRewound(let rewind):
@@ -785,11 +793,16 @@ public struct TranscriptModel: Sendable {
                 append(TranscriptRow(id: id, seq: seq, turnId: turnId, content: .plan(entries)))
             }
 
-        case .turnStarted:
+        case .turnStarted(let wokeBy):
             let key = turnId ?? ""
             openTurn = key
             startedTurns.insert(key)
             if let date = Self.date(event.ts) { turnStarts[key] = date }
+            // A turn nobody's message started: the agent picked up again
+            // as background work finished. Mark how long it was away.
+            if !messagedTurns.contains(key), let from = lastTurnEnd, let to = turnStarts[key], itemIndex["gap:\(key)"] == nil {
+                append(TranscriptRow(id: "gap:\(key)", seq: seq, turnId: turnId, content: .gap(TurnGap(from: from, to: to, wokeBy: wokeBy))))
+            }
             // Nothing new to show but the working line (and a live group).
             markInserted(items.count)
 
@@ -798,6 +811,7 @@ public struct TranscriptModel: Sendable {
             finishStreaming()
             let key = completion.turnId.isEmpty ? (turnId ?? "seq\(seq)") : completion.turnId
             completedTurns.insert(key)
+            if let date = Self.date(event.ts) { lastTurnEnd = date }
             if let turnId { completedTurns.insert(turnId) }
             if let open = openTurn, open == key || open == turnId || completion.turnId.isEmpty {
                 openTurn = nil
@@ -1101,10 +1115,49 @@ public struct TranscriptModel: Sendable {
         if replies.contains(k) || items[k].id.hasPrefix("rw:") { return true }
         switch items[k].content {
         case .user(let message): return !message.isFromRunner
-        case .error, .footer, .asks, .review: return true
+        case .error, .footer, .asks, .review, .gap: return true
         case .images(_, _, let generated): return generated
         case .tool(let tool): return Self.isTakenEndTurn(tool) || pressedRuns.contains(items[k].id)
         default: return false
+        }
+    }
+
+    /// The waits in a finished stretch that get a divider, by item: only
+    /// one with something of the agent's shown above and below it, as the
+    /// work between folds into one line above the replies. Waits with
+    /// nothing shown between them are one divider, from the first one's
+    /// start to the last one's end.
+    private func dividers(in turn: Range<Int>, replies: Set<Int>) -> [Int: TurnGap] {
+        var out: [Int: TurnGap] = [:]
+        var shownBefore = false
+        var waiting: (k: Int, gap: TurnGap)?
+        for k in turn {
+            if case .gap(let gap) = items[k].content {
+                guard shownBefore else { continue }
+                if let earlier = waiting?.gap {
+                    waiting = (k, TurnGap(from: earlier.from, to: gap.to, wokeBy: earlier.wokeBy + gap.wokeBy))
+                } else {
+                    waiting = (k, gap)
+                }
+                continue
+            }
+            guard showsInStretch(k, replies: replies) else { continue }
+            if let w = waiting { out[w.k] = w.gap }
+            waiting = nil
+            shownBefore = true
+        }
+        return out
+    }
+
+    /// Something of the agent's that a finished stretch shows on its own
+    /// (not Mike's message, the footer or a card that's gone).
+    private func showsInStretch(_ k: Int, replies: Set<Int>) -> Bool {
+        guard staysOut(k, replies: replies) else { return false }
+        switch items[k].content {
+        case .user, .footer, .gap: return false
+        case .asks(let card): return card.isOpen
+        case .tool(let tool): return !Self.isTakenEndTurn(tool)
+        default: return true
         }
     }
 
@@ -1254,6 +1307,7 @@ public struct TranscriptModel: Sendable {
                     return nil
                 }
                 let worked = footers.reduce(0) { $0 + $1.done.durationMs }
+                let gaps = dividers(in: turn, replies: replies)
                 for k in turn {
                     let row = items[k]
                     if k == groupAt, let first = folded.first {
@@ -1284,6 +1338,10 @@ public struct TranscriptModel: Sendable {
                         continue
                     } else if case .tool(let tool) = row.content, Self.isTakenEndTurn(tool) {
                         continue
+                    } else if case .gap = row.content {
+                        guard let gap = gaps[k] else { continue }
+                        out.append(derived(row.id, seq: row.seq, turnId: row.turnId, .gap(gap)))
+                        starts.append(turn.lowerBound)
                     } else if case .footer(var done) = row.content {
                         guard k == footers.last?.index else { continue }
                         let stretch = footers.map { items[$0.index].turnId ?? "" }

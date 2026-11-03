@@ -34,6 +34,8 @@ public enum RowKind: String, Sendable, Hashable, CaseIterable {
     /// of work, the "Working for 12s" line, the "3 sub-agents working in
     /// the background" line, and the "Edited 3 files" card.
     case group, working, background, changes
+    /// The time between a turn and the one the agent started by itself after it.
+    case gap
 }
 
 public struct TextItem: Sendable, Hashable {
@@ -286,6 +288,8 @@ public enum RowContent: Sendable, Hashable {
     case working(WorkingStatus)
     case background(BackgroundStatus)
     case changes(ChangedFiles)
+    /// "6 min later · Mine the repo finished" before a turn background work woke.
+    case gap(TurnGap)
 
     public var kind: RowKind {
         switch self {
@@ -308,6 +312,7 @@ public enum RowContent: Sendable, Hashable {
         case .working: return .working
         case .background: return .background
         case .changes: return .changes
+        case .gap: return .gap
         }
     }
 }
