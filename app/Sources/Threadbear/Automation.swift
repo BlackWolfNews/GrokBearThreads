@@ -1582,7 +1582,8 @@ enum Automation {
     /// Links with a hover card in a transcript row's text (an asks card's
     /// link buttons too): `{"row": id}` lists them (words, then where they
     /// go); with `"words"` (part of a link's words), shows that link's
-    /// card and says its window number, and `"show": false` closes it.
+    /// card and says its window number, and `"show": false` closes it;
+    /// `"middle": true` middle-clicks it instead.
     private static func peek(_ c: [String: Any], app: AppModel) -> String {
         guard let prefix = c["row"] as? String else { return "error row is required" }
         guard let row = displayedRow(prefix, app), let index = app.transcript.session?.displayIndex(of: row.id) else { return "error no such row" }
@@ -1597,6 +1598,11 @@ enum Automation {
         if let words = c["words"] as? String, c["press"] as? Bool == true {
             guard let opened = cell.textView.debugClickPictureChip(words) else { return "error no picture chip \(words) opened in \(row.id)" }
             return "ok quicklook \(opened.index) of " + json(opened.paths)
+        }
+        if let words = c["words"] as? String, c["middle"] as? Bool == true {
+            // A middle click on the link, through the window as a real one goes.
+            guard cell.textView.debugMiddleClick(words) else { return "error no link with \(words) in \(row.id), or no middle-button event" }
+            return "ok selection \(app.selection ?? "nothing")"
         }
         if let words = c["words"] as? String, c["menu"] as? Bool == true || c["click"] != nil {
             guard let menu = cell.textView.debugLinkMenu(words) else { return "error no link with \(words) in \(row.id)" }

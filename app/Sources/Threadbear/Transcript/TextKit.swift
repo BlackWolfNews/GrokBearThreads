@@ -442,6 +442,50 @@ final class TranscriptTextView: NSTextView {
         super.mouseDown(with: event)
     }
 
+    /// The link a middle-button press went down on, so letting go over the
+    /// same link opens it (as a browser does on release) and a press that
+    /// wanders off it doesn't.
+    private var middlePress: NSRange?
+
+    override func otherMouseDown(with event: NSEvent) {
+        // Button 2 is the middle one; MouseNavigation takes back/forward.
+        guard event.buttonNumber == 2, let press = middleTarget(at: convert(event.locationInWindow, from: nil)) else {
+            middlePress = nil
+            return super.otherMouseDown(with: event)
+        }
+        middlePress = press.range
+    }
+
+    override func otherMouseUp(with event: NSEvent) {
+        let pressed = middlePress
+        middlePress = nil
+        guard event.buttonNumber == 2, let pressed, let target = middleTarget(at: convert(event.locationInWindow, from: nil)),
+              target.range == pressed else { return super.otherMouseUp(with: event) }
+        closeChipCard()
+        // A middle click opens what a click would: a thread chip its
+        // thread, a picture chip its picture, any other link through
+        // clicked(onLink:), so work:, file and web links go where a left
+        // click sends them (and ⌘ still means the browser or the app).
+        if let chip = pictureChip(at: convert(event.locationInWindow, from: nil)), pictureGrid?.open(chip) == true { return }
+        switch target.open {
+        case .thread(let id): AppModel.shared.openThread(id)
+        case .link(let link, let index): clicked(onLink: link, at: index)
+        }
+    }
+
+    private enum MiddleOpen { case thread(String), link(Any, Int) }
+
+    /// The thread chip or link under `point`, with the range a press and
+    /// its release have to share.
+    private func middleTarget(at point: NSPoint) -> (range: NSRange, open: MiddleOpen)? {
+        if let chip = chip(at: point) { return (chip.range, .thread(chip.threadId)) }
+        guard let index = character(at: point), let storage = textStorage else { return nil }
+        var range = NSRange()
+        guard let link = storage.attribute(.link, at: index, longestEffectiveRange: &range,
+                                           in: NSRange(location: 0, length: storage.length)) else { return nil }
+        return (range, .link(link, index))
+    }
+
     /// The character under `point` (view coordinates, which already
     /// include a slice's bounds offset), if the point is on its glyph.
     private func character(at point: NSPoint) -> Int? {
@@ -789,6 +833,27 @@ final class TranscriptTextView: NSTextView {
             return opened
         }
         return nil
+    }
+
+    /// A middle-button press and release on the first link whose words
+    /// have `words`, sent through the window so it lands wherever a real
+    /// one would (the view under the pointer). False when there's no such link.
+    func debugMiddleClick(_ words: String) -> Bool {
+        guard let storage = textStorage, let window else { return false }
+        let found = (storage.string as NSString).range(of: words)
+        guard found.location != NSNotFound, let rect = chipRect(found) else { return false }
+        let spot = convert(NSPoint(x: rect.midX, y: rect.midY), to: nil)
+        for type in [NSEvent.EventType.otherMouseDown, .otherMouseUp] {
+            // mouseEvent makes other-button events as button 0 and has no
+            // way to say which; its CGEvent does, and keeps the window.
+            guard let cg = NSEvent.mouseEvent(with: type, location: spot, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                              windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)?.cgEvent
+            else { return false }
+            cg.setIntegerValueField(.mouseEventButtonNumber, value: 2)
+            guard let event = NSEvent(cgEvent: cg), event.buttonNumber == 2 else { return false }
+            window.sendEvent(event)
+        }
+        return true
     }
 
     /// The right-click menu of the first link whose words have `words`.

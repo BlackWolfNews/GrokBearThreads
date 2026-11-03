@@ -161,7 +161,8 @@ for a note, and Send takes your pick and notes back to the thread.
 
 Inside a thread, rest the pointer on a link for a moment, in a reply or on a
 Needs you card's buttons, to see where it goes: a picture of the file, or
-the page's address. Click it to open it. If an agent already has that page
+the page's address. Click it to open it (the middle mouse button works
+too). If an agent already has that page
 open in Chrome through [BrowserBear](https://github.com/mikecann/browserbear)
 (say, a sign-in page it wants you to use), the click brings the agent's tab
 into your Chrome window rather than opening a second one.
