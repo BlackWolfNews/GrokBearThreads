@@ -408,7 +408,9 @@ thread links to it. A thread's Highlights shows each of its projects' boards too
 project: what's under way first, then what's to do, with Done folded to a
 strip you can click open. If the columns don't fit, drag the bar under them,
 use its arrows, or scroll sideways, or drag the panel wider. Click a card to
-mention it in your message, with a link the agent can read it from; the arrow
+mention it in your message: it shows as a chip with the card's title, and the
+agent gets a link it can read the card from. Click the chip in a sent message
+to open the card; the arrow
 on a card, or its right-click menu, opens it in Notion. Boards are read through
 a Connectors gateway (see [Connectors](#connectors)); without one, the
 project's page says so and nothing is read.

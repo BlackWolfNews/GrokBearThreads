@@ -1074,7 +1074,27 @@ enum RowRenderer {
     /// the review's title small, then what he picked and his notes, not
     /// the review's id and the wording the agent gets (Mike, 29 Oct).
     static func userText(_ message: UserMessage) -> NSAttributedString {
-        pictureChips(userWords(message), images: message.images)
+        cardChips(pictureChips(userWords(message), images: message.images))
+    }
+
+    /// Notion cards mentioned in his words drawn as chips, rather than the
+    /// raw Markdown link the message holds. A click opens the card like any
+    /// other link, and the card's title is what the hover card and a Quote
+    /// or Explain of it read.
+    private static func cardChips(_ text: NSAttributedString) -> NSAttributedString {
+        let found = CardMentions.find(in: text.string)
+        guard !found.isEmpty else { return text }
+        let out = NSMutableAttributedString(attributedString: text)
+        for mention in found.reversed() {
+            guard let url = URL(string: mention.url) else { continue }
+            var attributes = out.attributes(at: mention.range.location, effectiveRange: nil)
+            attributes[.attachment] = CardChip.attachment(title: mention.title, font: attributes[.font] as? NSFont ?? Theme.bodyFont)
+            attributes[.link] = url
+            attributes[.tbPeek] = LinkPeek(url: url, title: mention.title)
+            attributes[.tbCardChip] = mention.title
+            out.replaceCharacters(in: mention.range, with: NSAttributedString(string: "\u{FFFC}", attributes: attributes))
+        }
+        return out
     }
 
     /// His [Picture N] markers drawn as the chips he pasted

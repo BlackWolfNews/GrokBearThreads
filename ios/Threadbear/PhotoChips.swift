@@ -71,23 +71,66 @@ enum PhotoChip {
         return image.withRenderingMode(.alwaysOriginal)
     }
 
-    /// A message's words with its [Picture N] markers drawn as chips.
+    /// A Notion card's chip: its title, cut off if it's long, as a mention
+    /// in a message is the raw link otherwise (`CardMentions`).
+    static func cardImage(title: String, metrics: Metrics, traits: UITraitCollection) -> UIImage {
+        let dark = traits.userInterfaceStyle == .dark
+        let secondary = UIColor.secondaryLabel.resolvedColor(with: traits)
+        let style = NSMutableParagraphStyle()
+        style.lineBreakMode = .byTruncatingTail
+        let label = NSAttributedString(string: title, attributes: [.font: metrics.labelFont, .foregroundColor: secondary, .paragraphStyle: style])
+        let words = min(220, label.size().width.rounded(.up))
+        let size = CGSize(width: (metrics.inset + metrics.icon + metrics.gap + words + metrics.trailing).rounded(.up), height: metrics.height)
+        let image = UIGraphicsImageRenderer(size: size, format: UIGraphicsImageRendererFormat(for: traits)).image { _ in
+            let shape = UIBezierPath(roundedRect: CGRect(origin: .zero, size: size).insetBy(dx: 0.25, dy: 0.25), cornerRadius: metrics.radius)
+            UIColor(white: dark ? 1 : 0, alpha: dark ? 0.12 : 0.06).setFill()
+            shape.fill()
+            UIColor.separator.resolvedColor(with: traits).setStroke()
+            shape.lineWidth = 0.5
+            shape.stroke()
+            let icon = CGRect(x: metrics.inset, y: (size.height - metrics.icon) / 2, width: metrics.icon, height: metrics.icon)
+            if let symbol = UIImage(systemName: "square.text.square", withConfiguration: UIImage.SymbolConfiguration(pointSize: metrics.icon * 0.78))?
+                .withTintColor(secondary, renderingMode: .alwaysOriginal) {
+                symbol.draw(in: CGRect(x: icon.midX - symbol.size.width / 2, y: icon.midY - symbol.size.height / 2,
+                                       width: symbol.size.width, height: symbol.size.height))
+            }
+            let height = label.size().height
+            label.draw(with: CGRect(x: icon.maxX + metrics.gap, y: ((size.height - height) / 2).rounded(), width: words, height: height),
+                       options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], context: nil)
+        }
+        return image.withRenderingMode(.alwaysOriginal)
+    }
+
+    /// A message's words with its [Picture N] markers and Notion cards drawn
+    /// as chips.
     static func text(_ message: String, font: UIFont, traits: UITraitCollection) -> Text {
         let pieces = InlinePictures.pieces(message)
-        guard pieces.contains(where: { if case .picture = $0 { true } else { false } }) else { return Text(verbatim: message) }
+        let hasPicture = pieces.contains { if case .picture = $0 { true } else { false } }
+        guard hasPicture || !CardMentions.find(in: message).isEmpty else { return Text(verbatim: message) }
         let metrics = Metrics(font: font)
         var out = Text(verbatim: "")
         for piece in pieces {
             switch piece {
             case .words(let words):
-                out = Text("\(out)\(Text(verbatim: words))")
+                let ns = words as NSString
+                var last = 0
+                for mention in CardMentions.find(in: words) {
+                    let before = ns.substring(with: NSRange(location: last, length: mention.range.location - last))
+                    let chip = Text(Image(uiImage: cardImage(title: mention.title, metrics: metrics, traits: traits)))
+                        .baselineOffset(metrics.baselineOffset)
+                    out = Text("\(out)\(Text(verbatim: before))\(chip)")
+                    last = NSMaxRange(mention.range)
+                }
+                out = Text("\(out)\(Text(verbatim: ns.substring(from: last)))")
             case .picture(let number):
                 let chip = Text(Image(uiImage: image(number: number, thumbnail: nil, metrics: metrics, traits: traits)))
                     .baselineOffset(metrics.baselineOffset)
                 out = Text("\(out)\(chip)")
             }
         }
-        return out.accessibilityLabel(InlinePictures.messageText(message))
+        return out.accessibilityLabel(CardMentions.find(in: message).reversed().reduce(into: message) { words, mention in
+            words = (words as NSString).replacingCharacters(in: mention.range, with: mention.title)
+        })
     }
 }
 

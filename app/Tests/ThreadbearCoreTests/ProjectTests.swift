@@ -110,6 +110,25 @@ final class ProjectTests: XCTestCase {
         XCTAssertEqual(ProjectTask(id: "b", title: "No link", url: "", status: "Doing").reference, "No link")
     }
 
+    func testCardMentionsAreNotionLinksInAMessage() {
+        let text = "Look at [Fix \\[the\\] button](https://app.notion.com/p/abc123) and [Docs](https://example.com/x) please"
+        let found = CardMentions.find(in: text)
+        XCTAssertEqual(found.map(\.title), ["Fix [the] button"], "only Notion links, with the brackets back")
+        XCTAssertEqual(found.first?.url, "https://app.notion.com/p/abc123")
+        XCTAssertEqual((text as NSString).substring(with: found[0].range), "[Fix \\[the\\] button](https://app.notion.com/p/abc123)")
+        XCTAssertEqual(CardMentions.find(in: "[a](https://www.notion.so/t3) [b](https://x.notion.site/y)").map(\.title), ["a", "b"])
+        XCTAssertEqual(CardMentions.find(in: "![a picture](https://www.notion.so/t3)").count, 0, "a picture isn't a card")
+        XCTAssertEqual(CardMentions.find(in: "[a](https://notnotion.so/t3) [b](http://www.notion.so/t3) [c](https://notion.so.evil.com/t3)").count, 0, "only real Notion addresses")
+        XCTAssertEqual(CardMentions.find(in: "no links here").count, 0)
+    }
+
+    func testACardsReferenceIsFoundAsAMention() {
+        let card = ProjectTask(id: "a", title: "Fix [the] button (soon)", url: "https://www.notion.so/a", status: "Doing")
+        let found = CardMentions.find(in: "See \(card.reference) next")
+        XCTAssertEqual(found.first?.title, card.title)
+        XCTAssertEqual(found.first?.url, card.url)
+    }
+
     func testAddingACardToADraft() {
         let ref = "[Card](https://n/a)"
         XCTAssertEqual(BoardLayout.adding(ref, to: ""), "[Card](https://n/a) ")

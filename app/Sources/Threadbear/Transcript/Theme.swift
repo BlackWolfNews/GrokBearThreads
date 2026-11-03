@@ -324,6 +324,9 @@ extension NSAttributedString.Key {
     /// value is the picture's index in the message, an NSNumber, so a click
     /// opens the same picture as the tile over the words.
     static let tbPictureChip = NSAttributedString.Key("tbPictureChip")
+    /// A Notion card's chip in Mike's bubble (RowRenderer.cardChips): the
+    /// value is the card's title, the words its one U+FFFC stands for.
+    static let tbCardChip = NSAttributedString.Key("tbCardChip")
     /// The room an open card leaves under an ask for its Something else
     /// box (an NSNumber, the ask's index): one line as tall as the box, with
     /// the box itself a text view the cell puts over it (AskAnswerBox).

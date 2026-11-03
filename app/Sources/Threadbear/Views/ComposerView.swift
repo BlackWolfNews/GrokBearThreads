@@ -873,9 +873,13 @@ extension ComposerTextView {
             guard value != nil else { return }
             words(to: run.location)
             for i in run.location..<NSMaxRange(run) where ns.character(at: i) == 0xFFFC {
-                if let picture = (storage.attribute(.attachment, at: i, effectiveRange: nil) as? PictureAttachment)?.picture {
+                let attachment = storage.attribute(.attachment, at: i, effectiveRange: nil)
+                if let picture = (attachment as? PictureAttachment)?.picture {
                     text += InlinePictures.markString
                     images.append(picture)
+                } else if let card = attachment as? CardAttachment {
+                    // A card is its plain link in the draft and the message.
+                    text += card.reference
                 }
             }
             last = NSMaxRange(run)
@@ -903,23 +907,36 @@ extension ComposerTextView {
         let out = NSMutableAttributedString()
         var images = draft.images.makeIterator()
         var run = ""
+        // Words, with any Notion card mentioned in them drawn as its chip.
+        func flush() {
+            let ns = run as NSString
+            var last = 0
+            for mention in CardMentions.find(in: run) {
+                out.append(NSAttributedString(string: ns.substring(with: NSRange(location: last, length: mention.range.location - last)), attributes: attributes))
+                out.append(chip(CardAttachment(reference: ns.substring(with: mention.range), title: mention.title)))
+                last = NSMaxRange(mention.range)
+            }
+            out.append(NSAttributedString(string: ns.substring(from: last), attributes: attributes))
+            run = ""
+        }
         for scalar in draft.text.unicodeScalars {
             if scalar == InlinePictures.mark {
                 if let picture = images.next() {
-                    out.append(NSAttributedString(string: run, attributes: attributes))
-                    run = ""
-                    out.append(chip(PictureAttachment(picture: picture, source: picture.path)))
+                    flush()
+                    let attachment = PictureAttachment(picture: picture, source: picture.path)
+                    attachment.owner = self
+                    out.append(chip(attachment))
                 }
             } else {
                 run.unicodeScalars.append(scalar)
             }
         }
-        out.append(NSAttributedString(string: run, attributes: attributes))
+        flush()
         return out
     }
 
-    private func chip(_ attachment: PictureAttachment) -> NSAttributedString {
-        attachment.owner = self
+    private func chip(_ attachment: NSTextAttachment) -> NSAttributedString {
+        (attachment as? PictureAttachment)?.owner = self
         var attributes = ComposerTextField.attributes
         attributes[.attachment] = attachment
         return NSAttributedString(string: InlinePictures.markString, attributes: attributes)
@@ -1052,12 +1069,29 @@ extension ComposerTextView {
 
     override func writeSelection(to pboard: NSPasteboard, types: [NSPasteboard.PasteboardType]) -> Bool {
         let selected = draft(in: selectedRange())
+        // Cards alone copy as their links, not as the attachment's character.
+        if selected.images.isEmpty, hasCard(in: selectedRange()) {
+            pboard.declareTypes([.string], owner: nil)
+            return pboard.setString(selected.text, forType: .string)
+        }
         guard !selected.images.isEmpty, let data = try? JSONEncoder().encode(Clip(text: selected.text, images: selected.images)) else {
             return super.writeSelection(to: pboard, types: types)
         }
         pboard.declareTypes([Self.clipType, .string], owner: nil)
         pboard.setData(data, forType: Self.clipType)
         return pboard.setString(InlinePictures.messageText(selected.text), forType: .string)
+    }
+
+    private func hasCard(in range: NSRange) -> Bool {
+        guard let storage = textStorage, range.length > 0, NSMaxRange(range) <= storage.length else { return false }
+        var found = false
+        storage.enumerateAttribute(.attachment, in: range) { value, _, stop in
+            if value is CardAttachment {
+                found = true
+                stop.pointee = true
+            }
+        }
+        return found
     }
 
     override var readablePasteboardTypes: [NSPasteboard.PasteboardType] {
@@ -1070,6 +1104,16 @@ extension ComposerTextView {
     }
 
     override func readSelection(from pboard: NSPasteboard, type: NSPasteboard.PasteboardType) -> Bool {
+        // A card's link pasted back (or from a message) is a chip again.
+        if type == .string, let words = pboard.string(forType: .string), !CardMentions.find(in: words).isEmpty, let storage = textStorage {
+            let piece = chips(for: Draft(text: InlinePictures.words(words)))
+            let replace = rangeForUserTextChange
+            guard replace.location != NSNotFound, shouldChangeText(in: replace, replacementString: piece.string) else { return false }
+            storage.replaceCharacters(in: replace, with: piece)
+            didChangeText()
+            setSelectedRange(NSRange(location: replace.location + piece.length, length: 0))
+            return true
+        }
         guard type == Self.clipType, pictures != nil, let storage = textStorage,
               let data = pboard.data(forType: type), let clip = try? JSONDecoder().decode(Clip.self, from: data) else {
             return super.readSelection(from: pboard, type: type)

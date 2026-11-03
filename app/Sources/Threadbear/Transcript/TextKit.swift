@@ -877,7 +877,35 @@ final class TranscriptTextView: NSTextView {
     private var selectedText: String {
         let range = selectedRange()
         guard let storage = textStorage, range.length > 0, NSMaxRange(range) <= storage.length else { return "" }
-        return storage.attributedSubstring(from: range).string.trimmingCharacters(in: .whitespacesAndNewlines)
+        return Self.wordsWithCards(storage.attributedSubstring(from: range)).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// A selection's words, with each card chip as its title, as its text is
+    /// one U+FFFC.
+    private static func wordsWithCards(_ selection: NSAttributedString) -> String {
+        let out = NSMutableString(string: selection.string)
+        selection.enumerateAttribute(.tbCardChip, in: NSRange(location: 0, length: selection.length), options: .reverse) { value, range, _ in
+            if let title = value as? String { out.replaceCharacters(in: range, with: title) }
+        }
+        return out as String
+    }
+
+    // A copy with a card chip in it is its words and card titles, as a plain
+    // copy would otherwise paste an empty box for each chip.
+    override func writeSelection(to pboard: NSPasteboard, types: [NSPasteboard.PasteboardType]) -> Bool {
+        let range = selectedRange()
+        guard let storage = textStorage, range.length > 0, NSMaxRange(range) <= storage.length else { return super.writeSelection(to: pboard, types: types) }
+        let selection = storage.attributedSubstring(from: range)
+        var hasCard = false
+        selection.enumerateAttribute(.tbCardChip, in: NSRange(location: 0, length: selection.length)) { value, _, stop in
+            if value != nil {
+                hasCard = true
+                stop.pointee = true
+            }
+        }
+        guard hasCard else { return super.writeSelection(to: pboard, types: types) }
+        pboard.declareTypes([.string], owner: nil)
+        return pboard.setString(Self.wordsWithCards(selection), forType: .string)
     }
 
     private func selectionAction(_ action: SelectionBarWindow.Action) {
