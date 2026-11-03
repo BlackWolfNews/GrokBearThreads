@@ -447,7 +447,6 @@ extension InboxSection {
         case .starred: return "star"
         case .inbox: return "tray"
         case .running: return "bolt"
-        case .waiting: return "clock"
         case .hibernating: return "moon.zzz"
         case .archived: return "archivebox"
         }
@@ -542,13 +541,14 @@ enum RowMode: Equatable {
     case inbox, hibernating, archive, projects
 
     /// A starred thread reads as what it is: one that's hibernating says
-    /// when it wakes, and wakes rather than hibernates.
+    /// when it wakes, and wakes rather than hibernates. So does one under
+    /// Hibernating that's only waiting on a schedule: it isn't snoozed, so
+    /// Wake would do nothing, and its row says when the schedule runs.
     init(_ section: InboxSection, thread: ThreadSummary, now: Date) {
         switch section {
-        case .starred: self = thread.isSnoozed(at: now) ? .hibernating : .inbox
-        case .hibernating: self = .hibernating
+        case .starred, .hibernating: self = thread.isSnoozed(at: now) ? .hibernating : .inbox
         case .archived: self = .archive
-        case .inbox, .running, .waiting: self = .inbox
+        case .inbox, .running: self = .inbox
         }
     }
 
@@ -805,7 +805,7 @@ struct ThreadRowView: View {
                     .font(.system(size: TypeScale.sidebarMeta, weight: .medium))
                     .foregroundStyle(Color.accentColor)
                     .tip(WokeWords.tip(woke))
-            } else if section == .waiting, let wake = app.wakes[thread.id], let next = wake.nextRunAt {
+            } else if section == .hibernating, let wake = app.wakes[thread.id], let next = wake.nextRunAt {
                 // When its schedule messages it next, where the time would be.
                 Text(RelativeTime.until(next, now: app.now))
                     .font(.system(size: TypeScale.sidebarMeta))

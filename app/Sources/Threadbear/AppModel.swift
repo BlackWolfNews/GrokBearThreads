@@ -633,7 +633,8 @@ final class AppModel {
         projectSectionsMemo = (key, built)
         return built
     }
-    /// The schedule due to message each thread soonest, for the Waiting section.
+    /// The schedule due to message each thread soonest, for the rows under
+    /// Hibernating that are waiting on one.
     var wakes: [String: Schedule] { ThreadSections.wakes(schedules) }
     var snoozed: [ThreadSummary] { ThreadSections.snoozed(threads.values, now: now) }
     var archivedCount: Int { threads.values.reduce(0) { $0 + ($1.isArchived ? 1 : 0) } }

@@ -27,23 +27,24 @@ back to it days later and carry on.
 
 ### The list
 
-The threads view has five sections. Inbox holds the threads for you, with
+The threads view has four sections. Inbox holds the threads for you, with
 the ones that need you at the top. The number on the Threads icon in the
 left-hand rail is how many are in it. The arrows at the end of its heading
 sort it newest first or oldest first instead, which is handy for working
 through a long inbox from the bottom up. Running holds threads whose agent is
-working now. Waiting holds threads that have booked a message to themselves
-for later (an agent saying "I'll check again in 20 minutes") and have nothing
-for you until then: each says when it wakes, soonest first. When the time
-comes it runs again, and lands in the inbox when it's done. A thread that
+working now. A thread that
 asks you something keeps its place in the inbox, wake-up or not, and so does
 one that has left a job running while it waits for you. Sub-agents are
 different: while they're working the thread stays in Running, even if it has
 asked you something, as what they find can change what it asks. It comes to
 the inbox when they're done, and you can still open it and answer early.
-Hibernating and Archived, at the foot, hold the threads you've put away
+Hibernating and Archived, at the foot, hold the threads that are put away
 (see [Hibernate and archive](#hibernate-and-archive)). They start folded,
-showing only how many; click a heading to open or fold it.
+showing only how many; click a heading to open or fold it. Hibernating also
+has the threads that have booked a message to themselves for later (an
+agent saying "I'll check again in 20 minutes") and have nothing for you
+until then. Each row says when it wakes, soonest first. When the time comes
+one of these runs again, and lands in the inbox when it's done.
 
 To keep a thread at the very top, star it: hover its row and press the star,
 or use its right-click or ... menu. Starred threads sit in a Starred section
@@ -589,11 +590,12 @@ the thread runs on.
 The Threadbear iPhone app is for when you're away from the Mac: ask a
 thread a question, steer it, answer the ones that need you, start new
 ones, and see how they're all getting on. Its inbox sorts threads the
-way the Mac's does, into Starred, Inbox, Running, Waiting, Hibernating and
+way the Mac's does, into Starred, Inbox, Running, Hibernating and
 Archived. To star a thread, swipe its row to the right, or use the menu when
 you press and hold it or the ... menu inside it. All but Starred and Inbox start folded, showing how many they hold; tap a
-heading to open or fold it, and the phone remembers. A folded Hibernating
-or Archived isn't loaded at all, so the phone fetches less. A thread's finished turns
+heading to open or fold it, and the phone remembers. A folded Archived isn't
+loaded at all, nor the hibernated threads in a folded Hibernating, so the
+phone fetches less. A thread's finished turns
 fold into one Worked line above the reply, as on the Mac; tap it to see
 the work. The search at the top of the inbox finds any thread, hibernating
 and archived ones too, by its title, last reply or project. What a thread needs from you shows under its reply with the

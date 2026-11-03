@@ -172,9 +172,9 @@ import UniformTypeIdentifiers
 
     /// The Mac's ThreadSectionsTests.testBookedThreadsWait, on the phone: a
     /// thread that has booked itself a message for later, and has nothing
-    /// for Mike, waits in its own section, soonest first, rather than
-    /// sitting in the inbox. Anything it still wants from him keeps it in
-    /// the inbox.
+    /// for Mike, goes under Hibernating with the snoozed ones, soonest to
+    /// wake first, rather than sitting in the inbox. Anything it still wants
+    /// from him keeps it in the inbox.
     @Test func bookedThreadsWait() {
         var said = thread("said-done-unread", 1)
         said.needs = "nothing"
@@ -220,7 +220,17 @@ import UniformTypeIdentifiers
         #expect(wakes["no-wake"] == nil)
         #expect(wakes["woken"] == nil)
         let sections = InboxSections.build(threads, now: now, wakes: wakes)
-        #expect(sections.waiting.map(\.threadId) == ["said-done-unread", "read"])
+        #expect(sections.scheduled.map(\.threadId) == ["said-done-unread", "read"])
+        // Snoozed by Mike, from the backend's hibernating list: in among
+        // them by when it wakes, and once only if it's mid-move.
+        var snoozed = thread("snoozed", 12)
+        snoozed.snoozedUntil = now.addingTimeInterval(300)
+        var restart = thread("restart", 13)
+        restart.snoozedUntilRestart = true
+        let rows = InboxSections.hibernating(scheduled: sections.scheduled, snoozed: [restart, snoozed, sections.scheduled[1]], wakes: wakes)
+        #expect(rows.map(\.threadId) == ["said-done-unread", "snoozed", "read", "restart"])
+        let search = ThreadSearch("e", sections: sections, hibernating: [snoozed], archived: [], wakes: wakes)
+        #expect(search.hibernating.map(\.threadId) == ["said-done-unread", "snoozed", "read"])
         #expect(Set(sections.inbox.map(\.threadId)) == ["asked-read", "unread", "question", "failed", "no-wake", "woken", "review", "no-room"])
         #expect(sections.running.map(\.threadId) == ["running"])
     }
@@ -243,7 +253,7 @@ import UniformTypeIdentifiers
     @Test func foldedSectionsAreNotLoaded() {
         var folds = SectionFolds(saved: nil)
         #expect(!folds.isFolded(.inbox))
-        #expect(PhoneSection.allCases.filter(folds.isFolded) == [.running, .waiting, .hibernating, .archived])
+        #expect(PhoneSection.allCases.filter(folds.isFolded) == [.running, .hibernating, .archived])
         #expect(folds.views(searching: false) == [.inbox])
         #expect(folds.views(searching: true) == [.inbox, .hibernating, .den])
         folds.toggle(.archived)

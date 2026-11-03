@@ -206,14 +206,19 @@ struct InboxView: View {
         if section != .inbox, count != 0 || (count == nil && section.view != nil) {
             Section {
                 if !folded {
-                    if let view = section.view {
+                    if section == .hibernating {
+                        // The scheduled ones are in the inbox list already;
+                        // the snoozed ones load once it's opened.
+                        hibernatingRows(threads)
+                        if !model.loaded.contains(.hibernating) { LoadingRows(count: 3) }
+                    } else if let view = section.view {
                         if !model.loaded.contains(view) {
                             LoadingRows(count: 3)
                         } else {
                             putAwayRows(threads, from: view)
                         }
                     } else {
-                        rows(threads, running: section == .running, waiting: section == .waiting, starred: section == .starred)
+                        rows(threads, running: section == .running, starred: section == .starred)
                     }
                 }
             } header: {
@@ -246,69 +251,83 @@ struct InboxView: View {
         if !search.running.isEmpty {
             Section { rows(search.running, running: true) } header: { SectionHeading(title: "Running", icon: "bolt") }
         }
-        if !search.waiting.isEmpty {
-            Section { rows(search.waiting, waiting: true) } header: { SectionHeading(title: "Waiting", icon: "clock") }
-        }
         if !search.hibernating.isEmpty {
-            Section { putAwayRows(search.hibernating, from: .hibernating) } header: { SectionHeading(title: "Hibernating", icon: "moon.zzz") }
+            Section { hibernatingRows(search.hibernating) } header: { SectionHeading(title: "Hibernating", icon: "moon.zzz") }
         }
         if !search.archived.isEmpty {
             Section { putAwayRows(search.archived, from: .den) } header: { SectionHeading(title: "Archived", icon: "archivebox") }
         }
     }
 
-    /// Hibernating or archived rows found by the search: open on a tap, and
-    /// swipe to bring back, as in their own lists.
+    /// Hibernating or archived rows: open on a tap, and swipe to bring
+    /// back.
     private func putAwayRows(_ threads: [PhoneThread], from view: ThreadsView) -> some View {
-        ForEach(threads) { thread in
-            Button { path.append(thread.threadId) } label: { ThreadRow(thread: thread) }
-                .buttonStyle(.plain)
-                .listRowInsets(ThreadRow.insets)
-                .listRowSeparator(.hidden)
-                .bringBackSwipe(thread, from: view)
-        }
+        ForEach(threads) { putAwayRow($0, from: view) }
     }
 
-    @ViewBuilder private func rows(_ threads: [PhoneThread], running: Bool = false, waiting: Bool = false, starred: Bool = false) -> some View {
-        ForEach(threads) { thread in
-            // Only under Starred can a row be asleep: elsewhere it's in Hibernating.
-            let asleep = starred && InboxSections.isSnoozed(thread, now: model.now)
-            // A plain row, not a NavigationLink: the Mac's rows have no
-            // chevron, and the status sits where it would go.
-            Button { path.append(thread.threadId) } label: {
-                ThreadRow(thread: thread, underRunning: running, wake: waiting ? model.wakes[thread.threadId] : nil, asleep: asleep)
-                    // Off to the left, the way a swipe to archive goes.
-                    .offset(x: model.slidingOff.contains(thread.threadId) && !reduceMotion ? -500 : 0)
-                    .opacity(model.slidingOff.contains(thread.threadId) ? 0 : 1)
-            }
+    private func putAwayRow(_ thread: PhoneThread, from view: ThreadsView) -> some View {
+        Button { path.append(thread.threadId) } label: { ThreadRow(thread: thread) }
             .buttonStyle(.plain)
             .listRowInsets(ThreadRow.insets)
             .listRowSeparator(.hidden)
-            .swipeActions(edge: .trailing) {
-                Button { model.archive(thread.threadId) } label: { Label("Archive", systemImage: "archivebox") }
-                    .tint(.brown)
+            .bringBackSwipe(thread, from: view)
+    }
+
+    /// Under Hibernating, snoozed threads wake with a swipe. One only
+    /// waiting on a schedule isn't snoozed, so it gets an inbox row that
+    /// says when the schedule runs, and can be hibernated for real.
+    private func hibernatingRows(_ threads: [PhoneThread]) -> some View {
+        ForEach(threads) { thread in
+            if InboxSections.isSnoozed(thread, now: model.now) {
+                putAwayRow(thread, from: .hibernating)
+            } else {
+                row(thread, scheduled: true)
             }
-            .swipeActions(edge: .leading) {
-                if asleep {
-                    Button { Task { await perform(thread, .wake) } } label: { Label("Wake", systemImage: "sun.max") }
-                        .tint(.accentColor)
-                } else {
-                    Button { hibernateTarget = thread } label: { Label("Hibernate", systemImage: "moon.zzz") }
-                        .tint(.indigo)
-                }
-                if model.canStar { starButton(thread).tint(.yellow) }
+        }
+    }
+
+    private func rows(_ threads: [PhoneThread], running: Bool = false, starred: Bool = false) -> some View {
+        ForEach(threads) { row($0, running: running, starred: starred) }
+    }
+
+    @ViewBuilder private func row(_ thread: PhoneThread, running: Bool = false, scheduled: Bool = false, starred: Bool = false) -> some View {
+        // Only under Starred can a row be asleep: elsewhere it's in Hibernating.
+        let asleep = starred && InboxSections.isSnoozed(thread, now: model.now)
+        // A plain row, not a NavigationLink: the Mac's rows have no
+        // chevron, and the status sits where it would go.
+        Button { path.append(thread.threadId) } label: {
+            ThreadRow(thread: thread, underRunning: running, wake: scheduled ? model.wakes[thread.threadId] : nil, asleep: asleep)
+                // Off to the left, the way a swipe to archive goes.
+                .offset(x: model.slidingOff.contains(thread.threadId) && !reduceMotion ? -500 : 0)
+                .opacity(model.slidingOff.contains(thread.threadId) ? 0 : 1)
+        }
+        .buttonStyle(.plain)
+        .listRowInsets(ThreadRow.insets)
+        .listRowSeparator(.hidden)
+        .swipeActions(edge: .trailing) {
+            Button { model.archive(thread.threadId) } label: { Label("Archive", systemImage: "archivebox") }
+                .tint(.brown)
+        }
+        .swipeActions(edge: .leading) {
+            if asleep {
+                Button { Task { await perform(thread, .wake) } } label: { Label("Wake", systemImage: "sun.max") }
+                    .tint(.accentColor)
+            } else {
+                Button { hibernateTarget = thread } label: { Label("Hibernate", systemImage: "moon.zzz") }
+                    .tint(.indigo)
             }
-            .contextMenu {
-                if model.canStar { starButton(thread) }
-                if asleep {
-                    Button { Task { await perform(thread, .wake) } } label: { Label("Wake", systemImage: "sun.max") }
-                } else {
-                    Button { hibernateTarget = thread } label: { Label("Hibernate…", systemImage: "moon.zzz") }
-                }
-                Button { model.archive(thread.threadId) } label: { Label("Archive", systemImage: "archivebox") }
-                if thread.unread || thread.needsYou {
-                    Button { Task { await perform(thread, .markSeen) } } label: { Label("Mark as read", systemImage: "envelope.open") }
-                }
+            if model.canStar { starButton(thread).tint(.yellow) }
+        }
+        .contextMenu {
+            if model.canStar { starButton(thread) }
+            if asleep {
+                Button { Task { await perform(thread, .wake) } } label: { Label("Wake", systemImage: "sun.max") }
+            } else {
+                Button { hibernateTarget = thread } label: { Label("Hibernate…", systemImage: "moon.zzz") }
+            }
+            Button { model.archive(thread.threadId) } label: { Label("Archive", systemImage: "archivebox") }
+            if thread.unread || thread.needsYou {
+                Button { Task { await perform(thread, .markSeen) } } label: { Label("Mark as read", systemImage: "envelope.open") }
             }
         }
     }

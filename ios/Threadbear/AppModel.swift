@@ -266,11 +266,18 @@ final class AppModel {
         case .starred: sections.starred.count
         case .inbox: sections.inbox.count
         case .running: sections.running.count
-        case .waiting: sections.waiting.count
-        case .hibernating: loaded.contains(.hibernating) ? hibernating.count : counts?.hibernating
+        // Folded, the snoozed ones aren't loaded, but the scheduled ones come
+        // from the inbox list, so they're added to phone:counts' number.
+        case .hibernating: loaded.contains(.hibernating) ? hibernatingRows.count : (counts?.hibernating).map { $0 + sections.scheduled.count }
         // The den list is capped at 100; the count isn't.
         case .archived: counts?.den ?? (loaded.contains(.den) ? den.count : nil)
         }
+    }
+
+    /// Under Hibernating: the threads waiting on a schedule and the snoozed
+    /// ones, soonest to wake first, as on the Mac.
+    var hibernatingRows: [PhoneThread] {
+        InboxSections.hibernating(scheduled: sections.scheduled, snoozed: loaded.contains(.hibernating) ? hibernating : [], wakes: wakes)
     }
 
     func threads(_ section: PhoneSection) -> [PhoneThread] {
@@ -278,8 +285,7 @@ final class AppModel {
         case .starred: sections.starred
         case .inbox: sections.inbox
         case .running: sections.running
-        case .waiting: sections.waiting
-        case .hibernating: hibernating
+        case .hibernating: hibernatingRows
         case .archived: den
         }
     }

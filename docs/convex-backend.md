@@ -476,7 +476,7 @@ Queries:
   `pendingReviews` and `waitingForRoom` (`{ until, accountId? }`) (API 15)
   are what the phone needs to sort threads into the Mac sidebar's
   sections: with `phone:schedules` it puts an idle thread a schedule will
-  message under Waiting, by the same rules as app ThreadSections. `pendingApproval`
+  message under Hibernating, by the same rules as app ThreadSections. `pendingApproval`
   (from step 2) is `{ approvalId, kind: "approval", name, title, options:
   ("allow" | "allowAlways" | "deny")[], inputSummary? }` or `{ approvalId,
   kind: "question", questions: Question[] }` with the protocol's

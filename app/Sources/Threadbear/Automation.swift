@@ -999,7 +999,7 @@ enum Automation {
             // the search's matches while it has text.
             let sections = app.sections.matching(app.searchQuery)
             let object: [String: Any] = [
-                "starred": sections.starred.map(\.id), "needsYou": sections.needsYou.map(\.id), "running": sections.running.map(\.id), "waiting": sections.waiting.map(\.id),
+                "starred": sections.starred.map(\.id), "needsYou": sections.needsYou.map(\.id), "running": sections.running.map(\.id),
                 "inbox": sections.inbox.map(\.id), "snoozed": sections.hibernating.count, "archived": sections.archived.count,
                 "hover": app.hoverOverride ?? "", "search": app.searchQuery,
             ]

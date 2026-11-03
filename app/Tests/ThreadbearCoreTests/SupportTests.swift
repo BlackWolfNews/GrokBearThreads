@@ -285,7 +285,7 @@ final class ThreadSectionsTests: XCTestCase {
         XCTAssertTrue(sections.inbox.isEmpty)
         XCTAssertTrue(sections.running.isEmpty)
         XCTAssertTrue(InboxSection.hibernating.isPutAway && InboxSection.archived.isPutAway)
-        XCTAssertFalse(InboxSection.waiting.isPutAway)
+        XCTAssertFalse(InboxSection.running.isPutAway)
     }
 
     /// The inbox's sort menu: newest or oldest first go by last activity
@@ -350,8 +350,12 @@ final class ThreadSectionsTests: XCTestCase {
         said.needs = "nothing"
         var asked = thread("asked-read", minutesAgo: 2)
         asked.needs = "you"
+        // Hibernated by Mike: it sits among the scheduled ones by when it wakes.
+        var snoozed = thread("snoozed", minutesAgo: 10)
+        snoozed.snoozedUntil = now.addingTimeInterval(300)
         let threads = [
             thread("read", minutesAgo: 5),
+            snoozed,
             said,
             asked,
             thread("unread", needsYou: true, minutesAgo: 3),
@@ -381,10 +385,11 @@ final class ThreadSectionsTests: XCTestCase {
         XCTAssertNil(wakes["no-wake"])
         XCTAssertNil(wakes["woken"])
         let sections = ThreadSections.build(threads, now: now, wakes: wakes)
-        XCTAssertEqual(sections.waiting.map(\.id), ["said-done-unread", "read"])
+        // Waiting on a schedule is hibernating too (Mike merged the two, 3 Nov).
+        XCTAssertEqual(sections.hibernating.map(\.id), ["said-done-unread", "snoozed", "read"])
         XCTAssertEqual(Set(sections.inbox.map(\.id)), ["asked-read", "unread", "question", "failed", "no-wake", "woken"])
         XCTAssertEqual(sections.running.map(\.id), ["running"])
-        XCTAssertEqual(InboxSection.allCases.map(\.title), ["Starred", "Inbox", "Running", "Waiting", "Hibernating", "Archived"])
+        XCTAssertEqual(InboxSection.allCases.map(\.title), ["Starred", "Inbox", "Running", "Hibernating", "Archived"])
     }
 
     func testPreviewTextDropsMarkdown() {
