@@ -74,3 +74,12 @@ and the app then update themselves from main, as they do for any change.
 
 If something goes wrong afterwards, `git revert -m 1 <merge commit>` on
 main takes the whole release back out in one go.
+
+## 6. Offer to push it
+
+`tb land` never pushes, so their own copy on GitHub (`origin`) is still on
+the old main: if this Mac went, the merge and anything of theirs not yet
+pushed would go with it. Once it's landed, if `git log origin/main..main`
+lists anything, say so and ask whether to push it. Run `git push origin
+main` only when they say yes. If `origin` isn't on GitHub, or they'd rather
+keep main to this Mac, leave it.
