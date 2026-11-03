@@ -138,4 +138,32 @@ final class FilePreviewPressTests: XCTestCase {
         let view = try shown("notes.pdf", Data("%PDF-1.4\n".utf8))
         XCTAssertFalse(view.pressTarget(at: middle) === view)
     }
+
+    /// Right-click, Copy Image: the PNG's own bytes and a TIFF, so it
+    /// pastes as a picture, not as the file or its path.
+    func testCopyImagePutsThePictureOnThePasteboard() throws {
+        let image = NSImage(size: NSSize(width: 20, height: 20), flipped: false) { rect in
+            NSColor.systemPink.setFill(); rect.fill(); return true
+        }
+        let png = try XCTUnwrap(NSBitmapImageRep(data: try XCTUnwrap(image.tiffRepresentation))?.representation(using: .png, properties: [:]))
+        let view = try shown("shot.png", png)
+        let click = try XCTUnwrap(NSEvent.mouseEvent(with: .rightMouseDown, location: middle, modifierFlags: [], timestamp: 0,
+                                                     windowNumber: view.window!.windowNumber, context: nil,
+                                                     eventNumber: 0, clickCount: 1, pressure: 1))
+        let menu = try XCTUnwrap(view.menu(for: click))
+        XCTAssertEqual(menu.items.map(\.title), ["Copy Image"])
+
+        let board = NSPasteboard(name: NSPasteboard.Name(UUID().uuidString))
+        addTeardownBlock { board.releaseGlobally() }
+        XCTAssertTrue(view.copyImage(to: board))
+        XCTAssertEqual(board.data(forType: .png), png)
+        XCTAssertNotNil(board.data(forType: .tiff))
+        XCTAssertNil(board.string(forType: .fileURL))
+        XCTAssertNotNil(NSImage(pasteboard: board))
+    }
+
+    func testOtherFilesHaveNoCopyImage() throws {
+        let view = try shown("notes.pdf", Data("%PDF-1.4\n".utf8))
+        XCTAssertFalse(view.copyImage(to: NSPasteboard(name: NSPasteboard.Name(UUID().uuidString))))
+    }
 }

@@ -159,6 +159,8 @@ reply, a picture in the transcript, a file in Highlights, or the picture or
 video showing in the side pane. It drops as the file itself, so you can
 drag a clip straight into a post on X, or onto the Finder. A web link drags
 out as its address.
+To paste a picture instead, right-click it in the side pane and choose
+Copy Image.
 
 ## Full access or Ask before edits
 <!-- slug: full-access -->

@@ -794,10 +794,44 @@ final class FilePreviewView: NSView {
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
+        // A right-click on a picture is taken here too, for Copy Image
+        // (menu(for:)); anywhere else it goes on to the panel's own menu.
+        if NSApp.currentEvent?.type == .rightMouseDown, case .picture = content {
+            return pressTarget(at: point)
+        }
         // Only a left press is taken here, so scrolling, pinching and
         // hovering (which shows the video's controls) still reach the view.
         guard NSApp.currentEvent?.type == .leftMouseDown else { return super.hitTest(point) }
         return pressTarget(at: point)
+    }
+
+    /// A picture's right-click menu: Copy Image, to paste the picture
+    /// itself into Slack or X (Mike, 3 Nov). Copy path and Reveal in
+    /// Finder are on its Highlights row and the panel's bar already.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard case .picture = content else { return super.menu(for: event) }
+        let menu = NSMenu()
+        menu.addItem(NSMenuItem(title: "Copy Image", symbol: "doc.on.doc", action: #selector(copyImageItem), target: self))
+        return menu
+    }
+
+    @objc private func copyImageItem() { copyImage() }
+
+    /// Puts the picture on `pasteboard` as the file's own bytes (a PNG
+    /// stays a PNG, a GIF keeps its frames) and as TIFF, which every app
+    /// that takes a pasted picture reads. Not the file's URL: that pastes
+    /// as a file, or as its path in a text box. False when there's no picture.
+    @discardableResult
+    func copyImage(to pasteboard: NSPasteboard = .general) -> Bool {
+        guard case .picture(let view) = content, let url else { return false }
+        let item = NSPasteboardItem()
+        if let type = UTType(filenameExtension: url.pathExtension), let data = try? Data(contentsOf: url) {
+            item.setData(data, forType: NSPasteboard.PasteboardType(type.identifier))
+        }
+        if let tiff = view.image?.tiffRepresentation { item.setData(tiff, forType: .tiff) }
+        guard !item.types.isEmpty else { return false }
+        pasteboard.clearContents()
+        return pasteboard.writeObjects([item])
     }
 
     /// Where a left press at `point` (in the superview) goes: here, to be
@@ -818,6 +852,11 @@ final class FilePreviewView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        // A Control-click is a right-click.
+        if event.modifierFlags.contains(.control), let menu = menu(for: event) {
+            NSMenu.popUpContextMenu(menu, with: event, for: self)
+            return
+        }
         if let url, FileDrag.isDrag(from: event) {
             FileDrag.begin(url, from: self, event: event)
             return
