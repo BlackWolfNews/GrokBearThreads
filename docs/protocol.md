@@ -151,6 +151,8 @@ type ThreadSummary = {
                         // only while snoozedUntil is set
   startedBy?: { kind, label, icon?, threadId?, threadTitle?, why? } // who
                         // started it when Mike didn't (Who started a thread)
+  asked?: string        // Mike's last message to it, one line, <= 140 chars
+                        // (What Mike last asked)
   woke?: { at: string, since?: string } // came back from hibernating by
                         // itself (its time, a restart, a topic) at `at`,
                         // put away at `since` when known; only until Mike
@@ -1500,6 +1502,20 @@ row shows its usual project or folder after the label. Threads from before
 this have none, and `tb new` outside a thread with no flags could be Mike at
 a terminal, so it has none either. Mirrored to the phone's row from backend
 API 22, and to another runner's sidebar row on a Mac from API 23.
+
+## What Mike last asked
+
+A thread's summary carries `asked`: the last message Mike sent it, at the
+Mac or from his phone, as one line of at most 140 characters. Messages he
+didn't write leave it as it was: the runner's own (`origin: "runner"`), a
+schedule's, and another agent's (`sentByAgent`). A design review's reply
+is his notes, joined, or "Picked <option title>" when he left none. It's
+absent until he's sent something. A thread from a runner before it learns
+it from the last 300 events of its log when the runner starts, unless it's
+archived. The Mac app's sidebar shows it under a thread's title as
+"You: ...", in place of the thread's projects or folder, which it shows
+until there's one. A thread someone else started keeps its byline. Other
+runners' threads (the backend's `threadIndex`) don't carry it yet.
 
 ## Needs you
 

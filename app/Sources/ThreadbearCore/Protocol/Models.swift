@@ -1080,6 +1080,9 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     /// Who started it, when it wasn't Mike. Nil for his own threads, and from
     /// a runner that predates this.
     public var startedBy: ThreadStartedBy?
+    /// Mike's last message to it, one line, for the sidebar's "You: ...".
+    /// Nil until he's sent one, and from runners before it (3 Nov).
+    public var asked: String?
     /// A panel the agent asked to show Mike, waiting for him to look at the
     /// thread. Nil when there's none, and from a runner older than this.
     public var panelRequest: PanelRequest?
@@ -1217,6 +1220,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         highlightsAt = ((try? c.decodeIfPresent(String.self, forKey: .highlightsAt)) ?? nil).flatMap(ISO8601.parse)
         schedule = (try? c.decodeIfPresent(ThreadSchedule.self, forKey: .schedule)) ?? nil
         startedBy = (try? c.decodeIfPresent(ThreadStartedBy.self, forKey: .startedBy)) ?? nil
+        asked = (try? c.decodeIfPresent(String.self, forKey: .asked)) ?? nil
         panelRequest = (try? c.decodeIfPresent(PanelRequest.self, forKey: .panelRequest)) ?? nil
         share = (try? c.decodeIfPresent(ThreadShare.self, forKey: .share)) ?? nil
     }
@@ -1271,6 +1275,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         try c.encodeIfPresent(highlightsAt.map(ISO8601.format), forKey: .highlightsAt)
         try c.encodeIfPresent(schedule, forKey: .schedule)
         try c.encodeIfPresent(startedBy, forKey: .startedBy)
+        try c.encodeIfPresent(asked, forKey: .asked)
         try c.encodeIfPresent(panelRequest, forKey: .panelRequest)
         try c.encodeIfPresent(share, forKey: .share)
     }
@@ -1279,7 +1284,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         case id, title, cwd, accountId, provider, model, effort, modelInUse, effortInUse, permissionMode, status, live, needsYou, pendingReviews
         case createdAt, updatedAt, lastActivityAt, snoozedUntil, snoozedUntilRestart, wakeWhen, woke, archivedAt, starredAt, onOldRunner, preview
         case lastSeq, lastSeenSeq, nativeSessionId, contextTokens, contextWindow, costUsd, panels, actions, hooks, patches, background, subagents
-        case projects, worktree, needs, asks, asksSeq, highlightsAt, schedule, startedBy, poolId, waitingForRoom, panelRequest, share, sample
+        case projects, worktree, needs, asks, asksSeq, highlightsAt, schedule, startedBy, asked, poolId, waitingForRoom, panelRequest, share, sample
     }
 
     /// The first ask Mike hasn't ticked on the open card, if any: what the

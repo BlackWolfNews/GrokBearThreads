@@ -198,6 +198,9 @@ export type ThreadSummary = {
   // Who started it, when that wasn't Mike (docs/protocol.md, "Who started
   // a thread"). Absent for his own threads.
   startedBy?: ThreadStartedBy;
+  // Mike's last message to it, one line, for the sidebar's "You: ..."
+  // (docs/protocol.md, "What Mike last asked"). Absent until he's sent one.
+  asked?: string;
   // A panel the agent asked to show Mike (show_panel), waiting for him to
   // look at the thread (docs/protocol.md, "Showing panels").
   panelRequest?: PanelRequest;

@@ -112,6 +112,8 @@ export type ThreadRecord = {
   // Who started it, when that wasn't Mike. Its why is the starter's, until
   // the thread's own end_turn says how it came out.
   startedBy?: ThreadStartedBy;
+  // Mike's last message, one line (askedLine in runner.ts).
+  asked?: string;
   // show_panel's request, until the app shows it or Mike sends a message.
   panelRequest?: PanelRequest;
   // The seq ranges edits of earlier messages cut out of the conversation

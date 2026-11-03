@@ -6,7 +6,7 @@ import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
 import { checkSequence, checkSummary } from '../helpers/protocol-check.ts';
 import { makePng } from '../helpers/png.ts';
 import { RpcError } from '../../src/protocol.ts';
-import { UNTIL_RESTART, WROTE_INSTEAD } from '../../src/runner.ts';
+import { askedLine, UNTIL_RESTART, WROTE_INSTEAD } from '../../src/runner.ts';
 import { PATIENCE_MS } from '../helpers/patience.ts';
 
 const MIN = 60_000;
@@ -1917,4 +1917,44 @@ test('who started a thread: the runner and a schedule each say so', () => {
   assert.deepEqual(h.runner.get(notice).startedBy, { kind: 'runner', label: 'Threadbear' });
   const scheduled = create(h, { origin: 'schedule', scheduleId: 'sc1', title: 'Nightly' }).thread;
   assert.deepEqual(scheduled.startedBy, { kind: 'schedule', label: 'Schedule' });
+});
+
+test('asked: the summary carries Mike\'s last message, not a schedule\'s or an agent\'s', () => {
+  const h = makeHarness();
+  const { thread } = create(h);
+  assert.equal(thread.asked, 'Fix the tests more detail here');
+  const s = h.adapter.last;
+  s.init();
+  s.text('m1:0', 'Done.');
+  s.result();
+  h.runner.send(thread.id, 'Nightly check', [], { origin: 'schedule', scheduleId: 'sc1' });
+  assert.equal(h.runner.get(thread.id).asked, 'Fix the tests more detail here');
+  h.adapter.last.result();
+  h.runner.send(thread.id, '[Sent by the agent in the thread abc] hello');
+  assert.equal(h.runner.get(thread.id).asked, 'Fix the tests more detail here');
+  h.adapter.last.result();
+  h.runner.send(thread.id, 'And   the\nlint too', [], { origin: 'phone' });
+  assert.equal(h.runner.get(thread.id).asked, 'And the lint too');
+  assert.deepEqual(checkSummary(h.runner.get(thread.id)), []);
+});
+
+test('asked: a review reply is Mike\'s notes, or the option he picked', () => {
+  const review = { id: 'r1', title: 'Grey line', status: 'answered', options: [{ id: 'A', title: 'Results', path: '/a.png' }, { id: 'C', title: 'What you asked', path: '/c.png' }] } as never;
+  const head = 'Review: Grey line (r1)\n\n';
+  assert.equal(askedLine({ text: head + 'Notes on C (What you asked): try this', reviewId: 'r1', reviewResponse: { notes: { C: 'try this' } } }, [review]), 'try this');
+  assert.equal(askedLine({ text: head + 'Picked C. What you asked.', reviewId: 'r1', reviewResponse: { pickedId: 'C', notes: {} } }, [review]), 'Picked What you asked');
+  assert.equal(askedLine({ text: 'Carry on', origin: 'runner' }), undefined);
+});
+
+test('asked: a thread from before it learns it from its log on restart', () => {
+  const h = makeHarness();
+  const { thread } = create(h);
+  h.adapter.last.init();
+  h.adapter.last.result();
+  h.runner.flush();
+  const file = path.join(h.home, 'threads', thread.id, 'thread.json');
+  const rec = JSON.parse(fs.readFileSync(file, 'utf8'));
+  delete rec.asked;
+  fs.writeFileSync(file, JSON.stringify(rec));
+  assert.equal(h.restart().runner.get(thread.id).asked, 'Fix the tests more detail here');
 });

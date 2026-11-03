@@ -186,6 +186,19 @@ final class SidebarRowTests: XCTestCase {
         XCTAssertEqual(ProjectMark.place(thread, under: "a"), "misc")
     }
 
+    func testRowLineIsWhatMikeLastAskedElseThePlace() throws {
+        var thread = ThreadSummary(id: "t", title: "t", cwd: "/Users/mike/dev/me/misc")
+        XCTAssertEqual(ProjectMark.line(thread), "misc", "nothing asked yet: the folder")
+        thread.asked = ""
+        XCTAssertEqual(ProjectMark.line(thread), "misc")
+        thread.asked = "try the GPU route"
+        XCTAssertEqual(ProjectMark.line(thread), "You: try the GPU route")
+        // A runner's summary carries it as `asked`.
+        let json = #"{"id":"t","title":"t","asked":"ship it"}"#
+        let decoded = try JSONDecoder().decode(ThreadSummary.self, from: Data(json.utf8))
+        XCTAssertEqual(decoded.asked, "ship it")
+    }
+
     func testFolderName() {
         XCTAssertEqual(FolderName.short("/Users/mike/dev/me/misc"), "misc")
         XCTAssertEqual(FolderName.short("~/dev/photo-sync/"), "photo-sync")

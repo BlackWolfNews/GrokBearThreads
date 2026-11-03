@@ -605,6 +605,7 @@ export class Runner {
       rec.lastSeq = this.store.log(rec.id).lastSeq;
       const st: ThreadState = { rec, rt: newRuntime(Date.parse(rec.lastActivityAt) || 0) };
       this.threads.set(rec.id, st);
+      if (rec.asked === undefined && !rec.archivedAt) this.backfillAsked(rec);
       this.recoverReviews(st);
       if (this.recover(st)) stopped++;
     }
@@ -4205,6 +4206,10 @@ export class Runner {
     log.append(event);
     st.rec.lastSeq = event.seq;
     st.rec.updatedAt = event.ts;
+    if (body.type === 'user.message') {
+      const asked = askedLine(body, st.rec.reviews);
+      if (asked) st.rec.asked = asked;
+    }
     this.markDirty(st);
     this.notify({ method: 'thread.event', params: { threadId: st.rec.id, event } });
     return event;
@@ -4389,6 +4394,7 @@ export class Runner {
     }
     if (rec.schedule) s.schedule = { ...rec.schedule };
     if (rec.startedBy) s.startedBy = { ...rec.startedBy };
+    if (rec.asked) s.asked = rec.asked;
     if (rec.panelRequest) s.panelRequest = { ...rec.panelRequest };
     // A record from 28 Oct may say "people" (sharing with specific people,
     // since dropped): that's not shared.
@@ -5267,6 +5273,22 @@ export class Runner {
     return this.threads.get(threadId)?.rec.status;
   }
 
+  // Threads from before `asked` (3 Nov 2026) learn it from the end of
+  // their log, once. Only the inbox's and hibernating ones: an archived
+  // thread's row doesn't show it, and there can be thousands of those.
+  private backfillAsked(rec: ThreadRecord): void {
+    const log = this.store.log(rec.id);
+    const events = log.read(Math.max(1, log.lastSeq - 300), log.lastSeq);
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i];
+      const asked = e.type === 'user.message' ? askedLine(e, rec.reviews) : undefined;
+      if (asked) {
+        rec.asked = asked;
+        return;
+      }
+    }
+  }
+
   // A note outside any turn (restart.ts: "Runner restarted: ...").
   note(threadId: string, text: string): void {
     this.emit(this.mustGet(threadId), { type: 'system.note', text });
@@ -5431,6 +5453,21 @@ function turnNeeds(turn: Turn): (Needs & { from: 'tool' | 'text' }) | undefined 
   if (tool) return { ...tool, from: 'tool' };
   const text = turn.lastText && needsFromText(turn.lastText);
   return text ? { ...text, from: 'text' } : undefined;
+}
+
+// The sidebar's "You: ..." line: what Mike last said to a thread, in one
+// line. Not the runner's, a schedule's or another agent's messages, which
+// he didn't write. A design review's reply is his notes, or which one he
+// picked, without the "Review: <title> (<id>)" heading.
+export function askedLine(m: { text: string; origin?: MessageOrigin; reviewId?: string; reviewResponse?: ReviewDraft }, reviews?: DesignReview[]): string | undefined {
+  if (!fromMike(m.text, m)) return undefined;
+  let text = m.text;
+  if (m.reviewId && m.reviewResponse) {
+    const notes = Object.values(m.reviewResponse.notes).filter(Boolean);
+    const picked = m.reviewResponse.pickedId && reviews?.find(r => r.id === m.reviewId)?.options.find(o => o.id === m.reviewResponse!.pickedId);
+    text = notes.length ? notes.join(' ') : picked ? `Picked ${picked.title}` : '';
+  }
+  return oneLine(text, LIMITS.previewChars) || undefined;
 }
 
 export function oneLine(text: string, max: number): string {

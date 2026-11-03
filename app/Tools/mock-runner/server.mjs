@@ -1549,6 +1549,7 @@ function persist(threadId, fields, turnId) {
   if (['user.message', 'turn.started', 'turn.completed'].includes(fields.type)) s.lastActivityAt = event.ts;
   s.updatedAt = event.ts;
   if (fields.type === 'assistant.text') s.preview = fields.text.replace(/\s+/g, ' ').slice(0, 140);
+  s.asked = askedLine(fields) ?? s.asked;
   // Like the real runner's Needs you: a new turn closes the open card, and
   // a completed one that says it needs Mike opens the next.
   if (fields.type === 'turn.started') { delete s.needs; delete s.asks; delete s.asksSeq; }
@@ -2557,6 +2558,13 @@ header p{color:var(--muted);margin:0 0 18px;max-width:30em}
 </section>`;
 }
 
+// Like the real runner's askedLine, roughly: the sidebar's "You: ..." is
+// Mike's own messages only (a review's reply goes in whole here).
+function askedLine(e) {
+  if (e.type !== 'user.message' || (e.origin && e.origin !== 'phone') || e.text.startsWith('[Sent by the agent')) return undefined;
+  return e.text.replace(/\s+/g, ' ').trim().slice(0, 140) || undefined;
+}
+
 function loadFixtures() {
   for (const root of fixtureDirs) {
     if (!fs.existsSync(root)) continue;
@@ -2580,6 +2588,8 @@ function loadFixtures() {
       });
       summary.lastSeq = events.at(-1)?.seq ?? 0;
       summary.lastSeenSeq ??= summary.lastSeq;
+      // As the real runner learns it for a thread from before it.
+      summary.asked ??= events.map(askedLine).findLast(Boolean);
       const reviews = new Map();
       for (const event of events) if (event.type === 'review.updated') reviews.set(event.review.id, event.review);
       const t = { summary, events, reviews, inProgress: new Map(), timers: [], dir };

@@ -666,7 +666,7 @@ struct ThreadRowView: View {
                                 .font(.system(size: TypeScale.sidebarMeta + 1))
                                 .lineLimit(1)
                         } else {
-                            Text(ProjectMark.place(thread, under: heading))
+                            Text(ProjectMark.line(thread, under: heading))
                                 .font(.system(size: TypeScale.sidebarMeta + 1))
                                 .lineLimit(1)
                         }
