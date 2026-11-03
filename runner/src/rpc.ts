@@ -628,7 +628,7 @@ function optStartedBy(p: Record<string, unknown>): { startedBy?: ThreadStartedBy
 function optMode(p: Record<string, unknown>): PermissionMode | undefined {
   const v = p.permissionMode;
   if (v === undefined || v === null) return undefined;
-  if (v !== 'full' && v !== 'ask') throw bad('permissionMode must be "full" or "ask"');
+  if (v !== 'full' && v !== 'ask' && v !== 'auto') throw bad('permissionMode must be "full", "ask" or "auto"');
   return v;
 }
 

@@ -22,6 +22,7 @@ const OPTIONS = {
   model: { type: 'string' },
   effort: { type: 'string' },
   ask: { type: 'boolean' },
+  auto: { type: 'boolean' },
   image: { type: 'string', multiple: true },
   wait: { type: 'boolean' },
   json: { type: 'boolean' },
@@ -63,7 +64,7 @@ const OPTIONS = {
 
 const HELP = `tb: talk to the Threadbear runner
 
-  tb new "text" [--cwd DIR] [--pool ID | --account ID] [--model M] [--effort L] [--ask] [--image FILE]... [--wait]
+  tb new "text" [--cwd DIR] [--pool ID | --account ID] [--model M] [--effort L] [--ask | --auto] [--image FILE]... [--wait]
                 [--from NAME] [--why WORDS] [--icon SYMBOL]
                                   --pool runs it on a pool (the login with room, moving when
                                   one runs dry); --account pins it to one login. --from says a
@@ -90,7 +91,7 @@ const HELP = `tb: talk to the Threadbear runner
   tb panel <threadId> <panelId> [--json]  draws an image panel or fills a list panel now
   tb run <threadId> <actionId>    run one: a command's output is printed and goes into the thread
   tb schedule "text" (--at WHEN | --cron "0 9 * * 1-5") [--tz ZONE] [--title T]
-              [--thread ID | --cwd DIR [--account ID] [--model M] [--effort L] [--ask]]
+              [--thread ID | --cwd DIR [--account ID] [--model M] [--effort L] [--ask | --auto]]
                                   sends the text later: once (--at 30m, 2h, 1d, tomorrow
                                   or an ISO time) or on a cron; to a thread with --thread,
                                   otherwise to a new thread each time
@@ -122,7 +123,7 @@ ${DEV_HELP}`;
 // The flags each command reads. Any other is refused rather than ignored:
 // `tb events <id> --from 3` used to print every event as if it had worked.
 const COMMAND_FLAGS: Record<string, string[]> = {
-  new: ['cwd', 'account', 'pool', 'model', 'effort', 'ask', 'image', 'wait', 'json', 'from', 'why', 'icon'],
+  new: ['cwd', 'account', 'pool', 'model', 'effort', 'ask', 'auto', 'image', 'wait', 'json', 'from', 'why', 'icon'],
   send: ['image', 'wait', 'json'],
   list: ['snoozed', 'archived', 'all', 'json'],
   search: ['json'],
@@ -138,7 +139,7 @@ const COMMAND_FLAGS: Record<string, string[]> = {
   delete: [],
   accounts: ['json'],
   pools: ['json'],
-  schedule: ['at', 'cron', 'tz', 'title', 'thread', 'cwd', 'account', 'model', 'effort', 'ask', 'json'],
+  schedule: ['at', 'cron', 'tz', 'title', 'thread', 'cwd', 'account', 'model', 'effort', 'ask', 'auto', 'json'],
   schedules: ['json'],
   projects: ['json', 'archived'],
   librarian: ['json'],
@@ -303,6 +304,7 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
       if (f.model) params.model = f.model;
       if (f.effort) params.effort = f.effort;
       if (f.ask) params.permissionMode = 'ask';
+      else if (f.auto) params.permissionMode = 'auto';
       const startedBy = startedByFlags(f, process.env.THREADBEAR_THREAD_ID);
       if (startedBy) params.startedBy = startedBy;
       const r = await client.call<{ thread: ThreadSummary; turnId: string }>('threads.create', params);
@@ -521,6 +523,7 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
         if (f.model) params.model = f.model;
         if (f.effort) params.effort = f.effort;
         if (f.ask) params.permissionMode = 'ask';
+        else if (f.auto) params.permissionMode = 'auto';
       }
       // A schedule an agent makes from a thread says which one.
       if (process.env.THREADBEAR_THREAD_ID) params.createdBy = process.env.THREADBEAR_THREAD_ID;

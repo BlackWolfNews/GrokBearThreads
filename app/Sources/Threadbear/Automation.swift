@@ -1289,7 +1289,7 @@ enum Automation {
         }
         if let value = c["ask"] {
             guard let ask = value as? Bool else { return "error ask is true or false" }
-            app.newThreadAsk = ask
+            app.newThreadPermission = ask ? .ask : .full
         }
         let settings = AppDump.newThreadSettings(app)
         return "ok cwd=\(settings.cwd) account=\(settings.account)" + (settings.pool.map { " pool=\($0)" } ?? "")

@@ -232,7 +232,7 @@ extension AppModel {
                 newThreadRunnerId = nil
                 newThreadRunnerProblem = nil
                 newThreadCwd = nil
-                newThreadAsk = false
+                newThreadPermission = .full
                 newThreadAccount = nil
                 newThreadPool = nil
                 newThreadProvider = nil

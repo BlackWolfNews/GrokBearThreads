@@ -269,7 +269,7 @@ final class AppModel {
     /// kept across launches: a Codex model is no use to a Claude thread.
     private(set) var lastModels: [String: String] = AppModel.loadMemory(AppModel.lastModelKey)
     private(set) var lastEfforts: [String: String] = AppModel.loadMemory(AppModel.lastEffortKey)
-    var newThreadAsk = false
+    var newThreadPermission: PermissionMode = .full
     /// What the runner says about the Claude and Codex CLIs (`clis.list`,
     /// `clis.updated`). Empty until it's said anything.
     var clis: [CliStatus] = []
@@ -1402,7 +1402,7 @@ final class AppModel {
                     // from the defaults again, on whichever account then
                     // has the most room. The model and effort stick.
                     newThreadCwd = nil
-                    newThreadAsk = false
+                    newThreadPermission = .full
                     newThreadAccount = nil
                     newThreadPool = nil
                     newThreadProvider = nil
@@ -1706,8 +1706,8 @@ final class AppModel {
         update(threadId, ThreadUpdate(snoozedUntil: .some(nil)))
     }
 
-    func setPermission(_ threadId: String, ask: Bool) {
-        update(threadId, ThreadUpdate(permissionMode: ask ? .ask : .full))
+    func setPermission(_ threadId: String, _ mode: PermissionMode) {
+        update(threadId, ThreadUpdate(permissionMode: mode))
     }
 
     /// A model or effort picked on a thread is also what the next new

@@ -330,7 +330,7 @@ public enum ThreadStatus: String, Sendable, Hashable, Codable {
 }
 
 public enum PermissionMode: String, Sendable, Hashable, Codable {
-    case full, ask
+    case full, ask, auto
 
     public init(from decoder: Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)

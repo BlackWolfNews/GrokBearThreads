@@ -65,7 +65,8 @@ export function terminalMcpTools(base: string | undefined, oneReply = false): st
   return names.join(',');
 }
 
-export function sdkPermissionMode(mode: PermissionMode): 'bypassPermissions' | 'default' {
+export function sdkPermissionMode(mode: PermissionMode): 'bypassPermissions' | 'default' | 'auto' {
+  if (mode === 'auto') return 'auto';
   return mode === 'full' ? 'bypassPermissions' : 'default';
 }
 

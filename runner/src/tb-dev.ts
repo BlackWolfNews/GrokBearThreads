@@ -512,7 +512,7 @@ export function formatUpstream(u: UpstreamStatus, now: number): string {
 }
 
 function access(t: ThreadSummary): string {
-  return t.permissionMode === 'ask' ? 'asks before edits' : 'full access';
+  return t.permissionMode === 'ask' ? 'asks before edits' : t.permissionMode === 'auto' ? 'auto' : 'full access';
 }
 
 // tb models: one row per model, the default starred, with its effort

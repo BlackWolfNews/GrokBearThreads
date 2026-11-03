@@ -936,6 +936,6 @@ function effort(v: unknown): EffortLevel | null | undefined {
 
 function mode(v: unknown): PermissionMode | undefined {
   if (v === undefined || v === null) return undefined;
-  if (v !== 'full' && v !== 'ask') throw bad('permissionMode must be "full" or "ask"');
+  if (v !== 'full' && v !== 'ask' && v !== 'auto') throw bad('permissionMode must be "full", "ask" or "auto"');
   return v;
 }

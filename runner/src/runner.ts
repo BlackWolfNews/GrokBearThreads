@@ -3389,7 +3389,7 @@ export class Runner {
           rt.releaseWhenIdle = true;
           if (!rt.turn) this.releaseSession(st);
         });
-        if (sayNextTurn()) nextTurn.push(params.permissionMode === 'ask' ? 'Ask before edits' : 'Full access');
+        if (sayNextTurn()) nextTurn.push(params.permissionMode === 'ask' ? 'Ask before edits' : params.permissionMode === 'auto' ? 'Auto' : 'Full access');
       }
     }
     if (nextTurn.length) {

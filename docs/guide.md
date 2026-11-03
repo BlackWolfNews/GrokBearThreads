@@ -162,7 +162,7 @@ out as its address.
 ## Full access or Ask before edits
 <!-- slug: full-access -->
 
-Read this before your first thread. Every thread runs in one of two modes,
+Read this before your first thread. Every thread runs in one of three modes,
 shown on the composer (the box you type in) and changed by clicking it.
 
 - **Full access** (the default): the agent edits files and runs commands
@@ -173,6 +173,10 @@ shown on the composer (the box you type in) and changed by clicking it.
   or runs a command. A card shows in the thread with Allow, Always allow and
   Deny. Always allow only lasts for that thread. A Codex thread in this mode
   can read files but not change them unless you agree.
+- **Auto** (Claude threads only): a separate safety check approves or blocks
+  each action, and a card shows only when it can't decide. It's for work on
+  text you didn't write, like an error report or a web page. It catches a lot
+  but it's no guarantee, and on a Codex thread it behaves like Ask before edits.
 
 The mode belongs to one thread. A new thread starts on Full access again
 unless you pick otherwise, so if you're unsure about a task, switch it to Ask

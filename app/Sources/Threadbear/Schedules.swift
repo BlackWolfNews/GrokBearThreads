@@ -152,7 +152,8 @@ extension AppModel {
         state.accountId = settings.account
         state.model = settings.model
         state.effort = settings.effort
-        state.ask = settings.ask
+        // The editor only offers Ask or Full; Auto carries over as the safer one.
+        state.ask = settings.permissionMode != .full
         scheduleEditor = state
         loadRunners()
     }

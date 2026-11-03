@@ -11,7 +11,10 @@ export function isProvider(v: unknown): v is Provider {
   return typeof v === 'string' && (PROVIDERS as readonly string[]).includes(v);
 }
 
-export type PermissionMode = 'full' | 'ask';
+// auto is Claude Code's auto mode: a separate classifier model approves or
+// blocks each action, and asks only when it can't decide. Codex has no such
+// thing, so there it behaves like ask.
+export type PermissionMode = 'full' | 'ask' | 'auto';
 // 'ultra' is Codex's multi-agent level; Claude never offers it.
 export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
 export const EFFORT_LEVELS: readonly EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'];

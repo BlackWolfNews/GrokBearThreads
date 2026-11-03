@@ -145,7 +145,7 @@ export class CodexTools {
     const alwaysAsk = ALWAYS_ASK_TOOLS.has(fullName);
     const readOnly = READ_ONLY_TOOLS.has(name) || tool.annotations?.readOnlyHint === true;
     const allowed = !alwaysAsk && [...this.deps.rules()].includes(fullName);
-    if (alwaysAsk || (this.deps.mode() === 'ask' && !readOnly && !allowed)) {
+    if (alwaysAsk || (this.deps.mode() !== 'full' && !readOnly && !allowed)) {
       const ans = await this.deps.requestApproval({
         toolUseId: o.fromChild ? undefined : params.callId,
         name: fullName,

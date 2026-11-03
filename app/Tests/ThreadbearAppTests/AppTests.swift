@@ -400,7 +400,7 @@ final class DraftTests: XCTestCase {
         app.newThreadCwd = "/tmp/somewhere"
         app.newThreadModel = "haiku"
         app.newThreadEffort = "low"
-        app.newThreadAsk = true
+        app.newThreadPermission = .ask
         app.newThreadAccount = "claude-3"
         app.drafts["new"] = Draft(text: "Start something")
         app.send(threadId: nil)
@@ -409,7 +409,7 @@ final class DraftTests: XCTestCase {
         }
         XCTAssertEqual(app.selection, "th_new")
         XCTAssertNil(app.newThreadCwd)
-        XCTAssertFalse(app.newThreadAsk)
+        XCTAssertEqual(app.newThreadPermission, .full)
         XCTAssertNil(app.newThreadAccount, "a picked account is for that draft only")
         XCTAssertEqual(app.lastAccountId, "claude-3")
         XCTAssertEqual(app.newThreadAccountId, "claude-3", "with no usage known, the last-used one")
@@ -662,7 +662,7 @@ final class AutomationTests: XCTestCase {
         app.defaults.model = "claude-haiku-5-5"
         XCTAssertEqual(AppDump.newThreadSettings(app).model, "default (the runner's, claude-haiku-5-5)")
         app.newThreadModel = "sonnet"
-        app.newThreadAsk = true
+        app.newThreadPermission = .ask
         let settings = AppDump.newThreadSettings(app)
         XCTAssertEqual(settings.model, "sonnet")
         XCTAssertEqual(settings.cwd, "/w")

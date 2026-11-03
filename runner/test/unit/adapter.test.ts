@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import { ClaudeAdapter, alwaysAllow, modelChoices, terminalMcpTools } from '../../src/adapters/claude/adapter.ts';
+import { ClaudeAdapter, alwaysAllow, modelChoices, sdkPermissionMode, terminalMcpTools } from '../../src/adapters/claude/adapter.ts';
 import type { SessionSink, AdapterOutput, ToolApprovalRequest } from '../../src/adapters/types.ts';
 import { ProcessRegistry } from '../../src/proc.ts';
 import { nullLogger } from '../../src/log.ts';
@@ -275,4 +275,12 @@ test("a subagent's approval is asked at once, with no itemId and no diff", async
   assert.deepEqual(res.updatedPermissions, [{ type: 'addRules', rules: [{ toolName: 'Write' }], behavior: 'allow', destination: 'session' }]);
   assert.deepEqual(outputs.find((o) => o.kind === 'allowRules'), { kind: 'allowRules', rules: ['Write'] });
   state.close!();
+});
+
+test('each permission mode maps to the SDK mode that enforces it', () => {
+  assert.equal(sdkPermissionMode('full'), 'bypassPermissions');
+  assert.equal(sdkPermissionMode('ask'), 'default');
+  // Auto must reach the SDK as auto: anything else either bypasses the
+  // classifier or prompts for everything.
+  assert.equal(sdkPermissionMode('auto'), 'auto');
 });

@@ -1033,3 +1033,11 @@ test('end() while the process is still being retried leaves nothing running', as
   await assert.rejects(f.next(800), /no process started/);
   assert.deepEqual(adapter.binariesInUse(), []);
 });
+
+test('auto on Codex is as careful as ask, as Codex has no classifier', async () => {
+  const h = await open({ permissionMode: 'auto' });
+  const req = await h.conn.request('thread/start');
+  assert.equal(req.params.approvalPolicy, 'on-request');
+  assert.equal(req.params.sandbox, 'read-only');
+  h.conn.respond(req.id, threadResult('th-1'));
+});

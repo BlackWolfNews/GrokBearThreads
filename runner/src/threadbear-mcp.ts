@@ -223,7 +223,7 @@ export function buildThreadbearTools(
       t.waitingForRoom ? `waiting for room until: ${t.waitingForRoom.until}` : '',
       `model: ${t.model ?? 'default'}${t.modelInUse ? ` (running as ${t.modelInUse})` : ''}`,
       `effort: ${t.effort ?? 'default'}${t.effortInUse ? ` (${t.effortInUse} last turn)` : ''}`,
-      `permissions: ${t.permissionMode === 'full' ? 'full access' : 'ask before edits'}`,
+      `permissions: ${t.permissionMode === 'full' ? 'full access' : t.permissionMode === 'auto' ? 'auto (a classifier checks each action)' : 'ask before edits'}`,
       t.snoozedUntil ? `snoozed until: ${snoozeEnd(t)}` : '',
       t.archivedAt ? `archived: ${t.archivedAt}` : '',
       `last activity: ${relativeTime(t.lastActivityAt, now())}`,
@@ -382,7 +382,7 @@ export function buildThreadbearTools(
         account: z.string().optional().describe('With new_thread: account id or email (Claude or Codex; see list_accounts). Default: the one with the most room, on the provider last used.'),
         model: z.string().optional().describe("With new_thread: model id, one of the account's (list_accounts shows them)."),
         effort: effortEnum.optional().describe('With new_thread: reasoning effort (ultra is Codex only).'),
-        permissionMode: z.enum(['full', 'ask']).optional().describe('With new_thread: "full" (default) or "ask".'),
+        permissionMode: z.enum(['full', 'ask', 'auto']).optional().describe('With new_thread: "full" (default), "ask" or "auto".'),
         runner: z
           .string()
           .optional()
@@ -1018,7 +1018,7 @@ export function buildThreadbearTools(
         account: z.string().optional().describe('Account id or email, Claude or Codex (see list_accounts). Pins the thread to that login, which it then never leaves; leave it out to let a pool pick.'),
         model: z.string().optional().describe("Model id, one of the account's (list_accounts shows them; Codex ones look like gpt-6-luna). With no account or pool, its provider picks the pool. Default: the runner's default model for the provider if it has one (a dev runner's is the cheapest), else the account's."),
         effort: effortEnum.optional().describe("Reasoning effort (ultra is Codex only). Default: the model's own level."),
-        permissionMode: z.enum(['full', 'ask']).optional().describe('"full" (default) or "ask" before edits and commands.'),
+        permissionMode: z.enum(['full', 'ask', 'auto']).optional().describe('"full" (default), "ask" before edits and commands, or "auto": a classifier approves or blocks each action and asks only when it can\'t decide, for work on untrusted text (Claude only; on Codex it acts like ask).'),
         why: z.string().optional().describe('A few plain words on why this thread exists, about 6 ("fixing a hook it hit"). The sidebar shows them under its title, as the user has none of your context for it.'),
       },
       handle(async ({ text, title, folder: f, pool: p, account: acc, model, effort, permissionMode, why }) => {
@@ -1061,7 +1061,7 @@ export function buildThreadbearTools(
         model: z.string().nullable().optional().describe('Model id, or null for the account default.'),
         effort: effortEnum.nullable().optional().describe("Reasoning effort, or null for the model's own level (ultra is Codex only)."),
         pool: z.string().nullable().optional().describe('Pool id or title to put the thread in (it moves onto one of its logins from the next turn if its current one isn\'t in it), or null or "pin" to pin it to its current login.'),
-        permissionMode: z.enum(['full', 'ask']).optional(),
+        permissionMode: z.enum(['full', 'ask', 'auto']).optional(),
         snooze: z.string().optional().describe('Snooze until: 30m, 2h, 1d, tomorrow, an ISO time, "restart" (until the runner next starts), or "off" to wake it.'),
         archived: z.boolean().optional().describe('true to archive, false to bring back to the inbox.'),
       },

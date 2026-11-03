@@ -118,7 +118,6 @@ struct ComposerControls: View {
         let settings = ThreadSettings(app: app, thread: thread)
         let cwd = settings.cwd
         let account = settings.account
-        let ask = settings.ask
         // A new thread for another runner: no pictures or schedules from
         // here (paths on this Mac). Its folder chip shows once it isn't
         // that runner's default; the machine chip's menu has Folder too.
@@ -166,9 +165,9 @@ struct ComposerControls: View {
             }, openRequest: app.modelPickerRequest)
             ChipDivider()
             ComposerChip(
-                icon: ask ? "lock" : "lock.open",
-                title: ask ? "Ask before edits" : "Full access",
-                help: ask ? "Asks before editing files or running commands" : "Edits files and runs commands without asking"
+                icon: settings.permissionMode.composerIcon,
+                title: settings.permissionMode.composerTitle,
+                help: settings.permissionMode.composerHelp
             ) {
                 settings.permissionMenu()
             }
@@ -210,7 +209,7 @@ struct ThreadSettings {
     var provider: String { thread?.provider ?? (logins.account(account)?.provider ?? "claude") }
     var model: String? { thread == nil ? app.lastModels[provider] : thread?.model }
     var effort: String? { thread == nil ? app.lastEfforts[provider] : thread?.effort }
-    var ask: Bool { thread.map { $0.permissionMode == .ask } ?? app.newThreadAsk }
+    var permissionMode: PermissionMode { thread?.permissionMode ?? app.newThreadPermission }
     /// A new thread for another runner: its folders are paths on that Mac.
     var draftRunnerId: String? { thread == nil ? app.newThreadRunnerId : nil }
     /// Another runner's thread, or a new one for another runner.
@@ -630,14 +629,15 @@ struct ThreadSettings {
 
     func permissionMenu() -> NSMenu {
         let menu = NSMenu()
-        let full = ActionMenuItem("Full access", checked: !ask) { setAsk(false) }
-        full.image = NSImage(systemSymbolName: "lock.open", accessibilityDescription: nil)
-        full.subtitle = "Edits files and runs commands without asking"
-        let askItem = ActionMenuItem("Ask before edits", checked: ask) { setAsk(true) }
-        askItem.image = NSImage(systemSymbolName: "lock", accessibilityDescription: nil)
-        askItem.subtitle = "Asks before editing files or running commands"
-        menu.addItem(full)
-        menu.addItem(askItem)
+        // Auto is Claude Code's; Codex has nothing like it, so it's only offered
+        // for Claude (or if a thread is somehow on it already).
+        let modes: [PermissionMode] = provider == "claude" || permissionMode == .auto ? [.full, .auto, .ask] : [.full, .ask]
+        for mode in modes {
+            let item = ActionMenuItem(mode.composerTitle, checked: permissionMode == mode) { setPermission(mode) }
+            item.image = NSImage(systemSymbolName: mode.composerIcon, accessibilityDescription: nil)
+            item.subtitle = mode.composerHelp
+            menu.addItem(item)
+        }
         return menu
     }
 
@@ -677,8 +677,34 @@ struct ThreadSettings {
         if let thread { app.setEffort(thread.id, effort) } else { app.remember(effort: effort, provider: provider) }
     }
 
-    private func setAsk(_ ask: Bool) {
-        if let thread { app.setPermission(thread.id, ask: ask) } else { app.newThreadAsk = ask }
+    private func setPermission(_ mode: PermissionMode) {
+        if let thread { app.setPermission(thread.id, mode) } else { app.newThreadPermission = mode }
+    }
+}
+
+private extension PermissionMode {
+    var composerTitle: String {
+        switch self {
+        case .full: "Full access"
+        case .ask: "Ask before edits"
+        case .auto: "Auto"
+        }
+    }
+
+    var composerIcon: String {
+        switch self {
+        case .full: "lock.open"
+        case .ask: "lock"
+        case .auto: "lock.shield"
+        }
+    }
+
+    var composerHelp: String {
+        switch self {
+        case .full: "Edits files and runs commands without asking"
+        case .ask: "Asks before editing files or running commands"
+        case .auto: "A safety check approves or blocks each action, and asks only when unsure"
+        }
     }
 }
 

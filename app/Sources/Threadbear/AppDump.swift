@@ -112,7 +112,7 @@ struct AppDump: Encodable {
     static func newThreadSettings(_ app: AppModel) -> Settings {
         let account = app.newThreadAccountId
         return Settings(cwd: app.newThreadCwd ?? app.draftLogins.defaults.cwd, account: account,
-                        model: app.newThreadModel ?? defaultModel(app, account: account), ask: app.newThreadAsk,
+                        model: app.newThreadModel ?? defaultModel(app, account: account), ask: app.newThreadPermission == .ask,
                         effort: app.newThreadEffort ?? "default", pool: app.newThreadPoolId)
     }
 
