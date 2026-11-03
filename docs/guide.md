@@ -667,9 +667,12 @@ thread button on a tab BrowserBear has marked for an agent uses it).
 
 To let someone else read a thread, click the share button beside a
 thread's ... menu and pick Anyone with the link, then Copy link. It's a
-read-only page anybody can open, which follows the thread as it carries on:
-the messages, one line per step and the pictures, but not tool output, the
-folder or the cost. Only you stops the link working (sharing again brings
+read-only page anybody can open, which follows the thread as it carries on.
+It reads like a short write-up: each of your messages, the work folded
+into one "Worked for" line (open it for one line per step), the answer,
+and the pictures, but not tool output, the folder or the cost. Pasted
+into Slack, X or Messages, the link shows the thread's title, the start
+of its last reply and its first picture. Only you stops the link working (sharing again brings
 the same link back), and the arrows beside the link make a new one, which
 stops the old. The same Share button is on the website, on your thread's
 page and on the shared page while you're signed in.

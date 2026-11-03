@@ -1,17 +1,23 @@
 // A thread shared by link (/s/<slug>; docs/website.md, "Sharing"):
-// read-only, for anyone, with its pictures. When this browser is signed in
-// as Mike the page also has ShareControl, so he can stop sharing it (it
-// then reads "Only you" for him and is gone for everyone else) or share
-// it again.
-import { useEffect, useMemo, useRef, useState } from 'react';
+// read-only, for anyone, with its pictures. Whoever opens it usually isn't
+// using Threadbear, so it reads as a short write-up rather than a chat:
+// the title, a byline, then each turn as the ask, its work folded to one
+// line and the answer, with an outline of the asks to jump between. When
+// this browser is signed in as Mike the page also has ShareControl, so he
+// can stop sharing it or share it again.
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
-import { groupTools, MessageText, Pictures, picturesByRow, ToolRun } from './messages';
+import { MessageText, Pictures, picturesByRow, ToolRun, Worked, type PageMessage, type Picture } from './messages';
 import { CommandState } from './command-state';
+import { fold, splitTurns, duration, roughly, type Item, type Turn } from './turns';
+import { day, modelLabel, plain, sentences } from './format';
+import * as Icon from './icons';
 
 const FIRST_PAGE = 80;
 const MORE = 200;
+const SITE = 'https://threadbear.mikecann.app';
 
 export function SharePage({ slug, token }: { slug: string; token: string | null }) {
   const [limit, setLimit] = useState(FIRST_PAGE);
@@ -37,132 +43,316 @@ export function SharePage({ slug, token }: { slug: string; token: string | null 
       </main>
     );
   }
-  return <SharedThread slug={slug} token={token} data={shown} loading={data !== shown} onMore={() => setLimit((n) => n + MORE)} />;
+  return <WriteUp slug={slug} token={token} data={shown} loading={data !== shown} onMore={() => setLimit((n) => n + MORE)} />;
 }
 
 type Shared = Extract<NonNullable<ReturnType<typeof useQuery<typeof api.share.view>>>, { state: 'ok' }>;
 
-function SharedThread({ slug, token, data, loading, onMore }: { slug: string; token: string | null; data: Shared; loading: boolean; onMore: () => void }) {
-  const bottom = useRef<HTMLDivElement>(null);
-  const list = useRef<HTMLDivElement>(null);
-  const keepFromBottom = useRef<number | null>(null);
-  const lastSeq = data.messages.at(-1)?.seq;
-  useEffect(() => {
-    bottom.current?.scrollIntoView({ block: 'end' });
-  }, [lastSeq]);
+function WriteUp({ slug, token, data, loading, onMore }: { slug: string; token: string | null; data: Shared; loading: boolean; onMore: () => void }) {
+  const messages = data.messages as PageMessage[];
+  const turns = useMemo(() => splitTurns(messages), [messages]);
+  const asked = turns.filter((t) => t.starter);
+  const worked = turns.reduce((n, t) => n + (t.ms ?? 0), 0);
+  const inText = useMemo(() => new Map(data.images.filter((p) => p.src).map((p) => [p.src!, p.url])), [data.images]);
+  const after = useMemo(() => picturesByRow(messages, data.images), [messages, data.images]);
+  const active = useActiveTurn(turns.length);
+
   // After loading earlier messages, stay where you were rather than jumping.
+  const keepFromBottom = useRef<number | null>(null);
   useEffect(() => {
-    const el = list.current;
-    if (!el || keepFromBottom.current === null) return;
-    el.scrollTop = el.scrollHeight - keepFromBottom.current;
+    if (keepFromBottom.current === null) return;
+    window.scrollTo(0, document.documentElement.scrollHeight - keepFromBottom.current);
     keepFromBottom.current = null;
   }, [data]);
 
-  const inText = useMemo(() => new Map(data.images.filter((p) => p.src).map((p) => [p.src!, p.url])), [data.images]);
-  const after = useMemo(() => picturesByRow(data.messages, data.images), [data.messages, data.images]);
-  const picturesFor = (seqs: number[]) => seqs.flatMap((s) => after.get(s) ?? []);
+  const started = data.createdAt ?? messages[0]?.at;
+  const byline = [started ? day(started) : null, asked.length ? `${asked.length} ${asked.length === 1 ? 'turn' : 'turns'}` : null, worked >= 60_000 ? `worked ${roughly(worked)}` : null].filter(Boolean);
+  const made = (
+    <>
+      Made with <a href={SITE}>Threadbear</a>
+    </>
+  );
 
   return (
-    <article className="thread shared">
-      <header className="thread-head">
-        <img src="/icon.png" alt="" width={26} height={26} />
-        <div className="head-text">
-          <h1>{data.title || 'Untitled'}</h1>
-        </div>
+    <div className="doc-page">
+      <header className="doc-top">
+        <TurnsMenu turns={turns} active={active} />
+        <span className="spacer" />
         {data.manage && token ? (
-          <div className="head-actions">
-            <ShareControl token={token} threadId={data.manage.threadId} share={{ access: data.manage.shared ? 'link' : 'off', slug }} onSharePage />
-          </div>
+          <ShareControl token={token} threadId={data.manage.threadId} share={{ access: data.manage.shared ? 'link' : 'off', slug }} onSharePage preview={previewOf(data.title, messages, data.images)} />
         ) : null}
+        <CopyButton text={() => location.origin + location.pathname} label="Copy link" />
       </header>
-      <div className="messages" ref={list}>
-        {data.hasMore ? (
-          <button
-            className="earlier"
-            disabled={loading}
-            onClick={() => {
-              const el = list.current;
-              keepFromBottom.current = el ? el.scrollHeight - el.scrollTop : null;
-              onMore();
-            }}
-          >
-            {loading ? 'Loading…' : 'Load earlier messages'}
-          </button>
-        ) : null}
-        {groupTools(data.messages).map((g) =>
-          g.kind === 'tools' ? (
-            <div key={g.items[0]!.seq}>
-              <ToolRun items={g.items} />
-              <Pictures items={picturesFor(g.items.map((m) => m.seq))} />
+      <div className="doc-grid">
+        <nav className="outline" aria-label="Turns">
+          {asked.length > 1 ? (
+            <>
+              <h2>
+                {asked.length} turns
+              </h2>
+              <ol>
+                {turns.map((t, i) =>
+                  t.starter ? (
+                    <li key={i}>
+                      <a href={`#turn-${i + 1}`} className={i === active ? 'on' : ''}>
+                        <span className="n">{asked.indexOf(t) + 1}</span>
+                        <span className="ask">{plain(t.starter.text)}</span>
+                      </a>
+                    </li>
+                  ) : null,
+                )}
+              </ol>
+            </>
+          ) : null}
+          <p className="made">{made}</p>
+        </nav>
+        <article className="doc">
+          <h1>{data.title || 'Untitled'}</h1>
+          <p className="byline">
+            <strong>{modelLabel(data.provider, data.model)}</strong>
+            {byline.length ? ` · ${byline.join(' · ')}` : ''}
+          </p>
+          <hr />
+          {data.hasMore ? (
+            <button
+              className="btn earlier"
+              disabled={loading}
+              onClick={() => {
+                keepFromBottom.current = document.documentElement.scrollHeight - window.scrollY;
+                onMore();
+              }}
+            >
+              {loading ? 'Loading…' : 'Load earlier messages'}
+            </button>
+          ) : null}
+          {turns.map((t, i) => (
+            <TurnSection key={t.messages[0]!.seq} id={`turn-${i + 1}`} turn={t} busy={data.running && i === turns.length - 1} after={after} inText={inText} rows={messages} />
+          ))}
+          {data.running && !messages.length ? (
+            <div className="working">
+              <span className="spinner" /> {data.working || 'Bear with me…'}
             </div>
-          ) : (
-            <div key={g.m.seq} className={`msg ${g.m.role}`}>
-              <MessageText text={g.m.text} pictures={inText} seq={g.m.seq} rows={data.messages} />
-              <Pictures items={picturesFor([g.m.seq])} />
-              <div className="when muted small">{new Date(g.m.at).toLocaleString()}</div>
-            </div>
-          ),
-        )}
-        {data.running ? (
-          <div className="working muted">
-            <span className="spinner" /> {data.working || 'Bear with me…'}
-          </div>
-        ) : null}
-        <div ref={bottom} />
+          ) : null}
+          <p className="doc-end">{made}</p>
+        </article>
       </div>
-    </article>
+    </div>
   );
 }
 
+// One turn: the ask as a quote, its work folded, the answer, and the
+// pictures from the work after the answer, large.
+function TurnSection({ id, turn, busy, after, inText, rows }: { id: string; turn: Turn<PageMessage>; busy: boolean; after: Map<number, Picture[]>; inText: Map<string, string>; rows: PageMessage[] }) {
+  const items = fold(turn.messages, busy);
+  const fromWork: Picture[] = [];
+  const seqsOf = (item: Item<PageMessage>): number[] =>
+    item.kind === 'message' ? [item.m.seq] : item.kind === 'tools' ? item.items.map((m) => m.seq) : item.items.flatMap(seqsOf);
+  for (const item of items) if (item.kind === 'worked') fromWork.push(...seqsOf(item).flatMap((s) => after.get(s) ?? []));
+
+  const text = (m: PageMessage) => <MessageText text={m.text} pictures={inText} seq={m.seq} rows={rows} />;
+  return (
+    <section className="turn" id={id}>
+      {items.map((item) => {
+        if (item.kind === 'worked') {
+          return (
+            <Worked key={`w${item.key}`} ms={item.ms}>
+              {item.items.map((w) =>
+                w.kind === 'tools' ? (
+                  <ToolRun key={w.items[0]!.seq} items={w.items} open />
+                ) : w.kind === 'message' ? (
+                  <Fragment key={w.m.seq}>{text(w.m)}</Fragment>
+                ) : null,
+              )}
+            </Worked>
+          );
+        }
+        if (item.kind === 'tools') {
+          return (
+            <div key={item.items[0]!.seq}>
+              <ToolRun items={item.items} />
+              <Pictures items={item.items.flatMap((m) => after.get(m.seq) ?? [])} />
+            </div>
+          );
+        }
+        const m = item.m;
+        if (m === turn.starter) {
+          const who = m.origin === 'schedule' ? 'Scheduled' : m.origin === 'agent' ? 'From another thread' : undefined;
+          return (
+            <div key={m.seq} className={`asked ${who ? 'from' : ''}`}>
+              {who ? <span className="who">{who}</span> : null}
+              {text(m)}
+              <Pictures items={after.get(m.seq) ?? []} />
+            </div>
+          );
+        }
+        return (
+          <div key={m.seq} className="reply">
+            {text(m)}
+            <Pictures items={after.get(m.seq) ?? []} />
+          </div>
+        );
+      })}
+      {fromWork.length ? <Pictures items={fromWork} /> : null}
+      {busy ? (
+        <div className="working">
+          <span className="spinner" /> Working…
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+// The outline on a narrow screen: "3 turns" in the bar, opening to the asks.
+function TurnsMenu({ turns, active }: { turns: Turn<PageMessage>[]; active: number }) {
+  const [open, setOpen] = useState(false);
+  const asked = turns.filter((t) => t.starter);
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    window.addEventListener('click', close);
+    return () => window.removeEventListener('click', close);
+  }, [open]);
+  if (asked.length < 2) return <img className="turns-menu" src="/icon.png" alt="" width={24} height={24} />;
+  return (
+    <div className="turns-menu">
+      <button
+        className="btn"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((o) => !o);
+        }}
+        aria-expanded={open}
+      >
+        {asked.length} turns <Icon.ChevronDown />
+      </button>
+      {open ? (
+        <div className="turns-list">
+          {turns.map((t, i) =>
+            t.starter ? (
+              <a key={i} href={`#turn-${i + 1}`} className={i === active ? 'on' : ''}>
+                <span className="n">{asked.indexOf(t) + 1}</span>
+                <span>{plain(t.starter.text).slice(0, 120)}</span>
+                {t.ms && t.ms >= 1000 ? <span className="took">Worked for {duration(t.ms)}</span> : null}
+              </a>
+            ) : null,
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// Which turn is being read: the last whose top has passed a third of the
+// way down the window.
+function useActiveTurn(count: number): number {
+  const [active, setActive] = useState(0);
+  useEffect(() => {
+    const onScroll = () => {
+      const line = window.innerHeight / 3;
+      let at = 0;
+      for (let i = 0; i < count; i++) {
+        const el = document.getElementById(`turn-${i + 1}`);
+        if (el && el.getBoundingClientRect().top <= line) at = i;
+      }
+      // At the bottom of the page the last turn is the one being read,
+      // even if it's too short for its top to reach the line.
+      if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) at = count - 1;
+      setActive(at);
+    };
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [count]);
+  return active;
+}
+
+export function CopyButton({ text, label, className = 'btn' }: { text: () => string; label: string; className?: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      className={className}
+      onClick={async () => {
+        await navigator.clipboard.writeText(text());
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }}
+    >
+      <Icon.Link />
+      {copied ? 'Copied' : label}
+    </button>
+  );
+}
+
+// What a link unfurls as (convex/http.ts): the title, the start of the
+// last reply, the first picture.
+export type Unfurl = { title: string; description: string; image?: string };
+
+export function previewOf(title: string, messages: PageMessage[], images: Picture[]): Unfurl {
+  const last = [...messages].reverse().find((m) => m.role === 'assistant' && m.text.trim());
+  const text = last ? sentences(last.text) : '';
+  return { title: title || 'Untitled', description: text.length > 200 ? `${text.slice(0, 197)}…` : text, image: images[0]?.url };
+}
+
 // Mike's sharing controls, on his own thread page and on the shared page
-// when he's signed in: share by link, copy it, stop sharing, or a new link.
-// Each is a command the runner applies (phone:share), so it shows "Waiting
-// for the Mac" while the Mac is asleep. No New link on the shared page
-// itself: its own address would stop working under him.
-export function ShareControl({ token, threadId, share, onSharePage }: { token: string; threadId: string; share?: { access: string; slug: string }; onSharePage?: boolean }) {
+// when he's signed in: a switch for sharing by link, the link to copy, how
+// it unfurls, and a new link. Each is a command the runner applies
+// (phone:share), so it shows "Waiting for the Mac" while the Mac is
+// asleep. No New link on the shared page itself: its own address would
+// stop working under him.
+export function ShareControl({ token, threadId, share, onSharePage, preview }: { token: string; threadId: string; share?: { access: string; slug: string }; onSharePage?: boolean; preview?: Unfurl }) {
   const send = useMutation(api.phone.share);
   const [pending, setPending] = useState<Id<'commands'> | null>(null);
-  const [copied, setCopied] = useState(false);
   const shared = share?.access === 'link';
   const link = share ? `${location.origin}/s/${share.slug}` : undefined;
   const run = async (access: 'off' | 'link', newLink?: boolean) => setPending(await send({ token, threadId, access, ...(newLink ? { newLink: true } : {}) }));
   return (
-    <details className="share-menu">
-      <summary className={shared ? 'on' : ''}>{shared ? 'Shared' : 'Share'}</summary>
-      <div className="share-panel">
-        <p className="muted small">{shared ? 'Anyone with the link can read this thread, as it carries on.' : 'Only you can see this thread.'}</p>
+    <details className="pop">
+      <summary className={`share-btn ${shared ? 'on' : ''}`} title={shared ? 'Anyone with the link can read this thread' : 'Share this thread'}>
+        {shared ? (
+          <>
+            <span className="live" />
+            <span className="narrow-only">
+              <Icon.Link />
+            </span>
+          </>
+        ) : (
+          <Icon.Share />
+        )}
+        <span className="word">{shared ? 'Shared' : 'Share'}</span>
+      </summary>
+      <div className="pop-panel share-panel">
+        <div className="row-line">
+          <h3>Share with a link</h3>
+          <button className={`switch ${shared ? 'on' : ''}`} role="switch" aria-checked={shared} aria-label="Share with a link" disabled={pending !== null} onClick={() => run(shared ? 'off' : 'link')} />
+        </div>
+        <p>{shared ? 'Anyone with the link can read this thread, and new replies show up as they come in. No sign-in.' : 'Only you can see this thread.'}</p>
         {shared && link ? (
           <div className="share-link">
             <input readOnly value={link} onFocus={(e) => e.target.select()} aria-label="Link" />
-            <button
-              onClick={async () => {
-                await navigator.clipboard.writeText(link);
-                setCopied(true);
-                setTimeout(() => setCopied(false), 1500);
-              }}
-            >
-              {copied ? 'Copied' : 'Copy'}
+            <CopyButton text={() => link} label="Copy" className="btn primary" />
+          </div>
+        ) : null}
+        {shared && preview ? (
+          <>
+            <div className="split" />
+            <span className="label">How the link shows up in Slack, X or Messages</span>
+            <div className="unfurl">
+              <span className="site">
+                <img src="/icon.png" alt="" width={16} height={16} /> Threadbear
+              </span>
+              <span className="t">{preview.title}</span>
+              {preview.description ? <span className="d">{preview.description}</span> : null}
+              {preview.image ? <img src={preview.image} alt="" /> : null}
+            </div>
+          </>
+        ) : null}
+        {shared && !onSharePage ? (
+          <div className="buttons">
+            <button className="btn" disabled={pending !== null} onClick={() => run('link', true)} title="The old link stops working">
+              New link
             </button>
           </div>
         ) : null}
-        <div className="buttons">
-          {shared ? (
-            <>
-              <button disabled={pending !== null} onClick={() => run('off')}>
-                Stop sharing
-              </button>
-              {onSharePage ? null : (
-                <button disabled={pending !== null} onClick={() => run('link', true)} title="The old link stops working">
-                  New link
-                </button>
-              )}
-            </>
-          ) : (
-            <button className="primary" disabled={pending !== null} onClick={() => run('link')}>
-              Share with a link
-            </button>
-          )}
-        </div>
         {pending ? <CommandState token={token} commandId={pending} onDone={() => setPending(null)} /> : null}
       </div>
     </details>

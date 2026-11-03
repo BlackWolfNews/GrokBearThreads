@@ -130,6 +130,7 @@ if [ "$APP_ONLY" = 0 ]; then
   fi
   step "convex typecheck" "$ROOT" npm run convex:typecheck
   step "web typecheck" "$ROOT" npm run web:typecheck
+  step "web tests" "$ROOT" npm run web:test
   step "runner unit tests" "$ROOT/runner" npm test
   if [ "$QUICK" = 0 ]; then
     if needed '^runner/(scripts/|launch\.mjs$|launcher/|test/deploy/)'; then

@@ -1,0 +1,74 @@
+// The website's HTTP routes (docs/website.md). Everything is the static
+// site from the static-hosting component, except a shared thread's page,
+// /s/<slug>, which is the same index.html with that thread's title, the
+// start of its last reply and its first picture in the meta tags, so a
+// link pasted into Slack, X or iMessage unfurls as the thread rather than
+// as plain "Threadbear". Link-preview bots don't run the page's script, so
+// the tags have to be in the HTML itself.
+import { httpRouter } from 'convex/server';
+import { registerStaticRoutes } from '@convex-dev/static-hosting';
+import { components, internal } from './_generated/api';
+import { httpAction } from './_generated/server';
+import type { Id } from './_generated/dataModel';
+
+const http = httpRouter();
+
+http.route({
+  pathPrefix: '/s/',
+  method: 'GET',
+  handler: httpAction(async (ctx, request) => {
+    const url = new URL(request.url);
+    const slug = decodeURIComponent(url.pathname.slice('/s/'.length).replace(/\/$/, ''));
+    const asset = await ctx.runQuery(components.staticHosting.lib.resolveAssetForHttp, { path: '/index.html' });
+    // The page is in one of the three places the component keeps files
+    // (registerStaticRoutes reads them the same way).
+    let html: string | null = null;
+    if (asset?.blobId) html = await text(fetch(`${url.origin}/fs/blobs/${asset.blobId}`));
+    else if (asset?.storageUrl) html = await text(fetch(asset.storageUrl));
+    else if (asset?.appStorageId) html = (await (await ctx.storage.get(asset.appStorageId as Id<'_storage'>))?.text()) ?? null;
+    if (!html) return new Response('Not Found', { status: 404, headers: { 'Content-Type': 'text/plain' } });
+    const card = slug && !slug.includes('/') ? await ctx.runQuery(internal.share.preview, { slug }) : null;
+    return new Response(card ? withCard(html, card, url) : html, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        // Sharing can stop at any time; a cached card would outlive it.
+        'Cache-Control': 'no-store',
+        'X-Content-Type-Options': 'nosniff',
+      },
+    });
+  }),
+});
+
+registerStaticRoutes(http, components.staticHosting);
+
+export default http;
+
+// index.html with the thread's title and Open Graph and Twitter card tags.
+export function withCard(html: string, card: { title: string; description: string; image?: string }, url: URL): string {
+  const e = escapeHtml;
+  const tags = [
+    `<meta property="og:type" content="article" />`,
+    `<meta property="og:site_name" content="Threadbear" />`,
+    `<meta property="og:title" content="${e(card.title)}" />`,
+    `<meta property="og:url" content="${e(url.origin + url.pathname)}" />`,
+    card.description ? `<meta property="og:description" content="${e(card.description)}" />` : '',
+    card.description ? `<meta name="description" content="${e(card.description)}" />` : '',
+    `<meta property="og:image" content="${e(card.image ?? `${url.origin}/icon.png`)}" />`,
+    `<meta name="twitter:card" content="${card.image ? 'summary_large_image' : 'summary'}" />`,
+    `<meta name="twitter:title" content="${e(card.title)}" />`,
+    card.description ? `<meta name="twitter:description" content="${e(card.description)}" />` : '',
+  ]
+    .filter(Boolean)
+    .join('\n    ');
+  return html.replace(/<title>[^<]*<\/title>/, `<title>${e(card.title)} · Threadbear</title>\n    ${tags}`);
+}
+
+async function text(response: Promise<Response>): Promise<string | null> {
+  const r = await response;
+  return r.ok ? r.text() : null;
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}

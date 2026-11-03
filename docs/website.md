@@ -6,19 +6,28 @@ Built 28 Oct 2026 (thread 66935d23).
 
 ## What it is
 
-- `web/`: a small Vite + React app. The inbox, hibernating and den lists on
-  the left, a thread on the right (one column on a phone). A thread shows
-  the mirrored messages, its pending approval or question with buttons, a
-  composer, Load earlier messages, and Hibernate / Wake / To the den / Copy
-  link. Opening a thread marks it seen.
+- `web/`: a small Vite + React app, looking like the Mac app (refreshed
+  3 Nov 2026, thread c1d311fd, from design B in
+  `docs/web-refresh-design/`). Signed in, it's the Mac's window: Starred,
+  Inbox and Running in the sidebar with Hibernating and Archived folded
+  under them (loaded only while open, counted by `phone:counts`), and a
+  thread whose finished turns fold to "Worked for 4m 12s" and the reply
+  (`web/src/turns.ts`, a port of the iPhone's `Turns.fold`), with the
+  pending approval, the end_turn card of asks or the done card's
+  follow-ups joined to the composer. Return sends; Shift-Return is a new
+  line. The header's Share button and ... menu (Copy link, Star,
+  Hibernate or Wake, Archive or Bring back) do the rest. Opening a thread
+  marks it seen.
 - It's a client of the phone's API (`convex/phone.ts`, docs/convex-backend.md
   section 6) and nothing else, so it sees exactly what the phone sees: the
   newest 20 text messages per thread, no tool output or images. Everything
   it does is a `commands` row the runner applies.
-- Hosted by `@convex-dev/static-hosting` on the same Convex deployment
-  (`convex/convex.config.ts` mounts it at `/`; our own HTTP routes would go
-  under `/api`). Unknown paths fall back to `index.html`, so `/t/<id>` works
-  cold.
+- Hosted by `@convex-dev/static-hosting` on the same Convex deployment.
+  Since 3 Nov the app owns HTTP routing (`convex/http.ts`) rather than
+  mounting the component's routes at `/`: `registerStaticRoutes` serves
+  the site, and one route of our own, `/s/`, serves a shared thread's
+  page (below). Unknown paths fall back to `index.html`, so `/t/<id>`
+  works cold.
 - The Mac app's thread `...` menu has **Copy web link**. It takes the site
   from `runner.status`'s `sync.url` (`.convex.cloud` → `.convex.site`), so
   it only shows while sync is on.
@@ -35,9 +44,27 @@ backend APIs 7 and 8).
 
 The link is `<site>/s/<slug>`, a page with no sign-in (`web/src/share.tsx`),
 read-only and live, served by `share:view` (`convex/share.ts`), the only
-function that takes no phone token. It gives the title, the messages, the
-tool lines and the thread's pictures, and nothing else; or `gone` for a
-link that isn't shared. With Mike's token it also answers while the
+function that takes no phone token. It gives the title, when the thread
+started, the model, the messages (with origin, summary and turn, so the
+page folds each turn as the apps do), the tool lines and the thread's
+pictures, and nothing else; or `gone` for a link that isn't shared.
+
+Whoever opens a shared link usually isn't using Threadbear, so the page
+reads as a short write-up rather than a chat: a big title, a byline
+(model, date, turns, time worked), then each turn as the ask set as a
+quote, its work folded to one "Worked for" line, and the answer, with the
+pictures from the work shown large after it. On a wide screen an outline
+of the asks sits on the left and marks the one you're reading; on a
+narrow one it's the "3 turns" menu in the top bar. Copy link is top
+right, and "Made with Threadbear" links to the landing page.
+
+**Link previews.** Slack, X and Messages read a page's meta tags without
+running its script, so `/s/<slug>` is served by `convex/http.ts`: the
+site's `index.html` with the thread's title, the start of its last reply
+(`share:preview`, Markdown flattened to sentences) and its first shared
+picture as Open Graph and Twitter card tags, `no-store` so a link that
+stops being shared stops unfurling. Mike's Share panel shows the same
+preview. With Mike's token it also answers while the
 thread isn't shared, with `manage`, so his page keeps its controls.
 
 Pictures are in file storage (`shareImages`), uploaded by the runner only

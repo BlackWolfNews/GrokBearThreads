@@ -5,23 +5,11 @@ import Markdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { go } from './route';
 import { escapeDestinations, findStep, readLink } from './thread-links';
+import { workedTitle, type TurnMessage } from './turns';
+import type { ReactNode } from 'react';
 
 // A message or tool line, from phone:messages or share:view.
-export type PageMessage = { seq: number; role: 'user' | 'assistant' | 'tool'; text: string; origin?: string; toolKind?: string; at: string };
-type Group = { kind: 'message'; m: PageMessage } | { kind: 'tools'; items: PageMessage[] };
-
-// Tool calls between two messages go together as one run.
-export function groupTools(messages: PageMessage[]): Group[] {
-  const out: Group[] = [];
-  for (const m of messages) {
-    const last = out.at(-1);
-    if (m.role === 'tool') {
-      if (last?.kind === 'tools') last.items.push(m);
-      else out.push({ kind: 'tools', items: [m] });
-    } else out.push({ kind: 'message', m });
-  }
-  return out;
-}
+export type PageMessage = TurnMessage;
 
 function stepId(seq: number): string {
   return `step-${seq}`;
@@ -31,8 +19,8 @@ function stepId(seq: number): string {
 function showStep(seq: number) {
   const el = document.getElementById(stepId(seq));
   if (!el) return;
-  const fold = el.closest('details');
-  if (fold) fold.open = true;
+  // Out of every fold it's in: a tool run inside a turn's work.
+  for (let fold = el.closest('details'); fold; fold = fold.parentElement?.closest('details') ?? null) fold.open = true;
   el.scrollIntoView({ behavior: 'smooth', block: 'center' });
   el.classList.add('lit');
   setTimeout(() => el.classList.remove('lit'), 2500);
@@ -40,7 +28,7 @@ function showStep(seq: number) {
 
 // A run of tool calls: up to three shown as lines, more folded into "12 tool
 // calls" that opens to the lines. What they printed stays on the Mac.
-export function ToolRun({ items }: { items: PageMessage[] }) {
+export function ToolRun({ items, open }: { items: PageMessage[]; open?: boolean }) {
   const lines = (
     <ul className="tools">
       {items.map((m) => (
@@ -48,12 +36,13 @@ export function ToolRun({ items }: { items: PageMessage[] }) {
           <span className="tool-glyph" aria-hidden="true">
             {toolGlyph(m.toolKind)}
           </span>
-          {m.text}
+          <span>{m.text}</span>
         </li>
       ))}
     </ul>
   );
-  if (items.length <= 3) return <div className="tool-run">{lines}</div>;
+  // Inside an opened "Worked for" fold they're already behind a click.
+  if (open || items.length <= 3) return <div className="tool-run">{lines}</div>;
   return (
     <details className="tool-run">
       <summary>{items.length} tool calls</summary>
@@ -77,6 +66,20 @@ function toolGlyph(kind?: string): string {
     default:
       return '·';
   }
+}
+
+// A finished turn's work, folded into one line as on the Mac: "Worked for
+// 4m 12s". Open, it shows the tool lines and what the agent said on the way.
+export function Worked({ ms, children }: { ms?: number; children: ReactNode }) {
+  return (
+    <details className="worked">
+      <summary>
+        {workedTitle(ms)}
+        <span className="chev">›</span>
+      </summary>
+      <div className="worked-body">{children}</div>
+    </details>
+  );
 }
 
 // A shared thread's picture (share:view): `src` for one written in a

@@ -10,6 +10,7 @@
     "web:dev": "vite --config web/vite.config.ts",
     "web:build": "vite build --config web/vite.config.ts",
     "web:typecheck": "tsc --noEmit -p web",
+    "web:test": "node --test web/src/*.test.ts",
     "web:deploy": "static-hosting deploy --dist web/dist --build-command 'npm run web:build'",
     "web:sign-in": "swift web/scripts/sign-in.swift"
   },

@@ -1,0 +1,321 @@
+<!doctype html>
+<!-- size: 2080x2170 -->
+<!-- Direction A, "The Mac, in a tab": the website is the Mac app's window
+     in a browser. Colours are the Mac's (docs/end-turn-design/m.css). The
+     transcript is written once in <template id="t"> and cloned into the
+     three frames by the script at the bottom, so all three show the same
+     thread. -->
+<html><head><meta charset="utf-8"><style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#121212;font:15px/1.5 -apple-system,"SF Pro Text",system-ui;color:#e6e4e1;width:2080px;height:2170px;padding:70px 80px;-webkit-font-smoothing:antialiased}
+.row{display:flex;justify-content:center;gap:80px;align-items:flex-start}
+.row+.row{margin-top:80px}
+.cap{color:#8a8884;font-size:17px;margin:0 0 14px 4px}
+svg.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none}
+code{font:13px ui-monospace,"SF Mono",monospace;background:#333;border-radius:5px;padding:1px 6px;color:#8fb4ff}
+a{color:#8fb4ff;text-decoration:none}
+
+/* ---------- browser window ---------- */
+.browser{width:1440px;border-radius:12px;overflow:hidden;border:1px solid #3a3a3a;box-shadow:0 30px 80px rgba(0,0,0,.55)}
+.bar{height:44px;background:#2a2a2a;border-bottom:1px solid #1a1a1a;display:flex;align-items:center;padding:0 16px;gap:18px;color:#8a8884}
+.lights{display:flex;gap:8px}.lights span{width:12px;height:12px;border-radius:50%;background:#ff5f57}
+.lights span:nth-child(2){background:#febc2e}.lights span:nth-child(3){background:#28c840}
+.nav{display:flex;gap:14px}
+.url{margin:0 auto;width:520px;height:28px;border-radius:8px;background:#1f1f1f;display:flex;align-items:center;justify-content:center;gap:7px;font-size:13px;color:#b5b2ad}
+.url img{width:14px;height:14px;border-radius:3px}
+.vp{height:900px;background:#1e1e1e;position:relative;overflow:hidden}
+
+/* ---------- transcript ---------- */
+.user{background:#333;border-radius:16px;padding:9px 14px;margin:0 0 14px auto;width:fit-content;max-width:75%;font-size:15px}
+.work{color:#9a9894;font-size:14px;margin:2px 0 10px}
+.work .ch{color:#6f6d69;margin-left:6px}
+.msg p{margin-bottom:10px}
+.msg ul{margin:0 0 10px;padding-left:22px}
+.msg li{margin:3px 0}
+.turn{margin-bottom:26px}
+.turn:last-child{margin-bottom:0}
+.meta{color:#7d7b77;font-size:12.5px;margin-top:-2px}
+/* a picture in a rounded frame */
+.pic{border:1px solid #3a3a3a;border-radius:12px;overflow:hidden;width:100%;max-width:500px;margin:4px 0 12px;background:#141414}
+
+/* the fake settings page drawn in the picture */
+.fs{width:500px;font-size:11px;line-height:1.3;color:#d8d6d2;aspect-ratio:16/9;display:flex;flex-direction:column}
+.fs .top{height:13%;background:#1b1d22;border-bottom:1px solid #2a2d33;display:flex;align-items:center;padding:0 4%;gap:3%}
+.fs .logo{width:16px;height:16px;border-radius:5px;background:#7c5cff}
+.fs .bars{display:flex;gap:10px;margin-left:auto}.fs .bars i{display:block;width:36px;height:6px;border-radius:3px;background:#3a3d44}
+.fs .ava{width:18px;height:18px;border-radius:50%;background:#4a4f59}
+.fs .body{flex:1;display:flex;background:#16181c}
+.fs .side{width:28%;border-right:1px solid #262930;padding:5% 4%;display:flex;flex-direction:column;gap:7px}
+.fs .side b{font-weight:500;color:#8b8f98;padding:3px 8px;border-radius:5px}
+.fs .side b.on{background:#262a33;color:#e8e9ec}
+.fs .main{flex:1;padding:5% 6%}
+.fs h4{font-size:15px;font-weight:600;margin-bottom:12px;color:#f0f0f2}
+.fs .r{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-top:1px solid #262930}
+.fs .r span{color:#a9adb5}
+.fs .seg{display:flex;background:#22252c;border-radius:7px;padding:2px}
+.fs .seg b{font-weight:500;padding:3px 9px;border-radius:5px;color:#a9adb5}
+.fs .seg b.on{background:#7c5cff;color:#fff}
+.fs .sel{width:84px;height:20px;border-radius:5px;background:#22252c;border:1px solid #30343c}
+.fs .tog{width:30px;height:17px;border-radius:9px;background:#30343c;position:relative}
+.fs .tog:after{content:"";position:absolute;left:2px;top:2px;width:13px;height:13px;border-radius:50%;background:#8b8f98}
+
+/* the agent's question, shown read-only on the shared page */
+.ro{border:1px solid #3a3a3a;border-radius:12px;padding:12px 16px 6px;margin-top:14px;background:#232323}
+.ro .q{font-weight:600;display:flex;gap:8px;align-items:center;margin-bottom:4px}
+.ro .o{padding:7px 0;border-top:1px solid #303030}
+.ro .o:first-of-type{border-top:0}
+.ro .o .s{color:#8f8d89;font-size:12.5px}
+.pick{color:#4f8ff7;font-size:12px;margin-left:6px}
+
+/* ---------- owner view ---------- */
+.app{display:flex;height:100%}
+.sb{width:300px;background:#252525;border-right:1px solid #1a1a1a;padding:12px 10px;display:flex;flex-direction:column;gap:2px}
+.search{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.search .f{flex:1;height:30px;border-radius:8px;background:#303030;display:flex;align-items:center;gap:7px;padding:0 10px;color:#7d7b77;font-size:13.5px}
+.ib{width:30px;height:30px;border-radius:7px;display:grid;place-items:center;color:#b5b2ad}
+.ib svg.i{width:17px;height:17px}
+.sec{display:flex;align-items:center;gap:8px;color:#9a9894;font-size:13px;font-weight:600;padding:4px 8px}
+.sec .n{margin-left:auto;font-weight:400;color:#7d7b77}
+.sec svg.i{width:14px;height:14px}
+.sec.c{padding:7px 8px;margin-top:4px}
+.th{display:flex;align-items:center;gap:10px;padding:8px 8px 8px 6px;border-radius:9px;position:relative}
+.th.sel{background:#353535}
+.dot{width:7px;height:7px;border-radius:50%;flex:none}
+.dot.b{background:#3478f6}
+.av{width:30px;height:30px;border-radius:8px;background:#3a3a3a;display:grid;place-items:center;font-size:13px;font-weight:600;color:#c9c6c1;flex:none}
+.th .tx{min-width:0;flex:1}
+.th .t{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#d8d6d2}
+.th .t.u{font-weight:600;color:#f0eeeb}
+.th .s{font-size:12.5px;color:#8a8884}
+.th .tm{font-size:12px;color:#7d7b77;align-self:flex-start;margin-top:2px}
+
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.hd{height:44px;border-bottom:1px solid #2c2c2c;display:flex;align-items:center;padding:0 12px 0 18px;gap:8px;flex:none;position:relative}
+.hd .av{width:22px;height:22px;border-radius:6px;font-size:11px}
+.hd .f{color:#9a9894}
+.hd .sl{color:#5f5d5a}
+.hd .t{font-weight:600;font-size:14.5px}
+.hd .r{margin-left:auto;display:flex;gap:4px}
+.ib.on{background:#3a3a3a;color:#e6e4e1}
+.scroll{flex:1;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end;position:relative}
+.scroll:before{content:"";position:absolute;left:0;right:0;top:0;height:56px;background:linear-gradient(#1e1e1e,rgba(30,30,30,0));z-index:2}
+.col{width:720px;margin:0 auto}
+.scroll .col{padding:0 0 18px}
+.dock{flex:none;padding:0 0 18px}
+
+/* the asks card joined to the composer, as on the Mac */
+.joined{border:1.5px solid #3478f6;border-radius:14px;background:#262626;overflow:hidden}
+.jh{display:flex;align-items:center;gap:8px;padding:12px 16px 4px;font-weight:600;font-size:14px}
+.jh .x{margin-left:auto;color:#7d7b77}
+.jq{padding:4px 16px 0 16px}
+.jq .q{font-weight:600}
+.jq .c{color:#a3a09b;font-size:13px;margin-top:1px}
+.opts{border:1px solid #363636;border-radius:10px;margin:10px 16px 14px;background:#222}
+.op{display:flex;gap:10px;padding:9px 12px;border-top:1px solid #333}
+.op:first-child{border-top:0}
+.rad{width:16px;height:16px;border-radius:50%;border:1.5px solid #6f6d69;flex:none;margin-top:3px}
+.rad.p{border-color:#3478f6}
+.op .s{color:#8f8d89;font-size:12.5px}
+.op.else{color:#8a8884}
+.comp{border-top:1px solid #333;padding:12px 16px 10px}
+.comp .ph{color:#6f6d69;margin-bottom:12px}
+.tools{display:flex;align-items:center;gap:14px;color:#8a8884;font-size:13px}
+.send{margin-left:auto;width:28px;height:28px;border-radius:50%;background:#e6e4e1;color:#1e1e1e;display:grid;place-items:center}
+.send svg.i{width:15px;height:15px;stroke-width:2.2}
+
+/* the share popover */
+.pop{position:absolute;top:44px;right:46px;width:420px;background:#2c2c2c;border:1px solid #444;border-radius:12px;box-shadow:0 18px 50px rgba(0,0,0,.6);padding:14px;z-index:5}
+.pop:before{content:"";position:absolute;top:-7px;right:21px;width:12px;height:12px;background:#2c2c2c;border-left:1px solid #444;border-top:1px solid #444;transform:rotate(45deg)}
+.pop .l1{font-size:14px;margin-bottom:10px}
+.pop .lf{display:flex;gap:8px}
+.pop .in{flex:1;height:30px;border-radius:7px;background:#1f1f1f;border:1px solid #3d3d3d;display:flex;align-items:center;padding:0 10px;font-size:13px;color:#c9c6c1;white-space:nowrap;overflow:hidden}
+.btn{height:30px;border-radius:7px;padding:0 14px;font-size:13.5px;display:grid;place-items:center;background:#383838;border:1px solid #474747}
+.btn.pri{background:#3478f6;border-color:#3478f6;color:#fff}
+.pop .stop{margin-top:12px;padding-top:10px;border-top:1px solid #3a3a3a;color:#ff6961;font-size:13.5px}
+
+/* ---------- shared page ---------- */
+.share{display:flex;flex-direction:column;height:100%}
+.sh{height:52px;border-bottom:1px solid #2c2c2c;flex:none}
+.sh .col{height:100%;display:flex;align-items:center;gap:10px;font-weight:600;font-size:15px}
+.sh img{width:24px;height:24px;border-radius:6px}
+.sh .tt{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.share .scroll .col{width:680px;padding:0}
+.made{flex:none;text-align:center;color:#6f6d69;font-size:12.5px;padding:26px 0 22px}
+.made a{color:#8a8884}
+
+/* ---------- phone ---------- */
+.phone{width:390px;height:844px;border-radius:54px;overflow:hidden;background:#1e1e1e;border:1px solid #3a3a3a;box-shadow:0 0 0 7px #0b0b0b,0 0 0 8px #333,0 30px 80px rgba(0,0,0,.55);position:relative;display:flex;flex-direction:column}
+.status{height:54px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:6px 30px 0 46px;font-weight:600;font-size:16px}
+.island{position:absolute;top:11px;left:50%;transform:translateX(-50%);width:122px;height:35px;border-radius:20px;background:#000}
+.sig{display:flex;gap:6px;align-items:center}
+.bars4{display:flex;gap:2px;align-items:flex-end}.bars4 i{display:block;width:3px;background:#fff;border-radius:1px}
+.batt{width:25px;height:12px;border:1.3px solid #9a9894;border-radius:4px;padding:1.5px}.batt i{display:block;height:100%;width:80%;background:#fff;border-radius:1.5px}
+.phone .sh{height:46px}
+.phone .sh .col{width:auto;padding:0 18px;font-size:15px}
+.phone .sh img{width:22px;height:22px}
+.phone .scroll .col{width:auto;padding:0 18px}
+.phone .pic{max-width:none;width:auto}
+.phone .fs{zoom:.705}
+.phone .made{padding:22px 0 14px}
+.safari{flex:none;height:84px;padding:6px 14px 0;background:#1e1e1e;border-top:1px solid #262626}
+.safari .p{height:44px;border-radius:22px;background:#2c2c2e;display:flex;align-items:center;padding:0 16px;color:#e6e4e1;font-size:14px}
+.safari .p .u{margin:0 auto;display:flex;gap:6px;align-items:center}
+.safari .p .u svg.i{width:12px;height:12px;color:#9a9894}
+.safari .p > svg.i{color:#9a9894}
+.home{width:134px;height:5px;border-radius:3px;background:#e6e4e1;margin:16px auto 0}
+</style></head><body>
+
+<!-- icon set -->
+<svg width="0" height="0" style="position:absolute">
+ <symbol id="search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></symbol>
+ <symbol id="pencil" viewBox="0 0 16 16"><path d="M13 9v3.5a1.5 1.5 0 0 1-1.5 1.5h-8A1.5 1.5 0 0 1 2 12.5v-8A1.5 1.5 0 0 1 3.5 3H7"/><path d="M11.5 2.2a1.3 1.3 0 0 1 1.9 1.9L8 9.5 5.6 10.1 6.2 7.7z"/></symbol>
+ <symbol id="tray" viewBox="0 0 16 16"><path d="M2 9.5 3.6 3.5h8.8L14 9.5V13H2z"/><path d="M2 9.5h3.5l1 1.5h3l1-1.5H14"/></symbol>
+ <symbol id="sort" viewBox="0 0 16 16"><path d="M5 3v10M2.5 10.5 5 13l2.5-2.5M11 13V3M8.5 5.5 11 3l2.5 2.5"/></symbol>
+ <symbol id="bolt" viewBox="0 0 16 16"><path d="M9 1.8 3.5 9h4L7 14.2 12.5 7h-4z"/></symbol>
+ <symbol id="moon" viewBox="0 0 16 16"><path d="M13.5 9.6A5.8 5.8 0 0 1 6.4 2.5a5.8 5.8 0 1 0 7.1 7.1z"/></symbol>
+ <symbol id="box" viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="3.2" rx=".8"/><path d="M3 6.2V13h10V6.2M6.5 8.8h3"/></symbol>
+ <symbol id="chev" viewBox="0 0 16 16"><path d="m6 3.5 4.5 4.5L6 12.5"/></symbol>
+ <symbol id="down" viewBox="0 0 16 16"><path d="m3.5 6 4.5 4.5L12.5 6"/></symbol>
+ <symbol id="share" viewBox="0 0 16 16"><path d="M5.5 6H4.2a.9.9 0 0 0-.9.9v6.4c0 .5.4.9.9.9h7.6c.5 0 .9-.4.9-.9V6.9a.9.9 0 0 0-.9-.9h-1.3"/><path d="M8 10V1.8M5.5 4.2 8 1.7l2.5 2.5"/></symbol>
+ <symbol id="dots" viewBox="0 0 16 16"><circle cx="3.5" cy="8" r=".6"/><circle cx="8" cy="8" r=".6"/><circle cx="12.5" cy="8" r=".6"/></symbol>
+ <symbol id="plus" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></symbol>
+ <symbol id="up" viewBox="0 0 16 16"><path d="M8 13V3.5M4 7.5l4-4 4 4"/></symbol>
+ <symbol id="back" viewBox="0 0 16 16"><path d="M10 3 5 8l5 5"/></symbol>
+ <symbol id="fwd" viewBox="0 0 16 16"><path d="m6 3 5 5-5 5"/></symbol>
+ <symbol id="lock" viewBox="0 0 16 16"><rect x="3.5" y="7" width="9" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></symbol>
+ <symbol id="reload" viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.5v3h-3"/></symbol>
+</svg>
+
+<!-- the thread, written once -->
+<template id="t">
+ <div class="turn">
+  <div class="user">add a dark mode toggle to the settings page</div>
+  <div class="work">Worked for 4m 12s<span class="ch">›</span></div>
+  <div class="msg"><p>Added a Theme row to Settings, under Appearance:</p>
+   <ul><li>three choices: Light, Dark and Match system</li>
+   <li>the choice is saved in <code>localStorage</code>, so it sticks between visits</li>
+   <li>the colours come from variables in <code>theme.css</code>, so no other page needed changes</li></ul></div>
+ </div>
+ <div class="turn">
+  <div class="user">nice, can I see it?</div>
+  <div class="work">Worked for 1m 06s<span class="ch">›</span></div>
+  <div class="msg"><p>Here it is with Dark picked:</p>
+   <div class="pic"><div class="fs">
+    <div class="top"><div class="logo"></div><div class="bars"><i></i><i></i><i></i></div><div class="ava"></div></div>
+    <div class="body">
+     <div class="side"><b>Profile</b><b>Account</b><b class="on">Appearance</b><b>Billing</b></div>
+     <div class="main"><h4>Appearance</h4>
+      <div class="r"><span>Theme</span><div class="seg"><b>Light</b><b class="on">Dark</b><b>Match system</b></div></div>
+      <div class="r"><span>Font size</span><div class="sel"></div></div>
+      <div class="r"><span>Reduce motion</span><div class="tog"></div></div>
+     </div></div></div></div>
+   <p>On a phone the three choices stack into a list, so nothing gets squashed.</p></div>
+ </div>
+ <div class="turn last">
+  <div class="user">looks good, ship it</div>
+  <div class="work">Worked for 3m 30s<span class="ch">›</span></div>
+  <div class="msg"><p>All 86 tests pass and the branch is pushed as <code>dark-mode-toggle</code>. One question before I open the PR.</p></div>
+ </div>
+</template>
+
+<!-- the question, read-only, for the shared page -->
+<template id="ro">
+ <div class="ro"><div class="q"><span>✋</span>Pick the default theme?</div>
+  <div class="o">Match system<span class="pick">my pick</span><div class="s">Follows the light or dark setting on the visitor's device</div></div>
+  <div class="o">Light<div class="s">Same as today, so nobody gets a surprise</div></div>
+ </div>
+</template>
+
+<!-- ============ 1. owner view ============ -->
+<div class="row"><div>
+ <div class="cap">Your thread, signed in</div>
+ <div class="browser">
+  <div class="bar"><div class="lights"><span></span><span></span><span></span></div>
+   <div class="nav"><svg class="i"><use href="#back"/></svg><svg class="i"><use href="#fwd"/></svg><svg class="i"><use href="#reload"/></svg></div>
+   <div class="url"><img src="../../web/public/icon.png">threadbear.mikecann.app/t/8f2c1a</div><div style="width:110px"></div></div>
+  <div class="vp"><div class="app">
+   <div class="sb">
+    <div class="search"><div class="f"><svg class="i"><use href="#search"/></svg>Search threads</div><div class="ib"><svg class="i"><use href="#pencil"/></svg></div></div>
+    <div class="sec"><svg class="i"><use href="#tray"/></svg>Inbox<span class="n"><svg class="i"><use href="#sort"/></svg></span></div>
+    <div class="th sel"><span class="dot b"></span><div class="av">A</div><div class="tx"><div class="t u">Add a dark mode toggle to settings</div><div class="s">acme-web</div></div><div class="tm">now</div></div>
+    <div class="th"><span class="dot"></span><div class="av">A</div><div class="tx"><div class="t u">Fix the flaky checkout test</div><div class="s">acme-api</div></div><div class="tm">12m</div></div>
+    <div class="th"><span class="dot"></span><div class="av">A</div><div class="tx"><div class="t">Tidy up old feature flags</div><div class="s">acme-api</div></div><div class="tm">3h</div></div>
+    <div class="sec c"><svg class="i"><use href="#bolt"/></svg>Running<span class="n">2</span><svg class="i" style="width:12px;color:#6f6d69"><use href="#chev"/></svg></div>
+    <div class="sec c"><svg class="i"><use href="#moon"/></svg>Hibernating<span class="n">5</span><svg class="i" style="width:12px;color:#6f6d69"><use href="#chev"/></svg></div>
+    <div class="sec c"><svg class="i"><use href="#box"/></svg>Archived<span class="n">312</span><svg class="i" style="width:12px;color:#6f6d69"><use href="#chev"/></svg></div>
+   </div>
+   <div class="main">
+    <div class="hd"><div class="av">A</div><span class="f">acme-web</span><span class="sl">/</span><span class="t">Add a dark mode toggle to settings</span>
+     <div class="r"><div class="ib on"><svg class="i"><use href="#share"/></svg></div><div class="ib"><svg class="i"><use href="#dots"/></svg></div></div>
+     <div class="pop"><div class="l1">Anyone with the link can read this thread</div>
+      <div class="lf"><div class="in">threadbear.mikecann.app/s/quiet-otter-42</div><div class="btn pri">Copy</div></div>
+      <div class="stop">Stop sharing</div></div>
+    </div>
+    <div class="scroll"><div class="col" id="owner"></div></div>
+    <div class="dock"><div class="col"><div class="joined">
+     <div class="jh"><span>✋</span>Decision needed<svg class="i x"><use href="#down"/></svg></div>
+     <div class="jq"><div class="q">Pick the default theme?</div><div class="c">New visitors see it until they choose one.</div></div>
+     <div class="opts">
+      <div class="op"><span class="rad p"></span><div>Match system<span class="pick">my pick</span><div class="s">Follows the light or dark setting on the visitor's device</div></div></div>
+      <div class="op"><span class="rad"></span><div>Light<div class="s">Same as today, so nobody gets a surprise</div></div></div>
+      <div class="op else"><span class="rad"></span><div>Something else…</div></div>
+     </div>
+     <div class="comp"><div class="ph">Reply</div>
+      <div class="tools"><svg class="i"><use href="#plus"/></svg><span>Claude · Opus 5.5</span><svg class="i" style="width:11px;margin-left:-10px"><use href="#down"/></svg>
+       <div class="send"><svg class="i"><use href="#up"/></svg></div></div></div>
+    </div></div></div>
+   </div>
+  </div></div>
+ </div>
+</div></div>
+
+<!-- ============ 2 + 3. shared link ============ -->
+<div class="row">
+ <div>
+  <div class="cap">Shared link, desktop</div>
+  <div class="browser">
+   <div class="bar"><div class="lights"><span></span><span></span><span></span></div>
+    <div class="nav"><svg class="i"><use href="#back"/></svg><svg class="i"><use href="#fwd"/></svg><svg class="i"><use href="#reload"/></svg></div>
+    <div class="url"><img src="../../web/public/icon.png">threadbear.mikecann.app/s/quiet-otter-42</div><div style="width:110px"></div></div>
+   <div class="vp"><div class="share">
+    <div class="sh"><div class="col" style="width:680px"><img src="../../web/public/icon.png"><span class="tt">Add a dark mode toggle to settings</span></div></div>
+    <div class="scroll" style="padding-top:20px"><div class="col" id="desk"></div></div>
+    <div class="made">Made with <a href="https://threadbear.mikecann.app">Threadbear</a></div>
+   </div></div>
+  </div>
+ </div>
+ <div>
+  <div class="cap">Shared link, phone</div>
+  <div class="phone">
+   <div class="island"></div>
+   <div class="status"><span>9:41</span><span class="sig"><span class="bars4"><i style="height:4px"></i><i style="height:6px"></i><i style="height:8px"></i><i style="height:10px"></i></span><span class="batt"><i></i></span></span></div>
+   <div class="share" style="flex:1;min-height:0">
+    <div class="sh"><div class="col"><img src="../../web/public/icon.png"><span class="tt">Add a dark mode toggle to settings</span></div></div>
+    <div class="scroll" style="padding-top:16px"><div class="col" id="phone"></div></div>
+    <div class="made">Made with <a href="https://threadbear.mikecann.app">Threadbear</a></div>
+   </div>
+   <div class="safari"><div class="p"><svg class="i"><use href="#back"/></svg><span class="u"><svg class="i"><use href="#lock"/></svg>threadbear.mikecann.app</span><svg class="i"><use href="#dots"/></svg></div><div class="home"></div></div>
+  </div>
+ </div>
+</div>
+
+<script>
+const t = document.getElementById('t').content;
+const ro = document.getElementById('ro').content;
+for (const id of ['owner', 'desk', 'phone']) {
+  const col = document.getElementById(id);
+  col.append(t.cloneNode(true));
+  const last = col.querySelector('.turn.last');
+  if (id === 'owner') {
+    // Only the owner sees time and cost, once, under the latest reply.
+    const m = document.createElement('div');
+    m.className = 'meta';
+    m.textContent = '8m 48s · $1.37';
+    last.append(m);
+  } else {
+    // Strangers see the open question, but nothing to click.
+    last.append(ro.cloneNode(true));
+  }
+}
+</script>
+</body></html>

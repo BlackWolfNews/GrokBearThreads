@@ -3,15 +3,17 @@
 // token. Anyone may ask; it answers only while the thread's `share` (as
 // the runner mirrored it) is "link".
 //
-// Readers get the thread's title, its messages, one line per tool call and
-// the pictures the runner uploaded for it (sync:addShareImage), and
-// nothing else: no folder, account, model, cost, approvals or composer.
+// Readers get the thread's title, when it started, which model ran it, its
+// messages (with what the page needs to fold each turn's work the way the
+// apps do: origin, summary, turn), one line per tool call and the pictures
+// the runner uploaded for it (sync:addShareImage), and nothing else: no
+// folder, account, cost, approvals or composer.
 //
 // Mike's own phone or browser token also reads it while it isn't shared,
 // and gets `manage` so the page can offer Stop sharing and Share again
 // (phone:share, a command the runner applies).
-import { v } from 'convex/values';
-import { query, type QueryCtx } from './_generated/server';
+import { v, type Infer } from 'convex/values';
+import { internalQuery, query, type QueryCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import { checkPhoneToken } from './lib';
 
@@ -22,7 +24,10 @@ const message = v.object({
   seq: v.number(),
   role: v.union(v.literal('user'), v.literal('assistant'), v.literal('tool')),
   text: v.string(),
+  origin: v.optional(v.string()),
   toolKind: v.optional(v.string()),
+  summary: v.optional(v.boolean()),
+  turn: v.optional(v.string()),
   at: v.string(),
 });
 
@@ -103,6 +108,11 @@ export const view = query({
     v.object({
       state: v.literal('ok'),
       title: v.string(),
+      createdAt: v.optional(v.string()),
+      // The CLI and the model id ("claude", "claude-opus-5-5"), for the
+      // page's byline.
+      provider: v.optional(v.string()),
+      model: v.optional(v.string()),
       running: v.boolean(),
       working: v.optional(v.string()),
       lastActivityAt: v.string(),
@@ -120,19 +130,31 @@ export const view = query({
     const mike = await isMike(ctx, token);
     if (!shared && !mike) return { state: 'gone' as const };
     const want = Math.max(1, Math.min(PAGE_MAX, Math.floor(limit ?? PAGE_DEFAULT)));
-    const out: { seq: number; role: 'user' | 'assistant' | 'tool'; text: string; toolKind?: string; at: string }[] = [];
+    const out: Infer<typeof message>[] = [];
     let hasMore = false;
     for await (const m of ctx.db.query('messages').withIndex('by_thread_seq', (q) => q.eq('threadId', t.threadId)).order('desc')) {
       if (out.length >= want) {
         hasMore = true;
         break;
       }
-      out.push({ seq: m.seq, role: m.role, text: m.text, ...(m.toolKind ? { toolKind: m.toolKind } : {}), at: m.at });
+      out.push({
+        seq: m.seq,
+        role: m.role,
+        text: m.text,
+        ...(m.origin ? { origin: m.origin } : {}),
+        ...(m.toolKind ? { toolKind: m.toolKind } : {}),
+        ...(m.summary ? { summary: true } : {}),
+        ...(m.turn ? { turn: m.turn } : {}),
+        at: m.at,
+      });
     }
     out.reverse();
     return {
       state: 'ok' as const,
       title: t.title,
+      createdAt: t.createdAt,
+      provider: t.provider,
+      ...(t.model ? { model: t.model } : {}),
       running: t.status === 'running' || t.status === 'starting',
       ...(t.working ? { working: t.working } : {}),
       lastActivityAt: t.lastActivityAt,
@@ -143,3 +165,49 @@ export const view = query({
     };
   },
 });
+
+// What a link to a shared thread unfurls as in Slack, X or iMessage (the
+// /s/ route in http.ts puts it in the page's meta tags): its title, the
+// start of its last reply, and its first picture. Null for a link that
+// isn't shared, which then unfurls as plain Threadbear.
+export const preview = internalQuery({
+  args: { slug: v.string() },
+  returns: v.union(v.null(), v.object({ title: v.string(), description: v.string(), image: v.optional(v.string()) })),
+  handler: async (ctx, { slug }) => {
+    const t = await threadBySlug(ctx, slug);
+    if (t?.share?.access !== 'link') return null;
+    let description = '';
+    let read = 0;
+    for await (const m of ctx.db.query('messages').withIndex('by_thread_seq', (q) => q.eq('threadId', t.threadId)).order('desc')) {
+      if (++read > 200) break;
+      if (m.role === 'assistant' && m.text.trim()) {
+        description = plainText(m.text);
+        break;
+      }
+    }
+    const first = await ctx.db
+      .query('shareImages')
+      .withIndex('by_thread_seq', (q) => q.eq('threadId', t.threadId))
+      .first();
+    const image = first ? await ctx.storage.getUrl(first.storageId) : null;
+    return { title: t.title || 'Untitled', description, ...(image ? { image } : {}) };
+  },
+});
+
+// Markdown as one line of plain text, cut at a word near 200 characters.
+// Each line or list item ends in a full stop, so bullets don't run
+// together. web/src/format.ts has the same for the page's own preview.
+export function plainText(md: string): string {
+  const lines = md
+    .replace(/```[\s\S]*?```/g, '\n')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\*\*|__|`/g, '')
+    .split('\n')
+    .map((l) => l.replace(/^\s*(?:#{1,6}\s+|>\s*|[-*+]\s+|\d+[.)]\s+)/, '').replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+  const flat = lines.map((l, i) => (i < lines.length - 1 && !/[.!?:…]$/.test(l) ? `${l}.` : l)).join(' ');
+  if (flat.length <= 200) return flat;
+  const cut = flat.slice(0, 200);
+  return `${cut.slice(0, Math.max(cut.lastIndexOf(' '), 150))}…`;
+}

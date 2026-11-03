@@ -1,0 +1,374 @@
+<!-- size: 2000x2120 -->
+<!doctype html>
+<html><head><meta charset="utf-8">
+<title>B. The shared page is a write-up</title>
+<style>
+/* Colours copied from the Mac app (docs/end-turn-design/m.css). Accent blue
+   only where it means something: links, the on state of sharing, the asks card. */
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:2000px;height:2120px;background:#121212;font:15px/1.5 -apple-system,"SF Pro Text",system-ui;color:#e6e4e1;padding:44px 56px;-webkit-font-smoothing:antialiased}
+code{font:13px ui-monospace,"SF Mono",monospace;background:#2e2e2e;border-radius:5px;padding:1px 6px;color:#cfcdc9}
+a{color:#8fb4ff;text-decoration:none}
+.canvas-title{font-size:22px;font-weight:600;color:#e6e4e1;margin-bottom:4px}
+.canvas-sub{font-size:14px;color:#8f8d89;margin-bottom:26px}
+.row{display:flex;gap:56px;align-items:flex-start}
+.row+.row{margin-top:48px}
+.cap{font-size:14px;color:#9a9894;margin-bottom:10px}
+
+/* ---------- frames ---------- */
+.desk{width:1440px;height:900px;border-radius:12px;overflow:hidden;border:1px solid #3a3a3a;background:#1c1c1c;position:relative;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.bbar{height:40px;background:#2a2a2a;border-bottom:1px solid #333;display:flex;align-items:center;padding:0 14px;position:relative}
+.lights{display:flex;gap:8px}.lights i{width:12px;height:12px;border-radius:50%;background:#ff5f57;display:block}.lights i:nth-child(2){background:#febc2e}.lights i:nth-child(3){background:#28c840}
+.url{position:absolute;left:50%;transform:translateX(-50%);background:#1f1f1f;border-radius:7px;padding:4px 16px;font-size:13px;color:#b5b2ad;min-width:420px;text-align:center}
+.url .lock{color:#7d7b77;margin-right:6px;font-size:11px}
+.phone{width:390px;height:844px;border-radius:46px;overflow:hidden;border:1px solid #3a3a3a;background:#1c1c1c;position:relative;box-shadow:0 20px 60px rgba(0,0,0,.5);flex:none}
+
+/* ---------- shared page, desktop ---------- */
+.page{position:absolute;top:40px;left:0;right:0;bottom:0;overflow:hidden}
+.rail{position:absolute;left:72px;top:92px;width:232px;bottom:28px;display:flex;flex-direction:column}
+.rail .n{font-size:13px;color:#7d7b77;margin-bottom:10px;padding-left:14px}
+.oitem{display:grid;grid-template-columns:18px 1fr;font-size:13.5px;line-height:1.45;color:#8f8d89;padding:7px 0 7px 12px;border-left:2px solid #333}
+.oitem .k{color:#6a6865}
+.oitem.on{color:#e6e4e1;border-left-color:#d8d6d2}
+.oitem.on .k{color:#9a9894}
+.rail .made{margin-top:auto;font-size:12.5px;color:#6f6d69;padding-left:14px}
+.rail .made a{color:#8f8d89}
+.copy{position:absolute;right:40px;top:26px;display:flex;align-items:center;gap:7px;background:#2a2a2a;border:1px solid #3d3d3d;border-radius:8px;padding:5px 12px;font-size:13px;color:#d8d6d2}
+.copy svg,.ib svg{width:14px;height:14px}
+.doc{position:absolute;left:360px;top:84px;width:720px}
+.doc h1{font-size:40px;line-height:1.15;font-weight:700;letter-spacing:-.02em}
+.by{font-size:14.5px;color:#9a9894;margin-top:14px}
+.by b{color:#d8d6d2;font-weight:500}
+.rule{border-top:1px solid #2f2f2f;margin:34px 0 34px}
+.ask{font-size:20px;line-height:1.45;font-weight:500;color:#e6e4e1;border-left:3px solid #4a4a4a;padding:1px 0 1px 18px}
+.worked{font-size:14px;color:#8f8d89;margin:18px 0 12px}
+.worked .ch{color:#6f6d69;margin-left:5px}
+.body p{margin-bottom:12px;line-height:1.6}
+.body ul{padding-left:20px;margin:4px 0 12px}
+.body li{margin:6px 0;line-height:1.55}
+.pic{border-radius:12px;border:1px solid #343434;overflow:hidden;position:relative;margin:6px 0 8px}
+.pcap{font-size:13px;color:#7d7b77;margin-bottom:18px}
+
+/* ---------- fake settings screenshot, drawn at 720x420 and scaled ---------- */
+.shotwrap{position:relative;overflow:hidden}
+.shot{width:720px;height:420px;background:#0f1218;transform-origin:0 0;position:absolute;left:0;top:0;font-family:-apple-system,system-ui;color:#dfe3ea}
+.shot .top{height:40px;background:#151922;border-bottom:1px solid #222836;display:flex;align-items:center;padding:0 18px;gap:22px;font-size:13px;color:#8a93a6}
+.shot .logo{font-weight:700;color:#dfe3ea;display:flex;align-items:center;gap:7px}
+.shot .logo i{width:16px;height:16px;border-radius:4px;background:#6d8cff;display:block}
+.shot .av{margin-left:auto;width:22px;height:22px;border-radius:50%;background:#2a3142}
+.shot .side{position:absolute;left:0;top:40px;bottom:0;width:170px;border-right:1px solid #1d2230;padding:18px 10px;font-size:13px;color:#8a93a6}
+.shot .side div{padding:6px 10px;border-radius:6px;margin-bottom:2px}
+.shot .side .sel{background:#1c2232;color:#dfe3ea}
+.shot .main{position:absolute;left:170px;top:40px;right:0;bottom:0;padding:24px 34px}
+.shot h3{font-size:20px;font-weight:600;margin-bottom:4px}
+.shot .sub{font-size:12.5px;color:#7d879b;margin-bottom:18px}
+.shot .srow{display:flex;justify-content:space-between;align-items:center;padding:16px 0;border-top:1px solid #1d2230}
+.shot .srow .l b{display:block;font-size:14px;font-weight:600}
+.shot .srow .l span{font-size:12px;color:#7d879b}
+.shot .seg{display:flex;background:#181d29;border:1px solid #262d3d;border-radius:8px;padding:3px}
+.shot .seg span{font-size:12.5px;padding:5px 14px;border-radius:6px;color:#9aa3b5}
+.shot .seg .on{background:#303a52;color:#fff;box-shadow:0 1px 2px rgba(0,0,0,.4)}
+.shot .sw{display:flex;gap:8px}.shot .sw i{width:20px;height:20px;border-radius:50%;display:block}
+.shot .tg{width:38px;height:22px;border-radius:11px;background:#2a3142;position:relative}
+.shot .tg:after{content:"";position:absolute;left:3px;top:3px;width:16px;height:16px;border-radius:50%;background:#9aa3b5}
+.shot .new{position:absolute;inset:-6px -10px;border:1.5px dashed transparent;border-radius:10px}
+
+/* ---------- shared page, phone ---------- */
+.sb{height:50px;display:flex;justify-content:space-between;align-items:center;padding:6px 30px 0 34px;font-weight:600;font-size:16px}
+.sb .ic{display:flex;gap:6px;align-items:center}
+.sb .ic i{display:block;background:#e6e4e1;border-radius:2px}
+.ph-head{height:48px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;border-bottom:1px solid #262626}
+.chip{display:flex;align-items:center;gap:6px;background:#2a2a2a;border:1px solid #3a3a3a;border-radius:16px;padding:4px 12px;font-size:13.5px;color:#d8d6d2}
+.chip .car{color:#8f8d89;font-size:11px}
+.chip.open{border-color:#5a5a5a;background:#333}
+.ib{width:32px;height:32px;border-radius:50%;background:#2a2a2a;border:1px solid #3a3a3a;display:flex;align-items:center;justify-content:center;color:#d8d6d2}
+.ph-body{position:absolute;top:98px;left:0;right:0;bottom:84px;overflow:hidden;padding:22px 20px 0}
+.ph-body h1{font-size:28px;line-height:1.18;font-weight:700;letter-spacing:-.015em}
+.ph-body .by{font-size:13.5px;margin-top:10px;line-height:1.5}
+.ph-body .rule{margin:22px 0}
+.ph-body .ask{font-size:17px;padding-left:14px}
+.ph-body .worked{margin:14px 0 10px;font-size:13.5px}
+.ph-body .body p{font-size:15px;line-height:1.55}
+.safari{position:absolute;left:0;right:0;bottom:0;height:84px;background:#242424;border-top:1px solid #2f2f2f;padding:10px 14px}
+.safari .u{background:#3a3a3c;border-radius:12px;height:44px;display:flex;align-items:center;justify-content:center;font-size:15px;color:#e6e4e1}
+.safari .u .lock{font-size:11px;color:#9a9894;margin-right:6px}
+.menu{position:absolute;top:92px;left:12px;right:12px;background:#2b2b2b;border:1px solid #3e3e3e;border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.6);padding:6px;z-index:5}
+.menu .mi{display:grid;grid-template-columns:22px 1fr;padding:10px 12px;font-size:15px;line-height:1.4;color:#d8d6d2;border-radius:9px}
+.menu .mi .k{color:#7d7b77}
+.menu .mi.on{background:#383838;color:#fff}
+.menu .mi .w{display:block;font-size:12.5px;color:#8f8d89;margin-top:2px}
+.dim{position:absolute;inset:98px 0 84px 0;background:rgba(0,0,0,.45);z-index:4}
+.foot{margin-top:28px;padding-top:18px;border-top:1px solid #2f2f2f;font-size:13px;color:#6f6d69;text-align:center}
+.foot a{color:#8f8d89}
+
+/* ---------- owner view ---------- */
+.owner{position:absolute;top:40px;left:0;right:0;bottom:0;display:flex}
+.side{width:290px;background:#232323;border-right:1px solid #303030;padding:12px 10px;display:flex;flex-direction:column;font-size:13px;flex:none}
+.search{display:flex;gap:8px;align-items:center}
+.search .f{flex:1;background:#2d2d2d;border-radius:7px;padding:5px 10px;color:#7d7b77;font-size:13px}
+.search .nw{color:#9a9894;font-size:15px}
+.sh{display:flex;justify-content:space-between;align-items:center;color:#9a9894;font-weight:600;font-size:12.5px;padding:14px 8px 6px}
+.th{display:grid;grid-template-columns:28px 1fr auto;gap:0 8px;padding:7px 8px;border-radius:8px;margin-bottom:1px}
+.th.sel{background:#353535}
+.th .fi{width:26px;height:26px;border-radius:7px;background:#333;display:flex;align-items:center;justify-content:center;font-size:12px;color:#9a9894;font-weight:600;grid-row:span 2}
+.th.sel .fi{background:#444}
+.th .t{font-weight:600;color:#e6e4e1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.th .s{color:#8f8d89;font-size:12px;grid-column:2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.th .tm{color:#7d7b77;font-size:11.5px}
+.th .tm.ask{color:#8fb4ff;font-size:11.5px;font-weight:500;border:0;padding:0;line-height:1.5}
+.grp{display:flex;justify-content:space-between;color:#b5b2ad;padding:8px 8px;font-weight:500;font-size:13px}
+.grp span:last-child{color:#7d7b77}
+.side .me{margin-top:auto;color:#6f6d69;font-size:12px;padding:0 8px}
+.mainv{flex:1;position:relative;background:#1c1c1c}
+.thead{height:46px;display:flex;align-items:center;padding:0 16px 0 20px;border-bottom:1px solid #2b2b2b;gap:10px}
+.thead .fold{color:#8f8d89;font-size:13px;background:#2a2a2a;border-radius:6px;padding:1px 8px}
+.thead .tt{font-weight:600;font-size:14.5px}
+.thead .sp{flex:1}
+.sbtn{display:flex;align-items:center;gap:7px;background:#2c2c2c;border:1px solid #4a6db5;border-radius:8px;padding:4px 12px;font-size:13px;color:#e6e4e1;box-shadow:0 0 0 3px rgba(52,120,246,.18)}
+.sbtn svg{width:14px;height:14px;color:#8fb4ff}
+.sbtn .dot{width:7px;height:7px;border-radius:50%;background:#3478f6}
+.more{color:#9a9894;font-size:18px;padding:0 6px;letter-spacing:1px}
+.tx{position:absolute;top:46px;left:0;right:0;bottom:0;overflow:hidden}
+.col{width:700px;margin:0 auto;position:absolute;left:50%;transform:translateX(-50%);bottom:24px}
+.user{background:#333;border-radius:14px;padding:9px 14px;margin:18px 0 14px auto;width:max-content;max-width:480px;font-size:14.5px}
+.meta{color:#7d7b77;font-size:12.5px;margin:4px 0 16px}
+.card{border:1px solid #3d5fae;border-radius:14px;background:#252525;overflow:hidden}
+.card .ch{display:flex;justify-content:space-between;align-items:center;padding:12px 16px 4px;font-weight:600;font-size:14px}
+.card .ch .pg{color:#7d7b77;font-weight:400;font-size:12.5px}
+.card .q{padding:4px 16px 0;font-size:15px}
+.card .q .why{color:#9a9894;font-size:13px;margin-top:2px}
+.opts{margin:10px 16px 12px;border:1px solid #333;border-radius:10px;background:#222}
+.opt{display:flex;gap:10px;align-items:flex-start;padding:8px 12px;font-size:14px}
+.opt+.opt{border-top:1px solid #2e2e2e}
+.opt .r{width:14px;height:14px;border-radius:50%;border:1.5px solid #6f6d69;margin-top:3px;flex:none}
+.opt .pick{color:#8fb4ff;font-size:11.5px;margin-left:6px}
+.opt .d{display:block;color:#8f8d89;font-size:12.5px}
+.comp{border-top:1px solid #333;padding:12px 16px 10px}
+.comp .ph{color:#77746f;font-size:14.5px;height:34px}
+.comp .bar{display:flex;align-items:center;gap:14px;color:#8f8d89;font-size:12.5px}
+.comp .send{margin-left:auto;width:28px;height:28px;border-radius:50%;background:#e6e4e1;color:#1c1c1c;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px}
+
+/* share popover */
+.pop{position:absolute;top:52px;right:44px;width:404px;background:#2a2a2a;border:1px solid #404040;border-radius:14px;box-shadow:0 24px 70px rgba(0,0,0,.65);padding:16px;z-index:10}
+.pop:before{content:"";position:absolute;top:-7px;right:58px;width:12px;height:12px;background:#2a2a2a;border-left:1px solid #404040;border-top:1px solid #404040;transform:rotate(45deg)}
+.pop .r1{display:flex;justify-content:space-between;align-items:center}
+.pop .r1 b{font-size:14.5px;font-weight:600}
+.tog{width:40px;height:24px;border-radius:12px;background:#3478f6;position:relative}
+.tog:after{content:"";position:absolute;right:2px;top:2px;width:20px;height:20px;border-radius:50%;background:#fff}
+.pop .hint{color:#9a9894;font-size:12.5px;margin-top:3px}
+.linkrow{display:flex;gap:8px;margin-top:12px}
+.linkrow .lf{flex:1;background:#1f1f1f;border:1px solid #3a3a3a;border-radius:8px;padding:6px 10px;font-size:13px;color:#d8d6d2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.linkrow .cp{background:#3478f6;color:#fff;border-radius:8px;padding:6px 14px;font-size:13px;font-weight:500}
+.pop .sep{border-top:1px solid #383838;margin:14px -16px 12px}
+.pvh{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.pvh span{color:#9a9894;font-size:12.5px}
+.segc{display:flex;background:#1f1f1f;border:1px solid #383838;border-radius:7px;padding:2px}
+.segc span{font-size:12px;padding:2px 10px;border-radius:5px;color:#9a9894}
+.segc .on{background:#3d3d3d;color:#e6e4e1}
+.unf{display:flex;gap:10px;background:#1f1f1f;border-radius:10px;padding:10px 12px}
+.unf .bar{width:4px;border-radius:2px;background:#4a4a4a;flex:none}
+.unf .site{font-size:12px;font-weight:600;color:#b5b2ad;display:flex;align-items:center;gap:6px}
+.unf .site i{width:14px;height:14px;border-radius:3px;background:#5a4632;display:inline-block;font-style:normal;font-size:9px;text-align:center;line-height:14px}
+.unf .ti{font-size:13.5px;font-weight:600;color:#8fb4ff;margin-top:2px}
+.unf .ds{font-size:12.5px;color:#cfcdc9;margin-top:2px;line-height:1.45}
+.unf .im{margin-top:8px;border-radius:8px;overflow:hidden;border:1px solid #333}
+</style></head>
+<body>
+
+<div class="canvas-title">B. The shared page is a write-up</div>
+<div class="canvas-sub">Someone opening a shared link reads what was asked and what came of it, like a short published page. Your own thread stays like the Mac, with sharing one button away.</div>
+
+<template id="shot">
+  <div class="shot">
+    <div class="top"><span class="logo"><i></i>acme</span><span>Dashboard</span><span>Reports</span><span>Team</span><span class="av"></span></div>
+    <div class="side"><div>Profile</div><div>Account</div><div class="sel">Appearance</div><div>Notifications</div><div>Billing</div><div>API keys</div></div>
+    <div class="main">
+      <h3>Appearance</h3><div class="sub">How acme looks on this device</div>
+      <div class="srow"><div class="l"><b>Theme</b><span>Follows your system unless you pick one</span></div><div class="seg"><span>System</span><span>Light</span><span class="on">Dark</span></div></div>
+      <div class="srow"><div class="l"><b>Accent colour</b><span>Used for buttons and links</span></div><div class="sw"><i style="background:#6d8cff;box-shadow:0 0 0 2px #0f1218,0 0 0 4px #6d8cff"></i><i style="background:#3fbf8f"></i><i style="background:#e0a33c"></i><i style="background:#d9607a"></i></div></div>
+      <div class="srow"><div class="l"><b>Reduce motion</b><span>Fewer animations</span></div><div class="tg"></div></div>
+    </div>
+  </div>
+</template>
+
+<!-- ============ ROW 1: shared link desktop + phone ============ -->
+<div class="row">
+<div>
+<div class="cap">Shared link, desktop</div>
+<div class="desk">
+  <div class="bbar"><div class="lights"><i></i><i></i><i></i></div><div class="url"><span class="lock">&#128274;</span>threadbear.mikecann.app/s/k3f9-dark-mode</div></div>
+  <div class="page">
+    <div class="rail">
+      <div class="n">3 turns</div>
+      <div class="oitem on"><span class="k">1</span><span>can you add a dark mode toggle to the settings page?</span></div>
+      <div class="oitem"><span class="k">2</span><span>the charts look washed out in dark, can you fix those too?</span></div>
+      <div class="oitem"><span class="k">3</span><span>looks good, open a PR and deploy a preview</span></div>
+      <div class="made">Made with <a href="#">Threadbear</a></div>
+    </div>
+    <div class="copy"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6.5 9.5l3-3M7 4.5l1.2-1.2a2.6 2.6 0 013.7 3.7L10.7 8.2M9 11.5l-1.2 1.2a2.6 2.6 0 01-3.7-3.7l1.2-1.2"/></svg>Copy link</div>
+    <div class="doc">
+      <h1>Add a dark mode toggle to settings</h1>
+      <div class="by"><b>Mike Cann</b> with <b>Claude Opus 5.5</b> · 3 Nov 2026 · 3 turns · worked 18m</div>
+      <div class="rule"></div>
+      <div class="ask">can you add a dark mode toggle to the settings page? should follow the system unless I pick one</div>
+      <div class="worked">Worked for 6m 12s<span class="ch">›</span></div>
+      <div class="body">
+        <p>Settings has a new Theme row with three choices: System, Light and Dark. System is the default, so nobody sees a change until they pick one.</p>
+        <div class="pic shotwrap" style="width:720px;height:420px" data-scale="1"></div>
+        <div class="pcap">The new Theme row, in dark</div>
+        <ul>
+          <li>The choice is saved in <code>localStorage</code> as <code>theme</code>, so it sticks across reloads.</li>
+          <li>Colours come from CSS variables on <code>&lt;html data-theme&gt;</code>, so no component had to change.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<div>
+<div class="cap">Shared link, phone</div>
+<div class="phone">
+  <div class="sb"><span>9:41</span><span class="ic"><i style="width:17px;height:10px"></i><i style="width:24px;height:11px;border-radius:3px"></i></span></div>
+  <div class="ph-head"><div class="chip">3 turns <span class="car">&#8964;</span></div><div class="ib"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6.5 9.5l3-3M7 4.5l1.2-1.2a2.6 2.6 0 013.7 3.7L10.7 8.2M9 11.5l-1.2 1.2a2.6 2.6 0 01-3.7-3.7l1.2-1.2"/></svg></div></div>
+  <div class="ph-body">
+    <h1>Add a dark mode toggle to settings</h1>
+    <div class="by"><b>Mike Cann</b> with <b>Claude Opus 5.5</b><br>3 Nov 2026 · 3 turns · worked 18m</div>
+    <div class="rule"></div>
+    <div class="ask">can you add a dark mode toggle to the settings page? should follow the system unless I pick one</div>
+    <div class="worked">Worked for 6m 12s<span class="ch">›</span></div>
+    <div class="body">
+      <p>Settings has a new Theme row with three choices: System, Light and Dark. System is the default, so nobody sees a change until they pick one.</p>
+      <div class="pic shotwrap" style="width:350px;height:204px" data-scale="0.4861"></div>
+      <div class="pcap">The new Theme row, in dark</div>
+      <ul>
+        <li>The choice is saved in <code>localStorage</code> as <code>theme</code>, so it sticks across reloads.</li>
+        <li>Colours come from CSS variables on <code>&lt;html data-theme&gt;</code>, so no component had to change.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="safari"><div class="u"><span class="lock">&#128274;</span>threadbear.mikecann.app</div></div>
+</div>
+</div>
+</div>
+
+<!-- ============ ROW 2: owner view + phone with turns menu open ============ -->
+<div class="row">
+<div>
+<div class="cap">Your thread, signed in</div>
+<div class="desk">
+  <div class="bbar"><div class="lights"><i></i><i></i><i></i></div><div class="url"><span class="lock">&#128274;</span>threadbear.mikecann.app/t/acme-web/dark-mode-toggle</div></div>
+  <div class="owner">
+    <div class="side">
+      <div class="search"><div class="f">Search threads</div><span class="nw">&#9998;</span></div>
+      <div class="sh"><span>Inbox</span><span>4</span></div>
+      <div class="th sel"><div class="fi">A</div><div class="t">Add a dark mode toggle to settings</div><div class="tm ask">Asking</div><div class="s">acme-web</div></div>
+      <div class="th"><div class="fi">A</div><div class="t">Flaky login test on CI</div><div class="tm">12m</div><div class="s">acme-web</div></div>
+      <div class="th"><div class="fi">D</div><div class="t">Draft the March changelog</div><div class="tm">1h</div><div class="s">docs</div></div>
+      <div class="th"><div class="fi">A</div><div class="t">Bump Next.js to 16</div><div class="tm">3h</div><div class="s">acme-web</div></div>
+      <div style="height:10px"></div>
+      <div class="grp"><span>Running</span><span>2 ›</span></div>
+      <div class="grp"><span>Hibernating</span><span>14 ›</span></div>
+      <div class="grp"><span>Archived</span><span>212 ›</span></div>
+      <div class="me">Signed in on this browser</div>
+    </div>
+    <div class="mainv">
+      <div class="thead"><span class="fold">acme-web</span><span class="tt">Add a dark mode toggle to settings</span><span class="sp"></span>
+        <span class="sbtn"><span class="dot"></span>Shared</span><span class="more">···</span></div>
+      <div class="tx"><div class="col">
+        <div class="user">the charts look washed out in dark, can you fix those too?</div>
+        <div class="worked" style="margin-top:0">Worked for 7m 48s<span class="ch">›</span></div>
+        <div class="body">
+          <p>The charts now take their colours from the same variables as everything else.</p>
+          <ul>
+            <li>Gridlines and labels use <code>--muted</code>, so they dim with the theme.</li>
+            <li>The five series colours were tuned so each one still passes contrast on the dark background.</li>
+          </ul>
+        </div>
+        <div class="meta">7m 48s · $2.40</div>
+        <div class="user">looks good, open a PR and deploy a preview</div>
+        <div class="worked" style="margin-top:0">Worked for 4m 02s<span class="ch">›</span></div>
+        <div class="body">
+          <p>PR <a href="#">#214</a> is open and the preview is up at <a href="#">acme-web-git-dark-mode.vercel.app</a>.</p>
+          <ul>
+            <li>All 48 tests pass, plus 3 new ones for the toggle.</li>
+            <li>The contrast check passes in both themes.</li>
+          </ul>
+        </div>
+        <div class="meta">4m 02s · $1.12</div>
+        <div class="card">
+          <div class="ch"><span>Decisions needed</span><span class="pg">1 of 1</span></div>
+          <div class="q">Add a keyboard shortcut to switch theme?<div class="why"><code>⌘⇧L</code> isn't used anywhere in the app yet.</div></div>
+          <div class="opts">
+            <div class="opt"><span class="r"></span><span>Yes, use ⌘⇧L<span class="pick">my pick</span><span class="d">I add it to the shortcuts list too</span></span></div>
+            <div class="opt"><span class="r"></span><span>No, leave it</span></div>
+            <div class="opt"><span class="r"></span><span style="color:#9a9894">Something else…</span></div>
+          </div>
+          <div class="comp"><div class="ph">Reply…</div><div class="bar"><span>+</span><span>Claude · Opus 5.5 · Max &#8964;</span><span class="send">&#8593;</span></div></div>
+        </div>
+      </div></div>
+
+      <div class="pop">
+        <div class="r1"><b>Share with a link</b><span class="tog"></span></div>
+        <div class="hint">Anyone with the link can read this thread. Live, no sign-in.</div>
+        <div class="linkrow"><div class="lf">threadbear.mikecann.app/s/k3f9-dark-mode</div><div class="cp">Copy</div></div>
+        <div class="sep"></div>
+        <div class="pvh"><span>How the link shows up</span><div class="segc"><span class="on">Slack</span><span>X</span></div></div>
+        <div class="unf"><div class="bar"></div><div style="flex:1;min-width:0">
+          <div class="site"><i>&#128059;</i>Threadbear</div>
+          <div class="ti">Add a dark mode toggle to settings</div>
+          <div class="ds">Settings has a new Theme row with three choices: System, Light and Dark.</div>
+          <div class="im shotwrap" style="width:220px;height:128px" data-scale="0.3056"></div>
+        </div></div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<div>
+<div class="cap">Shared link, phone, turns menu open</div>
+<div class="phone">
+  <div class="sb"><span>9:41</span><span class="ic"><i style="width:17px;height:10px"></i><i style="width:24px;height:11px;border-radius:3px"></i></span></div>
+  <div class="ph-head"><div class="chip open">3 turns <span class="car">&#8963;</span></div><div class="ib"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6.5 9.5l3-3M7 4.5l1.2-1.2a2.6 2.6 0 013.7 3.7L10.7 8.2M9 11.5l-1.2 1.2a2.6 2.6 0 01-3.7-3.7l1.2-1.2"/></svg></div></div>
+  <div class="menu">
+    <div class="mi"><span class="k">1</span><span>can you add a dark mode toggle to the settings page?<span class="w">Worked for 6m 12s</span></span></div>
+    <div class="mi"><span class="k">2</span><span>the charts look washed out in dark, can you fix those too?<span class="w">Worked for 7m 48s</span></span></div>
+    <div class="mi on"><span class="k">3</span><span>looks good, open a PR and deploy a preview<span class="w">Worked for 4m 02s</span></span></div>
+  </div>
+  <div class="dim"></div>
+  <div class="ph-body" style="padding-top:0;padding-bottom:28px;display:flex;flex-direction:column;justify-content:flex-end">
+    <div class="body" style="margin-top:14px">
+      <p>The charts now take their colours from the same variables as everything else.</p>
+      <ul>
+        <li>Gridlines and labels use <code>--muted</code>, so they dim with the theme.</li>
+        <li>The five series colours were tuned so each one still passes contrast on the dark background.</li>
+      </ul>
+    </div>
+    <div class="rule"></div>
+    <div class="ask">looks good, open a PR and deploy a preview</div>
+    <div class="worked">Worked for 4m 02s<span class="ch">›</span></div>
+    <div class="body">
+      <p>PR <a href="#">#214</a> is open and the preview is up at <a href="#">acme-web-git-dark-mode.vercel.app</a>.</p>
+      <ul>
+        <li>All 48 tests pass, plus 3 new ones for the toggle.</li>
+        <li>The contrast check passes in both themes.</li>
+      </ul>
+    </div>
+    <div class="foot">Made with <a href="#">Threadbear</a></div>
+  </div>
+  <div class="safari"><div class="u"><span class="lock">&#128274;</span>threadbear.mikecann.app</div></div>
+</div>
+</div>
+</div>
+
+<script>
+// One drawing of the fake settings screenshot, cloned into every picture frame at its scale.
+const t = document.getElementById('shot');
+document.querySelectorAll('.shotwrap').forEach(w => {
+  const s = t.content.firstElementChild.cloneNode(true);
+  s.style.transform = 'scale(' + w.dataset.scale + ')';
+  w.appendChild(s);
+});
+</script>
+</body></html>

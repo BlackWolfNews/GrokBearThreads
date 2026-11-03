@@ -1,0 +1,313 @@
+<!-- size: 2400x2000 -->
+<!doctype html><html><head><meta charset="utf-8">
+<title>C: Phone first, the share is the product</title>
+<style>
+/* Direction C. Colours follow the Mac app (end-turn-design/m.css): neutral
+   greys, system blue only where it means something. The frames are built by
+   the script at the bottom so the same thread renders in every frame,
+   including the mini "what readers see" preview. */
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0e0e0e;font:15px/1.5 -apple-system,"SF Pro Text",system-ui;color:#e6e4e1;width:2400px;height:2000px;overflow:hidden;-webkit-font-smoothing:antialiased}
+.canvas{display:flex;gap:64px;padding:44px 48px}
+.cap{font-size:14px;color:#8a8783;margin:0 0 12px 4px}
+.phones{display:grid;grid-template-columns:414px 414px;gap:40px 36px;align-content:start}
+.desks{display:flex;flex-direction:column;gap:40px}
+
+/* ---------- phone shell ---------- */
+.phone{width:414px;height:868px;border-radius:62px;background:#050505;padding:12px;box-shadow:0 0 0 1.5px #343434,0 30px 70px rgba(0,0,0,.55)}
+.screen{position:relative;width:390px;height:844px;border-radius:50px;overflow:hidden;background:#141414;--bg:#141414}
+.island{position:absolute;top:11px;left:50%;margin-left:-62px;width:124px;height:36px;border-radius:20px;background:#000;z-index:9}
+.status{position:absolute;top:0;left:0;right:0;height:54px;display:flex;justify-content:space-between;align-items:center;padding:6px 34px 0 46px;font-weight:600;font-size:16.5px;z-index:8}
+.status .ic{display:flex;gap:6px;align-items:center}
+.bars{display:flex;gap:2px;align-items:flex-end;height:12px}.bars i{width:3px;background:#fff;border-radius:1px}
+.batt{width:25px;height:12px;border:1.2px solid #8a8a8a;border-radius:4px;padding:1.5px}.batt i{display:block;height:100%;width:80%;background:#fff;border-radius:1.5px}
+.home{position:absolute;bottom:8px;left:50%;margin-left:-67px;width:134px;height:5px;border-radius:3px;background:#f2f2f2;z-index:9}
+
+/* shared page header: compact, sticky, small bear */
+.sh{position:absolute;top:54px;left:0;right:0;height:52px;display:flex;align-items:center;gap:10px;padding:0 18px;background:rgba(20,20,20,.86);backdrop-filter:blur(14px);border-bottom:.5px solid #2e2e2e;z-index:7}
+.sh .t{font-weight:600;font-size:15px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sh .f{font-size:12.5px;color:#8a8783;line-height:1.3}
+.sh .tx{min-width:0}
+.bear{flex:none;color:#cfccc7}
+.scroll{position:absolute;top:106px;left:0;right:0;bottom:0;padding:18px 18px 120px;overflow:hidden;display:flex;flex-direction:column}
+.scroll.end{justify-content:flex-end;padding-bottom:110px}
+
+/* floating Copy link pill */
+.pill{position:absolute;left:50%;transform:translateX(-50%);bottom:36px;display:flex;align-items:center;gap:8px;padding:11px 20px 11px 16px;border-radius:24px;background:rgba(48,48,50,.92);backdrop-filter:blur(14px);border:.5px solid #4a4a4c;box-shadow:0 8px 24px rgba(0,0,0,.45);font-weight:600;font-size:15px;z-index:7;white-space:nowrap}
+.pill svg{color:#6ea2ff}
+
+/* ---------- thread ---------- */
+.me{align-self:flex-end;max-width:80%;background:#2c2c2e;border-radius:20px;padding:9px 15px;margin:4px 0 14px;line-height:1.4}
+.worked{font-size:13.5px;color:#8a8783;margin-bottom:8px}
+.worked .ch{color:#5f5d5a;margin-left:5px}
+.reply p{margin-bottom:10px}
+.reply ul{margin:0 0 10px 20px}
+.reply li{margin:3px 0}
+.reply{margin-bottom:18px}
+code{font:13px ui-monospace,"SF Mono",monospace;background:#2a2a2a;border:.5px solid #383838;border-radius:5px;padding:1px 5px;color:#dcdad6}
+.pic{position:relative;border-radius:14px;overflow:hidden;border:.5px solid #3a3a3a;margin:2px 0 12px;background:#15171c}
+.pic .zoom{position:absolute;right:8px;bottom:8px;width:28px;height:28px;border-radius:14px;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;color:#ddd}
+
+/* end-of-thread card */
+.from{display:flex;gap:12px;align-items:flex-start;background:#1e1e1f;border:.5px solid #333;border-radius:16px;padding:14px 16px;margin-top:6px;font-size:14px;line-height:1.45;color:#b9b6b1}
+.from b{color:#e6e4e1;font-weight:600}
+.from a{color:#6ea2ff;text-decoration:none;display:inline-block;margin-top:4px}
+
+/* fake settings screenshot, drawn at 640x400 then scaled */
+.shot{width:640px;height:400px;transform-origin:0 0;background:#14161b;color:#e8eaf0;font:13px/1.3 -apple-system,system-ui;display:flex;flex-direction:column}
+.shot .top{height:44px;display:flex;align-items:center;gap:18px;padding:0 18px;border-bottom:1px solid #262a33;background:#1a1d24}
+.shot .logo{font-weight:800;font-size:15px;letter-spacing:-.3px}
+.shot .nav{width:46px;height:7px;border-radius:4px;background:#363b47}
+.shot .av{margin-left:auto;width:24px;height:24px;border-radius:12px;background:#4a5263}
+.shot .body{flex:1;display:flex}
+.shot .side{width:150px;padding:16px 10px;border-right:1px solid #232730;display:flex;flex-direction:column;gap:4px;color:#9aa1b1;font-size:12.5px}
+.shot .side div{padding:6px 10px;border-radius:7px}
+.shot .side .on{background:#262b36;color:#fff}
+.shot .main{flex:1;padding:18px 24px}
+.shot h4{font-size:19px;font-weight:700;margin-bottom:12px}
+.shot .card{background:#1b1f27;border:1px solid #272c37;border-radius:10px;margin-bottom:12px}
+.shot .row{display:flex;align-items:center;justify-content:space-between;padding:11px 14px;border-top:1px solid #262b35}
+.shot .row:first-child{border-top:0}
+.shot .row small{display:block;color:#8a91a1;font-size:11px;margin-top:2px}
+.shot .tg{width:34px;height:20px;border-radius:10px;background:#3a3f4b;position:relative}
+.shot .tg::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:8px;background:#fff}
+.shot .tg.on{background:#3478f6}.shot .tg.on::after{left:16px}
+.shot .seg{display:flex;background:#272c37;border-radius:7px;padding:2px;font-size:11px;color:#9aa1b1}
+.shot .seg span{padding:3px 9px;border-radius:5px}.shot .seg .s{background:#3b4252;color:#fff}
+.shot .sel{width:120px;height:24px;border-radius:6px;background:#272c37;border:1px solid #333948;font-size:11px;color:#c4c9d4;padding:4px 8px}
+.shot .lbl{font-size:11.5px;color:#8a91a1;margin:0 0 6px 2px;font-weight:600}
+
+/* ---------- picture viewer (phone) ---------- */
+.viewer{background:#000}
+.vtop{position:absolute;top:54px;left:0;right:0;height:56px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;z-index:5}
+.round{width:40px;height:40px;border-radius:20px;background:#262628;display:flex;align-items:center;justify-content:center;color:#e6e4e1}
+.vcount{font-size:14px;color:#a5a29d}
+.vpic{position:absolute;top:300px;left:0;width:390px}
+.vfoot{position:absolute;bottom:42px;left:22px;right:22px;font-size:14px;color:#a5a29d;line-height:1.45}
+.vfoot b{color:#e6e4e1;font-weight:500}
+
+/* ---------- owner phone + share sheet ---------- */
+.oh{position:absolute;top:54px;left:0;right:0;height:60px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;z-index:4}
+.oh .t{font-weight:600;font-size:15.5px}
+.dim{position:absolute;inset:0;background:rgba(0,0,0,.5);z-index:6}
+.sheet{position:absolute;left:0;right:0;bottom:0;height:716px;background:#1c1c1e;border-radius:38px 38px 0 0;z-index:7;padding:8px 16px 0}
+.grab{width:38px;height:5px;border-radius:3px;background:#48484a;margin:0 auto 10px}
+.shead{display:flex;align-items:center;justify-content:space-between;height:40px;margin-bottom:10px}
+.shead .t{font-weight:600;font-size:17px}
+.shead .x{width:30px;height:30px;border-radius:15px;background:#2c2c2e;display:flex;align-items:center;justify-content:center;color:#a5a29d}
+.group{background:#2a2a2c;border-radius:14px;padding:14px 16px}
+.sw{display:flex;align-items:center;justify-content:space-between;gap:14px}
+.sw b{font-weight:600;font-size:16px;line-height:1.3;display:block}
+.sw small{display:block;font-size:13px;color:#8e8b86;margin-top:3px;line-height:1.35}
+.tog{flex:none;width:64px;height:38px;border-radius:19px;background:#3478f6;position:relative}
+.tog::after{content:"";position:absolute;top:3px;right:3px;width:32px;height:32px;border-radius:16px;background:#fff;box-shadow:0 2px 4px rgba(0,0,0,.3)}
+.link{margin-top:12px;display:flex;align-items:center;gap:8px;background:#141414;border:.5px solid #3a3a3a;border-radius:12px;padding:11px 14px;font:13.5px ui-monospace,"SF Mono",monospace;color:#cfccc7;white-space:nowrap;overflow:hidden}
+.link span{overflow:hidden;text-overflow:ellipsis}
+.copy{margin-top:10px;height:50px;border-radius:14px;background:#3478f6;color:#fff;font-weight:600;font-size:16px;display:flex;align-items:center;justify-content:center;gap:8px}
+.plab{font-size:13px;color:#8e8b86;margin:16px 0 8px 2px}
+.prev{position:relative;border-radius:18px;overflow:hidden;border:.5px solid #3a3a3a;background:#141414;margin:0 auto}
+.prev .screen{border-radius:0;position:absolute;top:0;left:0;transform-origin:0 0}
+.sbtns{display:flex;gap:10px;margin-top:14px}
+.sbtns div{flex:1;height:44px;border-radius:12px;background:#2c2c2e;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:500}
+.sbtns .stop{color:#ff6961}
+
+/* ---------- desktop ---------- */
+.dwrap{width:1376px;height:898px;overflow:hidden;border-radius:12px;box-shadow:0 0 0 1px #333,0 24px 60px rgba(0,0,0,.5)}
+.win{width:1440px;height:940px;transform:scale(.9556);transform-origin:0 0;background:#161616;position:relative}
+.bbar{height:40px;background:#232323;border-bottom:1px solid #2f2f2f;display:flex;align-items:center;gap:8px;padding:0 14px}
+.bbar .l{width:12px;height:12px;border-radius:6px;background:#3d3d3d}
+.url{margin:0 auto;width:520px;height:26px;border-radius:7px;background:#1a1a1a;font-size:13px;color:#a5a29d;display:flex;align-items:center;justify-content:center;gap:6px}
+.vp{position:relative;height:900px;overflow:hidden}
+
+/* desktop shared page */
+.dsh{position:absolute;top:0;left:0;right:0;height:60px;background:rgba(22,22,22,.9);border-bottom:.5px solid #2c2c2c;z-index:3}
+.dsh .in{position:absolute;left:410px;width:620px;top:0;bottom:0;display:flex;align-items:center;gap:12px}
+.dsh .t{font-weight:600;font-size:16px;line-height:1.25}
+.dsh .f{font-size:13px;color:#8a8783}
+.dcol{position:absolute;top:60px;left:410px;width:620px;padding:28px 0 0;display:flex;flex-direction:column}
+.dcol .reply{font-size:15.5px}
+.strip{position:absolute;top:88px;left:1090px;width:250px}
+.strip .h{font-size:13.5px;color:#8a8783;margin:0 0 10px 2px}
+.strip .pic{margin:0}
+.strip .c{font-size:12.5px;color:#7d7b77;margin:8px 2px 0}
+.dpill{position:absolute;bottom:30px;left:720px;transform:translateX(-50%)}
+
+/* desktop owner view */
+.inbox{position:absolute;top:0;left:0;bottom:0;width:340px;background:#1a1a1a;border-right:1px solid #2a2a2a;padding:16px 14px}
+.ib-top{display:flex;align-items:center;justify-content:space-between;margin:2px 4px 12px}
+.ib-top h2{font-size:26px;font-weight:700;letter-spacing:-.3px}
+.ib-top .round{width:34px;height:34px;background:#262626}
+.search{height:34px;border-radius:10px;background:#242424;color:#7d7b77;font-size:14px;display:flex;align-items:center;gap:8px;padding:0 10px;margin-bottom:16px}
+.sec{font-size:14px;color:#8a8783;font-weight:600;margin:0 0 6px 8px}
+.grp{background:#222;border-radius:14px;margin-bottom:18px;overflow:hidden}
+.r{position:relative;display:flex;gap:11px;padding:10px 12px 10px 20px}
+.r+.r::before{content:"";position:absolute;top:0;left:63px;right:0;border-top:.5px solid #333}
+.r.sel{background:#2d2d2f}
+.r .dot{position:absolute;left:7px;top:22px;width:8px;height:8px;border-radius:4px;background:#3478f6}
+.tile{flex:none;width:32px;height:32px;border-radius:8px;background:#303030;color:#a5a29d;font-size:13.5px;font-weight:600;display:flex;align-items:center;justify-content:center;margin-top:2px}
+.r .m{flex:1;min-width:0}
+.r .l1{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.r .tt{font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.r.u .tt{font-weight:600}
+.r .tm{flex:none;font-size:12.5px;color:#7d7b77}
+.r .nd{flex:none;font-size:12.5px;color:#6ea2ff;font-weight:600}
+.r .pv{font-size:13px;color:#8a8783;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:1px}
+.r .lk{color:#7d7b77;margin-left:5px;vertical-align:-1px}
+.thr{position:absolute;top:0;left:340px;bottom:0;width:680px;background:#161616}
+.th-h{height:60px;display:flex;align-items:center;justify-content:space-between;padding:0 18px 0 26px;border-bottom:.5px solid #2a2a2a}
+.th-h .t{font-weight:600;font-size:16px;line-height:1.25}
+.th-h .f{font-size:13px;color:#8a8783}
+.ibtn{width:34px;height:34px;border-radius:17px;background:#262626;display:flex;align-items:center;justify-content:center;color:#cfccc7}
+.ibtn.on{background:rgba(52,120,246,.22);color:#7fb0ff;box-shadow:inset 0 0 0 1px rgba(52,120,246,.55)}
+.th-b{position:absolute;top:60px;left:0;right:0;bottom:252px;padding:0 40px;display:flex;flex-direction:column;justify-content:flex-end;overflow:hidden}
+.th-b .reply{margin-bottom:12px}
+.dock{position:absolute;left:40px;right:40px;bottom:22px;background:#222;border:1px solid #3a3a3a;border-radius:18px;overflow:hidden}
+.asks{padding:14px 16px 12px;border-bottom:1px solid #333}
+.asks p{margin-bottom:10px}
+.chs{display:flex;flex-wrap:wrap;gap:8px}
+.cb{background:#303030;border:1px solid #444;border-radius:16px;padding:4px 13px;font-size:13.5px}
+.cb .s{color:#8a8783;font-size:11px;margin-right:4px}
+.comp{display:flex;align-items:center;gap:10px;padding:10px 10px 10px 14px;color:#77746f}
+.comp .plus{width:28px;height:28px;border-radius:14px;background:#2c2c2c;display:flex;align-items:center;justify-content:center;color:#a5a29d}
+.comp .send{margin-left:auto;width:32px;height:32px;border-radius:16px;background:#3478f6;display:flex;align-items:center;justify-content:center;color:#fff}
+.panel{position:absolute;top:0;right:0;bottom:0;width:420px;background:#1c1c1e;border-left:1px solid #2c2c2c;padding:14px 20px}
+.panel .shead{margin-bottom:12px}
+.panel .prev{margin:0;flex:none}
+/* content fades out under the floating pill */
+.fadeb{position:absolute;left:0;right:0;bottom:0;height:150px;background:linear-gradient(rgba(20,20,20,0),var(--bg,#141414) 70%);z-index:6;pointer-events:none}
+.pv-row{display:flex;gap:16px;align-items:flex-start}
+.pv-note{font-size:13px;color:#8e8b86;line-height:1.45;padding-top:4px}
+.pv-note div+div{margin-top:10px}
+</style></head><body>
+<div class="canvas">
+  <div class="phones">
+    <div><div class="cap">Shared link, phone</div><div class="phone" id="p1"></div></div>
+    <div><div class="cap">Shared link, phone, end of the thread</div><div class="phone" id="p2"></div></div>
+    <div><div class="cap">Shared link, phone, picture tapped</div><div class="phone" id="p3"></div></div>
+    <div><div class="cap">Your thread, phone, sharing</div><div class="phone" id="p4"></div></div>
+  </div>
+  <div class="desks">
+    <div><div class="cap">Shared link, desktop</div><div class="dwrap" id="d1"></div></div>
+    <div><div class="cap">Your thread, signed in, sharing</div><div class="dwrap" id="d2"></div></div>
+  </div>
+</div>
+<script>
+const SLUG = "threadbear.mikecann.app/s/quiet-otter-41";
+const bear = (s=22) => `<svg class="bear" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="6.2" cy="6.4" r="2.5"/><circle cx="17.8" cy="6.4" r="2.5"/><circle cx="12" cy="13.2" r="7.6" fill="var(--bg,#141414)"/><ellipse cx="12" cy="15.9" rx="3" ry="2.2"/><circle cx="9.1" cy="11.6" r=".5" fill="currentColor"/><circle cx="14.9" cy="11.6" r=".5" fill="currentColor"/><path d="M11.3 15.2h1.4"/></svg>`;
+const linkIco = (s=16) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1 1"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1-1"/></svg>`;
+const shareIco = (s=17) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7.5 7.5 12 3l4.5 4.5"/><path d="M6 11H5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-1"/></svg>`;
+const xIco = (s=13) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>`;
+const dots = `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>`;
+const back = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>`;
+const expand = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/></svg>`;
+const up = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg>`;
+
+function shot(w){
+  const s = w/640;
+  return `<div style="width:${w}px;height:${Math.round(400*s)}px;overflow:hidden"><div class="shot" style="transform:scale(${s})">
+  <div class="top"><span class="logo">acme</span><span class="nav"></span><span class="nav" style="width:38px"></span><span class="nav" style="width:52px"></span><span class="av"></span></div>
+  <div class="body"><div class="side"><div>Profile</div><div class="on">Appearance</div><div>Notifications</div><div>Billing</div><div>Team</div></div>
+  <div class="main"><h4>Settings</h4><div class="lbl">Appearance</div>
+   <div class="card"><div class="row"><div>Dark mode<small>Use a dark theme on every page</small></div><span class="tg on"></span></div>
+   <div class="row"><div>Text size</div><span class="seg"><span>Small</span><span class="s">Default</span><span>Large</span></span></div>
+   <div class="row"><div>Reduce motion</div><span class="tg"></span></div></div>
+   <div class="lbl">Language</div>
+   <div class="card"><div class="row"><div>Language</div><span class="sel">English (UK)</span></div></div>
+  </div></div></div></div>`;
+}
+function pic(w, zoom=true){ return `<div class="pic">${shot(w)}${zoom?`<span class="zoom">${expand}</span>`:""}</div>`; }
+
+// The thread itself, the same text everywhere it appears.
+const T = {
+  t1me: `Can you add a dark mode toggle to the settings page? Should remember what I pick`,
+  t1: (w) => `<div class="worked">Worked for 4m 12s<span class="ch">›</span></div>
+   <div class="reply"><p>Done. There's a Dark mode switch under Appearance in settings, and it remembers your pick.</p>
+   <ul><li>The switch sets <code>data-theme="dark"</code> on the page</li><li>Colours come from CSS variables, so every page follows it</li><li>Your pick is kept in <code>localStorage</code>, and a first visit follows the system setting</li></ul>
+   <p>Here's the settings page with it on:</p>${pic(w)}</div>`,
+  t2me: `nice. header's still white in dark mode though`,
+  t2: `<div class="worked">Worked for 1m 48s<span class="ch">›</span></div>
+   <div class="reply"><p>Fixed. The header had its own <code>background: #fff</code>. It uses <code>var(--surface)</code> now, like the cards.</p><p>I looked for the same thing elsewhere and fixed two more: the footer and the sign-in modal.</p></div>`,
+  t3me: `great, ship it`,
+  t3: `<div class="worked">Worked for 2m 31s<span class="ch">›</span></div>
+   <div class="reply"><p>Merged and deployed. The switch is live on the settings page.</p><ul><li>14 tests pass, 2 of them new for the switch</li><li>Nothing else went out with it</li></ul></div>`,
+};
+const me = (t) => `<div class="me">${t}</div>`;
+const from = `<div class="from">${bear(26)}<div><b>This thread was shared from Threadbear</b>, Mike's agent app.<br><a href="#">What's Threadbear? ›</a></div></div>`;
+
+function chrome(){ return `<div class="island"></div><div class="status"><span>9:41</span><span class="ic"><span class="bars"><i style="height:4px"></i><i style="height:6px"></i><i style="height:9px"></i><i style="height:12px"></i></span><svg width="17" height="12" viewBox="0 0 17 12" fill="#fff"><path d="M8.5 2.2c2.4 0 4.6.9 6.2 2.5l1.2-1.2A10.4 10.4 0 0 0 8.5.5 10.4 10.4 0 0 0 1.1 3.5l1.2 1.2A8.7 8.7 0 0 1 8.5 2.2zm0 3.4c1.5 0 2.8.6 3.8 1.5l1.2-1.2a7 7 0 0 0-10 0l1.2 1.2c1-.9 2.3-1.5 3.8-1.5zm0 3.4c.6 0 1.1.2 1.5.6L8.5 11 7 9.6c.4-.4.9-.6 1.5-.6z"/></svg><span class="batt"><i></i></span></span></div><div class="home"></div>`; }
+const sharedHead = `<div class="sh">${bear(24)}<div class="tx"><div class="t">Add a dark mode toggle to settings</div><div class="f">acme-web</div></div></div>`;
+const pill = (cls="") => `<div class="pill ${cls}">${linkIco(16)}Copy link</div>`;
+
+// Shared page, phone. `end` shows the bottom of the thread.
+function sharedScreen(end, withChrome=true){
+  const body = end
+    ? me(T.t2me) + T.t2 + me(T.t3me) + T.t3 + from
+    : me(T.t1me) + T.t1(354) + me(T.t2me) + T.t2;
+  return `<div class="screen">${withChrome?chrome():""}${sharedHead}<div class="scroll ${end?"end":""}">${body}</div><div class="fadeb"></div>${pill()}</div>`;
+}
+document.getElementById("p1").innerHTML = sharedScreen(false);
+document.getElementById("p2").innerHTML = sharedScreen(true);
+
+// Picture viewer: tap a picture, it opens edge to edge.
+document.getElementById("p3").innerHTML = `<div class="screen viewer">${chrome()}
+  <div class="vtop"><span class="round">${xIco(14)}</span><span class="vcount">Picture 1 of 1</span><span class="round">${shareIco(17)}</span></div>
+  <div class="vpic">${shot(390)}</div>
+  <div class="vfoot"><b>Here's the settings page with it on</b><br>From the reply to "Can you add a dark mode toggle to the settings page?"</div></div>`;
+
+// Mini rendering of the shared page, for the share sheet and panel.
+function preview(w, h){
+  const s = w/390;
+  return `<div class="prev" style="width:${w}px;height:${h}px"><div class="screen" style="transform:scale(${s})">${sharedHead.replace('class="sh"','class="sh" style="top:0"')}<div class="scroll" style="top:52px">${me(T.t1me)+T.t1(354)}</div>${pill()}</div></div>`;
+}
+function shareBody(prevW, prevH, side){
+  const pv = preview(prevW, prevH);
+  return `<div class="group sw"><div><b>Anyone with the link can read this</b><small>Read only. New replies show up as they come in.</small></div><span class="tog"></span></div>
+   <div class="link">${linkIco(15)}<span>${SLUG}</span></div>
+   <div class="copy">${linkIco(17)}Copy link</div>
+   <div class="plab">What readers see</div>
+   ${side ? `<div class="pv-row">${pv}<div class="pv-note"><div>The thread as it is now, and as it grows.</div><div>The work behind each reply stays folded. Tool output, files and your folder path aren't shared.</div><div>1 picture</div></div></div>` : pv}
+   <div class="sbtns"><div>New link</div><div class="stop">Stop sharing</div></div>`;
+}
+
+// Owner phone, share sheet up over the thread.
+document.getElementById("p4").innerHTML = `<div class="screen">${chrome()}
+  <div class="oh"><span class="round">${back}</span><span class="t">Add a dark mode toggle…</span><span class="round">${shareIco(17)}</span></div>
+  <div class="scroll" style="top:114px">${me(T.t1me)+T.t1(354)}</div>
+  <div class="dim"></div>
+  <div class="sheet"><div class="grab"></div><div class="shead"><span style="width:30px"></span><span class="t">Share</span><span class="x">${xIco(11)}</span></div>
+  ${shareBody(186, 300, false)}</div></div>`;
+
+// Desktop shared page: the phone column centred, pictures in a strip.
+const bbar = (url) => `<div class="bbar"><span class="l"></span><span class="l"></span><span class="l"></span><span class="url">${url}</span></div>`;
+document.getElementById("d1").innerHTML = `<div class="win">${bbar(SLUG)}<div class="vp">
+  <div class="dsh"><div class="in">${bear(26)}<div><div class="t">Add a dark mode toggle to settings</div><div class="f">acme-web</div></div></div></div>
+  <div class="dcol">${me(T.t1me)}${T.t1(620)}${me(T.t2me)}${T.t2}</div>
+  <div class="strip"><div class="h">Pictures</div>${pic(250,false)}<div class="c">Turn 1, the settings page with dark mode on</div></div>
+  <div class="fadeb" style="--bg:#161616;height:170px"></div>${pill("dpill")}</div></div>`;
+
+// Desktop owner view: iPhone-style inbox, thread, share panel open.
+const rows = [
+  {l:"A", t:"Add a dark mode toggle to settings", p:"Should the switch show in the mobile menu too?", need:true, sel:true, link:true},
+  {l:"A", t:"Fix the flaky checkout test", p:"Found it: the test waited on a real timer. It uses a fake clock now.", tm:"4m", u:true},
+  {l:"D", t:"Date picker on small screens", p:"Under 500px it opens as a sheet from the bottom.", tm:"24m", u:true, link:true},
+  {l:"P", t:"Tidy up old feature flags", p:"Removed 9 flags. 3 are still read by the billing page.", tm:"3h"},
+  {l:"P", t:"Rename the billing tables", p:"Migration ran on staging, nothing failed.", tm:"1d"},
+  {l:"B", t:"Image sizes on the blog", p:"Every post image has a srcset now.", tm:"2d"},
+];
+const row = (r) => `<div class="r ${r.sel?"sel":""} ${r.u||r.need?"u":""}">${r.u?'<span class="dot"></span>':""}<span class="tile">${r.l}</span><div class="m"><div class="l1"><span class="tt">${r.t}</span>${r.need?'<span class="nd">Needs you</span>':`<span class="tm">${r.tm}</span>`}</div><div class="pv">${r.p}${r.link?`<span class="lk">${linkIco(11)}</span>`:""}</div></div></div>`;
+document.getElementById("d2").innerHTML = `<div class="win" style="--bg:#161616">${bbar("threadbear.mikecann.app/t/add-a-dark-mode-toggle")}<div class="vp">
+  <div class="inbox"><div class="ib-top"><h2>Threadbear</h2><span class="round"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></span></div>
+   <div class="search"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>Search</div>
+   <div class="sec">Inbox</div><div class="grp">${rows.slice(0,5).map(row).join("")}</div>
+   <div class="sec">Running</div><div class="grp">${row({l:"D",t:"Search box for the docs",p:"Running npm test",tm:"now"})}</div>
+   <div class="sec">Earlier</div><div class="grp">${row(rows[5])}</div></div>
+  <div class="thr"><div class="th-h"><div><div class="t">Add a dark mode toggle to settings</div><div class="f">acme-web</div></div><div style="display:flex;gap:8px"><span class="ibtn on">${shareIco(16)}</span><span class="ibtn">${dots}</span></div></div>
+   <div class="th-b">${me(T.t1me)+T.t1(600)}${me(T.t2me)}${T.t2.replace('<div class="worked">','<div class="worked" style="margin-top:0">')}${me(T.t3me)}${T.t3}</div>
+   <div class="dock"><div class="asks"><p>Should the switch show in the mobile menu too? It's a small change, but the menu gets one row taller.</p>
+    <div class="chs"><span class="cb"><span class="s">★</span>Yes, add it</span><span class="cb">No, settings only</span><span class="cb">Something else…</span></div></div>
+    <div class="comp"><span class="plus">+</span>Reply<span class="send">${up}</span></div></div></div>
+  <div class="panel"><div class="shead"><span class="t">Share</span><span class="x">${xIco(11)}</span></div>${shareBody(200, 410, true)}</div>
+  </div></div>`;
+// the agent's bubble rows on the desktop thread need flex parents
+</script>
+</body></html>

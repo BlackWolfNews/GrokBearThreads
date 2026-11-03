@@ -10,6 +10,7 @@
 
 import type * as crons from "../crons.js";
 import type * as devices from "../devices.js";
+import type * as http from "../http.js";
 import type * as lib from "../lib.js";
 import type * as phone from "../phone.js";
 import type * as push from "../push.js";
@@ -28,6 +29,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   crons: typeof crons;
   devices: typeof devices;
+  http: typeof http;
   lib: typeof lib;
   phone: typeof phone;
   push: typeof push;
