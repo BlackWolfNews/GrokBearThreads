@@ -42,6 +42,9 @@ export const threadFields = {
   // Who started it, when that wasn't Mike: the row's byline
   // (docs/protocol.md, "Who started a thread"). Since API 22.
   startedBy: v.optional(v.object({ kind: v.string(), label: v.string(), icon: v.optional(v.string()), why: v.optional(v.string()) })),
+  // What Mike last said to it, one line: the row's "You: ..."
+  // (docs/protocol.md, "What Mike last asked"). Since API 31.
+  asked: v.optional(v.string()),
   archivedAt: v.optional(v.string()),
   // Mike starred it: the phone's Starred section. Since API 27.
   starredAt: v.optional(v.string()),

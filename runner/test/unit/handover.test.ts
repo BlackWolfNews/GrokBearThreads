@@ -519,3 +519,14 @@ test("the phone's commands reach a thread a draining runner still has", async ()
   await host.update({ threadId: busy.id, title: 'Came across' });
   assert.equal(b.runner.get(busy.id).title, 'Came across');
 });
+
+test('a handed-over thread from before `asked` learns it from its log', () => {
+  const h = makeHarness();
+  const t = create(h, 'busy one').thread;
+  h.runner.flush();
+  const rec = JSON.parse(fs.readFileSync(threadFile(h, t.id), 'utf8'));
+  delete rec.asked;
+  fs.writeFileSync(threadFile(h, t.id), JSON.stringify(rec));
+  const b = primary(h, [t.id]);
+  assert.equal(b.runner.adopt(t.id)?.asked, 'busy one');
+});

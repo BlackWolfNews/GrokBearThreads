@@ -115,4 +115,8 @@
 //    starts. phone:counts reads a viewCounts row per runner, kept by the
 //    thread writes, rather than every hibernating and den thread. Nothing
 //    changes for a phone or an older runner.
-export const API_VERSION = 30;
+// 31: thread rows can carry `asked`, what Mike last said to the thread in
+//    one line, which the phone shows under the title as "You: ...". A
+//    runner sends it only to a backend of 31 or later; an older phone
+//    ignores it and shows the thread's place as before.
+export const API_VERSION = 31;

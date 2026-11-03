@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
-import { ConvexSync, forBackend, LINKS_API_VERSION, PROJECTS_DIFF_API_VERSION, STARS_API_VERSION, BACKEND_API_VERSION, TURNS_API_VERSION, ICONS_API_VERSION, RUNNER_ICON_API_VERSION, SCHEDULES_API_VERSION, SHARE_API_VERSION, WOKE_API_VERSION, STARTED_BY_API_VERSION, SECTIONS_API_VERSION, MODELS_API_VERSION, REPLY_IMAGES_API_VERSION, REPLY_IMAGES_LOOKBACK_MS, REPLY_IMAGES_SCANS_PER_FLUSH, toAccountDoc, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, convexUploader, pictureName, type ThreadDoc } from '../../src/sync.ts';
+import { ConvexSync, forBackend, ASKED_API_VERSION, LINKS_API_VERSION, PROJECTS_DIFF_API_VERSION, STARS_API_VERSION, BACKEND_API_VERSION, TURNS_API_VERSION, ICONS_API_VERSION, RUNNER_ICON_API_VERSION, SCHEDULES_API_VERSION, SHARE_API_VERSION, WOKE_API_VERSION, STARTED_BY_API_VERSION, SECTIONS_API_VERSION, MODELS_API_VERSION, REPLY_IMAGES_API_VERSION, REPLY_IMAGES_LOOKBACK_MS, REPLY_IMAGES_SCANS_PER_FLUSH, toAccountDoc, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, convexUploader, pictureName, type ThreadDoc } from '../../src/sync.ts';
 import type { Project } from '../../src/protocol.ts';
 import type { ScheduleBackend } from '../../src/schedules.ts';
 import { nullLogger, type Logger } from '../../src/log.ts';
@@ -103,6 +103,8 @@ test('a summary that changed nothing the phone sees is not written', async () =>
   const t = h.runner.create({ text: 'hello', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
   sync.start();
   await sync.flushNow();
+  // The first write went before the heartbeat said the backend takes
+  // `asked`, so the row goes again with it once it has.
   const before = upserts().length;
   // The same summary again (what a patches refresh or lastSeq bump does).
   h.runner.publish({ method: 'thread.updated', params: { thread: h.runner.get(t.id) } });
@@ -168,6 +170,12 @@ test('view follows hibernate and den; cost is to the cent; working comes from ba
   assert.ok(!('links' in inbox));
   assert.ok(!('links' in forBackend(linked, LINKS_API_VERSION - 1, now)));
   assert.equal(forBackend(linked, LINKS_API_VERSION, now), linked);
+  // What Mike last said goes up for the phone's row, to a backend that takes it.
+  const asked = toThreadDoc({ ...base, asked: 'try the GPU route' }, 'r', now);
+  assert.equal(asked.asked, 'try the GPU route');
+  assert.ok(!('asked' in inbox));
+  assert.ok(!('asked' in forBackend(asked, ASKED_API_VERSION - 1, now)));
+  assert.equal(forBackend(asked, ASKED_API_VERSION, now), asked);
   const woke = { at: '2026-10-27T10:00:00.000Z', since: '2026-10-26T10:00:00.000Z' };
   assert.deepEqual(toThreadDoc({ ...base, woke }, 'r', now).woke, woke);
   assert.ok(!('woke' in inbox));

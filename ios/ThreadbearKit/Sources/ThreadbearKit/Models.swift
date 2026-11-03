@@ -215,6 +215,9 @@ public struct PhoneThread: Codable, Sendable, Hashable, Identifiable {
     public var woke: Woke?
     /// Who started it, when Mike didn't: the row's second line says so.
     public var startedBy: StartedBy?
+    /// What Mike last said to it, one line (backend API 31): the row's
+    /// "You: ...". Nil until he's sent one, and from an older runner.
+    public var asked: String?
     @OptionalFlexibleDate public var archivedAt: Date?
     /// Mike starred it: the Starred section at the top (backend API 27).
     @OptionalFlexibleDate public var starredAt: Date?
@@ -256,8 +259,9 @@ public struct PhoneThread: Codable, Sendable, Hashable, Identifiable {
         pendingApproval: PendingApproval? = nil, earliestSeq: Double? = nil,
         asks: [PhoneAsk]? = nil, asksSeq: Double? = nil, next: [String]? = nil,
         needs: String? = nil, pendingReviews: Double? = nil, waitingForRoom: PhoneWaitingForRoom? = nil,
-        links: [PhoneLink]? = nil
+        links: [PhoneLink]? = nil, asked: String? = nil
     ) {
+        self.asked = asked
         self.threadId = threadId
         self.runnerId = runnerId
         self.title = title
@@ -324,6 +328,13 @@ public struct PhoneThread: Codable, Sendable, Hashable, Identifiable {
     public var placeText: String {
         if let projects, !projects.isEmpty { return projects.map(\.title).joined(separator: ", ") }
         return folderName
+    }
+
+    /// Line 2 of the row of a thread Mike started: what he last said to it
+    /// ("You: try the GPU route"), as on the Mac sidebar, else its place.
+    public var askedText: String {
+        guard let asked, !asked.isEmpty else { return placeText }
+        return "You: " + asked
     }
 
     /// Line 2 of the row of a thread Mike didn't start: who did, and why or

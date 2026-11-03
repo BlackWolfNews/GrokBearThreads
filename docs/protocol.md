@@ -1514,8 +1514,10 @@ absent until he's sent something. A thread from a runner before it learns
 it from the last 300 events of its log when the runner starts, unless it's
 archived. The Mac app's sidebar shows it under a thread's title as
 "You: ...", in place of the thread's projects or folder, which it shows
-until there's one. A thread someone else started keeps its byline. Other
-runners' threads (the backend's `threadIndex`) don't carry it yet.
+until there's one. A thread someone else started keeps its byline. A
+thread's row in the backend carries it too, from API 31, and the phone's
+list shows it the same way. Other runners' threads on a Mac (the
+backend's `threadIndex`) don't carry it yet.
 
 ## Needs you
 

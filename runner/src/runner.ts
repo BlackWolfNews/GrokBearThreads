@@ -1032,6 +1032,9 @@ export class Runner {
     rec.lastSeq = this.store.log(rec.id).lastSeq;
     const st: ThreadState = { rec, rt: newRuntime(Date.parse(rec.lastActivityAt) || 0) };
     this.threads.set(rec.id, st);
+    // A thread that was busy on the old runner comes across here, not at
+    // start, so it learns its "You: ..." line here too.
+    if (rec.asked === undefined && !rec.archivedAt) this.backfillAsked(rec);
     this.recoverReviews(st);
     if (opts.crashed) {
       if (this.recover(st)) this.notice('info', `The old runner stopped while "${rec.title}" was mid-turn; send a message to carry on.`);

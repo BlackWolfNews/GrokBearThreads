@@ -610,6 +610,16 @@ private func properties(of data: Data) -> [CFString: Any] {
     #expect(agent?.startedBy?.symbol == "pawprint")
 }
 
+@Test func aRowSaysWhatMikeLastAsked() {
+    let json = { (asked: String) in
+        #"{"threadId":"t","runnerId":"r","title":"t","cwd":"/x/misc","accountId":"a","provider":"claude","status":"idle","needsYou":false,"unread":false,"preview":"","createdAt":"2026-11-01T00:00:00.000Z","lastActivityAt":"2026-11-01T00:00:00.000Z"\#(asked)}"#
+    }
+    let before = try? JSONDecoder().decode(PhoneThread.self, from: Data(json("").utf8))
+    #expect(before?.askedText == "misc", "from an older runner: the place")
+    let asked = try? JSONDecoder().decode(PhoneThread.self, from: Data(json(#","asked":"try the GPU route""#).utf8))
+    #expect(asked?.askedText == "You: try the GPU route")
+}
+
 @Test func aThreadsLinkButtonsOnlyOpenWebPages() throws {
     let json = #"{"threadId":"t","runnerId":"r","title":"t","cwd":"/x","accountId":"a","provider":"claude","status":"idle","needsYou":false,"unread":false,"preview":"","createdAt":"2026-11-01T00:00:00.000Z","lastActivityAt":"2026-11-01T00:00:00.000Z","links":[{"title":"Website","url":"https://walkies.mikecann.app/","icon":"safari"},{"title":"Bad","url":"file:///etc/passwd"}]}"#
     let thread = try JSONDecoder().decode(PhoneThread.self, from: Data(json.utf8))
