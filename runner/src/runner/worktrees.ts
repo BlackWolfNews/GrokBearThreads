@@ -3,6 +3,7 @@
 // fork's change to one area doesn't clash with another's. Each method's `this`
 // is the Runner; runner.ts puts them on its prototype.
 import type { Runner } from '../runner.ts';
+import type { RunnerPart } from './part.ts';
 import type { Action, EventBody } from '../protocol.ts';
 import type { ThreadRecord } from '../store.ts';
 import { BIN_DIR, threadEnv } from '../restart.ts';
@@ -167,4 +168,4 @@ export const worktreesPart = {
   },
 };
 
-export type WorktreesPart = typeof worktreesPart;
+export type WorktreesPart = RunnerPart<typeof worktreesPart>;

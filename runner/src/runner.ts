@@ -124,6 +124,11 @@ import { FolderCache } from './folder-cache.ts';
 import { worktreesPart, type WorktreesPart } from './runner/worktrees.ts';
 import { networkPart, type NetworkPart } from './runner/network.ts';
 import { poolsPart, type PoolsPart } from './runner/pools.ts';
+import { handoversPart, type HandoversPart } from './runner/handovers.ts';
+import { stoppedWorkPart, type StoppedWorkPart } from './runner/stopped-work.ts';
+import { projectsHostPart, type ProjectsHostPart } from './runner/projects-host.ts';
+import { approvalsPart, type ApprovalsPart } from './runner/approvals.ts';
+import { reviewsPart, type ReviewsPart } from './runner/reviews.ts';
 
 export type Notification =
   | { method: 'thread.updated'; params: { thread: ThreadSummary } }
@@ -212,7 +217,7 @@ type BinaryReporter = { binariesInUse?(): string[] };
 // main: the card is for the agent's own tool call, so its CLI waits on it
 // and reads nothing else until it's answered. A background subagent's card
 // (no tool call of the agent's to point at) holds up only that subagent.
-type PendingApproval =
+export type PendingApproval =
   | { approvalId: string; kind: 'tool'; main: boolean; resolve: (a: ToolApprovalAnswer) => void }
   | { approvalId: string; kind: 'question'; main: boolean; questions: Question[]; resolve: (a: QuestionAnswer) => void };
 
@@ -365,7 +370,7 @@ type Runtime = {
 
 export type ThreadState = { rec: ThreadRecord; rt: Runtime };
 
-type Drain = {
+export type Drain = {
   keep: Set<string>;
   going: Set<string>; // being let go
   onHandedOver: (threadId: string) => void;
@@ -380,22 +385,22 @@ type Drain = {
 
 // How often a draining runner looks again at threads it keeps for
 // background work, since that work's limit passes without an event.
-const DRAIN_CHECK_MS = 5000;
+export const DRAIN_CHECK_MS = 5000;
 // How long background shells and monitors hold a kept thread after its last
 // turn. Most are waits that end by themselves, and the runner updates after
 // every landing: at 30 minutes, nearly every long wait was cut off (1 Nov:
 // a scan's wait, 4.5 hours of silence). A dev server does sit out the limit,
 // but that costs one old runner process, and only one per thread that has
 // work going, since a kept thread doesn't get kept again.
-const DRAIN_BACKGROUND_MS = 4 * 60 * 60_000;
+export const DRAIN_BACKGROUND_MS = 4 * 60 * 60_000;
 // A thread in use never reaches that limit, and would stay on the old release
 // for as long as its dev server ran. Past this long there, it goes across
 // after a much shorter quiet spell.
-const DRAIN_MAX_OLD_MS = 12 * 60 * 60_000;
-const DRAIN_SETTLE_MS = 30 * 60_000;
+export const DRAIN_MAX_OLD_MS = 12 * 60 * 60_000;
+export const DRAIN_SETTLE_MS = 30 * 60_000;
 // How long subagents hold a kept thread after its last turn. Long, since
 // they end by themselves; only a stuck one should ever reach it.
-const DRAIN_AGENT_MS = 4 * 60 * 60_000;
+export const DRAIN_AGENT_MS = 4 * 60 * 60_000;
 
 export type RunnerDeps = {
   config: Config;
@@ -493,7 +498,7 @@ export const UNTIL_RESTART = '9999-12-31T00:00:00.000Z';
 export const NO_WAKE_TIME = UNTIL_RESTART;
 
 // Parts of the Runner that live in runner/ (see each file's top).
-export interface Runner extends PoolsPart, NetworkPart, WorktreesPart {}
+export interface Runner extends ReviewsPart, ApprovalsPart, ProjectsHostPart, StoppedWorkPart, HandoversPart, PoolsPart, NetworkPart, WorktreesPart {}
 export class Runner {
   cfg: Config;
   store: ThreadStore;
@@ -912,263 +917,11 @@ export class Runner {
   // ------------------------------------------------------------- handovers
   // docs/protocol.md, "Handovers".
 
-  // This runner is handing over to a new release. `keep` are the busy
-  // threads it goes on running; every other thread is let go now (an idle
-  // CLI exits, and the new runner resumes it by session id). Resolves once
-  // those CLIs have gone, so the new runner never resumes a session beside
-  // its old CLI. Each kept thread is let go in turn once nothing would be
-  // cut short, and onHandedOver hears its id after its thread.json is saved.
-  //
-  // `ready` says whether the new runner is there to hear about one (it has
-  // connected); until it is, threads stay here, and recheckHandovers() looks
-  // again once it does.
-  async beginDrain(keep: Iterable<string>, opts: { onHandedOver: (threadId: string) => void; backgroundMs?: number; agentMs?: number; checkMs?: number; ready?: () => boolean }): Promise<void> {
-    if (this.draining) throw new Error('already draining');
-    const d: Drain = {
-      keep: new Set([...keep].filter((id) => this.threads.has(id))),
-      going: new Set(),
-      onHandedOver: opts.onHandedOver,
-      since: this.clock.now(),
-      backgroundMs: opts.backgroundMs ?? DRAIN_BACKGROUND_MS,
-      agentMs: opts.agentMs ?? DRAIN_AGENT_MS,
-      checkMs: opts.checkMs ?? DRAIN_CHECK_MS,
-      checkQueued: false,
-      ready: opts.ready ?? (() => true),
-    };
-    this.draining = d;
-    // Accounts are the primary's to watch now.
-    this.rescanTimer?.cancel();
-    this.accountsTimer?.cancel();
-    await Promise.all([...this.threads.values()].filter((st) => !d.keep.has(st.rec.id)).map((st) => this.letGo(st)));
-    this.log.info('let go of the idle threads', { keeps: [...d.keep] });
-    this.checkHandovers();
-  }
-
-  // The threads a draining runner still has; undefined when not draining.
-  keeping(): string[] | undefined {
-    return this.draining ? [...this.draining.keep] : undefined;
-  }
-
-  // Whether this runner has the thread (a draining one lets them go).
-  has(threadId: string): boolean {
-    return this.threads.has(threadId);
-  }
-
-  recheckHandovers(): void {
-    this.queueHandoverCheck();
-  }
-
-  queueHandoverCheck(): void {
-    const d = this.draining;
-    if (!d || d.checkQueued) return;
-    d.checkQueued = true;
-    this.defer(() => {
-      d.checkQueued = false;
-      this.checkHandovers();
-    });
-  }
-
-  checkHandovers(): void {
-    const d = this.draining;
-    if (!d || this.stopping) return;
-    d.timer?.cancel();
-    d.timer = undefined;
-    for (const id of d.ready() ? [...d.keep] : []) {
-      const st = this.threads.get(id);
-      if (!st) {
-        // Deleted while kept.
-        d.keep.delete(id);
-        continue;
-      }
-      if (d.going.has(id) || !this.readyToHandOver(st, d)) continue;
-      d.going.add(id);
-      void this.letGo(st).then(
-        () => {
-          d.going.delete(id);
-          d.keep.delete(id);
-          this.log.info('handed a thread over', { threadId: id, left: d.keep.size });
-          d.onHandedOver(id);
-        },
-        (e: unknown) => {
-          d.going.delete(id);
-          this.log.error('could not hand a thread over', { threadId: id, error: String(e) });
-        },
-      );
-    }
-    // Background work's limit passes without anything else happening.
-    if (d.keep.size > d.going.size) d.timer = this.clock.setTimeout(() => this.checkHandovers(), d.checkMs);
-  }
-
-  // Nothing would be cut short by letting it go now: no turn, approval or
-  // question, wake grace, turn-end hook or action. Queued messages go with
-  // it. Background shells and monitors hold it for backgroundMs after its
-  // last turn (a dev server never ends), or DRAIN_SETTLE_MS once it has
-  // been here DRAIN_MAX_OLD_MS, and are then stopped with a note, and the thread told
-  // on the new runner. Subagents hold it for agentMs: they
-  // finish by themselves, and stopping one throws away its work (27 Oct: a
-  // builder agent an agent left running was cut off after 30 minutes).
-  readyToHandOver(st: ThreadState, d: Drain): boolean {
-    const { rt } = st;
-    if (rt.turn || rt.approvals.size || rt.wakeTimer || rt.hooksRunning || rt.runningActions?.size) return false;
-    if (rt.tasks.length === 0) return true;
-    const idleFor = this.clock.now() - rt.activeAt;
-    if (rt.tasks.some((t) => t.kind === 'agent')) return idleFor >= d.agentMs;
-    if (this.clock.now() - d.since >= DRAIN_MAX_OLD_MS && idleFor >= DRAIN_SETTLE_MS) return true;
-    return idleFor >= d.backgroundMs;
-  }
-
-  // Lets go of a thread for good: its CLI exits (background work, if any,
-  // is stopped with a note), its record is saved, and anything the old CLI
-  // still reports goes nowhere.
-  async letGo(st: ThreadState): Promise<void> {
-    const { rt, rec } = st;
-    rt.idleTimer?.cancel();
-    rt.idleTimer = undefined;
-    this.flushDeltas(st);
-    if (rt.session && !rt.closing) {
-      this.rememberStoppedWork(st);
-      this.releaseSession(st);
-    }
-    if (rt.closing) await rt.closing;
-    rt.deltaTimer?.cancel();
-    rt.wakeTimer?.cancel();
-    rt.generation++;
-    this.store.save(rec);
-    rt.deleted = true;
-    this.dirty.delete(rec.id);
-    this.threads.delete(rec.id);
-    this.store.forget(rec.id);
-  }
-
-  // Loads a thread a draining runner has handed over and carries on with
-  // it: messages queued while it was busy there start now. `crashed`: the
-  // draining runner died with it, so it's recovered as after a crash (a
-  // turn in flight ends as stopped).
-  adopt(threadId: string, opts: { crashed?: boolean } = {}): ThreadSummary | undefined {
-    const had = this.threads.get(threadId);
-    if (had) return this.summary(had);
-    this.store.forget(threadId);
-    const rec = this.store.load(threadId) ?? this.rebuild(threadId);
-    if (!rec) {
-      this.log.warn('a handed-over thread is gone', { threadId });
-      return undefined;
-    }
-    rec.lastSeq = this.store.log(rec.id).lastSeq;
-    const st: ThreadState = { rec, rt: newRuntime(Date.parse(rec.lastActivityAt) || 0) };
-    this.threads.set(rec.id, st);
-    // A thread that was busy on the old runner comes across here, not at
-    // start, so it learns its "You: ..." line here too.
-    if (rec.asked === undefined && !rec.archivedAt) this.backfillAsked(rec);
-    this.recoverReviews(st);
-    if (opts.crashed) {
-      // main.ts carries it on (carryOnStopped), after any resume of its own.
-      if (this.recover(st)) this.notice('info', `The old runner stopped while "${rec.title}" was mid-turn.`);
-    }
-    // Hibernating until the runner restarts: for this thread, coming across
-    // is the restart.
-    if (rec.snoozedUntilRestart || rec.wakeWhen?.pending) this.wake(st, 'restart');
-    else if (rec.queue.length && this.bucket(rec) === 'inbox') {
-      this.kickQueue(st);
-    }
-    this.tellOneStoppedWork(st);
-    this.markDirty(st);
-    this.armSnoozeTimer();
-    this.armRoomTimer();
-    this.armNetTimer(true);
-    this.log.info('adopted a thread', { threadId, crashed: Boolean(opts.crashed), queued: rec.queue.length });
-    return this.summary(st);
-  }
-
   // ---------------------------------------------------- stopped background work
   // docs/protocol.md, "Stopped background work". A handover or restart stops
   // work the thread is counting on, usually a wait it promised to report
   // back from (1 Nov: Mike asked "Is this still going?" 4.5 hours later).
   // The note alone wakes nobody, so the next runner tells the thread.
-
-  rememberStoppedWork(st: ThreadState): void {
-    const { rec, rt } = st;
-    if (rt.tasks.length === 0) return;
-    const what = rt.tasks.map((t) => t.description || t.type);
-    rec.stoppedWork = { what: [...(rec.stoppedWork?.what ?? []), ...what], at: this.isoNow() };
-    this.markDirty(st);
-  }
-
-  // Once this runner is listening, for the threads it loaded at startup. A
-  // thread coming across from a draining runner is told as adopt() loads it.
-  tellStoppedWork(): void {
-    for (const st of this.threads.values()) this.tellOneStoppedWork(st);
-  }
-
-  tellOneStoppedWork(st: ThreadState): void {
-    const { rec } = st;
-    const stopped = rec.stoppedWork;
-    if (!stopped) return;
-    delete rec.stoppedWork;
-    this.markDirty(st);
-    // Put away since: its next message would bring it back, and the note
-    // is there to read then. This one mustn't bring it back by itself.
-    if (this.bucket(rec) !== 'inbox') return;
-    const wakes = rec.stoppedWorkWakes ?? 0;
-    const why =
-      this.clock.now() - Date.parse(stopped.at) > STOPPED_WORK_WAKE_MAX_AGE_MS
-        ? 'the runner was away for more than a day'
-        : wakes >= STOPPED_WORK_WAKES
-          ? `it has already been woken ${STOPPED_WORK_WAKES} times for this since anyone last wrote to it`
-          : undefined;
-    try {
-      if (why) {
-        this.emit(st, { type: 'system.note', text: `Not waking this thread about its stopped background work: ${why}.` });
-        return;
-      }
-      rec.stoppedWorkWakes = wakes + 1;
-      this.sendTo(st, stoppedWorkMessage(stopped.what, wakes + 1 >= STOPPED_WORK_WAKES), [], { origin: 'runner', queue: true });
-      this.log.info('told a thread its background work was stopped', { threadId: rec.id, what: stopped.what });
-    } catch (e) {
-      this.log.error('could not tell a thread its background work was stopped', { threadId: rec.id, error: String(e) });
-    }
-  }
-
-  // Threads a restart, a crash or the Mac restarting cut off mid-turn
-  // carry on by themselves with the runner's own message, as Mike would
-  // otherwise have to tell each one to (30 Oct 2026, after a reboot:
-  // "sorry I had to reboot, please continue"). main.ts calls this once
-  // listening, after the restart's own resume and tellStoppedWork, so a
-  // thread one of those already sent a message to isn't told twice. Not
-  // a thread put away, one with a message waiting, one stopped more than
-  // STOPPED_CARRY_ON_MAX_AGE_MS ago, or a carry-on that was itself cut
-  // off (a turn that crashes the runner mustn't loop). If the network
-  // isn't back yet, the carry-on waits for it (onNetworkLost).
-  // `threadId`: just that one (a thread a crashed draining runner had).
-  carryOnStopped(threadId?: string): void {
-    let carried = 0;
-    let left = 0;
-    for (const st of this.threads.values()) {
-      if (threadId && st.rec.id !== threadId) continue;
-      const { rec, rt } = st;
-      const stopped = rec.stoppedMidTurn;
-      if (!stopped) continue;
-      delete rec.stoppedMidTurn;
-      this.markDirty(st);
-      if (rt.deleted || rec.status !== 'stopped' || rt.turn || rec.queue.length || this.bucket(rec) !== 'inbox') continue;
-      const old = !(this.clock.now() - Date.parse(stopped.at) <= STOPPED_CARRY_ON_MAX_AGE_MS);
-      if (old || rec.restartCarryOn === stopped.turnId) {
-        left++;
-        continue;
-      }
-      try {
-        rec.restartCarryOn = this.sendTo(st, CARRY_ON_RESTART, [], { origin: 'runner', queue: true });
-        carried++;
-        this.log.info('carried on a thread the runner stopped mid-turn', { threadId: rec.id });
-      } catch (e) {
-        left++;
-        this.log.error('could not carry on a thread the runner stopped mid-turn', { threadId: rec.id, error: String(e) });
-      }
-    }
-    // At startup the app is rarely connected yet, so it hears later.
-    const say = (m: string) => (threadId ? this.notice('info', m) : this.startupNotice('info', m));
-    if (carried) say(`${carried === 1 ? 'A thread the runner stopped mid-turn is' : `${carried} threads the runner stopped mid-turn are`} carrying on by ${carried === 1 ? 'itself' : 'themselves'}.`);
-    if (left) say(`${left === 1 ? 'A thread was' : `${left} threads were`} mid-turn when the runner stopped; send a message to carry on.`);
-  }
 
   // From the moment a restart begins until the runner exits, a new turn
   // would only be cut off straight away, so sends and new threads are
@@ -1179,94 +932,6 @@ export class Runner {
 
   checkAccepting(): void {
     if (this.refusing) throw new RpcError(ErrorCode.busy, this.refusing);
-  }
-
-  // Threads whose CLI is running background shells or subagents. A restart
-  // waits for them (restart.ts), since stopping the CLI stops them.
-  backgroundWork(): { threadId: string; tasks: string[] }[] {
-    const out: { threadId: string; tasks: string[] }[] = [];
-    for (const st of this.threads.values()) {
-      const tasks = this.background(st).map((t) => (t.finished ? `${t.description || 'a background task'} (just finished, which the agent is about to look at)` : t.description || 'a background task'));
-      if (tasks.length) out.push({ threadId: st.rec.id, tasks });
-    }
-    return out;
-  }
-
-  // Claude threads with no turn going whose CLI still runs background
-  // work, for the stuck-job check (stuck-jobs.ts). Its output files are
-  // named by the session and task ids.
-  idleBackground(): { threadId: string; sessionId: string; tasks: BackgroundTask[] }[] {
-    const out: { threadId: string; sessionId: string; tasks: BackgroundTask[] }[] = [];
-    for (const { rec, rt } of this.threads.values()) {
-      if (rt.deleted || rec.archivedAt || rec.provider !== 'claude' || !rec.nativeSessionId || !rt.session) continue;
-      if (rt.turn || rt.wakeTimer || rec.status !== 'idle' || !rt.tasks.length) continue;
-      out.push({ threadId: rec.id, sessionId: rec.nativeSessionId, tasks: rt.tasks });
-    }
-    return out;
-  }
-
-  // Claude turns the CLI has said nothing in for a while, for the frozen
-  // CLI check (frozen-cli.ts). Not one waiting on Mike's approval: that's
-  // quiet because of him, and the CLI is fine.
-  quietTurns(minMs: number): { threadId: string; turnId: string; sessionId: string; quietMs: number }[] {
-    const now = this.clock.now();
-    const out: { threadId: string; turnId: string; sessionId: string; quietMs: number }[] = [];
-    for (const { rec, rt } of this.threads.values()) {
-      const turn = rt.turn;
-      if (!turn || rt.deleted || !rt.session || rt.closing || rec.provider !== 'claude' || !rec.nativeSessionId) continue;
-      if (turn.auto && !turn.cliStarted) continue;
-      if (rec.status === 'waiting') continue;
-      const quietMs = now - Math.max(turn.startedAt, rt.lastOutputAt ?? 0);
-      if (quietMs >= minMs) out.push({ threadId: rec.id, turnId: turn.turnId, sessionId: rec.nativeSessionId, quietMs });
-    }
-    return out;
-  }
-
-  // Says so in the thread and puts it in Needs you, as the agent can't: a
-  // frozen CLI isn't reading anything.
-  cliFrozen(threadId: string, turnId: string, text: string): void {
-    const st = this.threads.get(threadId);
-    if (!st || st.rt.turn?.turnId !== turnId) return;
-    st.rt.frozen = true;
-    st.rec.forceUnread = true;
-    this.emit(st, { type: 'system.note', text }, turnId);
-    this.markDirty(st);
-  }
-
-  cliMovingAgain(threadId: string, turnId: string, text: string): void {
-    const st = this.threads.get(threadId);
-    if (!st) return;
-    st.rt.frozen = false;
-    st.rec.forceUnread = false;
-    // A turn that has ended meanwhile (stopped by hand) has nothing to add.
-    if (st.rt.turn?.turnId === turnId) this.emit(st, { type: 'system.note', text }, turnId);
-    this.markDirty(st);
-  }
-
-  // Ends the turn and stops the CLI. TERM can't reach a process blocked in
-  // the kernel, but the spawner follows it with KILL (proc.ts).
-  stopFrozenCli(threadId: string, turnId: string, text: string): void {
-    const st = this.threads.get(threadId);
-    if (!st || st.rt.turn?.turnId !== turnId) return;
-    const session = st.rt.session;
-    st.rt.frozen = false;
-    st.rec.forceUnread = false;
-    this.failTurn(st, text);
-    session?.kill();
-  }
-
-  // The summary's background list: what the CLI is still running, then
-  // (while the wake grace runs) what just finished and is about to be read.
-  background(st: ThreadState): ProtocolBackgroundTask[] {
-    const { rt } = st;
-    const out: ProtocolBackgroundTask[] = rt.tasks.map((t) => ({ kind: t.kind, description: t.description || t.type }));
-    if (rt.wakeTimer) {
-      // A grace with nothing recorded as finished (a task list the CLI
-      // replaced wholesale) still says a result is on its way.
-      const finished = rt.finished.length ? rt.finished : [{ id: '', type: 'task', kind: 'other' as const, description: '' }];
-      for (const t of finished) out.push({ kind: t.kind, description: t.description || (t.type === 'task' ? '' : t.type), finished: true });
-    }
-    return out;
   }
 
   stopTurn(st: ThreadState): void {
@@ -1342,93 +1007,6 @@ export class Runner {
   }
 
   // ---------------------------------------------------- for projects.ts
-
-  // Every thread's record, put away ones included. Read only.
-  threadRecords(): ThreadRecord[] {
-    return [...this.threads.values()].filter((t) => !t.rt.deleted).map((t) => t.rec);
-  }
-
-  // A thread id from a full id or unique prefix; -32004 otherwise.
-  resolveThread(idOrPrefix: string): string {
-    const t = typeof idOrPrefix === 'string' && idOrPrefix ? this.findThread(idOrPrefix) : undefined;
-    if (!t) throw new RpcError(ErrorCode.threadNotFound, `Thread not found: ${idOrPrefix}`);
-    return t.id;
-  }
-
-  // Changes a thread's record for projects.ts, saves it and sends its
-  // summary; `note` goes in the transcript. The agent hears about a new
-  // project with its next message (projectNews).
-  editThread(threadId: string, edit: (rec: ThreadRecord) => void, say: { note?: string } = {}): ThreadSummary {
-    const st = this.mustGet(threadId);
-    edit(st.rec);
-    if (say.note) this.emit(st, { type: 'system.note', text: say.note }, st.rt.turn?.turnId);
-    this.markDirty(st);
-    return this.summary(st);
-  }
-
-  // Sends these threads' summaries again; their patches are read again on
-  // the way, since a project's folders may have changed.
-  touchThreads(threadIds: string[]): void {
-    this.forgetFolders();
-    for (const id of threadIds) {
-      const st = this.threads.get(id);
-      if (!st) continue;
-      if (st.rt.patches) st.rt.patches.at = -Infinity;
-      this.markDirty(st);
-    }
-  }
-
-  // The first user message and the last few messages of a thread, as plain
-  // text, for the librarian.
-  // `images` counts what a message had attached: the librarian only gets the
-  // words, so it has to know when they're pointing at a picture.
-  threadGist(threadId: string, opts: { recent?: number; chars?: number } = {}): { first?: string; firstImages?: number; recent: { who: 'user' | 'assistant'; text: string; images?: number }[] } {
-    const st = this.mustGet(threadId);
-    const chars = opts.chars ?? 600;
-    const cut = (t: string) => (t.length > chars ? t.slice(0, chars) + '…' : t);
-    const opening = this.opening(st.rec.id, st.rec);
-    const first = opening.text;
-    const log = this.store.log(st.rec.id);
-    const recent: { who: 'user' | 'assistant'; text: string; images?: number }[] = [];
-    const want = opts.recent ?? 6;
-    // Back from the end a page at a time until there are enough.
-    for (let to = log.lastSeq; to >= 1 && recent.length < want; to -= 200) {
-      const page = log.read(Math.max(1, to - 199), to);
-      for (const e of page.reverse()) {
-        if (recent.length >= want) break;
-        if (cutOut(st.rec, e.seq)) continue;
-        // From the phone is still Mike talking.
-        if (e.type === 'user.message' && (e.origin === undefined || e.origin === 'phone')) recent.unshift({ who: 'user', text: cut(e.text), ...(e.images?.length ? { images: e.images.length } : {}) });
-        else if (e.type === 'assistant.text' && e.text.trim()) recent.unshift({ who: 'assistant', text: cut(e.text) });
-      }
-    }
-    return { first: first ? cut(first) : undefined, ...(opening.images ? { firstImages: opening.images } : {}), recent };
-  }
-
-  // The seq ranges edits cut out of the thread (docs/protocol.md, "Editing
-  // a message").
-  cuts(threadId: string): { from: number; to: number }[] {
-    return [...(this.mustGet(threadId).rec.rewinds ?? [])];
-  }
-
-  // What a thread has said since `seq`: how much of Mike's and the
-  // agent's text, and whether any of it has a link. The librarian skips a
-  // catch-up look when there's little.
-  threadSince(threadId: string, seq: number): { chars: number; links: boolean } {
-    const st = this.mustGet(threadId);
-    const log = this.store.log(st.rec.id);
-    let chars = 0;
-    let links = false;
-    for (let from = seq + 1; from <= log.lastSeq; from += 500) {
-      for (const e of log.read(from, Math.min(log.lastSeq, from + 499))) {
-        if (cutOut(st.rec, e.seq)) continue;
-        const text = e.type === 'user.message' && (e.origin === undefined || e.origin === 'phone') ? e.text : e.type === 'assistant.text' ? e.text : '';
-        chars += text.trim().length;
-        if (!links && /https?:\/\//.test(text)) links = true;
-      }
-    }
-    return { chars, links };
-  }
 
   notify(n: Notification): void {
     // A kept thread's summary changing can be it becoming free to go.
@@ -3341,38 +2919,6 @@ export class Runner {
     return { thread: this.summary(st) };
   }
 
-  respondApproval(params: {
-    threadId: string;
-    approvalId: string;
-    decision: ApprovalDecision;
-    message?: string;
-    answers?: Record<string, string>;
-  }): Record<string, never> {
-    const st = this.mustGet(params.threadId);
-    const pending = st.rt.approvals.get(params.approvalId);
-    if (!pending) throw new RpcError(ErrorCode.badParams, 'That approval is no longer pending.');
-    if (pending.kind === 'question') {
-      if (params.decision === 'answered') {
-        const answers = matchAnswers(pending.questions, params.answers ?? {});
-        if (!answers) throw new RpcError(ErrorCode.badParams, 'answers must cover every question');
-        this.resolveApproval(st, pending.approvalId, 'answered', params.message);
-        pending.resolve({ answers });
-      } else if (params.decision === 'deny') {
-        this.resolveApproval(st, pending.approvalId, 'deny', params.message);
-        pending.resolve({ answers: null, message: params.message });
-      } else {
-        throw new RpcError(ErrorCode.badParams, 'A question takes "answered" or "deny".');
-      }
-    } else {
-      if (params.decision !== 'allow' && params.decision !== 'allowAlways' && params.decision !== 'deny') {
-        throw new RpcError(ErrorCode.badParams, 'An approval takes "allow", "allowAlways" or "deny".');
-      }
-      this.resolveApproval(st, pending.approvalId, params.decision, params.message);
-      pending.resolve({ decision: params.decision, message: params.message });
-    }
-    return {};
-  }
-
   importMedia(p: string): { image: ImageRef } {
     const src = path.resolve(expandHome(p));
     if (!fs.existsSync(src)) throw new RpcError(ErrorCode.badParams, `File not found: ${src}`);
@@ -3384,76 +2930,6 @@ export class Runner {
   }
 
   // ------------------------------------------------------------- approvals
-
-  // A request can come with no turn running: a background subagent keeps
-  // working after the turn that started it ended. It gets a turn of its own
-  // so the card is shown rather than the subagent being stopped.
-  turnForRequest(st: ThreadState, gen: number): boolean {
-    const { rt } = st;
-    if (rt.generation !== gen || rt.closing || this.stopping) return false;
-    if (!rt.turn) this.openCliTurn(st);
-    return true;
-  }
-
-  requestApproval(st: ThreadState, gen: number, req: ToolApprovalRequest): Promise<ToolApprovalAnswer> {
-    if (!this.turnForRequest(st, gen)) return Promise.resolve({ decision: 'expired' });
-    const approvalId = crypto.randomUUID();
-    const body: EventBody = {
-      type: 'approval.requested',
-      approvalId,
-      name: req.name,
-      title: approvalTitle(req.name, req.input, (q) => this.findThread(q)) ?? req.title,
-      input: req.input,
-      options: req.canAlwaysAllow ? ['allow', 'allowAlways', 'deny'] : ['allow', 'deny'],
-    };
-    if (req.toolUseId) body.itemId = req.toolUseId;
-    return new Promise((resolve) => {
-      this.addApproval(st, { approvalId, kind: 'tool', main: Boolean(req.toolUseId), resolve }, body, req.signal);
-    });
-  }
-
-  requestQuestion(st: ThreadState, gen: number, req: QuestionRequest): Promise<QuestionAnswer> {
-    if (!this.turnForRequest(st, gen)) return Promise.resolve({ answers: null });
-    const approvalId = crypto.randomUUID();
-    const body: EventBody = { type: 'question.requested', approvalId, questions: req.questions };
-    if (req.toolUseId) body.itemId = req.toolUseId;
-    return new Promise((resolve) => {
-      this.addApproval(st, { approvalId, kind: 'question', main: Boolean(req.toolUseId), questions: req.questions, resolve }, body, req.signal);
-    });
-  }
-
-  addApproval(st: ThreadState, pending: PendingApproval, body: EventBody, signal: AbortSignal): void {
-    const { rec, rt } = st;
-    rt.approvals.set(pending.approvalId, pending);
-    rec.pendingApprovals.push(pending.approvalId);
-    this.emit(st, body, rt.turn?.turnId);
-    rec.status = 'waiting';
-    this.markDirty(st);
-    signal.addEventListener('abort', () => this.expireApproval(st, pending.approvalId, 'Cancelled.'), { once: true });
-  }
-
-  resolveApproval(st: ThreadState, approvalId: string, decision: ApprovalDecision, message?: string): void {
-    const { rec, rt } = st;
-    rt.approvals.delete(approvalId);
-    rec.pendingApprovals = rec.pendingApprovals.filter((x) => x !== approvalId);
-    const body: EventBody = { type: 'approval.resolved', approvalId, decision };
-    if (message) body.message = message;
-    this.emit(st, body, rt.turn?.turnId);
-    if (rec.status === 'waiting' && rt.approvals.size === 0) rec.status = rt.turn ? 'running' : 'idle';
-    this.markDirty(st);
-  }
-
-  expireApproval(st: ThreadState, approvalId: string, message: string): void {
-    const pending = st.rt.approvals.get(approvalId);
-    if (!pending) return;
-    this.resolveApproval(st, approvalId, 'expired', message);
-    if (pending.kind === 'tool') pending.resolve({ decision: 'expired', message });
-    else pending.resolve({ answers: null, message });
-  }
-
-  expireApprovals(st: ThreadState, message: string): void {
-    for (const id of [...st.rt.approvals.keys()]) this.expireApproval(st, id, message);
-  }
 
   // ---------------------------------------------------------- idle release
 
@@ -3857,155 +3333,6 @@ export class Runner {
   }
 
   // ---------------------------------------------------------- design reviews
-
-  createReview(threadId: string, raw: ReviewInput): { review: DesignReview } {
-    const st = this.mustGet(threadId);
-    this.checkAccepting();
-    const input = reviewInput(raw, st.rec.cwd);
-    const id = crypto.randomUUID();
-    const dir = path.join(this.store.mediaDir(threadId), 'reviews', id);
-    const now = this.isoNow();
-    try {
-      const options = input.options.map(({path: source, ...option}) => ({...option, image: copyImageInto(dir, source)}));
-      const review: DesignReview = { id, title: input.title, ...(input.note ? {note: input.note} : {}), options,
-        status: 'pending', revision: 0, createdAt: now, updatedAt: now, draft: {notes: {}} };
-      this.persistReview(st, review);
-      return {review: structuredClone(review)};
-    } catch (e) {
-      // Only remove imports if the review was not committed. If an event
-      // append failed after the record save, startup repairs its card.
-      if (!st.rec.reviews?.some(r => r.id === id)) fs.rmSync(dir, {recursive: true, force: true});
-      throw e;
-    }
-  }
-
-  listReviews(threadId: string): { reviews: DesignReview[] } {
-    return { reviews: structuredClone((this.mustGet(threadId).rec.reviews ?? [])
-      .filter(review => review.status === 'pending')
-      .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))) };
-  }
-
-  getReview(threadId: string, reviewId: string): { review: DesignReview } {
-    return {review: structuredClone(this.mustReview(this.mustGet(threadId), reviewId))};
-  }
-
-  saveReview(threadId: string, reviewId: string, revision: number, raw: ReviewDraft): { review: DesignReview } {
-    const st = this.mustGet(threadId);
-    this.checkAccepting();
-    const review = this.mustReview(st, reviewId);
-    this.checkReviewRevision(review, revision);
-    const draft = reviewDraft(review, raw);
-    const next = {...review, draft, revision: review.revision + 1, updatedAt: this.isoNow()};
-    this.persistReview(st, next);
-    return {review: structuredClone(next)};
-  }
-
-  respondReview(threadId: string, reviewId: string, revision: number, raw: ReviewDraft): { review: DesignReview; turnId?: string } {
-    const st = this.mustGet(threadId);
-    const review = this.mustReview(st, reviewId);
-    const draft = reviewDraft(review, raw, true);
-    // A dropped WebSocket response must not send Mike's answer twice.
-    if (review.status === 'answered' && sameDraft(review.response, draft)) {
-      this.kickQueue(st);
-      return {review: structuredClone(review), turnId: review.replyTurnId};
-    }
-    this.checkAccepting();
-    this.checkReviewRevision(review, revision);
-    const turnId = crypto.randomUUID();
-    const next: DesignReview = {...review, draft, response: draft, status: 'answered', revision: review.revision + 1, updatedAt: this.isoNow(), replyTurnId: turnId};
-    const message: QueuedSend = {turnId, text: reviewReply(review, draft), images: [], reviewId, reviewResponse: draft};
-    // The answer and outbox live in one atomic thread.json write. Publish
-    // the card only after it succeeds, then start the queued reply.
-    this.persistReview(st, next, [...st.rec.queue, message], true);
-    st.rt.releaseWhenIdle = false;
-    this.markDirty(st);
-    this.kickQueue(st);
-    return {review: structuredClone(next), turnId};
-  }
-
-  cancelReview(threadId: string, reviewId: string, revision: number): {review: DesignReview} {
-    const st = this.mustGet(threadId);
-    this.checkAccepting();
-    const review = this.mustReview(st, reviewId);
-    this.checkReviewRevision(review, revision);
-    const next: DesignReview = {...review, status: 'cancelled', revision: review.revision + 1, updatedAt: this.isoNow()};
-    this.persistReview(st, next);
-    return {review: structuredClone(next)};
-  }
-
-  // Mike often answers a review by typing in the thread instead of picking
-  // in the review window. Left pending, it kept the thread in Needs you
-  // (even mid-turn) with nothing left to do. So his own message, from the
-  // app or the phone, closes every open review as superseded; the card
-  // and window stay readable. Runner, schedule and agent-to-thread
-  // messages aren't him and leave reviews open.
-  supersedeReviews(st: ThreadState, text: string, opts: SendOptions): void {
-    if (!fromMike(text, opts)) return;
-    for (const review of st.rec.reviews ?? []) {
-      if (review.status !== 'pending') continue;
-      this.persistReview(st, {...review, status: 'superseded', revision: review.revision + 1, updatedAt: this.isoNow()});
-    }
-  }
-
-  mustReview(st: ThreadState, id: string): DesignReview {
-    const review = st.rec.reviews?.find(r => r.id === id);
-    if (!review) throw new RpcError(ErrorCode.badParams, `Review not found: ${id}`);
-    return review;
-  }
-
-  checkReviewRevision(review: DesignReview, revision: number): void {
-    if (review.status !== 'pending') throw new RpcError(ErrorCode.badParams, `This review is ${review.status}.`);
-    if (!Number.isSafeInteger(revision) || review.revision !== revision) throw new RpcError(ErrorCode.badParams, 'This review changed. Reload it before saving or sending your answer.');
-  }
-
-  persistReview(st: ThreadState, review: DesignReview, queue = st.rec.queue, wake = false): void {
-    const previous = st.rec.reviews ?? [];
-    const reviews = previous.some(r => r.id === review.id)
-      ? previous.map(r => r.id === review.id ? review : r)
-      : [...previous, review];
-    const next = {...st.rec, reviews, queue};
-    if (wake) {
-      delete next.snoozedUntil;
-      delete next.snoozedUntilRestart;
-      delete next.wakeWhen;
-      delete next.archivedAt;
-    }
-    this.store.save(next);
-    if (wake) {
-      delete st.rec.snoozedUntil;
-      delete st.rec.snoozedUntilRestart;
-      delete st.rec.wakeWhen;
-      delete st.rec.archivedAt;
-    }
-    // Preserve the record object used by any in-flight deliver() callback.
-    Object.assign(st.rec, next);
-    this.emit(st, {type: 'review.updated', review});
-  }
-
-  recoverReviews(st: ThreadState): void {
-    // Reviews save their record before their event. Threads without reviews
-    // need no extra log scan (the common case, including long transcripts).
-    if (!st.rec.reviews?.length && !st.rec.queue.some(q => q.reviewId)) return;
-    const log = this.store.log(st.rec.id);
-    const latest = new Map<string, DesignReview>();
-    const sent = new Set(st.rec.reviewDeliveries ?? []);
-    for (const event of log.read(1, log.lastSeq)) {
-      if (event.type === 'review.updated') latest.set(event.review.id, event.review);
-    }
-    const reviews = new Map((st.rec.reviews ?? []).map(r => [r.id, r]));
-    for (const [id, review] of latest) if (!reviews.has(id) || reviews.get(id)!.revision < review.revision) reviews.set(id, review);
-    if (reviews.size) st.rec.reviews = [...reviews.values()];
-    // The delivery marker is written after session.send, not merely after
-    // user.message. A failed turn.started append leaves the answer unsent.
-    st.rec.queue = st.rec.queue.filter(q => !q.reviewId || !sent.has(q.reviewId));
-    for (const [id, review] of reviews) {
-      if (review.status === 'answered' && review.replyTurnId && review.response && !sent.has(id) && !st.rec.queue.some(q => q.reviewId === id)) {
-        st.rec.queue.push({turnId: review.replyTurnId, text: reviewReply(review, review.response), images: [], reviewId: id, reviewResponse: review.response});
-      }
-      if (latest.get(id)?.revision !== review.revision) this.emit(st, {type: 'review.updated', review});
-    }
-    if (reviews.size) this.markDirty(st);
-  }
 
   // ---------------------------------------------------------------- events
 
@@ -4908,7 +4235,7 @@ export class Runner {
 
 // The Runner's other methods live in parts under runner/, one area each;
 // they go onto its prototype here, as the class's own methods would be.
-for (const part of [poolsPart, networkPart, worktreesPart]) {
+for (const part of [reviewsPart, approvalsPart, projectsHostPart, stoppedWorkPart, handoversPart, poolsPart, networkPart, worktreesPart]) {
   for (const [key, d] of Object.entries(Object.getOwnPropertyDescriptors(part))) {
     Object.defineProperty(Runner.prototype, key, { ...d, enumerable: false });
   }
@@ -4917,12 +4244,12 @@ for (const part of [poolsPart, networkPart, worktreesPart]) {
 // answers: the asks the message answers (AskAnswer), for the app to show.
 // A wait started again can be stopped again by the next landing, so this
 // many wakes in a row at most, reset by anyone else writing to the thread.
-const STOPPED_WORK_WAKES = 3;
+export const STOPPED_WORK_WAKES = 3;
 // A runner that was away this long (a Mac left off for days) shouldn't wake
 // every thread that had something going when it went.
-const STOPPED_WORK_WAKE_MAX_AGE_MS = 24 * 60 * 60_000;
+export const STOPPED_WORK_WAKE_MAX_AGE_MS = 24 * 60 * 60_000;
 
-function stoppedWorkMessage(what: string[], last: boolean): string {
+export function stoppedWorkMessage(what: string[], last: boolean): string {
   const one = what.length === 1;
   const lines = what.map((w) => `- ${w.length > 200 ? `${w.slice(0, 200)}...` : w}`);
   return [
@@ -4941,7 +4268,7 @@ export type SendOptions = { origin?: MessageOrigin; scheduleId?: string; queue?:
 // schedule's or an agent's (another thread's, or this one's own `then`
 // from move_thread, which once stopped the turn that sent it on a move to
 // another login).
-function fromMike(text: string, opts: SendOptions): boolean {
+export function fromMike(text: string, opts: SendOptions): boolean {
   if (opts.origin && opts.origin !== 'phone') return false;
   return !sentByAgent(text);
 }
@@ -4956,7 +4283,7 @@ export const CARRY_ON_MOVED = 'Your last login hit its usage limit partway throu
 export const CARRY_ON_RESTART = 'The runner stopped partway through that turn (Threadbear or the Mac restarted) and is back now. Carry on from where you left off.';
 // Past this, a cut-off turn is left for Mike: the Mac was off for a while,
 // and he may have moved on.
-const STOPPED_CARRY_ON_MAX_AGE_MS = 12 * 3_600_000;
+export const STOPPED_CARRY_ON_MAX_AGE_MS = 12 * 3_600_000;
 export const CARRY_ON_NETWORK = "The connection to the API dropped partway through that turn and is back now. Carry on from where you left off.";
 // How a thread waits for the network: probes 5s, 10s, 20s... apart, at
 // most a minute; a carry-on that can't get through either counts as a
@@ -4996,7 +4323,7 @@ function checkImages(images: ImageRef[]): void {
   }
 }
 
-function newRuntime(activeAt: number): Runtime {
+export function newRuntime(activeAt: number): Runtime {
   return {
     generation: 0,
     resumed: false,

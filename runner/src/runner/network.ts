@@ -3,6 +3,7 @@
 // fork's change to one area doesn't clash with another's. Each method's `this`
 // is the Runner; runner.ts puts them on its prototype.
 import type { Runner } from '../runner.ts';
+import type { RunnerPart } from './part.ts';
 import { reachable } from '../net-probe.ts';
 import type { Provider } from '../protocol.ts';
 import type { ThreadState } from '../runner.ts';
@@ -104,4 +105,4 @@ export const networkPart = {
   },
 };
 
-export type NetworkPart = typeof networkPart;
+export type NetworkPart = RunnerPart<typeof networkPart>;

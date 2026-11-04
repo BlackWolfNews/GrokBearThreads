@@ -3,6 +3,7 @@
 // fork's change to one area doesn't clash with another's. Each method's `this`
 // is the Runner; runner.ts puts them on its prototype.
 import type { Runner } from '../runner.ts';
+import type { RunnerPart } from './part.ts';
 import type { Account, Pool, Provider } from '../protocol.ts';
 import { ErrorCode, RpcError } from '../protocol.ts';
 import { cutOut } from '../store.ts';
@@ -372,4 +373,4 @@ export const poolsPart = {
   },
 };
 
-export type PoolsPart = typeof poolsPart;
+export type PoolsPart = RunnerPart<typeof poolsPart>;
