@@ -13,6 +13,20 @@ final class FilePathRefsTests: XCTestCase {
         }
     }
 
+    func testPathsWithSpacesArePaths() {
+        for text in ["exports/Threadbear Launch.mp4", "~/Library/Application Support/Threadbear", "/tmp/My Dir/a b.png",
+                     "docs/My Notes.md:12", "./My Folder/run.sh"] {
+            XCTAssertTrue(FilePathRefs.looksLikePath(text), text)
+        }
+        // Commands, not paths: a word before the first folder, a flag, a
+        // spaced last word with no extension, shell punctuation.
+        for text in ["open exports/Threadbear Launch.mp4", "ls runner/src/", "node app/Tools/tour-e2e.mjs", "./check.sh --app",
+                     "runner/bin/tb land", "/usr/bin/log show", "cat a/b.txt | head", "a/b.txt > out/c.txt", "My Notes.md",
+                     "exports/a  b.mp4", " exports/a.mp4", "exports/a.mp4 ", "a/b\tc.txt"] {
+            XCTAssertFalse(FilePathRefs.looksLikePath(text), text)
+        }
+    }
+
     func testLineNumbersAreStripped() {
         XCTAssertEqual(FilePathRefs.stripLine("Foo.swift:12"), "Foo.swift")
         XCTAssertEqual(FilePathRefs.stripLine("Foo.swift:12:4"), "Foo.swift")

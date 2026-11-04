@@ -26,14 +26,15 @@ public enum FilePathRefs {
     /// Endings that are web addresses far more often than files.
     private static let domainEndings: Set<String> = ["com", "org", "net", "io", "dev", "co", "ai", "au", "uk"]
 
-    /// Whether inline code reads as a file path: one word, no scheme, and
-    /// either rooted (`/`, `~/`, `./`, `../`), or ending in a file name
-    /// with an extension. Folders need the leading root or a slash in them.
+    /// Whether inline code reads as a file path: no scheme, and either
+    /// rooted (`/`, `~/`, `./`, `../`), or ending in a file name with an
+    /// extension. Folders need the leading root or a slash in them. Single
+    /// spaces are allowed where they can't be a command (`spacedPathOK`).
     public static func looksLikePath(_ text: String) -> Bool {
         guard !text.isEmpty, text.count < 400, !text.contains("://"),
-              text.rangeOfCharacter(from: .whitespacesAndNewlines) == nil,
               !text.contains("*"), !text.contains("<"), !text.contains("`") else { return false }
         let path = stripLine(splitQuery(text).path)
+        if text.rangeOfCharacter(from: .whitespacesAndNewlines) != nil, !spacedPathOK(path) { return false }
         if path.hasPrefix("/") { return path.count > 1 }
         if path.hasPrefix("~/") || path.hasPrefix("./") || path.hasPrefix("../") { return true }
         let name = (path as NSString).lastPathComponent
@@ -45,6 +46,23 @@ public enum FilePathRefs {
         }
         if !path.contains("/"), domainEndings.contains(ext.lowercased()) { return false }
         return true
+    }
+
+    /// Whether a path with spaces in it (`exports/Threadbear Launch.mp4`,
+    /// `~/Library/Application Support`) is one, rather than a command in
+    /// inline code (`open exports/a.mp4`, `./check.sh --app`, `tb land`).
+    /// Single spaces only, and only after the first folder, so a command's
+    /// first word can't be read as part of the path; no flags or shell
+    /// punctuation; and a spaced last part needs an extension, as
+    /// `runner/bin/tb land` is a command.
+    static func spacedPathOK(_ path: String) -> Bool {
+        guard path.contains(" "), path.rangeOfCharacter(from: CharacterSet.whitespacesAndNewlines.subtracting(CharacterSet(charactersIn: " "))) == nil,
+              !path.hasPrefix(" "), !path.hasSuffix(" "), !path.contains("  "),
+              path.rangeOfCharacter(from: CharacterSet(charactersIn: "|;$>\"'")) == nil, !path.contains("&&"),
+              let slash = path.firstIndex(of: "/"), let space = path.firstIndex(of: " "), slash < space,
+              !path.split(separator: " ").contains(where: { $0.hasPrefix("-") }) else { return false }
+        let last = path.hasSuffix("/") ? "" : (path as NSString).lastPathComponent
+        return !last.contains(" ") || !(last as NSString).pathExtension.isEmpty
     }
 
     /// `Foo.swift:12` or `Foo.swift:12:4` names the file, and a line in it.
