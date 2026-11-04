@@ -55,6 +55,7 @@ const THREAD_METHODS = new Set([
   'threads.tickAsk',
   'threads.share',
   'approvals.respond',
+  'secrets.answer',
   'panels.render',
   'panels.convexKey',
   'panels.convexDeployments',
@@ -494,6 +495,17 @@ export class RpcServer {
           decision,
           message: optString(p, 'message'),
           answers,
+        });
+      }
+      case 'secrets.answer': {
+        // docs/protocol.md, "Secrets". Nothing here logs params, and the
+        // errors below never quote them.
+        const decline = p.decline === true;
+        if (!decline && typeof p.secret !== 'string') throw bad('secret or decline is required');
+        return r.answerSecret({
+          threadId: reqString(p, 'threadId'),
+          approvalId: reqString(p, 'approvalId'),
+          ...(decline ? { decline: true } : { secret: p.secret as string }),
         });
       }
       case 'pools.list':

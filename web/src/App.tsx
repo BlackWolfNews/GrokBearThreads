@@ -605,6 +605,7 @@ function followUpMessage(follow: string[], extra: string): string {
 function ApprovalCard({ token, threadId, approval, onSent }: { token: string; threadId: string; approval: Approval; onSent: (id: Id<'commands'>) => void }) {
   const respond = useMutation(api.phone.respond);
   const answer = useMutation(api.phone.answer);
+  const secret = useMutation(api.phone.secret);
   const [answers, setAnswers] = useState<Record<string, string[]>>({});
 
   if (approval.kind === 'approval') {
@@ -619,6 +620,23 @@ function ApprovalCard({ token, threadId, approval, onSent }: { token: string; th
               {label[o] ?? o}
             </button>
           ))}
+        </div>
+      </section>
+    );
+  }
+
+  if (approval.kind === 'secret') {
+    // The browser doesn't take secrets (docs/protocol.md, "Secrets"): the
+    // Mac app and the iPhone app do, the phone sealing it to the runner.
+    return (
+      <section className="card">
+        <h2>{approval.label}</h2>
+        <p>{approval.reason}</p>
+        <p className="desc">Answer this in Threadbear on your Mac or iPhone.</p>
+        <div className="ask-links">
+          <button className="btn" onClick={async () => onSent(await secret({ token, threadId, approvalId: approval.approvalId, decline: true }))}>
+            Decline
+          </button>
         </div>
       </section>
     );

@@ -11,6 +11,18 @@ import { approvalTitle } from '../threadbear-mcp.ts';
 import crypto from 'node:crypto';
 import type { PendingApproval, ThreadState } from '../runner.ts';
 import { matchAnswers } from '../runner.ts';
+import { SECRET_TIMEOUT_DEFAULT_MIN, SECRET_TIMEOUT_MAX_MIN, type SecretFiles } from '../secrets.ts';
+
+export type SecretRequest = { label: string; reason: string; placeholder?: string; timeoutMinutes?: number; toolUseId?: string; signal?: AbortSignal };
+export type SecretAnswer = ({ status: 'saved' } & SecretFiles) | { status: 'declined' | 'expired'; message?: string };
+
+// Closes a pending card of any kind without an answer: Mike wrote instead,
+// the turn ended, the thread went.
+export function settleDeclined(p: PendingApproval, decision: 'deny' | 'expired', message?: string): void {
+  if (p.kind === 'tool') p.resolve({ decision, message });
+  else if (p.kind === 'question') p.resolve({ answers: null, message });
+  else p.resolve({ status: decision === 'deny' ? 'declined' : 'expired', message });
+}
 
 export const approvalsPart = {
   respondApproval(this: Runner, params: {
@@ -23,6 +35,12 @@ export const approvalsPart = {
     const st = this.mustGet(params.threadId);
     const pending = st.rt.approvals.get(params.approvalId);
     if (!pending) throw new RpcError(ErrorCode.badParams, 'That approval is no longer pending.');
+    if (pending.kind === 'secret') {
+      // A phone from before secrets draws any card it doesn't know as
+      // Allow/Deny: Deny declines, and Allow can't carry a value.
+      if (params.decision === 'deny') return this.answerSecret({ threadId: params.threadId, approvalId: params.approvalId, decline: true });
+      throw new RpcError(ErrorCode.badParams, 'A secret is answered with secrets.answer: update the Threadbear app, or answer it on the Mac.');
+    }
     if (pending.kind === 'question') {
       if (params.decision === 'answered') {
         const answers = matchAnswers(pending.questions, params.answers ?? {});
@@ -82,6 +100,56 @@ export const approvalsPart = {
     });
   },
 
+  // ask_secret (docs/protocol.md, "Secrets"): a card that waits for Mike to
+  // type a secret on the Mac or the phone. Resolves with the file's paths,
+  // or declined or expired; never with the value.
+  requestSecret(this: Runner, threadId: string, req: SecretRequest): Promise<SecretAnswer> {
+    const st = this.mustGet(threadId);
+    if (!this.turnForRequest(st, st.rt.generation)) return Promise.resolve({ status: 'expired', message: 'The thread is not running a turn.' });
+    const approvalId = crypto.randomUUID();
+    const body: EventBody = { type: 'secret.requested', approvalId, label: req.label, reason: req.reason };
+    if (req.placeholder) body.placeholder = req.placeholder;
+    if (req.toolUseId) body.itemId = req.toolUseId;
+    const minutes = Math.min(Math.max(req.timeoutMinutes ?? SECRET_TIMEOUT_DEFAULT_MIN, 1), SECRET_TIMEOUT_MAX_MIN);
+    return new Promise((resolve) => {
+      const timer = this.clock.setTimeout(() => this.expireApproval(st, approvalId, 'No answer in time.'), minutes * 60_000);
+      const done = (a: SecretAnswer) => {
+        timer.cancel();
+        resolve(a);
+      };
+      // The agent's own call: a message from Mike declines it, as with a question.
+      this.addApproval(st, { approvalId, kind: 'secret', main: true, resolve: done }, body, req.signal ?? new AbortController().signal);
+    });
+  },
+
+  // secrets.answer: Mike typed it (or declined) on a Mac, or the phone's
+  // sealed answer was opened (sync.ts). The file is written before the card
+  // closes, so a failed write leaves it open with the error.
+  answerSecret(this: Runner, params: { threadId: string; approvalId: string; secret?: string; decline?: boolean }): Record<string, never> {
+    const st = this.mustGet(params.threadId);
+    const pending = st.rt.approvals.get(params.approvalId);
+    if (!pending) throw new RpcError(ErrorCode.badParams, 'That request is no longer waiting.');
+    if (pending.kind !== 'secret') throw new RpcError(ErrorCode.badParams, 'That card is not asking for a secret.');
+    if (params.decline) {
+      this.resolveApproval(st, pending.approvalId, 'deny');
+      pending.resolve({ status: 'declined' });
+      return {};
+    }
+    const value = typeof params.secret === 'string' ? params.secret.trim() : '';
+    if (!value) throw new RpcError(ErrorCode.badParams, 'Type the secret, or decline.');
+    let files: SecretFiles;
+    try {
+      files = this.secrets.write(value);
+    } catch (e) {
+      // The error's code only: an fs message can't hold the value, but say
+      // as little as possible anyway.
+      throw new RpcError(ErrorCode.other, `Couldn't save it (${(e as NodeJS.ErrnoException).code ?? 'error'}).`);
+    }
+    this.resolveApproval(st, pending.approvalId, 'answered');
+    pending.resolve({ status: 'saved', ...files });
+    return {};
+  },
+
   addApproval(this: Runner, st: ThreadState, pending: PendingApproval, body: EventBody, signal: AbortSignal): void {
     const { rec, rt } = st;
     rt.approvals.set(pending.approvalId, pending);
@@ -107,8 +175,7 @@ export const approvalsPart = {
     const pending = st.rt.approvals.get(approvalId);
     if (!pending) return;
     this.resolveApproval(st, approvalId, 'expired', message);
-    if (pending.kind === 'tool') pending.resolve({ decision: 'expired', message });
-    else pending.resolve({ answers: null, message });
+    settleDeclined(pending, 'expired', message);
   },
 
   expireApprovals(this: Runner, st: ThreadState, message: string): void {

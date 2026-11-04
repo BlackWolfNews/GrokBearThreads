@@ -657,6 +657,7 @@ Persisted event types (stored in `events.ndjson`, returned by `threads.events`):
 | `edit.diff` | `itemId`, `path`, `hunks: {oldStart, oldLines, newStart, newLines, lines: string[]}[]` (lines start with " ", "-" or "+"); sent after `tool.call` for Edit/MultiEdit/Write when the runner can compute it. One event per file: a tool that changes several files (a Codex patch) has one per path. A later `edit.diff` with the same `itemId` and `path` replaces that file's diff; a new path adds one |
 | `approval.requested` | `approvalId`, `itemId?` (absent for a subagent's tools, which have no `tool.call`), `name`, `title`, `input`, `options: ("allow" \| "allowAlways" \| "deny")[]` |
 | `question.requested` | `approvalId`, `questions: {question, header?, multiSelect, options: {label, description?}[]}[]` |
+| `secret.requested` | `approvalId`, `itemId?`, `label`, `reason`, `placeholder?`: an agent's `ask_secret` (Secrets). Answered with `secrets.answer`, never `approvals.respond` |
 | `approval.resolved` | `approvalId`, `decision` (`allow` \| `allowAlways` \| `deny` \| `answered` \| `expired`), `message?` |
 | `plan.updated` | `entries: {text, status: "pending" \| "in_progress" \| "completed"}[]` |
 | `turn.started` | `turnId`, `wokeBy?: {kind, description}[]`. A turn the agent starts by itself (a background task finished, or a background subagent needs an approval) has no `user.message` before it. `wokeBy` is on such a turn when background work finishing started it: each task that had finished since the last turn, `kind` as in `BackgroundTask` (`agent` \| `shell` \| `monitor` \| `other`), its `description` possibly empty. Clients mark the time between that turn and the one before it in the transcript (a "6 min later" divider, Mike 3 Nov). A `user.message` after `turn.started` was sent while the turn ran and went into it |
@@ -723,6 +724,7 @@ the summary and then the reply.
 | `threads.tickAsk` | `{ threadId, asksSeq, index, ticked: boolean }` | `{ thread: ThreadSummary }`. Ticks or unticks one of the open card's asks (Needs you), with an `asks.ticked` event. Sends nothing to the agent. `-32602` when `asksSeq` isn't the open card's or `index` is out of range |
 | `threads.share` | `{ threadId, access: "off" \| "link", newLink?: boolean }` | `{ thread: ThreadSummary }`. Whether anyone with the link can read the thread on the website (see Sharing). `newLink` makes a fresh slug, which stops the old link. Another access is `-32602` |
 | `approvals.respond` | `{ threadId, approvalId, decision: "allow" \| "allowAlways" \| "deny" \| "answered", message?: string, answers?: Record<string, string> }` | `{}`. `allowAlways` allows matching requests for the rest of this thread only; it never changes the thread's permission mode or saves anything in the project. With `answered`, the app sends the chosen answers in one line as `message` too: the runner keeps it in `approval.resolved` (only `answers` goes to the CLI), so the transcript can show what was chosen |
+| `secrets.answer` | `{ threadId, approvalId, secret?: string, decline?: true }` | `{}`. Answers a `secret.requested` card (Secrets). The runner never logs, emits or mirrors `secret` |
 | `media.import` | `{ path: string }` | `{ image: ImageRef }` copies a file into `inbox/` and reads its size; HEIC becomes JPEG and TIFF or BMP becomes PNG |
 | `patches.trust` | `{ threadId, files: { file, hash }[] }` | `{ trusted: string[] }`. Trusts those versions of the thread's waiting patch files (each a `file` its `patches` lists with `untrusted`, and the `hash` given there), then every thread's patches are read again, so the answer comes once they have been. `-32602` for a file the thread isn't waiting on, or one whose hash has moved on since (look again). See "Trusting a folder's patches" |
 | `actions.run` | `{ threadId, actionId }` | For a prompt action, `{ turnId }`: its prompt was sent as a message (as `threads.send`). For a url action (only an older client calls it for one), `{ ok: true, durationMs }` once the page is opened on the runner's Mac, with nothing in the transcript. For a command action, `{ ok, exitCode?, durationMs, seq }` once the command has finished, with its output in the transcript as the `action.run` event at `seq`. The command runs in the thread's folder through a login shell with the thread's variables (`THREADBEAR_THREAD_ID` and the rest) and is stopped after 10 minutes. `-32602` for an action the thread doesn't have, `-32020` while the same action is still running |
@@ -1957,6 +1959,74 @@ type AskLink = { title: string; url: string }
 type AskAnswer = { action: string; answer: string } // an ask's action and the answer he picked
 type OpenAsk = Ask & { ticked?: true }
 ```
+
+## Secrets
+
+Added 4 Nov 2026, after T3 Code's `request_secret` (its "Asking for a
+secret" card). Before this an agent that needed a password, an API key or
+a token had to stop and ask in its reply, and whatever Mike typed back
+went into the transcript, the phone's mirror and Agent Archive. Codex's
+own secret questions were declined (Codex approvals). Now:
+
+- **The tool.** `ask_secret` (a threadbear tool, Claude and Codex alike)
+  takes `label` (the card's title, "Mac administrator password"),
+  `reason` (what it's for and where to find it), `placeholder?` and
+  `timeoutMinutes?` (default 10, at most 60). It puts a card up and
+  waits. The agent never gets the value: it gets a file path, an owner-only
+  file under `<home>/secrets/asked/` (0600 in a 0700 folder), plus an
+  askpass helper beside it (`<file>.askpass`, 0700, a two-line script that
+  prints the file), so `SUDO_ASKPASS=<helper> sudo -A ...`, `SSH_ASKPASS`
+  and `GIT_ASKPASS` work without the value ever being in a command line.
+  Otherwise the agent reads the file inside its command
+  (`TOKEN="$(cat <file>)" wrangler whoami`). The tool's text tells it
+  never to print it. Declined, timed out, or the turn stopped: it says so,
+  and the agent can ask again.
+- **What the card promises.** The value is kept out of the chat, not out
+  of the agent's reach: its commands can read the file, and a command
+  that prints it puts it in the transcript. The card says so ("Kept out
+  of chat, in a private file this agent's commands can read for 24
+  hours"), as T3's does for its file delivery.
+- **The event.** `secret.requested` (persisted): `approvalId`, `itemId?`
+  (the tool call's), `label`, `reason`, `placeholder?`. It's a pending
+  approval like any other (the thread is `waiting`, it's in Needs you, a
+  message from Mike declines it first, Stop or a restart expires it),
+  closed by `approval.resolved` with `answered`, `deny` or `expired`, never
+  with a `message`. No event, log line, summary, mirror row or error ever
+  carries the value.
+- **Answering on a Mac.** `secrets.answer { threadId, approvalId, secret?:
+  string, decline?: true }` → `{}`, over the same connection as
+  everything else (loopback, or another runner's `wss://` on the
+  tailnet). One of the two is required; an empty or whitespace-only secret
+  is `-32602`. The runner writes the file before it resolves the card, so
+  a failed write leaves the card open with the error.
+- **Answering on the phone.** The Convex mirror never sees the value. The
+  runner has an X25519 key pair (`secrets/secret-box.key`, 0600, made on
+  first use). The thread row's `pendingApproval` for a secret is `{
+  approvalId, kind: "secret", label, reason, placeholder?, key }`, `key`
+  the runner's public key (raw, base64). The phone seals the value to it
+  and calls `phone:secret { token, threadId, approvalId, sealed?: { epk,
+  nonce, box }, decline?: true }` (backend API 35), which queues a
+  `respond` command with `{ approvalId, decision: "answered" | "deny",
+  sealed? }`. The runner opens it; `sync:finishCommand` drops `sealed`
+  from the row whether or not that worked. A runner only puts a secret on
+  the row for a backend of 35 or later (an older one's schema would refuse
+  the write). A phone from before API 35 draws a card it doesn't know as
+  Allow/Deny: its Deny declines the secret, and its Allow is refused with
+  a note to update the app or answer on the Mac.
+- **The seal.** The phone makes an ephemeral X25519 key (`epk`), agrees a
+  shared secret with `key`, and derives a 32-byte key with HKDF-SHA256
+  (salt `epk ‖ key`, info `threadbear secret v1 <approvalId>`), then
+  AES-256-GCM with a random 12-byte `nonce`; `box` is ciphertext then
+  the 16-byte tag. All base64. Binding the approval id into the key means
+  a sealed answer can't be replayed onto another card.
+- **Trusting the key.** The phone keeps the first key it sees for each
+  runner (keychain, by `runnerId`). A different key later is refused with
+  "This Mac's key changed. Answer it on the Mac." rather than sealing to a
+  key the backend could have swapped. Deleting `secret-box.key` on purpose
+  means re-pairing the phone.
+- **Keeping.** Files and helpers go 24 hours after they're written: the
+  runner sweeps the folder when it starts and hourly. Nothing else keeps
+  the value: the runner holds it in memory only long enough to write it.
 
 ## Patches
 

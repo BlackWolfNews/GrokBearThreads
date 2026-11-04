@@ -22,7 +22,7 @@ public final class FakeBackend: Backend, @unchecked Sendable {
     private let listDelay: Duration
     private var imagesById: [String: [MessageImage]] = [:]
 
-    public init(now: Date = .now, turnDelay: Duration = .seconds(2), runnerOnline: Bool = true, listDelay: Duration = .zero, pictures: Bool = false, long: Bool = false) {
+    public init(now: Date = .now, turnDelay: Duration = .seconds(2), runnerOnline: Bool = true, listDelay: Duration = .zero, pictures: Bool = false, long: Bool = false, secret: Bool = false) {
         let sample = Self.sample(now: now)
         threadsById = Dictionary(uniqueKeysWithValues: sample.threads.map { ($0.threadId, $0) })
         messagesById = sample.messages
@@ -39,11 +39,39 @@ public final class FakeBackend: Backend, @unchecked Sendable {
             messagesById[thread.thread.threadId] = thread.messages
             imagesById[thread.thread.threadId] = thread.images
         }
+        if secret {
+            let thread = Self.secretThread(now: now)
+            threadsById[thread.thread.threadId] = thread.thread
+            messagesById[thread.thread.threadId] = thread.messages
+        }
         scheduleList = sample.schedules
         runnerList = [PhoneRunner(runnerId: "mac", name: "MacBook Pro", version: "0.1.0",
                                   lastSeenAt: runnerOnline ? now : now.addingTimeInterval(-3 * 3600))]
         self.turnDelay = turnDelay
         self.listDelay = listDelay
+    }
+
+    // MARK: A thread asking for a secret
+
+    /// `-ThreadbearSecret`: one thread waiting on a secret card. Left out of
+    /// the usual samples, which the App Store shots are of. The key is a
+    /// made-up one (the seal test's), so the demo never pins a real runner's.
+    static let sampleSecretKey = "pOCSkrZRwni5dyxWn1+puxPZBrRqtoyd+dwrRAn4ogk="
+
+    private static func secretThread(now: Date) -> (thread: PhoneThread, messages: [PhoneMessage]) {
+        let ago = { (minutes: Double) in now.addingTimeInterval(-minutes * 60) }
+        let thread = PhoneThread(
+            threadId: "secret", title: "Deploy the docs site", cwd: "~/code/website", status: .waiting, needsYou: true,
+            preview: "I need a deploy token to go on.", lastActivityAt: ago(1),
+            pendingApproval: .secret(id: "sec1", label: "Hosting deploy token",
+                                     reason: "To deploy the docs site. Make one under Account, then API tokens, with deploy access.",
+                                     placeholder: nil, key: sampleSecretKey))
+        let messages = [
+            PhoneMessage(seq: 1, role: .user, text: "Deploy the docs site when the build's green", at: ago(6)),
+            PhoneMessage(seq: 2, role: .tool, text: "Run the docs build", toolKind: "command", at: ago(4)),
+            PhoneMessage(seq: 3, role: .assistant, text: "The build's green. I need a deploy token to go on.", at: ago(1)),
+        ]
+        return (thread, messages)
     }
 
     // MARK: A thread with pictures
@@ -389,6 +417,18 @@ public final class FakeBackend: Backend, @unchecked Sendable {
             s.threadsById[threadId]?.working = "Bear with me"
         }
         runTurn(threadId, reply: "Thanks, going with that.")
+        return newCommand()
+    }
+
+    public func secret(threadId: String, approvalId: String, answer: SecretAnswer) async throws -> String {
+        let declined = answer == .decline
+        mutate { s in
+            s.threadsById[threadId]?.pendingApproval = nil
+            s.threadsById[threadId]?.status = declined ? .idle : .running
+            s.threadsById[threadId]?.working = declined ? nil : "Signing in"
+            s.threadsById[threadId]?.needsYou = false
+        }
+        if !declined { runTurn(threadId, reply: "Thanks, that worked. I'm signed in now.") }
         return newCommand()
     }
 

@@ -127,7 +127,8 @@ import { poolsPart, type PoolsPart } from './runner/pools.ts';
 import { handoversPart, type HandoversPart } from './runner/handovers.ts';
 import { stoppedWorkPart, type StoppedWorkPart } from './runner/stopped-work.ts';
 import { projectsHostPart, type ProjectsHostPart } from './runner/projects-host.ts';
-import { approvalsPart, type ApprovalsPart } from './runner/approvals.ts';
+import { approvalsPart, settleDeclined, type ApprovalsPart, type SecretAnswer } from './runner/approvals.ts';
+import { SecretStore } from './secrets.ts';
 import { reviewsPart, type ReviewsPart } from './runner/reviews.ts';
 import { clisPart, type ClisPart } from './runner/clis.ts';
 import { editingPart, type EditingPart } from './runner/editing.ts';
@@ -226,7 +227,11 @@ export type BinaryReporter = { binariesInUse?(): string[] };
 // (no tool call of the agent's to point at) holds up only that subagent.
 export type PendingApproval =
   | { approvalId: string; kind: 'tool'; main: boolean; resolve: (a: ToolApprovalAnswer) => void }
-  | { approvalId: string; kind: 'question'; main: boolean; questions: Question[]; resolve: (a: QuestionAnswer) => void };
+  | { approvalId: string; kind: 'question'; main: boolean; questions: Question[]; resolve: (a: QuestionAnswer) => void }
+  // An agent's ask_secret (docs/protocol.md, "Secrets"). The value never
+  // passes through here: secrets.answer writes the file and hands this the
+  // paths.
+  | { approvalId: string; kind: 'secret'; main: boolean; resolve: (a: SecretAnswer) => void };
 
 export type Turn = {
   turnId: string;
@@ -525,6 +530,8 @@ export class Runner {
   actionTimeoutMs?: number;
   openUrl: (url: string) => Promise<void>;
   convexKeys: ConvexKeys;
+  // Where answers to ask_secret go, and the key the phone seals them to.
+  secrets: SecretStore;
   models?: Pick<Models, 'generate'>;
   projects?: Projects;
   activity = new Set<(a: ThreadActivity) => void>();
@@ -595,6 +602,7 @@ export class Runner {
       undefined,
       deps.convexKeyOptions,
     );
+    this.secrets = new SecretStore(paths.secrets(deps.config.home), () => this.clock.now());
     this.models = deps.models;
     this.projects = deps.projects;
     this.appRestartAsked = deps.appRestartAsked;
@@ -1298,8 +1306,7 @@ export class Runner {
       for (const [approvalId, pending] of [...rt.approvals]) {
         if (!pending.main) continue;
         this.resolveApproval(st, approvalId, 'deny', WROTE_INSTEAD);
-        if (pending.kind === 'question') pending.resolve({ answers: null, message: WROTE_INSTEAD });
-        else pending.resolve({ decision: 'deny', message: WROTE_INSTEAD });
+        settleDeclined(pending, 'deny', WROTE_INSTEAD);
       }
     }
     if (rt.turn && !opts.queue && this.canSteer(st)) {
@@ -2465,8 +2472,7 @@ export class Runner {
     // (output, approvals, its exit) go nowhere.
     rt.generation++;
     for (const [, p] of rt.approvals) {
-      if (p.kind === 'tool') p.resolve({ decision: 'expired', message: 'The thread was deleted.' });
-      else p.resolve({ answers: null, message: 'The thread was deleted.' });
+      settleDeclined(p, 'expired', 'The thread was deleted.');
     }
     rt.approvals.clear();
     const session = rt.session;

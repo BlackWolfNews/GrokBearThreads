@@ -616,6 +616,8 @@ export type EventBody =
       options: ApprovalOption[];
     }
   | { type: 'question.requested'; approvalId: string; itemId?: string; questions: Question[] }
+  // An agent's ask_secret (docs/protocol.md, "Secrets"): never the value.
+  | { type: 'secret.requested'; approvalId: string; itemId?: string; label: string; reason: string; placeholder?: string }
   | { type: 'approval.resolved'; approvalId: string; decision: ApprovalDecision; message?: string }
   | { type: 'plan.updated'; entries: PlanEntry[] }
   // wokeBy: the background work that finished and started this turn (docs/protocol.md)
@@ -705,6 +707,7 @@ export const PERSISTED_TYPES = new Set<string>([
   'edit.diff',
   'approval.requested',
   'question.requested',
+  'secret.requested',
   'approval.resolved',
   'plan.updated',
   'turn.started',

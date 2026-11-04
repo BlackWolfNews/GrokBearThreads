@@ -106,6 +106,16 @@ final class AppModel {
     /// Whether this backend takes photos. The demo does, so App Review sees it.
     var canStar: Bool { isFake || (apiVersion ?? 0) >= BackendCompatibility.starsAPIVersion }
     var canSendPhotos: Bool { isFake || (apiVersion ?? 0) >= BackendCompatibility.photosAPIVersion }
+    /// Whether a secret card can be answered here (backend API 35, phone:secret).
+    var canAnswerSecrets: Bool { isFake || (apiVersion ?? 0) >= BackendCompatibility.secretsAPIVersion }
+    /// The demo's kept runner keys, in memory so it never writes the keychain.
+    private let demoRunnerKeys = MemoryRunnerKeyStore()
+    /// Where the first key each runner's secret cards carried is kept
+    /// (docs/protocol.md, "Trusting the key"), per paired deployment.
+    var runnerKeys: any RunnerKeyStore {
+        guard !isFake, let pairing else { return demoRunnerKeys }
+        return KeychainRunnerKeyStore(scope: pairing.deploymentURL.host() ?? pairing.deploymentURL.absoluteString)
+    }
 
     /// The models a new thread can start on; empty hides the pickers, as an
     /// older backend would turn an effort down.
@@ -175,7 +185,8 @@ final class AppModel {
             // -ThreadbearSlowLoad: the lists answer after a few seconds, to see the loading rows.
             // -ThreadbearPictures: and a thread with pictures, "pics".
             // -ThreadbearLong: and a very long thread, "long".
-            connect(FakeBackend(listDelay: args.contains("-ThreadbearSlowLoad") ? .seconds(6) : .zero, pictures: args.contains("-ThreadbearPictures"), long: args.contains("-ThreadbearLong")), pairing: nil)
+            // -ThreadbearSecret: and a thread waiting on a secret card, "secret".
+            connect(FakeBackend(listDelay: args.contains("-ThreadbearSlowLoad") ? .seconds(6) : .zero, pictures: args.contains("-ThreadbearPictures"), long: args.contains("-ThreadbearLong"), secret: args.contains("-ThreadbearSecret")), pairing: nil)
         } else if let saved = PairingStore.load() {
             connect(ConvexBackend(deploymentURL: saved.deploymentURL, token: saved.token), pairing: saved)
         }
@@ -414,6 +425,9 @@ final class AppModel {
         UserDefaults.standard.removeObject(forKey: "pocketSeenUpTo")
         pocketSeenUpTo = nil
         PairingStore.clear()
+        // Pairing again trusts each runner's key afresh, which is how a Mac
+        // whose secret key was deleted on purpose gets answered again.
+        KeychainRunnerKeyStore.clearAll()
         stop()
         backend = nil
         pairing = nil

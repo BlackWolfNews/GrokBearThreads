@@ -357,9 +357,12 @@ function setupFull(opts: { heads?: { threadId: string; lastSeq: number }[]; take
     }
     return null;
   };
+  // push() feeds the commands query; a newer backend's other watches
+  // (schedules, other runners) mustn't take its place.
   let onUpdate: ((v: unknown) => void) | undefined;
   const subscriber = {
-    subscribe: (_fn: string, _args: Record<string, unknown>, update: (v: unknown) => void) => {
+    subscribe: (fn: string, _args: Record<string, unknown>, update: (v: unknown) => void) => {
+      if (fn !== 'sync:pendingCommands' && onUpdate) return () => {};
       onUpdate = update;
       return () => (onUpdate = undefined);
     },
@@ -395,6 +398,10 @@ function setupFull(opts: { heads?: { threadId: string; lastSeq: number }[]; take
         applied.push(`respond ${p.threadId} ${p.approvalId} ${p.decision}`);
         return h.runner.respondApproval(p);
       },
+      answerSecret: (p) => {
+        applied.push(`secret ${p.threadId} ${p.approvalId} ${p.decline ? 'decline' : 'saved'}`);
+        return h.runner.answerSecret(p);
+      },
       update: (p) => {
         applied.push(`update ${JSON.stringify(p)}`);
         return h.runner.update(p);
@@ -422,6 +429,7 @@ function setupFull(opts: { heads?: { threadId: string; lastSeq: number }[]; take
     log: opts.log ?? nullLogger,
     post,
     subscriber,
+    secretBox: h.runner.secrets,
   });
   return { h, sync, calls, push: (v) => onUpdate?.(v), applied };
 }
@@ -813,6 +821,7 @@ test('pushText says why the thread needs Mike: the question, the approval, or th
   const base = { title: 'Fix the dock badge', status: 'idle', preview: 'Done, the badge clears when you open the thread.' };
   assert.deepEqual(pushText(base), { title: 'Fix the dock badge', body: 'Done, the badge clears when you open the thread.' });
   assert.deepEqual(pushText({ ...base, status: 'waiting', pendingApproval: { kind: 'approval', name: 'Bash', title: 'Run a command', inputSummary: 'npm test' } }), { title: 'Fix the dock badge', body: 'Run a command: npm test' });
+  assert.deepEqual(pushText({ ...base, status: 'waiting', pendingApproval: { kind: 'secret', label: 'Mac administrator password' } }), { title: 'Fix the dock badge', body: 'Asking for a secret: Mac administrator password' });
   assert.deepEqual(pushText({ ...base, status: 'waiting', pendingApproval: { kind: 'question', questions: [{ question: 'Which colour?' }] } }), { title: 'Fix the dock badge', body: 'Which colour?' });
   assert.deepEqual(pushText({ ...base, status: 'error', preview: 'usage limit' }), { title: 'Fix the dock badge', body: 'Failed: usage limit' });
   assert.deepEqual(pushText({ title: '', status: 'idle', preview: '' }), { title: 'Threadbear', body: 'Finished' });
@@ -1668,4 +1677,62 @@ test('projects: the whole list once per start, then only the ones that changed, 
   const old = await run(PROJECTS_DIFF_API_VERSION - 1);
   assert.ok(old.every((c) => c.fn === 'sync:setProjects'));
   assert.equal(old.length, 4);
+});
+
+// docs/protocol.md, "Secrets".
+import { seal } from '../../src/secrets.ts';
+import { SECRETS_API_VERSION } from '../../src/sync.ts';
+
+test('secrets: the card goes up with the runner key, and the phone sealed answer is opened here', async () => {
+  const f = setupFull({ apiVersion: SECRETS_API_VERSION });
+  const { h, sync, calls, push, applied } = f;
+  const rows = () => calls.filter((c) => c.fn === 'sync:upsertThreads').flatMap((c) => c.args.threads as ThreadDoc[]);
+  sync.start();
+  await sync.flushNow();
+  await tick();
+  const t = h.runner.create({ text: 'go', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  session(h, t.id).init();
+  const answer = h.runner.requestSecret(t.id, { label: 'Cloudflare token', reason: 'For wrangler.' });
+  h.clock.advance(SYNC_COALESCE_MS);
+  await tick();
+  const card = rows().filter((d) => d.threadId === t.id).at(-1)!.pendingApproval as { kind: string; approvalId: string; key: string; label: string };
+  assert.equal(card.kind, 'secret');
+  assert.equal(card.label, 'Cloudflare token');
+  assert.equal(card.key, h.runner.secrets.publicKey());
+  push([{ commandId: 's1', kind: 'respond', threadId: t.id, args: { approvalId: card.approvalId, decision: 'answered', secret: true, sealed: seal(card.key, 'cfut_abc', card.approvalId) }, createdAt: 1 }] as Command[]);
+  await tick(10);
+  const a = await answer;
+  assert.equal(a.status, 'saved');
+  assert.equal(fs.readFileSync((a as { file: string }).file, 'utf8'), 'cfut_abc');
+  assert.deepEqual(applied, [`secret ${t.id} ${card.approvalId} saved`]);
+  assert.ok(calls.some((c) => c.fn === 'sync:finishCommand' && c.args.commandId === 's1' && c.args.ok === true));
+  assert.ok(!JSON.stringify(calls.filter((c) => c.fn !== 'sync:takeCommand')).includes('cfut_abc'), 'the value never goes up');
+  // Sealed to another card's id: refused, and the card stays open.
+  const again = h.runner.requestSecret(t.id, { label: 'Again', reason: 'x' });
+  h.clock.advance(SYNC_COALESCE_MS);
+  await tick();
+  const card2 = rows().filter((d) => d.threadId === t.id).at(-1)!.pendingApproval as { approvalId: string; key: string };
+  push([{ commandId: 's2', kind: 'respond', threadId: t.id, args: { approvalId: card2.approvalId, decision: 'answered', secret: true, sealed: seal(card2.key, 'nope', 'other') }, createdAt: 2 }] as Command[]);
+  await tick(10);
+  const failed = calls.find((c) => c.fn === 'sync:finishCommand' && c.args.commandId === 's2')!;
+  assert.equal(failed.args.ok, false);
+  assert.match(String(failed.args.note), /couldn't be opened/);
+  push([{ commandId: 's3', kind: 'respond', threadId: t.id, args: { approvalId: card2.approvalId, decision: 'deny', secret: true }, createdAt: 3 }] as Command[]);
+  await tick(10);
+  assert.equal((await again).status, 'declined');
+});
+
+test('secrets: an older backend gets the row without the card', async () => {
+  const { h, sync, calls } = setupFull({ apiVersion: SECRETS_API_VERSION - 1 });
+  sync.start();
+  await sync.flushNow();
+  await tick();
+  const t = h.runner.create({ text: 'go', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  session(h, t.id).init();
+  void h.runner.requestSecret(t.id, { label: 'Token', reason: 'x' });
+  h.clock.advance(SYNC_COALESCE_MS);
+  await tick();
+  const last = calls.filter((c) => c.fn === 'sync:upsertThreads').flatMap((c) => c.args.threads as ThreadDoc[]).filter((d) => d.threadId === t.id).at(-1)!;
+  assert.equal(last.status, 'waiting');
+  assert.equal(last.pendingApproval, undefined);
 });

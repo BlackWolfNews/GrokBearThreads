@@ -11,6 +11,7 @@
 // key the deployment's RUNNER_KEY was set to (`npx convex env set`).
 // THREADBEAR_SYNC=off turns it off whatever runner.json says, which
 // check.sh sets so no test runner ever writes to the real project.
+import { isSealed, type Sealed } from './secrets.ts';
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -68,7 +69,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 34;
+export const BACKEND_API_VERSION = 35;
 // From this one a thread's row carries its open card of asks and a finished
 // turn's next steps, and a message row can be `summary` (end_turn's
 // bullets), so the phone shows end-of-turn cards. An older backend's
@@ -152,6 +153,10 @@ export const INDEX_ASKED_API_VERSION = 32;
 // phone's "6 min later · Mine the repo finished" divider. An older
 // backend's validator would turn the row down, so it goes without.
 export const WOKE_BY_API_VERSION = 33;
+// From this one a thread row's pendingApproval can be a secret (docs/protocol.md,
+// "Secrets"), answered with phone:secret. An older backend's validator would
+// turn the whole row down, so it goes without the card.
+export const SECRETS_API_VERSION = 35;
 // How far back a start looks for pictures, as new ones go up as they come.
 // Reading a whole log for each thread is too much to do for all of them on
 // every start, and it's the threads in use that Mike opens on the phone.
@@ -182,7 +187,10 @@ export type SyncStatus = {
 // The approval or question a thread is waiting on, as the phone sees it.
 export type PendingApproval =
   | { approvalId: string; kind: 'approval'; name: string; title: string; options: ApprovalOption[]; inputSummary?: string }
-  | { approvalId: string; kind: 'question'; questions: Question[] };
+  | { approvalId: string; kind: 'question'; questions: Question[] }
+  // docs/protocol.md, "Secrets": key is the runner's public key, which the
+  // phone seals its answer to.
+  | { approvalId: string; kind: 'secret'; label: string; reason: string; placeholder?: string; key: string };
 
 // The phone's view of a thread: convex/schema.ts's threadFields plus view.
 export type ThreadDoc = {
@@ -302,6 +310,7 @@ type Host = {
 export type CommandHost = {
   send(threadId: string, text: string, images: ImageRef[], opts: { origin: 'phone'; answers?: AskAnswer[] }): unknown;
   respondApproval(p: { threadId: string; approvalId: string; decision: ApprovalDecision; message?: string; answers?: Record<string, string> }): unknown;
+  answerSecret(p: { threadId: string; approvalId: string; secret?: string; decline?: boolean }): unknown;
   update(p: { threadId: string; title?: string; snoozedUntil?: string | null; archived?: boolean; starred?: boolean }): unknown;
   // Seen up to the last event it has.
   markSeen(threadId: string): unknown;
@@ -325,6 +334,9 @@ export type SyncDeps = {
   statePath?: string;
   runner: Host;
   commands?: CommandHost;
+  // The runner's key pair for secrets the phone answers (secrets.ts).
+  // Absent in small tests: then a secret card isn't mirrored.
+  secretBox?: { publicKey(): string; open(sealed: Sealed, approvalId: string): string };
   version: string;
   release?: string;
   startedAt: string;
@@ -525,7 +537,7 @@ function phoneAnswers(raw: unknown): AskAnswer[] | undefined {
 export function forBackend(d: ThreadDoc, v: number, now: number): ThreadDoc {
   const asks = d.asks !== undefined || d.asksSeq !== undefined || d.next !== undefined;
   const sections = d.needs !== undefined || d.pendingReviews !== undefined || d.waitingForRoom !== undefined;
-  if ((v >= SHARE_API_VERSION || !d.share) && (v >= WOKE_API_VERSION || !d.woke) && (v >= ASKS_API_VERSION || !asks) && (v >= SECTIONS_API_VERSION || !sections) && (v >= STARTED_BY_API_VERSION || !d.startedBy) && (v >= STARS_API_VERSION || !d.starredAt) && (v >= LINKS_API_VERSION || !d.links) && (v >= ASKED_API_VERSION || !d.asked) && (v >= NETWORK_WAIT_API_VERSION || !d.waitingForNetwork)) return d;
+  if ((v >= SHARE_API_VERSION || !d.share) && (v >= WOKE_API_VERSION || !d.woke) && (v >= ASKS_API_VERSION || !asks) && (v >= SECTIONS_API_VERSION || !sections) && (v >= STARTED_BY_API_VERSION || !d.startedBy) && (v >= STARS_API_VERSION || !d.starredAt) && (v >= LINKS_API_VERSION || !d.links) && (v >= ASKED_API_VERSION || !d.asked) && (v >= NETWORK_WAIT_API_VERSION || !d.waitingForNetwork) && (v >= SECRETS_API_VERSION || d.pendingApproval?.kind !== 'secret')) return d;
   const out = { ...d };
   if (v < SECTIONS_API_VERSION) {
     delete out.needs;
@@ -534,6 +546,7 @@ export function forBackend(d: ThreadDoc, v: number, now: number): ThreadDoc {
   }
   if (v < SHARE_API_VERSION) delete out.share;
   if (v < NETWORK_WAIT_API_VERSION) delete out.waitingForNetwork;
+  if (v < SECRETS_API_VERSION && out.pendingApproval?.kind === 'secret') delete out.pendingApproval;
   if (v < WOKE_API_VERSION) delete out.woke;
   if (v < STARTED_BY_API_VERSION) delete out.startedBy;
   if (v < LINKS_API_VERSION) delete out.links;
@@ -1065,6 +1078,18 @@ export class ConvexSync {
       this.pending.set(threadId, { approvalId: e.approvalId, kind: 'approval', name: e.name, title: e.title, options: e.options, ...(inputSummary(e.input) ? { inputSummary: inputSummary(e.input) } : {}) });
     } else if (e.type === 'question.requested') {
       this.pending.set(threadId, { approvalId: e.approvalId, kind: 'question', questions: e.questions });
+    } else if (e.type === 'secret.requested') {
+      // forBackend drops it for a backend older than SECRETS_API_VERSION.
+      const box = this.deps.secretBox;
+      if (!box) return;
+      let key: string;
+      try {
+        key = box.publicKey();
+      } catch (err) {
+        this.deps.log.warn('no key for secrets from the phone', { error: String(err) });
+        return;
+      }
+      this.pending.set(threadId, { approvalId: e.approvalId, kind: 'secret', label: e.label, reason: e.reason, ...(e.placeholder ? { placeholder: e.placeholder } : {}), key });
     } else if (e.type === 'approval.resolved') {
       if (this.pending.get(threadId)?.approvalId === e.approvalId) this.pending.delete(threadId);
     } else return;
@@ -1807,6 +1832,19 @@ export class ConvexSync {
         return undefined;
       }
       case 'respond': {
+        if (a.secret === true) {
+          // docs/protocol.md, "Secrets": opened here, so the value never
+          // touched the backend in the clear.
+          const approvalId = String(a.approvalId);
+          if (a.decision === 'deny') {
+            await host.answerSecret({ threadId: needThread(), approvalId, decline: true });
+            return undefined;
+          }
+          const box = this.deps.secretBox;
+          if (!box || !isSealed(a.sealed)) throw new Error("The phone's answer couldn't be opened. Answer it on the Mac.");
+          await host.answerSecret({ threadId: needThread(), approvalId, secret: box.open(a.sealed, approvalId) });
+          return undefined;
+        }
         const decision = a.decision as ApprovalDecision;
         if (!['allow', 'allowAlways', 'deny', 'answered'].includes(decision)) throw new Error(`bad decision ${String(a.decision)}`);
         await host.respondApproval({

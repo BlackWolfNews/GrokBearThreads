@@ -42,26 +42,45 @@ public struct Question: Codable, Sendable, Hashable {
     }
 }
 
-/// What a thread is stuck on: a tool wanting permission, or the agent's
-/// questions.
+/// What a thread is stuck on: a tool wanting permission, the agent's
+/// questions, or a secret it asked for (backend API 35).
 public enum PendingApproval: Codable, Sendable, Hashable {
     case approval(id: String, name: String, title: String, options: [ApprovalOption], inputSummary: String?)
     case question(id: String, questions: [Question])
+    /// `ask_secret` (docs/protocol.md, "Secrets"): `key` is the runner's
+    /// X25519 public key (raw, base64), which the phone seals the value to.
+    case secret(id: String, label: String, reason: String, placeholder: String?, key: String)
+    /// A kind this build doesn't know: the thread waits, and the card says
+    /// to answer it on the Mac rather than guessing at buttons.
+    case other(id: String, kind: String)
 
     public var id: String {
         switch self {
-        case let .approval(id, _, _, _, _), let .question(id, _): id
+        case let .approval(id, _, _, _, _), let .question(id, _), let .secret(id, _, _, _, _), let .other(id, _): id
         }
     }
 
-    private enum Keys: String, CodingKey { case approvalId, kind, name, title, options, inputSummary, questions }
+    private enum Keys: String, CodingKey { case approvalId, kind, name, title, options, inputSummary, questions, label, reason, placeholder, key }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
         let id = try c.decode(String.self, forKey: .approvalId)
-        if try c.decodeIfPresent(String.self, forKey: .kind) == "question" {
+        switch try c.decodeIfPresent(String.self, forKey: .kind) {
+        case "question":
             self = .question(id: id, questions: try c.decode([Question].self, forKey: .questions))
-        } else {
+        case "secret":
+            // Missing a key, it can't be sealed to: the Mac has to answer it.
+            guard let key = try c.decodeIfPresent(String.self, forKey: .key) else {
+                self = .other(id: id, kind: "secret")
+                return
+            }
+            self = .secret(
+                id: id,
+                label: try c.decodeIfPresent(String.self, forKey: .label) ?? "A secret",
+                reason: try c.decodeIfPresent(String.self, forKey: .reason) ?? "",
+                placeholder: try c.decodeIfPresent(String.self, forKey: .placeholder),
+                key: key)
+        case nil, "approval":
             // Options this build doesn't know are dropped rather than
             // failing the whole inbox.
             let raw = try c.decodeIfPresent([String].self, forKey: .options) ?? ["allow", "deny"]
@@ -72,6 +91,8 @@ public enum PendingApproval: Codable, Sendable, Hashable {
                 options: raw.compactMap(ApprovalOption.init(rawValue:)),
                 inputSummary: try c.decodeIfPresent(String.self, forKey: .inputSummary)
             )
+        case let kind?:
+            self = .other(id: id, kind: kind)
         }
     }
 
@@ -89,6 +110,16 @@ public enum PendingApproval: Codable, Sendable, Hashable {
             try c.encode(id, forKey: .approvalId)
             try c.encode("question", forKey: .kind)
             try c.encode(questions, forKey: .questions)
+        case let .secret(id, label, reason, placeholder, key):
+            try c.encode(id, forKey: .approvalId)
+            try c.encode("secret", forKey: .kind)
+            try c.encode(label, forKey: .label)
+            try c.encode(reason, forKey: .reason)
+            try c.encodeIfPresent(placeholder, forKey: .placeholder)
+            try c.encode(key, forKey: .key)
+        case let .other(id, kind):
+            try c.encode(id, forKey: .approvalId)
+            try c.encode(kind, forKey: .kind)
         }
     }
 }
@@ -732,7 +763,7 @@ public enum BackendCompatibility {
     /// The newest backend API this app knows. From 2 a thread's messages come
     /// from phone:messages (every message and tool line, paged in Convex);
     /// an older backend still gets phone:thread and the runner's paging.
-    public static let currentAPIVersion = 27
+    public static let currentAPIVersion = 35
     public static let messagePagesAPIVersion = 2
     /// From 3 each phone chooses when it's notified (phone:setNotifications).
     public static let notificationSettingAPIVersion = 3
@@ -771,6 +802,10 @@ public enum BackendCompatibility {
     /// From 27 threads can be starred (phone:update's `star`). Older backends
     /// would refuse it, so the phone doesn't offer it.
     public static let starsAPIVersion = 27
+    /// From 35 a thread row's pendingApproval can be a secret card, answered
+    /// sealed with phone:secret. An older backend has neither, so the phone
+    /// says to answer it on the Mac.
+    public static let secretsAPIVersion = 35
 
     /// The line to show, or nil when the backend is fine.
     public static func problem(_ identity: PhoneIdentity) -> String? {

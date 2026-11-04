@@ -354,6 +354,26 @@ export const answer = mutation({
   },
 });
 
+// An answer to a secret card (API 35, docs/protocol.md "Secrets"): sealed
+// on the phone to the runner's key, so only that runner can open it.
+// finishCommand drops `sealed` once the runner has taken it.
+export const secret = mutation({
+  args: {
+    token: v.string(),
+    threadId: v.string(),
+    approvalId: v.string(),
+    sealed: v.optional(v.object({ epk: v.string(), nonce: v.string(), box: v.string() })),
+    decline: v.optional(v.boolean()),
+  },
+  returns: v.id('commands'),
+  handler: async (ctx, { token, threadId, approvalId, sealed, decline }) => {
+    await checkPhoneToken(ctx, token);
+    if (!decline && !sealed) throw new Error('sealed or decline is required');
+    const t = await findThread(ctx, threadId);
+    return queue(ctx, t.runnerId, 'respond', threadId, decline ? { approvalId, decision: 'deny', secret: true } : { approvalId, decision: 'answered', secret: true, sealed });
+  },
+});
+
 export const update = mutation({
   args: {
     token: v.string(),

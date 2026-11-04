@@ -96,6 +96,7 @@ runner, app and phone; it's usually better to hide its entry point.
 | Pools and Usage | `runner/src/pools.ts`, `usage*.ts`, `token-tally.ts`, `accounts.ts`; app `PoolsModel.swift`, `Usage.swift`, `Views/UsagePanel.swift` |
 | Patches (project buttons and panels) | `runner/src/patches.ts`, `patch-trust.ts`, `panel-requests.ts`; app `Views/PanelsView.swift`, `ThreadPanels.swift`, `ActionChips.swift` |
 | Design reviews (`show_options`) | `runner/src/reviews.ts`; app `ReviewSession.swift`, `Views/ReviewWindow.swift` |
+| Secrets (`ask_secret` and its card) | `runner/src/secrets.ts`, `runner/src/runner/approvals.ts` (`requestSecret`, `answerSecret`), the tool in `threadbear-mcp.ts`; app `Transcript/Cells.swift` (the card); phone `Threadbear/SecretCard.swift`, `ThreadbearKit/Secrets.swift`; `convex/phone.ts` (`secret`). Leave the tool out of `buildThreadbearTools` to switch it off. |
 | Highlights and `pin` | `runner/src/highlights.ts`; app `Views/HighlightsView.swift`, `HighlightsBoard.swift` |
 | First-run tour and sample threads | app `Views/Tour.swift`, `runner/src/samples.ts`, `app/Tools/tour-e2e.mjs`. It only runs once, for a new user. |
 

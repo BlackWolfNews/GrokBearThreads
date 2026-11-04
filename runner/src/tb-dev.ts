@@ -665,6 +665,9 @@ export function formatThread(t: ThreadSummary, events: PersistedEvent[], opts: {
           lines.push(`  Question: ${q.question}${q.options.length ? ` (${q.options.map((o) => o.label).join(' / ')})` : ''}`);
         }
         break;
+      case 'secret.requested':
+        lines.push(`  Secret asked: ${e.label}`);
+        break;
       case 'approval.resolved':
         lines.push(`  Answer: ${DECISIONS[e.decision] ?? e.decision}${e.message ? `: ${e.message}` : ''}`);
         break;

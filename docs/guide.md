@@ -198,6 +198,20 @@ unless you pick otherwise, so if you're unsure about a task, switch it to Ask
 before edits before you send. Deleting a thread is one thing an agent always
 has to ask about, whatever the mode.
 
+### When an agent needs a password or a key
+
+An agent that needs a secret (your Mac's administrator password for a
+`sudo` command, an API key, a token) asks for it in a card in the thread
+instead of in its reply. Type it into the card and click Save securely, or
+Decline. You can answer it on your phone too, where it's sealed so only your
+Mac can read it on the way through.
+
+It never goes into the chat: the agent gets a private file holding it,
+which its commands can read for 24 hours, and then it's deleted. That's
+not the same as hiding it from the agent. A command that prints the file
+would put it in the transcript, so only give a secret to a thread you'd
+trust with it.
+
 ## Your first thread
 <!-- slug: first-thread -->
 

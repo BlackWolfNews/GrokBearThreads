@@ -124,7 +124,7 @@ struct ThreadView: View {
                     }
                     ForEach(pins.trailing) { PinnedPicture(image: $0) }
                     if let pending = thread.pendingApproval {
-                        PendingCard(threadId: thread.threadId, pending: pending) { sent = ($0, nil) }
+                        PendingCard(threadId: thread.threadId, runnerId: thread.runnerId, pending: pending) { sent = ($0, nil) }
                     } else if thread.isBusy || thread.working != nil {
                         WorkingLine(text: thread.working)
                             .id("working:\(thread.status == .running)")

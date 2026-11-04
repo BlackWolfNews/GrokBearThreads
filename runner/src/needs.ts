@@ -397,7 +397,8 @@ const END_TURN_SNOOZE =
 // 2 Nov 2026). The button stays for what's left after a real try.
 export const TRY_IT_FIRST =
   'Before you give the user a step, try it yourself with the tools you have, including any that drive their browser, apps or phone, and if it works there is no ask. ' +
-  'Hand it over only when it really needs them (a password or code, a payment, something physical, an approval that is theirs to give) or after a real attempt, and say in your reply what you tried and what stopped it. ' +
+  'Hand it over only when it really needs them (a payment, something physical, an approval that is theirs to give) or after a real attempt, and say in your reply what you tried and what stopped it. ' +
+  'A password, key or code is no reason to stop: ask for it with ask_secret and carry on. ' +
   'If there is still something you could try, offer "Can you do it?" next to Done and say what in its answer: it lets them send the step back to you, and is no reason to skip trying. ';
 
 // What end_turn says, once a turn, to a card offering to take a step back. The

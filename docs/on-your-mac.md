@@ -26,7 +26,10 @@ File references are where to look.
 - **A command:** `~/.local/bin/threadbear`.
 - **Files:** the data folder `~/Library/Application Support/Threadbear`
   (threads, settings, `secrets/`, runner releases, and the pinned release
-  key `upstream-signers`); `~/Library/Caches/Threadbear/update`;
+  key `upstream-signers`). In `secrets/`, `asked/` holds the answers you
+  type into an agent's secret card, one owner-only file each with a small
+  script beside it that prints it for `sudo -A`, removed after 24 hours,
+  and `secret-box.key` is the key your phone seals those answers to; `~/Library/Caches/Threadbear/update`;
   `~/Library/Caches/Threadbear/remote` (copies of pictures and files from
   threads on your other Macs, at most 512 MB, unused ones go after 30 days);
   `~/Library/Logs/threadbear-runner.log` and `threadbear-update.log`;

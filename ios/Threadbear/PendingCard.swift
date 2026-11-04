@@ -1,10 +1,12 @@
 import SwiftUI
 import ThreadbearKit
 
-/// What a thread's stuck on: a permission to give, or questions to answer.
+/// What a thread's stuck on: a permission to give, questions to answer, or
+/// a secret to type (SecretCard).
 struct PendingCard: View {
     @Environment(AppModel.self) private var model
     let threadId: String
+    let runnerId: String
     let pending: PendingApproval
     var onSent: (String) -> Void
     @State private var busy = false
@@ -12,6 +14,16 @@ struct PendingCard: View {
     @State private var typed = ""
 
     var body: some View {
+        switch pending {
+        case let .secret(id, label, reason, placeholder, key):
+            SecretCard(threadId: threadId, runnerId: runnerId, approvalId: id, label: label, reason: reason,
+                       placeholder: placeholder, key: key, onSent: onSent)
+        default:
+            card
+        }
+    }
+
+    private var card: some View {
         VStack(alignment: .leading, spacing: 12) {
             switch pending {
             case let .approval(id, name, title, options, inputSummary):
@@ -56,6 +68,11 @@ struct PendingCard: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(busy || Answers.build(questions, chosen: chosen, typed: typed).isEmpty)
+            case .secret, .other:
+                // A kind this build doesn't know (a secret is SecretCard's).
+                Label("Answer this on the Mac.", systemImage: "laptopcomputer")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
         }
         .padding()

@@ -396,7 +396,7 @@ export class CodexApprovals {
   private userInput(id: RequestId, p: ToolRequestUserInputParams, fromChild: boolean): void {
     const all = Array.isArray(p.questions) ? p.questions : [];
     const secret = all.filter((q) => q?.isSecret);
-    for (const q of secret) this.deps.note(`Codex asked for something secret (${q.header || q.question}). Threadbear doesn't take secrets in a card, so it was declined.`);
+    for (const q of secret) this.deps.note(`Codex asked for something secret (${q.header || q.question}). It was declined, as the answer would go to Codex itself; the agent's ask_secret keeps it in a private file instead.`);
     const asked = all.filter((q) => q && !q.isSecret);
     if (!asked.length) {
       this.deps.reply(id, { answers: {} });

@@ -916,6 +916,12 @@ export const finishCommand = mutation({
     const c = await ctx.db.get(commandId);
     if (!c) return null;
     await ctx.db.patch(commandId, { state: ok ? 'done' : 'failed', doneAt: Date.now(), ...(note ? { note } : {}), ...(resultThreadId ? { resultThreadId } : {}) });
+    // A secret's sealed answer (docs/protocol.md, "Secrets") has done its
+    // job: only the runner could open it, but it needn't sit here a day.
+    if (c.args?.sealed) {
+      const { sealed: _sealed, ...rest } = c.args;
+      await ctx.db.patch(commandId, { args: rest });
+    }
     // The runner has its copy of the phone's photos by now, and images are
     // meant to live on the Mac. A failed send keeps its photos on the phone,
     // which uploads them again.

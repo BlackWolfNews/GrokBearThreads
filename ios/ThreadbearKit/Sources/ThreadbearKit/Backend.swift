@@ -55,6 +55,10 @@ public protocol Backend: Sendable {
     /// Answers keyed by question text, several choices joined with ", ",
     /// as the Mac app sends them. `summary` goes in the transcript.
     func answer(threadId: String, approvalId: String, answers: [String: String], summary: String) async throws -> String
+    /// A secret card's answer (backend API 35): the value sealed to the
+    /// runner's key (SecretSeal), or a decline. The backend only ever sees
+    /// the sealed form.
+    func secret(threadId: String, approvalId: String, answer: SecretAnswer) async throws -> String
     func update(threadId: String, change: ThreadChange) async throws -> String
     /// `settings` (backend API 20 for an effort): the model and effort it starts on.
     func create(text: String, runnerId: String?, cwd: String?, images: [String], settings: NewThreadSettings) async throws -> String
@@ -233,6 +237,17 @@ public final class ConvexBackend: Backend, @unchecked Sendable {
             "threadId": .string(threadId), "approvalId": .string(approvalId),
             "answers": .object(answers.mapValues { .string($0) }), "message": .string(summary),
         ])
+    }
+
+    public func secret(threadId: String, approvalId: String, answer: SecretAnswer) async throws -> String {
+        var extra: [String: JSONValue] = ["threadId": .string(threadId), "approvalId": .string(approvalId)]
+        switch answer {
+        case let .sealed(sealed):
+            extra["sealed"] = .object(["epk": .string(sealed.epk), "nonce": .string(sealed.nonce), "box": .string(sealed.box)])
+        case .decline:
+            extra["decline"] = .bool(true)
+        }
+        return try await command("phone:secret", extra)
     }
 
     public func update(threadId: String, change: ThreadChange) async throws -> String {

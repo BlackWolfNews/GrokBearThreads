@@ -8,7 +8,8 @@ export type PushThread = {
   preview: string;
   pendingApproval?:
     | { kind: 'approval'; name: string; title: string; inputSummary?: string }
-    | { kind: 'question'; questions: { question: string }[] };
+    | { kind: 'question'; questions: { question: string }[] }
+    | { kind: 'secret'; label: string };
 };
 
 export const PUSH_BODY_CHARS = 180;
@@ -18,6 +19,7 @@ export function pushText(t: PushThread): { title: string; body: string } {
   const p = t.pendingApproval;
   let body: string;
   if (p?.kind === 'question') body = p.questions[0]?.question ?? 'Has a question for you';
+  else if (p?.kind === 'secret') body = `Asking for a secret: ${p.label}`;
   else if (p?.kind === 'approval') body = p.inputSummary ? `${p.title}: ${p.inputSummary}` : p.title;
   else if (t.status === 'error') body = t.preview ? `Failed: ${t.preview}` : 'The last turn failed';
   else body = t.preview || 'Finished';

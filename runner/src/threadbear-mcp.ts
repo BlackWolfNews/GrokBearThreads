@@ -29,6 +29,8 @@ import { readRelease, type ReleaseJson } from './release.ts';
 import { userLine } from './user-name.ts';
 import type { ConvexSync } from './sync.ts';
 import { POCKET_ICONS } from './pocket-icons.ts';
+import type { SecretAnswer, SecretRequest } from './runner/approvals.ts';
+import { SECRET_TIMEOUT_DEFAULT_MIN, SECRET_TIMEOUT_MAX_MIN } from './secrets.ts';
 
 // What the tools drive: the Runner itself, or during a handover
 // (docs/protocol.md) a ThreadRouter (handover.ts) that reaches threads on
@@ -42,6 +44,7 @@ export type ThreadControl = {
   unpin?: (...args: Parameters<Runner['unpin']>) => Aw<ReturnType<Runner['unpin']>>;
   showPanel?: (threadId: string, ask: Parameters<Runner['showPanel']>[1]) => ReturnType<Runner['showPanel']>;
   endTurnNudged?: (threadId: string) => boolean;
+  requestSecret?: (threadId: string, req: SecretRequest) => Promise<SecretAnswer>;
 } & Async<Runner, 'list' | 'search' | 'get' | 'events' | 'create' | 'send' | 'update' | 'interrupt' | 'delete'>;
 
 // Messages a thread when the Mac app restarts onto a new build (app-restarts.ts).
@@ -310,6 +313,36 @@ export function buildThreadbearTools(
             const source = t.projects?.[0]?.title ?? path.basename(t.cwd);
             const how = await pocket.savePocketCard({ title, text, ...(place ? { place } : {}), ...(icon ? { icon } : {}), threadId: selfId, ...(source ? { source } : {}) });
             return `${how === 'replaced' ? 'Replaced' : 'Filed'} "${title}" in the Pocket.`;
+          }),
+        ),
+      ]
+    : [];
+
+  // docs/protocol.md, "Secrets". The tool waits for the card's answer and
+  // returns paths, never the value.
+  const askSecret = control.requestSecret?.bind(control);
+  const secretTools = askSecret
+    ? [
+        tool(
+          'ask_secret',
+          `Asks the user for a secret (a password, an API key, a token, a code) in a private card in Threadbear, on their Mac or their phone, and waits for it. You never see the value, and it stays out of the chat: you get a private file holding it, readable by your commands for 24 hours. Use this whenever a task needs a secret from them, including their Mac administrator password for sudo, instead of asking for it in your reply or stopping to hand the step over. Read the file inside a command and never print it, echo it or put it in a file of your own.`,
+          {
+            label: z.string().trim().min(1).max(80).describe('The card\'s title, what you need: "Mac administrator password", "Cloudflare API token".'),
+            reason: z.string().trim().min(1).max(500).describe('One or two sentences: what it is for, and where to find it if that is not obvious.'),
+            placeholder: z.string().trim().min(1).max(60).optional().describe('Hint in the empty field, such as "cfut_...".'),
+            timeoutMinutes: z.number().int().min(1).max(SECRET_TIMEOUT_MAX_MIN).optional().describe(`How long to wait. Default ${SECRET_TIMEOUT_DEFAULT_MIN}.`),
+          },
+          handle(async ({ label, reason, placeholder, timeoutMinutes }, extra?: { signal?: AbortSignal }) => {
+            const a = await askSecret(selfId, { label, reason, ...(placeholder ? { placeholder } : {}), ...(timeoutMinutes ? { timeoutMinutes } : {}), ...(extra?.signal ? { signal: extra.signal } : {}) });
+            if (a.status === 'saved') {
+              return [
+                `Saved. The value is in ${a.file} (only you can read it; it's deleted after 24 hours).`,
+                `Read it inside a command, never print it: TOKEN="$(cat ${a.file})" some-cli ...`,
+                `For a password a program asks for, use the askpass helper beside it, which prints it to the program: SUDO_ASKPASS=${a.askpass} sudo -A <command> (also SSH_ASKPASS, GIT_ASKPASS).`,
+              ].join('\n');
+            }
+            if (a.status === 'declined') return `The user declined${a.message ? `: ${a.message}` : '.'} Don't ask again unless they say so.`;
+            return `No answer: ${a.message ?? 'the request ended.'} Ask again if you still need it.`;
           }),
         ),
       ]
@@ -926,6 +959,7 @@ export function buildThreadbearTools(
       : []),
     ...reviewTools,
     ...highlightTools,
+    ...secretTools,
     ...pocketTools,
     ...(schedules ? scheduleTools : []),
     ...(projects ? projectTools : []),

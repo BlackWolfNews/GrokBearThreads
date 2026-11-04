@@ -530,6 +530,11 @@ within a second or two while it's online (state `taken`, then `done` or
   the runner's `approvals.respond` with decision `answered` takes it;
   `message` is the answers in one line for the transcript (default: joined
   with "; ").
+- `phone:secret({ token, threadId, approvalId, sealed?: { epk, nonce,
+  box }, decline? })` (API 35): the answer to a `pendingApproval` of kind
+  `secret`, sealed to that card's `key` so only the runner can open it
+  (docs/protocol.md, "Secrets"). `sealed` is dropped from the command
+  once the runner has finished it.
 - `phone:update({ token, threadId, change })` where `change` is one of
   `{ snooze: { until?, untilRestart? } }`, `{ wake: true }`, `{ archive:
   true }`, `{ unarchive: true }`, `{ markSeen: true }`, `{ title }`.

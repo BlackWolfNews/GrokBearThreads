@@ -229,6 +229,8 @@ async function main(): Promise<void> {
   const kept = await peers.connectAll();
   elsewhere = peersElsewhere(peers);
   runner.start({ skip: kept });
+  // Answers to ask_secret go after a day (docs/protocol.md, "Secrets").
+  runner.secrets.startSweeping((e) => log.warn('secret sweep failed', { error: String(e) }));
   // After the threads are loaded, so a schedule that came due while the
   // runner was stopped finds its thread.
   appRestarts = new AppRestarts({ runner, home: cfg.home, clock: realClock, log, away: (threadId) => peers.owns(threadId) });
@@ -309,6 +311,7 @@ async function main(): Promise<void> {
     // The phone's commands, through the same methods the app's RPCs use,
     // on whichever runner has the thread.
     commands: phoneCommands(runner, peers),
+    secretBox: runner.secrets,
     schedules: scheduler,
     publish: (n) => runner.publish(n),
     home: cfg.home,

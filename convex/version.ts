@@ -132,4 +132,10 @@
 //    can, so the phone's row says "Waiting for connection", not Failed. A
 //    runner sends it only to a backend of 34 or later; an older phone
 //    ignores it and shows Failed.
-export const API_VERSION = 34;
+// 35: secrets (docs/protocol.md, "Secrets"). A thread row's
+//    pendingApproval can be `kind: "secret"` with the card's label, reason
+//    and the runner's public key; phone:secret queues the phone's sealed
+//    answer (or a decline) as a respond command, and finishCommand drops
+//    the sealed answer from the row. A runner sends a secret card only to a
+//    backend of 35 or later; an older phone shows the thread waiting.
+export const API_VERSION = 35;

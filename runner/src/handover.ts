@@ -9,6 +9,7 @@
 //   tools that act on other threads, schedules or projects;
 // - ThreadRouter: what the agent tools drive, on either side, so they reach
 //   a thread wherever it is.
+import type { SecretAnswer, SecretRequest } from './runner/approvals.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { paths } from './config.ts';
@@ -499,6 +500,12 @@ export class ThreadRouter implements ThreadControl {
     return e ? e.call('reviews.create', {threadId, ...input}) : this.runner.createReview(threadId, input);
   }
 
+  // Only a thread's own agent asks, from its CLI on the runner that has the
+  // thread, so this never goes elsewhere.
+  requestSecret(threadId: string, req: SecretRequest): Promise<SecretAnswer> {
+    return this.runner.requestSecret(threadId, req);
+  }
+
   // Only a thread's own agent pins, and its CLI is a child of the runner
   // that has the thread, so these never have to go elsewhere.
   pin(threadId: string, target: Parameters<Runner['pin']>[1]): ReturnType<Runner['pin']> {
@@ -547,6 +554,9 @@ export function phoneCommands(runner: Runner, remote?: Pick<Peers, 'owns' | 'cal
   return {
     send: (id, text, images, o) => at(id, 'threads.send', { text, ...(images.length ? { images } : {}), origin: o.origin, ...(o.answers ? { answers: o.answers } : {}) }, () => runner.send(id, text, images, o)) as { turnId: string },
     respondApproval: (p) => at(p.threadId, 'approvals.respond', { ...p }, () => runner.respondApproval(p)),
+    // Opened by sync.ts already; a thread still on a draining runner gets
+    // it over the local link, both runners sharing the one data dir.
+    answerSecret: (p) => at(p.threadId, 'secrets.answer', { ...p }, () => runner.answerSecret(p)),
     update: (p) => at(p.threadId, 'threads.update', { ...p }, () => runner.update(p)),
     // Up to whatever it has: markSeen keeps it within the thread's events.
     markSeen: (id) => at(id, 'threads.markSeen', { seq: Number.MAX_SAFE_INTEGER }, () => runner.markSeen(id, runner.get(id).lastSeq)),

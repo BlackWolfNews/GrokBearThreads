@@ -113,6 +113,17 @@ export const threadFields = {
           }),
         ),
       }),
+      // An agent asking for a secret (API 35, docs/protocol.md "Secrets"):
+      // `key` is the runner's X25519 public key, which the phone seals its
+      // answer to, so the value never reaches this deployment in the clear.
+      v.object({
+        approvalId: v.string(),
+        kind: v.literal('secret'),
+        label: v.string(),
+        reason: v.string(),
+        placeholder: v.optional(v.string()),
+        key: v.string(),
+      }),
     ),
   ),
 };

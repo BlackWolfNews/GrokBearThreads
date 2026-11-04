@@ -804,6 +804,9 @@ function printEvent(e: any, json: boolean, prefix = ''): void {
       return out(`? approve ${e.title}: tb approve ${e.threadId.slice(0, 8)} ${e.approvalId} allow|deny`);
     case 'question.requested':
       return out(`? ${e.questions.map((q: { question: string }) => q.question).join(' / ')}: tb answer ${e.threadId.slice(0, 8)} ${e.approvalId} "..."`);
+    case 'secret.requested':
+      // No tb command answers it: an agent mustn't be able to type its own.
+      return out(`? secret: ${e.label} (answer it in the app or on the phone)`);
     case 'approval.resolved':
       return out(`  (${e.decision})`);
     case 'plan.updated':

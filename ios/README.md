@@ -1,7 +1,9 @@
 # Threadbear for iPhone
 
 The phone side of Threadbear: the inbox, a thread's last messages, replies
-(typed, with photos taken or chosen), approvals and questions, Hibernate and the Den, new
+(typed, with photos taken or chosen), approvals, questions and secrets
+(sealed to the runner's key before they leave the phone, so the mirror only
+carries ciphertext: `ThreadbearKit/.../Secrets.swift`), Hibernate and the Den, new
 threads and push. It reads the Convex mirror the runner writes
 (`docs/convex-backend.md`, `convex/phone.ts`) and never talks to the runner
 directly, so it works with the Mac asleep: whatever you send waits in
@@ -24,7 +26,7 @@ directly, so it works with the Mac asleep: whatever you send waits in
 - `Threadbear/`: the SwiftUI app. iOS 18, so the XS Max runs it too.
 - `scripts/sim-shots.sh [dir] [--dark]`: screenshots on sample data in the
   simulator (`-ThreadbearFake`, `-ThreadbearOpen <threadId>`,
-  `-ThreadbearCompose <text>`, `-ThreadbearSearch <text>`, `-ThreadbearLong` for a very long thread, "long"), on a 6.9" iPhone, so they're App Store sized.
+  `-ThreadbearCompose <text>`, `-ThreadbearSearch <text>`, `-ThreadbearLong` for a very long thread, "long", `-ThreadbearSecret` for one waiting on a secret card, "secret"), on a 6.9" iPhone, so they're App Store sized.
 - `scripts/sim.sh [boot|stop]`: this worktree's own simulator, for
   `sim-shots.sh` and any repro of your own. It prints the id; use that
   rather than picking a simulator from `simctl list`, and `stop` it when
