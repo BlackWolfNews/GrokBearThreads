@@ -107,10 +107,10 @@ test('ask_secret: a card goes up, the answer goes to a file, and the value is no
   assert.throws(() => h.runner.answerSecret({ threadId: thread.id, approvalId: req.approvalId, secret: '   ' }), /Type the secret/);
   h.runner.answerSecret({ threadId: thread.id, approvalId: req.approvalId, secret: `  ${VALUE}\n` });
   const text = await reply;
-  const file = /in (\S+) \(only you/.exec(text)?.[1];
+  const file = /in '([^']+)' \(only you/.exec(text)?.[1];
   assert.ok(file, text);
   assert.equal(fs.readFileSync(file, 'utf8'), VALUE, 'trimmed');
-  assert.match(text, /SUDO_ASKPASS=\S+\.askpass sudo -A/);
+  assert.match(text, /SUDO_ASKPASS='[^']+\.askpass' sudo -A/);
   assert.ok(!text.includes(VALUE));
   const resolved = h.events(thread.id).find((e) => e.type === 'approval.resolved' && e.approvalId === req.approvalId);
   assert.equal(resolved.decision, 'answered');

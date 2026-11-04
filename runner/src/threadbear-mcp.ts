@@ -336,9 +336,11 @@ export function buildThreadbearTools(
             const a = await askSecret(selfId, { label, reason, ...(placeholder ? { placeholder } : {}), ...(timeoutMinutes ? { timeoutMinutes } : {}), ...(extra?.signal ? { signal: extra.signal } : {}) });
             if (a.status === 'saved') {
               return [
-                `Saved. The value is in ${a.file} (only you can read it; it's deleted after 24 hours).`,
-                `Read it inside a command, never print it: TOKEN="$(cat ${a.file})" some-cli ...`,
-                `For a password a program asks for, use the askpass helper beside it, which prints it to the program: SUDO_ASKPASS=${a.askpass} sudo -A <command> (also SSH_ASKPASS, GIT_ASKPASS).`,
+                // Quoted, as the data dir is under "Application Support": an
+                // agent pastes these as they are (4 Nov, the first real run).
+                `Saved. The value is in '${a.file}' (only you can read it; it's deleted after 24 hours).`,
+                `Read it inside a command, never print it: TOKEN="$(cat '${a.file}')" some-cli ...`,
+                `For a password a program asks for, use the askpass helper beside it, which prints it to the program: SUDO_ASKPASS='${a.askpass}' sudo -A <command> (also SSH_ASKPASS, GIT_ASKPASS).`,
               ].join('\n');
             }
             if (a.status === 'declined') return `The user declined${a.message ? `: ${a.message}` : '.'} Don't ask again unless they say so.`;
