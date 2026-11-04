@@ -32,8 +32,9 @@ come in:
 cd ~ && gh repo fork mikecann/threadbear --clone
 ```
 
-If `gh` isn't logged in, run `gh auth login --web` and **Ask** them to
-approve it in the browser. If they'd rather not use GitHub, a plain
+If `gh` isn't logged in (`gh auth status` fails, which an expired login
+does too), run `gh auth login --web` and **Ask** them to approve it in the
+browser. If they'd rather not use GitHub, a plain
 `git clone https://github.com/mikecann/threadbear ~/threadbear` works too:
 setup then makes Mike's repo their `upstream`, and they can fork later.
 Work from `~/threadbear` from here on.
@@ -50,7 +51,9 @@ Look first, without changing anything:
 
 - whether this Mac is joining a Threadbear they already have on another Mac
   (then: the name of that Convex project),
-- otherwise, what to call their new Convex project (default `threadbear`).
+- otherwise, what to call their new Convex project (default `threadbear`),
+- and if the dry run said their Convex login has several teams, which team
+  it goes in (pass it as `--team <slug>`).
 
 Then run it, with their answers:
 

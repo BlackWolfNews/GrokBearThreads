@@ -137,7 +137,9 @@ function withKey(key) {
 function checkMac() {
   say('1. This Mac');
   if (process.platform !== 'darwin') throw new Fail('Threadbear runs on macOS.');
-  ok(`macOS ${os.release()} on ${os.arch()}`);
+  // os.release() is the Darwin version (25.x on macOS 26), so ask sw_vers for the one people know.
+  const macos = run('sw_vers', ['-productVersion']).stdout?.trim() || `Darwin ${os.release()}`;
+  ok(`macOS ${macos} on ${os.arch()}`);
   if (run('xcode-select', ['-p']).status !== 0) throw new Fail("Xcode's command line tools aren't installed. Run: xcode-select --install");
   ok("Xcode's command line tools");
   if (!has('git')) throw new Fail('git is missing.');
@@ -182,7 +184,10 @@ function yourCopy() {
   const mikes = repoKey(MIKES_REPO);
   if (upstream) ok(`Mike's releases come from upstream (${upstream})`);
   else if (origin && repoKey(origin) === mikes) {
-    const login = has('gh') ? run('gh', ['api', 'user', '--jq', '.login']).stdout?.trim() : '';
+    // Only a zero exit is a login: with an expired token gh prints the 401's JSON, which once
+    // became the "username" and then failed the fork (Tinker Desk, 5 Nov 2026).
+    const ghUser = has('gh') ? run('gh', ['api', 'user', '--jq', '.login']) : undefined;
+    const login = ghUser?.status === 0 ? ghUser.stdout.trim() : '';
     if (login === 'mikecann') ok("this is Mike's own repo");
     else if (dry) todo(login ? `gh repo fork --remote: fork it to ${login}'s GitHub, origin becomes the fork and upstream Mike's` : "git remote rename origin upstream (no GitHub login, so no fork)");
     else if (login) {
@@ -249,7 +254,12 @@ async function project() {
   const selected = fs.existsSync(path.join(repo, '.env.local')) && /CONVEX_DEPLOYMENT=/.test(fs.readFileSync(path.join(repo, '.env.local'), 'utf8'));
   if (!selected) {
     const verb = v.existing ? 'use the existing' : 'create a';
-    if (dry) return todo(`${verb} Convex project "${v.project}"${v.team ? ` on team ${v.team}` : ''} with a dev deployment`), undefined;
+    if (dry) {
+      todo(`${verb} Convex project "${v.project}"${v.team ? ` on team ${v.team}` : ''} with a dev deployment`);
+      const teams = v.team ? [] : convexTeams();
+      if (teams.length > 1) note(`your Convex login has ${teams.length} teams, so the real run needs --team and one of: ${teams.map((t) => `${t.slug} (${t.name})`).join(', ')}`);
+      return undefined;
+    }
     const args = ['convex', 'dev', '--once', '--configure', v.existing ? 'existing' : 'new', '--project', v.project, '--dev-deployment', 'cloud'];
     const team = v.team ?? onlyTeam();
     if (team) args.push('--team', team);
@@ -324,11 +334,16 @@ function nearestRegion() {
 // The team to use when none was given: the only one there is. With several,
 // Convex asks in the terminal; with nobody there to answer (an agent), setup
 // stops and lists them instead.
-function onlyTeam() {
-  // `convex login status` prints the list on stderr.
+// The Convex login's teams, from `convex login status` (which prints the list on stderr). None
+// when it isn't logged in yet.
+function convexTeams() {
   const r = run(npx, ['convex', 'login', 'status']);
   const out = `${r.stdout ?? ''}\n${r.stderr ?? ''}`;
-  const teams = [...out.matchAll(/^\s+- (.+) \(([^)]+)\)$/gm)].map((m) => ({ name: m[1], slug: m[2] }));
+  return [...out.matchAll(/^\s+- (.+) \(([^)]+)\)$/gm)].map((m) => ({ name: m[1], slug: m[2] }));
+}
+
+function onlyTeam() {
+  const teams = convexTeams();
   if (teams.length === 1) return teams[0].slug;
   if (process.stdin.isTTY && !v.yes) return undefined;
   throw new Fail(`Your Convex login has ${teams.length} teams. Run setup again with --team and one of: ${teams.map((t) => `${t.slug} (${t.name})`).join(', ')}.`);
