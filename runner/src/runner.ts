@@ -122,6 +122,8 @@ import {
 } from './patches.ts';
 import { FolderCache } from './folder-cache.ts';
 import { worktreesPart, type WorktreesPart } from './runner/worktrees.ts';
+import { networkPart, type NetworkPart } from './runner/network.ts';
+import { poolsPart, type PoolsPart } from './runner/pools.ts';
 
 export type Notification =
   | { method: 'thread.updated'; params: { thread: ThreadSummary } }
@@ -491,7 +493,7 @@ export const UNTIL_RESTART = '9999-12-31T00:00:00.000Z';
 export const NO_WAKE_TIME = UNTIL_RESTART;
 
 // Parts of the Runner that live in runner/ (see each file's top).
-export interface Runner extends WorktreesPart {}
+export interface Runner extends PoolsPart, NetworkPart, WorktreesPart {}
 export class Runner {
   cfg: Config;
   store: ThreadStore;
@@ -1515,127 +1517,6 @@ export class Runner {
   // ------------------------------------------------------------------ pools
   // docs/protocol.md, "Pools". The rules are in pools.ts; this is where
   // they meet threads.
-
-  // The pools in force: runner.json's, else the built-in ones from the
-  // logins found.
-  pools(all = this.safeAccounts()): Pool[] {
-    return readPools({ pools: this.cfg.pools, accountNotes: this.cfg.accountNotes }, all, this.cfg.poolFolders ?? DEFAULT_POOL_FOLDERS);
-  }
-
-  listPools(): { pools: Pool[] } {
-    return { pools: this.pools() };
-  }
-
-  // For the small-model layer (models/index.ts): a pool and the logins this
-  // runner can use, with the room it knows of, a login that just ran dry
-  // counting as blocked.
-  smallModelPool(id: string): { pool: Pool; accounts: Account[] } | undefined {
-    const accounts = this.usableAccounts();
-    const pool = this.pools().find((p) => p.id === id);
-    return pool ? { pool, accounts: poolAccounts(pool, accounts) } : undefined;
-  }
-
-  // A small-model call found this login out of room: the same as a turn
-  // that did.
-  noteRanDry(accountId: string): void {
-    const account = this.safeAccounts().find((a) => a.id === accountId);
-    if (account) this.markRanDry(account);
-  }
-
-  // pools.save: replaces the whole list in runner.json (an empty one goes
-  // back to the built-in pools) and tells every client.
-  savePools(raw: unknown): { pools: Pool[] } {
-    const checked = validatePools(raw, this.safeAccounts());
-    if ('error' in checked) throw new RpcError(ErrorCode.badParams, checked.error);
-    const json = readRunnerJson(this.cfg.home);
-    if (checked.pools.length) json.pools = checked.pools;
-    else delete json.pools;
-    writeRunnerJson(this.cfg.home, json);
-    this.cfg.pools = checked.pools.length ? checked.pools : undefined;
-    const pools = this.pools();
-    this.poolsShown = JSON.stringify(pools);
-    this.notify({ method: 'pools.updated', params: { pools } });
-    return { pools };
-  }
-
-  // Logins this runner can start a CLI for, with any it found at its limit
-  // marked blocked until then (ranDry).
-  usable(all: Account[]): Account[] {
-    const now = this.clock.now();
-    return all
-      .filter((a) => this.adapters[a.provider])
-      .map((a) => {
-        const until = this.ranDry.get(a.id);
-        if (until === undefined || until <= now || a.usage?.blocked) return a;
-        return { ...a, usage: { ...(a.usage ?? { windows: [], readAt: this.isoNow(), source: 'live' as const }), blocked: true } };
-      });
-  }
-
-  usableAccounts(): Account[] {
-    return this.usable(this.safeAccounts());
-  }
-
-  poolById(id: string | undefined): Pool | undefined {
-    return id === undefined ? undefined : this.pools().find((p) => p.id === id);
-  }
-
-  // The pool a new thread with nothing named starts on: the last one named
-  // (runner.json's defaults.poolId), else the first pool holding the
-  // default account, else the first pool. Only pools with a login this
-  // runner can use.
-  defaultPoolId(pools: Pool[], usable: Account[], defaultAccount?: string): string | undefined {
-    const live = pools.filter((p) => poolAccounts(p, usable).length);
-    const saved = readRunnerJson(this.cfg.home).defaults?.poolId ?? this.cfg.defaults.poolId;
-    if (saved && live.some((p) => p.id === saved)) return saved;
-    const account = defaultAccount ?? this.defaultAccountId();
-    return (live.find((p) => p.accountIds.includes(account)) ?? live[0])?.id;
-  }
-
-  // The provider a model id belongs to, when that can be told.
-  modelProvider(model: string): Provider | undefined {
-    if (isClaudeModel(model)) return 'claude';
-    const accounts = this.safeAccounts();
-    if (model.startsWith('gpt-') || accounts.some((a) => a.provider === 'codex' && modelRow(a, model))) return 'codex';
-    if (accounts.some((a) => a.provider === 'claude' && modelRow(a, model))) return 'claude';
-    return undefined;
-  }
-
-  // The pool and login for a new thread with no accountId: the pool named,
-  // else the folder's, else the default; and when a model is named whose
-  // provider has no login there, the first pool that has one. The login is
-  // the pool's one of the thread's provider (its model's, else the pool's
-  // first) with the most room, else one of another provider with room,
-  // else the first of its provider. undefined when no pool has a login
-  // this runner can use.
-  pickForNew(p: { poolId?: string; cwd: string; model?: string }): { poolId: string; accountId: string } | undefined {
-    const accounts = this.usableAccounts();
-    const pools = this.pools().filter((x) => poolAccounts(x, accounts).length);
-    let pool: Pool | undefined;
-    if (p.poolId !== undefined) {
-      pool = pools.find((x) => x.id === p.poolId);
-      if (!pool) throw new RpcError(ErrorCode.badParams, `No pool called ${p.poolId}. Pools: ${pools.map((x) => x.id).join(', ') || 'none'}`);
-    }
-    const wanted = p.model ? this.modelProvider(p.model) : undefined;
-    if (!pool) {
-      pool = poolForFolder(pools, p.cwd) ?? pools.find((x) => x.id === this.defaultPoolId(pools, accounts)) ?? pools[0];
-      if (!pool) return undefined;
-      // Naming a model picks its provider: create_thread with an Opus
-      // model and no account must not land on Codex and drop the model.
-      if (wanted && !poolProviders(pool, accounts).includes(wanted)) pool = pools.find((x) => poolProviders(x, accounts).includes(wanted)) ?? pool;
-    }
-    const providers = poolProviders(pool, accounts);
-    const provider = wanted && providers.includes(wanted) ? wanted : providers[0];
-    // The last login used wins a tie, or when nothing says another has
-    // more room, as pickAccount has it.
-    const json = readRunnerJson(this.cfg.home).defaults;
-    let accountId = pickInPool(pool, accounts, { provider, prefer: json?.accountId ?? this.cfg.defaults.accountId });
-    if (!accountId) {
-      const next = nextLogin(pool, accounts, { accountId: '', provider }, this.clock.now());
-      if (!('waitUntil' in next)) accountId = next.accountId;
-    }
-    accountId ??= poolAccounts(pool, accounts).find((a) => a.provider === provider)?.id ?? poolAccounts(pool, accounts)[0].id;
-    return { poolId: pool.id, accountId };
-  }
 
   list(include: ('inbox' | 'snoozed' | 'archived')[] = ['inbox']): ThreadSummary[] {
     const want = new Set(include);
@@ -3036,266 +2917,7 @@ export class Runner {
     this.moveLogin(st, accounts.find((a) => a.id === next.accountId)!, why);
   }
 
-  // A pool thread's turn ended failed with errorKind usageLimit: mark the
-  // login blocked, move to the next login with room and carry on by
-  // itself, once. A carry-on that runs dry too waits instead of moving
-  // again, as does a pool with nothing left.
-  onUsageLimit(st: ThreadState, turnId: string): void {
-    const { rec } = st;
-    const pool = this.poolById(rec.poolId);
-    if (!pool) return;
-    const now = this.clock.now();
-    const was = this.usableAccounts().find((a) => a.id === rec.accountId);
-    if (was) this.markRanDry(was);
-    if (this.bucket(rec) !== 'inbox') return;
-    // A message sent meanwhile goes next; the before-a-turn check moves it.
-    if (rec.queue.length) return;
-    const accounts = this.usableAccounts();
-    const title = was?.title ?? rec.accountId;
-    if (rec.autoCarryOn === turnId) {
-      this.startWait(st, roomWait(pool, accounts, now), `${title} hit its usage limit too, so this thread waits rather than move again.`);
-      return;
-    }
-    const next = nextLogin(pool, accounts, rec, now);
-    if ('waitUntil' in next) {
-      this.startWait(st, next, `Every login in ${pool.title} is out of room.`);
-      return;
-    }
-    this.moveLogin(st, accounts.find((a) => a.id === next.accountId)!, `${title} ${was ? limitWhy(was, now, true) : 'hit its usage limit'}`);
-    this.carryOn(st, CARRY_ON_MOVED);
-  }
-
-  // A login a turn found at its limit counts as blocked until its window
-  // resets (30 minutes when none says), here and in the UsageStore, which
-  // tells clients. The reading may already say so.
-  markRanDry(account: Account): void {
-    const now = this.clock.now();
-    const until = blockedUntil(account, now);
-    this.ranDry.set(account.id, until);
-    if (account.usage?.blocked) return;
-    try {
-      this.usage?.record(account.id, { windows: [], blocked: true, blockedUntil: until });
-    } catch (e) {
-      this.log.warn('could not record a usage limit', { accountId: account.id, error: String(e) });
-    }
-  }
-
-  // Moves a pool thread onto another login from its next turn: a new
-  // session on it, carrying the transcript across between Claude logins
-  // (carryTranscript), else with a handoff note. Another provider takes
-  // its own default model and effort, like any provider change. The move
-  // is a note in the transcript.
-  moveLogin(st: ThreadState, to: Account, why: string): void {
-    const { rec, rt } = st;
-    if (rec.sessionUsed || rt.session) rec.handoff ??= { fromCwd: rec.moved?.fromCwd ?? rec.cwd, fromAccountId: rec.accountId };
-    delete rec.moved;
-    rec.accountId = to.id;
-    let note = `Moved to ${to.title}: ${why}.`;
-    if (to.provider !== rec.provider) {
-      rec.provider = to.provider;
-      delete rec.allowRules;
-      delete rec.cliVersion;
-      const checked = this.checkSettings(to, this.defaultModelFor(to.provider), this.defaultEffortFor(to.provider));
-      if (checked.model) rec.model = checked.model;
-      else delete rec.model;
-      if (checked.effort) rec.effort = checked.effort;
-      else delete rec.effort;
-      const model = rec.model ? modelTitle(to, rec.model) : to.defaultModel ? modelTitle(to, to.defaultModel) : "the account's default model";
-      note += ` It's on ${providerName(to.provider)} now, with ${model}${rec.sessionUsed ? ' and a summary of the thread so far' : ''}.`;
-    }
-    if (rt.session) {
-      rt.releaseWhenIdle = true;
-      if (!rt.turn) this.releaseSession(st);
-    }
-    rec.updatedAt = this.isoNow();
-    this.emit(st, { type: 'system.note', text: note }, rt.turn?.turnId);
-    this.markDirty(st);
-  }
-
-  // Nothing in the pool has room: the thread waits, with a note, and the
-  // room timer carries it on at `until`.
-  startWait(st: ThreadState, w: { waitUntil: string; accountId?: string }, lead: string): void {
-    const { rec } = st;
-    const now = this.clock.now();
-    rec.waitingForRoom = { until: w.waitUntil, ...(w.accountId ? { accountId: w.accountId } : {}) };
-    const who = w.accountId ? (this.accounts.get(w.accountId)?.title ?? w.accountId) : undefined;
-    // The time it's back, not the minute after it the wait adds.
-    const at = resetTime(new Date(Date.parse(w.waitUntil) - (who ? WAIT_SLACK_MS : 0)).toISOString(), now);
-    this.emit(st, { type: 'system.note', text: `${lead} Carrying on at ${at}${who ? ` when ${who} is back` : ''}.` });
-    this.markDirty(st);
-    this.armRoomTimer();
-  }
-
-  // A wait's time has come: look again. A login with room (the thread's
-  // own, if it's back) carries on by itself; with none, wait again.
-  endWait(st: ThreadState): void {
-    const { rec, rt } = st;
-    delete rec.waitingForRoom;
-    this.markDirty(st);
-    if (rt.deleted || rt.turn || rec.queue.length || this.bucket(rec) !== 'inbox') return;
-    const pool = this.poolById(rec.poolId);
-    if (!pool) return;
-    const now = this.clock.now();
-    const accounts = this.usableAccounts();
-    const current = accounts.find((a) => a.id === rec.accountId);
-    let moved = false;
-    if (!current || !pool.accountIds.includes(current.id) || !loginOk(current)) {
-      const next = nextLogin(pool, accounts, rec, now);
-      if ('waitUntil' in next) {
-        this.startWait(st, next, `Still no room in ${pool.title}.`);
-        return;
-      }
-      const why = current ? `${current.title} ${pool.accountIds.includes(current.id) ? limitWhy(current, now) : `isn't in ${pool.title}`}` : `${rec.accountId} isn't on this Mac`;
-      this.moveLogin(st, accounts.find((a) => a.id === next.accountId)!, why);
-      moved = true;
-    }
-    this.carryOn(st, moved ? CARRY_ON_MOVED : CARRY_ON_BACK);
-  }
-
-  // The runner's own message after a move or a wait. Its turn id is kept,
-  // so if it runs dry too the thread waits rather than move again. While
-  // a restart refuses new turns it waits a minute instead, which the next
-  // runner picks up from thread.json.
-  carryOn(st: ThreadState, text: string): void {
-    const { rec } = st;
-    if (this.refusing || this.draining) {
-      rec.waitingForRoom = { until: new Date(this.clock.now() + WAIT_SLACK_MS).toISOString() };
-      this.markDirty(st);
-      this.armRoomTimer();
-      return;
-    }
-    try {
-      rec.autoCarryOn = this.sendTo(st, text, [], { origin: 'runner', queue: true });
-      this.markDirty(st);
-    } catch (e) {
-      this.log.error('could not carry on after a move', { threadId: rec.id, error: String(e) });
-    }
-  }
-
-  // One timer for every thread waiting for room, at the earliest `until`
-  // (looked at again at least hourly, like snoozes).
-  armRoomTimer(): void {
-    if (this.armingRoom) return;
-    this.armingRoom = true;
-    try {
-      this.roomTimer?.cancel();
-      this.roomTimer = undefined;
-      // A draining runner's threads are the new runner's to carry on.
-      if (this.stopping || this.draining) return;
-      const now = this.clock.now();
-      for (const st of [...this.threads.values()]) {
-        const w = st.rec.waitingForRoom;
-        if (!w) continue;
-        const t = Date.parse(w.until);
-        if (!(t > now)) this.endWait(st);
-      }
-      let next = Infinity;
-      for (const st of this.threads.values()) {
-        const t = st.rec.waitingForRoom ? Date.parse(st.rec.waitingForRoom.until) : NaN;
-        if (t > now) next = Math.min(next, t);
-      }
-      if (next === Infinity) return;
-      this.roomTimer = this.clock.setTimeout(() => this.armRoomTimer(), Math.min(next - now, 3_600_000));
-    } finally {
-      this.armingRoom = false;
-    }
-  }
-
   // ------------------------------------------------- the network dropping
-
-  // A turn failed because the API couldn't be reached (errorKind network,
-  // after the CLI's own retries): the thread waits, with a note, and
-  // carries on by itself once a probe reaches the API again (3 Nov 2026:
-  // Mike's internet went for five minutes and six threads stopped dead
-  // until he told each one to continue). A carry-on that can't get
-  // through either waits again, up to NET_CARRY_ON_MAX times or
-  // NET_WAIT_MAX_MS from the first failure; then it's left to him. Only
-  // the network: limits, the login and real errors never retry by
-  // themselves. A message already queued goes next instead.
-  onNetworkLost(st: ThreadState, turnId: string): void {
-    const { rec } = st;
-    // The same outage if this was the runner's carry-on, or a turn the CLI
-    // opened by itself during the wait (a background job ended).
-    const chain = rec.netCarryOn?.turnId === turnId ? rec.netCarryOn : rec.waitingForNetwork;
-    delete rec.netCarryOn;
-    delete rec.waitingForNetwork;
-    this.markDirty(st);
-    if (this.bucket(rec) !== 'inbox' || rec.queue.length) return;
-    const since = chain?.since ?? this.isoNow();
-    const tries = chain?.tries ?? 0;
-    if (tries >= NET_CARRY_ON_MAX || this.clock.now() - Date.parse(since) > NET_WAIT_MAX_MS) {
-      this.emit(st, { type: 'system.note', text: "Still can't reach the API, so this thread has stopped trying by itself. Send a message to carry on." });
-      return;
-    }
-    rec.waitingForNetwork = { since, tries };
-    if (!chain) this.emit(st, { type: 'system.note', text: "Lost the connection to the API partway through that turn. This thread carries on by itself once it's back." });
-    this.markDirty(st);
-    this.armNetTimer(true);
-  }
-
-  // One timer for every thread waiting for the network. `restart` starts
-  // the backoff again (a new wait, a restart); otherwise a pending probe
-  // is left be. A draining runner's waits are the next runner's.
-  armNetTimer(restart = false): void {
-    if (this.stopping || this.draining) return;
-    const waiting = [...this.threads.values()].some((st) => st.rec.waitingForNetwork);
-    if (!waiting) {
-      this.netTimer?.cancel();
-      this.netTimer = undefined;
-      this.netProbes = 0;
-      return;
-    }
-    if (restart) this.netProbes = 0;
-    else if (this.netTimer) return;
-    this.netTimer?.cancel();
-    const delay = Math.min(NET_PROBE_MAX_MS, NET_PROBE_FIRST_MS * 2 ** this.netProbes);
-    this.netTimer = this.clock.setTimeout(() => {
-      this.netTimer = undefined;
-      void this.probeNetwork();
-    }, delay);
-  }
-
-  // Tries each waiting provider's API once; the threads whose API answers
-  // carry on, the rest wait for the next probe.
-  async probeNetwork(): Promise<void> {
-    if (this.probing) return;
-    this.probing = true;
-    try {
-      const waiting = [...this.threads.values()].filter((st) => st.rec.waitingForNetwork);
-      const up = new Map<Provider, boolean>();
-      for (const provider of new Set(waiting.map((st) => st.rec.provider))) {
-        up.set(provider, await this.reachable(provider).catch(() => false));
-      }
-      if (this.stopping || this.draining) return;
-      for (const st of waiting) if (st.rec.waitingForNetwork && up.get(st.rec.provider)) this.endNetWait(st);
-      this.netProbes++;
-    } catch (e) {
-      this.log.error('could not check the network', { error: String(e) });
-    } finally {
-      this.probing = false;
-    }
-    this.armNetTimer();
-  }
-
-  // The API answers again: carry on, unless the thread's moved on by
-  // itself meanwhile (a turn, a message waiting, archived or snoozed).
-  endNetWait(st: ThreadState): void {
-    const { rec, rt } = st;
-    const w = rec.waitingForNetwork;
-    if (!w) return;
-    if (this.refusing) return; // a restart is coming; the next runner carries on
-    delete rec.waitingForNetwork;
-    this.markDirty(st);
-    if (rt.deleted || rt.turn || rec.queue.length || this.bucket(rec) !== 'inbox') return;
-    try {
-      const turnId = this.sendTo(st, CARRY_ON_NETWORK, [], { origin: 'runner', queue: true });
-      rec.netCarryOn = { turnId, since: w.since, tries: w.tries + 1 };
-      this.markDirty(st);
-      this.log.info('carried on after the network came back', { threadId: rec.id, tries: w.tries + 1 });
-    } catch (e) {
-      this.log.error('could not carry on after the network came back', { threadId: rec.id, error: String(e) });
-    }
-  }
 
   onExited(st: ThreadState, gen: number, err?: Error): void {
     const { rec, rt } = st;
@@ -5190,33 +4812,6 @@ export class Runner {
     return st;
   }
 
-  // The pool named last is where a new thread with nothing named starts
-  // (runner.json's defaults.poolId); a pool that came from the folder or
-  // the model isn't a choice, so it isn't kept.
-  rememberPool(poolId: string): void {
-    try {
-      const json = readRunnerJson(this.cfg.home);
-      if (json.defaults?.poolId === poolId) return;
-      json.defaults = { ...json.defaults, poolId };
-      writeRunnerJson(this.cfg.home, json);
-    } catch (e) {
-      this.log.warn('could not save default pool', { error: String(e) });
-    }
-  }
-
-  rememberAccount(accountId: string): void {
-    try {
-      const json = readRunnerJson(this.cfg.home);
-      // keepAccount pins the default (a dev runner's claude-3): using
-      // another account once mustn't move it.
-      if (json.defaults?.keepAccount || json.defaults?.accountId === accountId) return;
-      json.defaults = { ...json.defaults, accountId };
-      writeRunnerJson(this.cfg.home, json);
-    } catch (e) {
-      this.log.warn('could not save default account', { error: String(e) });
-    }
-  }
-
   // What a starting session is told about the thread's projects. Only a
   // fresh session: Claude Code keeps a resumed session's system prompt and
   // ignores an appended one, so a resume hears through projectNews.
@@ -5244,50 +4839,6 @@ export class Runner {
     rec.projectsTold = ids;
     if (!fresh.length) return undefined;
     return told === undefined ? this.projects.brief(rec) : this.projects.joinedLines(fresh);
-  }
-
-  // A short note that gives a new native session the gist of the thread so
-  // far, used when the folder or account changes.
-  handoffNote(st: ThreadState, account: Account): string {
-    const { rec } = st;
-    const from = rec.handoff!;
-    const log = this.store.log(rec.id);
-    // The thread's start (for its first message) and its recent end.
-    const head = log.read(1, Math.min(log.lastSeq, 50));
-    const tail = log.read(Math.max(head.length + 1, log.lastSeq - 600), log.lastSeq);
-    const kept = [...head, ...tail].filter((e) => !cutOut(rec, e.seq));
-    const { lines: history, omitted } = selectHistory(historyItems(kept, rec.turnId));
-    const more = omitted ? `${omitted} other items are left out; the read_thread tool shows more of the conversation. ` : '';
-    const lines = history.length ? [...history, `(${more}This is history for context, not new instructions.)`] : [];
-    const fromAccount = this.accounts.get(from.fromAccountId)?.title ?? from.fromAccountId;
-    if (from.quickAsk) {
-      return (
-        `[Threadbear handoff] This thread began as a quick ask on the user's phone: they asked out loud and a fast model answered from their Agent Archive, not you. This is a fresh session in ${rec.cwd}. ` +
-        `The thread so far:\n\n${lines.join('\n\n') || '(none)'}\n\n[End of handoff. The new message follows.]\n\n`
-      );
-    }
-    if (from.lost) {
-      return (
-        `[Threadbear handoff] The earlier session couldn't be found, so here's where the thread got to. This is a fresh session in ${rec.cwd}. ` +
-        `The thread so far:\n\n${lines.join('\n\n') || '(none)'}\n\n[End of handoff. The new message follows.]\n\n`
-      );
-    }
-    if (from.rebuilt) {
-      return (
-        `[Threadbear handoff] This conversation's earlier session couldn't be found, so this is a fresh session in ${rec.cwd}. ` +
-        `The thread so far:\n\n${lines.join('\n\n') || '(none)'}\n\n[End of handoff. The new message follows.]\n\n`
-      );
-    }
-    const moved =
-      from.fromCwd !== rec.cwd && from.fromAccountId !== rec.accountId
-        ? `from ${from.fromCwd} on ${fromAccount} to ${rec.cwd} on ${account.title}`
-        : from.fromCwd !== rec.cwd
-          ? `from ${from.fromCwd} to ${rec.cwd}`
-          : `from the ${fromAccount} login to ${account.title}`;
-    return (
-      `[Threadbear handoff] This conversation moved ${moved}, so this is a fresh session. ` +
-      `The thread so far:\n\n${lines.join('\n\n') || '(none)'}\n\n[End of handoff. The new message follows.]\n\n`
-    );
   }
 
   isoNow(): string {
@@ -5357,7 +4908,7 @@ export class Runner {
 
 // The Runner's other methods live in parts under runner/, one area each;
 // they go onto its prototype here, as the class's own methods would be.
-for (const part of [worktreesPart]) {
+for (const part of [poolsPart, networkPart, worktreesPart]) {
   for (const [key, d] of Object.entries(Object.getOwnPropertyDescriptors(part))) {
     Object.defineProperty(Runner.prototype, key, { ...d, enumerable: false });
   }
@@ -5410,10 +4961,10 @@ export const CARRY_ON_NETWORK = "The connection to the API dropped partway throu
 // How a thread waits for the network: probes 5s, 10s, 20s... apart, at
 // most a minute; a carry-on that can't get through either counts as a
 // try; after five, or six hours from the first failure, it's left to Mike.
-const NET_PROBE_FIRST_MS = 5_000;
-const NET_PROBE_MAX_MS = 60_000;
-const NET_CARRY_ON_MAX = 5;
-const NET_WAIT_MAX_MS = 6 * 3_600_000;
+export const NET_PROBE_FIRST_MS = 5_000;
+export const NET_PROBE_MAX_MS = 60_000;
+export const NET_CARRY_ON_MAX = 5;
+export const NET_WAIT_MAX_MS = 6 * 3_600_000;
 export const CARRY_ON_BACK = 'Your login hit its usage limit partway through that turn and has room again now. Carry on from where you left off.';
 
 // How many sub-agents a thread keeps in its summary.
@@ -5534,7 +5085,7 @@ export function oneLine(text: string, max: number): string {
 }
 
 // A provider's name in notes.
-function providerName(p: Provider): string {
+export function providerName(p: Provider): string {
   return p === 'codex' ? 'Codex' : 'Claude';
 }
 
@@ -5550,12 +5101,12 @@ export function isClaudeModel(id: string): boolean {
 }
 
 // The account's row for a model id, matched by picker id or full id.
-function modelRow(account: Account, model: string | undefined): ModelChoice | undefined {
+export function modelRow(account: Account, model: string | undefined): ModelChoice | undefined {
   if (!model) return undefined;
   return account.models?.find((m) => m.id === model || m.model === model);
 }
 
-function modelTitle(account: Account, model: string): string {
+export function modelTitle(account: Account, model: string): string {
   return modelRow(account, model)?.title ?? model;
 }
 
