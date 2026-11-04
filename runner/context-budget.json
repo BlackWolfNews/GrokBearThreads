@@ -1,0 +1,42 @@
+{
+  "claude": {
+    "instructions": 2718,
+    "tools": 33811,
+    "total": 36529
+  },
+  "codex": {
+    "instructions": 2158,
+    "tools": 33910,
+    "total": 36068
+  },
+  "worktreeInstructions": 498,
+  "perTool": {
+    "ask_secret": 1241,
+    "create_project": 1335,
+    "create_thread": 2176,
+    "delete_schedule": 267,
+    "delete_thread": 445,
+    "end_turn": 8041,
+    "interrupt_thread": 335,
+    "join_project": 524,
+    "leave_project": 460,
+    "list_accounts": 454,
+    "list_projects": 474,
+    "list_schedules": 379,
+    "list_threads": 706,
+    "move_thread": 1166,
+    "pin": 1120,
+    "pocket": 1419,
+    "read_project": 379,
+    "read_thread": 520,
+    "schedule_message": 2674,
+    "send_message": 562,
+    "show_options": 1671,
+    "show_panel": 1299,
+    "unpin": 300,
+    "update_project": 2822,
+    "update_schedule": 721,
+    "update_thread": 1672,
+    "wait_for_app_restart": 649
+  }
+}

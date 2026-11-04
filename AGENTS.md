@@ -23,6 +23,14 @@ static site with its own `package.json`; its comments say how to build it.
   Claude session keeps a tool's definition from when it first loaded it, and
   ToolSearch shows that one too, so it goes on calling the old form
   (docs/protocol.md, "One reply"; `end_turn` handles this).
+- What every agent is handed (the threadbear tools' names, descriptions
+  and arguments, and the standing instructions) has a byte budget,
+  `runner/context-budget.json`, checked by
+  `test/unit/context-budget.test.ts`. A change that alters it fails until
+  you run `npm run context-budget` in `runner/` and commit the file with
+  it, so the size change is in the diff. Mike wants agents' tools and
+  standing context kept lean: before accepting growth, see if it can be
+  shorter or go behind something agents look up.
 - The protocol is the contract. Change `docs/protocol.md` first, then both
   sides, and keep both sides tolerant of unknown fields and event types.
 - Only ever spawn the official `claude` (and later `codex`) binaries under

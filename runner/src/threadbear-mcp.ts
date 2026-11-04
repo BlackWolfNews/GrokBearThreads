@@ -1246,28 +1246,36 @@ export function patchesLine(guide = guidePath(), exists: (p: string) => boolean 
   );
 }
 
-export function threadbearMcpServer(control: ThreadControl, selfId: string, schedules?: ScheduleControl, projects?: ProjectControl, appRestarts?: AppRestartControl, bulletReplies: () => boolean = () => true, pocket?: () => PocketControl | undefined, oneReply: () => boolean = () => false): McpSdkServerConfigWithInstance {
-  const one = oneReply();
+// What a Claude session's threadbear server tells it, standing in every
+// turn's context. Measured by the context budget test with the tools
+// (test/unit/context-budget.test.ts), so growth is a choice.
+export function serverInstructions(selfId: string, o: { one: boolean; bulletReplies: boolean; pocket: boolean; projects: boolean }): string {
   const guide = guideLine();
   const patches = patchesLine();
+  return (
+    `This session is a thread in Threadbear, the app the user runs agent threads in (thread id ${selfId}). ` +
+    userLine() +
+    (guide ? `${guide} ` : '') +
+    (patches ? `${patches} ` : '') +
+    'These tools manage Threadbear itself: list and read threads, start new ones, message them, rename, snooze, archive, move and delete them, schedule messages for later (once or on a cron), and keep the user\'s projects (groupings above folders with goals, state and notes) up to date. ' +
+    'Use move_thread when the work belongs in another folder (for example a repo), so this thread runs there from the next turn. ' +
+    `${SHOWING_THE_USER} ` +
+    (o.pocket ? `${POCKET_LINE} ` : '') +
+    (o.projects ? `${FILING_PROJECTS} ` : '') +
+    (o.one
+      ? 'End every turn by calling end_turn, then writing your reply straight after it: the reply is the only text the user sees from the turn.'
+      : o.bulletReplies
+        ? 'End every turn by calling end_turn, with a short summary of what you did (the user reads it first, as your reply) and anything they have to do.'
+        : 'End every turn by writing your reply as an ordinary message, then calling end_turn with a short summary of what you did (for previews and notifications) and anything they have to do.')
+  );
+}
+
+export function threadbearMcpServer(control: ThreadControl, selfId: string, schedules?: ScheduleControl, projects?: ProjectControl, appRestarts?: AppRestartControl, bulletReplies: () => boolean = () => true, pocket?: () => PocketControl | undefined, oneReply: () => boolean = () => false): McpSdkServerConfigWithInstance {
+  const one = oneReply();
   const server = createSdkMcpServer({
     name: SERVER_NAME,
     version: RUNNER_VERSION,
-    instructions:
-      `This session is a thread in Threadbear, the app the user runs agent threads in (thread id ${selfId}). ` +
-      userLine() +
-      (guide ? `${guide} ` : '') +
-      (patches ? `${patches} ` : '') +
-      'These tools manage Threadbear itself: list and read threads, start new ones, message them, rename, snooze, archive, move and delete them, schedule messages for later (once or on a cron), and keep the user\'s projects (groupings above folders with goals, state and notes) up to date. ' +
-      'Use move_thread when the work belongs in another folder (for example a repo), so this thread runs there from the next turn. ' +
-      `${SHOWING_THE_USER} ` +
-      (pocket?.() ? `${POCKET_LINE} ` : '') +
-      (projects ? `${FILING_PROJECTS} ` : '') +
-      (one
-        ? 'End every turn by calling end_turn, then writing your reply straight after it: the reply is the only text the user sees from the turn.'
-        : bulletReplies()
-          ? 'End every turn by calling end_turn, with a short summary of what you did (the user reads it first, as your reply) and anything they have to do.'
-          : 'End every turn by writing your reply as an ordinary message, then calling end_turn with a short summary of what you did (for previews and notifications) and anything they have to do.'),
+    instructions: serverInstructions(selfId, { one, bulletReplies: bulletReplies(), pocket: Boolean(pocket?.()), projects: Boolean(projects) }),
     tools: buildThreadbearTools(control, selfId, Date.now, schedules, projects, appRestarts, { bulletReplies, pocket, oneReply: () => one }),
   });
   server.tools = [...ALWAYS_ASK_TOOLS].map((name) => ({ name: name.split('__').at(-1)!, permission_policy: 'always_ask' as const }));
