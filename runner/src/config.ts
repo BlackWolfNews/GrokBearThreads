@@ -12,22 +12,21 @@ import { CLI_POLICIES, isEffortLevel, isProvider, type CliPolicy, type EffortLev
 export const RUNNER_VERSION = RELEASE.version;
 // Where a new thread starts when nothing says otherwise. Setup writes
 // ~/ThreadbearThreads into runner.json (not the home folder, where agents set off
-// macOS's Dropbox, Desktop and Documents prompts); Mike's own default
-// (~/dev/me/misc) is in his runner.json's defaults.cwd.
+// macOS's Dropbox, Desktop and Documents prompts); anyone's own choice
+// goes in their runner.json's defaults.cwd.
 export const DEFAULT_CWD = '~';
 export const DEFAULT_PORT = 8797;
 export const DEFAULT_MAX_LIVE = 6;
 
 // Notes shown with an account in the app's account menu (runner.json
-// accountNotes, e.g. Mike's { "claude-2": "Convex work only" }). None by
+// accountNotes, e.g. { "claude-2": "Work only" }). None by
 // default: they're one person's.
 export const DEFAULT_ACCOUNT_NOTES: Record<string, string> = {};
 
 // Folders whose new threads start on a built-in pool, by the login that
 // pool is made from (pools.ts, defaultPools), from runner.json poolFolders
-// (Mike's: { "claude-2": ["~/dev/convex"] }). None by default; until
-// 28 Oct Mike's were in the code and would have applied to anyone's second
-// login. A runner.json `pools` list carries its own folders.
+// (e.g. { "claude-2": ["~/dev/work"] }). None by default, as one
+// person's folders would otherwise apply to anyone's second login. A runner.json `pools` list carries its own folders.
 export const DEFAULT_POOL_FOLDERS: Record<string, string[]> = {};
 
 export type CliUpdatesConfig = {

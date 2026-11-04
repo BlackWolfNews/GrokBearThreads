@@ -1,7 +1,7 @@
 // End to end for the threadbear tools (src/threadbear-mcp.ts) with the real
 // Claude CLI: an agent moves its own thread to another folder and carries on
 // there with its memory intact, then starts and deletes another thread.
-// Temp runner, temp folders, account claude-3, the cheapest model.
+// Temp runner, temp folders, the claude-main login (TB_E2E_ACCOUNT), the cheapest model.
 // Run with `node --test test/e2e/tools.e2e.test.ts`.
 import { describe, test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -12,7 +12,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { RunnerClient } from '../../src/client.ts';
 import { isTransient } from '../helpers/protocol-check.ts';
 
-const ACCOUNT = process.env.TB_E2E_ACCOUNT ?? 'claude-3';
+const ACCOUNT = process.env.TB_E2E_ACCOUNT ?? 'claude-main';
 const MODEL = process.env.TB_E2E_MODEL ?? 'claude-haiku-5-5';
 const RUNNER_DIR = path.join(import.meta.dirname, '..', '..');
 

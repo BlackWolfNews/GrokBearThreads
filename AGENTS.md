@@ -156,8 +156,8 @@ if `tb` isn't found (an older runner, or outside a thread), use
   change it. To try a runner change, start `runner/scripts/dev-runner.sh` in
   the background and use the `<dev home>/tb` it prints (a bare `tb` reaches
   the live runner unless `THREADBEAR_HOME` is set in that same command).
-  Its threads start in `<dev home>/work` on claude-3 and claude-haiku-5-5
-  (its `runner.json` defaults), from `tb` or a debug app's composer alike.
+  Its threads start in `<dev home>/work` on claude-main (or
+  `TB_E2E_ACCOUNT`) and claude-haiku-5-5 (its `runner.json` defaults), from `tb` or a debug app's composer alike.
   Leave `--home` out, or keep it and any extra work folders under
   `$TMPDIR`: Agent Archive skips transcripts from there, but not from
   `/tmp`, so a try-out thread in `/tmp` ends up in Mike's archive.

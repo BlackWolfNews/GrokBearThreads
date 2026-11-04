@@ -1102,7 +1102,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     public var isRemote: Bool { runnerId != nil }
 
     public init(
-        id: String, title: String, cwd: String = "~/dev/me/misc", accountId: String = "claude-main",
+        id: String, title: String, cwd: String = "~/ThreadbearThreads", accountId: String = "claude-main",
         provider: String = "claude", model: String? = nil, permissionMode: PermissionMode = .full,
         status: ThreadStatus = .idle, live: Bool = false, needsYou: Bool = false,
         createdAt: Date = Date(), updatedAt: Date = Date(), lastActivityAt: Date = Date(),

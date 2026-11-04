@@ -8,8 +8,18 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const site = join(dirname(fileURLToPath(import.meta.url)), "..");
-const playwrightDir = process.env.PLAYWRIGHT_DIR ?? `${process.env.HOME}/dev/me/mikerosoft.app/`;
-const { chromium } = createRequire(playwrightDir.endsWith("/") ? playwrightDir : `${playwrightDir}/`)("playwright");
+// Playwright isn't a dependency of the site: it comes from PLAYWRIGHT_DIR (a folder whose
+// node_modules has it) or, failing that, wherever Node finds it from here.
+function loadPlaywright() {
+  const dir = process.env.PLAYWRIGHT_DIR;
+  try {
+    return createRequire(dir ? (dir.endsWith("/") ? dir : `${dir}/`) : import.meta.url)("playwright");
+  } catch {
+    console.error("Playwright not found. Set PLAYWRIGHT_DIR to a folder that has it installed (npm i playwright there).");
+    process.exit(1);
+  }
+}
+const { chromium } = loadPlaywright();
 const data = (file, type) => `data:${type};base64,${readFileSync(join(site, file)).toString("base64")}`;
 
 const html = `<!doctype html><html><head><style>

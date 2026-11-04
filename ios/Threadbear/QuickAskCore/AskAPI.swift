@@ -24,13 +24,6 @@ nonisolated enum AskAPI {
     static let askPath = "/api/quick/ask"
     static let historyLimit = 3
 
-    #if DEBUG
-    /// Mike's Agent Archive deployments, as Settings presets for his testing. Debug builds only:
-    /// the App Store build knows no server of his, and his will move to a box of his own anyway.
-    static let prodBaseURL = "https://greedy-octopus-740.convex.site"
-    static let devBaseURL = "https://notable-orca-910.convex.site"
-    #endif
-
     static func body(question: String, history: [Exchange], timeZone: TimeZone, now: Date) -> AskBody {
         let recent = recentHistory(history)
         return AskBody(

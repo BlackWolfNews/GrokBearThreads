@@ -233,7 +233,7 @@ failed. Like launchd, the script starts the runner
 again when it exits 0 (`tb restart`), and stops when it exits with an
 error. It uses your real logins, so threads in it cost like any other. On a
 new data dir it writes a `runner.json` whose threads default to the folder
-`<home>/work`, account `claude-3` and model `claude-haiku-5-5`, so a thread
+`<home>/work`, account `claude-main` (or `TB_E2E_ACCOUNT`) and model `claude-haiku-5-5`, so a thread
 a debug app's composer starts is a cheap one too (an account's own default
 can be Fable with a 1M context), and it prints a `tb new` line. Ctrl-C or the `kill` stops it and the CLIs it
 started. Run in the background from a thread, it is background work that
@@ -246,7 +246,7 @@ holds the live runner's restart, so stop it before a deploy.
 ```json
 {
   "port": 8797,
-  "defaults": { "cwd": "~/dev/me/misc", "accountId": "claude-3", "model": "claude-haiku-5-5" },
+  "defaults": { "cwd": "~/ThreadbearThreads", "accountId": "claude-main", "model": "claude-haiku-5-5" },
   "claudePath": "~/.local/bin/claude",
   "idleMinutes": 30,
   "maxLiveCLIs": 6,
@@ -629,7 +629,7 @@ and on the thread it runs in).
 `docs/protocol.md` and is shared by both suites.
 
 The end-to-end suite starts the runner on a free port with a temp data dir
-and drives account `claude-3` on `claude-haiku-5-5` in a temp folder:
+and drives account `claude-main` (`TB_E2E_ACCOUNT`) on `claude-haiku-5-5` in a temp folder:
 streaming, a Read tool call, resume after idle release, interrupt, an
 ask-mode Write approval, AskUserQuestion, an image in and an image out, a
 folder change handoff, `tb`, archive, a background shell whose finish

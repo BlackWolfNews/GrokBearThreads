@@ -502,7 +502,7 @@ private struct PoolListRow: View {
         .accessibilityLabel(pool.title + (selected ? ", showing" : ""))
     }
 
-    /// "gangbusters, gmail, cannstudios · ~/dev/convex".
+    /// "acme, gmail, bearworks · ~/dev/convex".
     private var detail: String {
         let logins = pool.accountIds.map { AccountName.login($0, accounts: accounts) }
         var text = logins.isEmpty ? "No logins yet" : logins.joined(separator: ", ")

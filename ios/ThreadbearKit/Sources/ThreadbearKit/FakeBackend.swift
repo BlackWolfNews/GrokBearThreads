@@ -40,7 +40,7 @@ public final class FakeBackend: Backend, @unchecked Sendable {
             imagesById[thread.thread.threadId] = thread.images
         }
         scheduleList = sample.schedules
-        runnerList = [PhoneRunner(runnerId: "m5", name: "MacBook Pro", version: "0.1.0",
+        runnerList = [PhoneRunner(runnerId: "mac", name: "MacBook Pro", version: "0.1.0",
                                   lastSeenAt: runnerOnline ? now : now.addingTimeInterval(-3 * 3600))]
         self.turnDelay = turnDelay
         self.listDelay = listDelay

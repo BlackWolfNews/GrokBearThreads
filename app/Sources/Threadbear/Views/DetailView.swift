@@ -543,7 +543,7 @@ private struct NewThreadHeading: View {
     }
 }
 
-/// "Starts in misc on cannstudios": the folder and account the composer's
+/// "Starts in misc on bearworks": the folder and account the composer's
 /// menus are set to (with pools, "on the Claude pool", or the login a
 /// pinned draft is on). Then each login as a card with the room it has
 /// left: the pool's logins, or every one when the draft isn't in a pool.

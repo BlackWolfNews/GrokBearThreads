@@ -25,11 +25,11 @@ final class PoolsTests: XCTestCase {
     /// one, and Codex.
     private var accounts: [Account] {
         [
-            Account(id: "claude-main", title: "mike@gangbusters.io", email: "mike@gangbusters.io", usage: room(61)),
-            Account(id: "claude-1", title: "mike.cann@gmail.com", email: "mike.cann@gmail.com", usage: room(16)),
-            Account(id: "claude-3", title: "mike@cannstudios.com", email: "mike@cannstudios.com", usage: room(0, blocked: true, reset: at(17))),
+            Account(id: "claude-main", title: "sam@acme.io", email: "sam@acme.io", usage: room(61)),
+            Account(id: "claude-1", title: "sam.lee@gmail.com", email: "sam.lee@gmail.com", usage: room(16)),
+            Account(id: "claude-3", title: "sam@bearworks.com", email: "sam@bearworks.com", usage: room(0, blocked: true, reset: at(17))),
             Account(id: "claude-2", title: "mike@convex.dev", email: "mike@convex.dev", note: "Convex work only", usage: room(65)),
-            Account(id: "codex-main", provider: "codex", title: "Codex · mike@gangbusters.io", email: "mike@gangbusters.io", usage: room(91, weekly: 95)),
+            Account(id: "codex-main", provider: "codex", title: "Codex · sam@acme.io", email: "sam@acme.io", usage: room(91, weekly: 95)),
         ]
     }
 
@@ -147,19 +147,19 @@ final class PoolsTests: XCTestCase {
     /// The most room first, resting ones last with when they're back.
     func testStatusLine() {
         XCTAssertEqual(Pools.statusLine(claude, accounts: accounts, now: now, calendar: calendar),
-                       "gangbusters 61% · gmail 16% · cannstudios resting until 5 pm")
-        XCTAssertEqual(Pools.statusLine(mixed, accounts: accounts, now: now, calendar: calendar), "Codex 91% · gangbusters 61% · gmail 16%")
+                       "acme 61% · gmail 16% · bearworks resting until 5 pm")
+        XCTAssertEqual(Pools.statusLine(mixed, accounts: accounts, now: now, calendar: calendar), "Codex 91% · acme 61% · gmail 16%")
         var unknown = accounts
         unknown[0].usage = nil
         unknown[2].usage = AccountUsage(windows: [], blocked: true)
-        XCTAssertEqual(Pools.statusLine(claude, accounts: unknown, now: now, calendar: calendar), "gmail 16% · gangbusters · cannstudios resting")
+        XCTAssertEqual(Pools.statusLine(claude, accounts: unknown, now: now, calendar: calendar), "gmail 16% · acme · bearworks resting")
         XCTAssertNil(Pools.statusLine(Pool(id: "e", title: "E", accountIds: []), accounts: accounts, now: now))
     }
 
     /// Only when the whole pool is low: one login with room is enough for
     /// the runner to move to.
     func testChipBadgeIsForTheWholePool() {
-        XCTAssertNil(Pools.chipBadge(claude, accounts: accounts), "gangbusters has 61%")
+        XCTAssertNil(Pools.chipBadge(claude, accounts: accounts), "acme has 61%")
         var low = accounts
         low[0].usage = room(20)
         XCTAssertEqual(Pools.chipBadge(claude, accounts: low), .low("20%"))
@@ -176,7 +176,7 @@ final class PoolsTests: XCTestCase {
     /// Mike's logins share "mike" before the @, so pools name them by
     /// their domain, falling back when two share one.
     func testLoginNames() {
-        XCTAssertEqual(accounts.map { AccountName.login($0.id, accounts: accounts) }, ["gangbusters", "gmail", "cannstudios", "convex", "Codex"])
+        XCTAssertEqual(accounts.map { AccountName.login($0.id, accounts: accounts) }, ["acme", "gmail", "bearworks", "convex", "Codex"])
         let twoGmails = [Account(id: "a", title: "a@gmail.com", email: "a@gmail.com"), Account(id: "b", title: "b@gmail.com", email: "b@gmail.com"),
                          Account(id: "c", title: "a@gmail.co.uk", email: "a@gmail.co.uk")]
         XCTAssertEqual(twoGmails.map { AccountName.login($0.id, accounts: twoGmails) }, ["a@gmail.com", "b", "a@gmail.co.uk"])

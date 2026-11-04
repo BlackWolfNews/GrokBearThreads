@@ -191,7 +191,7 @@ the data dir (`<home>`, normally `~/Library/Application Support/Threadbear`):
   tree's runner in the foreground on a temp data dir (refuses the real
   one) and prints the `<home>/tb` for `tb` and the `dev-app.sh start
   --home` line for the app. A new data dir's `runner.json` defaults threads
-  to `<home>/work`, claude-3 and claude-haiku-5-5 (`defaults.model`, which
+  to `<home>/work`, claude-main (or `TB_E2E_ACCOUNT`) and claude-haiku-5-5 (`defaults.model`, which
   the runner applies to a `threads.create` with no model).
 - `./check.sh [--quick | --app] [--e2e] [--shots DIR]` at the repo root:
   runner typecheck, unit tests and deploy tests, app `swift build` and

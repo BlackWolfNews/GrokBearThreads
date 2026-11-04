@@ -139,7 +139,7 @@ public enum Pools {
 
     /// The quiet line under Effort: each login's short name and room, the
     /// most room first, and the ones at their limit last, saying when they
-    /// come back: "gangbusters 61% · gmail 16% · cannstudios resting until
+    /// come back: "acme 61% · gmail 16% · bearworks resting until
     /// 5 am". Nil for a pool with no logins.
     public static func statusLine(_ pool: Pool, accounts: [Account], now: Date, calendar: Calendar = .current) -> String? {
         let all = logins(pool, accounts: accounts)

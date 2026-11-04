@@ -254,8 +254,8 @@ public struct PhoneThread: Codable, Sendable, Hashable, Identifiable {
     public var links: [PhoneLink]?
 
     public init(
-        threadId: String, runnerId: String = "m5", title: String, cwd: String = "~/dev/me/misc",
-        accountId: String = "claude-3", provider: String = "claude", model: String? = nil,
+        threadId: String, runnerId: String = "mac", title: String, cwd: String = "~/ThreadbearThreads",
+        accountId: String = "claude-main", provider: String = "claude", model: String? = nil,
         status: ThreadStatus = .idle, needsYou: Bool = false, unread: Bool = false, preview: String = "",
         lastActivityAt: Date, snoozedUntil: Date? = nil, snoozedUntilRestart: Bool? = nil, woke: Woke? = nil, archivedAt: Date? = nil, starredAt: Date? = nil,
         costUsd: Double? = nil, projects: [ProjectRef]? = nil, working: String? = nil,

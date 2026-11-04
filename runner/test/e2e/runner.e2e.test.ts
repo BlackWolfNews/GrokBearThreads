@@ -1,5 +1,5 @@
 // Real end-to-end suite: starts the runner on a temp port and data dir and
-// drives the real Claude CLI on account claude-3 with the cheapest model,
+// drives the real Claude CLI on the claude-main login (TB_E2E_ACCOUNT) with the cheapest model,
 // tiny prompts and a temp working folder. Run with `npm run test:e2e`.
 import { describe, test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -11,7 +11,7 @@ import { RunnerClient } from '../../src/client.ts';
 import { checkSequence, checkSummary, isTransient } from '../helpers/protocol-check.ts';
 import { makePng } from '../helpers/png.ts';
 
-const ACCOUNT = process.env.TB_E2E_ACCOUNT ?? 'claude-3';
+const ACCOUNT = process.env.TB_E2E_ACCOUNT ?? 'claude-main';
 const MODEL = process.env.TB_E2E_MODEL ?? 'claude-haiku-5-5';
 const IDLE_MS = 6000;
 const RUNNER_DIR = path.join(import.meta.dirname, '..', '..');

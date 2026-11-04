@@ -12,7 +12,7 @@ import path from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { RunnerClient } from '../../src/client.ts';
 
-const ACCOUNT = process.env.TB_E2E_ACCOUNT ?? 'claude-3';
+const ACCOUNT = process.env.TB_E2E_ACCOUNT ?? 'claude-main';
 const MODEL = process.env.TB_E2E_MODEL ?? 'claude-haiku-5-5';
 const RUNNER_DIR = path.join(import.meta.dirname, '..', '..');
 

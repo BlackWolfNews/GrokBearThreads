@@ -18,9 +18,10 @@ const PROVIDER_TITLES: Record<Provider, string> = { claude: 'Claude', codex: 'Co
 
 // The built-in list, worked out from the logins found: one pool per
 // provider holding its logins that have no note, then one per noted login
-// (claude-2's "Convex work only" is `convex`), titled from the note's first
+// (claude-2's "Work only" is `work`), titled from the note's first
 // word. Providers in PROVIDERS order, each one's noted pools after it, so
-// Mike's list is Claude, Convex, Codex.
+// three Claude logins, one noted "Work only", and a Codex one make Claude,
+// Work, Codex.
 export function defaultPools(accounts: Account[], notes: Record<string, string>, folders: Record<string, string[]>): Pool[] {
   const out: Pool[] = [];
   const noteOf = (a: Account): string | undefined => (notes[a.id] ?? a.note)?.trim() || undefined;

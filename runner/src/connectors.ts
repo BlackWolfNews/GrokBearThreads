@@ -1,10 +1,10 @@
-// Mike's Connectors gateway (~/dev/me/connectors, on Bruce): which of its
+// The Connectors gateway (plugbear, optional; runner.json's gateway): which of its
 // services are signed in, for the app's Connectors panel, and the sign-in
 // problems an agent runs into, for end_turn to turn into an ask
 // (docs/protocol.md, "Connectors").
 //
 // The runner asks the gateway's open /health every few minutes and when
-// the panel opens; the app never calls Bruce itself. /health has changed
+// the panel opens; the app never calls the gateway itself. /health has changed
 // shape once already (a map of id to state, then a list of objects with a
 // title, a message and a connect URL), so everything here is read
 // leniently: a field it doesn't know is ignored, a missing one has a

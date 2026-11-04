@@ -32,10 +32,10 @@ final class PoolPickTests: XCTestCase {
 
     private var accounts: [Account] {
         [
-            Account(id: "claude-main", title: "mike@gangbusters.io", models: [opus], email: "mike@gangbusters.io", usage: room(61)),
-            Account(id: "claude-1", title: "mike.cann@gmail.com", models: [opus], email: "mike.cann@gmail.com", usage: room(16)),
-            Account(id: "claude-2", title: "mike@convex.dev", models: [opus], email: "mike@convex.dev", note: "Convex work only", usage: room(80)),
-            Account(id: "codex-main", provider: "codex", title: "Codex · mike@gangbusters.io", models: [sol], email: "mike@gangbusters.io", usage: room(91)),
+            Account(id: "claude-main", title: "sam@acme.io", models: [opus], email: "sam@acme.io", usage: room(61)),
+            Account(id: "claude-1", title: "sam.lee@gmail.com", models: [opus], email: "sam.lee@gmail.com", usage: room(16)),
+            Account(id: "claude-2", title: "sam@convex.dev", models: [opus], email: "sam@convex.dev", note: "Convex work only", usage: room(80)),
+            Account(id: "codex-main", provider: "codex", title: "Codex · sam@acme.io", models: [sol], email: "sam@acme.io", usage: room(91)),
         ]
     }
 
@@ -239,7 +239,7 @@ final class PoolPickTests: XCTestCase {
         let waiting = ThreadSummary(id: "th2", title: "t", accountId: "claude-main", poolId: "claude", waitingForRoom: WaitingForRoom(until: until))
         XCTAssertEqual(app.limitAdvice(for: waiting)?.text.hasPrefix("Every login in Claude is out of room. It carries on by itself"), true)
         let pinned = ThreadSummary(id: "th3", title: "t", accountId: "claude-main")
-        XCTAssertEqual(app.limitAdvice(for: pinned)?.text, "mike@gangbusters.io has reached its limit.", "a pinned thread: as before")
+        XCTAssertEqual(app.limitAdvice(for: pinned)?.text, "sam@acme.io has reached its limit.", "a pinned thread: as before")
     }
 }
 

@@ -192,7 +192,7 @@ final class AccountUsageTests: XCTestCase {
     }
 
     func testResetLineOnlyWhenRoomIsShort() {
-        // Mike's cannstudios on 27 Oct: 54% and 7%, the week back tomorrow.
+        // Mike's bearworks on 27 Oct: 54% and 7%, the week back tomorrow.
         XCTAssertEqual(AccountUsageText.resetLine(usage(54, 7, reset: at(16, 10), weeklyReset: at(day: 28, 5)), now: now, calendar: calendar),
                        "Weekly resets tomorrow 5 am")
         XCTAssertNil(AccountUsageText.resetLine(usage(90, 60, reset: at(16, 40), weeklyReset: at(day: 29, 13)), now: now, calendar: calendar))
@@ -229,34 +229,34 @@ final class AccountUsageTests: XCTestCase {
     // MARK: Names
 
     func testAccountNamesAreProviderAware() {
-        // claude-1 and codex-main share mike.cann@gmail.com, as Mike's do.
+        // claude-1 and codex-main share sam.lee@gmail.com, as one person's might.
         let accounts = [
-            Account(id: "claude-main", title: "mike@cannstudios.com", email: "mike@cannstudios.com"),
-            Account(id: "claude-1", title: "mike.cann@gmail.com", email: "mike.cann@gmail.com"),
-            Account(id: "codex-main", provider: "codex", title: "Codex · mike.cann@gmail.com", email: "mike.cann@gmail.com"),
+            Account(id: "claude-main", title: "sam@bearworks.com", email: "sam@bearworks.com"),
+            Account(id: "claude-1", title: "sam.lee@gmail.com", email: "sam.lee@gmail.com"),
+            Account(id: "codex-main", provider: "codex", title: "Codex · sam.lee@gmail.com", email: "sam.lee@gmail.com"),
         ]
-        XCTAssertEqual(AccountName.short("claude-1", accounts: accounts), "mike.cann", "no clash across providers")
+        XCTAssertEqual(AccountName.short("claude-1", accounts: accounts), "sam.lee", "no clash across providers")
         XCTAssertEqual(AccountName.short("codex-main", accounts: accounts), "Codex")
-        XCTAssertEqual(AccountName.title(accounts[2]), "mike.cann@gmail.com")
+        XCTAssertEqual(AccountName.title(accounts[2]), "sam.lee@gmail.com")
         // An older runner: no email, the title has the prefix.
         XCTAssertEqual(AccountName.title(Account(id: "codex-main", provider: "codex", title: "Codex · a@b.c")), "a@b.c")
         let two = accounts + [Account(id: "codex-1", provider: "codex", title: "Codex · m@work.example", email: "m@work.example")]
-        XCTAssertEqual(AccountName.short("codex-main", accounts: two), "Codex mike.cann")
+        XCTAssertEqual(AccountName.short("codex-main", accounts: two), "Codex sam.lee")
         XCTAssertEqual(AccountName.short("codex-1", accounts: two), "Codex m")
     }
 
     func testCardLabelsUseTheDomainWhenNamesClash() {
-        // Mike's four Claude logins: two "mike@" and two "mike.cann@".
+        // Four Claude logins: two "sam@" and two "sam.lee@".
         let accounts = [
-            Account(id: "claude-main", title: "", email: "mike@cannstudios.com"),
-            Account(id: "claude-1", title: "", email: "mike.cann@gmail.com"),
-            Account(id: "claude-2", title: "", email: "mike.cann@convex.dev"),
-            Account(id: "claude-3", title: "", email: "mike@gangbusters.io"),
-            Account(id: "codex-main", provider: "codex", title: "", email: "mike.cann@gmail.com"),
+            Account(id: "claude-main", title: "", email: "sam@bearworks.com"),
+            Account(id: "claude-1", title: "", email: "sam.lee@gmail.com"),
+            Account(id: "claude-2", title: "", email: "sam.lee@convex.dev"),
+            Account(id: "claude-3", title: "", email: "sam@acme.io"),
+            Account(id: "codex-main", provider: "codex", title: "", email: "sam.lee@gmail.com"),
         ]
-        XCTAssertEqual(accounts.map { AccountName.label($0.id, accounts: accounts) }, ["cannstudios", "gmail", "convex", "gangbusters", "Codex"])
+        XCTAssertEqual(accounts.map { AccountName.label($0.id, accounts: accounts) }, ["bearworks", "gmail", "convex", "acme", "Codex"])
         let unique = [accounts[0], accounts[1]]
-        XCTAssertEqual(unique.map { AccountName.label($0.id, accounts: unique) }, ["mike", "mike.cann"])
+        XCTAssertEqual(unique.map { AccountName.label($0.id, accounts: unique) }, ["sam", "sam.lee"])
         let sameDomain = [Account(id: "a", title: "", email: "a@x.com"), Account(id: "b", title: "", email: "a@x.org")]
         XCTAssertEqual(AccountName.label("a", accounts: sameDomain), "a@x.com")
     }

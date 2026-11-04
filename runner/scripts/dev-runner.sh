@@ -16,10 +16,10 @@
 # THREADBEAR_HOME doesn't last past one command in an agent's shell), and
 # prints the app/Tools/dev-app.sh command for a debug app against it. On a
 # new data dir, threads default to the folder <home>/work (under $TMPDIR
-# when <home> isn't), account claude-3
+# when <home> isn't), the login claude-main (TB_E2E_ACCOUNT picks another)
 # and model claude-haiku-5-5, and Codex threads to gpt-6-luna at low effort
-# (runner.json's defaults; keepAccount keeps new threads on claude-3 rather
-# than the login with the most room), not your real folders or the
+# (runner.json's defaults; keepAccount keeps new threads on that login rather
+# than the one with the most room), not your real folders or the
 # account's own model, so a thread started from a debug app's composer is
 # a cheap one.
 # It never updates a CLI (cliUpdates off): Codex runs from the npm copy
@@ -95,8 +95,8 @@ case "$(real_dir "$DATA_HOME")/" in
   "$TMP_REAL"/*) ;;
   *) [ -e "$DATA_HOME/runner.json" ] || WORK="$(mktemp -d "${TMP_REAL%/}/threadbear-dev-work.XXXXXX")" ;;
 esac
-# The runner's defaults are Mike's real folder, the last account used and
-# the account's own model (Fable with a 1M context on claude-3); a thread
+# The runner's defaults are your real folder, the last account used and
+# the account's own model (Fable with a 1M context, say); a thread
 # made to try a change belongs in a scratch folder on the cheapest model,
 # whether tb or a debug app's composer starts it. (The account and model
 # are the ones the end-to-end tests use.)
@@ -104,10 +104,10 @@ IN_WORK=""
 if [ ! -e "$DATA_HOME/runner.json" ]; then
   mkdir -p "$WORK"
   "$NODE" -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({
-    defaults: { cwd: process.argv[2], accountId: "claude-3", keepAccount: true, model: "claude-haiku-5-5", models: { codex: "gpt-6-luna" }, efforts: { codex: "low" } },
+    defaults: { cwd: process.argv[2], accountId: process.argv[3], keepAccount: true, model: "claude-haiku-5-5", models: { codex: "gpt-6-luna" }, efforts: { codex: "low" } },
     cliUpdates: { claude: "off", codex: "off" },
   }, null, 2) + "\n")' \
-    "$DATA_HOME/runner.json" "$WORK"
+    "$DATA_HOME/runner.json" "$WORK" "${TB_E2E_ACCOUNT:-claude-main}"
   IN_WORK="   (in $(printf '%q' "$WORK"), on claude-haiku-5-5)"
 fi
 # THREADBEAR_PORT and THREADBEAR_URL go too: tb then reads the port this

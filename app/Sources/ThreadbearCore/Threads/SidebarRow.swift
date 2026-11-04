@@ -149,7 +149,7 @@ public enum BusyThreadAction {
 /// Names for accounts, for the sidebar, the composer and its menus. Built
 /// from the account's email and provider rather than its title, so a Claude
 /// login and a Codex login with the same address (claude-1 and codex-main
-/// are both mike.cann@gmail.com) don't clash.
+/// are both sam.lee@gmail.com) don't clash.
 public enum AccountName {
     /// The bare address when the runner sends one, else the title without
     /// Codex's "Codex · " prefix (older runners), else the id.
@@ -162,7 +162,7 @@ public enum AccountName {
 
     /// A Claude account: the part of its email before the @, unless another
     /// Claude account shares it (then the whole address). A Codex account:
-    /// "Codex" when it's the only Codex login, "Codex mike.cann" when
+    /// "Codex" when it's the only Codex login, "Codex sam.lee" when
     /// there are several. Ids with no account are shown as they are.
     public static func short(_ id: String, accounts: [Account]) -> String {
         guard let account = accounts.first(where: { $0.id == id }) else { return id }
@@ -179,9 +179,9 @@ public enum AccountName {
     }
 
     /// A login as the pools picker and a pinned thread's chip name it: the
-    /// first part of its email's domain ("gangbusters" for
-    /// mike@gangbusters.io, "gmail" for mike.cann@gmail.com), since Mike's
-    /// logins mostly share "mike" before the @. When another login of the
+    /// first part of its email's domain ("acme" for
+    /// sam@acme.io, "gmail" for sam.lee@gmail.com), since one person's
+    /// logins mostly share a name before the @. When another login of the
     /// same provider has that domain too, the part before the @, else the
     /// whole address. Codex reads as `short` has it.
     public static func login(_ id: String, accounts: [Account]) -> String {
@@ -204,7 +204,7 @@ public enum AccountName {
 
     /// A name for a card, where a whole address doesn't fit: the part
     /// before the @ when that's the only one, else the domain's first part
-    /// ("cannstudios", "gangbusters", "convex"), which is how Mike tells
+    /// ("bearworks", "acme", "convex"), which is how Mike tells
     /// his logins apart. Codex as `short`; the whole address when neither
     /// is unique.
     public static func label(_ id: String, accounts: [Account]) -> String {

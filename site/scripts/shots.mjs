@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Full page screenshots of the built site for review, desktop (1440 wide) and phone (390 wide),
 // into site/review/ (gitignored). Serve it first (`npm run serve`), then `npm run shots`.
-// Playwright comes from wherever it's installed (PLAYWRIGHT_DIR, default Mike's mikerosoft.app
-// checkout), so the site itself has no dependencies.
+// Playwright comes from wherever it's installed (PLAYWRIGHT_DIR, see loadPlaywright), so the
+// site itself has no dependencies.
 //
 // Every .reveal section is shown and the tagline lit before the shot, since a full page shot
 // doesn't scroll and they'd otherwise stay hidden.
@@ -12,8 +12,18 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const base = process.env.SITE_URL_LOCAL ?? "http://localhost:5176";
-const playwrightDir = process.env.PLAYWRIGHT_DIR ?? `${process.env.HOME}/dev/me/mikerosoft.app/`;
-const { chromium } = createRequire(playwrightDir.endsWith("/") ? playwrightDir : `${playwrightDir}/`)("playwright");
+// Playwright isn't a dependency of the site: it comes from PLAYWRIGHT_DIR (a folder whose
+// node_modules has it) or, failing that, wherever Node finds it from here.
+function loadPlaywright() {
+  const dir = process.env.PLAYWRIGHT_DIR;
+  try {
+    return createRequire(dir ? (dir.endsWith("/") ? dir : `${dir}/`) : import.meta.url)("playwright");
+  } catch {
+    console.error("Playwright not found. Set PLAYWRIGHT_DIR to a folder that has it installed (npm i playwright there).");
+    process.exit(1);
+  }
+}
+const { chromium } = loadPlaywright();
 const out = join(dirname(fileURLToPath(import.meta.url)), "../review");
 mkdirSync(out, { recursive: true });
 

@@ -25,7 +25,7 @@
 # (a new worktree), as SwiftPM's cache only works where it was made. Run
 # it in the background rather than waiting on it.
 #   --e2e         also the runner's end-to-end tests: the real claude CLI on
-#                 claude-haiku-5-5 and account claude-3, then Codex on
+#                 claude-haiku-5-5 and login claude-main (TB_E2E_ACCOUNT), then Codex on
 #                 gpt-6-luna at low effort and a Codex install into a temp
 #                 folder, all in temp folders (several minutes, a few cents;
 #                 TB_E2E_SKIP_CODEX=1 leaves the Codex ones out)

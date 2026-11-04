@@ -1,7 +1,7 @@
 // Real end-to-end check for pools (docs/protocol.md, "Pools"): does the
 // Claude CLI resume a session another login wrote, thinking signatures and
-// all? A thread is told a code word on one login (claude-3), moved to
-// another (claude-1) with threads.update, and asked for the word back. It
+// all? A thread is told a code word on one login (TB_E2E_ACCOUNT), moved to
+// another (TB_E2E_OTHER_ACCOUNT, claude-1) with threads.update, and asked for the word back. It
 // must come back through the resumed session (the transcript copied into
 // the new login's config dir), not through a handoff note. Cheapest model,
 // tiny prompts, a temp working folder and a temp runner data dir. Run with
@@ -16,7 +16,7 @@ import { RunnerClient } from '../../src/client.ts';
 import { checkSequence, isTransient } from '../helpers/protocol-check.ts';
 import { projectDirName } from '../../src/transcripts.ts';
 
-const FROM = process.env.TB_E2E_ACCOUNT ?? 'claude-3';
+const FROM = process.env.TB_E2E_ACCOUNT ?? 'claude-main';
 const TO = process.env.TB_E2E_OTHER_ACCOUNT ?? 'claude-1';
 const MODEL = process.env.TB_E2E_MODEL ?? 'claude-haiku-5-5';
 const RUNNER_DIR = path.join(import.meta.dirname, '..', '..');
