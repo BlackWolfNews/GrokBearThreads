@@ -41,9 +41,10 @@ enum TourTarget: Hashable {
     }
 }
 
-/// The pages and panels with a one-card intro the first time they open.
+/// The pages and panels with a one-card intro the first time they open,
+/// and `pools`, the first time a pool has a second login to move to.
 enum TourIntro: String, CaseIterable {
-    case scheduled, projects, librarian, usage, updates, connectors
+    case scheduled, projects, librarian, usage, updates, connectors, pools
 
     /// The intro for a sidebar view, if it has one.
     static func of(_ mode: SidebarMode) -> TourIntro? {
@@ -179,6 +180,12 @@ final class Tour {
         .connectors: TourStep(targets: [.panel("connectors")], title: "Connectors",
                               body: "The services your agents can use, and whether each is signed in.",
                               doc: "connectors"),
+        // Nothing in the first run mentions pools: with one login there's
+        // nothing for one to do. A second login is when they start to
+        // matter, and nothing else would tell you (Mike, 5 Nov).
+        .pools: TourStep(targets: [.composer], title: "Pools",
+                         body: "A thread moves to another login in its pool when the one it's on nears its limit.",
+                         doc: "accounts"),
     ]
     static func introKey(_ intro: TourIntro) -> String { "tourIntro.\(intro.rawValue)" }
     /// Off in scripted runs (screenshots, perf, a dev app) so a page they
@@ -266,6 +273,15 @@ final class Tour {
         shown = [card]
         step = 0
         taskDone = false
+    }
+
+    /// The pools intro, once a pool has a second login. Not before the
+    /// first-run tour's been seen: the pools arrive with the runner's
+    /// hello, just ahead of the tour, which wouldn't start under it. Someone
+    /// who already had two logins then sees it on a later launch.
+    func introducePools(_ pools: [Pool]) {
+        guard defaults.bool(forKey: Self.seenKey), pools.contains(where: { $0.accountIds.count >= 2 }) else { return }
+        introduce(.pools)
     }
 
     /// Done or skipped: either way it doesn't come up by itself again, and

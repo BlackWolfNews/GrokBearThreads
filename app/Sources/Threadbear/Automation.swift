@@ -934,8 +934,11 @@ enum Automation {
             case "next": tour.next()
             case "back": tour.back()
             case "end": tour.finish()
+            // What a change to the runner's pools does: the pools card,
+            // if a pool has a second login and the tour's been seen.
+            case "pools": tour.introducePools(app.pools)
             case nil: break
-            default: return "error do is start, next, back or end"
+            default: return "error do is start, next, back, end or pools"
             }
             // The card and spotlight's move to settle before a shot.
             try? await Task.sleep(for: .milliseconds(400))

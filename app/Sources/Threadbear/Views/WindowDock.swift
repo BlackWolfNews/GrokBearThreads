@@ -254,6 +254,9 @@ struct RootView: View {
         .onChange(of: app.usageShown) { _, shown in if shown { introduceSoon(.usage) } }
         .onChange(of: app.updatesShown) { _, shown in if shown { introduceSoon(.updates) } }
         .onChange(of: app.connectorsShown) { _, shown in if shown { introduceSoon(.connectors) } }
+        .onChange(of: app.pools) { _, pools in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { Tour.shared.introducePools(pools) }
+        }
         // Saves where the window is, so the next launch opens it there.
         .background(MainWindowFrameTracker())
     }

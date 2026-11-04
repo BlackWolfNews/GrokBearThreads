@@ -547,6 +547,8 @@ another login in the pool with room, and carries on from where it was. When
 none has room, the thread waits and carries on by itself once a limit
 resets. With only one login, that means it waits for that login's limit to
 reset.
+The first time a pool has a second login, a card by the composer says
+what pools do.
 
 Usage, near the bottom of the left-hand rail, shows how much room each login
 has left before it hits its limits: the weekly one, and the 5-hour one for

@@ -1,6 +1,7 @@
 import AppKit
 import XCTest
 @testable import Threadbear
+import ThreadbearCore
 
 /// The first-run tour: which steps it shows, that it only comes up by
 /// itself once, and where its card goes.
@@ -69,6 +70,24 @@ final class TourTests: XCTestCase {
         tour.introduce(.librarian)
         XCTAssertNil(tour.step)
         XCTAssertEqual(Set(Tour.intros.keys), Set(TourIntro.allCases), "every intro has a card")
+    }
+
+    /// The pools card: only once a pool has a login to move to, and never
+    /// ahead of the first-run tour, which it would keep from starting.
+    func testPoolsIntroWaitsForASecondLoginAndTheTour() {
+        let one = [Pool(id: "claude", title: "Claude", accountIds: ["claude-main"]),
+                   Pool(id: "codex", title: "Codex", accountIds: ["codex-main"])]
+        let two = [Pool(id: "claude", title: "Claude", accountIds: ["claude-main", "claude-1"])]
+        tour.introducePools(two)
+        XCTAssertNil(tour.step, "not before the tour")
+        defaults.set(true, forKey: Tour.seenKey)
+        tour.introducePools(one)
+        XCTAssertNil(tour.step, "a Claude and a Codex login are two pools of one")
+        tour.introducePools(two)
+        XCTAssertEqual(tour.current?.title, "Pools")
+        tour.finish()
+        tour.introducePools(two)
+        XCTAssertNil(tour.step, "only once")
     }
 
     func testOnlyTheReplayCanBeSkipped() {
