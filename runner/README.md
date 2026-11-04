@@ -577,7 +577,7 @@ through the deploy script (Releases and deploys, above).
 | `src/lock.ts` | The one-runner-per-data-dir lock. |
 | `src/accounts.ts`, `src/media.ts`, `src/config.ts` | Login discovery, image handling, config and data dir. |
 | `src/cli.ts`, `src/tb-dev.ts`, `src/client.ts` | `tb` (its working-on-Threadbear commands in `tb-dev.ts`) and the small client it and the tests use. |
-| `scripts/deploy-runner.sh`, `scripts/deploy.mjs` | Building, smoke testing, switching to and pruning releases. `scripts/rpc-client.mjs` is their dependency-free client. |
+| `scripts/deploy-runner.sh`, `scripts/deploy.mjs` | Building, smoke testing, switching to and pruning releases. `scripts/rpc-client.mjs` is their dependency-free client, and `scripts/deploy-steps.mjs` the typecheck and unit test steps a build runs. |
 | `scripts/install-runner.sh`, `scripts/dev-runner.sh` | The LaunchAgent, and a foreground runner on a temp data dir. |
 
 ## Tests

@@ -10,6 +10,7 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { pointCurrent, readCurrentLink, readState, releaseExists, writeState } from '../launch.mjs';
 import { connectRpc } from './rpc-client.mjs';
+import { Fail, step, unitTests } from './deploy-steps.mjs';
 // THREADBARE_* was the old name for these variables (config.ts, adoptOldNames).
 for (const [k, v] of Object.entries(process.env)) {
   const name = k.startsWith('THREADBARE_') ? 'THREADBEAR_' + k.slice(11) : undefined;
@@ -80,9 +81,6 @@ const BUSY = new Set(['starting', 'running', 'waiting']);
 // A runner that answers slower than the first try's 3 s is busy, not down:
 // one more try with this long before giving up.
 const SLOW_RPC_MS = 15_000;
-
-// A failure with a message for whoever ran the script; no stack trace.
-class Fail extends Error {}
 
 const say = (msg) => console.log(msg);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -624,24 +622,7 @@ function newReleaseId(c, short, dirty) {
   }
 }
 
-// Runs a step with its output in a log file, printed only if it fails.
-function step(name, cmd, args, opts) {
-  process.stdout.write(`${name}... `);
-  const started = Date.now();
-  const logFile = path.join(os.tmpdir(), `threadbear-deploy-${process.pid}-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.log`);
-  const fd = fs.openSync(logFile, 'w');
-  const r = spawnSync(cmd, args, { ...opts, stdio: ['ignore', fd, fd] });
-  fs.closeSync(fd);
-  const secs = `${((Date.now() - started) / 1000).toFixed(1)}s`;
-  if (r.status === 0) {
-    say(`ok (${secs})`);
-    fs.rmSync(logFile, { force: true });
-    return;
-  }
-  say(`failed (${secs})`);
-  console.error(tail(logFile));
-  throw new Fail(`${name} failed; the whole output is in ${logFile}`);
-}
+// step() and unitTests() are in deploy-steps.mjs, where unit tests reach them.
 
 // Step 4: the backend before the runner, so a runner is never newer than the
 // backend it writes to. deploy-backend.mjs does nothing when convex/ and web/
@@ -660,33 +641,6 @@ function checks(c) {
   if (!fs.existsSync(path.join(c.runnerDir, 'node_modules'))) step('Installing the checkout\'s packages', c.npm, ['ci', '--no-audit', '--no-fund'], opts);
   step('Typecheck', c.npm, ['run', 'typecheck'], opts);
   unitTests(c, opts);
-}
-
-// The full suite runs files in parallel on a Mac that's usually busy with
-// threads, so a test with a timing assumption can fail for no real reason
-// and hold the runner back from main. Files that failed get one more go, one
-// at a time; a real break fails both runs and still stops the update.
-// Both runs give up on a test after 5 minutes, and end once the tests are
-// done even if one left a server open (package.json's test script has the
-// same flags). Without them a test that failed with its socket still open
-// held the run, and so the runner, off main for 48 minutes on 29 Oct, until
-// it was stopped by hand.
-const TEST_LIMITS = ['--test-timeout=300000', '--test-force-exit'];
-function unitTests(c, opts) {
-  try {
-    step('Unit tests', c.npm, ['test'], opts);
-  } catch (e) {
-    const logFile = e.message.match(/output is in (\S+)$/)?.[1];
-    const files = logFile ? failedTestFiles(fs.readFileSync(logFile, 'utf8')) : [];
-    if (!files.length) throw e;
-    step(`Rerunning ${files.join(', ')}`, process.execPath, ['--test', '--test-reporter=spec', '--test-concurrency=1', ...TEST_LIMITS, ...files], opts);
-    say(`Flaky: ${files.join(', ')} failed in the full run and passed alone (first run's output: ${logFile})`);
-  }
-}
-
-// node --test's summary names each failure as "test at <file>:<line>:<col>".
-function failedTestFiles(output) {
-  return [...new Set([...output.matchAll(/^test at (\S+?\.test\.ts):\d+:\d+$/gm)].map((m) => m[1]))];
 }
 
 function snapshotHead(c, g, dest) {
