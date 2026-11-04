@@ -41,6 +41,12 @@ static site with its own `package.json`; its comments say how to build it.
   against it before installing (README's prompt), so anything missing
   from it looks like something hidden. Keep it true when a change adds a
   file outside the repo, a timer, something it reads, or a network call.
+- `docs/forking.md` says where each feature lives, how to take it out,
+  and every value that's Mike's own (bundle ids, team id, keys, Sentry,
+  the push relay, his repo's checks). Keep it true when a change adds a
+  feature, moves one, or adds anything of Mike's to the code; anything
+  of his that only his setup needs belongs in his runner.json, not in
+  the code.
 - The first-run tour (app/Sources/Threadbear/Views/Tour.swift), its sample
   threads (`threads.samples`) or anything a step points at: run
   `node app/Tools/tour-e2e.mjs` before landing. It plays the whole tour

@@ -54,3 +54,5 @@ merges it with your changes and asks before it lands
   `relay/`: the push relay (Mike's, shared), `site/`: the landing page.
 - `docs/guide.md` for using it, `AGENTS.md` for agents working on it, `docs/`
   for how it all works.
+- `docs/forking.md` for taking features out of your copy, or shipping your
+  own build (what's Mike's: bundle ids, keys, Sentry, the push relay).
