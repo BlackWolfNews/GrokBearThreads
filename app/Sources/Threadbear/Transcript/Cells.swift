@@ -11,6 +11,13 @@ protocol RowCellDelegate: AnyObject {
     func respond(approvalId: String, decision: ApprovalDecision, answers: [String: String]?, message: String?)
     func questionDraft(_ approvalId: String) -> [Int: Set<String>]
     func setQuestionDraft(_ approvalId: String, _ draft: [Int: Set<String>])
+    /// A secret card (docs/protocol.md, "Secrets"): where its answer is,
+    /// and sending one. The value goes straight to `secrets.answer`; the
+    /// delegate never keeps it.
+    func secretState(_ approvalId: String) -> SecretCardState
+    func answerSecret(approvalId: String, _ answer: SecretAnswer)
+    /// Mike typed again after a failed send: the error goes.
+    func secretEdited(_ approvalId: String)
     /// A click on an asks card: `tick:<index>` or `reply:<index>`.
     func askAction(_ card: AsksCard, action: String)
     /// An ask's Something else box on the open card (AskAnswerBox): what's
@@ -36,6 +43,9 @@ protocol RowCellDelegate: AnyObject {
 
 extension RowCellDelegate {
     var remoteImages: RemoteImages? { nil }
+    func secretState(_ approvalId: String) -> SecretCardState { .ready }
+    func answerSecret(approvalId: String, _ answer: SecretAnswer) {}
+    func secretEdited(_ approvalId: String) {}
     func askNoteChanged(_ card: AsksCard, ask: Int, note: AskNote) {}
     func askNoteImages(_ card: AsksCard, ask: Int, urls: [URL]) {}
     func askPicturesAllowed(_ card: AsksCard) -> Bool { false }
@@ -810,6 +820,14 @@ final class HeaderRowCell: RowCellView {
             // Its tool's own row opens to the same thing.
             canExpand = item.opens
             tooltip = ToolPresentation.shortTitle(item.request.title, limit: 400)
+        case .secret(let item):
+            switch item.resolution?.decision {
+            case .answered?: symbol = "lock"
+            case .expired?: symbol = "clock"
+            default: symbol = "xmark.circle"
+            }
+            canExpand = false
+            tooltip = item.request.reason.isEmpty ? item.request.label : item.request.label + ": " + item.request.reason
         case .note:
             symbol = "info.circle"
             canExpand = false
@@ -1692,6 +1710,263 @@ final class QuestionRowCell: RowCellView, NSTextFieldDelegate {
             if !parts.isEmpty { answers[question.question] = parts.joined(separator: ", ") }
         }
         return answers
+    }
+}
+
+// MARK: - Secret card
+
+/// Where a secret card's answer is. Kept by the transcript (not the cell,
+/// which is reused), and never holding the value itself.
+enum SecretCardState: Equatable {
+    case ready
+    case sending
+    /// It went; the card closes when the runner's approval.resolved comes.
+    case sent
+    /// The runner said no (or couldn't be reached): its message, under the
+    /// field. The card stays open for another go.
+    case failed(String)
+}
+
+/// The secret card's field: masked, and with nothing that would keep or
+/// offer what's typed. NSSecureTextField already skips spelling, undo and
+/// copying out; this turns off completion and AutoFill's suggestions too.
+final class SecretField: NSSecureTextField {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        isAutomaticTextCompletionEnabled = false
+        allowsCharacterPickerTouchBarItem = false
+        // No content type, so macOS offers no saved passwords or codes and
+        // never asks to save this one.
+        contentType = nil
+        isBezeled = false
+        isBordered = false
+        drawsBackground = false
+        backgroundColor = .clear
+        focusRingType = .none
+        usesSingleLineMode = true
+        lineBreakMode = .byClipping
+        cell?.isScrollable = true
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    /// Called once the field has the cursor, before anything's typed.
+    var onFocus: (() -> Void)?
+
+    override func becomeFirstResponder() -> Bool {
+        let became = super.becomeFirstResponder()
+        // After AppKit has given it its editor.
+        if became { DispatchQueue.main.async { [weak self] in self?.onFocus?() } }
+        return became
+    }
+}
+
+/// An agent's `ask_secret`: what it wants and why, a masked field with Save
+/// securely, and Decline. Laid out like the question card (same container,
+/// field box and buttons). Settled, it's a work line (HeaderRowCell).
+final class SecretRowCell: RowCellView, NSTextFieldDelegate {
+    let card = FillView()
+    let textView = TranscriptTextView()
+    let fieldBox = FillView()
+    let field = SecretField(frame: .zero)
+    let save = PillButton(pill: "Save securely", prominent: true)
+    let shield = Symbols.makeView()
+    /// Wraps, and an error longer than the room it has is cut short (the
+    /// whole of it is in the tip).
+    let note: NSTextField = {
+        let label = NSTextField(wrappingLabelWithString: "")
+        label.lineBreakMode = .byTruncatingTail
+        label.cell?.truncatesLastVisibleLine = true
+        return label
+    }()
+    let decline = PointerButton()
+    private var approvalId = ""
+    private var state = SecretCardState.ready
+    private var editing = false
+
+    nonisolated static let promise = "Kept out of chat, in a private file this agent's commands can read for 24 hours"
+    static let promiseTip = "The value never goes in the chat, the phone or the archive. The agent gets a private file its commands can read, deleted after 24 hours. A command that printed it would show it."
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        field.delegate = self
+        field.onFocus = { [weak self] in
+            guard let self, let editor = field.currentEditor() as? NSTextView else { return }
+            // The secure field's editor brings a box of its own; the field
+            // box (with its outline now) is the only one.
+            editor.drawsBackground = false
+            editing = true
+            updateFieldBox()
+        }
+        save.target = self
+        save.action = #selector(saveClicked)
+        decline.isBordered = false
+        decline.bezelStyle = .regularSquare
+        decline.setButtonType(.momentaryPushIn)
+        decline.focusRingType = .none
+        decline.target = self
+        decline.action = #selector(declineClicked)
+        field.setTip("Type or paste it here. It's masked, and never shown in the chat")
+        save.setTip("Save it to a private file for the agent (Return)")
+        decline.setTip("Don't give it; the agent is told you declined")
+        shield.setTip(Self.promiseTip)
+        [card, textView, fieldBox, field, save, shield, note, decline].forEach(addSubview)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func configure(row: TranscriptRow, render: RowRender, tableWidth: CGFloat, expanded: Bool) {
+        super.configure(row: row, render: render, tableWidth: tableWidth, expanded: expanded)
+        guard case .secret(let item) = row.content else { return }
+        // A reused cell must never show what was typed into another card.
+        if approvalId != item.request.approvalId {
+            clearField()
+            approvalId = item.request.approvalId
+        }
+        state = delegate?.secretState(approvalId) ?? .ready
+        let (x, width) = RowMetrics.column(for: row, tableWidth: tableWidth)
+        let pad = RowMetrics.cardPad
+        let left = x + pad + RowMetrics.accentBar
+        let inner = width - pad * 2 - RowMetrics.accentBar
+        let top = RowMetrics.rowTop + zoomed(2)
+        card.frame = NSRect(x: x, y: top, width: width, height: render.height - top - RowMetrics.rowBottom - zoomed(2))
+        card.set(fill: Theme.cardBackground, stroke: Theme.cardBorder, radius: RowMetrics.cardRadius, accent: .controlAccentColor)
+
+        var y = card.frame.minY + pad
+        textView.place(NSRect(x: left, y: y, width: inner, height: render.textSize.height))
+        textView.show(render.text ?? NSAttributedString(), width: inner)
+        y += render.textSize.height + zoomed(12)
+
+        // The field and Save on one line, Save at its right.
+        let saveWidth = max(zoomed(110), save.fittingWidth)
+        let boxWidth = max(zoomed(120), inner - saveWidth - zoomed(8))
+        fieldBox.frame = NSRect(x: left, y: y, width: boxWidth, height: RowMetrics.otherFieldHeight)
+        updateFieldBox()
+        styleField(item.request)
+        let fieldHeight = ceil(field.intrinsicContentSize.height)
+        field.frame = NSRect(x: left + RowMetrics.boxPad - RowMetrics.labelInset, y: y + (RowMetrics.otherFieldHeight - fieldHeight) / 2,
+                             width: boxWidth - RowMetrics.boxPad * 2 + RowMetrics.labelInset * 2, height: fieldHeight)
+        save.frame = NSRect(x: fieldBox.frame.maxX + zoomed(8), y: y + (RowMetrics.otherFieldHeight - RowMetrics.buttonHeight) / 2,
+                            width: saveWidth, height: RowMetrics.buttonHeight)
+        y += RowMetrics.otherFieldHeight + zoomed(10)
+
+        // What happens to it, or why it didn't go, then Decline at the right.
+        // The promise wraps onto a second line in a narrow window (its
+        // height is measured with the rest of the card).
+        let footer = render.lineHeights.first ?? RowMetrics.secretFooterHeight
+        decline.attributedTitle = NSAttributedString(string: "Decline", attributes: [.font: Theme.labelFont, .foregroundColor: Theme.quietText])
+        let declineWidth = RowRenderer.secretDeclineWidth
+        decline.frame = NSRect(x: left + inner - declineWidth + zoomed(6), y: y + (footer - RowMetrics.secretFooterHeight) / 2,
+                               width: declineWidth, height: RowMetrics.secretFooterHeight)
+        let side = zoomed(16)
+        shield.frame = NSRect(x: left, y: y + (RowMetrics.secretFooterHeight - side) / 2, width: side, height: side)
+        let textX = left + RowMetrics.titleIndent - RowMetrics.labelInset
+        let noteText: NSAttributedString
+        if case .failed(let message) = state {
+            Symbols.set(shield, "exclamationmark.triangle", size: 12, tint: Theme.failed)
+            noteText = RowRenderer.secretNoteText(message, color: Theme.failed)
+            note.setTip(message)
+        } else {
+            Symbols.set(shield, "lock.shield", size: 12, tint: Theme.faintIcon)
+            noteText = RowRenderer.secretNoteText(Self.promise, color: Theme.faintText)
+            note.setTip(Self.promiseTip)
+        }
+        if note.attributedStringValue != noteText { note.attributedStringValue = noteText }
+        note.frame = NSRect(x: textX, y: y + zoomed(3), width: RowRenderer.secretNoteWidth(inner: inner) + RowMetrics.labelInset * 2,
+                            height: footer - zoomed(3))
+        updateControls()
+    }
+
+    /// The field's font and placeholder at the current zoom.
+    private func styleField(_ request: SecretRequest) {
+        field.font = .systemFont(ofSize: TypeScale.work)
+        let placeholder = request.placeholder ?? "Paste the secret"
+        if field.placeholderAttributedString?.string != placeholder || field.placeholderAttributedString?.attribute(.font, at: 0, effectiveRange: nil) as? NSFont != field.font {
+            field.placeholderAttributedString = NSAttributedString(string: placeholder, attributes: [
+                .font: NSFont.systemFont(ofSize: TypeScale.work), .foregroundColor: ComposerTextView.placeholderColor,
+            ])
+        }
+    }
+
+    /// Save only once there's something to save, and nothing while it's
+    /// on its way.
+    private func updateControls() {
+        let busy = state == .sending || state == .sent
+        let ready = !busy && SecretAnswer.canSave(field.stringValue)
+        if save.isEnabled != ready { save.isEnabled = ready }
+        if field.isEnabled == busy { field.isEnabled = !busy }
+        if decline.isEnabled == busy { decline.isEnabled = !busy }
+    }
+
+    /// The box's outline takes the accent colour while Mike types in it,
+    /// as the question card's does.
+    private func updateFieldBox() {
+        fieldBox.set(fill: Theme.codeBackground, stroke: editing ? NSColor.controlAccentColor.withAlphaComponent(0.5) : Theme.cardBorder, radius: zoomed(8))
+    }
+
+    /// Empties the field and its editor, so the value isn't left in either.
+    private func clearField() {
+        if field.currentEditor() != nil { field.abortEditing() }
+        field.stringValue = ""
+        // abortEditing doesn't say editing ended, so the outline goes here.
+        editing = false
+        updateFieldBox()
+    }
+
+    func controlTextDidBeginEditing(_ notification: Notification) {
+        editing = true
+        updateFieldBox()
+    }
+
+    func controlTextDidEndEditing(_ notification: Notification) {
+        editing = false
+        updateFieldBox()
+    }
+
+    func controlTextDidChange(_ notification: Notification) {
+        // The secure field's editor brings a box of its own; the field box
+        // is the only one.
+        if let editor = field.currentEditor() as? NSTextView, editor.drawsBackground { editor.drawsBackground = false }
+        if case .failed = state {
+            state = .ready
+            delegate?.secretEdited(approvalId)
+        }
+        updateControls()
+    }
+
+    /// Return saves; nothing else in the field does anything special.
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        guard selector == #selector(NSResponder.insertNewline(_:)) else { return false }
+        saveClicked()
+        return true
+    }
+
+    @objc private func saveClicked() {
+        guard state != .sending, state != .sent, !approvalId.isEmpty else { return }
+        let typed = field.stringValue
+        guard SecretAnswer.canSave(typed) else { return }
+        // Out of the field the moment it goes: a failed send means typing it
+        // again, never a value left sitting in the window.
+        clearField()
+        state = .sending
+        updateControls()
+        delegate?.answerSecret(approvalId: approvalId, .secret(typed))
+    }
+
+    @objc private func declineClicked() {
+        guard state != .sending, state != .sent, !approvalId.isEmpty else { return }
+        clearField()
+        state = .sending
+        updateControls()
+        delegate?.answerSecret(approvalId: approvalId, .decline)
+    }
+
+    override func releaseContent() {
+        textView.park()
+    }
+
+    override func updateSlices(force: Bool = false) {
+        textView.updateSlice(force: force)
     }
 }
 

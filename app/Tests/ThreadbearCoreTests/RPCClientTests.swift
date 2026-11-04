@@ -100,6 +100,35 @@ final class RPCClientTests: XCTestCase {
         XCTAssertEqual((respond["answers"] as? [String: String])?["Which?"], "B")
     }
 
+    /// `secrets.answer` (docs/protocol.md, "Secrets"): the value or a
+    /// decline, never both, and never shown when an answer is printed.
+    func testAnswerSecretSendsTheValueOrADecline() async throws {
+        let transport = FakeTransport()
+        transport.onSend = { request in [E.json(["jsonrpc": "2.0", "id": request["id"]!, "result": [:]])] }
+        let client = RPCClient(transport: transport)
+        try await client.start()
+        try await client.answerSecret(threadId: "th1", approvalId: "sec1", .secret("hunter2 with spaces "))
+        try await client.answerSecret(threadId: "th1", approvalId: "sec2", .decline)
+        XCTAssertEqual(transport.sent.map { $0["method"] as? String }, ["secrets.answer", "secrets.answer"])
+        let saved = transport.sent[0]["params"] as! [String: Any]
+        XCTAssertEqual(saved["threadId"] as? String, "th1")
+        XCTAssertEqual(saved["approvalId"] as? String, "sec1")
+        XCTAssertEqual(saved["secret"] as? String, "hunter2 with spaces ", "sent as typed, not trimmed")
+        XCTAssertNil(saved["decline"])
+        let declined = transport.sent[1]["params"] as! [String: Any]
+        XCTAssertEqual(declined["approvalId"] as? String, "sec2")
+        XCTAssertEqual(declined["decline"] as? Bool, true)
+        XCTAssertNil(declined["secret"])
+
+        let answer = SecretAnswer.secret("hunter2")
+        for printed in [String(describing: answer), String(reflecting: answer), "\(answer)", "\([answer])"] {
+            XCTAssertFalse(printed.contains("hunter2"), printed)
+        }
+        XCTAssertFalse(SecretAnswer.canSave(""))
+        XCTAssertFalse(SecretAnswer.canSave(" \n\t"))
+        XCTAssertTrue(SecretAnswer.canSave(" x "))
+    }
+
     func testNotificationsAreDecoded() async throws {
         let transport = FakeTransport()
         let client = RPCClient(transport: transport)

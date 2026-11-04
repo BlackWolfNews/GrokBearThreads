@@ -753,6 +753,14 @@ public struct TranscriptModel: Sendable {
             pendingCards[id] = turnId ?? ""
             tailDirty = true
 
+        case .secretRequested(let request):
+            // `s:` keeps it out of pendingApprovalIds: Return in an empty
+            // composer must never answer a secret card.
+            let id = "s:\(request.approvalId)"
+            append(TranscriptRow(id: id, seq: seq, turnId: turnId, content: .secret(SecretItem(request: request))))
+            pendingCards[id] = turnId ?? ""
+            tailDirty = true
+
         case .reviewUpdated(let review):
             let id = "review:\(review.id)"
             if let existing = item(id: id), case .review(let previous) = existing.content {
@@ -766,7 +774,7 @@ public struct TranscriptModel: Sendable {
             }
 
         case .approvalResolved(let resolution):
-            for id in ["ap:\(resolution.approvalId)", "q:\(resolution.approvalId)"] where itemIndex[id] != nil {
+            for id in ["ap:\(resolution.approvalId)", "q:\(resolution.approvalId)", "s:\(resolution.approvalId)"] where itemIndex[id] != nil {
                 pendingCards[id] = nil
                 tailDirty = true
                 update(id) { content in
@@ -777,6 +785,9 @@ public struct TranscriptModel: Sendable {
                     case .question(var item):
                         item.resolution = resolution
                         content = .question(item)
+                    case .secret(var item):
+                        item.resolution = resolution
+                        content = .secret(item)
                     default:
                         break
                     }

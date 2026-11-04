@@ -121,6 +121,29 @@ final class ModelsTests: XCTestCase {
         XCTAssertFalse(E.text(15, "m", "x").isTransient)
     }
 
+    /// docs/protocol.md, "Secrets": the card's text, tolerant of what it
+    /// doesn't know, and never anything like a value.
+    func testSecretRequestedDecodes() {
+        guard case .secretRequested(let secret) = E.event(1, "secret.requested", [
+            "approvalId": "sec1", "itemId": "toolu_1", "label": "Mac administrator password",
+            "reason": "Install the Keep Awake rule.", "placeholder": "Your login password", "somethingNew": ["x": 1],
+        ]).payload else { return XCTFail("secret.requested") }
+        XCTAssertEqual(secret, SecretRequest(approvalId: "sec1", itemId: "toolu_1", label: "Mac administrator password",
+                                             reason: "Install the Keep Awake rule.", placeholder: "Your login password"))
+        // Only the required fields; an empty item id or placeholder is none.
+        guard case .secretRequested(let bare) = E.event(2, "secret.requested", [
+            "approvalId": "sec2", "itemId": "", "label": "  API key ", "reason": "For wrangler", "placeholder": " ",
+        ]).payload else { return XCTFail("secret.requested without extras") }
+        XCTAssertNil(bare.itemId)
+        XCTAssertNil(bare.placeholder)
+        XCTAssertEqual(bare.label, "API key")
+        // A label of the wrong type still makes a card that says something.
+        guard case .secretRequested(let odd) = E.event(3, "secret.requested", ["approvalId": "sec3", "label": 7]).payload
+        else { return XCTFail("secret.requested with an odd label") }
+        XCTAssertEqual(odd.label, "A secret")
+        XCTAssertEqual(odd.reason, "")
+    }
+
     func testEventsPageSkipsJunkButKeepsTheSeqOfUnreadableEvents() throws {
         // An object with a seq stays (as .unknown) so the seq order has no
         // hole; anything that isn't an object is skipped.

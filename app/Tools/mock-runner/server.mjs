@@ -607,6 +607,15 @@ async function dispatch(client, method, p) {
     }
     case 'threads.send': {
       const t = need(p.threadId);
+      // A message declines any secret card still open, first (docs/
+      // protocol.md, "Secrets"), as the real runner does.
+      const resolved = new Set(t.events.filter((e) => e.type === 'approval.resolved').map((e) => e.approvalId));
+      for (const card of t.events.filter((e) => e.type === 'secret.requested' && !resolved.has(e.approvalId))) {
+        persist(t.summary.id, { type: 'approval.resolved', approvalId: card.approvalId, decision: 'deny' }, card.turnId);
+        const waiter = t.approvalWaiters?.get(card.approvalId);
+        t.approvalWaiters?.delete(card.approvalId);
+        waiter?.({ decision: 'deny' });
+      }
       const turnId = 'turn_' + crypto.randomBytes(4).toString('hex');
       // Answers from the card go on the user.message, as the runner keeps them.
       const extra = Array.isArray(p.answers) && p.answers.length ? { answers: p.answers } : {};
@@ -806,6 +815,36 @@ async function dispatch(client, method, p) {
         const text = p.decision === 'deny' ? 'OK, I left it alone.' : p.decision === 'answered' ? `Going with ${Object.values(p.answers ?? {}).join(', ') || 'that'}.` : 'Done.';
         persist(t.summary.id, { type: 'assistant.text', itemId: 'm_' + crypto.randomBytes(4).toString('hex'), text });
         persist(t.summary.id, { type: 'turn.completed', turnId: 'turn_resolved', outcome: 'completed', durationMs: 1200 });
+        t.summary.needsYou = true;
+        setStatus(t.summary.id, 'idle');
+      }
+      return {};
+    }
+    case 'secrets.answer': {
+      // docs/protocol.md, "Secrets". The mock keeps nothing: it checks the
+      // answer's shape, never writes or logs the value, and closes the card
+      // with approval.resolved (never a message).
+      const t = need(p.threadId);
+      const card = t.events.find((e) => e.type === 'secret.requested' && e.approvalId === p.approvalId);
+      if (!card) throw rpcError(-32602, 'No secret card with that approvalId');
+      if (t.events.some((e) => e.type === 'approval.resolved' && e.approvalId === p.approvalId)) throw rpcError(-32602, 'That card has already been answered');
+      const decline = p.decline === true;
+      if (!decline && (typeof p.secret !== 'string' || !p.secret.trim())) throw rpcError(-32602, 'Give the secret or decline');
+      // For seeing the card's error line: the real runner fails like this
+      // when it can't write the file, and leaves the card open.
+      if (!decline && p.secret === 'mock-fail') throw rpcError(-32000, 'Couldn\'t write the secret file (disk full). The card is still open.');
+      const decision = decline ? 'deny' : 'answered';
+      persist(t.summary.id, { type: 'approval.resolved', approvalId: p.approvalId, decision }, card.turnId);
+      const waiter = t.approvalWaiters?.get(p.approvalId);
+      if (waiter) {
+        t.approvalWaiters.delete(p.approvalId);
+        waiter({ decision });
+      } else {
+        // A fixture's card with no fake turn behind it: finish the turn.
+        const text = decline ? 'OK, I left it as it is. Keep Awake will still ask each time.'
+          : 'Saved. The rule is in /etc/sudoers.d/keep-awake and allows only the two pmset commands, so the Raycast toggles no longer ask.';
+        persist(t.summary.id, { type: 'assistant.text', itemId: 'm_' + crypto.randomBytes(4).toString('hex'), text }, card.turnId);
+        persist(t.summary.id, { type: 'turn.completed', turnId: card.turnId ?? 'turn_resolved', outcome: 'completed', durationMs: 2400 }, card.turnId);
         t.summary.needsYou = true;
         setStatus(t.summary.id, 'idle');
       }
@@ -1258,6 +1297,19 @@ async function fakeTurn(threadId, text, images, turnId = 'turn_' + crypto.random
       return finishTurn(threadId, turnId, started, 'completed');
     }
   }
+  // "password" or "secret" in a message: an ask_secret card first.
+  if (/password|secret/i.test(text)) {
+    const approvalId = 'sec_' + crypto.randomBytes(4).toString('hex');
+    persist(threadId, { type: 'secret.requested', approvalId, label: 'Mac administrator password', reason: 'Install the Keep Awake rule that allows only the two fixed pmset sleep-toggle commands, so Raycast toggles work without repeated prompts.' }, turnId);
+    setStatus(threadId, 'waiting', true);
+    t.approvalWaiters ??= new Map();
+    const answer = await new Promise((resolve) => t.approvalWaiters.set(approvalId, resolve));
+    setStatus(threadId, 'running', false);
+    if (answer.decision === 'deny') {
+      persist(threadId, { type: 'assistant.text', itemId: 'm_' + crypto.randomBytes(4).toString('hex'), text: 'OK, I left it as it is.' }, turnId);
+      return finishTurn(threadId, turnId, started, 'completed');
+    }
+  }
   if (/question/i.test(text)) {
     const approvalId = 'q_' + crypto.randomBytes(4).toString('hex');
     persist(threadId, { type: 'question.requested', approvalId, questions: [{ question: 'Which colour should the button be?', header: 'Colour', multiSelect: false, options: [{ label: 'Blue', description: 'Matches the sidebar' }, { label: 'Green' }, { label: 'Orange', description: 'Stands out more' }] }] }, turnId);
@@ -1429,7 +1481,7 @@ function restartNow(p) {
     } else if (!waited.has(id)) {
       // Cards still open expire, as the real runner's do when it stops.
       const answered = new Set(t.events.filter((e) => e.type === 'approval.resolved').map((e) => e.approvalId));
-      for (const e of t.events.filter((e) => (e.type === 'approval.requested' || e.type === 'question.requested') && !answered.has(e.approvalId))) {
+      for (const e of t.events.filter((e) => ['approval.requested', 'question.requested', 'secret.requested'].includes(e.type) && !answered.has(e.approvalId))) {
         persist(id, { type: 'approval.resolved', approvalId: e.approvalId, decision: 'expired' }, turnId);
       }
       persist(id, { type: 'turn.completed', outcome: 'interrupted', durationMs: Date.now() - startedAt }, turnId);

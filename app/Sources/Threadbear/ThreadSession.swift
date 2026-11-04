@@ -586,6 +586,26 @@ final class ThreadSession {
         }
     }
 
+    /// Sends a secret card's answer (docs/protocol.md, "Secrets") to the
+    /// thread's own runner, this Mac's or another's. Nil once it's gone,
+    /// else what to say under the field. The value is in this call only:
+    /// no log line, activity entry or banner ever has it.
+    func answerSecret(approvalId: String, _ answer: SecretAnswer) async -> String? {
+        guard let client = app?.client(for: threadId) else { return "Not connected to this thread's runner." }
+        let declined: Bool
+        if case .decline = answer { declined = true } else { declined = false }
+        ActivityRecorder.shared.answered(threadId: threadId, decision: declined ? .deny : .answered)
+        do {
+            try await client.answerSecret(threadId: threadId, approvalId: approvalId, answer)
+            return nil
+        } catch let unreachable as RemoteUnreachable {
+            return unreachable.headline + " " + unreachable.detail
+        } catch {
+            AppLog.write("rpc", "secrets.answer failed: \(error.localizedDescription)")
+            return error.localizedDescription
+        }
+    }
+
     /// Copies the whole thread, fetching any older pages first.
     func copyTranscript() {
         guard let client = app?.client(for: threadId) else { return }

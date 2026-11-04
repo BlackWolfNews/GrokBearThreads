@@ -219,6 +219,13 @@ public extension RPCClient {
         _ = try await call("approvals.respond", .object(params), as: EmptyResult.self)
     }
 
+    /// Answers a `secret.requested` card (docs/protocol.md, "Secrets").
+    /// The value goes in this one request and nowhere else: not logged,
+    /// not kept, not retried.
+    func answerSecret(threadId: String, approvalId: String, _ answer: SecretAnswer) async throws {
+        _ = try await call("secrets.answer", .object(answer.params(threadId: threadId, approvalId: approvalId)), as: EmptyResult.self)
+    }
+
     func importMedia(path: String) async throws -> ImageRef {
         try await call("media.import", .object(["path": .string(path)]), as: MediaImportResult.self).image
     }
@@ -853,4 +860,37 @@ public struct PoolsResult: Sendable, Decodable {
     }
 
     enum CodingKeys: String, CodingKey { case pools }
+}
+
+/// What Mike gave a secret card: the value, or no. Printing one (a log
+/// line, a debugger's `po`) never shows the value.
+public enum SecretAnswer: Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
+    case secret(String)
+    case decline
+
+    public var description: String {
+        switch self {
+        case .secret: return "SecretAnswer.secret(<hidden>)"
+        case .decline: return "SecretAnswer.decline"
+        }
+    }
+
+    public var debugDescription: String { description }
+    public var customMirror: Mirror { Mirror(self, children: [], displayStyle: .enum) }
+
+    /// `secrets.answer`'s params: `secret` or `decline: true`, never both.
+    public func params(threadId: String, approvalId: String) -> [String: JSONValue] {
+        var params: [String: JSONValue] = ["threadId": .string(threadId), "approvalId": .string(approvalId)]
+        switch self {
+        case .secret(let value): params["secret"] = .string(value)
+        case .decline: params["decline"] = .bool(true)
+        }
+        return params
+    }
+
+    /// Whether Save can send it: the runner refuses an empty or
+    /// whitespace-only secret (-32602).
+    public static func canSave(_ typed: String) -> Bool {
+        !typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 }

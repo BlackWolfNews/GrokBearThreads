@@ -28,6 +28,8 @@ public struct TranscriptRow: Sendable, Hashable, Identifiable {
 
 public enum RowKind: String, Sendable, Hashable, CaseIterable {
     case user, assistant, reasoning, tool, diff, images, approval, question, review, plan, footer, note, error
+    /// An agent's `ask_secret` card (docs/protocol.md, "Secrets").
+    case secret
     /// What a finished turn needs Mike to do, as a checklist.
     case asks
     /// Rows the model derives rather than reads from events: a folded run
@@ -265,6 +267,29 @@ public struct QuestionItem: Sendable, Hashable {
     }
 }
 
+/// An agent asking for a secret, and how it ended. The value itself is
+/// never in here: only the card's text from `secret.requested`.
+public struct SecretItem: Sendable, Hashable {
+    public var request: SecretRequest
+    public var resolution: ApprovalResolution?
+
+    public init(request: SecretRequest, resolution: ApprovalResolution? = nil) {
+        self.request = request
+        self.resolution = resolution
+    }
+
+    /// The settled card's one line: "Mac administrator password · Saved
+    /// securely", "Declined", "Request ended".
+    public var resolvedText: String? {
+        guard let resolution else { return nil }
+        switch resolution.decision {
+        case .answered: return request.label + " · Saved securely"
+        case .expired: return request.label + " · Request ended"
+        default: return request.label + " · Declined"
+        }
+    }
+}
+
 public enum RowContent: Sendable, Hashable {
     case user(UserMessage)
     case assistant(TextItem)
@@ -275,6 +300,7 @@ public enum RowContent: Sendable, Hashable {
     case images(itemId: String, images: [ImageRef], generated: Bool = false)
     case approval(ApprovalItem)
     case question(QuestionItem)
+    case secret(SecretItem)
     case review(DesignReview)
     case plan([PlanEntry])
     case footer(TurnCompletion)
@@ -302,6 +328,7 @@ public enum RowContent: Sendable, Hashable {
         case .images: return .images
         case .approval: return .approval
         case .question: return .question
+        case .secret: return .secret
         case .review: return .review
         case .plan: return .plan
         case .footer: return .footer

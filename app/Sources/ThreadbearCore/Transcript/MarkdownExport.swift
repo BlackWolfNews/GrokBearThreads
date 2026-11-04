@@ -64,6 +64,9 @@ public enum MarkdownExport {
             return "**Approval**: \(item.request.title)\(decision)"
         case .question(let item):
             return item.request.questions.map { "**Question**: \($0.question)" }.joined(separator: "\n")
+        case .secret(let item):
+            // The card's text only: the app never has the value.
+            return "**Asked for a secret**: " + (item.resolvedText ?? item.request.label)
         case .review(let review):
             var lines = ["**Design review**: \(review.title) (\(review.status))"]
             if let note = review.note { lines.append(note) }

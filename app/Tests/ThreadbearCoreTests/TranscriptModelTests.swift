@@ -173,6 +173,32 @@ final class TranscriptModelTests: XCTestCase {
         XCTAssertEqual(question.resolution?.decision, .answered)
     }
 
+    /// A secret card is a pending approval of its own (`s:`): resolved by
+    /// approval.resolved, and never one Return in the composer can answer.
+    func testSecretCardWaitsThenSettles() {
+        var model = TranscriptModel(events: [
+            E.event(1, "secret.requested", ["approvalId": "sec1", "label": "Mac administrator password", "reason": "For pmset"]),
+            E.event(2, "secret.requested", ["approvalId": "sec2", "label": "API key", "reason": "For wrangler"]),
+            E.event(3, "secret.requested", ["approvalId": "sec3", "label": "Token", "reason": ""]),
+        ])
+        XCTAssertEqual(model.rows.map(\.id), ["s:sec1", "s:sec2", "s:sec3"])
+        XCTAssertEqual(model.rows.map(\.kind), [.secret, .secret, .secret])
+        XCTAssertEqual(model.pendingApprovalIds, [], "Return must never answer a secret card")
+        let change = model.apply([
+            E.event(4, "approval.resolved", ["approvalId": "sec1", "decision": "answered"]),
+            E.event(5, "approval.resolved", ["approvalId": "sec2", "decision": "deny"]),
+            E.event(6, "approval.resolved", ["approvalId": "sec3", "decision": "expired"]),
+        ])
+        XCTAssertEqual(change.updated, [0, 1, 2])
+        let texts = model.rows.compactMap { row -> String? in
+            guard case .secret(let item) = row.content else { return nil }
+            return item.resolvedText
+        }
+        XCTAssertEqual(texts, ["Mac administrator password · Saved securely", "API key · Declined", "Token · Request ended"])
+        // Copy debug info names the card's request and its answer.
+        XCTAssertEqual(model.sourceSeqs(of: "s:sec1"), [1, 4])
+    }
+
     /// What Return in an empty composer can allow: approval cards still
     /// waiting, oldest first, never questions.
     func testPendingApprovalIds() {

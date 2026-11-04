@@ -55,6 +55,9 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
     private var deferred = Set<String>()
     private var deferredTimer: Timer?
     private var questionDrafts: [String: [Int: Set<String>]] = [:]
+    /// Each secret card's answer on its way, or why it failed. Never the
+    /// value: that's only ever in the card's field and the one request.
+    private var secretStates: [String: SecretCardState] = [:]
     /// Set by perf runs: called after older rows are added at the top.
     var onPrepend: (() -> Void)?
     /// Pause paging (perf runs drive it themselves at times).
@@ -175,6 +178,7 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         session = newSession
         newSession?.view = self
         questionDrafts = [:]
+        secretStates = [:]
         deferred = []
         remeasureTask?.cancel()
         width = currentTableWidth
@@ -269,6 +273,10 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
             if case .approval(let item) = row.content, item.resolution != nil { return "header" }
             return "approval"
         case .question: return "question"
+        // Once settled, a secret card is one work line too.
+        case .secret:
+            if case .secret(let item) = row.content, item.resolution != nil { return "header" }
+            return "secret"
         case .review: return "review"
         case .group: return "group"
         case .working: return "working"
@@ -288,6 +296,7 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         case "header": cell = HeaderRowCell(frame: .zero)
         case "images": cell = ImagesRowCell(frame: .zero)
         case "approval": cell = ApprovalRowCell(frame: .zero)
+        case "secret": cell = SecretRowCell(frame: .zero)
         case "review": cell = ReviewRowCell(frame: .zero)
         case "group": cell = GroupRowCell(frame: .zero)
         case "working": cell = WorkingRowCell(frame: .zero)
@@ -775,6 +784,34 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
     func questionDraft(_ approvalId: String) -> [Int: Set<String>] { questionDrafts[approvalId] ?? [:] }
 
     func setQuestionDraft(_ approvalId: String, _ draft: [Int: Set<String>]) { questionDrafts[approvalId] = draft }
+
+    func secretState(_ approvalId: String) -> SecretCardState { secretStates[approvalId] ?? .ready }
+
+    func answerSecret(approvalId: String, _ answer: SecretAnswer) {
+        guard let session else { return }
+        secretStates[approvalId] = .sending
+        refreshSecretCard(approvalId)
+        Task { [weak self] in
+            let failure = await session.answerSecret(approvalId: approvalId, answer)
+            // Another thread opened meanwhile: its cards aren't this one's.
+            guard let self, self.session === session else { return }
+            self.secretStates[approvalId] = failure.map { .failed($0) } ?? .sent
+            self.refreshSecretCard(approvalId)
+        }
+    }
+
+    func secretEdited(_ approvalId: String) {
+        guard case .failed = secretStates[approvalId] else { return }
+        secretStates[approvalId] = nil
+        refreshSecretCard(approvalId)
+    }
+
+    /// Lays the card out again for its new state. Its height doesn't
+    /// change (an error takes the footer's line), so nothing moves.
+    private func refreshSecretCard(_ approvalId: String) {
+        guard let index = session?.displayIndex(of: "s:" + approvalId), let row = row(at: index) else { return }
+        refreshCell(at: index, row: row)
+    }
 
     /// Mike typed in, or took a picture out of, an ask's Something else box.
     func askNoteChanged(_ card: AsksCard, ask: Int, note: AskNote) {

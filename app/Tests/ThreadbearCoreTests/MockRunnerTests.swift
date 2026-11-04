@@ -114,6 +114,42 @@ final class MockRunnerTests: XCTestCase {
         }
     }
 
+    /// The demo's secret card, answered over a real connection: an empty
+    /// value is refused and leaves it open; a real one closes it as
+    /// answered, with no message and nothing of the value in any event.
+    func testSecretCardIsAnsweredWithSecretsAnswer() async throws {
+        let client = try await connect()
+        defer { client.close() }
+        _ = try await client.hello(version: "test")
+        let threadId = "demo_keep_awake"
+        let before = try await client.events(threadId: threadId)
+        guard case .secretRequested(let card)? = before.events.last?.payload else { return XCTFail("the demo should end on a secret card") }
+        XCTAssertEqual(card.label, "Mac administrator password")
+        XCTAssertTrue(TranscriptModel(events: before.events).rows.contains { $0.id == "s:" + card.approvalId })
+
+        do {
+            try await client.answerSecret(threadId: threadId, approvalId: card.approvalId, .secret("   "))
+            XCTFail("a blank secret should be refused")
+        } catch RPCError.server(let code, _) {
+            XCTAssertEqual(code, -32602)
+        }
+        try await client.answerSecret(threadId: threadId, approvalId: card.approvalId, .secret("correct horse"))
+        let after = try await client.events(threadId: threadId)
+        let resolved = after.events.compactMap { event -> ApprovalResolution? in
+            if case .approvalResolved(let resolution) = event.payload { return resolution }
+            return nil
+        }
+        XCTAssertEqual(resolved, [ApprovalResolution(approvalId: card.approvalId, decision: .answered)])
+        let raw = try JSONSerialization.data(withJSONObject: after.events.map { "\($0)" })
+        XCTAssertFalse(String(decoding: raw, as: UTF8.self).contains("correct horse"))
+        do {
+            try await client.answerSecret(threadId: threadId, approvalId: card.approvalId, .decline)
+            XCTFail("an answered card can't be answered again")
+        } catch RPCError.server(let code, _) {
+            XCTAssertEqual(code, -32602)
+        }
+    }
+
     func testSendStreamsIntoTheFeed() async throws {
         let client = try await connect()
         defer { client.close() }
@@ -202,9 +238,9 @@ final class MockRunnerTests: XCTestCase {
         for await notification in client.notifications {
             if case .runnerNotice(_, let message) = notification, restart.notice(message, now: Date()) { break }
         }
-        XCTAssertEqual(restart.pendingText, "The runner will restart when 1 thread finishes and you answer 2.", "two of the three wait on a card")
+        XCTAssertEqual(restart.pendingText, "The runner will restart when 1 thread finishes and you answer 3.", "three of the four wait on a card")
         let status = try await client.runnerStatus()
-        XCTAssertEqual(Set(status.pendingRestart?.waitingFor ?? []), ["demo_button_colour", "demo_ci_slow", "demo_upload_resume"])
+        XCTAssertEqual(Set(status.pendingRestart?.waitingFor ?? []), ["demo_button_colour", "demo_ci_slow", "demo_keep_awake", "demo_upload_resume"])
         XCTAssertEqual(status.pendingRestart?.resumeThreadId, "demo_settings_tabs")
 
         let before = try await client.events(threadId: "demo_settings_tabs").lastSeq

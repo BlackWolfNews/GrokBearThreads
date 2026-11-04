@@ -166,6 +166,11 @@ function smallThread({ name, title, minutesAgo, status = 'idle', needsYou = fals
       events.push({ seq: ++seq, ts, threadId: id, turnId, type: 'question.requested', approvalId: `${turnId}_q`, questions: turn.question });
       return;
     }
+    // An ask_secret card (docs/protocol.md, "Secrets"), still waiting.
+    if (turn.secret) {
+      events.push({ seq: ++seq, ts, threadId: id, turnId, type: 'secret.requested', approvalId: `${turnId}_secret`, itemId: `${turnId}_ask`, ...turn.secret });
+      return;
+    }
     events.push({ seq: ++seq, ts, threadId: id, turnId, type: 'assistant.text', itemId: `${turnId}_m`, text: turn.reply });
     // What the turn said it needs from Mike (docs/protocol.md, "Needs you").
     const said = turn.needs ? { needs: turn.needs, ...(turn.asks ? { asks: turn.asks } : {}), ...(turn.next ? { next: turn.next } : {}), needsFrom: 'tool' } : {};
@@ -195,6 +200,10 @@ function others() {
     { user: 'Add a Share button to the photo viewer toolbar.', tools: [{ id: 'read', name: 'Read', kind: 'read', title: 'Read ~/dev/photo-sync/Sources/Viewer/Toolbar.swift', input: { file_path: `${home}/dev/photo-sync/Sources/Viewer/Toolbar.swift` }, output: 'struct Toolbar: View { ... }' }],
       question: [{ question: 'Which colour should the Share button be?', header: 'Colour', multiSelect: false, options: [
         { label: 'Accent blue', description: 'Matches the other toolbar buttons' }, { label: 'Green', description: 'Stands out as the main action' }, { label: 'Plain grey' }] }] },
+  ] });
+  smallThread({ name: 'keep-awake', title: 'Stop Keep Awake asking for my password', minutesAgo: 9, status: 'waiting', needsYou: true, turns: [
+    { user: 'My Raycast Keep Awake toggle asks for my password every time. Can you make it stop asking?', tools: [{ id: 'read', name: 'Read', kind: 'read', title: 'Read ~/dev/me/raycast-scripts/keep-awake.sh', input: { file_path: `${home}/dev/me/raycast-scripts/keep-awake.sh` }, output: 'sudo pmset -a disablesleep "$1"' }],
+      secret: { label: 'Mac administrator password', reason: 'Install the Keep Awake rule that allows only the two fixed pmset sleep-toggle commands, so Raycast toggles work without repeated prompts.' } },
   ] });
   runningThread();
   // A turn that ended with three sub-agents still going: the sidebar's

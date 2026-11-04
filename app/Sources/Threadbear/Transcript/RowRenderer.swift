@@ -48,6 +48,8 @@ enum RowMetrics {
     /// with the answer.
     static var answeredGap: CGFloat { zoomed(6) }
     static var answerHeight: CGFloat { zoomed(20) }
+    /// A secret card's last line: what happens to the value, and Decline.
+    static var secretFooterHeight: CGFloat { zoomed(22) }
     static var userThumbHeight: CGFloat { zoomed(120) }
     static var gridMaxHeight: CGFloat { zoomed(240) }
     static var gridMaxWidth: CGFloat { zoomed(320) }
@@ -411,6 +413,23 @@ enum RowRenderer {
             // greyed out with none of them ticked.
             total += RowMetrics.answerHeight
             return RowRender(height: vertical + zoomed(4) + total, text: answerText(resolution), lineHeights: textHeights)
+
+        case .secret(let item):
+            // Settled, it's one quiet line ("Mac administrator password ·
+            // Saved securely"), as an answered approval is; it opens to
+            // nothing, since there's nothing more to show.
+            if item.resolution != nil {
+                let header = secretResolvedText(item)
+                return RowRender(height: RowMetrics.workHeight, text: header, textSize: header.size())
+            }
+            let inner = width - RowMetrics.cardPad * 2 - RowMetrics.accentBar
+            let text = secretCardText(item.request)
+            let size = measurer.measure(text, width: inner)
+            let note = secretNoteText(SecretRowCell.promise, color: Theme.faintText)
+            let noteHeight = measurer.measure(note, width: secretNoteWidth(inner: inner)).height
+            let footer = max(RowMetrics.secretFooterHeight, noteHeight + zoomed(6))
+            let height = RowMetrics.cardPad * 2 + size.height + zoomed(12) + RowMetrics.otherFieldHeight + zoomed(10) + footer
+            return RowRender(height: vertical + zoomed(4) + height, text: text, textSize: size, lineHeights: [footer])
 
         case .asks(let card):
             // The open card is drawn at the top of the composer instead
@@ -1033,6 +1052,47 @@ enum RowRenderer {
         let text = resolution.decision == .answered ? (message ?? "Answered") : ApprovalText.decision(resolution.decision)
         let color: NSColor = resolution.decision == .answered ? .labelColor : Theme.quietText
         return NSAttributedString(string: text, attributes: [.font: Theme.workFont, .foregroundColor: color, .paragraphStyle: truncating])
+    }
+
+    /// A secret card's words: the label as its title and the agent's
+    /// reason under it, quieter. No "Asking for a secret" line above it:
+    /// that's an eyebrow label, and the field and promise say it already.
+    /// One text view, so the reason can be selected and copied like any
+    /// other text in the transcript.
+    static func secretCardText(_ request: SecretRequest) -> NSAttributedString {
+        let output = NSMutableAttributedString(string: request.label, attributes: Theme.text(Theme.cardTitleFont, line: TypeScale.scaled(20)))
+        if !request.reason.isEmpty {
+            output.append(NSAttributedString(string: "\n" + request.reason, attributes: Theme.text(Theme.detailFont, color: Theme.quietText, line: TypeScale.scaled(19))))
+        }
+        return output
+    }
+
+    /// The line under a secret card's field: the promise, or an error.
+    static func secretNoteText(_ text: String, color: NSColor) -> NSAttributedString {
+        NSAttributedString(string: text, attributes: Theme.text(Theme.smallFont, color: color, line: TypeScale.scaled(16)))
+    }
+
+    /// Decline's width, and so the room the note has before it.
+    static var secretDeclineWidth: CGFloat {
+        ceil(NSAttributedString(string: "Decline", attributes: [.font: Theme.labelFont]).size().width) + zoomed(12)
+    }
+
+    static func secretNoteWidth(inner: CGFloat) -> CGFloat {
+        max(zoomed(80), inner - RowMetrics.titleIndent - secretDeclineWidth + zoomed(6) - zoomed(10))
+    }
+
+    /// "Mac administrator password · Saved securely": the label, then how
+    /// it ended, as a work line.
+    static func secretResolvedText(_ item: SecretItem) -> NSAttributedString {
+        let style = truncating
+        let output = NSMutableAttributedString(string: item.request.label, attributes: [
+            .font: Theme.workFont, .foregroundColor: Theme.quietText, .paragraphStyle: style,
+        ])
+        let ending = (item.resolvedText ?? "").dropFirst(item.request.label.count)
+        output.append(NSAttributedString(string: String(ending), attributes: [
+            .font: Theme.workFont, .foregroundColor: Theme.faintText, .paragraphStyle: style,
+        ]))
+        return output
     }
 
     static func questionHeight(_ question: Question, textHeight: CGFloat) -> CGFloat {

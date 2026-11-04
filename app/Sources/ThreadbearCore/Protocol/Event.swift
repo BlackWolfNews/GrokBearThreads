@@ -229,6 +229,42 @@ public struct QuestionRequest: Sendable, Hashable, Decodable {
     enum CodingKeys: String, CodingKey { case approvalId, questions }
 }
 
+/// An agent's `ask_secret` (docs/protocol.md, "Secrets"): a card asking
+/// Mike for a password, key or token. It's answered with `secrets.answer`,
+/// never `approvals.respond`, and closed by `approval.resolved` like any
+/// other approval. Nothing here, or in what the app keeps, is the value.
+public struct SecretRequest: Sendable, Hashable, Decodable {
+    public var approvalId: String
+    /// The `ask_secret` tool call's, when the runner knows it.
+    public var itemId: String?
+    /// The card's title: "Mac administrator password".
+    public var label: String
+    /// What it's for and where to find it.
+    public var reason: String
+    public var placeholder: String?
+
+    public init(approvalId: String, itemId: String? = nil, label: String, reason: String = "", placeholder: String? = nil) {
+        self.approvalId = approvalId
+        self.itemId = itemId
+        self.label = label
+        self.reason = reason
+        self.placeholder = placeholder
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        approvalId = (try? c.decodeIfPresent(String.self, forKey: .approvalId)) ?? ""
+        itemId = (try? c.decodeIfPresent(String.self, forKey: .itemId)).flatMap { $0?.isEmpty == false ? $0 : nil }
+        let label = ((try? c.decodeIfPresent(String.self, forKey: .label)) ?? nil)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        self.label = label.isEmpty ? "A secret" : label
+        reason = ((try? c.decodeIfPresent(String.self, forKey: .reason)) ?? nil)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let placeholder = ((try? c.decodeIfPresent(String.self, forKey: .placeholder)) ?? nil)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.placeholder = placeholder?.isEmpty == false ? placeholder : nil
+    }
+
+    enum CodingKeys: String, CodingKey { case approvalId, itemId, label, reason, placeholder }
+}
+
 public enum ApprovalDecision: String, Sendable, Hashable, Codable {
     case allow, allowAlways, deny, answered, expired
 
@@ -449,6 +485,7 @@ public enum EventPayload: Sendable, Hashable {
     case editDiff(EditDiff)
     case approvalRequested(ApprovalRequest)
     case questionRequested(QuestionRequest)
+    case secretRequested(SecretRequest)
     case reviewUpdated(DesignReview)
     case approvalResolved(ApprovalResolution)
     case planUpdated([PlanEntry])
@@ -595,6 +632,8 @@ public struct Event: Sendable, Hashable, Decodable {
             return .approvalRequested(try ApprovalRequest(from: decoder))
         case "question.requested":
             return .questionRequested(try QuestionRequest(from: decoder))
+        case "secret.requested":
+            return .secretRequested(try SecretRequest(from: decoder))
         case "review.updated":
             let c = try decoder.container(keyedBy: ReviewFields.self)
             return .reviewUpdated(try c.decode(DesignReview.self, forKey: .review))
