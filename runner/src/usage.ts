@@ -509,7 +509,7 @@ export function accountRoom(account: Account): number | undefined {
 // Which account a new thread starts on when none is named: the one with the
 // most room, among the last-used account's provider so a Claude habit stays
 // on Claude. Skips blocked accounts, ones under 10%, and ones with a note
-// (claude-2 is "Convex work only", never picked for Mike's own threads).
+// (a login noted "Work only" is kept for that work).
 // A tie, or a last-used account with no usage known, stays on the last-used
 // one; so does a list where every candidate is skipped. The app's
 // AccountUsageText.swift has the same rule and the same test cases
