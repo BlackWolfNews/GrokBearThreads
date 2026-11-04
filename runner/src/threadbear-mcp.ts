@@ -699,11 +699,11 @@ export function buildThreadbearTools(
       endTurnDescription(codex ? 'codex' : 'claude', bulletReplies(), true),
       {
         headline: z.string().optional().describe('One line, at most 80 characters, for the sidebar and notifications: the result, or what you need from them.'),
-        needs: z.enum(['you', 'nothing']).optional().describe('"you" when the user has to do something before this can go on; "nothing" when it is done. Left out, it follows the asks.'),
+        needs: z.enum(['you', 'nothing']).optional().describe('"you" when the user has to do something before this can go on (an approval, a decision, a key, something to look at); "nothing" when it is done or still going by itself. Left out, it follows the asks.'),
         asks: z
           .array(
             z.object({
-              question: z.string().min(1).describe('One sentence, at most 160 characters: the question, or the step for them to take, naming the thing. It shows right under your reply, so no background.'),
+              question: z.string().min(1).describe('One sentence, at most 160 characters: the question, or the step for them to take, naming the thing ("Deploy the walkies-api fix to production?"). It shows right under your reply, so no background.'),
               options: z
                 .array(
                   z.object({
@@ -738,15 +738,15 @@ export function buildThreadbearTools(
         byline: z
           .string()
           .optional()
-          .describe('Only in a thread the user did not start (a tool, a schedule or another thread did): how it came out in a few plain words, about 6 ("network blip, nothing to do"). The sidebar shows them when the user hovers the mark on its row, so they can tell how much it matters. Leave it out in a thread the user started.'),
+          .describe('Only in a thread the user did not start (a tool, a schedule or another thread did): how it came out in about 6 plain words ("network blip, nothing to do"), shown when they hover its row, so they can tell how much it matters.'),
         archive: z
           .boolean()
           .optional()
-          .describe('true to archive this thread once the turn is over. Only when the user has asked for this thread to be archived or the message that started it says to, and only with needs "nothing". If they ask after you have called end_turn, call it again with this.'),
+          .describe('true archives this thread once the turn is over: only when the user asked for that (or the message that started the thread says to), with needs "nothing". Asked after you called end_turn? Call it again with this.'),
         snooze: z
           .string()
           .optional()
-          .describe('Hibernate this thread once the turn is over, until 30m, 2h, 1d, tomorrow, an ISO time with its offset, "restart" (until the runner next starts), or words saying when ("when the phone arrives"). Only when the user has asked for this thread to be snoozed or hibernated, and only with needs "nothing". If they ask after you have called end_turn, call it again with this.'),
+          .describe('Hibernates this thread once the turn is over, until 2h, 1d, tomorrow, an ISO time with its offset, "restart" (the runner next starting) or words saying when ("when the phone arrives"): only when the user asked for that, with needs "nothing". Asked after you called end_turn? Call it again with this.'),
       },
       handle(async (input) => {
         checkSnooze(input.snooze);

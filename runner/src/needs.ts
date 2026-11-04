@@ -515,18 +515,14 @@ const ONE_REPLY_REPLY =
   'When you\'re asking something, end the reply with what they need to know to answer it. The question itself, and what each answer would do, are in the card under the reply, so don\'t repeat them. ' +
   'Never write a "What I need from you" section, a "Nothing needed from you" line or a list of follow-ups in the reply: asks and next are those. ';
 
+// Only what the fields' own descriptions don't say (threadbear-mcp.ts):
+// each field's rules sat in both until 4 Nov 2026, and every thread read
+// them twice (runner/context-budget.json). Checked in the end_turn eval
+// (~/dev/me/misc/end-turn-eval/v3, "trim") before landing.
 const ONE_REPLY_FIELDS =
-  'headline is one line of at most 80 characters for the sidebar and notifications: the result, or what you need from them. ' +
-  'needs is "you" when something waits on the user (an approval, a decision, a key, something to look at) and "nothing" when the work is done or still going by itself; left out, it follows the asks. ' +
-  'asks: each thing the user has to do or decide, most blocking first; usually one. ' +
-  'question is one sentence of at most 160 characters, the question or the step to take, naming the thing ("Deploy the walkies-api fix to production?"). It shows right under your reply, so give no background. ' +
-  'options: for every decision or step, 2 to 4 answers, each a label of 1 to 4 words and does, what happens if they pick it, in at most 90 characters ("I deploy and watch the logs"). They can always write their own answer instead. suggested is the index of the one you\'d pick. ' +
   TRY_IT_FIRST +
-  'links: up to 3 places to go to do it or judge it (the page to log in on, the PR, the preview, the file, or review:<id> for a show_options review), each a button titled as the action ("Open the PR"). ' +
   'next is only for when nothing is needed: up to 3 follow-ups that really came up and that you\'d tell the user are worth doing; usually none, and never something you\'d call optional or low priority. ' +
   NEXT_ROW +
-  'archive: true only when the user asked for this thread to be archived, or the message that started the thread says to. ' +
-  END_TURN_SNOOZE +
   'If you leave sub-agents running, the thread stays under Running and your asks don\'t reach the user\'s inbox until the sub-agents finish and you\'ve ended a later turn, so don\'t leave one waiting on the user. ' +
   'Sub-agents never call this; only the thread\'s own agent does.';
 
