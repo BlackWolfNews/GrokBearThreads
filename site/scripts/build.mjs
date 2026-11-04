@@ -150,7 +150,7 @@ const FAQ = [
   ["Why is it called Threadbear?",
     "A threadbare teddy is the one you've had for years, worn and patched and loved for it, and that's what I wanted this to be. There are a few bear words in the app too: snoozing a thread is Hibernate, the archive is the Den, and while an agent works it says Bear with me."],
   ["When can I get it?",
-    "Not quite yet. The code is private for now and goes public a bit later, and the iPhone app is on its way to the App Store. Once they're out, the buttons on this page turn into links."],
+    "Right now. The code's up on GitHub for you to fork and the iPhone app is on the App Store, so the quickest way in is to paste the prompt from How it works into Claude Code or Codex and let it set things up for you."],
 ];
 
 function faq() {
