@@ -698,7 +698,7 @@ export function buildThreadbearTools(
         byline: z
           .string()
           .optional()
-          .describe('Only in a thread the user did not start (a tool, a schedule or another thread did): how it came out in a few plain words, about 6 ("network blip, nothing to do"). The sidebar shows them under its title, so the user can tell at a glance how much it matters. Leave it out in a thread the user started.'),
+          .describe('Only in a thread the user did not start (a tool, a schedule or another thread did): how it came out in a few plain words, about 6 ("network blip, nothing to do"). The sidebar shows them when the user hovers the mark on its row, so they can tell how much it matters. Leave it out in a thread the user started.'),
         archive: z
           .boolean()
           .optional()
@@ -784,7 +784,7 @@ export function buildThreadbearTools(
         byline: z
           .string()
           .optional()
-          .describe('Only in a thread the user did not start (a tool, a schedule or another thread did): how it came out in a few plain words, about 6 ("network blip, nothing to do"). The sidebar shows them under its title, so the user can tell at a glance how much it matters. Leave it out in a thread the user started.'),
+          .describe('Only in a thread the user did not start (a tool, a schedule or another thread did): how it came out in a few plain words, about 6 ("network blip, nothing to do"). The sidebar shows them when the user hovers the mark on its row, so they can tell how much it matters. Leave it out in a thread the user started.'),
         archive: z
           .boolean()
           .optional()
@@ -1019,7 +1019,7 @@ export function buildThreadbearTools(
         model: z.string().optional().describe("Model id, one of the account's (list_accounts shows them; Codex ones look like gpt-6-luna). With no account or pool, its provider picks the pool. Default: the runner's default model for the provider if it has one (a dev runner's is the cheapest), else the account's."),
         effort: effortEnum.optional().describe("Reasoning effort (ultra is Codex only). Default: the model's own level."),
         permissionMode: z.enum(['full', 'ask', 'auto']).optional().describe('"full" (default), "ask" before edits and commands, or "auto": a classifier approves or blocks each action and asks only when it can\'t decide, for work on untrusted text (Claude only; on Codex it acts like ask).'),
-        why: z.string().optional().describe('A few plain words on why this thread exists, about 6 ("fixing a hook it hit"). The sidebar shows them under its title, as the user has none of your context for it.'),
+        why: z.string().optional().describe('A few plain words on why this thread exists, about 6 ("fixing a hook it hit"). The sidebar shows them when the user hovers the mark on its row, as they have none of your context for it.'),
       },
       handle(async ({ text, title, folder: f, pool: p, account: acc, model, effort, permissionMode, why }) => {
         const r = await control.create({
