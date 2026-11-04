@@ -959,7 +959,8 @@ final class TranscriptTextView: NSTextView {
     }
 
     // A copy with a card chip in it is its words and card titles, as a plain
-    // copy would otherwise paste an empty box for each chip.
+    // copy would otherwise paste an empty box for each chip. Every copy also
+    // carries HTML, as Slack and the web only keep links from that.
     override func writeSelection(to pboard: NSPasteboard, types: [NSPasteboard.PasteboardType]) -> Bool {
         let range = selectedRange()
         guard let storage = textStorage, range.length > 0, NSMaxRange(range) <= storage.length else { return super.writeSelection(to: pboard, types: types) }
@@ -971,9 +972,19 @@ final class TranscriptTextView: NSTextView {
                 stop.pointee = true
             }
         }
-        guard hasCard else { return super.writeSelection(to: pboard, types: types) }
-        pboard.declareTypes([.string], owner: nil)
-        return pboard.setString(Self.wordsWithCards(selection), forType: .string)
+        guard hasCard else {
+            guard super.writeSelection(to: pboard, types: types) else { return false }
+            pboard.addTypes([.html], owner: nil)
+            pboard.setString(SelectionHTML.html(selection), forType: .html)
+            return true
+        }
+        return Self.write(Self.wordsWithCards(selection), html: selection, to: pboard)
+    }
+
+    private static func write(_ text: String, html selection: NSAttributedString, to pboard: NSPasteboard) -> Bool {
+        pboard.declareTypes([.string, .html], owner: nil)
+        pboard.setString(SelectionHTML.html(selection), forType: .html)
+        return pboard.setString(text, forType: .string)
     }
 
     private func selectionAction(_ action: SelectionBarWindow.Action) {
@@ -990,8 +1001,9 @@ final class TranscriptTextView: NSTextView {
             guard let threadId = transcriptThreadId else { return }
             app.quoteInComposer(text, in: threadId)
         case .copy:
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(text, forType: .string)
+            let range = selectedRange()
+            guard let storage = textStorage, NSMaxRange(range) <= storage.length else { return }
+            _ = Self.write(text, html: storage.attributedSubstring(from: range), to: .general)
         }
     }
 
