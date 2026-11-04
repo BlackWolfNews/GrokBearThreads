@@ -182,8 +182,10 @@ private final class ReviewNativeWindow: NSWindow {
         // browsing works immediately without first clicking the canvas.
         if !(firstResponder is NSTextView), event.modifierFlags.intersection([.command, .control, .option]).isEmpty, let session = reviewSession {
             switch event.keyCode {
-            case 123, 126: session.browse(-1); return // left, up
-            case 124, 125: session.browse(1); return // right, down
+            case 123: session.browse(-1); return // left: the shot before
+            case 124: session.browse(1); return // right: the next shot
+            case 126: session.jump(-1); return // up: the option before
+            case 125: session.jump(1); return // down: the next option
             case 36: // Return
                 if session.mode == .single { session.showAll() } else { session.browse(0) }
                 return
@@ -242,19 +244,19 @@ private struct ReviewTitlebarButtons: View {
     }
 }
 
-/// The review: every image on the stage, and on the right the question, the
-/// choices with the agent's reasons, a note on any of them, and Send. Mike
-/// picked this layout on 1 Nov, over the grid of cards that hid the notes and
-/// reasons and put Pick and Send at opposite ends of the window.
+/// The review, as Mike picked on 4 Nov: the option on show big on the stage,
+/// with its other shots in a strip under it and a mark for every shot of
+/// every option; down the right, the options with their reasons and shots,
+/// ticks for as many as he wants, and one reply box with Send. Before, each
+/// extra shot was an option of its own (A2, A3) that couldn't be picked, a
+/// single pick was all he could send, and he answered most reviews by
+/// typing in the thread instead.
 struct ReviewWindow: View {
     @Bindable var session: ReviewSession
     let back: () -> Void
     let close: () -> Void
     @Environment(\.colorScheme) private var colorScheme
-    /// Choices with a box because the note icon was pressed. A pick or a
-    /// saved note opens one by itself.
-    @State private var openedNotes: Set<String> = []
-    @FocusState private var typingIn: String?
+    @FocusState private var replying: Bool
 
     private static let railWidth: CGFloat = 340
     private static let stageInset: CGFloat = 14
@@ -303,6 +305,7 @@ struct ReviewWindow: View {
 
     private var stage: some View {
         VStack(spacing: 0) {
+            if session.mode == .single, let option = session.focusedOption { caption(option) }
             images
             stepper
         }
@@ -311,15 +314,37 @@ struct ReviewWindow: View {
         .background(Color.black.opacity(colorScheme == .dark ? 0.22 : 0.05))
     }
 
+    /// Which option and shot this is, and the way to try it live.
+    private func caption(_ option: ReviewOption) -> some View {
+        let shots = option.allShots
+        let title = session.focusedShot?.title
+        let where_ = shots.count > 1 ? "\(session.shot + 1) of \(shots.count)" + (title.map { " \u{00B7} \($0)" } ?? "") : title ?? ""
+        return HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(option.label).font(.system(size: TypeScale.work + 2, weight: .semibold)).lineLimit(1)
+            Text(where_).font(.system(size: TypeScale.work)).foregroundStyle(.secondary).lineLimit(1)
+            Spacer(minLength: 8)
+            if let link = option.url, let url = URL(string: link) {
+                Button { NSWorkspace.shared.open(url) } label: {
+                    Label("Open live", systemImage: "arrow.up.right")
+                        .font(.system(size: TypeScale.detail, weight: .medium))
+                        .padding(.horizontal, 11).frame(height: 26)
+                        .background(Color.primary.opacity(0.08), in: Capsule())
+                        .contentShape(Capsule())
+                }.buttonStyle(.plain).tip("Try \(option.id) running live: \(link)")
+            }
+        }
+        .padding(.horizontal, 22).padding(.top, 14)
+    }
+
     private var images: some View {
         GeometryReader { geo in
             let room = CGSize(width: max(0, geo.size.width - Self.stageInset * 2), height: max(0, geo.size.height - Self.stageInset * 2))
             Group {
-                if session.mode == .single, session.review.options.indices.contains(session.focused) {
-                    cell(session.focused, size: room)
+                if session.mode == .single, let shot = session.focusedShot {
+                    enlarged(shot.image, size: room)
                 } else {
                     let layout = ReviewGalleryLayout.best(
-                        aspects: session.review.options.map(aspect), width: room.width, height: room.height, spacing: Self.cellSpacing,
+                        aspects: session.review.options.map { aspect($0.image) }, width: room.width, height: room.height, spacing: Self.cellSpacing,
                         chromeWidth: Self.cellPadding * 2, chromeHeight: Self.cellPadding * 2 + Self.captionHeight)
                     let indices = Array(session.review.options.indices)
                     VStack(spacing: Self.cellSpacing) {
@@ -338,16 +363,21 @@ struct ReviewWindow: View {
         .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// Back and next under the image, with a mark for each step between
-    /// them: one per image, then the grid where they're all side by side to
-    /// choose from. A mark takes you straight to its step.
+    /// Back and next, the option's other shots, and a mark for every shot
+    /// of every option, grouped under its letter, then the grid where
+    /// they're all side by side to choose from. A mark or a shot takes you
+    /// straight to it.
     private var stepper: some View {
-        HStack(spacing: 16) {
+        HStack(alignment: .center, spacing: 18) {
             stepButton("chevron.left", tip: session.mode == .all ? "Back to the last one (\u{2190})" : "Previous (\u{2190})",
                        enabled: session.canStepBack) { session.browse(-1) }
-            HStack(spacing: 2) {
+            if session.mode == .single, let option = session.focusedOption, option.allShots.count > 1 {
+                filmstrip(option)
+            }
+            Spacer(minLength: 8)
+            HStack(spacing: 12) {
                 ForEach(Array(session.review.options.enumerated()), id: \.element.id) { index, option in
-                    stepMark(index, option)
+                    marks(index, option)
                 }
                 Button { session.showAll() } label: {
                     Image(systemName: "square.grid.2x2")
@@ -359,32 +389,60 @@ struct ReviewWindow: View {
             stepButton("chevron.right", tip: session.nextIsAll ? "See them all and choose (\u{2192})" : "Next (\u{2192})",
                        enabled: session.canStepForward, prominent: true) { session.browse(1) }
         }
-        .padding(.vertical, 12)
+        .padding(.horizontal, 22).padding(.vertical, 12)
         .frame(maxWidth: .infinity)
     }
 
-    private func stepMark(_ index: Int, _ option: ReviewOption) -> some View {
-        let current = session.mode == .single && session.focused == index
-        let picked = session.draft.pickedId == option.id
-        let colour = picked ? Color.accentColor : current ? Color.primary : Color.secondary.opacity(0.45)
-        return Button { session.enlarge(index) } label: {
-            Group {
-                // A reference is hollow: it's there to look at, not to pick.
-                if option.reference {
-                    Circle().strokeBorder(colour, lineWidth: 1.5)
-                } else {
-                    Circle().fill(colour)
-                }
+    private func filmstrip(_ option: ReviewOption) -> some View {
+        HStack(spacing: 8) {
+            ForEach(Array(option.allShots.enumerated()), id: \.offset) { index, shot in
+                let current = index == session.shot
+                Button { session.enlarge(session.focused, shot: index) } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ReviewThumb(path: shot.image.path, width: 92, height: 58)
+                            .opacity(current ? 1 : 0.55)
+                            .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(current ? Color.primary : Color.clear, lineWidth: 2).padding(-3))
+                        Text(shot.title ?? "\(index + 1)").font(.system(size: TypeScale.detail - 1))
+                            .foregroundStyle(current ? Color.primary : Color.secondary).lineLimit(1).frame(width: 92, alignment: .leading)
+                    }.contentShape(Rectangle())
+                }.buttonStyle(.plain).tip(shotTip(option, index))
             }
-            .frame(width: current ? 11 : 8, height: current ? 11 : 8)
-            .frame(width: 18, height: 26).contentShape(Rectangle())
-        }.buttonStyle(.plain).tip(option.label)
+        }
+    }
+
+    private func shotTip(_ option: ReviewOption, _ index: Int) -> String {
+        let shots = option.allShots
+        guard shots.count > 1 else { return option.label }
+        return "\(option.label), " + (shots[index].title ?? "shot \(index + 1)")
+    }
+
+    /// An option's letter and a dot per shot. A reference is hollow: it's
+    /// there to look at, not to pick.
+    private func marks(_ index: Int, _ option: ReviewOption) -> some View {
+        let picked = session.draft.pickedIds.contains(option.id)
+        let here = session.mode == .single && session.focused == index
+        return HStack(spacing: 0) {
+            Text(option.id).font(.system(size: TypeScale.detail - 1, weight: .semibold))
+                .foregroundStyle(picked ? Color.accentColor : here ? Color.primary : Color.secondary)
+                .lineLimit(1).padding(.trailing, 2)
+            ForEach(Array(option.allShots.indices), id: \.self) { shot in
+                let current = here && session.shot == shot
+                let colour = picked ? Color.accentColor : current || here ? Color.primary : Color.secondary.opacity(0.45)
+                Button { session.enlarge(index, shot: shot) } label: {
+                    Group {
+                        if option.reference { Circle().strokeBorder(colour, lineWidth: 1.5) } else { Circle().fill(colour) }
+                    }
+                    .frame(width: current ? 10 : 7, height: current ? 10 : 7)
+                    .frame(width: 13, height: 26).contentShape(Rectangle())
+                }.buttonStyle(.plain).tip(shotTip(option, shot))
+            }
+        }
     }
 
     private func stepButton(_ symbol: String, tip: String, enabled: Bool, prominent: Bool = false, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol).font(.system(size: 15, weight: .semibold))
-                .frame(width: 56, height: 32)
+                .frame(width: 50, height: 32)
                 .background(Color.primary.opacity(prominent && enabled ? 0.1 : 0.05), in: Capsule())
                 .contentShape(Capsule())
         }
@@ -392,31 +450,43 @@ struct ReviewWindow: View {
         .disabled(!enabled).tip(tip)
     }
 
-    private func aspect(_ option: ReviewOption) -> Double {
-        guard let width = option.image.width, let height = option.image.height, width > 0, height > 0 else { return 1100.0 / 760.0 }
+    private func aspect(_ image: ImageRef) -> Double {
+        guard let width = image.width, let height = image.height, width > 0, height > 0 else { return 1100.0 / 760.0 }
         return Double(width) / Double(height)
     }
 
+    /// One shot on the whole stage. A click goes back to all of them; at
+    /// full size a click is for scrolling, so it does nothing.
+    private func enlarged(_ image: ImageRef, size: CGSize) -> some View {
+        let id = session.focusedOption?.id ?? ""
+        let scrolling = session.actualSize
+        let fit = ReviewGalleryLayout.fit(aspect: aspect(image), width: size.width, height: size.height)
+        return ReviewCanvas(image: image, actualSize: scrolling, onClick: scrolling ? nil : { session.showAll() })
+            .tip(scrolling ? "" : "\(id): click to see them all")
+            .frame(width: scrolling ? size.width : fit.width, height: scrolling ? size.height : fit.height)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityLabel("\(session.focusedOption?.label ?? ""). Scroll to inspect the image.")
+    }
+
+    /// An option among them all: its first shot, and how many it has.
     private func cell(_ index: Int, size: CGSize) -> some View {
         let option = session.review.options[index]
-        let picked = session.draft.pickedId == option.id
-        let enlarged = session.mode == .single
-        let scrolling = enlarged && session.actualSize
+        let picked = session.draft.pickedIds.contains(option.id)
+        let count = option.allShots.count
         let room = CGSize(width: max(0, size.width - Self.cellPadding * 2), height: max(0, size.height - Self.cellPadding * 2 - Self.captionHeight))
-        let fit = ReviewGalleryLayout.fit(aspect: aspect(option), width: room.width, height: room.height)
+        let fit = ReviewGalleryLayout.fit(aspect: aspect(option.image), width: room.width, height: room.height)
         return VStack(alignment: .leading, spacing: 0) {
-            Text(option.id)
-                .font(.system(size: TypeScale.detail, weight: .semibold))
-                .foregroundStyle(picked ? Color.accentColor : Color.secondary)
-                .lineLimit(1).frame(height: Self.captionHeight, alignment: .topLeading)
-            // At full size a click is for scrolling, so it does nothing.
-            ReviewCanvas(image: option.image, actualSize: scrolling, onClick: scrolling ? nil : {
-                if enlarged { session.showAll() } else { session.enlarge(index) }
-            })
-            .tip(scrolling ? "" : "\(option.id): click to \(enlarged ? "see them all" : "enlarge")")
-            .frame(width: scrolling ? room.width : fit.width, height: scrolling ? room.height : fit.height)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .accessibilityLabel("\(option.label). Scroll to inspect the image.")
+            HStack(spacing: 6) {
+                Text(option.id).font(.system(size: TypeScale.detail, weight: .semibold))
+                    .foregroundStyle(picked ? Color.accentColor : Color.secondary)
+                if count > 1 { Text("\(count) shots").font(.system(size: TypeScale.detail)).foregroundStyle(.tertiary) }
+            }
+            .lineLimit(1).frame(height: Self.captionHeight, alignment: .topLeading)
+            ReviewCanvas(image: option.image, actualSize: false, onClick: { session.enlarge(index) })
+                .tip("\(option.id): click to enlarge")
+                .frame(width: fit.width, height: fit.height)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityLabel(option.label)
         }
         .padding(Self.cellPadding)
         .frame(width: size.width, height: size.height)
@@ -456,60 +526,58 @@ struct ReviewWindow: View {
     }
 
     private func choice(_ option: ReviewOption, index: Int) -> some View {
-        let picked = session.draft.pickedId == option.id
-        let note = session.draft.notes[option.id] ?? ""
-        let hasNote = !note.isEmpty
+        let picked = session.draft.pickedIds.contains(option.id)
+        let note = (session.review.response ?? session.draft).notes[option.id] ?? ""
         let current = session.mode == .single && session.focused == index
-        // The one on show has its box out, so a thought about it as you
-        // step through is just typing.
-        let showsBox = session.editable && (picked || hasNote || current || openedNotes.contains(option.id))
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 9) {
-                pickMark(option, index: index, picked: picked)
-                // The whole row shows its image, references too: before,
-                // a row only picked, and one that couldn't be picked did
-                // nothing at all (Mike, 2 Nov).
-                Button { session.enlarge(index) } label: { choiceText(option) }
+        let shots = option.allShots
+        return HStack(alignment: .top, spacing: 10) {
+            pickMark(option, picked: picked)
+            VStack(alignment: .leading, spacing: 8) {
+                // The whole row shows its image, references too (Mike, 2 Nov).
+                Button { if !current { session.enlarge(index) } } label: { choiceText(option) }
                     .buttonStyle(.plain)
                     .tip(current ? "Showing \(option.id)" : "Show \(option.id)")
-                if session.editable && !showsBox {
-                    Button {
-                        openedNotes.insert(option.id)
-                        focusSoon(option.id)
-                    } label: {
-                        Image(systemName: "text.bubble").foregroundStyle(.secondary).frame(width: 24, height: 20).contentShape(Rectangle())
-                    }.buttonStyle(.plain)
-                        .accessibilityLabel("Add a note on \(option.label)")
-                        .tip("Add a note on \(option.id)")
+                if shots.count > 1 {
+                    HStack(spacing: 5) {
+                        ForEach(Array(shots.enumerated()), id: \.offset) { shot, item in
+                            let on = current && session.shot == shot
+                            Button { session.enlarge(index, shot: shot) } label: {
+                                ReviewThumb(path: item.image.path, width: 52, height: 33)
+                                    .opacity(on ? 1 : 0.7)
+                                    .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(on ? Color.primary : Color.clear, lineWidth: 1.5).padding(-2))
+                            }.buttonStyle(.plain).tip(shotTip(option, shot))
+                        }
+                    }
                 }
-            }
-            if showsBox {
-                noteBox(option, note: note).padding(.leading, 25)
-            } else if !session.editable && hasNote {
-                Text(note).font(.system(size: TypeScale.work)).textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true).padding(.leading, 25)
+                // Notes on one option are from before the one reply box,
+                // or a client that still sends them: shown, as they'll go.
+                if !note.isEmpty {
+                    Text(note).font(.system(size: TypeScale.work)).textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
         .padding(.horizontal, 14).padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(picked ? Color.accentColor.opacity(0.1) : current ? Color.primary.opacity(0.06) : Color.clear)
+        .background(current ? Color.primary.opacity(0.06) : picked ? Color.accentColor.opacity(0.07) : Color.clear)
         .overlay(alignment: .leading) {
             if current { Rectangle().fill(Color.primary.opacity(0.5)).frame(width: 3) }
         }
     }
 
-    /// A reference has no pick, and neither has a sent review's other
-    /// choices; the gap keeps the text lined up all the same.
-    @ViewBuilder private func pickMark(_ option: ReviewOption, index: Int, picked: Bool) -> some View {
+    /// A tick, as several can be picked. A reference has none, and neither
+    /// has a sent review's unpicked options; the gap keeps the text lined up.
+    @ViewBuilder private func pickMark(_ option: ReviewOption, picked: Bool) -> some View {
         if session.editable && !option.reference {
-            Button { choose(option, index: index) } label: {
-                Image(systemName: picked ? "checkmark.circle.fill" : "circle")
+            Button { session.pick(option.id) } label: {
+                Image(systemName: picked ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 15))
                     .foregroundStyle(picked ? Color.accentColor : Color.secondary)
                     .frame(width: 16, height: 16).padding(4).contentShape(Rectangle())
             }.buttonStyle(.plain).padding(-4)
                 .tip(picked ? "Unpick \(option.id)" : "Pick \(option.id)")
         } else if picked {
-            Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.accentColor).frame(width: 16, height: 16)
+            Image(systemName: "checkmark.square.fill").font(.system(size: 15)).foregroundStyle(Color.accentColor).frame(width: 16, height: 16)
         } else {
             Color.clear.frame(width: 16, height: 16)
         }
@@ -530,63 +598,75 @@ struct ReviewWindow: View {
         .contentShape(Rectangle())
     }
 
-    private func noteBox(_ option: ReviewOption, note: String) -> some View {
-        ZStack(alignment: .topLeading) {
-            // Grows with what's typed: the hidden copy sets the height.
-            Text(note + "\n").font(.system(size: TypeScale.work)).opacity(0)
-                .padding(.horizontal, 5).padding(.vertical, 1)
-            TextEditor(text: Binding(get: { session.draft.notes[option.id] ?? "" }, set: { session.setNote($0, for: option.id) }))
-                .font(.system(size: TypeScale.work)).scrollContentBackground(.hidden)
-                .scrollIndicators(.never)
-                .focused($typingIn, equals: option.id)
-                .accessibilityLabel("Note on \(option.label)")
-            if note.isEmpty {
-                Text("Add a note").font(.system(size: TypeScale.work)).foregroundStyle(.tertiary)
-                    .padding(.leading, 5).allowsHitTesting(false)
+    /// One box for what he thinks of the lot, as he'd say it in the thread.
+    private var replyBox: some View {
+        let reply = session.draft.reply ?? ""
+        // Grows with what's typed: the hidden copy sets the height, and the
+        // editor sits over it, as a TextEditor on its own takes all the
+        // room the rail has left.
+        return Text(reply + "\n").font(.system(size: TypeScale.work)).opacity(0)
+            .padding(.horizontal, 5).padding(.vertical, 1)
+            .frame(maxWidth: .infinity, minHeight: 60, alignment: .topLeading)
+            .frame(maxHeight: 220)
+            .fixedSize(horizontal: false, vertical: true)
+            .overlay {
+                TextEditor(text: Binding(get: { session.draft.reply ?? "" }, set: { session.setReply($0) }))
+                    .font(.system(size: TypeScale.work)).scrollContentBackground(.hidden)
+                    .scrollIndicators(.never)
+                    .focused($replying)
+                    .accessibilityLabel("Reply")
             }
-        }
-        .frame(minHeight: 60, maxHeight: 220)
+            .overlay(alignment: .topLeading) {
+                if reply.isEmpty {
+                    Text("Add a reply").font(.system(size: TypeScale.work)).foregroundStyle(.tertiary)
+                        .padding(.leading, 5).allowsHitTesting(false)
+                }
+            }
         .padding(6)
         .background(Color.black.opacity(colorScheme == .dark ? 0.2 : 0.03), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(typingIn == option.id ? Color.accentColor : Color(nsColor: .separatorColor), lineWidth: 1))
-    }
-
-    /// A pick goes straight to its note box, so adding detail is just typing.
-    private func choose(_ option: ReviewOption, index: Int) {
-        let picking = session.draft.pickedId != option.id
-        session.pick(option.id)
-        // On the choosing step the pick stays among them all.
-        if session.mode == .single { session.enlarge(index) }
-        if picking { focusSoon(option.id) } else if typingIn == option.id { typingIn = nil }
-    }
-
-    /// The box only exists from the next update.
-    private func focusSoon(_ id: String) {
-        Task { @MainActor in typingIn = id }
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(replying ? Color.accentColor : Color(nsColor: .separatorColor), lineWidth: 1))
     }
 
     @ViewBuilder private var footer: some View {
         if session.review.isPending {
-            Button {
-                Task {
-                    await session.submit()
-                    // Once it's sent there's nothing left to do here, so
-                    // it gets out of the way (Mike, 28 Oct). A failed send
-                    // stays open with its error and the notes kept.
-                    if session.review.status == "answered" { close() }
+            VStack(spacing: 10) {
+                replyBox
+                HStack(spacing: 8) {
+                    Button { session.toggleNone() } label: {
+                        Text("None").frame(width: 70)
+                    }
+                    .buttonStyle(.bordered).controlSize(.large).tint(session.draft.none ? .accentColor : nil)
+                    .disabled(!session.editable)
+                    .tip(session.draft.none ? "Take back none of them" : "None of them will do")
+                    Button {
+                        Task {
+                            await session.submit()
+                            // Once it's sent there's nothing left to do here, so
+                            // it gets out of the way (Mike, 28 Oct). A failed send
+                            // stays open with its error and the reply kept.
+                            if session.review.status == "answered" { close() }
+                        }
+                    } label: {
+                        Text(session.sendLabel).fontWeight(.semibold).lineLimit(1).frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent).controlSize(.large)
+                    .keyboardShortcut(.return, modifiers: .command)
+                    .disabled(!session.canSubmit)
+                    .tip("Send your picks and reply to the agent (\u{2318}\u{21A9}). Close the window to finish it later.")
                 }
-            } label: {
-                Text(session.sendLabel).fontWeight(.semibold).frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent).controlSize(.large)
-            .keyboardShortcut(.return, modifiers: .command)
-            .disabled(!session.canSubmit)
-            .tip("Send your pick and notes to the agent (\u{2318}\u{21A9}). Close the window to finish it later.")
         } else {
-            HStack {
-                Text(status).font(.system(size: TypeScale.detail)).foregroundStyle(.secondary).lineLimit(1)
-                Spacer()
-                Button("Done") { close() }.tip("Close it")
+            VStack(alignment: .leading, spacing: 10) {
+                let sent = session.review.response ?? session.draft
+                if sent.none { Text("None of them").font(.system(size: TypeScale.work, weight: .semibold)) }
+                if let reply = sent.reply, !reply.isEmpty {
+                    Text(reply).font(.system(size: TypeScale.work)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                }
+                HStack {
+                    Text(status).font(.system(size: TypeScale.detail)).foregroundStyle(.secondary).lineLimit(1)
+                    Spacer()
+                    Button("Done") { close() }.tip("Close it")
+                }
             }
         }
     }
@@ -599,6 +679,32 @@ struct ReviewWindow: View {
         case "superseded": return "Answered in the thread"
         default: return "Closed"
         }
+    }
+}
+
+/// A small picture of a shot, cropped from its top left, where a mockup's
+/// title and controls are, rather than squashed.
+private struct ReviewThumb: View {
+    let path: String
+    let width: CGFloat
+    let height: CGFloat
+    @State private var image: CGImage?
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Color.primary.opacity(0.08)
+            if let image {
+                Image(decorative: image, scale: 2).resizable().aspectRatio(contentMode: .fill)
+                    .frame(width: width, height: height, alignment: .topLeading)
+            }
+        }
+        .frame(width: width, height: height).clipShape(RoundedRectangle(cornerRadius: 4))
+        .onAppear(perform: load)
+        .onChange(of: path) { _, _ in load() }
+    }
+
+    private func load() {
+        ThumbnailLoader.shared.load(path: path, maxPixels: Int(width * 4)) { image = $0 }
     }
 }
 

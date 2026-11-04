@@ -73,11 +73,14 @@ public enum MarkdownExport {
             let response = review.response ?? review.draft
             for option in review.options {
                 var line = "- \(option.id). \(option.title)"
-                if response.pickedId == option.id { line += " (picked)" }
+                if response.pickedIds.contains(option.id) { line += " (picked)" }
                 if option.reference { line += " (reference)" }
+                if option.allShots.count > 1 { line += " (\(option.allShots.count) shots)" }
                 if let note = response.notes[option.id], !note.isEmpty { line += ": " + note }
                 lines.append(line)
             }
+            if response.none { lines.append("None of them") }
+            if let reply = response.reply, !reply.isEmpty { lines.append(reply) }
             return lines.joined(separator: "\n")
         case .plan(let entries):
             return entries.map { entry in

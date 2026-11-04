@@ -152,11 +152,15 @@ as one message, with anything you wrote in the message box at the end.
 When an ask is about pictures the agent put up to compare, its button can
 open that comparison window straight from the card.
 
-The comparison window starts on the first picture. Next and back (or the
-arrow keys) step through them one at a time, and after the last one they're
-all side by side for you to pick one. Click any one on the right, or a dot
-under the picture, to go straight to it. Each picture you're on has a box
-for a note, and Send takes your pick and notes back to the thread.
+The comparison window starts on the first option's first picture. An option
+can have several (its overview, how it looks mid-drag, a detail), shown in a
+strip under the picture. Next and back (or the left and right arrow keys)
+step through every picture of every option, up and down jump to the option
+before or after, and after the last one they're all side by side. Click an
+option on the right, one of its small pictures, or a dot under the stage, to
+go straight to it, and Open live to try one the agent has running. Tick as
+many as you like, or None if none of them will do, write what you think in
+the box at the bottom, and Send takes it all back to the thread.
 
 Inside a thread, rest the pointer on a link for a moment, in a reply or on a
 Needs you card's buttons, to see where it goes: a picture of the file, or

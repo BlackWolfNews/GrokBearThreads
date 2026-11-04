@@ -276,3 +276,60 @@ test('a message from the phone supersedes open reviews too', () => {
   h.runner.send(thread.id,'from my phone',[],{origin:'phone'});
   assert.equal(h.runner.getReview(thread.id,review.id).review.status,'superseded');
 });
+
+// An option's several shots used to be options of their own (A2, A3) that
+// couldn't be picked; and Mike often wants two of them, or none, in his own
+// words (4 Nov).
+test('an option keeps its shots and url, and old single-image options are unchanged', () => {
+  const {h,thread,source}=fixture();
+  const {review}=h.runner.createReview(thread.id,{title:'Diagrams',options:[
+    {id:'A',title:'Board',path:source,url:'http://localhost:5190/a',shots:[{path:source,title:'Mid-drag'},{path:source,title:'Detail'}]},
+    {id:'B',title:'Dossier',shots:[{path:source,title:'Overview'},{path:source}]},
+    {id:'C',title:'Map',path:source},
+  ]});
+  const [a,b,c]=review.options;
+  assert.equal(a.shots?.length,3);
+  assert.equal(a.shots?.[0].image.path,a.image.path,'image is the first shot, for clients that show one');
+  assert.deepEqual(a.shots?.map(s=>s.title),[undefined,'Mid-drag','Detail']);
+  assert.equal(a.url,'http://localhost:5190/a');
+  assert.equal(new Set(a.shots?.map(s=>s.image.path)).size,3,'each shot is its own copy');
+  assert.deepEqual(b.shots?.map(s=>s.title),['Overview',undefined]);
+  assert.equal(c.shots,undefined);
+  assert.equal(c.url,undefined);
+  for (const bad of [
+    {id:'X',title:'No picture'},
+    {id:'X',title:'Bad url',path:source,url:'javascript:alert(1)'},
+    {id:'X',title:'Too many',shots:Array.from({length:9},()=>({path:source}))},
+    {id:'X',title:'Missing',path:source,shots:[{path:'/does/not/exist'}]},
+  ]) assert.throws(()=>h.runner.createReview(thread.id,{title:'Bad',options:[bad as any]}),/./,JSON.stringify(bad));
+  assert.throws(()=>h.runner.createReview(thread.id,{title:'Too big',options:Array.from({length:6},(_,i)=>({id:`O${i}`,title:'Many',shots:Array.from({length:7},()=>({path:source}))}))}),/at most 40/);
+});
+
+test('several picks, none, and a reply go to the agent in the order of the options', () => {
+  const {h,thread,input}=fixture();
+  const {review}=h.runner.createReview(thread.id,input);
+  const saved=h.runner.saveReview(thread.id,review.id,0,{pickedIds:['B','A'],notes:{},reply:'  The board, with the sandbox for the video. '}).review;
+  assert.deepEqual(saved.draft,{pickedId:'A',pickedIds:['A','B'],notes:{},reply:'The board, with the sandbox for the video.'});
+  assert.throws(()=>h.runner.saveReview(thread.id,review.id,saved.revision,{pickedIds:['A'],none:true,notes:{}}),/none/i);
+  assert.throws(()=>h.runner.saveReview(thread.id,review.id,saved.revision,{pickedIds:['A','D'],notes:{}}),/reference/i);
+  // An older client's pickedId alone still works.
+  const old=h.runner.saveReview(thread.id,review.id,saved.revision,{pickedId:'B',notes:{}}).review;
+  assert.deepEqual(old.draft,{pickedId:'B',notes:{}});
+  const answered=h.runner.respondReview(thread.id,review.id,old.revision,{pickedIds:['A','B'],notes:{D:'Keep this'},reply:'Both, please.'});
+  const sent=h.store.load(thread.id)!.queue.at(-1)!;
+  assert.equal(sent.text,`Review: Account picker (${review.id})\n\nPicked A + B. First + Second.\n\nBoth, please.\n\nNotes on D (Reference): Keep this`);
+  // Retrying the same answer is the same answer, whichever order it came in.
+  assert.equal(h.runner.respondReview(thread.id,review.id,old.revision,{pickedIds:['B','A'],notes:{D:'Keep this'},reply:'Both, please.'}).turnId,answered.turnId);
+});
+
+test('none of them, with or without a reply, is an answer', () => {
+  const {h,thread,input}=fixture();
+  const {review}=h.runner.createReview(thread.id,input);
+  h.runner.respondReview(thread.id,review.id,0,{none:true,notes:{}});
+  const sent=h.store.load(thread.id)!.queue.at(-1)!;
+  assert.equal(sent.text,`Review: Account picker (${review.id})\n\nPicked none of them.`);
+  const second=h.runner.createReview(thread.id,input).review;
+  h.runner.respondReview(thread.id,second.id,0,{notes:{},reply:'Can you explain what these are for?'});
+  const reply=h.store.load(thread.id)!.queue.at(-1)!;
+  assert.equal(reply.text,`Review: Account picker (${second.id})\n\nCan you explain what these are for?`);
+});

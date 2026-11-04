@@ -1203,7 +1203,8 @@ enum RowRenderer {
         }
         for (i, item) in lines.enumerated() {
             if i > 0 { output.append(NSAttributedString(string: "\n", attributes: answer)) }
-            output.append(NSAttributedString(string: item.label + "\n", attributes: question))
+            // A review's reply under its pick has no label of its own.
+            if !item.label.isEmpty { output.append(NSAttributedString(string: item.label + "\n", attributes: question)) }
             // Line separators keep a written answer's lines in one paragraph,
             // so the gap between answers doesn't open up inside one.
             output.append(NSAttributedString(string: item.text.replacingOccurrences(of: "\n", with: "\u{2028}"), attributes: answer))

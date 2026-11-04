@@ -1971,6 +1971,9 @@ test('asked: a review reply is Mike\'s notes, or the option he picked', () => {
   const head = 'Review: Grey line (r1)\n\n';
   assert.equal(askedLine({ text: head + 'Notes on C (What you asked): try this', reviewId: 'r1', reviewResponse: { notes: { C: 'try this' } } }, [review]), 'try this');
   assert.equal(askedLine({ text: head + 'Picked C. What you asked.', reviewId: 'r1', reviewResponse: { pickedId: 'C', notes: {} } }, [review]), 'Picked What you asked');
+  assert.equal(askedLine({ text: head + 'Picked A + C. Results + What you asked.', reviewId: 'r1', reviewResponse: { pickedId: 'A', pickedIds: ['A', 'C'], notes: {} } }, [review]), 'Picked Results + What you asked');
+  assert.equal(askedLine({ text: head + 'Picked A.\n\nThe first one', reviewId: 'r1', reviewResponse: { pickedId: 'A', notes: {}, reply: 'The first one' } }, [review]), 'The first one');
+  assert.equal(askedLine({ text: head + 'Picked none of them.', reviewId: 'r1', reviewResponse: { notes: {}, none: true } }, [review]), 'None of them');
   assert.equal(askedLine({ text: 'Carry on', origin: 'runner' }), undefined);
 });
 

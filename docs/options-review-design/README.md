@@ -1,5 +1,16 @@
 # Comparing design options
 
+**4 November 2026: options have shots, and one reply box.** Mike picked
+"Directions with their shots" from four directions
+(`~/dev/me/misc/threadbear-options-window/round2` has all four and the
+reasons). A look through his 64 reviews found agents passing an option's
+extra screens as options of their own (A2, A3), Mike picking more than one
+or none, and answering most reviews in the thread in his own words; notes
+on single options were used five times. So an option has shots (the strip
+under the stage, ←/→ through them, ↑/↓ between options) and a live URL,
+several can be ticked, None is an answer, and one reply box replaces the
+note on each option. The paragraphs below describe the earlier windows.
+
 **1 November 2026: the window was redone.** `4-all-plus-form.png` is the layout
 Mike picked (`~/dev/me/misc/threadbear-options-window` has the other two he
 compared). Every image stays on a stage, sized by how many columns make them

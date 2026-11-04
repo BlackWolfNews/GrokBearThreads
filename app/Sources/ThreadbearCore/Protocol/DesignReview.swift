@@ -3,42 +3,85 @@ import Foundation
 /// A draft is saved separately from submission: closing a review must never
 /// turn an unfinished choice or note into a message to the agent.
 public struct ReviewDraft: Sendable, Hashable, Codable {
-    public var pickedId: String?
+    /// Every option picked, in the review's order. Mike often wants two
+    /// ("A + B's to-do list") or none of them (4 Nov).
+    public var pickedIds: [String]
     public var notes: [String: String]
+    /// His own words on the whole review.
+    public var reply: String?
+    /// None of them will do.
+    public var none: Bool
 
-    public init(pickedId: String? = nil, notes: [String: String] = [:]) {
-        self.pickedId = pickedId
+    public init(pickedId: String? = nil, pickedIds: [String]? = nil, notes: [String: String] = [:], reply: String? = nil, none: Bool = false) {
+        self.pickedIds = pickedIds ?? pickedId.map { [$0] } ?? []
         self.notes = notes
+        self.reply = reply
+        self.none = none
+    }
+
+    /// The first pick: all a runner from before several picks knows about.
+    public var pickedId: String? {
+        get { pickedIds.first }
+        set { pickedIds = newValue.map { [$0] } ?? [] }
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        pickedId = try c.decodeIfPresent(String.self, forKey: .pickedId)
+        let first = try c.decodeIfPresent(String.self, forKey: .pickedId)
+        let all = (try? c.decodeIfPresent([String].self, forKey: .pickedIds)) ?? nil
+        pickedIds = all ?? first.map { [$0] } ?? []
         notes = (try? c.decodeIfPresent([String: String].self, forKey: .notes)) ?? [:]
+        reply = (try? c.decodeIfPresent(String.self, forKey: .reply)) ?? nil
+        none = ((try? c.decodeIfPresent(Bool.self, forKey: .none)) ?? nil) ?? false
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encodeIfPresent(pickedId, forKey: .pickedId)
+        if pickedIds.count > 1 { try c.encode(pickedIds, forKey: .pickedIds) }
+        try c.encode(notes, forKey: .notes)
+        try c.encodeIfPresent(reply, forKey: .reply)
+        if none { try c.encode(true, forKey: .none) }
     }
 
     public var hasNotes: Bool {
         notes.values.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 
+    public var hasReply: Bool { !(reply ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
     /// The runner validates again. This only keeps the Send button from
     /// offering an empty reply or a pick that cannot be made.
     public func canSubmit(options: [ReviewOption]) -> Bool {
         let ids = Set(options.map(\.id))
         guard notes.allSatisfy({ ids.contains($0.key) && $0.value.utf16.count <= 4000 }) else { return false }
-        if let pickedId {
-            guard options.contains(where: { $0.id == pickedId && !$0.reference }) else { return false }
-        }
-        return pickedId != nil || hasNotes
+        guard (reply ?? "").utf16.count <= 8000, !(none && !pickedIds.isEmpty) else { return false }
+        guard pickedIds.allSatisfy({ id in options.contains(where: { $0.id == id && !$0.reference }) }) else { return false }
+        return !pickedIds.isEmpty || none || hasReply || hasNotes
     }
 
     public var jsonValue: JSONValue {
         var value: [String: JSONValue] = ["notes": .object(notes.mapValues(JSONValue.string))]
         if let pickedId { value["pickedId"] = .string(pickedId) }
+        // Always the list, so a runner that knows it takes it over pickedId.
+        value["pickedIds"] = .array(pickedIds.map(JSONValue.string))
+        if let reply { value["reply"] = .string(reply) }
+        if none { value["none"] = .bool(true) }
         return .object(value)
     }
 
-    enum CodingKeys: String, CodingKey { case pickedId, notes }
+    enum CodingKeys: String, CodingKey { case pickedId, pickedIds, notes, reply, none }
+}
+
+/// One picture of an option: its first, or another screen or state of it.
+public struct ReviewShot: Sendable, Hashable, Codable {
+    public var title: String?
+    public var image: ImageRef
+
+    public init(title: String? = nil, image: ImageRef) {
+        self.title = title
+        self.image = image
+    }
 }
 
 public struct ReviewOption: Sendable, Hashable, Codable, Identifiable {
@@ -46,15 +89,26 @@ public struct ReviewOption: Sendable, Hashable, Codable, Identifiable {
     public var title: String
     public var note: String?
     public var reference: Bool
+    /// The first shot, all a runner from before shots sends.
     public var image: ImageRef
+    /// Every shot in order, the first included, when there's more than one
+    /// (or the one has a title).
+    public var shots: [ReviewShot]
+    /// Where it runs live, to try it.
+    public var url: String?
 
-    public init(id: String, title: String, note: String? = nil, reference: Bool = false, image: ImageRef) {
+    public init(id: String, title: String, note: String? = nil, reference: Bool = false, image: ImageRef, shots: [ReviewShot] = [], url: String? = nil) {
         self.id = id
         self.title = title
         self.note = note
         self.reference = reference
         self.image = image
+        self.shots = shots
+        self.url = url
     }
+
+    /// What the window steps through: the shots, or the one image.
+    public var allShots: [ReviewShot] { shots.isEmpty ? [ReviewShot(image: image)] : shots }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -63,9 +117,11 @@ public struct ReviewOption: Sendable, Hashable, Codable, Identifiable {
         note = try c.decodeIfPresent(String.self, forKey: .note)
         reference = (try? c.decodeIfPresent(Bool.self, forKey: .reference)) ?? false
         image = try c.decode(ImageRef.self, forKey: .image)
+        shots = c.lossyArray(ReviewShot.self, forKey: .shots)
+        url = (try? c.decodeIfPresent(String.self, forKey: .url)) ?? nil
     }
 
-    enum CodingKeys: String, CodingKey { case id, title, note, reference, image }
+    enum CodingKeys: String, CodingKey { case id, title, note, reference, image, shots, url }
 }
 
 /// The latest persisted snapshot of a review. Status stays a string so a
@@ -181,15 +237,29 @@ public struct ReviewAnswer: Sendable, Hashable {
         let title = String(rest[rest.index(rest.startIndex, offsetBy: 8)..<close.lowerBound])
         rest = rest[close.upperBound...]
         var lines: [Line] = []
-        // "Picked <id>. <option title>."
-        if let picked = response.pickedId {
-            guard rest.hasPrefix("\n\nPicked \(picked). ") else { return nil }
-            rest = rest.dropFirst("\n\nPicked \(picked). ".count)
+        // "Picked <id>. <option title>.", or "Picked A + D. <title> + <title>."
+        let picks = response.pickedIds
+        if !picks.isEmpty {
+            let lead = "\n\nPicked \(picks.joined(separator: " + ")). "
+            guard rest.hasPrefix(lead) else { return nil }
+            rest = rest.dropFirst(lead.count)
             let end = rest.range(of: "\n\n")?.lowerBound ?? rest.endIndex
             var option = rest[..<end]
             if option.hasSuffix(".") { option = option.dropLast() }
-            lines.append(Line(label: title, text: "Picked \(picked): \(Self.bare(option, id: picked))"))
+            let what = picks.count == 1 ? Self.bare(option, id: picks[0]) : option
+            lines.append(Line(label: title, text: "Picked \(picks.joined(separator: " + ")): \(what)"))
             rest = rest[end...]
+        }
+        if response.none {
+            guard rest.hasPrefix("\n\nPicked none of them.") else { return nil }
+            rest = rest.dropFirst("\n\nPicked none of them.".count)
+            lines.append(Line(label: title, text: "None of them"))
+        }
+        // His reply, as he wrote it, under the pick or on its own.
+        if let reply = response.reply, !reply.isEmpty {
+            guard rest.hasPrefix("\n\n" + reply) else { return nil }
+            rest = rest.dropFirst(2 + reply.count)
+            lines.append(Line(label: lines.isEmpty ? title : "", text: reply))
         }
         // "Notes on <id> (<option title>): <note>", in the review's option
         // order, which the draft doesn't keep, so whichever comes next.

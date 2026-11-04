@@ -181,6 +181,43 @@ final class DesignReviewTests: XCTestCase {
         XCTAssertNil(ReviewAnswer.parse("Review: Picker (r1)\n\nPicked A. Thing.\n\nNotes on B (X): y", reviewId: "r1", response: draft))
     }
 
+    // The runner's wording for several picks, none, and a reply (reviewReply).
+    func testReviewReplyWithSeveralPicksAndAReply() {
+        let text = "Review: Diagrams (r1)\n\nPicked A + D. Entity board + Sandbox.\n\nThe board for the app.\n\nThe sandbox for the video."
+        let reply = ReviewAnswer.parse(text, reviewId: "r1", response: ReviewDraft(pickedIds: ["A", "D"], reply: "The board for the app.\n\nThe sandbox for the video."))
+        XCTAssertEqual(reply?.lines, [
+            .init(label: "Diagrams", text: "Picked A + D: Entity board + Sandbox"),
+            .init(label: "", text: "The board for the app.\n\nThe sandbox for the video."),
+        ])
+    }
+
+    func testReviewReplyWithNoneOrOnlyWords() {
+        let none = ReviewAnswer.parse("Review: Diagrams (r1)\n\nPicked none of them.", reviewId: "r1", response: ReviewDraft(none: true))
+        XCTAssertEqual(none?.lines, [.init(label: "Diagrams", text: "None of them")])
+        let words = ReviewAnswer.parse("Review: Diagrams (r1)\n\nWhat are these for?", reviewId: "r1", response: ReviewDraft(reply: "What are these for?"))
+        XCTAssertEqual(words?.lines, [.init(label: "Diagrams", text: "What are these for?")])
+    }
+
+    func testADraftWithSeveralPicksRoundTripsAndOneStaysAsItWas() throws {
+        let several = ReviewDraft(pickedIds: ["A", "D"], reply: "Both", none: false)
+        XCTAssertEqual(try JSONDecoder().decode(ReviewDraft.self, from: JSONEncoder().encode(several)), several)
+        let one = try JSONDecoder().decode(ReviewDraft.self, from: Data(#"{"pickedId":"B","notes":{}}"#.utf8))
+        XCTAssertEqual(one.pickedIds, ["B"], "a runner from before several picks")
+        let options = ["A", "B"].map { ReviewOption(id: $0, title: $0, image: ImageRef(path: "/\($0).png", mediaType: "image/png")) }
+        XCTAssertFalse(ReviewDraft(pickedIds: ["A"], none: true).canSubmit(options: options), "picks or none, not both")
+        XCTAssertTrue(ReviewDraft(reply: "Hmm").canSubmit(options: options))
+        XCTAssertFalse(ReviewDraft(reply: "  ").canSubmit(options: options))
+    }
+
+    func testOptionShotsDecodeAndOneImageIsOneShot() throws {
+        let json = #"{"id":"A","title":"Board","image":{"path":"/a.png","mediaType":"image/png"},"shots":[{"image":{"path":"/a.png","mediaType":"image/png"}},{"title":"Mid-drag","image":{"path":"/a2.png","mediaType":"image/png"}}],"url":"http://localhost:5190"}"#
+        let option = try JSONDecoder().decode(ReviewOption.self, from: Data(json.utf8))
+        XCTAssertEqual(option.allShots.map(\.title), [nil, "Mid-drag"])
+        XCTAssertEqual(option.url, "http://localhost:5190")
+        let plain = try JSONDecoder().decode(ReviewOption.self, from: Data(#"{"id":"B","title":"B","image":{"path":"/b.png","mediaType":"image/png"}}"#.utf8))
+        XCTAssertEqual(plain.allShots.map(\.image.path), ["/b.png"])
+    }
+
     func testReviewReplyEventReachesTheBubble() {
         let text = "Review: Picker (r1)\n\nPicked A. Auto account."
         let event = E.event(4, "user.message", ["text": text, "images": [], "reviewId": "r1", "reviewResponse": ["pickedId": "A", "notes": [:]]])

@@ -563,13 +563,22 @@ export type CodexTurnUsage = {
   reasoningTokens: number;
 };
 
-export type ReviewDraft = { pickedId?: string; notes: Record<string, string> };
+// pickedIds: every option picked, in the review's order, with pickedId the
+// first of them for clients from before several could be picked (4 Nov).
+// reply: Mike's own words on the whole review. none: none of them will do.
+export type ReviewDraft = { pickedId?: string; pickedIds?: string[]; notes: Record<string, string>; reply?: string; none?: true };
+
+// One picture of an option: its first, or another screen or state of it.
+export type ReviewShot = { title?: string; image: ImageRef };
 
 export type DesignReview = {
   id: string;
   title: string;
   note?: string;
-  options: { id: string; title: string; note?: string; reference?: boolean; image: ImageRef }[];
+  // image is the option's first shot, kept for clients that only show one.
+  // shots, when given, is every shot in order, image included. url: the
+  // option running live, to open beside the pictures.
+  options: { id: string; title: string; note?: string; reference?: boolean; image: ImageRef; shots?: ReviewShot[]; url?: string }[];
   status: 'pending' | 'answered' | 'cancelled' | 'superseded';
   revision: number;
   createdAt: string;

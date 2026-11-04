@@ -29,8 +29,9 @@ final class ReviewSession {
     /// all of them, as there's nothing left to step towards.
     var mode: ReviewMode
     var actualSize = false
-    /// The one enlarged in .single.
+    /// The option enlarged in .single, and which of its shots.
     private(set) var focused = 0
+    private(set) var shot = 0
 
     @ObservationIgnored private let service: ReviewService
     @ObservationIgnored private let defaults: UserDefaults
@@ -81,8 +82,23 @@ final class ReviewSession {
     /// now it read as done, with Send at the far end of the window (Mike, 1 Nov).
     var sendLabel: String {
         if submitting { return "Sending…" }
-        if let pickedId = draft.pickedId { return "Send \(pickedId)" }
-        return draft.hasNotes ? "Send notes" : "Send"
+        if !draft.pickedIds.isEmpty { return "Send " + draft.pickedIds.joined(separator: " + ") }
+        if draft.none { return "Send none of them" }
+        return draft.hasReply || draft.hasNotes ? "Send reply" : "Send"
+    }
+
+    /// The option on show and its shot, for the stage.
+    var focusedOption: ReviewOption? { review.options.indices.contains(focused) ? review.options[focused] : nil }
+    var focusedShot: ReviewShot? {
+        guard let shots = focusedOption?.allShots, shots.indices.contains(shot) else { return focusedOption?.allShots.first }
+        return shots[shot]
+    }
+
+    func setReply(_ text: String) {
+        guard editable else { return }
+        var next = draft
+        next.reply = text.isEmpty ? nil : text
+        edit(next)
     }
 
     func setNote(_ text: String, for id: String) {
@@ -92,10 +108,25 @@ final class ReviewSession {
         edit(next)
     }
 
+    /// Adds or takes away one pick. Several can be picked ("A + B's to-do
+    /// list", Mike, 2 Nov); they stay in the review's order, as the runner
+    /// keeps them, so the draft doesn't look changed after a save.
     func pick(_ id: String) {
         guard editable, review.options.contains(where: { $0.id == id && !$0.reference }) else { return }
+        var picked = Set(draft.pickedIds)
+        if picked.contains(id) { picked.remove(id) } else { picked.insert(id) }
         var next = draft
-        next.pickedId = next.pickedId == id ? nil : id
+        next.pickedIds = review.options.map(\.id).filter(picked.contains)
+        next.none = false
+        edit(next)
+    }
+
+    /// None of them will do: it takes the picks away, and a pick takes it away.
+    func toggleNone() {
+        guard editable else { return }
+        var next = draft
+        next.none.toggle()
+        if next.none { next.pickedIds = [] }
         edit(next)
     }
 
@@ -274,9 +305,10 @@ final class ReviewSession {
         } catch { self.error = "Couldn’t cancel the review. \(error.localizedDescription)" }
     }
 
-    func enlarge(_ index: Int) {
+    func enlarge(_ index: Int, shot: Int = 0) {
         guard review.options.indices.contains(index) else { return }
         focused = index
+        self.shot = max(0, min(shot, review.options[index].allShots.count - 1))
         mode = .single
     }
 
@@ -286,34 +318,58 @@ final class ReviewSession {
         actualSize = false
     }
 
-    /// The arrow keys and the stage's back and next. The images in order,
-    /// then all of them to choose from; it stops at either end rather than
-    /// wrapping, so the walkthrough has a start and an end. From all of
-    /// them, back goes to the last image and 0 (Return) to the one last
-    /// looked at.
+    /// The left and right arrows and the stage's back and next: every shot
+    /// of every option in order, then all of them to choose from. It stops
+    /// at either end rather than wrapping, so the walkthrough has a start
+    /// and an end. From all of them, back goes to the last shot and 0
+    /// (Return) to the one last looked at.
     func browse(_ direction: Int) {
         let count = review.options.count
         guard count > 0 else { return }
         if mode == .all {
-            if direction < 0 { enlarge(count - 1) } else if direction == 0 { enlarge(min(focused, count - 1)) }
+            if direction < 0 { enlarge(count - 1, shot: review.options[count - 1].allShots.count - 1) }
+            else if direction == 0 { enlarge(min(focused, count - 1), shot: shot) }
+            return
+        }
+        let shots = review.options[focused].allShots.count
+        if direction > 0 {
+            if shot + 1 < shots { enlarge(focused, shot: shot + 1) }
+            else if focused + 1 < count { enlarge(focused + 1) }
+            else { showAll() }
+        } else if direction < 0 {
+            if shot > 0 { enlarge(focused, shot: shot - 1) }
+            else if focused > 0 { enlarge(focused - 1, shot: review.options[focused - 1].allShots.count - 1) }
+        }
+    }
+
+    /// The up and down arrows: straight to the previous or next option's
+    /// first shot, past the shots in between; down from the last is all of them.
+    func jump(_ direction: Int) {
+        let count = review.options.count
+        guard count > 0 else { return }
+        if mode == .all {
+            if direction < 0 { enlarge(count - 1) }
             return
         }
         let next = focused + direction
-        if next >= count { showAll() } else if next >= 0 { enlarge(next) }
+        if next >= count { showAll() } else if next >= 0 { enlarge(next) } else { enlarge(0) }
     }
 
-    var canStepBack: Bool { mode == .all ? !review.options.isEmpty : focused > 0 }
+    var canStepBack: Bool { mode == .all ? !review.options.isEmpty : focused > 0 || shot > 0 }
     var canStepForward: Bool { mode == .single }
     /// The next step is all of them, where the pick happens.
-    var nextIsAll: Bool { mode == .single && focused == review.options.count - 1 }
+    var nextIsAll: Bool {
+        mode == .single && focused == review.options.count - 1 && shot >= (focusedOption?.allShots.count ?? 1) - 1
+    }
 
     /// The runner trims notes and drops blanks. A saved space at the end
     /// must not keep a draft dirty and trigger another save every 500 ms.
     private func normalized(_ draft: ReviewDraft) -> ReviewDraft {
-        ReviewDraft(pickedId: draft.pickedId, notes: draft.notes.compactMapValues {
+        let reply = (draft.reply ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return ReviewDraft(pickedIds: draft.pickedIds, notes: draft.notes.compactMapValues {
             let note = $0.trimmingCharacters(in: .whitespacesAndNewlines)
             return note.isEmpty ? nil : note
-        })
+        }, reply: reply.isEmpty ? nil : reply, none: draft.none)
     }
 }
 

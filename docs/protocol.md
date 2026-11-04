@@ -548,11 +548,23 @@ promptly, with the review's id and the `review:<id>` link that opens it
 from an ask or a message (see Needs you); the agent may finish its turn
 while Mike reviews the options.
 The app shows a compact card outside work groups. Opening it opens a
-resizable, modeless window with every image on a stage and the choices,
-their notes and Send down the right; arrival never steals focus.
+resizable, modeless window that steps through every shot of every option,
+then shows the options side by side, with the options to tick, one reply
+box and Send down the right; arrival never steals focus.
+
+An option can have several shots (its overview, a state mid-interaction, a
+detail) and a live `url`. Agents used to pass extra shots as options of
+their own (A2, A3) that couldn't be picked; Mike also picked more than one
+or none, and answered most reviews in the thread in his own words (4 Nov
+2026), hence several picks, `none` and `reply`.
 
 ```ts
-type ReviewDraft = { pickedId?: string, notes: Record<string, string> }
+// pickedIds lists every pick in the review's option order, only when there
+// are two or more; pickedId is always the first pick, for older clients.
+// Clients send pickedIds (it wins over pickedId); a client that sends only
+// pickedId still works. none: none of them will do, never with picks.
+type ReviewDraft = { pickedId?: string, pickedIds?: string[], notes: Record<string, string>, reply?: string, none?: true }
+type ReviewShot = { title?: string, image: ImageRef }
 type DesignReview = {
   id: string
   title: string
@@ -562,7 +574,9 @@ type DesignReview = {
     title: string
     note?: string
     reference?: boolean // can have notes, cannot be picked
-    image: ImageRef     // a copy owned by the thread, never the source path
+    image: ImageRef     // the first shot: a copy owned by the thread, never the source path
+    shots?: ReviewShot[] // every shot in order, image first; only when more than one or the one has a title
+    url?: string        // http(s): where it runs live
   }[]
   status: "pending" | "answered" | "cancelled" | "superseded"
   revision: number     // optimistic concurrency for saves and submission
@@ -578,7 +592,7 @@ The following RPCs take full thread/review IDs. Unknown IDs are errors.
 
 | method | params | result |
 |---|---|---|
-| `reviews.create` | `{ threadId, title, note?, options: { id, title, path, note?, reference? }[] }` | `{ review: DesignReview }` |
+| `reviews.create` | `{ threadId, title, note?, options: { id, title, path?, shots?: { path, title? }[], url?, note?, reference? }[] }` | `{ review: DesignReview }` |
 | `reviews.get` | `{ threadId, reviewId }` | `{ review: DesignReview }` |
 | `reviews.list` | `{ threadId }` | `{ reviews: DesignReview[] }` pending reviews only, oldest first |
 | `reviews.save` | `{ threadId, reviewId, revision, draft: ReviewDraft }` | `{ review: DesignReview }` |
@@ -587,11 +601,17 @@ The following RPCs take full thread/review IDs. Unknown IDs are errors.
 
 Creation validates the whole request and imports supported image files
 before publishing the card. Paths can be absolute, home-relative or
-relative to the thread's folder. Limit: 12 images, each at most 25 MB,
-nonempty unique option IDs and titles, title/note at most 200/4000
-characters. Draft notes are at most 4000 characters per image; unknown
-option IDs and picks of reference images are invalid. A response needs a
-pick or at least one nonblank note. Saving an empty draft is allowed.
+relative to the thread's folder. An option's shots are `path` then
+`shots`, or `shots` alone; it needs at least one. Limit: 12 options, 8
+shots each and 40 in all, each image at most 25 MB, nonempty unique option
+IDs and titles, title/note at most 200/4000 characters, `url` http or https.
+Draft notes are at most 4000 characters per option and the reply 8000;
+unknown option IDs, picks of reference options and `none` with picks are
+invalid. A response needs a pick, `none`, a reply or a nonblank note.
+Saving an empty draft is allowed. The agent's message reads `Picked A.
+<title>.` or `Picked A + D. <title> + <title>.`, or `Picked none of them.`,
+then the reply as written, then any notes; the Mac and phone read that
+wording back for Mike's bubble (`ReviewAnswer`), so change them with it.
 
 Every change persists a `review.updated` event with `{ review: DesignReview }`.
 Its stable card ID is the review ID; later snapshots update that card in
@@ -629,8 +649,9 @@ Both Claude and Codex receive `threadbear.show_options` through the shared
 MCP tool definitions, bound to the calling thread. Its schema matches
 `reviews.create` without `threadId`; it returns the review ID and explains
 that the choice/notes will arrive as a later message. The existing URL
-patch panels are independent of these review windows. V1 accepts images;
-HTML previews and overlays are deferred.
+patch panels are independent of these review windows. Reviews take
+images, with a live `url` per option opened in the browser; HTML previews
+and overlays are deferred.
 
 Every persisted event has an envelope:
 

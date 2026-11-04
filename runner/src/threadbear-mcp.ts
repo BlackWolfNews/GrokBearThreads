@@ -264,22 +264,27 @@ export function buildThreadbearTools(
   const reviewTools = [
     tool(
       'show_options',
-      'Shows the user a set of images in a review window, with an optional pick and notes per image. The window steps through them one at a time in the order given, then shows them all side by side to pick from, so order them as you want them seen, with each reference image straight after the option it belongs to. Use this whenever you have two or more design alternatives (mockups, wireframes, screenshots of variants) for the user to choose between, instead of pinning them, listing them in your reply or reading every image into the transcript. Returns a review ID promptly; finish your turn and the user’s answer arrives later as a message. Images are copied into the thread. Reference images can receive notes but cannot be picked.',
+      'Shows the user design options (mockups, wireframes, screenshots of variants) in a review window to choose between, instead of pinning them, listing them or reading every image into the transcript. Give an option\u2019s other screens or states as its shots, never as options of their own. The window steps through every shot in order, then shows the options side by side; the user can pick any number or none, and reply. Returns a review ID promptly; finish your turn and the answer arrives later as a message. A reference option (today\u2019s version, say) can\u2019t be picked.',
       {
         title: z.string().min(1).max(200).describe('What the user is reviewing.'),
         note: z.string().max(4000).optional().describe('A short explanation or question for the whole review.'),
         options: z.array(z.object({
           id: z.string().min(1).max(200).describe('Stable option ID, such as A or B.'),
           title: z.string().min(1).max(200),
-          path: z.string().min(1).describe('Image path, absolute or relative to this thread’s folder.'),
+          path: z.string().min(1).optional().describe('Image path, absolute or relative to this thread\u2019s folder. Or give shots.'),
+          shots: z.array(z.object({
+            path: z.string().min(1),
+            title: z.string().max(200).optional().describe('What it shows: "Mid-drag". The same across options.'),
+          })).max(8).optional().describe('More images of this option, after path.'),
+          url: z.string().max(2000).optional().describe('Where it runs live, http(s).'),
           note: z.string().max(4000).optional(),
-          reference: z.boolean().optional().describe('Context image that can receive notes but cannot be picked.'),
+          reference: z.boolean().optional().describe('Context to compare against, not to pick.'),
         })).min(1).max(12),
       },
       handle(async (input) => {
         if (!control.createReview) throw new Error('This runner does not support image reviews yet.');
         const { review } = await control.createReview(selfId, input);
-        return `Review ${review.id}: ${review.title} (${review.options.length} images). The user can compare them and send a choice or notes. You can finish this turn; their reply will arrive as a later message. To open it from an end_turn ask, link to review:${review.id}.`;
+        return `Review ${review.id}: ${review.title} (${review.options.length} options). The user can compare them and send their picks and a reply. You can finish this turn; their reply will arrive as a later message. To open it from an end_turn ask, link to review:${review.id}.`;
       }),
     ),
   ];

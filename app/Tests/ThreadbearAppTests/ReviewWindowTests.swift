@@ -9,31 +9,58 @@ import ThreadbearCore
 /// that only checked hit testing passed while the click did nothing.
 @MainActor
 final class ReviewWindowTests: XCTestCase {
-    func testItOpensOnTheFirstAndStepsThroughToAllOfThem() {
+    func testItOpensOnTheFirstAndStepsThroughEveryShotToAllOfThem() {
         let (session, host, window) = make()
         defer { window.close() }
         XCTAssertEqual(session.mode, .single, "a walkthrough, one at a time")
-        XCTAssertEqual(session.visibleIndices, [0])
+        XCTAssertEqual(at(session), ["A", "0"])
         XCTAssertFalse(session.canStepBack, "nothing before the first")
         click("Next (\u{2192})", in: host, window)
+        XCTAssertEqual(at(session), ["A", "1"], "A's own shots come first")
         click("Next (\u{2192})", in: host, window)
-        XCTAssertEqual(session.visibleIndices, [2])
         click("Next (\u{2192})", in: host, window)
-        XCTAssertEqual(session.visibleIndices, [3], "a reference is a step too")
+        XCTAssertEqual(at(session), ["B", "0"])
+        click("Next (\u{2192})", in: host, window)
+        XCTAssertEqual(at(session), ["B", "1"])
+        click("Next (\u{2192})", in: host, window)
+        click("Next (\u{2192})", in: host, window)
+        XCTAssertEqual(at(session), ["Today", "0"], "a reference is a step too")
         click("See them all and choose (\u{2192})", in: host, window)
         XCTAssertEqual(session.mode, .all, "it ends on all of them, to choose")
         XCTAssertFalse(session.canStepForward)
         click("Back to the last one (\u{2190})", in: host, window)
-        XCTAssertEqual(session.visibleIndices, [3])
+        XCTAssertEqual(at(session), ["Today", "0"])
         click("Previous (\u{2190})", in: host, window)
-        XCTAssertEqual(session.visibleIndices, [2])
+        XCTAssertEqual(at(session), ["C", "0"])
+        click("Previous (\u{2190})", in: host, window)
+        XCTAssertEqual(at(session), ["B", "1"], "back into B's last shot")
+        click("Previous (\u{2190})", in: host, window)
+        click("Previous (\u{2190})", in: host, window)
+        XCTAssertEqual(at(session), ["A", "2"])
     }
 
-    func testAMarkUnderTheImageGoesStraightToItsStep() {
+    func testUpAndDownJumpBetweenOptionsPastTheirShots() {
+        let (session, _, window) = make()
+        defer { window.close() }
+        session.browse(1)
+        session.jump(1)
+        XCTAssertEqual(at(session), ["B", "0"])
+        session.jump(-1)
+        XCTAssertEqual(at(session), ["A", "0"])
+        session.jump(1); session.jump(1); session.jump(1)
+        session.jump(1)
+        XCTAssertEqual(session.mode, .all, "down from the last is all of them")
+    }
+
+    func testAMarkOrAShotGoesStraightToIt() {
         let (session, host, window) = make()
         defer { window.close() }
         click("C. Option C", in: host, window)
-        XCTAssertEqual(session.visibleIndices, [2])
+        XCTAssertEqual(at(session), ["C", "0"])
+        click("A. Option A, Mid-drag", in: host, window)
+        XCTAssertEqual(at(session), ["A", "1"], "a mark under the stage")
+        click("A. Option A, Detail", in: host, window)
+        XCTAssertEqual(at(session), ["A", "2"])
         click("See them all and choose (Esc)", in: host, window)
         XCTAssertEqual(session.mode, .all)
     }
@@ -41,68 +68,60 @@ final class ReviewWindowTests: XCTestCase {
     func testClickingAnyRowInTheRailShowsItReferencesToo() {
         let (session, host, window) = make()
         defer { window.close() }
-        click("Show A2", in: host, window)
-        XCTAssertEqual(session.visibleIndices, [3], "a reference row used to do nothing")
-        XCTAssertNil(session.draft.pickedId, "showing isn't picking")
+        click("Show Today", in: host, window)
+        XCTAssertEqual(at(session), ["Today", "0"], "a reference row used to do nothing")
+        XCTAssertTrue(session.draft.pickedIds.isEmpty, "showing isn't picking")
         session.showAll()
         pump()
         click("Show B", in: host, window)
-        XCTAssertEqual(session.visibleIndices, [1], "from all of them too")
+        XCTAssertEqual(at(session), ["B", "0"], "from all of them too")
     }
 
-    func testTheOneOnShowHasItsNoteBoxOut() {
-        let (session, host, window) = make()
-        defer { window.close() }
-        XCTAssertEqual(noteBoxes(in: host), 1, "a thought about the first is just typing")
-        click("Next (\u{2192})", in: host, window)
-        XCTAssertEqual(noteBoxes(in: host), 1, "the empty box moves along")
-        session.setNote("Too busy", for: "B")
-        pump()
-        click("Next (\u{2192})", in: host, window)
-        XCTAssertEqual(noteBoxes(in: host), 2, "B keeps its note on show")
-        session.showAll()
-        pump()
-        XCTAssertEqual(noteBoxes(in: host), 1, "only the noted one when they're all up")
-    }
-
-    func testThePickCircleInTheRailPicksAndShowsIt() {
+    func testSeveralCanBePickedAndStayInTheirOrder() {
         let (session, host, window) = make()
         defer { window.close() }
         click("Pick C", in: host, window)
-        XCTAssertEqual(session.draft.pickedId, "C")
-        XCTAssertEqual(session.visibleIndices, [2])
-        XCTAssertEqual(noteBoxes(in: host), 1)
-        click("Pick B", in: host, window)
-        XCTAssertEqual(session.draft.pickedId, "B")
-        XCTAssertEqual(noteBoxes(in: host), 1, "the empty box moves with the pick")
-        click("Unpick B", in: host, window)
-        XCTAssertNil(session.draft.pickedId)
-        XCTAssertNil(anchor("Pick A2", in: host), "a reference can't be picked")
+        click("Pick A", in: host, window)
+        XCTAssertEqual(session.draft.pickedIds, ["A", "C"])
+        XCTAssertEqual(session.sendLabel, "Send A + C")
+        XCTAssertEqual(at(session), ["A", "0"], "picking doesn't move the stage")
+        click("Unpick C", in: host, window)
+        XCTAssertEqual(session.draft.pickedIds, ["A"])
+        XCTAssertNil(anchor("Pick Today", in: host), "a reference can't be picked")
     }
 
-    func testPickingOnTheChoosingStepStaysOnIt() {
+    func testNoneTakesThePicksAwayAndAPickTakesNoneAway() {
         let (session, host, window) = make()
         defer { window.close() }
-        session.showAll()
-        pump()
-        XCTAssertEqual(noteBoxes(in: host), 0)
-        click("Pick C", in: host, window)
-        XCTAssertEqual(session.mode, .all)
-        XCTAssertEqual(noteBoxes(in: host), 1, "adding detail to a pick takes no extra step")
-        session.setNote("Fainter", for: "C")
-        pump()
         click("Pick B", in: host, window)
-        XCTAssertEqual(noteBoxes(in: host), 2, "the note on C stays on show, and B gets a box")
+        click("None of them will do", in: host, window)
+        XCTAssertTrue(session.draft.none)
+        XCTAssertTrue(session.draft.pickedIds.isEmpty)
+        XCTAssertEqual(session.sendLabel, "Send none of them")
+        XCTAssertTrue(session.canSubmit)
+        click("Pick B", in: host, window)
+        XCTAssertFalse(session.draft.none)
     }
 
-    func testAChoiceThatIsntPickedCanStillGetANote() {
+    func testOneReplyBoxAndSendSaysWhatItWillSend() {
+        let (session, _, window) = make()
+        defer { window.close() }
+        XCTAssertFalse(session.canSubmit)
+        XCTAssertEqual(session.sendLabel, "Send")
+        session.setReply("Can you explain what these are for?")
+        XCTAssertEqual(session.sendLabel, "Send reply")
+        XCTAssertTrue(session.canSubmit, "words alone are an answer")
+        session.pick("C")
+        XCTAssertEqual(session.sendLabel, "Send C")
+    }
+
+    func testTheStageSaysWhichShotAndOffersTheLiveOne() {
         let (session, host, window) = make()
         defer { window.close() }
-        session.showAll()
-        pump()
-        click("Add a note on B", in: host, window)
-        XCTAssertEqual(noteBoxes(in: host), 1)
-        XCTAssertNil(session.draft.pickedId, "a note isn't a pick")
+        XCTAssertNotNil(anchor("Try A running live: http://localhost:5190/a", in: host))
+        click("C. Option C", in: host, window)
+        XCTAssertNil(anchor("Try A running live: http://localhost:5190/a", in: host))
+        XCTAssertEqual(session.focusedShot?.image.path, "/tmp/C.png", "one image is one shot")
     }
 
     func testClickingAnImageEnlargesItAndAgainGoesBack() {
@@ -112,43 +131,41 @@ final class ReviewWindowTests: XCTestCase {
         pump()
         click("C: click to enlarge", in: host, window)
         XCTAssertEqual(session.mode, .single)
-        XCTAssertEqual(session.visibleIndices, [2])
+        XCTAssertEqual(at(session), ["C", "0"])
         click("C: click to see them all", in: host, window)
         XCTAssertEqual(session.mode, .all)
-    }
-
-    func testSendSaysWhatItWillSend() {
-        let (session, host, window) = make()
-        defer { window.close() }
-        XCTAssertFalse(session.canSubmit)
-        XCTAssertEqual(session.sendLabel, "Send")
-        session.setNote("Too busy", for: "A")
-        XCTAssertEqual(session.sendLabel, "Send notes")
-        click("Pick C", in: host, window)
-        XCTAssertEqual(session.sendLabel, "Send C")
-        XCTAssertTrue(session.canSubmit)
     }
 
     func testASentReviewHasNothingToPress() async {
         var answered = review()
         answered.status = "answered"
-        answered.response = ReviewDraft(pickedId: "C", notes: ["C": "Fainter"])
+        answered.response = ReviewDraft(pickedIds: ["A", "C"], notes: ["C": "Fainter"], reply: "Both")
         let (session, host, window) = make(answered)
         defer { window.close() }
         XCTAssertEqual(session.mode, .all, "nothing left to step towards")
-        XCTAssertNil(anchor("Pick A", in: host))
+        XCTAssertNil(anchor("Pick B", in: host))
         XCTAssertNil(anchor("Unpick C", in: host))
-        XCTAssertNil(anchor("Add a note on B", in: host))
-        XCTAssertEqual(noteBoxes(in: host), 0, "the note is shown as text, not a box that can't be typed in")
+        XCTAssertNil(anchor("None of them will do", in: host))
+        XCTAssertEqual(noteBoxes(in: host), 0, "the reply is shown as text, not a box that can't be typed in")
     }
 
     private func review() -> DesignReview {
+        func image(_ name: String) -> ImageRef { ImageRef(path: "/tmp/\(name).png", mediaType: "image/png") }
         var options = ["A", "B", "C"].map {
-            ReviewOption(id: $0, title: "Option \($0)", note: "Why \($0)", image: ImageRef(path: "/tmp/\($0).png", mediaType: "image/png"))
+            ReviewOption(id: $0, title: "Option \($0)", note: "Why \($0)", image: image($0))
         }
+        // A has three shots and runs live; B has two, untitled.
+        options[0].shots = [ReviewShot(title: "Overview", image: image("A")), ReviewShot(title: "Mid-drag", image: image("A2")), ReviewShot(title: "Detail", image: image("A3"))]
+        options[0].url = "http://localhost:5190/a"
+        options[1].shots = [ReviewShot(image: image("B")), ReviewShot(image: image("B2"))]
         // A reference: to look at, not to pick.
-        options.append(ReviewOption(id: "A2", title: "A's table", reference: true, image: ImageRef(path: "/tmp/A2.png", mediaType: "image/png")))
+        options.append(ReviewOption(id: "Today", title: "Today", reference: true, image: image("today")))
         return DesignReview(id: "review", title: "Rail", options: options)
+    }
+
+    /// The option on show and its shot.
+    private func at(_ session: ReviewSession) -> [String] {
+        [session.focusedOption?.id ?? "", String(session.shot)]
     }
 
     private func make(_ given: DesignReview? = nil) -> (ReviewSession, NSView, NSWindow) {

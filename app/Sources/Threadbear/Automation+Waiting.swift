@@ -178,10 +178,13 @@ extension Automation {
         await session.refresh()
         if let mode = c["mode"] as? String, ReviewMode(rawValue: mode) == .all { session.showAll() }
         if let mode = c["mode"] as? String, ReviewMode(rawValue: mode) == .single { session.enlarge(session.focused) }
-        if let show = c["show"] as? Int { session.enlarge(show) }
+        if let show = c["show"] as? Int { session.enlarge(show, shot: c["shot"] as? Int ?? 0) }
         if let actual = c["actual"] as? Bool { session.actualSize = actual }
         if let notes = c["notes"] as? [String: String] { for (id, text) in notes { session.setNote(text, for: id) } }
         if let pick = c["pick"] as? String { session.pick(pick) }
+        if let picks = c["pick"] as? [String] { for id in picks { session.pick(id) } }
+        if c["none"] as? Bool == true { session.toggleNone() }
+        if let reply = c["reply"] as? String { session.setReply(reply) }
         if c["save"] as? Bool == true { await session.saveNow() }
         if c["submit"] as? Bool == true { await session.submit() }
         if c["cancel"] as? Bool == true { await session.cancelReview() }
@@ -191,7 +194,8 @@ extension Automation {
             "id": session.review.id, "window": controller.window?.windowNumber ?? 0,
             "status": session.review.status, "revision": session.review.revision,
             "mode": session.mode.rawValue, "actual": session.actualSize,
-            "pickedId": session.draft.pickedId ?? "", "notes": session.draft.notes,
+            "pickedId": session.draft.pickedId ?? "", "pickedIds": session.draft.pickedIds, "notes": session.draft.notes,
+            "reply": session.draft.reply ?? "", "none": session.draft.none, "shot": session.shot,
             "dirty": session.dirty, "error": session.error ?? "",
         ] as [String: Any])
     }

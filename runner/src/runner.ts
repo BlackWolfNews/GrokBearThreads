@@ -3102,15 +3102,17 @@ function turnNeeds(turn: Turn): (Needs & { from: 'tool' | 'text' }) | undefined 
 
 // The sidebar's "You: ..." line: what Mike last said to a thread, in one
 // line. Not the runner's, a schedule's or another agent's messages, which
-// he didn't write. A design review's reply is his notes, or which one he
-// picked, without the "Review: <title> (<id>)" heading.
+// he didn't write. A design review's reply is his words (reply, then
+// notes), or which ones he picked, without the "Review: <title> (<id>)" heading.
 export function askedLine(m: { text: string; origin?: MessageOrigin; reviewId?: string; reviewResponse?: ReviewDraft }, reviews?: DesignReview[]): string | undefined {
   if (!fromMike(m.text, m)) return undefined;
   let text = m.text;
   if (m.reviewId && m.reviewResponse) {
-    const notes = Object.values(m.reviewResponse.notes).filter(Boolean);
-    const picked = m.reviewResponse.pickedId && reviews?.find(r => r.id === m.reviewId)?.options.find(o => o.id === m.reviewResponse!.pickedId);
-    text = notes.length ? notes.join(' ') : picked ? `Picked ${picked.title}` : '';
+    const r = m.reviewResponse;
+    const words = [r.reply, ...Object.values(r.notes)].filter(Boolean);
+    const options = reviews?.find(v => v.id === m.reviewId)?.options ?? [];
+    const picked = (r.pickedIds ?? (r.pickedId ? [r.pickedId] : [])).map(id => options.find(o => o.id === id)?.title).filter(Boolean);
+    text = words.length ? words.join(' ') : picked.length ? `Picked ${picked.join(' + ')}` : r.none ? 'None of them' : '';
   }
   return oneLine(text, LIMITS.previewChars) || undefined;
 }

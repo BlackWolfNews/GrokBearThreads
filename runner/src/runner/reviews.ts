@@ -24,7 +24,12 @@ export const reviewsPart = {
     const dir = path.join(this.store.mediaDir(threadId), 'reviews', id);
     const now = this.isoNow();
     try {
-      const options = input.options.map(({path: source, ...option}) => ({...option, image: copyImageInto(dir, source)}));
+      const options = input.options.map(({shots: sources, ...option}) => {
+        const shots = sources.map(s => ({...(s.title ? {title: s.title} : {}), image: copyImageInto(dir, s.path)}));
+        // image stays the first shot for clients that show one per option;
+        // shots only when there's more to say than that one picture.
+        return {...option, image: shots[0].image, ...(shots.length > 1 || shots[0].title ? {shots} : {})};
+      });
       const review: DesignReview = { id, title: input.title, ...(input.note ? {note: input.note} : {}), options,
         status: 'pending', revision: 0, createdAt: now, updatedAt: now, draft: {notes: {}} };
       this.persistReview(st, review);
