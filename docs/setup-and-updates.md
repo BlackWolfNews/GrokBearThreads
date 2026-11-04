@@ -1,7 +1,9 @@
-# Setup, updates, the phone and Tailscale (proposal)
+# Setup, updates, the phone and Tailscale (design record)
 
-28 Oct 2026, thread 66935d23. A proposal for Mike to react to, nothing built yet. Revised the same day after his
-first answer (section 3).
+Written 28 Oct 2026 (thread 66935d23) as a proposal, and kept as the record of why
+setup and updates work as they do. Most of it is built: section 4 says which steps
+are done. For how to set Threadbear up today, read README.md and INSTALL.md; for
+what it installs and talks to, docs/on-your-mac.md.
 
 What Mike asked for: setting up Threadbear has you create a Convex deployment
 "where everything goes"; a careful think about how updates work and how the iPhone app
