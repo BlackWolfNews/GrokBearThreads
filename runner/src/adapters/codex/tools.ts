@@ -15,7 +15,7 @@
 import { z } from 'zod';
 import type { ToolApprovalAnswer, ToolApprovalRequest } from '../types.ts';
 import type { PermissionMode } from '../../protocol.ts';
-import { ALWAYS_ASK_TOOLS, FILING_PROJECTS, guideLine, SERVER_NAME, SHOWING_THE_USER } from '../../threadbear-mcp.ts';
+import { ALWAYS_ASK_TOOLS, FILING_PROJECTS, guideLine, POCKET_LINE, SERVER_NAME, SHOWING_THE_USER } from '../../threadbear-mcp.ts';
 import { userLine } from '../../user-name.ts';
 import { CODEX_ONE_REPLY_DESCRIPTION, END_TURN_TOOL } from '../../needs.ts';
 import { toolTitle, truncateInput } from '../../tools.ts';
@@ -67,7 +67,9 @@ export const ONE_REPLY_TOOL_GUIDANCE =
 // Which guidance a thread's tools call for: one reply's end_turn has its
 // own description.
 export function toolGuidance(tools: ToolDefinition[]): string {
-  return tools.some((t) => t.name === END_TURN_TOOL && t.description === CODEX_ONE_REPLY_DESCRIPTION) ? ONE_REPLY_TOOL_GUIDANCE : TOOL_GUIDANCE;
+  const base = tools.some((t) => t.name === END_TURN_TOOL && t.description === CODEX_ONE_REPLY_DESCRIPTION) ? ONE_REPLY_TOOL_GUIDANCE : TOOL_GUIDANCE;
+  // The pocket line only when the thread has the tool (sync on).
+  return tools.some((t) => t.name === 'pocket') ? `${POCKET_LINE}\n\n${base}` : base;
 }
 
 // The tools as one dynamic-tool namespace, with JSON Schema from zod.

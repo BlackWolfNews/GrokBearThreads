@@ -1152,6 +1152,25 @@ test('both instruction texts say when to use show_options and pin', async () => 
   }
 });
 
+// The Pocket lives in the Convex backend, so with phone sync off the tool
+// isn't offered. Its instruction line was there anyway, telling agents in
+// every such copy (a fork with no Convex yet, say) to use a tool they didn't
+// have (4 Nov 2026).
+test('only a thread that has the pocket tool is told to use it, Claude or Codex', async () => {
+  const { threadbearMcpServer } = await import('../../src/threadbear-mcp.ts');
+  const { toolGuidance } = await import('../../src/adapters/codex/tools.ts');
+  const instructionsOf = (pocket?: () => never) => {
+    const server = threadbearMcpServer({} as never, 'self', undefined, undefined, undefined, () => true, pocket);
+    return (server.instance as unknown as { server: { _instructions?: string } }).server._instructions ?? '';
+  };
+  assert.doesNotMatch(instructionsOf(), /\bpocket\b/);
+  assert.doesNotMatch(instructionsOf(() => undefined as never), /\bpocket\b/);
+  assert.match(instructionsOf(() => ({}) as never), /file it on their phone with pocket/);
+  const def = (name: string) => ({ name, description: '', inputSchema: {} }) as unknown as ToolDefinition;
+  assert.doesNotMatch(toolGuidance([def('pin')]), /\bpocket\b/);
+  assert.match(toolGuidance([def('pin'), def('pocket')]), /file it on their phone with pocket/);
+});
+
 // A new user's first thread asked how the app works, and with nothing to
 // read the agent searched the disk for threadbear*, setting off macOS's
 // folder prompts. Every thread, Claude or Codex, is now pointed at the guide.

@@ -1156,7 +1156,11 @@ function clip(text: string, max = 2000): string {
 export const SHOWING_THE_USER =
   'When you have design options, mockups or wireframes for the user to choose between, put them in front of them with show_options (a review window that steps through them one at a time, then has them pick one and leave notes), not as pins or a list in your reply; their answer comes back as a message. ' +
   "For a single file or link they should look at (a doc, a screenshot, a preview URL, a PR), use pin, with show: true to open it in Threadbear's side pane rather than running `open`. " +
-  "To put one of Threadbear's own panels in front of them (this thread's Highlights, a patch panel such as the Convex dashboard, Usage), use show_panel. " +
+  "To put one of Threadbear's own panels in front of them (this thread's Highlights, a patch panel such as the Convex dashboard, Usage), use show_panel.";
+
+// Only for a thread that has the pocket tool: the Pocket lives in the Convex
+// backend, so with phone sync off there's no tool to tell it about.
+export const POCKET_LINE =
   "When they say they're heading out or will need a fact away from their Mac (an address, a booking code, what to take), file it on their phone with pocket.";
 
 // Also in the instructions, for the same reason. The librarian files
@@ -1221,6 +1225,7 @@ export function threadbearMcpServer(control: ThreadControl, selfId: string, sche
       'These tools manage Threadbear itself: list and read threads, start new ones, message them, rename, snooze, archive, move and delete them, schedule messages for later (once or on a cron), and keep the user\'s projects (groupings above folders with goals, state and notes) up to date. ' +
       'Use move_thread when the work belongs in another folder (for example a repo), so this thread runs there from the next turn. ' +
       `${SHOWING_THE_USER} ` +
+      (pocket?.() ? `${POCKET_LINE} ` : '') +
       (projects ? `${FILING_PROJECTS} ` : '') +
       (one
         ? 'End every turn by calling end_turn, then writing your reply straight after it: the reply is the only text the user sees from the turn.'
