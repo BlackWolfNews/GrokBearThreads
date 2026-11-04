@@ -72,9 +72,12 @@ public extension RPCClient {
     /// turn has started, which can take a while: a turn to stop, a CLI to
     /// start for the files.
     @discardableResult
-    func editMessage(threadId: String, seq: Int, text: String, images: [ImageRef] = []) async throws -> String? {
+    /// While background work runs it fails with `RPCError.backgroundRunning`
+    /// unless `stopBackground`, as going back stops it.
+    func editMessage(threadId: String, seq: Int, text: String, images: [ImageRef] = [], stopBackground: Bool = false) async throws -> String? {
         var params: [String: JSONValue] = ["threadId": .string(threadId), "seq": .number(Double(seq)), "text": .string(text)]
         if !images.isEmpty { params["images"] = .array(images.map(\.jsonValue)) }
+        if stopBackground { params["stopBackground"] = .bool(true) }
         return try await call("threads.edit", .object(params), as: TurnResult.self, timeout: .seconds(120)).turnId
     }
 

@@ -183,3 +183,25 @@ test('editing the first message starts a fresh session; with history before it, 
   assert.match(sent[0], /Second question, edited$/);
   assert.doesNotMatch(sent[0], /Second question\n/);
 });
+
+// 4 Nov: Mike edited a message he'd just sent while an upload started
+// turns earlier was still running in the background, and the release
+// that the edit needs took the upload with it, without a word.
+test('an edit while background work runs refuses until told to stop it', async () => {
+  const h = makeHarness();
+  const { thread, s, seq } = await twoTurns(h);
+  s.out({ kind: 'tasks', tasks: [{ id: 'b1', type: 'local_bash', kind: 'shell', description: 'Upload the video' }] });
+  await assert.rejects(
+    h.runner.editMessage(thread.id, seq, 'Write it to plan.txt instead'),
+    (e: unknown) => e instanceof RpcError && e.code === -32050 && /Upload the video/.test(e.message),
+  );
+  // Nothing was touched: the CLI and its task are still live, nothing cut.
+  assert.equal(s.ended, false);
+  assert.deepEqual(h.adapter.rewound, []);
+  assert.ok(!log(h, thread.id).some((e) => e.type === 'thread.rewound'));
+  // Told to, it stops the work, says so, and edits.
+  await h.runner.editMessage(thread.id, seq, 'Write it to plan.txt instead', [], { stopBackground: true });
+  assert.equal(s.endedHard, true);
+  assert.ok(log(h, thread.id).some((e) => e.type === 'system.note' && /Upload the video/.test(e.text)));
+  assert.ok(log(h, thread.id).some((e) => e.type === 'thread.rewound'));
+});

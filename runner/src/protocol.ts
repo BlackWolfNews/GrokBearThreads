@@ -795,6 +795,7 @@ export const ErrorCode = {
   moved: -32030, // a draining runner has handed the thread over (Handovers)
   convexSignedOut: -32040, // the runner's Convex CLI isn't signed in ("The Convex panel")
   convexNoAccess: -32041, // its Convex login can't reach the deployment
+  backgroundRunning: -32050, // threads.edit without stopBackground while background work runs
   other: -32000,
 } as const;
 

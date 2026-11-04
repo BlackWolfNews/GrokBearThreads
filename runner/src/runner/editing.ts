@@ -19,7 +19,7 @@ export const editingPart = {
   // (docs/protocol.md, "Editing a message"): the turn stops, the native
   // session is cut back to just before the message, the agent's file
   // changes since are put back, and the new text starts a turn.
-  async editMessage(this: Runner, threadId: string, seq: number, text: string, images: ImageRef[] = []): Promise<{ turnId: string; rewound: { seq: number; fromSeq: number; toSeq: number; files: RewoundFiles } }> {
+  async editMessage(this: Runner, threadId: string, seq: number, text: string, images: ImageRef[] = [], opts: { stopBackground?: boolean } = {}): Promise<{ turnId: string; rewound: { seq: number; fromSeq: number; toSeq: number; files: RewoundFiles } }> {
     const st = this.mustGet(threadId);
     const { rec, rt } = st;
     this.checkAccepting();
@@ -32,6 +32,14 @@ export const editingPart = {
     if (!adapter?.rewind) throw new RpcError(ErrorCode.badParams, `${providerName(rec.provider)} threads can't go back to an earlier message.`);
     const account = this.accounts.get(rec.accountId);
     if (!account) throw new RpcError(ErrorCode.badParams, `Account ${rec.accountId} isn't available on this Mac.`);
+    // Going back needs a fresh CLI (it resumes at the cut), and releasing
+    // this one stops its background shells and sub-agents, which may have
+    // been started turns before the edited message (an upload, 4 Nov). So
+    // only once whoever's editing has been told and said yes.
+    if (rt.tasks.length && !opts.stopBackground) {
+      const what = rt.tasks.map((t) => t.description || t.type).join('; ');
+      throw new RpcError(ErrorCode.backgroundRunning, `Still running in the background: ${what}. Going back to an earlier message stops it.`, { background: rt.tasks });
+    }
     rt.editing = true;
     try {
       // Messages waiting behind the turn were sent after the edited one,

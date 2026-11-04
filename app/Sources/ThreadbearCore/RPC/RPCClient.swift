@@ -36,6 +36,10 @@ public enum RPCError: Error, Sendable, Equatable, LocalizedError {
     /// the panel's deployment (docs/protocol.md, "The Convex panel").
     public static let convexSignedOut = -32040
     public static let convexNoAccess = -32041
+    /// `threads.edit` would stop the thread's background work; sent again
+    /// with `stopBackground` once Mike says so (docs/protocol.md,
+    /// "Editing a message").
+    public static let backgroundRunning = -32050
 }
 
 public enum RPCNotification: Sendable {

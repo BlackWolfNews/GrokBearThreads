@@ -633,6 +633,8 @@ async function dispatch(client, method, p) {
       const target = t.events.find((e) => e.seq === p.seq);
       if (!target || target.type !== 'user.message') throw rpcError(-32602, 'That message can\'t be edited.');
       if (!p.text && !(p.images ?? []).length) throw rpcError(-32602, 'text or images required');
+      const bg = t.summary.background ?? [];
+      if (bg.length && p.stopBackground !== true) throw rpcError(-32050, `Still running in the background: ${bg.map((b) => b.description).join('; ')}. Going back to an earlier message stops it.`);
       if (t.interrupt) t.interrupt();
       await new Promise((r) => setTimeout(r, 300));
       const files = { undone: ['src/settings/SettingsView.swift', 'src/settings/Tabs.swift'], failed: [], how: 'checkpoint' };

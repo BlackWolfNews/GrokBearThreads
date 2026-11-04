@@ -267,6 +267,11 @@ sent as if the rest had never happened. A turn that's running is stopped
 first. What was cut is gone from the thread, and a line where it was says
 how many files were put back.
 
+Going back stops anything the agent left running in the background (an
+upload, a long build), even if it started it before the message you're
+changing. When something is, the app asks first and says what: Cancel
+keeps it running, and you can send your change as a new message instead.
+
 Files changed by commands the agent ran (a script, `git`, `npm install`)
 aren't put back, only ones it edited or wrote itself. If you've changed one
 of its files yourself since, that file may be left as it is, and the line

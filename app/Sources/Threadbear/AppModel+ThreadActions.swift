@@ -160,15 +160,38 @@ extension AppModel {
         ActivityRecorder.shared.sent(threadId: threadId, images: draft.images.count, answers: 0, edit: true)
         editing[threadId]?.sending = true
         Task {
-            do {
-                try await client.editMessage(threadId: threadId, seq: edit.seq, text: text, images: draft.images)
-                editing[threadId] = nil
-                drafts[threadId] = edit.before.text.isEmpty && edit.before.images.isEmpty ? nil : edit.before
-            } catch {
-                editing[threadId]?.sending = false
-                show(error)
+            var stopBackground = false
+            while true {
+                do {
+                    try await client.editMessage(threadId: threadId, seq: edit.seq, text: text, images: draft.images, stopBackground: stopBackground)
+                    editing[threadId] = nil
+                    drafts[threadId] = edit.before.text.isEmpty && edit.before.images.isEmpty ? nil : edit.before
+                } catch RPCError.server(RPCError.backgroundRunning, let message) where !stopBackground {
+                    // Going back would stop work the agent left running
+                    // (an upload was lost that way, 4 Nov), so ask first.
+                    if Self.confirmStopBackground(message) {
+                        stopBackground = true
+                        continue
+                    }
+                    editing[threadId]?.sending = false
+                } catch {
+                    editing[threadId]?.sending = false
+                    show(error)
+                }
+                return
             }
         }
+    }
+
+    /// Whether Mike wants the edit to go ahead and stop the thread's
+    /// background work; `message` is the runner's, saying what's running.
+    private static func confirmStopBackground(_ message: String) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "Stop the background work?"
+        alert.informativeText = message + "\n\nCancel keeps it running; you can send your change as a new message instead."
+        alert.addButton(withTitle: "Stop It and Go Back")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     /// Sends the draft for `threadId` (or starts a new thread with the "new"
