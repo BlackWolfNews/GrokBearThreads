@@ -32,6 +32,10 @@ final class ReviewSession {
     /// The option enlarged in .single, and which of its shots.
     private(set) var focused = 0
     private(set) var shot = 0
+    /// Today's version over the shot on show, while Space is held or its
+    /// button is on, to flick between them (Mike, 4 Nov). Moving anywhere
+    /// turns it off.
+    var peeking = false
 
     @ObservationIgnored private let service: ReviewService
     @ObservationIgnored private let defaults: UserDefaults
@@ -92,6 +96,20 @@ final class ReviewSession {
     var focusedShot: ReviewShot? {
         guard let shots = focusedOption?.allShots, shots.indices.contains(shot) else { return focusedOption?.allShots.first }
         return shots[shot]
+    }
+
+    /// What there is to flick to: the first reference option, which agents
+    /// use for today's version.
+    var baseline: ReviewOption? { review.options.first(where: \.reference) }
+    var canPeek: Bool { mode == .single && baseline != nil && baseline?.id != focusedOption?.id }
+
+    /// What the stage shows: the shot on show, or while peeking, today's
+    /// shot of the same name (its first if none has that name).
+    var shownOption: ReviewOption? { peeking && canPeek ? baseline : focusedOption }
+    var shownShot: ReviewShot? {
+        guard peeking, canPeek, let baseline else { return focusedShot }
+        let shots = baseline.allShots
+        return focusedShot?.title.flatMap { title in shots.first { $0.title == title } } ?? shots.first
     }
 
     func setReply(_ text: String) {
@@ -310,12 +328,14 @@ final class ReviewSession {
         focused = index
         self.shot = max(0, min(shot, review.options[index].allShots.count - 1))
         mode = .single
+        peeking = false
     }
 
     /// Zoom only means anything on an enlarged image, so it doesn't outlive one.
     func showAll() {
         mode = .all
         actualSize = false
+        peeking = false
     }
 
     /// The left and right arrows and the stage's back and next: every shot

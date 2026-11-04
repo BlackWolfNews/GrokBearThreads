@@ -180,6 +180,7 @@ extension Automation {
         if let mode = c["mode"] as? String, ReviewMode(rawValue: mode) == .single { session.enlarge(session.focused) }
         if let show = c["show"] as? Int { session.enlarge(show, shot: c["shot"] as? Int ?? 0) }
         if let actual = c["actual"] as? Bool { session.actualSize = actual }
+        if let peek = c["peek"] as? Bool { session.peeking = peek && session.canPeek }
         if let notes = c["notes"] as? [String: String] { for (id, text) in notes { session.setNote(text, for: id) } }
         if let pick = c["pick"] as? String { session.pick(pick) }
         if let picks = c["pick"] as? [String] { for id in picks { session.pick(id) } }
@@ -195,7 +196,7 @@ extension Automation {
             "status": session.review.status, "revision": session.review.revision,
             "mode": session.mode.rawValue, "actual": session.actualSize,
             "pickedId": session.draft.pickedId ?? "", "pickedIds": session.draft.pickedIds, "notes": session.draft.notes,
-            "reply": session.draft.reply ?? "", "none": session.draft.none, "shot": session.shot,
+            "reply": session.draft.reply ?? "", "none": session.draft.none, "shot": session.shot, "peeking": session.peeking,
             "dirty": session.dirty, "error": session.error ?? "",
         ] as [String: Any])
     }

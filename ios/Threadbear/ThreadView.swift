@@ -545,9 +545,12 @@ struct MessageView: View {
                 ForEach(Array(review.lines.enumerated()), id: \.offset) { i, line in
                     VStack(alignment: .leading, spacing: 2) {
                         // The same symbol as the Mac's review card and button.
-                        (i == 0 ? Text("\(Image(systemName: "rectangle.on.rectangle")) \(line.label)") : Text(line.label))
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                        // A reply under its pick has no label of its own.
+                        if i == 0 || !line.label.isEmpty {
+                            (i == 0 ? Text("\(Image(systemName: "rectangle.on.rectangle")) \(line.label)") : Text(line.label))
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
                         Text(line.text)
                     }
                 }

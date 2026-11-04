@@ -28,6 +28,20 @@ import Testing
         #expect(ReviewAnswer.parse("Review: this PR please") == nil)
         #expect(ReviewAnswer.parse("Review: Picker (not-a-uuid)\n\nPicked A. Thing.") == nil)
         #expect(ReviewAnswer.parse("Review: Picker (\(Self.id))") == nil)
-        #expect(ReviewAnswer.parse("Review: Picker (\(Self.id))\n\nSomething else entirely") == nil)
+    }
+
+    // Since 4 Nov a review takes several picks, none, and a reply in his words.
+    @Test func severalPicksAndAReply() {
+        let text = "Review: Diagrams (\(Self.id))\n\nPicked A + D. Entity board + Sandbox.\n\nThe board for the app.\n\nThe sandbox for the video.\n\nNotes on C (Map): Too busy"
+        #expect(ReviewAnswer.parse(text)?.lines == [
+            .init(label: "Diagrams", text: "Picked A + D: Entity board + Sandbox"),
+            .init(label: "", text: "The board for the app.\n\nThe sandbox for the video."),
+            .init(label: "Notes on C: Map", text: "Too busy"),
+        ])
+    }
+
+    @Test func noneOrOnlyAReply() {
+        #expect(ReviewAnswer.parse("Review: Diagrams (\(Self.id))\n\nPicked none of them.")?.lines == [.init(label: "Diagrams", text: "None of them")])
+        #expect(ReviewAnswer.parse("Review: Diagrams (\(Self.id))\n\nWhat are these for?")?.lines == [.init(label: "Diagrams", text: "What are these for?")])
     }
 }

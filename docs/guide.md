@@ -158,7 +158,9 @@ strip under the picture. Next and back (or the left and right arrow keys)
 step through every picture of every option, up and down jump to the option
 before or after, and after the last one they're all side by side. Click an
 option on the right, one of its small pictures, or a dot under the stage, to
-go straight to it, and Open live to try one the agent has running. Tick as
+go straight to it, and Open live to try one the agent has running. When
+the agent includes today's version to compare against, hold Space (or click
+its button over the picture) to flick to it and back. Tick as
 many as you like, or None if none of them will do, write what you think in
 the box at the bottom, and Send takes it all back to the thread.
 

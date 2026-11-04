@@ -174,8 +174,21 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
     }
 }
 
-private final class ReviewNativeWindow: NSWindow {
+/// Not private, so ReviewWindowTests can press keys in a real one.
+final class ReviewNativeWindow: NSWindow {
     weak var reviewSession: ReviewSession?
+
+    /// Holding Space shows today's version over the shot on show. Caught
+    /// before the responder chain, as a focused button would take the
+    /// Space press for itself; a text box keeps it for typing.
+    override func sendEvent(_ event: NSEvent) {
+        if (event.type == .keyDown || event.type == .keyUp), event.keyCode == 49, !(firstResponder is NSTextView),
+           event.modifierFlags.intersection([.command, .control, .option]).isEmpty, let session = reviewSession {
+            if event.type == .keyUp { session.peeking = false } else if !event.isARepeat, session.canPeek { session.peeking = true }
+            return
+        }
+        super.sendEvent(event)
+    }
 
     override func keyDown(with event: NSEvent) {
         // Text editors own their arrows and Return. Outside an editor,
@@ -305,7 +318,7 @@ struct ReviewWindow: View {
 
     private var stage: some View {
         VStack(spacing: 0) {
-            if session.mode == .single, let option = session.focusedOption { caption(option) }
+            if session.mode == .single, let option = session.shownOption { caption(option) }
             images
             stepper
         }
@@ -317,12 +330,25 @@ struct ReviewWindow: View {
     /// Which option and shot this is, and the way to try it live.
     private func caption(_ option: ReviewOption) -> some View {
         let shots = option.allShots
-        let title = session.focusedShot?.title
-        let where_ = shots.count > 1 ? "\(session.shot + 1) of \(shots.count)" + (title.map { " \u{00B7} \($0)" } ?? "") : title ?? ""
+        let shown = session.shownShot
+        let index = shots.firstIndex(of: shown ?? shots[0]) ?? 0
+        let title = shown?.title
+        let where_ = shots.count > 1 ? "\(index + 1) of \(shots.count)" + (title.map { " \u{00B7} \($0)" } ?? "") : title ?? ""
         return HStack(alignment: .firstTextBaseline, spacing: 10) {
             Text(option.label).font(.system(size: TypeScale.work + 2, weight: .semibold)).lineLimit(1)
             Text(where_).font(.system(size: TypeScale.work)).foregroundStyle(.secondary).lineLimit(1)
             Spacer(minLength: 8)
+            if let baseline = session.baseline, session.canPeek {
+                Button { session.peeking.toggle() } label: {
+                    Label(baseline.title, systemImage: "rectangle.2.swap")
+                        .font(.system(size: TypeScale.detail, weight: .medium))
+                        .padding(.horizontal, 11).frame(height: 26)
+                        .foregroundStyle(session.peeking ? Color.white : Color.primary)
+                        .background(session.peeking ? Color.accentColor : Color.primary.opacity(0.08), in: Capsule())
+                        .contentShape(Capsule())
+                }.buttonStyle(.plain)
+                    .tip(session.peeking ? "Back to \(session.focusedOption?.id ?? "it") (or let go of Space)" : "Flick to \(baseline.title): click, or hold Space")
+            }
             if let link = option.url, let url = URL(string: link) {
                 Button { NSWorkspace.shared.open(url) } label: {
                     Label("Open live", systemImage: "arrow.up.right")
@@ -340,7 +366,7 @@ struct ReviewWindow: View {
         GeometryReader { geo in
             let room = CGSize(width: max(0, geo.size.width - Self.stageInset * 2), height: max(0, geo.size.height - Self.stageInset * 2))
             Group {
-                if session.mode == .single, let shot = session.focusedShot {
+                if session.mode == .single, let shot = session.shownShot {
                     enlarged(shot.image, size: room)
                 } else {
                     let layout = ReviewGalleryLayout.best(

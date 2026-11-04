@@ -25,11 +25,13 @@ final class ReviewWindowTests: XCTestCase {
         click("Next (\u{2192})", in: host, window)
         click("Next (\u{2192})", in: host, window)
         XCTAssertEqual(at(session), ["Today", "0"], "a reference is a step too")
+        click("Next (\u{2192})", in: host, window)
         click("See them all and choose (\u{2192})", in: host, window)
         XCTAssertEqual(session.mode, .all, "it ends on all of them, to choose")
         XCTAssertFalse(session.canStepForward)
         click("Back to the last one (\u{2190})", in: host, window)
-        XCTAssertEqual(at(session), ["Today", "0"])
+        XCTAssertEqual(at(session), ["Today", "1"])
+        click("Previous (\u{2190})", in: host, window)
         click("Previous (\u{2190})", in: host, window)
         XCTAssertEqual(at(session), ["C", "0"])
         click("Previous (\u{2190})", in: host, window)
@@ -124,6 +126,37 @@ final class ReviewWindowTests: XCTestCase {
         XCTAssertEqual(session.focusedShot?.image.path, "/tmp/C.png", "one image is one shot")
     }
 
+    func testTodayCanBeFlickedToByItsButtonOrHoldingSpace() {
+        let (session, host, window) = make(native: true)
+        defer { window.close() }
+        session.enlarge(0, shot: 1)
+        pump()
+        click("Flick to Today: click, or hold Space", in: host, window)
+        XCTAssertEqual(session.shownOption?.id, "Today")
+        XCTAssertEqual(session.shownShot?.image.path, "/tmp/today2.png", "today's shot of the same name")
+        XCTAssertEqual(at(session), ["A", "1"], "flicking isn't moving")
+        click("Back to A (or let go of Space)", in: host, window)
+        XCTAssertEqual(session.shownOption?.id, "A")
+        func space(_ type: NSEvent.EventType) {
+            window.sendEvent(NSEvent.keyEvent(with: type, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
+                                              context: nil, characters: " ", charactersIgnoringModifiers: " ", isARepeat: false, keyCode: 49)!)
+            pump()
+        }
+        space(.keyDown)
+        XCTAssertTrue(session.peeking)
+        space(.keyUp)
+        XCTAssertFalse(session.peeking)
+        session.enlarge(1, shot: 1)
+        XCTAssertEqual(session.peeking, false)
+        session.peeking = true
+        XCTAssertEqual(session.shownShot?.image.path, "/tmp/today.png", "no shot of that name: today's first")
+        session.browse(1)
+        XCTAssertFalse(session.peeking, "moving turns it off")
+        session.enlarge(3)
+        pump()
+        XCTAssertNil(anchor("Flick to Today: click, or hold Space", in: host), "nothing to flick to from today itself")
+    }
+
     func testClickingAnImageEnlargesItAndAgainGoesBack() {
         let (session, host, window) = make()
         defer { window.close() }
@@ -159,7 +192,8 @@ final class ReviewWindowTests: XCTestCase {
         options[0].url = "http://localhost:5190/a"
         options[1].shots = [ReviewShot(image: image("B")), ReviewShot(image: image("B2"))]
         // A reference: to look at, not to pick.
-        options.append(ReviewOption(id: "Today", title: "Today", reference: true, image: image("today")))
+        options.append(ReviewOption(id: "Today", title: "Today", reference: true, image: image("today"),
+                                    shots: [ReviewShot(title: "Overview", image: image("today")), ReviewShot(title: "Mid-drag", image: image("today2"))]))
         return DesignReview(id: "review", title: "Rail", options: options)
     }
 
@@ -168,13 +202,22 @@ final class ReviewWindowTests: XCTestCase {
         [session.focusedOption?.id ?? "", String(session.shot)]
     }
 
-    private func make(_ given: DesignReview? = nil) -> (ReviewSession, NSView, NSWindow) {
+    private func make(_ given: DesignReview? = nil, native: Bool = false) -> (ReviewSession, NSView, NSWindow) {
         let review = given ?? review()
         let service = ReviewService(load: { review }, save: { _, _ in review }, respond: { _, _ in review }, cancel: { _ in review })
         let session = ReviewSession(threadId: "thread", review: review, service: service,
                                     defaults: UserDefaults(suiteName: "ReviewWindowTests.\(UUID().uuidString)")!, autosave: false)
         let host = NSHostingView(rootView: ReviewWindow(session: session, back: {}, close: {}))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 760), styleMask: [.titled], backing: .buffered, defer: false)
+        // The review's own window class where its keys matter.
+        let frame = NSRect(x: 0, y: 0, width: 1100, height: 760)
+        let window: NSWindow
+        if native {
+            let reviewWindow = ReviewNativeWindow(contentRect: frame, styleMask: [.titled], backing: .buffered, defer: false)
+            reviewWindow.reviewSession = session
+            window = reviewWindow
+        } else {
+            window = NSWindow(contentRect: frame, styleMask: [.titled], backing: .buffered, defer: false)
+        }
         window.isReleasedWhenClosed = false
         window.contentView = host
         // SwiftUI's Buttons ignore clicks in a window that was never

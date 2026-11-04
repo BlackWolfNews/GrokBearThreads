@@ -19,30 +19,42 @@ public struct ReviewAnswer: Sendable, Hashable {
     public var title: String
     public var lines: [Line]
 
-    /// "Review: <title> (<uuid>)", then "Picked <id>. <option>." and
-    /// "Notes on <id> (<option>): <note>" paragraphs.
+    /// "Review: <title> (<uuid>)", then "Picked <id>. <option>." (or
+    /// "Picked A + D. <option> + <option>.", or "Picked none of them."),
+    /// then his reply as he wrote it, then "Notes on <id> (<option>): <note>"
+    /// paragraphs (`reviewReply` in runner/src/reviews.ts).
     public static func parse(_ text: String) -> ReviewAnswer? {
         guard let head = text.firstMatch(of: /^Review: (.+?) \(([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\)(?:\n\n|$)/) else { return nil }
         let title = String(head.1)
-        // Paragraphs of a note stay with it: a new part starts only at
-        // "Picked " (first) or "Notes on ".
-        var parts: [String] = []
-        for paragraph in text[head.range.upperBound...].components(separatedBy: "\n\n") {
-            let starts = paragraph.hasPrefix("Notes on ") || (parts.isEmpty && paragraph.hasPrefix("Picked "))
-            if starts || parts.isEmpty { parts.append(paragraph) } else { parts[parts.count - 1] += "\n\n" + paragraph }
-        }
+        var paragraphs = text[head.range.upperBound...].components(separatedBy: "\n\n")[...]
+        if paragraphs.last == "" { paragraphs = paragraphs.dropLast() }
         var lines: [Line] = []
-        for (i, part) in parts.enumerated() {
-            if i == 0, let picked = part.firstMatch(of: /^Picked (.+?)\. ([\s\S]+?)\.?$/) {
+        if let first = paragraphs.first {
+            if first == "Picked none of them." {
+                lines.append(Line(label: title, text: "None of them"))
+                paragraphs = paragraphs.dropFirst()
+            } else if let picked = first.firstMatch(of: /^Picked (.+?)\. (.+?)\.?$/) {
                 let id = String(picked.1)
                 lines.append(Line(label: title, text: "Picked \(id): \(bare(String(picked.2), id: id))"))
-            } else if let note = part.firstMatch(of: /^Notes on (.+?) \((.+?)\): ([\s\S]+)$/) {
-                let id = String(note.1)
-                // With nothing picked, the review's title goes over the first note.
-                lines.append(Line(label: (lines.isEmpty ? title + "\n" : "") + "Notes on \(id): \(bare(String(note.2), id: id))", text: String(note.3)))
-            } else {
-                return nil
+                paragraphs = paragraphs.dropFirst()
             }
+        }
+        // Everything up to the first note is his reply, paragraphs and all.
+        let reply = paragraphs.prefix { !$0.hasPrefix("Notes on ") }
+        if !reply.isEmpty {
+            lines.append(Line(label: lines.isEmpty ? title : "", text: reply.joined(separator: "\n\n")))
+            paragraphs = paragraphs.dropFirst(reply.count)
+        }
+        // Paragraphs of a note stay with it: a new one starts only at "Notes on ".
+        var notes: [String] = []
+        for paragraph in paragraphs {
+            if paragraph.hasPrefix("Notes on ") || notes.isEmpty { notes.append(paragraph) } else { notes[notes.count - 1] += "\n\n" + paragraph }
+        }
+        for part in notes {
+            guard let note = part.firstMatch(of: /^Notes on (.+?) \((.+?)\): ([\s\S]+)$/) else { return nil }
+            let id = String(note.1)
+            // With nothing picked, the review's title goes over the first note.
+            lines.append(Line(label: (lines.isEmpty ? title + "\n" : "") + "Notes on \(id): \(bare(String(note.2), id: id))", text: String(note.3)))
         }
         return lines.isEmpty ? nil : ReviewAnswer(title: title, lines: lines)
     }
