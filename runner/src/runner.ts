@@ -121,6 +121,7 @@ import {
   webPage,
 } from './patches.ts';
 import { FolderCache } from './folder-cache.ts';
+import { worktreesPart, type WorktreesPart } from './runner/worktrees.ts';
 
 export type Notification =
   | { method: 'thread.updated'; params: { thread: ThreadSummary } }
@@ -360,7 +361,7 @@ type Runtime = {
   turnEndWaiters?: (() => void)[];
 };
 
-type ThreadState = { rec: ThreadRecord; rt: Runtime };
+export type ThreadState = { rec: ThreadRecord; rt: Runtime };
 
 type Drain = {
   keep: Set<string>;
@@ -489,77 +490,79 @@ export const UNTIL_RESTART = '9999-12-31T00:00:00.000Z';
 // while its time is worked out: the same far-off time, without the flag.
 export const NO_WAKE_TIME = UNTIL_RESTART;
 
+// Parts of the Runner that live in runner/ (see each file's top).
+export interface Runner extends WorktreesPart {}
 export class Runner {
-  private cfg: Config;
-  private store: ThreadStore;
-  private adapters: Record<string, AgentAdapter>;
-  private accounts: AccountSource;
-  private usage?: UsageSink;
-  private pickAccount: AccountPicker;
-  private clis?: CliControl;
-  private clock: Clock;
-  private log: Logger;
-  private defer: (fn: () => void) => void;
-  private copyTranscript: typeof copySessionTranscript;
-  private subagentTranscript: typeof subagentTranscriptPath;
-  private screenshot: Screenshot;
-  private panelsRoot?: string;
-  private actionShell?: string[];
-  private actionTimeoutMs?: number;
-  private openUrl: (url: string) => Promise<void>;
-  private convexKeys: ConvexKeys;
-  private models?: Pick<Models, 'generate'>;
-  private projects?: Projects;
-  private activity = new Set<(a: ThreadActivity) => void>();
-  private patchCache: PatchCache = new Map();
-  private patchTrust: PatchTrustStore;
-  private folderCache: FolderCache;
-  private sharedPatchSets = new Map<string, { at: number; set: Promise<PatchSet> }>();
-  private patchReads = new Set<Promise<void>>();
-  private liveRuns = new Map<string, { doneAt?: number; out: Promise<CommandOutcome> }>();
-  private threads = new Map<string, ThreadState>();
-  private listeners = new Set<(n: Notification) => void>();
-  private dirty = new Set<string>();
-  private flushScheduled = false;
-  private snoozeTimer?: TimerHandle;
-  private stopping = false;
+  cfg: Config;
+  store: ThreadStore;
+  adapters: Record<string, AgentAdapter>;
+  accounts: AccountSource;
+  usage?: UsageSink;
+  pickAccount: AccountPicker;
+  clis?: CliControl;
+  clock: Clock;
+  log: Logger;
+  defer: (fn: () => void) => void;
+  copyTranscript: typeof copySessionTranscript;
+  subagentTranscript: typeof subagentTranscriptPath;
+  screenshot: Screenshot;
+  panelsRoot?: string;
+  actionShell?: string[];
+  actionTimeoutMs?: number;
+  openUrl: (url: string) => Promise<void>;
+  convexKeys: ConvexKeys;
+  models?: Pick<Models, 'generate'>;
+  projects?: Projects;
+  activity = new Set<(a: ThreadActivity) => void>();
+  patchCache: PatchCache = new Map();
+  patchTrust: PatchTrustStore;
+  folderCache: FolderCache;
+  sharedPatchSets = new Map<string, { at: number; set: Promise<PatchSet> }>();
+  patchReads = new Set<Promise<void>>();
+  liveRuns = new Map<string, { doneAt?: number; out: Promise<CommandOutcome> }>();
+  threads = new Map<string, ThreadState>();
+  listeners = new Set<(n: Notification) => void>();
+  dirty = new Set<string>();
+  flushScheduled = false;
+  snoozeTimer?: TimerHandle;
+  stopping = false;
   // Set while this runner drains after a handover (docs/protocol.md,
   // "Handovers"): the threads it still keeps, and who hears when one goes.
-  private draining?: Drain;
-  private refusing?: string;
-  private startedAt = 0;
-  private startupNotices: { level: 'info' | 'warning' | 'error'; message: string }[] = [];
+  draining?: Drain;
+  refusing?: string;
+  startedAt = 0;
+  startupNotices: { level: 'info' | 'warning' | 'error'; message: string }[] = [];
   // Accounts whose CLI has been asked for its models (or is being asked).
-  private probed = new Set<string>();
-  private rescanTimer?: TimerHandle;
-  private liveTimer?: TimerHandle;
-  private accountsTimer?: TimerHandle;
-  private accountsSentAt = -Infinity;
-  private accountsShown?: string; // the last list clients were sent (or got in hello's time)
+  probed = new Set<string>();
+  rescanTimer?: TimerHandle;
+  liveTimer?: TimerHandle;
+  accountsTimer?: TimerHandle;
+  accountsSentAt = -Infinity;
+  accountsShown?: string; // the last list clients were sent (or got in hello's time)
   // E's last Codex status, to notice an update activating (or a first
   // copy arriving where there was none) as against E working out what's
   // installed when it starts.
-  private codexVersion?: string;
-  private codexMissing = false;
+  codexVersion?: string;
+  codexMissing = false;
   // The version E last asked sessions to move to, per provider.
-  private wantedVersion: Partial<Record<Provider, string>> = {};
-  private unsubs: (() => void)[] = [];
+  wantedVersion: Partial<Record<Provider, string>> = {};
+  unsubs: (() => void)[] = [];
   // Pools (docs/protocol.md, "Pools"): the timer for threads waiting for
   // room, the list clients were last sent, and logins a turn found at
   // their limit, blocked here until the time given even when the usage
   // readings haven't caught up.
-  private roomTimer?: TimerHandle;
-  private armingRoom = false;
-  private poolsShown?: string;
-  private ranDry = new Map<string, number>();
+  roomTimer?: TimerHandle;
+  armingRoom = false;
+  poolsShown?: string;
+  ranDry = new Map<string, number>();
   // Threads waiting for the API to be reachable again (waitingForNetwork):
   // one timer probes for all of them, backing off from NET_PROBE_FIRST_MS.
-  private netTimer?: TimerHandle;
-  private netProbes = 0;
-  private probing = false;
-  private reachable: Reachable;
-  private appRestartAsked?: (threadId: string) => void;
-  private atMac?: () => boolean | undefined;
+  netTimer?: TimerHandle;
+  netProbes = 0;
+  probing = false;
+  reachable: Reachable;
+  appRestartAsked?: (threadId: string) => void;
+  atMac?: () => boolean | undefined;
 
   constructor(deps: RunnerDeps) {
     this.cfg = deps.config;
@@ -671,12 +674,12 @@ export class Runner {
     }
   }
 
-  private learnAccount(accountId: string, info: LearnedAccountInfo): void {
+  learnAccount(accountId: string, info: LearnedAccountInfo): void {
     if (!this.accounts.learn(accountId, info)) return;
     this.accountsChanged();
   }
 
-  private safeAccounts(): Account[] {
+  safeAccounts(): Account[] {
     try {
       return this.accounts.list();
     } catch (e) {
@@ -688,7 +691,7 @@ export class Runner {
   // Reads the account list again every ACCOUNT_RESCAN_MS, so a login added
   // in Token Stats shows up in the app (and gets its models asked for)
   // without a reconnect.
-  private armRescan(): void {
+  armRescan(): void {
     this.rescanTimer?.cancel();
     this.rescanTimer = this.clock.setTimeout(() => {
       this.rescanTimer = undefined;
@@ -708,7 +711,7 @@ export class Runner {
   // accounts.updated, level-triggered: the first change goes out at once,
   // then at most one every ACCOUNTS_THROTTLE_MS, read when it goes so it's
   // always the latest list.
-  private accountsChanged(): void {
+  accountsChanged(): void {
     if (this.accountsTimer || this.stopping) return;
     const wait = this.accountsSentAt + ACCOUNTS_THROTTLE_MS - this.clock.now();
     if (wait <= 0) {
@@ -721,7 +724,7 @@ export class Runner {
     }, wait);
   }
 
-  private sendAccounts(): void {
+  sendAccounts(): void {
     const accounts = this.safeAccounts();
     // The built-in pools follow the login list.
     const pools = this.pools(accounts);
@@ -742,7 +745,7 @@ export class Runner {
   // read from its events, rather than have it disappear. Settings that live
   // only in thread.json (folder, account, session) fall back to defaults,
   // and the next message starts a new session with a handoff note.
-  private rebuild(id: string): ThreadRecord | undefined {
+  rebuild(id: string): ThreadRecord | undefined {
     const log = this.store.log(id);
     if (log.lastSeq === 0) return undefined;
     const events = log.read(1, log.lastSeq);
@@ -800,7 +803,7 @@ export class Runner {
   }
 
   // Returns true if the thread was mid-turn.
-  private recover(st: ThreadState): boolean {
+  recover(st: ThreadState): boolean {
     const { rec } = st;
     // A sub-agent can't outlive the runner that started its CLI.
     this.stopSubagents(st);
@@ -857,7 +860,7 @@ export class Runner {
     return midTurn && !ended;
   }
 
-  private findTurnCompleted(threadId: string, turnId: string): PersistedEvent | undefined {
+  findTurnCompleted(threadId: string, turnId: string): PersistedEvent | undefined {
     const log = this.store.log(threadId);
     return log
       .read(Math.max(1, log.lastSeq - 200), log.lastSeq)
@@ -953,7 +956,7 @@ export class Runner {
     this.queueHandoverCheck();
   }
 
-  private queueHandoverCheck(): void {
+  queueHandoverCheck(): void {
     const d = this.draining;
     if (!d || d.checkQueued) return;
     d.checkQueued = true;
@@ -963,7 +966,7 @@ export class Runner {
     });
   }
 
-  private checkHandovers(): void {
+  checkHandovers(): void {
     const d = this.draining;
     if (!d || this.stopping) return;
     d.timer?.cancel();
@@ -1002,7 +1005,7 @@ export class Runner {
   // on the new runner. Subagents hold it for agentMs: they
   // finish by themselves, and stopping one throws away its work (27 Oct: a
   // builder agent an agent left running was cut off after 30 minutes).
-  private readyToHandOver(st: ThreadState, d: Drain): boolean {
+  readyToHandOver(st: ThreadState, d: Drain): boolean {
     const { rt } = st;
     if (rt.turn || rt.approvals.size || rt.wakeTimer || rt.hooksRunning || rt.runningActions?.size) return false;
     if (rt.tasks.length === 0) return true;
@@ -1015,7 +1018,7 @@ export class Runner {
   // Lets go of a thread for good: its CLI exits (background work, if any,
   // is stopped with a note), its record is saved, and anything the old CLI
   // still reports goes nowhere.
-  private async letGo(st: ThreadState): Promise<void> {
+  async letGo(st: ThreadState): Promise<void> {
     const { rt, rec } = st;
     rt.idleTimer?.cancel();
     rt.idleTimer = undefined;
@@ -1080,7 +1083,7 @@ export class Runner {
   // back from (1 Nov: Mike asked "Is this still going?" 4.5 hours later).
   // The note alone wakes nobody, so the next runner tells the thread.
 
-  private rememberStoppedWork(st: ThreadState): void {
+  rememberStoppedWork(st: ThreadState): void {
     const { rec, rt } = st;
     if (rt.tasks.length === 0) return;
     const what = rt.tasks.map((t) => t.description || t.type);
@@ -1094,7 +1097,7 @@ export class Runner {
     for (const st of this.threads.values()) this.tellOneStoppedWork(st);
   }
 
-  private tellOneStoppedWork(st: ThreadState): void {
+  tellOneStoppedWork(st: ThreadState): void {
     const { rec } = st;
     const stopped = rec.stoppedWork;
     if (!stopped) return;
@@ -1172,7 +1175,7 @@ export class Runner {
     this.refusing = message;
   }
 
-  private checkAccepting(): void {
+  checkAccepting(): void {
     if (this.refusing) throw new RpcError(ErrorCode.busy, this.refusing);
   }
 
@@ -1252,7 +1255,7 @@ export class Runner {
 
   // The summary's background list: what the CLI is still running, then
   // (while the wake grace runs) what just finished and is about to be read.
-  private background(st: ThreadState): ProtocolBackgroundTask[] {
+  background(st: ThreadState): ProtocolBackgroundTask[] {
     const { rt } = st;
     const out: ProtocolBackgroundTask[] = rt.tasks.map((t) => ({ kind: t.kind, description: t.description || t.type }));
     if (rt.wakeTimer) {
@@ -1264,7 +1267,7 @@ export class Runner {
     return out;
   }
 
-  private stopTurn(st: ThreadState): void {
+  stopTurn(st: ThreadState): void {
     const { rec, rt } = st;
     const turn = rt.turn!;
     this.persistInProgress(st, turn.turnId);
@@ -1292,7 +1295,7 @@ export class Runner {
 
   // Text that streamed but never got its complete frame is kept as what the
   // user saw.
-  private persistInProgress(st: ThreadState, turnId: string): void {
+  persistInProgress(st: ThreadState, turnId: string): void {
     const { rt } = st;
     this.flushDeltas(st);
     for (const item of rt.inProgress.values()) {
@@ -1326,7 +1329,7 @@ export class Runner {
     return () => this.activity.delete(fn);
   }
 
-  private tellActivity(a: ThreadActivity): void {
+  tellActivity(a: ThreadActivity): void {
     for (const fn of this.activity) {
       try {
         fn(a);
@@ -1425,7 +1428,7 @@ export class Runner {
     return { chars, links };
   }
 
-  private notify(n: Notification): void {
+  notify(n: Notification): void {
     // A kept thread's summary changing can be it becoming free to go.
     if (this.draining && n.method === 'thread.updated') this.queueHandoverCheck();
     for (const fn of this.listeners) {
@@ -1481,7 +1484,7 @@ export class Runner {
   // among the last-used account's provider (usage.ts, pickAccount), worked
   // out again each time so it follows usage. Without usage it's the last
   // one used.
-  private defaultAccountId(all = this.accounts.list()): string {
+  defaultAccountId(all = this.accounts.list()): string {
     // Only accounts this runner can start a CLI for.
     const accounts = all.filter((a) => this.adapters[a.provider]);
     const json = readRunnerJson(this.cfg.home).defaults;
@@ -1501,11 +1504,11 @@ export class Runner {
   // What a thread on this provider gets when it names no model: the
   // runner's default for that provider, or for Claude the older single
   // default. Undefined means the account's own.
-  private defaultModelFor(provider: Provider): string | undefined {
+  defaultModelFor(provider: Provider): string | undefined {
     return this.cfg.defaults.models?.[provider] ?? (provider === 'claude' ? this.cfg.defaults.model : undefined);
   }
 
-  private defaultEffortFor(provider: Provider): EffortLevel | undefined {
+  defaultEffortFor(provider: Provider): EffortLevel | undefined {
     return this.cfg.defaults.efforts?.[provider];
   }
 
@@ -1515,7 +1518,7 @@ export class Runner {
 
   // The pools in force: runner.json's, else the built-in ones from the
   // logins found.
-  private pools(all = this.safeAccounts()): Pool[] {
+  pools(all = this.safeAccounts()): Pool[] {
     return readPools({ pools: this.cfg.pools, accountNotes: this.cfg.accountNotes }, all, this.cfg.poolFolders ?? DEFAULT_POOL_FOLDERS);
   }
 
@@ -1557,7 +1560,7 @@ export class Runner {
 
   // Logins this runner can start a CLI for, with any it found at its limit
   // marked blocked until then (ranDry).
-  private usable(all: Account[]): Account[] {
+  usable(all: Account[]): Account[] {
     const now = this.clock.now();
     return all
       .filter((a) => this.adapters[a.provider])
@@ -1568,11 +1571,11 @@ export class Runner {
       });
   }
 
-  private usableAccounts(): Account[] {
+  usableAccounts(): Account[] {
     return this.usable(this.safeAccounts());
   }
 
-  private poolById(id: string | undefined): Pool | undefined {
+  poolById(id: string | undefined): Pool | undefined {
     return id === undefined ? undefined : this.pools().find((p) => p.id === id);
   }
 
@@ -1580,7 +1583,7 @@ export class Runner {
   // (runner.json's defaults.poolId), else the first pool holding the
   // default account, else the first pool. Only pools with a login this
   // runner can use.
-  private defaultPoolId(pools: Pool[], usable: Account[], defaultAccount?: string): string | undefined {
+  defaultPoolId(pools: Pool[], usable: Account[], defaultAccount?: string): string | undefined {
     const live = pools.filter((p) => poolAccounts(p, usable).length);
     const saved = readRunnerJson(this.cfg.home).defaults?.poolId ?? this.cfg.defaults.poolId;
     if (saved && live.some((p) => p.id === saved)) return saved;
@@ -1589,7 +1592,7 @@ export class Runner {
   }
 
   // The provider a model id belongs to, when that can be told.
-  private modelProvider(model: string): Provider | undefined {
+  modelProvider(model: string): Provider | undefined {
     if (isClaudeModel(model)) return 'claude';
     const accounts = this.safeAccounts();
     if (model.startsWith('gpt-') || accounts.some((a) => a.provider === 'codex' && modelRow(a, model))) return 'codex';
@@ -1604,7 +1607,7 @@ export class Runner {
   // first) with the most room, else one of another provider with room,
   // else the first of its provider. undefined when no pool has a login
   // this runner can use.
-  private pickForNew(p: { poolId?: string; cwd: string; model?: string }): { poolId: string; accountId: string } | undefined {
+  pickForNew(p: { poolId?: string; cwd: string; model?: string }): { poolId: string; accountId: string } | undefined {
     const accounts = this.usableAccounts();
     const pools = this.pools().filter((x) => poolAccounts(x, accounts).length);
     let pool: Pool | undefined;
@@ -1643,7 +1646,7 @@ export class Runner {
     return sortByActivity(out);
   }
 
-  private bucket(rec: ThreadRecord): 'inbox' | 'snoozed' | 'archived' {
+  bucket(rec: ThreadRecord): 'inbox' | 'snoozed' | 'archived' {
     if (rec.archivedAt) return 'archived';
     if (rec.snoozedUntil && Date.parse(rec.snoozedUntil) > this.clock.now()) return 'snoozed';
     return 'inbox';
@@ -1852,7 +1855,7 @@ export class Runner {
 
   // The record and state of a new thread, before anything is sent to it:
   // its folder, login, model and effort as create picks them.
-  private makeThread(params: {
+  makeThread(params: {
     text: string;
     cwd?: string;
     accountId?: string;
@@ -1935,7 +1938,7 @@ export class Runner {
   // An account whose CLI this runner can't drive (a Codex login found
   // before the Codex adapter is wired) is refused up front, rather than
   // making a thread whose first turn can only fail.
-  private checkProvider(account: Account): void {
+  checkProvider(account: Account): void {
     if (!this.adapters[account.provider]) {
       throw new RpcError(ErrorCode.badParams, `This runner can't run ${providerName(account.provider)} threads yet, so ${account.id} can't be used.`);
     }
@@ -1947,7 +1950,7 @@ export class Runner {
   // default; an effort the model doesn't offer is dropped. Each says so in
   // a note rather than failing the call, since an older app always sends a
   // model and can't get past an error.
-  private checkSettings(account: Account, model: string | undefined, effort: EffortLevel | undefined): { model?: string; effort?: EffortLevel; notes: string[] } {
+  checkSettings(account: Account, model: string | undefined, effort: EffortLevel | undefined): { model?: string; effort?: EffortLevel; notes: string[] } {
     const notes: string[] = [];
     const provider = account.provider;
     if (model && !this.modelFits(account, model)) {
@@ -1974,7 +1977,7 @@ export class Runner {
   // Whether a thread on this account can run this model id. Codex: one the
   // account lists, or before the list is known anything starting gpt-.
   // Claude: anything but a Codex id, unless the account itself lists it.
-  private modelFits(account: Account, model: string): boolean {
+  modelFits(account: Account, model: string): boolean {
     if (modelRow(account, model)) return true;
     if (account.provider === 'codex') return !account.models?.length && model.startsWith('gpt-');
     if (isClaudeModel(model)) return true;
@@ -1988,7 +1991,7 @@ export class Runner {
   // `reply`, the start of the agent's first answer, is there when an older
   // thread is named (retitle): a terse first message like "Explain thread
   // count" means little without it.
-  private async titleFromModel(st: ThreadState, text: string, reply?: string): Promise<{ title: string } | { reason: string }> {
+  async titleFromModel(st: ThreadState, text: string, reply?: string): Promise<{ title: string } | { reason: string }> {
     if (!this.models) return { reason: 'Model calls are off in this runner.' };
     const before = st.rec.title;
     const res = await this.models.generate({
@@ -2139,7 +2142,7 @@ export class Runner {
   // The first user.message's text and the first assistant.text after it,
   // read a page at a time from the start: both are nearly always within
   // the first few events, and a long thread's log is large.
-  private opening(id: string, rec?: Pick<ThreadRecord, 'rewinds'>): { text?: string; images?: number; reply?: string } {
+  opening(id: string, rec?: Pick<ThreadRecord, 'rewinds'>): { text?: string; images?: number; reply?: string } {
     const log = this.store.log(id);
     let text: string | undefined;
     let images = 0;
@@ -2171,7 +2174,7 @@ export class Runner {
     return { turnId: this.sendTo(st, text, images, opts) };
   }
 
-  private sendTo(st: ThreadState, text: string, images: ImageRef[], opts: SendOptions = {}): string {
+  sendTo(st: ThreadState, text: string, images: ImageRef[], opts: SendOptions = {}): string {
     const { rec, rt } = st;
     if (opts.origin !== 'runner') {
       rt.hookTurns = undefined;
@@ -2266,7 +2269,7 @@ export class Runner {
   // meant for that), not after Stop was pressed (the CLI would cancel it
   // with the rest), and not into a turn opened only for a background
   // subagent's approval, where there's no CLI turn to join.
-  private canSteer(st: ThreadState): boolean {
+  canSteer(st: ThreadState): boolean {
     const { rec, rt } = st;
     const turn = rt.turn;
     if (!turn || !rt.session || rt.closing || this.stopping || rt.editing) return false;
@@ -2276,7 +2279,7 @@ export class Runner {
 
   // A move to another login is waiting for the next turn while this one
   // runs on the old login's CLI.
-  private switchWaiting(st: ThreadState): boolean {
+  switchWaiting(st: ThreadState): boolean {
     const { rec, rt } = st;
     const turn = rt.turn;
     if (!turn || !rt.session || turn.interruptRequested || (turn.auto && !turn.cliStarted) || rt.editing) return false;
@@ -2284,7 +2287,7 @@ export class Runner {
   }
 
   // "Opus 5.5", or the login's name when there's no model to name.
-  private modelLabel(rec: ThreadRecord): string {
+  modelLabel(rec: ThreadRecord): string {
     const account = this.accounts.get(rec.accountId);
     if (!account) return rec.accountId;
     const model = rec.model ?? account.defaultModel;
@@ -2294,7 +2297,7 @@ export class Runner {
   // Shows the message in the running turn and hands it to the CLI. If the
   // event can't be written the message isn't sent, and the caller gets the
   // error (the app puts the draft back).
-  private steer(st: ThreadState, msg: QueuedSend): void {
+  steer(st: ThreadState, msg: QueuedSend): void {
     const { rt } = st;
     const turn = rt.turn!;
     this.emit(st, userMessage(msg), turn.turnId);
@@ -2314,7 +2317,7 @@ export class Runner {
   // step while he's out and keeps the reply short. It goes on every phone
   // message rather than once, as he moves between the two. The transcript
   // keeps what he typed.
-  private forAgent(msg: { text: string; origin?: MessageOrigin }): string {
+  forAgent(msg: { text: string; origin?: MessageOrigin }): string {
     if (msg.origin !== 'phone') return msg.text;
     const atMac = this.atMac?.();
     const where = atMac === true ? ', at the Mac' : atMac === false ? ', away from the Mac' : '';
@@ -2324,7 +2327,7 @@ export class Runner {
   // Writes the turn's first events before changing any state, so if the
   // disk refuses (full, permissions) the thread is left as it was rather
   // than stuck on a turn that never started.
-  private startTurn(st: ThreadState, msg: QueuedSend): void {
+  startTurn(st: ThreadState, msg: QueuedSend): void {
     const { rec, rt } = st;
     // A review can be replayed after a failed turn.started append. Its
     // stable message ID keeps the original user row rather than duplicating it.
@@ -2365,7 +2368,7 @@ export class Runner {
     });
   }
 
-  private async deliver(st: ThreadState, msg: QueuedSend): Promise<void> {
+  async deliver(st: ThreadState, msg: QueuedSend): Promise<void> {
     const { rec, rt } = st;
     // A folder, account or settings change asked for a fresh CLI, or a CLI
     // update came in since this one started.
@@ -2446,7 +2449,7 @@ export class Runner {
   // short note. Anything else (another provider, a rebuilt record, a
   // transcript that can't be found) gets the handoff note, as does a
   // resume that then fails (onExited).
-  private carryTranscript(st: ThreadState, account: Account): boolean {
+  carryTranscript(st: ThreadState, account: Account): boolean {
     const { rec } = st;
     const from = rec.handoff;
     // Claude only: it copies Claude's own transcript files. Codex moves
@@ -2463,7 +2466,7 @@ export class Runner {
     return ok;
   }
 
-  private makeRoomForCli(starting: ThreadState): void {
+  makeRoomForCli(starting: ThreadState): void {
     const live = [...this.threads.values()].filter((t) => t !== starting && t.rt.session && !t.rt.closing);
     if (live.length < this.cfg.maxLive) return;
     const idle = live
@@ -2475,7 +2478,7 @@ export class Runner {
     }
   }
 
-  private startSession(st: ThreadState, account: Account): void {
+  startSession(st: ThreadState, account: Account): void {
     const { rec, rt } = st;
     const adapter = this.adapters[rec.provider];
     if (!adapter) throw new Error(`This runner can't run ${providerName(rec.provider)} threads.`);
@@ -2528,7 +2531,7 @@ export class Runner {
     this.markDirty(st);
   }
 
-  private onOutput(st: ThreadState, o: AdapterOutput): void {
+  onOutput(st: ThreadState, o: AdapterOutput): void {
     const { rec, rt } = st;
     switch (o.kind) {
       case 'event': {
@@ -2794,7 +2797,7 @@ export class Runner {
     }
   }
 
-  private startWakeGrace(st: ThreadState): void {
+  startWakeGrace(st: ThreadState): void {
     const { rt } = st;
     rt.wakeTimer?.cancel();
     rt.wakeTimer = this.clock.setTimeout(() => {
@@ -2806,7 +2809,7 @@ export class Runner {
     }, WAKE_GRACE_MS);
   }
 
-  private openCliTurn(st: ThreadState): void {
+  openCliTurn(st: ThreadState): void {
     const { rec, rt } = st;
     rt.wakeTimer?.cancel();
     rt.wakeTimer = undefined;
@@ -2827,7 +2830,7 @@ export class Runner {
     this.markDirty(st);
   }
 
-  private completeTurn(st: ThreadState, r: TurnResult): void {
+  completeTurn(st: ThreadState, r: TurnResult): void {
     const { rec, rt } = st;
     const turn = rt.turn;
     if (!turn) return;
@@ -2911,7 +2914,7 @@ export class Runner {
 
   // end_turn's snooze, once the turn is over: a time as update_thread
   // reads it, or else words, read as Hibernate in words reads Mike's.
-  private snoozeAfterTurn(st: ThreadState, when: string): void {
+  snoozeAfterTurn(st: ThreadState, when: string): void {
     const { rec } = st;
     let until: string | undefined;
     if (when.toLowerCase() === 'restart') until = 'restart';
@@ -2941,7 +2944,7 @@ export class Runner {
     this.update({ threadId: rec.id, snoozedUntil: until });
   }
 
-  private endTurn(st: ThreadState, completedSeq: number, status: ThreadStatus, outcome?: TurnOutcome, limitHit?: string, netLost?: string): void {
+  endTurn(st: ThreadState, completedSeq: number, status: ThreadStatus, outcome?: TurnOutcome, limitHit?: string, netLost?: string): void {
     const { rec, rt } = st;
     const finished = rt.turn;
     rt.turn?.interruptTimer?.cancel();
@@ -2978,7 +2981,7 @@ export class Runner {
   }
 
   // A turn that ended without a result from the CLI (spawn failure, crash).
-  private failTurn(st: ThreadState, message: string): void {
+  failTurn(st: ThreadState, message: string): void {
     const { rec, rt } = st;
     const turn = rt.turn;
     if (!turn) return;
@@ -2997,7 +3000,7 @@ export class Runner {
     this.endTurn(st, ev.seq, interrupted ? 'idle' : 'error');
   }
 
-  private afterTurn(st: ThreadState, limitHit?: string, netLost?: string): void {
+  afterTurn(st: ThreadState, limitHit?: string, netLost?: string): void {
     if (this.stopping) return;
     if (limitHit) {
       try {
@@ -3018,7 +3021,7 @@ export class Runner {
   // under the minimum room) or isn't in its pool any more, it moves first
   // (docs/protocol.md, "Pools"). With nowhere better, the turn starts
   // where it is. A pinned thread (no poolId) never moves.
-  private beforeTurn(st: ThreadState): void {
+  beforeTurn(st: ThreadState): void {
     const { rec } = st;
     const pool = this.poolById(rec.poolId);
     if (!pool) return;
@@ -3037,7 +3040,7 @@ export class Runner {
   // login blocked, move to the next login with room and carry on by
   // itself, once. A carry-on that runs dry too waits instead of moving
   // again, as does a pool with nothing left.
-  private onUsageLimit(st: ThreadState, turnId: string): void {
+  onUsageLimit(st: ThreadState, turnId: string): void {
     const { rec } = st;
     const pool = this.poolById(rec.poolId);
     if (!pool) return;
@@ -3065,7 +3068,7 @@ export class Runner {
   // A login a turn found at its limit counts as blocked until its window
   // resets (30 minutes when none says), here and in the UsageStore, which
   // tells clients. The reading may already say so.
-  private markRanDry(account: Account): void {
+  markRanDry(account: Account): void {
     const now = this.clock.now();
     const until = blockedUntil(account, now);
     this.ranDry.set(account.id, until);
@@ -3082,7 +3085,7 @@ export class Runner {
   // (carryTranscript), else with a handoff note. Another provider takes
   // its own default model and effort, like any provider change. The move
   // is a note in the transcript.
-  private moveLogin(st: ThreadState, to: Account, why: string): void {
+  moveLogin(st: ThreadState, to: Account, why: string): void {
     const { rec, rt } = st;
     if (rec.sessionUsed || rt.session) rec.handoff ??= { fromCwd: rec.moved?.fromCwd ?? rec.cwd, fromAccountId: rec.accountId };
     delete rec.moved;
@@ -3111,7 +3114,7 @@ export class Runner {
 
   // Nothing in the pool has room: the thread waits, with a note, and the
   // room timer carries it on at `until`.
-  private startWait(st: ThreadState, w: { waitUntil: string; accountId?: string }, lead: string): void {
+  startWait(st: ThreadState, w: { waitUntil: string; accountId?: string }, lead: string): void {
     const { rec } = st;
     const now = this.clock.now();
     rec.waitingForRoom = { until: w.waitUntil, ...(w.accountId ? { accountId: w.accountId } : {}) };
@@ -3125,7 +3128,7 @@ export class Runner {
 
   // A wait's time has come: look again. A login with room (the thread's
   // own, if it's back) carries on by itself; with none, wait again.
-  private endWait(st: ThreadState): void {
+  endWait(st: ThreadState): void {
     const { rec, rt } = st;
     delete rec.waitingForRoom;
     this.markDirty(st);
@@ -3153,7 +3156,7 @@ export class Runner {
   // so if it runs dry too the thread waits rather than move again. While
   // a restart refuses new turns it waits a minute instead, which the next
   // runner picks up from thread.json.
-  private carryOn(st: ThreadState, text: string): void {
+  carryOn(st: ThreadState, text: string): void {
     const { rec } = st;
     if (this.refusing || this.draining) {
       rec.waitingForRoom = { until: new Date(this.clock.now() + WAIT_SLACK_MS).toISOString() };
@@ -3171,7 +3174,7 @@ export class Runner {
 
   // One timer for every thread waiting for room, at the earliest `until`
   // (looked at again at least hourly, like snoozes).
-  private armRoomTimer(): void {
+  armRoomTimer(): void {
     if (this.armingRoom) return;
     this.armingRoom = true;
     try {
@@ -3209,7 +3212,7 @@ export class Runner {
   // NET_WAIT_MAX_MS from the first failure; then it's left to him. Only
   // the network: limits, the login and real errors never retry by
   // themselves. A message already queued goes next instead.
-  private onNetworkLost(st: ThreadState, turnId: string): void {
+  onNetworkLost(st: ThreadState, turnId: string): void {
     const { rec } = st;
     // The same outage if this was the runner's carry-on, or a turn the CLI
     // opened by itself during the wait (a background job ended).
@@ -3233,7 +3236,7 @@ export class Runner {
   // One timer for every thread waiting for the network. `restart` starts
   // the backoff again (a new wait, a restart); otherwise a pending probe
   // is left be. A draining runner's waits are the next runner's.
-  private armNetTimer(restart = false): void {
+  armNetTimer(restart = false): void {
     if (this.stopping || this.draining) return;
     const waiting = [...this.threads.values()].some((st) => st.rec.waitingForNetwork);
     if (!waiting) {
@@ -3254,7 +3257,7 @@ export class Runner {
 
   // Tries each waiting provider's API once; the threads whose API answers
   // carry on, the rest wait for the next probe.
-  private async probeNetwork(): Promise<void> {
+  async probeNetwork(): Promise<void> {
     if (this.probing) return;
     this.probing = true;
     try {
@@ -3276,7 +3279,7 @@ export class Runner {
 
   // The API answers again: carry on, unless the thread's moved on by
   // itself meanwhile (a turn, a message waiting, archived or snoozed).
-  private endNetWait(st: ThreadState): void {
+  endNetWait(st: ThreadState): void {
     const { rec, rt } = st;
     const w = rec.waitingForNetwork;
     if (!w) return;
@@ -3294,7 +3297,7 @@ export class Runner {
     }
   }
 
-  private onExited(st: ThreadState, gen: number, err?: Error): void {
+  onExited(st: ThreadState, gen: number, err?: Error): void {
     const { rec, rt } = st;
     if (rt.generation !== gen) return;
     // A CLI that died before it got going, other than one asked to stop or
@@ -3701,7 +3704,7 @@ export class Runner {
     return { thread: this.summary(st) };
   }
 
-  private saidNothing(rec: ThreadRecord): boolean {
+  saidNothing(rec: ThreadRecord): boolean {
     return rec.needs?.needs === 'nothing' && rec.needs.seq === rec.lastTurnCompletedSeq;
   }
 
@@ -3763,14 +3766,14 @@ export class Runner {
   // A request can come with no turn running: a background subagent keeps
   // working after the turn that started it ended. It gets a turn of its own
   // so the card is shown rather than the subagent being stopped.
-  private turnForRequest(st: ThreadState, gen: number): boolean {
+  turnForRequest(st: ThreadState, gen: number): boolean {
     const { rt } = st;
     if (rt.generation !== gen || rt.closing || this.stopping) return false;
     if (!rt.turn) this.openCliTurn(st);
     return true;
   }
 
-  private requestApproval(st: ThreadState, gen: number, req: ToolApprovalRequest): Promise<ToolApprovalAnswer> {
+  requestApproval(st: ThreadState, gen: number, req: ToolApprovalRequest): Promise<ToolApprovalAnswer> {
     if (!this.turnForRequest(st, gen)) return Promise.resolve({ decision: 'expired' });
     const approvalId = crypto.randomUUID();
     const body: EventBody = {
@@ -3787,7 +3790,7 @@ export class Runner {
     });
   }
 
-  private requestQuestion(st: ThreadState, gen: number, req: QuestionRequest): Promise<QuestionAnswer> {
+  requestQuestion(st: ThreadState, gen: number, req: QuestionRequest): Promise<QuestionAnswer> {
     if (!this.turnForRequest(st, gen)) return Promise.resolve({ answers: null });
     const approvalId = crypto.randomUUID();
     const body: EventBody = { type: 'question.requested', approvalId, questions: req.questions };
@@ -3797,7 +3800,7 @@ export class Runner {
     });
   }
 
-  private addApproval(st: ThreadState, pending: PendingApproval, body: EventBody, signal: AbortSignal): void {
+  addApproval(st: ThreadState, pending: PendingApproval, body: EventBody, signal: AbortSignal): void {
     const { rec, rt } = st;
     rt.approvals.set(pending.approvalId, pending);
     rec.pendingApprovals.push(pending.approvalId);
@@ -3807,7 +3810,7 @@ export class Runner {
     signal.addEventListener('abort', () => this.expireApproval(st, pending.approvalId, 'Cancelled.'), { once: true });
   }
 
-  private resolveApproval(st: ThreadState, approvalId: string, decision: ApprovalDecision, message?: string): void {
+  resolveApproval(st: ThreadState, approvalId: string, decision: ApprovalDecision, message?: string): void {
     const { rec, rt } = st;
     rt.approvals.delete(approvalId);
     rec.pendingApprovals = rec.pendingApprovals.filter((x) => x !== approvalId);
@@ -3818,7 +3821,7 @@ export class Runner {
     this.markDirty(st);
   }
 
-  private expireApproval(st: ThreadState, approvalId: string, message: string): void {
+  expireApproval(st: ThreadState, approvalId: string, message: string): void {
     const pending = st.rt.approvals.get(approvalId);
     if (!pending) return;
     this.resolveApproval(st, approvalId, 'expired', message);
@@ -3826,13 +3829,13 @@ export class Runner {
     else pending.resolve({ answers: null, message });
   }
 
-  private expireApprovals(st: ThreadState, message: string): void {
+  expireApprovals(st: ThreadState, message: string): void {
     for (const id of [...st.rt.approvals.keys()]) this.expireApproval(st, id, message);
   }
 
   // ---------------------------------------------------------- idle release
 
-  private scheduleIdle(st: ThreadState): void {
+  scheduleIdle(st: ThreadState): void {
     const { rec, rt } = st;
     rt.idleTimer?.cancel();
     rt.idleTimer = undefined;
@@ -3862,7 +3865,7 @@ export class Runner {
   // Background work would keep the CLI alive (and could start a turn in a
   // thread that's just been snoozed), so if there is any it's stopped
   // straight away, with a note saying what was stopped.
-  private releaseSession(st: ThreadState): void {
+  releaseSession(st: ThreadState): void {
     const { rt, rec } = st;
     rt.idleTimer?.cancel();
     rt.idleTimer = undefined;
@@ -3933,7 +3936,7 @@ export class Runner {
   // Nothing would be cut short by releasing it: no turn (starting, running
   // or interrupting), approval or question, queued message, background
   // work or wake grace, and not already due to go.
-  private idleForUpdate(st: ThreadState): boolean {
+  idleForUpdate(st: ThreadState): boolean {
     const { rec, rt } = st;
     return !rt.turn && rt.approvals.size === 0 && rec.queue.length === 0 && rt.tasks.length === 0 && !rt.wakeTimer && !rt.releaseWhenIdle;
   }
@@ -3971,7 +3974,7 @@ export class Runner {
     this.unsubs.push(clis.onChange((list) => this.clisChanged(list)));
   }
 
-  private cliList(): CliStatus[] | undefined {
+  cliList(): CliStatus[] | undefined {
     if (!this.clis) return undefined;
     try {
       return this.clis.list();
@@ -3981,7 +3984,7 @@ export class Runner {
     }
   }
 
-  private tellStarted(p: Provider, version: string | undefined, ok: boolean): void {
+  tellStarted(p: Provider, version: string | undefined, ok: boolean): void {
     try {
       this.clis?.sessionStarted?.(p, version, ok);
     } catch (e) {
@@ -3989,7 +3992,7 @@ export class Runner {
     }
   }
 
-  private clisChanged(list: CliStatus[]): void {
+  clisChanged(list: CliStatus[]): void {
     this.notify({ method: 'clis.updated', params: { clis: list } });
     const codex = list.find((c) => c.provider === 'codex');
     const version = codex?.installedVersion;
@@ -4003,7 +4006,7 @@ export class Runner {
 
   // Runs a pending archive once no CLI has the session: none live and none
   // closing. Skipped if the thread came back meanwhile.
-  private archiveWhenGone(st: ThreadState): void {
+  archiveWhenGone(st: ThreadState): void {
     const { rec, rt } = st;
     if (!rt.archivePending || rt.session || rt.closing || rt.deleted) return;
     rt.archivePending = false;
@@ -4016,7 +4019,7 @@ export class Runner {
   // Archives the native session in the CLI's own app (Codex Desktop) when
   // the thread is archived or deleted here, once `after` (the session
   // letting go) has settled. Best effort.
-  private archiveNative(st: ThreadState, after?: Promise<unknown>): void {
+  archiveNative(st: ThreadState, after?: Promise<unknown>): void {
     const { rec } = st;
     const adapter = this.adapters[rec.provider];
     if (!adapter?.archive || !rec.sessionUsed || !rec.nativeSessionId) return;
@@ -4032,7 +4035,7 @@ export class Runner {
 
   // ----------------------------------------------------------------- snooze
 
-  private armSnoozeTimer(): void {
+  armSnoozeTimer(): void {
     this.snoozeTimer?.cancel();
     this.snoozeTimer = undefined;
     if (this.stopping) return;
@@ -4053,7 +4056,7 @@ export class Runner {
   // in its conversation, with how long it was away, and its row says
   // "Woke up" until Mike looks (`woke`): otherwise it just turns up in the
   // inbox with nothing to say why (30 Oct).
-  private wake(st: ThreadState, cause: 'time' | 'restart' | { why: string }): void {
+  wake(st: ThreadState, cause: 'time' | 'restart' | { why: string }): void {
     const { rec } = st;
     const now = this.clock.now();
     const since = rec.snoozedAt && Date.parse(rec.snoozedAt) <= now ? rec.snoozedAt : undefined;
@@ -4079,7 +4082,7 @@ export class Runner {
 
   // Starts the next queued message if nothing is running. Returns true if
   // one started. One that can't be written (disk full) stays at the front.
-  private kickQueue(st: ThreadState): boolean {
+  kickQueue(st: ThreadState): boolean {
     if (st.rt.turn || st.rec.queue.length === 0 || this.stopping || st.rt.editing) return false;
     // A draining runner hands a thread over with its queue rather than
     // start another turn on the old release; the primary starts it. Not if
@@ -4206,7 +4209,7 @@ export class Runner {
   }
 
   // The message at `seq`, if Mike can edit it; otherwise why not.
-  private editableMessage(st: ThreadState, seq: number): { turnId: string } {
+  editableMessage(st: ThreadState, seq: number): { turnId: string } {
     const { rec } = st;
     const log = this.store.log(rec.id);
     const ev = Number.isInteger(seq) && seq >= 1 && seq <= log.lastSeq ? log.read(seq, seq)[0] : undefined;
@@ -4222,7 +4225,7 @@ export class Runner {
   }
 
   // Whether the thread had a message before `seq` that's still part of it.
-  private saidBefore(rec: ThreadRecord, seq: number): boolean {
+  saidBefore(rec: ThreadRecord, seq: number): boolean {
     const log = this.store.log(rec.id);
     for (let to = seq - 1; to >= 1; to -= 500) {
       const page = log.read(Math.max(1, to - 499), to);
@@ -4314,7 +4317,7 @@ export class Runner {
   // app or the phone, closes every open review as superseded; the card
   // and window stay readable. Runner, schedule and agent-to-thread
   // messages aren't him and leave reviews open.
-  private supersedeReviews(st: ThreadState, text: string, opts: SendOptions): void {
+  supersedeReviews(st: ThreadState, text: string, opts: SendOptions): void {
     if (!fromMike(text, opts)) return;
     for (const review of st.rec.reviews ?? []) {
       if (review.status !== 'pending') continue;
@@ -4322,18 +4325,18 @@ export class Runner {
     }
   }
 
-  private mustReview(st: ThreadState, id: string): DesignReview {
+  mustReview(st: ThreadState, id: string): DesignReview {
     const review = st.rec.reviews?.find(r => r.id === id);
     if (!review) throw new RpcError(ErrorCode.badParams, `Review not found: ${id}`);
     return review;
   }
 
-  private checkReviewRevision(review: DesignReview, revision: number): void {
+  checkReviewRevision(review: DesignReview, revision: number): void {
     if (review.status !== 'pending') throw new RpcError(ErrorCode.badParams, `This review is ${review.status}.`);
     if (!Number.isSafeInteger(revision) || review.revision !== revision) throw new RpcError(ErrorCode.badParams, 'This review changed. Reload it before saving or sending your answer.');
   }
 
-  private persistReview(st: ThreadState, review: DesignReview, queue = st.rec.queue, wake = false): void {
+  persistReview(st: ThreadState, review: DesignReview, queue = st.rec.queue, wake = false): void {
     const previous = st.rec.reviews ?? [];
     const reviews = previous.some(r => r.id === review.id)
       ? previous.map(r => r.id === review.id ? review : r)
@@ -4357,7 +4360,7 @@ export class Runner {
     this.emit(st, {type: 'review.updated', review});
   }
 
-  private recoverReviews(st: ThreadState): void {
+  recoverReviews(st: ThreadState): void {
     // Reviews save their record before their event. Threads without reviews
     // need no extra log scan (the common case, including long transcripts).
     if (!st.rec.reviews?.length && !st.rec.queue.some(q => q.reviewId)) return;
@@ -4384,7 +4387,7 @@ export class Runner {
 
   // ---------------------------------------------------------------- events
 
-  private emit(st: ThreadState, body: EventBody, turnId?: string): PersistedEvent {
+  emit(st: ThreadState, body: EventBody, turnId?: string): PersistedEvent {
     if (st.rt.deleted) throw new Error('The thread was deleted.');
     this.flushDeltas(st);
     const log = this.store.log(st.rec.id);
@@ -4401,7 +4404,7 @@ export class Runner {
     return event;
   }
 
-  private addDelta(st: ThreadState, d: DeltaBody): void {
+  addDelta(st: ThreadState, d: DeltaBody): void {
     const { rt } = st;
     if (d.type !== 'tool.output.delta') {
       const type = d.type === 'assistant.text.delta' ? 'assistant.text' : 'reasoning';
@@ -4420,7 +4423,7 @@ export class Runner {
 
   // Sends coalesced deltas. Transient events carry the seq of the last
   // persisted event and don't consume a number.
-  private flushDeltas(st: ThreadState): void {
+  flushDeltas(st: ThreadState): void {
     const { rt, rec } = st;
     rt.deltaTimer?.cancel();
     rt.deltaTimer = undefined;
@@ -4437,7 +4440,7 @@ export class Runner {
   // --------------------------------------------------------------- helpers
 
   // A sub-agent started or changed (AdapterOutput 'subagent').
-  private updateSubagent(st: ThreadState, u: SubagentUpdate): void {
+  updateSubagent(st: ThreadState, u: SubagentUpdate): void {
     const { rec } = st;
     const list = (rec.subagents ??= []);
     let a = list.find((x) => x.id === u.id);
@@ -4471,7 +4474,7 @@ export class Runner {
 
   // Marks the thread's running sub-agents stopped once the CLI running them
   // has gone.
-  private stopSubagents(st: ThreadState): void {
+  stopSubagents(st: ThreadState): void {
     let any = false;
     for (const a of st.rec.subagents ?? []) {
       if (a.status !== 'running') continue;
@@ -4483,7 +4486,7 @@ export class Runner {
     if (any) this.markDirty(st);
   }
 
-  private markDirty(st: ThreadState): void {
+  markDirty(st: ThreadState): void {
     if (st.rt.deleted) return;
     this.dirty.add(st.rec.id);
     if (this.flushScheduled) return;
@@ -4591,7 +4594,7 @@ export class Runner {
 
   // What the thread's folder gives it (see Runtime.patches): the last set
   // read, with a fresh read started when it's stale.
-  private patchSet(st: ThreadState): PatchSet {
+  patchSet(st: ThreadState): PatchSet {
     const { rec, rt } = st;
     const now = this.clock.now();
     const folders = this.projects?.foldersFor(rec) ?? [];
@@ -4638,7 +4641,7 @@ export class Runner {
     while (this.patchReads.size) await Promise.allSettled([...this.patchReads]);
   }
 
-  private async readPatches(st: ThreadState): Promise<void> {
+  async readPatches(st: ThreadState): Promise<void> {
     const { rec, rt } = st;
     const entry = rt.patches;
     if (!entry || entry.refreshing) return;
@@ -4683,7 +4686,7 @@ export class Runner {
   // every 15 seconds kept the runner busy for seconds on a loaded Mac.
   // Sets aren't changed once made (applyLive makes new ones), so sharing
   // one is safe, as sharing a patch file's module already was.
-  private loadSharedPatchSet(cwd: string, folders: ProjectFolder[], allFolders: string[]): Promise<PatchSet> {
+  loadSharedPatchSet(cwd: string, folders: ProjectFolder[], allFolders: string[]): Promise<PatchSet> {
     const key = JSON.stringify([cwd, folders, allFolders]);
     const now = this.clock.now();
     const hit = this.sharedPatchSets.get(key);
@@ -4699,7 +4702,7 @@ export class Runner {
 
   // Forgets what was read from the folders, after something that may have
   // changed them: the next patch reads go to the disk.
-  private forgetFolders(): void {
+  forgetFolders(): void {
     this.folderCache.clear();
     this.sharedPatchSets.clear();
     // A turn may have changed what they read (comments resolved, a handback).
@@ -4714,7 +4717,7 @@ export class Runner {
   // one run serves them all for LIVE_SHARE_MS, and a poll that comes round
   // while it's still going joins it. Live state is about the folder (what
   // a tool says about the files there), not about one thread.
-  private runLiveCommand(threadId: string, command: string, cwd: string): Promise<CommandOutcome> {
+  runLiveCommand(threadId: string, command: string, cwd: string): Promise<CommandOutcome> {
     const key = `${cwd}\u0000${command}`;
     const hit = this.liveRuns.get(key);
     if (hit && (hit.doneAt === undefined || this.clock.now() - hit.doneAt < LIVE_SHARE_MS)) return hit.out;
@@ -4731,14 +4734,14 @@ export class Runner {
 
   // A command a patch's function runs (list panels, live state): in its
   // folder, with the thread's variables, like an action.
-  private runPatchCommand(threadId: string, command: string, cwd: string) {
+  runPatchCommand(threadId: string, command: string, cwd: string) {
     return runCommand(command, { cwd, env: { ...process.env, ...threadEnv(threadId, this.cfg.home) }, shell: this.actionShell, timeoutMs: this.actionTimeoutMs });
   }
 
   // Reads live state again for the inbox's threads that have any, every
   // LIVE_POLL_MS while there are some. Hibernating and Den threads wait
   // until they're back (patchSet reads again on the next summary).
-  private armLivePoll(): void {
+  armLivePoll(): void {
     if (this.liveTimer || this.stopping) return;
     this.liveTimer = this.clock.setTimeout(() => {
       this.liveTimer = undefined;
@@ -4753,7 +4756,7 @@ export class Runner {
     }, LIVE_POLL_MS);
   }
 
-  private notePatchChanges(st: ThreadState, before: PatchSet, after: PatchSet): void {
+  notePatchChanges(st: ThreadState, before: PatchSet, after: PatchSet): void {
     const was = new Map(before.patches.map((p) => [p.id + '@' + p.source, p]));
     for (const p of after.patches) {
       if (p.source === 'builtin') continue;
@@ -4803,7 +4806,7 @@ export class Runner {
   // Trusts patch files an agent wrote, as they are now (patch-trust.ts).
   // `reread` false when the caller reads them again itself.
   // A helper the agent edited carries on the trusted patches importing it.
-  private trustAgentPatches(files: string[], reread = true): void {
+  trustAgentPatches(files: string[], reread = true): void {
     const done = this.patchTrust.trustCurrent(files.filter(isPatchFile));
     for (const file of files) if (!isPatchFile(file)) done.push(...this.patchTrust.trustDependents(file));
     if (done.length && reread) this.rereadAllPatches();
@@ -4811,7 +4814,7 @@ export class Runner {
 
   // Every thread whose patches have been read reads them again now: a
   // trusted file can matter to threads in other folders (a project's).
-  private rereadAllPatches(): void {
+  rereadAllPatches(): void {
     this.forgetFolders();
     for (const st of this.threads.values()) {
       if (!st.rt.patches || st.rt.deleted) continue;
@@ -4824,7 +4827,7 @@ export class Runner {
   // files of every thread's folder and every project's are trusted as they
   // are, since this runner was already running them. Anything new after
   // this asks.
-  private seedPatchTrust(threadFolders: string[]): void {
+  seedPatchTrust(threadFolders: string[]): void {
     if (this.patchTrust.existed) return;
     const home = this.panelsRoot ?? os.homedir();
     const folders = new Set<string>(threadFolders);
@@ -4887,7 +4890,7 @@ export class Runner {
     return this.convexKeys.login(check, force);
   }
 
-  private convexPanelContext(threadId: string, panelId: string) {
+  convexPanelContext(threadId: string, panelId: string) {
     const st = this.mustGet(threadId);
     const panel = this.patchSet(st).panels.find((p) => p.id === panelId);
     if (!panel) throw new RpcError(ErrorCode.badParams, `This thread has no panel called ${panelId}`);
@@ -5003,7 +5006,7 @@ export class Runner {
     return { thread: this.summary(st) };
   }
 
-  private endPanelWait(st: ThreadState, shown: boolean): void {
+  endPanelWait(st: ThreadState, shown: boolean): void {
     const waiter = st.rt.panelWaiter;
     if (!waiter) return;
     st.rt.panelWaiter = undefined;
@@ -5036,7 +5039,7 @@ export class Runner {
     return clean;
   }
 
-  private catchUpHighlights(st: ThreadState): void {
+  catchUpHighlights(st: ThreadState): void {
     const state = (st.rec.highlights ??= emptyHighlights());
     const log = this.store.log(st.rec.id);
     if (state.seq >= log.lastSeq) return;
@@ -5050,7 +5053,7 @@ export class Runner {
     this.markDirty(st);
   }
 
-  private highlightsChanged(st: ThreadState): void {
+  highlightsChanged(st: ThreadState): void {
     // markDirty sends the summary, whose new highlightsAt tells clients
     // to fetch again.
     st.rec.highlightsAt = this.isoNow();
@@ -5062,7 +5065,7 @@ export class Runner {
   // the hook's `tell` says so (failures by default), to the agent as a
   // message from the runner, which starts a turn. A hook whose turn fails
   // the same way again is told HOOK_TELL_LIMIT times, then only posted.
-  private async runHooks(st: ThreadState, turn: Turn): Promise<void> {
+  async runHooks(st: ThreadState, turn: Turn): Promise<void> {
     const hooks = this.patchSet(st).hooks.filter((h) => h.on === 'turn.end' && hookApplies(h, turn.edited, st.rec.cwd));
     if (!hooks.length) return;
     st.rt.hooksRunning = (st.rt.hooksRunning ?? 0) + 1;
@@ -5074,7 +5077,7 @@ export class Runner {
     }
   }
 
-  private async runHookList(st: ThreadState, hooks: PatchSet['hooks']): Promise<void> {
+  async runHookList(st: ThreadState, hooks: PatchSet['hooks']): Promise<void> {
     for (const hook of hooks) {
       if (st.rt.deleted || this.stopping) return;
       const outcome = await runCommand(hook.command, {
@@ -5172,168 +5175,16 @@ export class Runner {
     }
   }
 
-  // ------------------------------------------------------------ worktrees
-  // A worktree per thread (docs/thread-worktrees.md, worktrees.ts).
-
-  // Whether a new thread in `cwd` might get a worktree: there's at least
-  // one patch file in its own folder chain to read.
-  private mayWantWorktree(cwd: string): boolean {
-    try {
-      return worktreePatchFiles(cwd, this.panelsRoot).length > 0;
-    } catch {
-      return false;
-    }
-  }
-
-  // Before a new thread's first turn: if its repo's patch asks for a
-  // worktree, makes one, moves the thread into it and runs the patch's
-  // setup there. Anything going wrong is said, and the thread starts
-  // where it was asked to.
-  private async prepareWorktree(st: ThreadState, turnId: string): Promise<void> {
-    const { rec, rt } = st;
-    delete rec.worktreePending;
-    this.markDirty(st);
-    // A session already ran in the folder (a turn that failed later, say):
-    // moving it now would leave that session behind.
-    if (rec.sessionUsed || rec.worktree) return;
-    let patch;
-    try {
-      patch = await findWorktreePatch(rec.cwd, this.panelsRoot, this.patchCache, undefined, this.patchTrust);
-    } catch (e) {
-      this.log.warn('could not read patches for a worktree', { threadId: rec.id, error: String(e) });
-      return;
-    }
-    if (!patch || rt.deleted) return;
-    const asked = rec.cwd;
-    const made = await makeWorktree({ cwd: asked, threadId: rec.id, patch });
-    if (rt.deleted) return;
-    if (!made.ok) {
-      this.log.warn('could not make a worktree', { threadId: rec.id, reason: made.reason });
-      this.emit(st, { type: 'system.note', text: `Couldn't make a worktree for this thread: ${made.reason}. It starts in ${asked} instead.` }, turnId);
-      return;
-    }
-    rec.worktree = made.worktree;
-    rec.cwd = made.cwd;
-    rec.updatedAt = this.isoNow();
-    this.markDirty(st);
-    this.log.info('made a worktree', { threadId: rec.id, path: made.worktree.path, branch: made.worktree.branch });
-    this.emit(st, { type: 'system.note', text: `Working in a worktree of its own at ${made.worktree.path}, on the branch ${made.worktree.branch}. tb land puts it on main.` }, turnId);
-    if (!patch.setup) return;
-    const outcome = await runCommand(patch.setup, {
-      cwd: made.worktree.path,
-      env: { ...process.env, ...threadEnv(rec.id, this.cfg.home) },
-      shell: this.actionShell,
-      timeoutMs: this.actionTimeoutMs,
-    });
-    if (rt.deleted) return;
-    const body: EventBody = {
-      type: 'action.run',
-      actionId: `${patch.patch}.worktree-setup`,
-      patch: patch.patch,
-      title: 'Set up the worktree',
-      command: patch.setup,
-      ok: outcome.ok,
-      text: outcome.text,
-      truncated: outcome.truncated,
-      durationMs: outcome.durationMs,
-      trigger: 'worktree.setup',
-    };
-    if (outcome.exitCode !== undefined) body.exitCode = outcome.exitCode;
-    this.emit(st, body, rt.turn?.turnId ?? turnId);
-    this.markDirty(st);
-  }
-
-  // A thread whose worktree was removed (it was archived with everything
-  // landed) and has now come back carries on in the main checkout. Returns
-  // a line for the agent, whose system prompt still names the worktree.
-  private leaveRemovedWorktree(st: ThreadState, turnId: string): string | undefined {
-    const { rec } = st;
-    const w = rec.worktree;
-    // A spare's folder is still there, but it's another thread's (or will
-    // be), so the thread never carries on in it.
-    if (!w?.removedAt || !isInside(rec.cwd, w.path) || (!w.spare && isDirectory(rec.cwd))) return undefined;
-    const from = rec.cwd;
-    const to = sameSubfolder(from, w.path, w.mainCheckout);
-    if (rec.sessionUsed) {
-      if (this.adapters[rec.provider]?.movesFolders) rec.moved ??= { fromCwd: from };
-      else rec.handoff ??= { fromCwd: from, fromAccountId: rec.accountId };
-    }
-    rec.cwd = to;
-    rec.updatedAt = this.isoNow();
-    this.markDirty(st);
-    this.tellActivity({ kind: 'moved', threadId: rec.id, from, to });
-    const went = w.spare ? 'was handed on to other threads' : 'was removed';
-    this.emit(st, { type: 'system.note', text: `This thread's worktree ${went} when it was archived, so it carries on in the main checkout, ${to}.` }, turnId);
-    return `[Threadbear] Your worktree at ${w.path} ${went} after its work landed on main. You're now in the main checkout, ${to}, which other threads share: stage your own files by name.`;
-  }
-
-  // The Land chip, for a thread with a worktree of its own.
-  private worktreeAction(rec: ThreadRecord): Action | undefined {
-    const w = rec.worktree;
-    if (!w || w.removedAt) return undefined;
-    // This runner's own tb, in full: a login shell's PATH may not have it.
-    const tb = path.join(BIN_DIR, 'tb');
-    const quoted = /^[\w./-]+$/.test(tb) ? tb : `'${tb.replace(/'/g, `'\\''`)}'`;
-    return {
-      id: 'worktree.land',
-      title: 'Land',
-      kind: 'command',
-      command: `${quoted} land`,
-      patch: 'worktree',
-      note: `Rebase ${w.branch} on main, run the check, then move main to it`,
-    };
-  }
-
-  private actionsOf(st: ThreadState, set: PatchSet): Action[] {
-    const land = this.worktreeAction(st.rec);
-    return land ? [...set.actions, land] : set.actions;
-  }
-
-  // When the thread is archived or deleted: its worktree and branch go if
-  // everything on them is on main; otherwise they stay, and the thread (or,
-  // once it's deleted, a notice) says so and how to land or drop them.
-  private async cleanUpWorktree(st: ThreadState, deleted = false): Promise<void> {
-    const { rec } = st;
-    const w = rec.worktree;
-    if (!w || w.removedAt) return;
-    let result;
-    try {
-      result = await cleanUpWorktree(w);
-    } catch (e) {
-      result = { removed: false as const, reason: String((e as Error).message ?? e) };
-    }
-    this.log.info('worktree cleanup', { threadId: rec.id, path: w.path, ...result });
-    if (result.removed) {
-      w.removedAt = this.isoNow();
-      if ('spare' in result && result.spare) w.spare = true;
-      if (deleted) return;
-      const text = w.spare
-        ? `Deleted this thread's branch ${w.branch} (everything on it is on main) and kept its worktree, build caches and all, for the next thread.`
-        : `Removed this thread's worktree and its branch ${w.branch}: everything on it is on main.`;
-      this.emit(st, { type: 'system.note', text });
-      this.markDirty(st);
-      return;
-    }
-    const how =
-      `To land it, run tb land in ${w.path}${deleted ? '' : ' (or bring the thread back and press Land)'}. ` +
-      `To drop it, git -C ${w.mainCheckout} worktree remove --force ${w.path} && git -C ${w.mainCheckout} branch -D ${w.branch}.`;
-    if (deleted) {
-      this.notice('info', `"${rec.title}" was deleted, but its worktree at ${w.path} and branch ${w.branch} stay: ${result.reason}. ${how}`);
-      return;
-    }
-    this.emit(st, { type: 'system.note', text: `This thread's worktree at ${w.path} and its branch ${w.branch} stay: ${result.reason}. ${how}` });
-    this.markDirty(st);
-  }
 
   // A thread by full id or unique prefix, for titles; undefined if unclear.
-  private findThread(q: string): ThreadSummary | undefined {
+  findThread(q: string): ThreadSummary | undefined {
     const exact = this.threads.get(q);
     if (exact) return this.summary(exact);
     const hits = [...this.threads.values()].filter((t) => t.rec.id.startsWith(q));
     return hits.length === 1 ? this.summary(hits[0]) : undefined;
   }
 
-  private mustGet(threadId: string): ThreadState {
+  mustGet(threadId: string): ThreadState {
     const st = typeof threadId === 'string' ? this.threads.get(threadId) : undefined;
     if (!st) throw new RpcError(ErrorCode.threadNotFound, `Thread not found: ${threadId}`);
     return st;
@@ -5342,7 +5193,7 @@ export class Runner {
   // The pool named last is where a new thread with nothing named starts
   // (runner.json's defaults.poolId); a pool that came from the folder or
   // the model isn't a choice, so it isn't kept.
-  private rememberPool(poolId: string): void {
+  rememberPool(poolId: string): void {
     try {
       const json = readRunnerJson(this.cfg.home);
       if (json.defaults?.poolId === poolId) return;
@@ -5353,7 +5204,7 @@ export class Runner {
     }
   }
 
-  private rememberAccount(accountId: string): void {
+  rememberAccount(accountId: string): void {
     try {
       const json = readRunnerJson(this.cfg.home);
       // keepAccount pins the default (a dev runner's claude-3): using
@@ -5369,7 +5220,7 @@ export class Runner {
   // What a starting session is told about the thread's projects. Only a
   // fresh session: Claude Code keeps a resumed session's system prompt and
   // ignores an appended one, so a resume hears through projectNews.
-  private briefFor(rec: ThreadRecord, resume: boolean): { instructions?: string } {
+  briefFor(rec: ThreadRecord, resume: boolean): { instructions?: string } {
     if (resume) return {};
     const parts: string[] = [];
     if (this.projects) {
@@ -5385,7 +5236,7 @@ export class Runner {
   // The thread's projects its session hasn't been told about, as lines to
   // put before its next message, or undefined. A thread whose session
   // predates projects (never told anything) gets the whole brief.
-  private projectNews(rec: ThreadRecord): string | undefined {
+  projectNews(rec: ThreadRecord): string | undefined {
     if (!this.projects) return undefined;
     const ids = this.projects.briefIds(rec);
     const told = rec.projectsTold;
@@ -5397,7 +5248,7 @@ export class Runner {
 
   // A short note that gives a new native session the gist of the thread so
   // far, used when the folder or account changes.
-  private handoffNote(st: ThreadState, account: Account): string {
+  handoffNote(st: ThreadState, account: Account): string {
     const { rec } = st;
     const from = rec.handoff!;
     const log = this.store.log(rec.id);
@@ -5439,7 +5290,7 @@ export class Runner {
     );
   }
 
-  private isoNow(): string {
+  isoNow(): string {
     return new Date(this.clock.now()).toISOString();
   }
 
@@ -5463,7 +5314,7 @@ export class Runner {
   // Threads from before `asked` (3 Nov 2026) learn it from the end of
   // their log, once. Only the inbox's and hibernating ones: an archived
   // thread's row doesn't show it, and there can be thousands of those.
-  private backfillAsked(rec: ThreadRecord): void {
+  backfillAsked(rec: ThreadRecord): void {
     const log = this.store.log(rec.id);
     const events = log.read(Math.max(1, log.lastSeq - 300), log.lastSeq);
     for (let i = events.length - 1; i >= 0; i--) {
@@ -5501,6 +5352,14 @@ export class Runner {
     this.emit(st, { type: 'system.note', text });
     this.markDirty(st);
     if (archive && !st.rt.turn && !st.rec.archivedAt && this.opening(threadId).text === undefined) this.update({ threadId, archived: true });
+  }
+}
+
+// The Runner's other methods live in parts under runner/, one area each;
+// they go onto its prototype here, as the class's own methods would be.
+for (const part of [worktreesPart]) {
+  for (const [key, d] of Object.entries(Object.getOwnPropertyDescriptors(part))) {
+    Object.defineProperty(Runner.prototype, key, { ...d, enumerable: false });
   }
 }
 
