@@ -250,7 +250,9 @@ export function buildThreadbearTools(
 
   const scheduleLine = async (sc: Schedule): Promise<string> => {
     const state = sc.finishedAt ? 'done' : sc.paused ? 'paused' : sc.nextRunAt ? `next ${relativeFuture(sc.nextRunAt, now())} (${sc.nextRunAt})` : 'no more runs';
-    const target = sc.threadId ? (sc.threadId === selfId ? 'this thread' : `thread ${sc.threadId.slice(0, 8)} ${await titleOf(sc.threadId)}`) : `a new thread in ${sc.cwd ?? 'its default folder'}`;
+    // A new-thread one says what it runs on, so a change to it shows.
+    const on = [sc.accountId, sc.model, sc.effort, sc.permissionMode && sc.permissionMode !== 'full' ? sc.permissionMode : undefined].filter(Boolean).join(', ');
+    const target = sc.threadId ? (sc.threadId === selfId ? 'this thread' : `thread ${sc.threadId.slice(0, 8)} ${await titleOf(sc.threadId)}`) : `a new thread in ${sc.cwd ?? 'its default folder'}${on ? ` (${on})` : ''}`;
     const last = sc.lastRun && sc.lastRun.outcome !== 'sent' ? `; last run ${sc.lastRun.outcome}: ${sc.lastRun.note ?? ''}` : '';
     const where = sc.runnerName ? ` on ${sc.runnerName}` : '';
     return `${sc.id.slice(0, 8)}  ${sc.title}  [${sc.whenText}; ${state}${last}]  to ${target}${where}`;
@@ -462,7 +464,7 @@ export function buildThreadbearTools(
     ),
     tool(
       'update_schedule',
-      'Changes a schedule: its message, title or time, or pauses and resumes it. Setting when makes it a one-off, setting cron makes it repeat.',
+      'Changes a schedule: its message, title or time, or pauses and resumes it. Setting when makes it a one-off, setting cron makes it repeat. A new_thread one also takes schedule_message\'s folder, account, model, effort and permissionMode (null model or effort: the default).',
       {
         scheduleId: z.string().describe('Schedule id or a unique prefix (list_schedules shows them).'),
         text: z.string().optional(),
@@ -471,16 +473,33 @@ export function buildThreadbearTools(
         cron: z.string().optional().describe('Repeating: a 5-field cron.'),
         timezone: z.string().nullable().optional().describe("IANA zone for the cron, or null for the Mac's."),
         paused: z.boolean().optional(),
+        folder: z.string().optional(),
+        account: z.string().optional(),
+        model: z.string().nullable().optional(),
+        effort: effortEnum.nullable().optional(),
+        permissionMode: z.enum(['full', 'ask', 'auto']).optional(),
       },
-      handle(async ({ scheduleId, text, title, when, cron, timezone, paused }) => {
-        const sc = await mustSchedules().update({
-          scheduleId,
+      handle(async ({ scheduleId, text, title, when, cron, timezone, paused, folder: f, account: acc, model, effort, permissionMode }) => {
+        const s = mustSchedules();
+        const current = await s.find(scheduleId);
+        // A schedule on another runner checks its account there, so a login
+        // this Mac doesn't have goes as given. (In the backend every
+        // schedule has a runnerId; the Scheduler still checks this
+        // runner's own.)
+        const accountId = acc === undefined ? undefined : current.runnerId ? await account(acc).catch(() => acc) : await account(acc);
+        const sc = await s.update({
+          scheduleId: current.id,
           text,
           title,
           at: when === undefined ? undefined : parseWhen(when, now()),
           cron,
           timezone,
           paused,
+          cwd: f === undefined ? undefined : await folder(f),
+          accountId,
+          model,
+          effort,
+          permissionMode,
         });
         return await scheduleLine(sc);
       }),

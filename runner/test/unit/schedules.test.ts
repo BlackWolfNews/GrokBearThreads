@@ -291,7 +291,22 @@ test('agents schedule messages to their own thread by default', async () => {
   assert.match(daily.text, /Every day at 8:00; next in 20h .*to a new thread in /);
   assert.match((await call('list_schedules', {})).text, /Look at CI again[\s\S]*Morning summary/);
 
+  // A new-thread schedule's account, model and folder can move (the
+  // standup that needed the login with Slack, 5 Nov); a thread's can't.
+  const dailyId = sched.list().find((x) => x.title === 'Morning summary')!.id;
+  const moved = await call('update_schedule', { scheduleId: dailyId.slice(0, 8), account: 'claude-3', model: 'opus', effort: 'high', permissionMode: 'ask', folder: '..' });
+  assert.equal(moved.error, false, moved.text);
+  assert.match(moved.text, /\(claude-3, opus, high, ask\)/);
+  const after = await sched.find(dailyId);
+  assert.deepEqual([after.accountId, after.model, after.effort, after.permissionMode, after.cwd], ['claude-3', 'opus', 'high', 'ask', path.dirname(thread.cwd)]);
+  await call('update_schedule', { scheduleId: dailyId, model: null, effort: null });
+  assert.deepEqual([(await sched.find(dailyId)).model, (await sched.find(dailyId)).effort], [undefined, undefined]);
+  assert.match((await call('update_schedule', { scheduleId: dailyId, account: 'nobody' })).text, /No account nobody/);
+
   const id = sched.list()[0].id.slice(0, 8);
+  const refused = await call('update_schedule', { scheduleId: id, account: 'claude-3' });
+  assert.equal(refused.error, true);
+  assert.match(refused.text, /sends to a thread/);
   assert.match((await call('update_schedule', { scheduleId: id, paused: true })).text, /paused/);
   assert.match((await call('delete_schedule', { scheduleId: id })).text, /Deleted the schedule "Look at CI again"/);
   h.clock.advance(30 * MIN);

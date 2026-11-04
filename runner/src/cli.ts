@@ -23,6 +23,8 @@ const OPTIONS = {
   effort: { type: 'string' },
   ask: { type: 'boolean' },
   auto: { type: 'boolean' },
+  full: { type: 'boolean' },
+  text: { type: 'string' },
   image: { type: 'string', multiple: true },
   wait: { type: 'boolean' },
   json: { type: 'boolean' },
@@ -96,6 +98,10 @@ const HELP = `tb: talk to the Threadbear runner
                                   or an ISO time) or on a cron; to a thread with --thread,
                                   otherwise to a new thread each time
   tb schedules [--json]           tb schedules run|pause|resume|delete <scheduleId>
+  tb schedules update <scheduleId> [--text T] [--title T] [--at WHEN | --cron C] [--tz ZONE]
+              [--cwd DIR] [--account ID] [--model M] [--effort L] [--ask | --auto | --full]
+                                  changes a schedule; folder, account, model, effort and
+                                  access only for one that starts a new thread
   tb projects [--archived] [--json]  the projects, their folders and thread counts
   tb projects show <project>      one project: goals, state, notes, threads
   tb projects add|remove <threadId> <project>   puts a thread in a project or takes it out, as the user would
@@ -140,7 +146,7 @@ const COMMAND_FLAGS: Record<string, string[]> = {
   accounts: ['json'],
   pools: ['json'],
   schedule: ['at', 'cron', 'tz', 'title', 'thread', 'cwd', 'account', 'model', 'effort', 'ask', 'auto', 'json'],
-  schedules: ['json'],
+  schedules: ['json', 'text', 'title', 'at', 'cron', 'tz', 'cwd', 'account', 'model', 'effort', 'ask', 'auto', 'full'],
   projects: ['json', 'archived'],
   librarian: ['json'],
   settings: ['json'],
@@ -552,7 +558,28 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
         console.log(`sent to ${r.threadId}`);
         return 0;
       }
-      if (action !== 'pause' && action !== 'resume') throw new Error(`Unknown: tb schedules ${action}. It's run, pause, resume or delete.`);
+      if (action === 'update') {
+        const params: Record<string, unknown> = { scheduleId: id };
+        if (f.text !== undefined) params.text = f.text;
+        if (f.title !== undefined) params.title = f.title;
+        if (f.at) params.at = parseLater(String(f.at), Date.now());
+        if (f.cron) params.cron = f.cron;
+        if (f.tz !== undefined) params.timezone = f.tz || null;
+        if (f.cwd) params.cwd = path.resolve(String(f.cwd));
+        if (f.account) params.accountId = f.account;
+        if (f.model !== undefined) params.model = f.model || null;
+        if (f.effort !== undefined) params.effort = f.effort || null;
+        if ([f.ask, f.auto, f.full].filter(Boolean).length > 1) throw new Error('Give one of --ask, --auto and --full.');
+        if (f.ask) params.permissionMode = 'ask';
+        else if (f.auto) params.permissionMode = 'auto';
+        else if (f.full) params.permissionMode = 'full';
+        if (Object.keys(params).length === 1) throw new Error('Nothing to change. tb schedules update <scheduleId> --account claude-2 (tb --help lists the rest)');
+        const r = await client.call<{ schedule: Schedule }>('schedules.update', params);
+        if (f.json) console.log(JSON.stringify(r.schedule));
+        else printSchedules([r.schedule]);
+        return 0;
+      }
+      if (action !== 'pause' && action !== 'resume') throw new Error(`Unknown: tb schedules ${action}. It's update, run, pause, resume or delete.`);
       const r = await client.call<{ schedule: Schedule }>('schedules.update', { scheduleId: id, paused: action === 'pause' });
       printSchedules([r.schedule]);
       return 0;
@@ -740,7 +767,8 @@ function parseWhen(s: string): string {
 function printSchedules(list: Schedule[]): void {
   for (const sc of list) {
     const state = sc.finishedAt ? 'done' : sc.paused ? 'paused' : sc.nextRunAt ? `next ${relativeFuture(sc.nextRunAt, Date.now())}` : 'no more runs';
-    const target = sc.threadId ? `thread ${sc.threadId.slice(0, 8)}` : `new thread in ${sc.cwd}`;
+    const on = [sc.accountId, sc.model, sc.effort].filter(Boolean).join(', ');
+    const target = sc.threadId ? `thread ${sc.threadId.slice(0, 8)}` : `new thread in ${sc.cwd}${on ? ` (${on})` : ''}`;
     const last = sc.lastRun && sc.lastRun.outcome !== 'sent' ? `  (last run ${sc.lastRun.outcome}: ${sc.lastRun.note ?? ''})` : '';
     console.log(`${sc.id.slice(0, 8)}  ${sc.title}  [${sc.whenText}, ${state}]  ${target}${last}`);
   }
