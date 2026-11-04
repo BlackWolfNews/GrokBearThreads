@@ -56,3 +56,7 @@ merges it with your changes and asks before it lands
   for how it all works.
 - `docs/forking.md` for taking features out of your copy, or shipping your
   own build (what's Mike's: bundle ids, keys, Sentry, the push relay).
+
+## Licence
+
+MIT, see [LICENSE](LICENSE). The fonts and icons under `site/` keep their own licences, beside them.

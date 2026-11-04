@@ -4,12 +4,9 @@
      follows docs/convex-backend.md, docs/website.md, ios/README.md and the iPhone app itself
      (ios/Threadbear: AppModel.swift for pairing and push, QuickAsk/, QRScanner.swift,
      PrivacyInfo.xcprivacy). The App Store listing links here (ios/appstore/metadata.json).
-     NOT BUILT: "your own Convex deployment" assumes the install sets one up in your account.
+     ./threadbear setup makes the user's own Convex deployment (scripts/setup.mjs).
      Notifications: since 28 Oct a deployment without its own Apple key goes through the push
-     relay (docs/push-relay.md), sealed with the phone's own key from the version after 1.0.
-     Before that: in 1.0 the phone's pushes go straight from the deployment it's paired with
-     (convex/push.ts, with Mike's push key). The relay in docs/setup-and-updates.md 2.4 comes
-     later; when it does, say here what it sees (an encrypted message and a device token). -->
+     relay (docs/push-relay.md), sealed with the phone's own key from the version after 1.0. -->
     <article class="legal">
       <h1>Privacy</h1>
       <p class="lede">The short version: I don't collect anything about you, apart from anonymous crash reports. Your threads stay on your Mac and in a Convex deployment that's yours.</p>

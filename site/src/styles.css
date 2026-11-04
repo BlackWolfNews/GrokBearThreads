@@ -311,6 +311,12 @@ a.appstore:active { transform: scale(.98); }
 }
 .step h3 { font-size: 20px; line-height: 28px; font-weight: 600; }
 .step p { font-size: 16px; line-height: 24px; color: var(--body); margin-top: var(--s-75); }
+/* The README's agent prompt, under the steps, as wide as they are. */
+.agent-install { margin-top: var(--s-400); }
+.agent-install > p { max-width: 680px; font-size: 16px; line-height: 24px; color: var(--body); margin-bottom: var(--s-200); }
+.code.wide { width: 100%; margin: 0; }
+.code.wide pre code { font-size: 14px; line-height: 20px; }
+.code.wide pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* proof */
 .quote { background: var(--card); border-radius: var(--r-3xl); box-shadow: var(--lift); padding: var(--s-600); }
