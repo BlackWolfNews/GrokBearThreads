@@ -1517,10 +1517,13 @@ idea why it exists. `ThreadSummary.startedBy` says who did; his own threads
 | `librarian` | "Librarian" | the librarian's fix threads, which it no longer starts (see No fix threads); older threads keep it. `threadId` and `threadTitle` name the thread Mike said it in |
 | `runner` | "Threadbear" | a notice from the runner itself, such as a dialog left on a Mac's screen |
 
-`why` is a few words the row shows after the label: why it was started, from
-the starter, until an `end_turn` with `byline` replaces it with how it came
-out. A `byline` in a thread with no `startedBy` is dropped. With no `why` the
-row shows its usual project or folder after the label. Threads from before
+The row marks such a thread with the kind's symbol (the tool's `icon`) before
+its project or folder, which every row names, and the symbol's tooltip says
+who started it and `why` ("Started by Sentry (network blip, sorted)"); on the
+phone that's its VoiceOver label. Until 4 Nov the line itself read "label ·
+why"; Mike wanted the project back. `why` is a few words: why it was started,
+from the starter, until an `end_turn` with `byline` replaces it with how it
+came out. A `byline` in a thread with no `startedBy` is dropped. Threads from before
 this have none, and `tb new` outside a thread with no flags could be Mike at
 a terminal, so it has none either. Mirrored to the phone's row from backend
 API 22, and to another runner's sidebar row on a Mac from API 23.
@@ -1535,13 +1538,12 @@ is his notes, joined, or "Picked <option title>" when he left none. It's
 absent until he's sent something. A thread from a runner before it learns
 it from the last 300 events of its log when the runner starts, unless it's
 archived. The Mac app's sidebar shows it as the tooltip of the line under a
-thread's title ("You: ..."). That line itself is the thread's `preview`,
-what its last turn came to, or its projects or folder until it has one;
-Mike tried `asked` there for an afternoon (3 Nov) and didn't like it. A
-thread someone else started keeps its byline. A thread's row in the
-backend carries `asked` too, from API 31, and so does a `threadIndex` row,
-from API 32, so a Mac's tooltip has it for another runner's threads. The
-phone's rows show the preview the same way, with no tooltip.
+thread's title ("You: ..."). That line names the thread's projects or
+folder: Mike tried `asked` there (3 Nov), then the thread's `preview`, and
+went back to the project on 4 Nov. A thread's row in the backend carries
+`asked` too, from API 31, and so does a `threadIndex` row, from API 32, so
+a Mac's tooltip has it for another runner's threads. The phone doesn't
+show it.
 
 ## Needs you
 

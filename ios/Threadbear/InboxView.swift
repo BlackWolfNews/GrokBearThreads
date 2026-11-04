@@ -422,10 +422,11 @@ struct ThreadRow: View {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     HStack(alignment: .firstTextBaseline, spacing: 4) {
                         if let startedBy = thread.startedBy {
-                            // Mike didn't start it; the words say who did.
+                            // Mike didn't start it: the mark alone says so,
+                            // before the place every row names.
                             Image(systemName: UIImage(systemName: startedBy.symbol) == nil ? "wrench.and.screwdriver" : startedBy.symbol)
                                 .font(.footnote)
-                                .accessibilityHidden(true)
+                                .accessibilityLabel(thread.bylineText ?? startedBy.label)
                         }
                         Text(line2)
                             .font(.subheadline)
@@ -454,7 +455,7 @@ struct ThreadRow: View {
     private var emphasised: Bool { thread.needsYou || RowStatus.kind(thread) == .needsYou || done }
 
     private var line2: String {
-        var parts = [thread.bylineText ?? thread.resultText]
+        var parts = [thread.placeText]
         if let runner = model.runnerName(thread.runnerId) { parts.append(runner) }
         if let working = thread.working, thread.isBusy || (thread.pendingApproval == nil && !thread.waitingOnMike) { parts.append(working) }
         return parts.joined(separator: " · ")

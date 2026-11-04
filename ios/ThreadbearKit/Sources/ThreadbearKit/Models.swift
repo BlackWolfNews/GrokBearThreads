@@ -333,20 +333,15 @@ public struct PhoneThread: Codable, Sendable, Hashable, Identifiable {
         return folderName
     }
 
-    /// Line 2 of the row of a thread Mike started: what it came to (the
-    /// preview: the last turn's headline), as on the Mac sidebar, else its
-    /// place.
-    public var resultText: String {
-        let plain = PreviewText.plain(preview)
-        return plain.isEmpty ? placeText : plain
-    }
-
-    /// Line 2 of the row of a thread Mike didn't start: who did, and why or
-    /// how it came out, as on the Mac sidebar. Nil for his own.
+    /// Who started a thread Mike didn't, and why, for VoiceOver on the
+    /// symbol before its place (the Mac has it as the symbol's tooltip).
+    /// Line 2 used to spell this out; since 4 Nov every row names its place
+    /// and only the symbol marks a tool or agent's thread. Nil for his own.
     public var bylineText: String? {
         guard let startedBy else { return nil }
-        let rest = startedBy.why.flatMap { $0.isEmpty ? nil : $0 } ?? placeText
-        return startedBy.label + " · " + rest
+        let who = "Started by " + startedBy.label
+        guard let why = startedBy.why, !why.isEmpty else { return who }
+        return who + " (" + why + ")"
     }
 }
 

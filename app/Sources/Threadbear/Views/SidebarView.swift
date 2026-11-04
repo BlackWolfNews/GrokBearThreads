@@ -655,8 +655,8 @@ struct ThreadRowView: View {
                 HStack(alignment: .firstTextBaseline, spacing: zoomed(6)) {
                     HStack(alignment: .firstTextBaseline, spacing: zoomed(4)) {
                         if let byline = ThreadByline.line(thread, under: heading) {
-                            // Mike didn't start it: who did, and why, in
-                            // place of the project the tile already shows.
+                            // Mike didn't start it: a mark for who did
+                            // (who and why in its tip), then the place.
                             // A tool's symbol may not exist on this macOS.
                             Image(systemName: NSImage(systemSymbolName: byline.symbol, accessibilityDescription: nil) == nil ? ThreadByline.toolSymbol : byline.symbol)
                                 .font(.system(size: TypeScale.sidebarMeta))
@@ -666,7 +666,7 @@ struct ThreadRowView: View {
                                 .font(.system(size: TypeScale.sidebarMeta + 1))
                                 .lineLimit(1)
                         } else {
-                            Text(ProjectMark.line(thread, under: heading))
+                            Text(ProjectMark.place(thread, under: heading))
                                 .font(.system(size: TypeScale.sidebarMeta + 1))
                                 .lineLimit(1)
                                 .tip(ProjectMark.lineTip(thread, under: heading))

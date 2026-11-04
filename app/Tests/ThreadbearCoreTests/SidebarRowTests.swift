@@ -186,14 +186,8 @@ final class SidebarRowTests: XCTestCase {
         XCTAssertEqual(ProjectMark.place(thread, under: "a"), "misc")
     }
 
-    func testRowLineIsWhatItCameToWithWhatMikeAskedAsItsTip() throws {
+    func testRowLineIsThePlaceWithWhatMikeAskedAsItsTip() throws {
         var thread = ThreadSummary(id: "t", title: "t", cwd: "/Users/mike/dev/me/misc")
-        XCTAssertEqual(ProjectMark.line(thread), "misc", "nothing to say yet: the folder")
-        XCTAssertEqual(ProjectMark.lineTip(thread), "misc")
-        thread.preview = "GPU route 3x faster"
-        XCTAssertEqual(ProjectMark.line(thread), "GPU route 3x faster")
-        thread.preview = "## 0.4 - **Uploads** resume"
-        XCTAssertEqual(ProjectMark.line(thread), "0.4 - Uploads resume", "a reply's markdown reads as plain words")
         XCTAssertEqual(ProjectMark.lineTip(thread), "misc", "nothing asked: the tip names the place")
         thread.asked = "try the GPU route"
         XCTAssertEqual(ProjectMark.lineTip(thread), "You: try the GPU route")
@@ -263,19 +257,18 @@ final class DockBadgeTests: XCTestCase {
         XCTAssertNil(DockBadge.label(needsYou: 0))
     }
 
-    func testAThreadMikeDidNotStartSaysWhoDidInPlaceOfItsProject() {
+    func testAThreadMikeDidNotStartIsMarkedAndStillNamesItsPlace() {
         var thread = ThreadSummary(id: "t", title: "t", cwd: "/x/misc", status: .idle)
         XCTAssertNil(ThreadByline.line(thread), "his own row doesn't change")
 
         thread.startedBy = ThreadStartedBy(kind: "tool", label: "Sentry", icon: "ladybug", why: "1 event, 0 users")
-        XCTAssertEqual(ThreadByline.line(thread), .init(symbol: "ladybug", text: "Sentry · 1 event, 0 users", tip: "Started by Sentry"))
+        XCTAssertEqual(ThreadByline.line(thread), .init(symbol: "ladybug", text: "misc", tip: "Started by Sentry (1 event, 0 users)"))
 
-        // With nothing to say why, the place it would have shown.
         thread.startedBy = ThreadStartedBy(kind: "thread", label: "Agent", threadTitle: "Poddle fix")
-        XCTAssertEqual(ThreadByline.line(thread), .init(symbol: "pawprint", text: "Agent · misc", tip: "Started by another thread: Poddle fix"))
+        XCTAssertEqual(ThreadByline.line(thread), .init(symbol: "pawprint", text: "misc", tip: "Started by another thread: Poddle fix"))
 
         thread.startedBy = ThreadStartedBy(kind: "librarian", label: "Librarian", why: "")
-        XCTAssertEqual(ThreadByline.line(thread)?.text, "Librarian · misc")
+        XCTAssertEqual(ThreadByline.line(thread)?.tip, "Started by the librarian", "an empty why adds nothing")
 
         // A tool with no symbol, and a kind from a newer runner.
         thread.startedBy = ThreadStartedBy(kind: "someday", label: "Thing")
@@ -284,7 +277,7 @@ final class DockBadgeTests: XCTestCase {
         // A schedule's thread from before startedBy.
         thread.startedBy = nil
         thread.schedule = ThreadSchedule(id: "s", title: "Nightly")
-        XCTAssertEqual(ThreadByline.line(thread), .init(symbol: "clock", text: "Schedule · misc", tip: "Started by Schedule"))
+        XCTAssertEqual(ThreadByline.line(thread), .init(symbol: "clock", text: "misc", tip: "Started by Schedule"))
     }
 
     func testStartedByDecodesFromTheRunnerAndABadOneIsIgnored() throws {

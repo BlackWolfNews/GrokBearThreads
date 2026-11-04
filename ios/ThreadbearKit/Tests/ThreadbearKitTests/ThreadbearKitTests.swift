@@ -610,21 +610,12 @@ private func properties(of data: Data) -> [CFString: Any] {
     #expect(mine != nil)
     #expect(mine?.bylineText == nil)
     let sentry = try? decoder.decode(PhoneThread.self, from: Data(json(#","startedBy":{"kind":"tool","label":"Sentry","icon":"ladybug","why":"1 event"}"#).utf8))
-    #expect(sentry?.bylineText == "Sentry · 1 event")
+    #expect(sentry?.bylineText == "Started by Sentry (1 event)")
+    #expect(sentry?.placeText == "misc", "the line names its place, as Mike's own do")
     #expect(sentry?.startedBy?.symbol == "ladybug")
     let agent = try? decoder.decode(PhoneThread.self, from: Data(json(#","startedBy":{"kind":"thread","label":"Agent"}"#).utf8))
-    #expect(agent?.bylineText == "Agent · misc")
+    #expect(agent?.bylineText == "Started by Agent")
     #expect(agent?.startedBy?.symbol == "pawprint")
-}
-
-@Test func aRowSaysWhatTheThreadCameTo() {
-    let json = { (preview: String) in
-        #"{"threadId":"t","runnerId":"r","title":"t","cwd":"/x/misc","accountId":"a","provider":"claude","status":"idle","needsYou":false,"unread":false,"preview":"\#(preview)","createdAt":"2026-11-01T00:00:00.000Z","lastActivityAt":"2026-11-01T00:00:00.000Z","asked":"try it"}"#
-    }
-    let none = try? JSONDecoder().decode(PhoneThread.self, from: Data(json("").utf8))
-    #expect(none?.resultText == "misc", "nothing to say yet: the place")
-    let done = try? JSONDecoder().decode(PhoneThread.self, from: Data(json("GPU route 3x faster").utf8))
-    #expect(done?.resultText == "GPU route 3x faster")
 }
 
 @Test func aThreadsLinkButtonsOnlyOpenWebPages() throws {

@@ -229,10 +229,11 @@ public enum AccountName {
     }
 }
 
-/// The line under the title of a thread Mike didn't start, in place of its
-/// project (the tile shows that): who started it and, in a few words, why or
-/// how it came out. He has none of the reasoning behind these threads, so the
-/// row has to give it (1 Nov). Nil for his own threads, whose rows don't change.
+/// The line under the title of a thread Mike didn't start: a symbol for who
+/// started it, then its place, as his own threads' rows have. Who and why
+/// are the symbol's tooltip. From 1 Nov the line spelled out "Sentry · 1
+/// event"; on 4 Nov Mike wanted every row back to naming its project, with
+/// only a mark to say a tool or agent started it. Nil for his own threads.
 public enum ThreadByline {
     public struct Line: Sendable, Equatable {
         public var symbol: String
@@ -246,8 +247,7 @@ public enum ThreadByline {
         // A schedule's thread from before startedBy still says it's one.
         let started = thread.startedBy ?? thread.schedule.map { _ in ThreadStartedBy(kind: "schedule", label: "Schedule") }
         guard let started else { return nil }
-        let rest = started.why.flatMap { $0.isEmpty ? nil : $0 } ?? ProjectMark.place(thread, under: heading)
-        return Line(symbol: symbol(started), text: started.label + " · " + rest, tip: tip(started))
+        return Line(symbol: symbol(started), text: ProjectMark.place(thread, under: heading), tip: tip(started))
     }
 
     static func symbol(_ started: ThreadStartedBy) -> String {
@@ -262,11 +262,15 @@ public enum ThreadByline {
 
     static func tip(_ started: ThreadStartedBy) -> String {
         let from = started.threadTitle.flatMap { $0.isEmpty ? nil : $0 }
+        let who: String
         switch started.kind {
-        case "thread": return from.map { "Started by another thread: \($0)" } ?? "Started by another thread"
-        case "librarian": return from.map { "Started by the librarian, from: \($0)" } ?? "Started by the librarian"
-        default: return "Started by \(started.label)"
+        case "thread": who = from.map { "Started by another thread: \($0)" } ?? "Started by another thread"
+        case "librarian": who = from.map { "Started by the librarian, from: \($0)" } ?? "Started by the librarian"
+        default: who = "Started by \(started.label)"
         }
+        // The why left the row's line for here.
+        guard let why = started.why, !why.isEmpty else { return who }
+        return who + " (" + why + ")"
     }
 }
 
@@ -288,19 +292,11 @@ public enum ProjectMark {
         return projects.map { title($0) }.joined(separator: ", ")
     }
 
-    /// The line under the title of a thread Mike started: what it came to,
-    /// the preview (the last turn's end_turn headline, else its reply's
-    /// first line; while a turn runs, the agent's latest words). Its place
-    /// until it has one. The tile still shows the project, so the place
-    /// said it twice. Mike picked this on 3 Nov, after trying "You: <his
-    /// last message>" and not liking it.
-    public static func line(_ thread: ThreadSummary, under heading: String? = nil) -> String {
-        let preview = PreviewText.plain(thread.preview)
-        return preview.isEmpty ? place(thread, under: heading) : preview
-    }
-
-    /// That line's tooltip: what Mike last said to it ("You: try the GPU
-    /// route"), else the place, which the line no longer names.
+    /// The place line's tooltip on a thread Mike started: what he last said
+    /// to it ("You: try the GPU route"), else the place again. The line
+    /// itself went back to the place on 4 Nov: Mike tried "You: <his last
+    /// message>" and then the thread's latest headline there (3 Nov), and
+    /// liked neither.
     public static func lineTip(_ thread: ThreadSummary, under heading: String? = nil) -> String {
         guard let asked = thread.asked, !asked.isEmpty else { return place(thread, under: heading) }
         return "You: " + asked

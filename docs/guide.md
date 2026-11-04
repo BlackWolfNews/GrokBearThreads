@@ -59,17 +59,15 @@ ones opened. The x clears it.
 
 ### What a row tells you
 
-Each row has the thread's title, with what it came to under it: the
-agent's one line at the end of its last turn, like "1.0.7 in App Review,
-manual release" (while it's working, its latest words). Hover the line to
-see the last thing you said to it. The tile before the title shows its
-project, and until the thread has anything to say the line names its
-project or folder instead. Your phone's list shows the same line. A title in bold
-needs you or has a reply you haven't read.
+Each row has the thread's title, with its project under it (or its folder,
+when it's in none). Hover that line to see the last thing you said to it.
+The tile before the title shows the project too. Your phone's list shows the
+same line. A title in bold needs you or has a reply you haven't read.
 
-A thread you didn't start says who did instead of its project: a tool such
-as Sentry, a schedule, another thread's agent or the librarian, with a few
-words on why it exists or how it came out ("Sentry · network blip, sorted").
+A thread you didn't start has a small mark before its project: a ladybug
+or other tool symbol for a tool such as Sentry, a clock for a schedule, a
+pawprint for another thread's agent, books for the librarian. Hover the mark
+to see who started it and why.
 
 Before the title, in the gap at the left:
 

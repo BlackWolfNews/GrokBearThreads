@@ -297,15 +297,14 @@ final class RemoteClientsTests: XCTestCase {
     func testAnotherRunnersThreadCarriesItsBylineToTheRow() throws {
         let json = #"{"runnerId":"r","threadId":"t","title":"t","cwd":"/x/misc","status":"idle","startedBy":{"kind":"tool","label":"Sentry","why":"2 events"}}"#
         let summary = try JSONDecoder().decode(RemoteThread.self, from: Data(json.utf8)).summary
-        XCTAssertEqual(ThreadByline.line(summary)?.text, "Sentry · 2 events")
+        XCTAssertEqual(ThreadByline.line(summary), .init(symbol: ThreadByline.toolSymbol, text: "misc", tip: "Started by Sentry (2 events)"))
         XCTAssertNil(RemoteThread(runnerId: "r", threadId: "t2").summary.startedBy)
     }
 
-    func testAnotherRunnersThreadSaysWhatItCameTo() throws {
+    func testAnotherRunnersThreadNamesItsPlaceWithWhatMikeAskedAsItsTip() throws {
         let json = #"{"runnerId":"r","threadId":"t","title":"t","cwd":"/x/misc","status":"idle","preview":"Backup done","asked":"try the GPU route"}"#
         let summary = try JSONDecoder().decode(RemoteThread.self, from: Data(json.utf8)).summary
-        XCTAssertEqual(ProjectMark.line(summary), "Backup done")
+        XCTAssertEqual(ProjectMark.place(summary), "misc")
         XCTAssertEqual(ProjectMark.lineTip(summary), "You: try the GPU route")
-        XCTAssertEqual(ProjectMark.line(RemoteThread(runnerId: "r", threadId: "t2", cwd: "/x/misc").summary), "misc", "nothing to say yet: the place")
     }
 }
