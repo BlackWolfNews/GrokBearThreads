@@ -129,6 +129,13 @@ import { stoppedWorkPart, type StoppedWorkPart } from './runner/stopped-work.ts'
 import { projectsHostPart, type ProjectsHostPart } from './runner/projects-host.ts';
 import { approvalsPart, type ApprovalsPart } from './runner/approvals.ts';
 import { reviewsPart, type ReviewsPart } from './runner/reviews.ts';
+import { clisPart, type ClisPart } from './runner/clis.ts';
+import { editingPart, type EditingPart } from './runner/editing.ts';
+import { patchesPart, type PatchesPart } from './runner/patches.ts';
+import { highlightsPart, type HighlightsPart } from './runner/highlights.ts';
+import { titlesPart, type TitlesPart } from './runner/titles.ts';
+import { hibernationPart, type HibernationPart } from './runner/hibernation.ts';
+import { newThreadsPart, type NewThreadsPart } from './runner/new-threads.ts';
 
 export type Notification =
   | { method: 'thread.updated'; params: { thread: ThreadSummary } }
@@ -212,7 +219,7 @@ export type AccountSource = Pick<AccountRegistry, 'list' | 'get' | 'learn'> & { 
 // The Codex adapter reports the binaries its live processes run, so E only
 // deletes version folders nothing uses. Not on AgentAdapter, since only
 // Codex has it.
-type BinaryReporter = { binariesInUse?(): string[] };
+export type BinaryReporter = { binariesInUse?(): string[] };
 
 // main: the card is for the agent's own tool call, so its CLI waits on it
 // and reads nothing else until it's answered. A background subagent's card
@@ -221,7 +228,7 @@ export type PendingApproval =
   | { approvalId: string; kind: 'tool'; main: boolean; resolve: (a: ToolApprovalAnswer) => void }
   | { approvalId: string; kind: 'question'; main: boolean; questions: Question[]; resolve: (a: QuestionAnswer) => void };
 
-type Turn = {
+export type Turn = {
   turnId: string;
   startedAt: number;
   interruptRequested: boolean;
@@ -466,18 +473,18 @@ const STARTUP_NOTICE_MS = 10 * 60_000;
 // while the CLI gets round to its own turn (usually well under a second).
 const WAKE_GRACE_MS = 15_000;
 // How long a thread's patches are kept before the folder is read again.
-const PATCHES_TTL_MS = 15_000;
+export const PATCHES_TTL_MS = 15_000;
 // How long a folder listing (and a patch file's time, a .env) read for one
 // thread's patches serves every other thread in the same folders
 // (folder-cache.ts). A turn ending forgets them, as it may have added one.
-const FOLDER_CACHE_MS = 10_000;
+export const FOLDER_CACHE_MS = 10_000;
 // How often a thread whose patches have live state (when, badge) has it
 // read again by itself, while it's in the inbox: comments Mike leaves in
 // Tandem turn into a "Your turn" chip within this long.
-const LIVE_POLL_MS = 20_000;
+export const LIVE_POLL_MS = 20_000;
 // How long a live state command's output serves every thread in the same
 // folder (runLiveCommand): well inside one poll, so each poll runs it again.
-const LIVE_SHARE_MS = 10_000;
+export const LIVE_SHARE_MS = 10_000;
 // How often the account list is read again, so a new login is noticed
 // (and its models asked for) without a client asking.
 const ACCOUNT_RESCAN_MS = 10_000;
@@ -485,9 +492,9 @@ const ACCOUNT_RESCAN_MS = 10_000;
 // this often, always ending on the latest list.
 const ACCOUNTS_THROTTLE_MS = 5_000;
 // How many turns in a row one hook may start with its result.
-const HOOK_TELL_LIMIT = 2;
+export const HOOK_TELL_LIMIT = 2;
 // How much of a hook's output goes to the agent (the transcript has it all).
-const HOOK_TELL_CHARS = 8000;
+export const HOOK_TELL_CHARS = 8000;
 // snoozedUntil for a thread hibernating until the runner next starts: far
 // enough off that everything reading snoozedUntil (the lists, the resume
 // after a restart, a client older than snoozedUntilRestart) sees it as
@@ -498,7 +505,7 @@ export const UNTIL_RESTART = '9999-12-31T00:00:00.000Z';
 export const NO_WAKE_TIME = UNTIL_RESTART;
 
 // Parts of the Runner that live in runner/ (see each file's top).
-export interface Runner extends ReviewsPart, ApprovalsPart, ProjectsHostPart, StoppedWorkPart, HandoversPart, PoolsPart, NetworkPart, WorktreesPart {}
+export interface Runner extends NewThreadsPart, HibernationPart, TitlesPart, HighlightsPart, PatchesPart, EditingPart, ClisPart, ReviewsPart, ApprovalsPart, ProjectsHostPart, StoppedWorkPart, HandoversPart, PoolsPart, NetworkPart, WorktreesPart {}
 export class Runner {
   cfg: Config;
   store: ThreadStore;
@@ -1193,410 +1200,6 @@ export class Runner {
   }
 
   // ------------------------------------------------------------- mutations
-
-  create(params: {
-    text: string;
-    images?: ImageRef[];
-    cwd?: string;
-    accountId?: string;
-    poolId?: string;
-    model?: string;
-    effort?: EffortLevel;
-    permissionMode?: PermissionMode;
-    title?: string;
-    origin?: MessageOrigin;
-    scheduleId?: string;
-    // false: start in the folder as it is, even in a repo that asks for a
-    // worktree per thread.
-    worktree?: boolean;
-    startedBy?: ThreadStartedBy;
-  }): { thread: ThreadSummary; turnId: string } {
-    if (!params.text && !params.images?.length) throw new RpcError(ErrorCode.badParams, 'text or images required');
-    checkImages(params.images ?? []);
-    const { st, notes } = this.makeThread(params);
-    const turnId = this.sendTo(st, params.text ?? '', params.images ?? [], { origin: params.origin, scheduleId: params.scheduleId });
-    // Under the first turn, so they read as part of starting it.
-    for (const text of notes) this.emit(st, { type: 'system.note', text }, st.rt.turn?.turnId ?? turnId);
-    if (!st.rec.titleSet && params.text?.trim()) void this.titleFromModel(st, params.text);
-    return { thread: this.summary(st), turnId };
-  }
-
-  // A quick ask the phone already answered out loud (docs/protocol.md, Sync,
-  // "quickAsk"), kept as a thread so Mike can carry on in it. It's made as a
-  // create with no folder would be, but no turn runs: the exchange is
-  // written as a finished turn, seen, and the first message sent to it
-  // starts a fresh session with a handoff note saying how it began.
-  quickAsk(params: { question: string; answer: string; sources?: { title: string; url: string }[]; askedAt?: number }): { thread: ThreadSummary } {
-    const question = params.question.trim();
-    const answer = params.answer.trim();
-    if (!question || !answer) throw new RpcError(ErrorCode.badParams, 'question and answer required');
-    // A follow-up is usually spoken and waited on, so it starts on a small
-    // quick model. Mike picked Haiku 5.5 over GPT-6-Luna on 31 Oct as the
-    // smarter of the two, though Luna is quicker on long replies (about 10 s
-    // for 300 words against 21 to 31). Luna is for a runner with no Claude
-    // login. With neither it's the account's default, as naming a model the
-    // login can't run would write a note into the thread.
-    const usable = this.usableAccounts();
-    const speed = usable.some((a) => a.provider === 'claude')
-      ? { model: HAIKU }
-      : usable.some((a) => a.provider === 'codex')
-        ? { model: ASK_CODEX_MODEL, effort: 'low' as const }
-        : {};
-    const { st, notes } = this.makeThread({ text: question, origin: 'phone', worktree: false, ...speed });
-    const { rec } = st;
-    const turnId = crypto.randomUUID();
-    const sources = (params.sources ?? []).filter((x) => x?.url).slice(0, 10);
-    const links = sources.map((x) => `- [${(x.title || x.url).replace(/[[\]]/g, '')}](${x.url})`).join('\n');
-    const text = links ? `${answer}\n\n${links}` : answer;
-    // In the order startTurn writes them: a user.message after turn.started
-    // would read as one sent while the turn ran.
-    this.emit(st, userMessage({ turnId, text: question, images: [], origin: 'phone' }), turnId);
-    this.emit(st, { type: 'turn.started', turnId }, turnId);
-    this.emit(st, { type: 'assistant.text', itemId: crypto.randomUUID(), text }, turnId);
-    this.emit(st, { type: 'system.note', text: 'Answered by Ask from Agent Archive' }, turnId);
-    for (const note of notes) this.emit(st, { type: 'system.note', text: note }, turnId);
-    const askedAt = params.askedAt !== undefined && Number.isFinite(params.askedAt) ? params.askedAt : this.clock.now();
-    const done = this.emit(st, { type: 'turn.completed', turnId, outcome: 'completed', durationMs: Math.max(0, this.clock.now() - askedAt), needs: 'nothing' }, turnId);
-    rec.needs = { seq: done.seq, needs: 'nothing' };
-    rec.preview = oneLine(answer, LIMITS.previewChars);
-    rec.lastTurnCompletedSeq = done.seq;
-    rec.lastSeenSeq = done.seq;
-    // The answer came from a fast model, not a session of this thread's.
-    rec.handoff = { fromCwd: rec.cwd, fromAccountId: rec.accountId, quickAsk: true };
-    this.markDirty(st);
-    void this.titleFromModel(st, question, answer);
-    return { thread: this.summary(st) };
-  }
-
-  // The tour's sample threads (docs/protocol.md, threads.samples; samples.ts):
-  // made up exchanges written as finished turns, like a quick ask, in the
-  // folder the app gives (~/ThreadbearThreads/Welcome, where its example patch
-  // is), so someone new has threads to hibernate, archive and look round.
-  // Asking again makes them afresh; remove deletes them all, archived and
-  // hibernating ones too.
-  samples(params: { cwd: string; remove?: boolean }): { threads: ThreadSummary[] } {
-    // Any there are go first, made fresh each time: ones left by a tour that
-    // didn't finish could be hibernating, archived, in another folder, or
-    // from a runner that didn't trust the patch yet (Tinker Desk, 30 Oct).
-    for (const st of [...this.threads.values()].filter((st) => st.rec.sample)) this.delete(st.rec.id);
-    if (params.remove) return { threads: [] };
-    // The folder and its example patch, written here and trusted as written:
-    // one changed since is someone's code, and waits like any other.
-    const cwd = path.resolve(expandHome(params.cwd));
-    const patchFile = path.join(cwd, '.threadbear', 'patches', 'welcome.ts');
-    fs.mkdirSync(path.dirname(patchFile), { recursive: true });
-    if (!fs.existsSync(patchFile)) fs.writeFileSync(patchFile, WELCOME_PATCH);
-    if (fs.readFileSync(patchFile, 'utf8') === WELCOME_PATCH) this.trustAgentPatches([patchFile]);
-    const made: ThreadSummary[] = [];
-    // Oldest first, so the first in SAMPLE_THREADS is the newest in the list.
-    for (const sample of [...SAMPLE_THREADS].reverse()) {
-      const { st } = this.makeThread({ text: sample.question, cwd, title: sample.title, worktree: false });
-      const { rec } = st;
-      rec.sample = true;
-      const turnId = crypto.randomUUID();
-      this.emit(st, userMessage({ turnId, text: sample.question, images: [] }), turnId);
-      this.emit(st, { type: 'turn.started', turnId }, turnId);
-      this.emit(st, { type: 'assistant.text', itemId: crypto.randomUUID(), text: sample.answer }, turnId);
-      const done = this.emit(st, {
-        type: 'turn.completed', turnId, outcome: 'completed', durationMs: 4000, needs: sample.needs,
-        ...(sample.asks ? { asks: sample.asks } : {}),
-      }, turnId);
-      rec.needs = { seq: done.seq, needs: sample.needs, ...(sample.asks ? { asks: sample.asks } : {}) };
-      rec.preview = oneLine(sample.answer, LIMITS.previewChars);
-      rec.lastTurnCompletedSeq = done.seq;
-      // Unseen: Needs you, or the blue dot; the rest read.
-      if (sample.needs === 'nothing' && !sample.unread) rec.lastSeenSeq = done.seq;
-      this.markDirty(st);
-      made.push(this.summary(st));
-    }
-    return { threads: made.reverse() };
-  }
-
-  // The record and state of a new thread, before anything is sent to it:
-  // its folder, login, model and effort as create picks them.
-  makeThread(params: {
-    text: string;
-    cwd?: string;
-    accountId?: string;
-    poolId?: string;
-    model?: string;
-    effort?: EffortLevel;
-    permissionMode?: PermissionMode;
-    title?: string;
-    origin?: MessageOrigin;
-    scheduleId?: string;
-    worktree?: boolean;
-    startedBy?: ThreadStartedBy;
-  }): { st: ThreadState; notes: string[] } {
-    this.checkAccepting();
-    // New threads belong on the new release.
-    if (this.draining) throw new RpcError(ErrorCode.busy, 'This runner is handing over to a new one; start the thread there.');
-    // A blank folder means the default, not the runner's own folder.
-    const cwd = path.resolve(expandHome(params.cwd?.trim() ? params.cwd.trim() : this.cfg.defaults.cwd));
-    // An accountId pins the thread to that login. Otherwise a pool picks
-    // the login (docs/protocol.md, "Pools"), except on a dev runner whose
-    // keepAccount pins new threads to its own account.
-    let poolId: string | undefined;
-    let accountId = params.accountId;
-    if (accountId === undefined && (params.poolId !== undefined || !readRunnerJson(this.cfg.home).defaults?.keepAccount)) {
-      const picked = this.pickForNew({ poolId: params.poolId, cwd, model: params.model });
-      if (picked) ({ poolId, accountId } = picked);
-    }
-    accountId ??= this.defaultAccountId();
-    const account = this.accounts.get(accountId);
-    if (!account) throw new RpcError(ErrorCode.accountNotFound, `No account called ${accountId}`);
-    this.checkProvider(account);
-    if (!isDirectory(cwd)) throw new RpcError(ErrorCode.badParams, `Folder not found: ${cwd}`);
-    const now = this.isoNow();
-    const id = crypto.randomUUID();
-    const rec: ThreadRecord = {
-      id,
-      title: params.title?.trim() ? params.title.trim().slice(0, 200) : titleFrom(params.text),
-      titleSet: Boolean(params.title?.trim()),
-      cwd,
-      accountId,
-      ...(poolId ? { poolId } : {}),
-      provider: account.provider,
-      permissionMode: params.permissionMode ?? 'full',
-      status: 'idle',
-      createdAt: now,
-      updatedAt: now,
-      lastActivityAt: now,
-      preview: '',
-      lastSeq: 0,
-      lastSeenSeq: 0,
-      nativeSessionId: crypto.randomUUID(),
-      sessionUsed: false,
-      lastTurnCompletedSeq: 0,
-      queue: [],
-      pendingApprovals: [],
-    };
-    const checked = this.checkSettings(account, params.model || this.defaultModelFor(account.provider), params.effort ?? this.defaultEffortFor(account.provider));
-    if (checked.model) rec.model = checked.model;
-    if (checked.effort) rec.effort = checked.effort;
-    // Whether the first turn should look for a worktree patch. Reading the
-    // patch files is async, so it happens there; a folder with no patch
-    // files at all (most of them) starts its CLI straight away as before.
-    if (params.worktree !== false && this.mayWantWorktree(cwd)) rec.worktreePending = true;
-    if (params.origin === 'schedule' && params.scheduleId) rec.schedule = { id: params.scheduleId, title: params.title?.trim() || rec.title };
-    const startedBy = params.origin === 'schedule' && params.scheduleId ? { kind: 'schedule' as const, label: 'Schedule' } : params.startedBy;
-    if (startedBy) {
-      // Its title as it is now, for the row's tooltip: that thread may be
-      // renamed, archived or deleted later.
-      const from = startedBy.threadId ? this.threads.get(startedBy.threadId) : undefined;
-      rec.startedBy = { ...startedBy, ...(from ? { threadTitle: from.rec.title } : {}) };
-    }
-    this.store.create(rec);
-    const st: ThreadState = { rec, rt: newRuntime(this.clock.now()) };
-    this.threads.set(id, st);
-    if (!poolId) this.rememberAccount(accountId);
-    else if (params.poolId !== undefined) this.rememberPool(poolId);
-    return { st, notes: checked.notes };
-  }
-
-  // An account whose CLI this runner can't drive (a Codex login found
-  // before the Codex adapter is wired) is refused up front, rather than
-  // making a thread whose first turn can only fail.
-  checkProvider(account: Account): void {
-    if (!this.adapters[account.provider]) {
-      throw new RpcError(ErrorCode.badParams, `This runner can't run ${providerName(account.provider)} threads yet, so ${account.id} can't be used.`);
-    }
-  }
-
-  // Checks a model and effort against the account's provider (protocol,
-  // "Models and effort across providers"). A model of the other provider,
-  // or a Codex id the account doesn't list, gives way to the provider's
-  // default; an effort the model doesn't offer is dropped. Each says so in
-  // a note rather than failing the call, since an older app always sends a
-  // model and can't get past an error.
-  checkSettings(account: Account, model: string | undefined, effort: EffortLevel | undefined): { model?: string; effort?: EffortLevel; notes: string[] } {
-    const notes: string[] = [];
-    const provider = account.provider;
-    if (model && !this.modelFits(account, model)) {
-      const replacement = this.defaultModelFor(provider);
-      const fallback = replacement && this.modelFits(account, replacement) ? replacement : undefined;
-      const uses = fallback ? modelTitle(account, fallback) : account.defaultModel ? modelTitle(account, account.defaultModel) : "the account's default model";
-      notes.push(`${model} isn't a ${providerName(provider)} model, so this thread uses ${uses}.`);
-      model = fallback;
-    }
-    if (effort) {
-      const row = modelRow(account, model ?? account.defaultModel);
-      const offered = (e: EffortLevel) => !(provider === 'claude' && e === 'ultra') && (!row?.effortLevels || row.effortLevels.includes(e));
-      if (!offered(effort)) {
-        const fallback = this.defaultEffortFor(provider);
-        const next = fallback && fallback !== effort && offered(fallback) ? fallback : undefined;
-        const why = provider === 'claude' && effort === 'ultra' ? `${effortTitle(effort)} effort is Codex only` : `${row ? row.title : 'This model'} doesn't offer ${effortTitle(effort)} effort`;
-        notes.push(`${why}, so this thread uses ${next ? `${effortTitle(next)} effort` : "the model's own level"}.`);
-        effort = next;
-      }
-    }
-    return { ...(model ? { model } : {}), ...(effort ? { effort } : {}), notes };
-  }
-
-  // Whether a thread on this account can run this model id. Codex: one the
-  // account lists, or before the list is known anything starting gpt-.
-  // Claude: anything but a Codex id, unless the account itself lists it.
-  modelFits(account: Account, model: string): boolean {
-    if (modelRow(account, model)) return true;
-    if (account.provider === 'codex') return !account.models?.length && model.startsWith('gpt-');
-    if (isClaudeModel(model)) return true;
-    const codexIds = this.safeAccounts().filter((a) => a.provider === 'codex').some((a) => modelRow(a, model));
-    return !model.startsWith('gpt-') && !codexIds;
-  }
-
-  // Asks a small model for a better title than the first line. Without a
-  // pool, out of room or in a private folder it says why and nothing
-  // changes. A title set meanwhile (by Mike or an agent) wins.
-  // `reply`, the start of the agent's first answer, is there when an older
-  // thread is named (retitle): a terse first message like "Explain thread
-  // count" means little without it.
-  async titleFromModel(st: ThreadState, text: string, reply?: string): Promise<{ title: string } | { reason: string }> {
-    if (!this.models) return { reason: 'Model calls are off in this runner.' };
-    const before = st.rec.title;
-    const res = await this.models.generate({
-      feature: 'titles',
-      cwd: st.rec.cwd,
-      system: TITLE_PROMPT,
-      prompt: reply ? `Message:\n${text.slice(0, 4000)}\n\nStart of the reply:\n${reply.slice(0, 1000)}` : `Message:\n${text.slice(0, 4000)}`,
-      // Room for Haiku to think first: at 30 it sometimes ran out before
-      // writing a word. A long answer is turned down by cleanTitle anyway.
-      maxTokens: 300,
-    });
-    if (!res.ok) return { reason: res.message };
-    if (st.rt.deleted) return { reason: 'Deleted meanwhile.' };
-    if (st.rec.titleSet || st.rec.title !== before) return { reason: 'Renamed meanwhile.' };
-    const title = cleanTitle(res.value);
-    if (!title) return { reason: 'The model gave no title.' };
-    st.rec.title = title;
-    st.rec.updatedAt = this.isoNow();
-    this.markDirty(st);
-    return { title };
-  }
-
-  // Names the threads that started before there was a key (or whose call
-  // failed): the ones still titled with their first message's first line
-  // and never named by anyone. A model title doesn't set titleSet, so the
-  // first-line check is what keeps those from being asked again. Given
-  // threadIds, it names those whatever their title, so a poor model title
-  // can be asked for again; one named by hand still stays.
-  async retitle(params: { dryRun?: boolean; threadIds?: string[] }): Promise<{ threads: { threadId: string; from: string; to?: string; reason?: string }[] }> {
-    const picked = params.threadIds?.map((id) => this.mustGet(id));
-    const due: { st: ThreadState; text: string; reply?: string }[] = [];
-    for (const st of picked ?? this.threads.values()) {
-      if (st.rec.titleSet) continue;
-      const { text, reply } = this.opening(st.rec.id);
-      const line = text?.split('\n').map((l) => l.trim()).find(Boolean);
-      // titleFrom cut it at some length; an older runner may have cut it elsewhere.
-      if (line && (picked || (st.rec.title && line.startsWith(st.rec.title)))) due.push({ st, text: text!, reply });
-    }
-    const threads = await Promise.all(
-      due.map(async ({ st, text, reply }) => {
-        const from = st.rec.title;
-        if (params.dryRun) return { threadId: st.rec.id, from };
-        const r = await this.titleFromModel(st, text, reply);
-        return 'title' in r ? { threadId: st.rec.id, from, to: r.title } : { threadId: st.rec.id, from, reason: r.reason };
-      }),
-    );
-    this.log.info('retitle', { dryRun: Boolean(params.dryRun), found: threads.length, named: threads.filter((t) => t.to).length });
-    return { threads };
-  }
-
-  // Explains words Mike selected in a thread (explain.ts), on the small
-  // model. A side conversation: nothing is written to the thread.
-  // `message` is the whole message the selection came from, as the app
-  // shows it (a row's seq can be a streamed delta's, not the final text's).
-  async explain(params: { threadId: string; selection: string; message?: string; question?: string; earlier?: ExplainTurn[] }): Promise<{ answer: string; model: string }> {
-    const st = this.mustGet(params.threadId);
-    if (!this.models) throw new RpcError(ErrorCode.other, 'Model calls are off in this runner.');
-    const gist = this.threadGist(st.rec.id, { recent: RECENT_MESSAGES, chars: RECENT_CHARS });
-    const res = await this.models.generate({
-      feature: 'explain',
-      cwd: st.rec.cwd,
-      system: EXPLAIN_SYSTEM,
-      prompt: explainPrompt({ selection: params.selection, message: params.message, first: gist.first, recent: gist.recent, earlier: params.earlier ?? [], question: params.question }),
-      maxTokens: 800,
-    });
-    if (!res.ok) throw new RpcError(ErrorCode.other, res.message || `No explanation (${res.reason}).`);
-    return { answer: res.value.trim(), model: res.model };
-  }
-
-  // Hibernates a thread until when Mike said, in his own words
-  // (wake-when.ts), as Opus reads them: a time, a topic for the librarian
-  // to listen for, or both. The thread goes away at once, as a preset
-  // does, and the time follows once the model answers; if it can't say,
-  // the thread comes back and the call fails with why.
-  async hibernateWhen(params: { threadId: string; said: string }): Promise<{ thread: ThreadSummary; until?: string; topic?: string; why: string }> {
-    const st = this.mustGet(params.threadId);
-    const said = params.said.trim();
-    if (!said) throw new RpcError(ErrorCode.badParams, 'Say when it should wake.');
-    if (said.length > SAID_MAX) throw new RpcError(ErrorCode.badParams, `That's more than ${SAID_MAX} characters.`);
-    const models = this.models;
-    if (!models) throw new RpcError(ErrorCode.other, 'Model calls are off in this runner.');
-    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    const gist = this.threadGist(st.rec.id, { recent: 0 });
-    const input = { said, now: this.clock.now(), timeZone, title: st.rec.title, first: gist.first, brief: st.rec.brief?.text };
-    this.update({ threadId: st.rec.id, snoozedUntil: NO_WAKE_TIME });
-    st.rec.wakeWhen = { said, pending: true };
-    this.markDirty(st);
-    const ask = (withThread: boolean) =>
-      models.generate({
-        feature: 'wake-when',
-        ...(withThread ? { cwd: st.rec.cwd } : {}),
-        system: WAKE_SYSTEM,
-        prompt: wakePrompt(withThread ? input : { said, now: input.now, timeZone, title: '(private)' }),
-        maxTokens: 300,
-        strong: true,
-      });
-    let res = await ask(true);
-    // A private folder's thread isn't sent: his words alone are usually enough.
-    if (!res.ok && res.reason === 'private') res = await ask(false);
-    // Woken, hibernated another way or deleted meanwhile: that wins.
-    if (st.rt.deleted || st.rec.wakeWhen?.pending !== true || st.rec.wakeWhen.said !== said) {
-      throw new RpcError(ErrorCode.other, 'The thread was woken or put away again while this was worked out.');
-    }
-    const answer = res.ok ? readWakeAnswer(res.value, this.clock.now()) : { error: res.message || `No answer from the model (${res.reason}).` };
-    if ('error' in answer) {
-      delete st.rec.snoozedUntil;
-      delete st.rec.wakeWhen;
-      st.rec.updatedAt = this.isoNow();
-      this.markDirty(st);
-      this.armSnoozeTimer();
-      this.kickQueue(st);
-      throw new RpcError(ErrorCode.other, `Couldn't work out when to wake it: ${answer.error}`);
-    }
-    st.rec.snoozedUntil = answer.until ?? NO_WAKE_TIME;
-    st.rec.wakeWhen = { said, ...(answer.topic ? { topic: answer.topic } : {}) };
-    this.emit(st, { type: 'system.note', text: hibernateNote(answer, said, timeZone) });
-    this.armSnoozeTimer();
-    this.log.info('hibernated in words', { threadId: st.rec.id, until: answer.until, topic: answer.topic });
-    return { thread: this.summary(st), ...answer };
-  }
-
-  // Threads hibernating until Mike next talks about something, for the
-  // librarian to listen for.
-  waitingTopics(): { threadId: string; title: string; topic: string }[] {
-    const now = this.clock.now();
-    const out: { threadId: string; title: string; topic: string }[] = [];
-    for (const { rec, rt } of this.threads.values()) {
-      const topic = rec.wakeWhen?.topic;
-      if (!topic || rt.deleted || rec.archivedAt || !rec.snoozedUntil || Date.parse(rec.snoozedUntil) <= now) continue;
-      out.push({ threadId: rec.id, title: rec.title, topic });
-    }
-    return out;
-  }
-
-  // The librarian heard Mike talk about a hibernating thread's topic in
-  // another thread: it wakes, unread, saying where.
-  wakeForTopic(threadId: string, inThreadId: string): boolean {
-    const st = this.threads.get(threadId);
-    const topic = st?.rec.wakeWhen?.topic;
-    if (!st || !topic || st.rt.deleted || st.rec.archivedAt || threadId === inThreadId || this.bucket(st.rec) !== 'snoozed') return false;
-    const where = this.threads.get(inThreadId)?.rec.title;
-    this.wake(st, { why: `you talked about ${topic}${where ? ` in "${where}"` : ' in another thread'}` });
-    this.armSnoozeTimer();
-    this.log.info('woke for a topic', { threadId, inThreadId, topic });
-    return true;
-  }
 
   // The first user.message's text and the first assistant.text after it,
   // read a page at a time from the start: both are nearly always within
@@ -2933,174 +2536,7 @@ export class Runner {
 
   // ---------------------------------------------------------- idle release
 
-  scheduleIdle(st: ThreadState): void {
-    const { rec, rt } = st;
-    rt.idleTimer?.cancel();
-    rt.idleTimer = undefined;
-    if (!rt.session || rt.closing || rt.turn || rec.queue.length || rt.approvals.size) return;
-    if (rt.releaseWhenIdle || this.bucket(rec) !== 'inbox') {
-      this.releaseSession(st);
-      return;
-    }
-    // A CLI update is waiting for this session to be idle. Never at the
-    // cost of background work, or of the turn the CLI is about to start to
-    // read a finished task's result.
-    if (rt.versionMove && rt.tasks.length === 0 && !rt.wakeTimer) {
-      this.log.info('releasing a CLI on an old version', { threadId: rec.id, version: rt.cliVersion, wanted: this.wantedVersion[rec.provider] });
-      this.releaseSession(st);
-      return;
-    }
-    // A background shell or subagent is still working; the countdown starts
-    // when it finishes.
-    if (rt.tasks.length) return;
-    rt.idleTimer = this.clock.setTimeout(() => {
-      rt.idleTimer = undefined;
-      if (!rt.turn && rec.queue.length === 0 && rt.tasks.length === 0) this.releaseSession(st);
-    }, this.cfg.idleMs);
-  }
-
-  // Ends the CLI's input so it exits; the next send resumes the session.
-  // Background work would keep the CLI alive (and could start a turn in a
-  // thread that's just been snoozed), so if there is any it's stopped
-  // straight away, with a note saying what was stopped.
-  releaseSession(st: ThreadState): void {
-    const { rt, rec } = st;
-    rt.idleTimer?.cancel();
-    rt.idleTimer = undefined;
-    if (!rt.session || rt.closing) return;
-    const session = rt.session;
-    const hard = rt.tasks.length > 0;
-    if (hard) {
-      const what = rt.tasks.map((t) => t.description || t.type).join('; ');
-      try {
-        this.emit(st, { type: 'system.note', text: `Stopped background work when the session was released: ${what}` }, rt.turn?.turnId);
-      } catch (e) {
-        this.log.error('could not save a note', { threadId: rec.id, error: String(e) });
-      }
-      rt.tasks = [];
-    }
-    rt.finished = [];
-    rt.releaseWhenIdle = false;
-    rt.releasedGen = rt.generation;
-    this.log.info('releasing CLI', { threadId: rec.id, hard });
-    rt.closing = session
-      .end({ hard })
-      .catch((e: unknown) => this.log.warn('release failed', { threadId: rec.id, error: String(e) }))
-      .finally(() => {
-        rt.closing = undefined;
-        if (rt.session === session) {
-          // The adapter didn't report an exit; treat it as gone.
-          rt.session = undefined;
-        }
-        this.markDirty(st);
-        this.archiveWhenGone(st);
-      });
-  }
-
   // ------------------------------------------------------------ CLI updates
-
-  // The hooks E's CliUpdates calls (restartPending comes from the
-  // Restarter, in main.ts).
-  cliHooks(restartPending: () => boolean): CliHooks {
-    return {
-      restartPending,
-      releaseIdle: (p, v) => this.releaseIdle(p, v),
-      versionsInUse: (p) => this.versionsInUse(p),
-      codexBinariesInUse: () => this.codexBinariesInUse(),
-    };
-  }
-
-  // A new version of a provider's CLI is in place. Live sessions on another
-  // version are released now if they're idle, with the soft release (so
-  // background work is never stopped by an update), and the rest as soon
-  // as they are (scheduleIdle). The next message resumes on the new one.
-  releaseIdle(provider: Provider, keepVersion: string): void {
-    this.wantedVersion[provider] = keepVersion;
-    for (const st of this.threads.values()) {
-      const { rec, rt } = st;
-      if (rec.provider !== provider || !rt.session || rt.closing) continue;
-      if (rt.cliVersion === keepVersion) {
-        rt.versionMove = false;
-        continue;
-      }
-      rt.versionMove = true;
-      if (this.idleForUpdate(st)) {
-        this.log.info('releasing an idle CLI for an update', { threadId: rec.id, version: rt.cliVersion, wanted: keepVersion });
-        this.releaseSession(st);
-      }
-    }
-  }
-
-  // Nothing would be cut short by releasing it: no turn (starting, running
-  // or interrupting), approval or question, queued message, background
-  // work or wake grace, and not already due to go.
-  idleForUpdate(st: ThreadState): boolean {
-    const { rec, rt } = st;
-    return !rt.turn && rt.approvals.size === 0 && rec.queue.length === 0 && rt.tasks.length === 0 && !rt.wakeTimer && !rt.releaseWhenIdle;
-  }
-
-  // Which versions of a provider's CLI the live sessions run, from their
-  // cliVersion outputs.
-  versionsInUse(provider: Provider): { version: string; threadIds: string[] }[] {
-    const by = new Map<string, string[]>();
-    for (const { rec, rt } of this.threads.values()) {
-      if (rec.provider !== provider || !rt.session || !rt.cliVersion) continue;
-      by.set(rt.cliVersion, [...(by.get(rt.cliVersion) ?? []), rec.id]);
-    }
-    return [...by].map(([version, threadIds]) => ({ version, threadIds }));
-  }
-
-  // The Codex binaries live processes run, so E only deletes version
-  // folders nothing uses.
-  codexBinariesInUse(): string[] {
-    const codex = this.adapters.codex as (AgentAdapter & BinaryReporter) | undefined;
-    try {
-      return codex?.binariesInUse?.() ?? [];
-    } catch (e) {
-      this.log.warn('could not list the Codex binaries in use', { error: String(e) });
-      return [];
-    }
-  }
-
-  // E's CliUpdates: hello and clis.updated carry its statuses, and a Codex
-  // update that activates asks every Codex account for its models again.
-  attachClis(clis: CliControl): void {
-    this.clis = clis;
-    const codex = this.cliList()?.find((c) => c.provider === 'codex');
-    this.codexVersion = codex?.installedVersion;
-    this.codexMissing = codex?.status === 'missing';
-    this.unsubs.push(clis.onChange((list) => this.clisChanged(list)));
-  }
-
-  cliList(): CliStatus[] | undefined {
-    if (!this.clis) return undefined;
-    try {
-      return this.clis.list();
-    } catch (e) {
-      this.log.warn('could not read the CLI statuses', { error: String(e) });
-      return undefined;
-    }
-  }
-
-  tellStarted(p: Provider, version: string | undefined, ok: boolean): void {
-    try {
-      this.clis?.sessionStarted?.(p, version, ok);
-    } catch (e) {
-      this.log.warn('could not report a session start', { error: String(e) });
-    }
-  }
-
-  clisChanged(list: CliStatus[]): void {
-    this.notify({ method: 'clis.updated', params: { clis: list } });
-    const codex = list.find((c) => c.provider === 'codex');
-    const version = codex?.installedVersion;
-    if (version && version !== this.codexVersion) {
-      const changed = this.codexVersion !== undefined || this.codexMissing;
-      this.codexVersion = version;
-      if (changed && !this.stopping) void this.probeModels((a) => a.provider === 'codex');
-    }
-    this.codexMissing = codex?.status === 'missing';
-  }
 
   // Runs a pending archive once no CLI has the session: none live and none
   // closing. Skipped if the thread came back meanwhile.
@@ -3133,51 +2569,6 @@ export class Runner {
 
   // ----------------------------------------------------------------- snooze
 
-  armSnoozeTimer(): void {
-    this.snoozeTimer?.cancel();
-    this.snoozeTimer = undefined;
-    if (this.stopping) return;
-    const now = this.clock.now();
-    let next = Infinity;
-    for (const st of this.threads.values()) {
-      if (!st.rec.snoozedUntil) continue;
-      const t = Date.parse(st.rec.snoozedUntil);
-      if (t <= now) this.wake(st, 'time');
-      else next = Math.min(next, t);
-    }
-    if (next === Infinity) return;
-    // Re-check at least hourly so long snoozes survive clock changes.
-    this.snoozeTimer = this.clock.setTimeout(() => this.armSnoozeTimer(), Math.min(next - now, 3_600_000));
-  }
-
-  // A thread coming back by itself (its time, a restart, a topic) says so
-  // in its conversation, with how long it was away, and its row says
-  // "Woke up" until Mike looks (`woke`): otherwise it just turns up in the
-  // inbox with nothing to say why (30 Oct).
-  wake(st: ThreadState, cause: 'time' | 'restart' | { why: string }): void {
-    const { rec } = st;
-    const now = this.clock.now();
-    const since = rec.snoozedAt && Date.parse(rec.snoozedAt) <= now ? rec.snoozedAt : undefined;
-    // Under a minute (a wake-when cut short by a restart) isn't worth saying.
-    const ms = since ? now - Date.parse(since) : 0;
-    const away = ms >= 60_000 ? ` after ${awayFor(ms)}` : '';
-    const text = typeof cause === 'object'
-      ? `Woke up${away}: ${cause.why}.`
-      : cause === 'restart'
-        ? `Woke up${away}, as the runner restarted.`
-        : away ? `Woke up after hibernating for ${awayFor(ms)}.` : 'Woke up from hibernating.';
-    this.emit(st, { type: 'system.note', text });
-    rec.woke = { at: new Date(now).toISOString(), ...(since ? { since } : {}) };
-    delete rec.snoozedAt;
-    delete st.rec.snoozedUntil;
-    delete st.rec.snoozedUntilRestart;
-    delete st.rec.wakeWhen;
-    st.rec.forceUnread = true;
-    st.rec.updatedAt = this.isoNow();
-    this.markDirty(st);
-    this.kickQueue(st);
-  }
-
   // Starts the next queued message if nothing is running. Returns true if
   // one started. One that can't be written (disk full) stays at the front.
   kickQueue(st: ThreadState): boolean {
@@ -3208,129 +2599,6 @@ export class Runner {
   }
 
   // ------------------------------------------------------ editing a message
-
-  // Mike changes one of his earlier messages and carries on from there
-  // (docs/protocol.md, "Editing a message"): the turn stops, the native
-  // session is cut back to just before the message, the agent's file
-  // changes since are put back, and the new text starts a turn.
-  async editMessage(threadId: string, seq: number, text: string, images: ImageRef[] = []): Promise<{ turnId: string; rewound: { seq: number; fromSeq: number; toSeq: number; files: RewoundFiles } }> {
-    const st = this.mustGet(threadId);
-    const { rec, rt } = st;
-    this.checkAccepting();
-    if (this.draining) throw new RpcError(ErrorCode.busy, 'The runner is handing over to a new one; edit again in a moment.');
-    if (rt.editing) throw new RpcError(ErrorCode.busy, 'This thread is already going back to an earlier message.');
-    if (!text && images.length === 0) throw new RpcError(ErrorCode.badParams, 'text or images required');
-    checkImages(images);
-    const target = this.editableMessage(st, seq);
-    const adapter = this.adapters[rec.provider];
-    if (!adapter?.rewind) throw new RpcError(ErrorCode.badParams, `${providerName(rec.provider)} threads can't go back to an earlier message.`);
-    const account = this.accounts.get(rec.accountId);
-    if (!account) throw new RpcError(ErrorCode.badParams, `Account ${rec.accountId} isn't available on this Mac.`);
-    rt.editing = true;
-    try {
-      // Messages waiting behind the turn were sent after the edited one,
-      // so they go with the rest.
-      if (rec.queue.length) {
-        rec.queue = [];
-        this.markDirty(st);
-      }
-      // A turn the CLI starts by itself as the last one ends (a
-      // background task's result) is stopped too.
-      for (let i = 0; rt.turn && i < 5; i++) {
-        const ended = new Promise<void>((r) => (rt.turnEndWaiters ??= []).push(r));
-        this.interrupt(rec.id);
-        await ended;
-      }
-      if (rt.session) this.releaseSession(st);
-      while (rt.closing) await rt.closing;
-      if (rt.deleted || this.threads.get(rec.id) !== st) throw new RpcError(ErrorCode.threadNotFound, `Thread not found: ${threadId}`);
-      // Cut the native session. One never started (its first turn failed
-      // before the CLI got going) has nothing to cut.
-      let cut: RewindResult = { fresh: true };
-      if (rec.sessionUsed && rec.nativeSessionId && !rec.handoff) {
-        try {
-          cut = await adapter.rewind({ threadId: rec.id, account, cwd: rec.cwd, sessionId: rec.nativeSessionId, messageId: target.turnId });
-        } catch (e) {
-          const err = e as Error;
-          if (err.name === 'RewindRefusedError') throw new RpcError(ErrorCode.badParams, err.message);
-          this.log.error('could not cut the session back', { threadId: rec.id, error: String(e) });
-          throw new RpcError(ErrorCode.other, `Couldn't go back to that message: ${err.message}`);
-        }
-      }
-      const toSeq = this.store.log(rec.id).lastSeq;
-      let files: RewoundFiles;
-      if (cut.files) files = { ...cut.files, how: 'checkpoint' };
-      else {
-        const changes = appliedChanges(this.store.log(rec.id).read(seq, toSeq).filter((e) => !cutOut(rec, e.seq)));
-        files = changes.length ? { ...undoChanges(changes, rec.cwd), how: 'diffs' } : { undone: [], failed: [], how: 'none' };
-      }
-      if (cut.fresh) {
-        // The message opened the session: a new one, told what came before
-        // it when anything did (a handoff from another login, say).
-        rec.nativeSessionId = crypto.randomUUID();
-        rec.sessionUsed = false;
-        rec.sessionCostTotal = 0;
-        delete rec.resumeAt;
-        if (!rec.handoff && this.saidBefore(rec, seq)) rec.handoff = { fromCwd: rec.cwd, fromAccountId: rec.accountId };
-      } else if (cut.resumeAt) rec.resumeAt = cut.resumeAt;
-      (rec.rewinds ??= []).push({ from: seq, to: toSeq });
-      const ev = this.emit(st, { type: 'thread.rewound', fromSeq: seq, toSeq, files });
-      // What the cut turns left open or found goes with them (pins stay).
-      if (rec.needs && rec.needs.seq >= seq) delete rec.needs;
-      if (rec.highlights?.items.some((h) => h.seq >= seq && h.how !== 'pinned')) {
-        rec.highlights.items = rec.highlights.items.filter((h) => h.seq < seq || h.how === 'pinned');
-        this.highlightsChanged(st);
-      }
-      if (rec.panelRequest) {
-        delete rec.panelRequest;
-        this.endPanelWait(st, false);
-      }
-      this.markDirty(st);
-      this.log.info('went back to an earlier message', { threadId: rec.id, seq, toSeq, how: files.how, undone: files.undone.length, failed: files.failed.length, fresh: Boolean(cut.fresh) });
-      rt.editing = false;
-      // The edited message goes first; anything sent during the edit after it.
-      const later = rec.queue.splice(0);
-      const turnId = this.sendTo(st, text, images, { editOf: seq });
-      if (later.length) {
-        rec.queue.push(...later);
-        this.markDirty(st);
-      }
-      return { turnId, rewound: { seq: ev.seq, fromSeq: seq, toSeq, files } };
-    } finally {
-      if (rt.editing) {
-        rt.editing = false;
-        // Messages sent while it failed still go.
-        if (!rt.turn) this.kickQueue(st);
-      }
-      this.markDirty(st);
-    }
-  }
-
-  // The message at `seq`, if Mike can edit it; otherwise why not.
-  editableMessage(st: ThreadState, seq: number): { turnId: string } {
-    const { rec } = st;
-    const log = this.store.log(rec.id);
-    const ev = Number.isInteger(seq) && seq >= 1 && seq <= log.lastSeq ? log.read(seq, seq)[0] : undefined;
-    const no = (why: string) => new RpcError(ErrorCode.badParams, why);
-    if (!ev || ev.type !== 'user.message') throw no(`There's no message at ${seq} to edit.`);
-    if (cutOut(rec, seq)) throw no('That message was already taken out by an earlier edit.');
-    if ((ev.origin && ev.origin !== 'phone') || sentByAgent(ev.text)) throw no('Only your own messages can be edited.');
-    // It started a turn: its turn.started comes straight after it. One sent
-    // into a running turn went into that turn and can't be cut out alone.
-    const next = log.read(seq + 1, seq + 3).find((e) => e.type === 'turn.started');
-    if (!ev.turnId || !next || next.turnId !== ev.turnId) throw no('That message went into a turn that was already running, so it can only be edited with the message that started that turn.');
-    return { turnId: ev.turnId };
-  }
-
-  // Whether the thread had a message before `seq` that's still part of it.
-  saidBefore(rec: ThreadRecord, seq: number): boolean {
-    const log = this.store.log(rec.id);
-    for (let to = seq - 1; to >= 1; to -= 500) {
-      const page = log.read(Math.max(1, to - 499), to);
-      if (page.some((e) => (e.type === 'user.message' || e.type === 'assistant.text') && !cutOut(rec, e.seq))) return true;
-    }
-    return false;
-  }
 
   // ---------------------------------------------------------- design reviews
 
@@ -3541,394 +2809,9 @@ export class Runner {
     return s;
   }
 
-  // What the thread's folder gives it (see Runtime.patches): the last set
-  // read, with a fresh read started when it's stale.
-  patchSet(st: ThreadState): PatchSet {
-    const { rec, rt } = st;
-    const now = this.clock.now();
-    const folders = this.projects?.foldersFor(rec) ?? [];
-    const key = JSON.stringify([rec.cwd, folders]);
-    if (rt.patches && rt.patches.cwd === rec.cwd && rt.patches.key !== key) {
-      // Same folder, different projects: keep showing what there is while
-      // the new set loads, rather than flashing the panels away.
-      rt.patches.key = key;
-      rt.patches.at = -Infinity;
-    }
-    if (!rt.patches || rt.patches.cwd !== rec.cwd) {
-      // A thread moved to another folder looks at it afresh, rather than
-      // through what was read a few seconds ago (rare, unlike startup).
-      if (rt.patches) this.forgetFolders();
-      // The built-in panels straight away; the files follow.
-      let panels: PatchSet['panels'] = [];
-      try {
-        panels = projectPanels(rec.cwd, this.panelsRoot, folders, this.folderCache);
-      } catch (e) {
-        this.log.warn('could not read the folder for panels', { threadId: rec.id, cwd: rec.cwd, error: String(e) });
-      }
-      const set = { ...EMPTY_PATCH_SET, panels };
-      rt.patches = { cwd: rec.cwd, key, at: now, base: set, set, refreshing: false, loaded: false };
-      void this.refreshPatches(st);
-    } else if (!rt.patches.refreshing && now - rt.patches.at > PATCHES_TTL_MS) {
-      void this.refreshPatches(st);
-    }
-    return rt.patches.set;
-  }
-
-  // Reads the folder's patches again; a change sends a new summary, and a
-  // patch file that has appeared or broken since the last read is said in
-  // the transcript (not on the first read, which would say it at startup).
-  refreshPatches(st: ThreadState): Promise<void> {
-    const read = this.readPatches(st);
-    this.patchReads.add(read);
-    void read.finally(() => this.patchReads.delete(read));
-    return read;
-  }
-
-  // Resolves once no thread's patches are being read. For tests: the
-  // reads go to the disk asynchronously, so a tick or two isn't enough.
-  async patchesIdle(): Promise<void> {
-    while (this.patchReads.size) await Promise.allSettled([...this.patchReads]);
-  }
-
-  async readPatches(st: ThreadState): Promise<void> {
-    const { rec, rt } = st;
-    const entry = rt.patches;
-    if (!entry || entry.refreshing) return;
-    entry.refreshing = true;
-    const cwd = rec.cwd;
-    const key = entry.key;
-    let base: PatchSet;
-    let set: PatchSet;
-    try {
-      base = await this.loadSharedPatchSet(cwd, this.projects?.foldersFor(rec) ?? [], this.projects?.allFolders() ?? []);
-      set = await applyLive(base, { cwd, threadId: rec.id, run: (command, dir) => this.runLiveCommand(rec.id, command, dir) });
-    } catch (e) {
-      this.log.warn('could not read the folder for patches', { threadId: rec.id, cwd, error: String(e) });
-      base = entry.base;
-      set = entry.set;
-    }
-    entry.refreshing = false;
-    entry.at = this.clock.now();
-    // The folder moved on meanwhile: the next summary starts over.
-    if (rt.patches !== entry || rec.cwd !== cwd || rt.deleted) return;
-    // The projects changed meanwhile: read again.
-    if (entry.key !== key) {
-      entry.at = -Infinity;
-      this.markDirty(st);
-      return;
-    }
-    // What the files give is said in the transcript; live state (a chip
-    // coming and going) only moves the summary.
-    if (entry.loaded && JSON.stringify(entry.base) !== JSON.stringify(base)) this.notePatchChanges(st, entry.base, base);
-    const changed = JSON.stringify(entry.set) !== JSON.stringify(set);
-    entry.base = base;
-    entry.set = set;
-    entry.live = hasLive(base);
-    entry.loaded = true;
-    if (changed) this.markDirty(st);
-    if (entry.live) this.armLivePoll();
-  }
-
-  // Threads in the same folder with the same projects get the same set, so
-  // it's read once per FOLDER_CACHE_MS for all of them: a couple of hundred
-  // threads share a few dozen folders, and each reading its own set again
-  // every 15 seconds kept the runner busy for seconds on a loaded Mac.
-  // Sets aren't changed once made (applyLive makes new ones), so sharing
-  // one is safe, as sharing a patch file's module already was.
-  loadSharedPatchSet(cwd: string, folders: ProjectFolder[], allFolders: string[]): Promise<PatchSet> {
-    const key = JSON.stringify([cwd, folders, allFolders]);
-    const now = this.clock.now();
-    const hit = this.sharedPatchSets.get(key);
-    if (hit && now - hit.at < FOLDER_CACHE_MS) return hit.set;
-    const set = loadPatchSet(cwd, this.panelsRoot, this.patchCache, folders, allFolders, this.folderCache, this.patchTrust);
-    const entry = { at: now, set };
-    this.sharedPatchSets.set(key, entry);
-    set.catch(() => {
-      if (this.sharedPatchSets.get(key) === entry) this.sharedPatchSets.delete(key);
-    });
-    return set;
-  }
-
-  // Forgets what was read from the folders, after something that may have
-  // changed them: the next patch reads go to the disk.
-  forgetFolders(): void {
-    this.folderCache.clear();
-    this.sharedPatchSets.clear();
-    // A turn may have changed what they read (comments resolved, a handback).
-    this.liveRuns.clear();
-  }
-
-  // A live state command (when, badge), shared by every thread that runs
-  // the same one in the same folder: Tandem's patch runs tandem status and
-  // tandem comments for each thread in a video folder every LIVE_POLL_MS.
-  // On a loaded Mac each took longer than that, so they piled up, nine at a
-  // time, and every spawn blocked the event loop for a second or so. Now
-  // one run serves them all for LIVE_SHARE_MS, and a poll that comes round
-  // while it's still going joins it. Live state is about the folder (what
-  // a tool says about the files there), not about one thread.
-  runLiveCommand(threadId: string, command: string, cwd: string): Promise<CommandOutcome> {
-    const key = `${cwd}\u0000${command}`;
-    const hit = this.liveRuns.get(key);
-    if (hit && (hit.doneAt === undefined || this.clock.now() - hit.doneAt < LIVE_SHARE_MS)) return hit.out;
-    const entry: { doneAt?: number; out: Promise<CommandOutcome> } = { out: this.runPatchCommand(threadId, command, cwd) };
-    this.liveRuns.set(key, entry);
-    void entry.out.then(
-      () => (entry.doneAt = this.clock.now()),
-      () => {
-        if (this.liveRuns.get(key) === entry) this.liveRuns.delete(key);
-      },
-    );
-    return entry.out;
-  }
-
-  // A command a patch's function runs (list panels, live state): in its
-  // folder, with the thread's variables, like an action.
-  runPatchCommand(threadId: string, command: string, cwd: string) {
-    return runCommand(command, { cwd, env: { ...process.env, ...threadEnv(threadId, this.cfg.home) }, shell: this.actionShell, timeoutMs: this.actionTimeoutMs });
-  }
-
-  // Reads live state again for the inbox's threads that have any, every
-  // LIVE_POLL_MS while there are some. Hibernating and Den threads wait
-  // until they're back (patchSet reads again on the next summary).
-  armLivePoll(): void {
-    if (this.liveTimer || this.stopping) return;
-    this.liveTimer = this.clock.setTimeout(() => {
-      this.liveTimer = undefined;
-      if (this.stopping) return;
-      let any = false;
-      for (const st of this.threads.values()) {
-        if (!st.rt.patches?.live || st.rt.deleted || this.bucket(st.rec) !== 'inbox') continue;
-        any = true;
-        void this.refreshPatches(st);
-      }
-      if (any) this.armLivePoll();
-    }, LIVE_POLL_MS);
-  }
-
-  notePatchChanges(st: ThreadState, before: PatchSet, after: PatchSet): void {
-    const was = new Map(before.patches.map((p) => [p.id + '@' + p.source, p]));
-    for (const p of after.patches) {
-      if (p.source === 'builtin') continue;
-      const old = was.get(p.id + '@' + p.source);
-      if (p.error) {
-        if (old?.error !== p.error) this.emit(st, { type: 'system.note', text: `Patch ${p.id} couldn't load: ${p.error}` });
-        continue;
-      }
-      if (p.untrusted) {
-        if (old?.untrusted !== p.untrusted || old?.hash !== p.hash) {
-          const why = p.untrusted === 'changed' ? 'it changed since you trusted it' : 'nothing from its folder is trusted yet';
-          this.emit(st, { type: 'system.note', text: `Patch ${p.id} isn't loaded: ${why}. Trust it in Patches to load it.` });
-        }
-        continue;
-      }
-      if (old && !old.error && !old.untrusted) continue;
-      const gives: string[] = [];
-      const actions = after.actions.filter((a) => a.patch === p.id).map((a) => a.title);
-      const panels = after.panels.filter((x) => x.patch === p.id).map((x) => x.title);
-      const hooks = after.hooks.filter((x) => x.patch === p.id).map((x) => x.title);
-      if (actions.length) gives.push(`${actions.length === 1 ? 'action' : 'actions'} ${actions.join(', ')}`);
-      if (panels.length) gives.push(`${panels.length === 1 ? 'panel' : 'panels'} ${panels.join(', ')}`);
-      if (hooks.length) gives.push(`${hooks.length === 1 ? 'hook' : 'hooks'} ${hooks.join(', ')}`);
-      this.emit(st, { type: 'system.note', text: `Patch ${p.id} ${old ? 'loads again' : 'added'}: ${gives.join(', ') || 'nothing yet'}.` });
-    }
-  }
-
-  // patches.trust: trusts the versions of a thread's untrusted patch files
-  // that the app showed (by hash), then reads every thread's patches again.
-  // Only files the thread lists as untrusted: this isn't a way to trust
-  // any path.
-  async trustPatches(threadId: string, files: { file: string; hash: string }[]): Promise<{ trusted: string[] }> {
-    const st = this.mustGet(threadId);
-    const waiting = this.patchSet(st).patches.filter((p) => p.untrusted && p.file);
-    for (const { file, hash } of files) {
-      const p = waiting.find((w) => w.file === file);
-      if (!p) throw new RpcError(ErrorCode.badParams, `${file} isn't one of this thread's patches waiting to be trusted`);
-      if (p.hash !== hash) throw new RpcError(ErrorCode.badParams, `${path.basename(file)} has changed since it was shown; look again`);
-    }
-    const trusted = files.filter(({ file, hash }) => this.patchTrust.trust(file, hash)).map((f) => f.file);
-    this.log.info('patches trusted', { threadId, files: trusted });
-    this.rereadAllPatches();
-    await this.patchesIdle();
-    return { trusted };
-  }
-
-  // Trusts patch files an agent wrote, as they are now (patch-trust.ts).
-  // `reread` false when the caller reads them again itself.
-  // A helper the agent edited carries on the trusted patches importing it.
-  trustAgentPatches(files: string[], reread = true): void {
-    const done = this.patchTrust.trustCurrent(files.filter(isPatchFile));
-    for (const file of files) if (!isPatchFile(file)) done.push(...this.patchTrust.trustDependents(file));
-    if (done.length && reread) this.rereadAllPatches();
-  }
-
-  // Every thread whose patches have been read reads them again now: a
-  // trusted file can matter to threads in other folders (a project's).
-  rereadAllPatches(): void {
-    this.forgetFolders();
-    for (const st of this.threads.values()) {
-      if (!st.rt.patches || st.rt.deleted) continue;
-      st.rt.patches.at = -Infinity;
-      void this.refreshPatches(st);
-    }
-  }
-
-  // A first start with patch trust (no patch-trust.json yet): the patch
-  // files of every thread's folder and every project's are trusted as they
-  // are, since this runner was already running them. Anything new after
-  // this asks.
-  seedPatchTrust(threadFolders: string[]): void {
-    if (this.patchTrust.existed) return;
-    const home = this.panelsRoot ?? os.homedir();
-    const folders = new Set<string>(threadFolders);
-    for (const f of Projects.savedFolders(this.cfg.home)) folders.add(f);
-    const files = new Set<string>();
-    for (const folder of folders) {
-      try {
-        for (const f of projectPatchFiles(folder, home)) files.add(f);
-      } catch {
-        // a folder that's gone
-      }
-    }
-    const done = this.patchTrust.trustCurrent([...files]);
-    this.patchTrust.save();
-    this.log.info('patch trust seeded', { files: done.length });
-  }
-
-  // Draws an image panel (the Simulator's screenshot) for `panels.render`.
-  async renderPanel(threadId: string, panelId: string): Promise<PanelRender> {
-    const st = this.mustGet(threadId);
-    const panel = this.patchSet(st).panels.find((p) => p.id === panelId);
-    if (!panel) throw new RpcError(ErrorCode.badParams, `This thread has no panel called ${panelId}`);
-    if (panel.kind === 'list') {
-      return renderListPanel(panel, this.patchSet(st), {
-        cwd: st.rec.cwd,
-        threadId,
-        run: (command, cwd) => this.runPatchCommand(threadId, command, cwd),
-      });
-    }
-    return renderPanel(panel, paths.panels(this.cfg.home, threadId), this.screenshot);
-  }
-
-  // Cloud deployments in the Convex panel's project, through its CLI.
-  async convexPanelDeployments(threadId: string, panelId: string, refresh = false): Promise<ConvexDeployments> {
-    const { convex, folder } = this.convexPanelContext(threadId, panelId);
-    return this.convexKeys.deployments(folder, convex, refresh);
-  }
-
-  // A deploy key for the embedded dashboard. Other choices must resolve in
-  // this panel's project before they can get a key.
-  async convexPanelKey(threadId: string, panelId: string, renew = false, selected?: string): Promise<ConvexKey> {
-    const { convex, folder } = this.convexPanelContext(threadId, panelId);
-    let target = convex;
-    if (selected && selected !== convex.deployment) {
-      const choices = await this.convexKeys.deployments(folder, convex);
-      const choice = choices.deployments.find(d => d.deployment === selected);
-      if (!choice) throw new RpcError(ErrorCode.badParams, `This project's panel has no deployment called ${selected}`);
-      target = choice;
-    }
-    const { deployment, deploymentUrl } = target;
-    const team = deployment === convex.deployment ? convex.team : undefined;
-    return { deployment, deploymentUrl, adminKey: await this.convexKeys.key(deployment, folder, renew, { deploymentUrl, team }) };
-  }
-
-  // Signs this runner's Convex CLI in, for a panel that said it's signed
-  // out (or can't reach its deployment, with `force`). `check` only says
-  // how the sign-in going is getting on.
-  async convexPanelLogin(threadId: string, panelId: string, check = false, force = false): Promise<ConvexLogin> {
-    this.convexPanelContext(threadId, panelId);
-    return this.convexKeys.login(check, force);
-  }
-
-  convexPanelContext(threadId: string, panelId: string) {
-    const st = this.mustGet(threadId);
-    const panel = this.patchSet(st).panels.find((p) => p.id === panelId);
-    if (!panel) throw new RpcError(ErrorCode.badParams, `This thread has no panel called ${panelId}`);
-    if (!panel.convex) throw new RpcError(ErrorCode.badParams, `${panelId} isn't a Convex cloud deployment's panel`);
-    const { deployment } = panel.convex;
-    const starts = [st.rec.cwd, ...(this.projects?.foldersFor(st.rec) ?? []).map((f) => f.folder)];
-    const folder = convexFolderFor(deployment, starts, this.panelsRoot ?? os.homedir());
-    if (!folder) throw new RpcError(ErrorCode.badParams, `Couldn't find the Convex project for ${deployment}`);
-    return { convex: panel.convex, folder };
-  }
-
   // ------------------------------------------------------------ highlights
 
-  // What the thread has made, shared and pinned (docs/protocol.md,
-  // "Highlights"): brought up to date from the events since the last ask.
-  highlights(threadId: string): ThreadHighlights {
-    const st = this.mustGet(threadId);
-    this.catchUpHighlights(st);
-    return highlightsView(st.rec.highlights!, st.rec.brief);
-  }
-
-  removeHighlight(threadId: string, highlightId: string): { thread: ThreadSummary } {
-    const st = this.mustGet(threadId);
-    this.catchUpHighlights(st);
-    if (!removeHighlight(st.rec.highlights!, highlightId)) throw new RpcError(ErrorCode.badParams, `This thread has no highlight ${highlightId}`);
-    this.highlightsChanged(st);
-    return { thread: this.summary(st) };
-  }
-
-  // The `pin` tool: a file (relative to the thread's folder is fine) or a
-  // URL, for Mike to look at. Returns the highlight's id.
-  pin(threadId: string, target: { path?: string; url?: string; title?: string; note?: string; show?: boolean }): { id: string } {
-    const st = this.mustGet(threadId);
-    if (Boolean(target.path) === Boolean(target.url)) throw new RpcError(ErrorCode.badParams, 'Pin a path or a url, one of the two.');
-    let file: string | undefined;
-    if (target.path) {
-      file = absolute(target.path, st.rec.cwd);
-      if (!fs.statSync(file, { throwIfNoEntry: false })?.isFile()) throw new RpcError(ErrorCode.badParams, `There's no file at ${file}.`);
-    } else if (!/^[a-z][a-z0-9+.-]*:\/\/\S/i.test(target.url!)) {
-      throw new RpcError(ErrorCode.badParams, 'A url needs a scheme, like https://.');
-    }
-    this.catchUpHighlights(st);
-    const state = st.rec.highlights!;
-    const item = pinItem({ ...target, path: file }, st.rec.lastSeq, this.isoNow());
-    // Pinning something Mike removed is the agent asking again: let it.
-    state.removed = state.removed?.filter((id) => id !== item.id);
-    upsertHighlight(state, item);
-    this.highlightsChanged(st);
-    return { id: item.id };
-  }
-
-  unpin(threadId: string, highlightId: string): { removed: boolean } {
-    const st = this.mustGet(threadId);
-    this.catchUpHighlights(st);
-    const removed = unpinHighlight(st.rec.highlights!, highlightId);
-    if (removed) this.highlightsChanged(st);
-    return { removed };
-  }
-
   // ------------------------------------------------------- showing panels
-
-  // The show_panel tool (docs/protocol.md, "Showing panels"): the request
-  // waits on the thread, replacing an older one, for the app to show once
-  // Mike is looking at it. Resolves when the app says it has, or after
-  // waitMs with shown false. Everything up to the wait runs before the
-  // promise is returned, so the request is there as soon as this is called.
-  async showPanel(threadId: string, ask: { panel: string; where?: PanelPlace }, waitMs = PANEL_ACK_WAIT_MS): Promise<{ request: PanelRequest; shown: boolean }> {
-    const st = this.mustGet(threadId);
-    if (ask.where !== undefined && !PANEL_PLACES.includes(ask.where)) {
-      throw new RpcError(ErrorCode.badParams, `where is ${PANEL_PLACES.slice(0, -1).join(', ')} or ${PANEL_PLACES.at(-1)}.`);
-    }
-    const set = this.patchSet(st);
-    let panel: { id: string; title: string };
-    try {
-      panel = resolvePanel(ask.panel, { panels: set.panels, hasPatches: set.patches.length > 0 || Boolean(this.worktreeAction(st.rec)) });
-    } catch (e) {
-      throw new RpcError(ErrorCode.badParams, (e as Error).message);
-    }
-    const request: PanelRequest = { id: crypto.randomUUID(), panel: panel.id, title: panel.title, at: this.isoNow() };
-    if (ask.where) request.where = ask.where;
-    this.endPanelWait(st, false);
-    st.rec.panelRequest = request;
-    this.markDirty(st);
-    const shown = await new Promise<boolean>((resolve) => {
-      const timer = this.clock.setTimeout(() => this.endPanelWait(st, false), waitMs);
-      st.rt.panelWaiter = { id: request.id, resolve, timer };
-    });
-    return { request, shown };
-  }
 
   // Whether anyone with the link can read the thread on the website
   // (docs/protocol.md, "Sharing"). The mirror carries it to Convex, which
@@ -3942,186 +2825,6 @@ export class Runner {
     st.rec.share = { access: args.access, slug, updatedAt: this.isoNow() };
     this.markDirty(st);
     return { thread: this.summary(st) };
-  }
-
-  // The app has shown the thread's panel request: it's done.
-  panelShown(threadId: string, requestId: string): { thread: ThreadSummary } {
-    const st = this.mustGet(threadId);
-    if (st.rec.panelRequest?.id === requestId) {
-      delete st.rec.panelRequest;
-      if (st.rt.panelWaiter?.id === requestId) this.endPanelWait(st, true);
-      this.markDirty(st);
-    }
-    return { thread: this.summary(st) };
-  }
-
-  endPanelWait(st: ThreadState, shown: boolean): void {
-    const waiter = st.rt.panelWaiter;
-    if (!waiter) return;
-    st.rt.panelWaiter = undefined;
-    waiter.timer.cancel();
-    waiter.resolve(shown);
-  }
-
-  // The librarian's line on where the thread is up to.
-  setBrief(threadId: string, text: string): void {
-    const st = this.threads.get(threadId);
-    if (!st || st.rt.deleted) return;
-    const clean = text.trim().slice(0, 600);
-    if (!clean || clean === st.rec.brief?.text) return;
-    st.rec.brief = { text: clean, at: this.isoNow() };
-    this.highlightsChanged(st);
-  }
-
-  // The librarian's title for a thread that has moved on from its old one.
-  // Never over one Mike or an agent set, and only while the title is still
-  // `from`, the one the look was given, so a rename meanwhile wins. Like a
-  // model title it doesn't set titleSet, so a later look can rename again.
-  retitleFromLibrarian(threadId: string, title: string, from: string): string | undefined {
-    const st = this.threads.get(threadId);
-    if (!st || st.rt.deleted || st.rec.titleSet || st.rec.title !== from) return undefined;
-    const clean = cleanTitle(title);
-    if (!clean || clean === st.rec.title) return undefined;
-    st.rec.title = clean;
-    st.rec.updatedAt = this.isoNow();
-    this.markDirty(st);
-    return clean;
-  }
-
-  catchUpHighlights(st: ThreadState): void {
-    const state = (st.rec.highlights ??= emptyHighlights());
-    const log = this.store.log(st.rec.id);
-    if (state.seq >= log.lastSeq) return;
-    // A page at a time, so a long thread's first look doesn't hold
-    // thousands of events at once.
-    for (let from = state.seq + 1; from <= log.lastSeq; from += 500) {
-      const to = Math.min(log.lastSeq, from + 499);
-      observeHighlights(state, log.read(from, to).filter((e) => !cutOut(st.rec, e.seq)), { cwd: st.rec.cwd });
-      state.seq = Math.max(state.seq, to);
-    }
-    this.markDirty(st);
-  }
-
-  highlightsChanged(st: ThreadState): void {
-    // markDirty sends the summary, whose new highlightsAt tells clients
-    // to fetch again.
-    st.rec.highlightsAt = this.isoNow();
-    this.markDirty(st);
-  }
-
-  // Runs the folder's turn.end hooks for a turn that just completed: each
-  // command's output goes into the transcript as an action.run, and when
-  // the hook's `tell` says so (failures by default), to the agent as a
-  // message from the runner, which starts a turn. A hook whose turn fails
-  // the same way again is told HOOK_TELL_LIMIT times, then only posted.
-  async runHooks(st: ThreadState, turn: Turn): Promise<void> {
-    const hooks = this.patchSet(st).hooks.filter((h) => h.on === 'turn.end' && hookApplies(h, turn.edited, st.rec.cwd));
-    if (!hooks.length) return;
-    st.rt.hooksRunning = (st.rt.hooksRunning ?? 0) + 1;
-    try {
-      await this.runHookList(st, hooks);
-    } finally {
-      st.rt.hooksRunning--;
-      if (this.draining) this.queueHandoverCheck();
-    }
-  }
-
-  async runHookList(st: ThreadState, hooks: PatchSet['hooks']): Promise<void> {
-    for (const hook of hooks) {
-      if (st.rt.deleted || this.stopping) return;
-      const outcome = await runCommand(hook.command, {
-        cwd: hook.folder ?? st.rec.cwd,
-        env: { ...process.env, ...threadEnv(st.rec.id, this.cfg.home) },
-        shell: this.actionShell,
-        timeoutMs: this.actionTimeoutMs,
-      });
-      if (st.rt.deleted || this.stopping) return;
-      const body: EventBody = {
-        type: 'action.run',
-        actionId: hook.id,
-        patch: hook.patch,
-        title: hook.title,
-        command: hook.command,
-        ok: outcome.ok,
-        text: outcome.text,
-        truncated: outcome.truncated,
-        durationMs: outcome.durationMs,
-        trigger: 'turn.end',
-      };
-      if (outcome.exitCode !== undefined) body.exitCode = outcome.exitCode;
-      this.emit(st, body, st.rt.turn?.turnId);
-      this.markDirty(st);
-      const tell = hook.tell === 'always' || (hook.tell === 'failures' && !outcome.ok);
-      if (!tell) continue;
-      const counts = (st.rt.hookTurns ??= new Map());
-      const sofar = counts.get(hook.id) ?? 0;
-      if (sofar >= HOOK_TELL_LIMIT) {
-        this.log.info('hook result not told again', { threadId: st.rec.id, hook: hook.id, times: sofar });
-        continue;
-      }
-      counts.set(hook.id, sofar + 1);
-      const shown = outcome.text.length > HOOK_TELL_CHARS ? outcome.text.slice(-HOOK_TELL_CHARS) : outcome.text;
-      const verdict = outcome.ok ? 'passed' : `failed${outcome.exitCode !== undefined ? ` (exit ${outcome.exitCode})` : ''}`;
-      const text =
-        `[Threadbear hook] ${hook.title} (patch ${hook.patch}) ran after your turn and ${verdict}:\n\n` +
-        '```\n' + (shown.trim() || '(no output)') + '\n```\n\n' +
-        (outcome.ok ? 'Nothing to do unless something above surprises you.' : 'If this is from your change, fix it; if not, say so and carry on.');
-      try {
-        this.sendTo(st, text, [], { origin: 'runner' });
-      } catch (e) {
-        this.log.warn('could not tell the agent a hook result', { threadId: st.rec.id, hook: hook.id, error: String(e) });
-      }
-    }
-  }
-
-  // Runs an action for `actions.run`: a prompt action is a message to the
-  // thread; a command action runs in its folder, and what it printed goes
-  // into the transcript as an action.run event. One run of an action at a
-  // time per thread.
-  async runAction(threadId: string, actionId: string): Promise<{ turnId?: string; ok?: boolean; exitCode?: number; durationMs?: number; seq?: number }> {
-    const st = this.mustGet(threadId);
-    const action = this.actionsOf(st, this.patchSet(st)).find((a) => a.id === actionId);
-    if (!action) throw new RpcError(ErrorCode.badParams, `This thread has no action called ${actionId}`);
-    if (action.kind === 'prompt') return this.send(threadId, action.prompt ?? '');
-    if (action.kind === 'url') {
-      // Apps that know url actions open the page themselves, on the device
-      // it was pressed on, and never call this. An older Mac app reads the
-      // unknown kind as a command and asks here, so open it on this Mac,
-      // with nothing in the transcript, which is where that app is.
-      const started = Date.now();
-      await this.openUrl(action.url ?? '');
-      return { ok: true, durationMs: Date.now() - started };
-    }
-    const running = (st.rt.runningActions ??= new Set());
-    if (running.has(actionId)) throw new RpcError(ErrorCode.busy, `${action.title} is already running.`);
-    running.add(actionId);
-    try {
-      const outcome = await runCommand(action.command ?? '', {
-        cwd: action.folder ?? st.rec.cwd,
-        env: { ...process.env, ...threadEnv(threadId, this.cfg.home) },
-        shell: this.actionShell,
-        timeoutMs: this.actionTimeoutMs,
-      });
-      if (st.rt.deleted) return { ok: outcome.ok, exitCode: outcome.exitCode, durationMs: outcome.durationMs };
-      const body: EventBody = {
-        type: 'action.run',
-        actionId,
-        patch: action.patch,
-        title: action.title,
-        command: action.command ?? '',
-        ok: outcome.ok,
-        text: outcome.text,
-        truncated: outcome.truncated,
-        durationMs: outcome.durationMs,
-      };
-      if (outcome.exitCode !== undefined) body.exitCode = outcome.exitCode;
-      const event = this.emit(st, body, st.rt.turn?.turnId);
-      st.rec.lastActivityAt = this.isoNow();
-      this.markDirty(st);
-      return { ok: outcome.ok, exitCode: outcome.exitCode, durationMs: outcome.durationMs, seq: event.seq };
-    } finally {
-      running.delete(actionId);
-    }
   }
 
 
@@ -4235,7 +2938,7 @@ export class Runner {
 
 // The Runner's other methods live in parts under runner/, one area each;
 // they go onto its prototype here, as the class's own methods would be.
-for (const part of [reviewsPart, approvalsPart, projectsHostPart, stoppedWorkPart, handoversPart, poolsPart, networkPart, worktreesPart]) {
+for (const part of [newThreadsPart, hibernationPart, titlesPart, highlightsPart, patchesPart, editingPart, clisPart, reviewsPart, approvalsPart, projectsHostPart, stoppedWorkPart, handoversPart, poolsPart, networkPart, worktreesPart]) {
   for (const [key, d] of Object.entries(Object.getOwnPropertyDescriptors(part))) {
     Object.defineProperty(Runner.prototype, key, { ...d, enumerable: false });
   }
@@ -4302,7 +3005,7 @@ function publicSubagent(a: SubagentRecord): Subagent {
   return rest;
 }
 
-function userMessage(msg: QueuedSend): EventBody {
+export function userMessage(msg: QueuedSend): EventBody {
   return {
     type: 'user.message',
     text: msg.text,
@@ -4315,7 +3018,7 @@ function userMessage(msg: QueuedSend): EventBody {
   };
 }
 
-function checkImages(images: ImageRef[]): void {
+export function checkImages(images: ImageRef[]): void {
   for (const img of images) {
     if (!img || typeof img.path !== 'string' || !fs.existsSync(img.path)) {
       throw new RpcError(ErrorCode.badParams, `Image not found: ${img?.path}`);
@@ -4351,7 +3054,7 @@ export function titleFrom(text: string): string {
 // What the runner asks a small model for a thread's title. The examples
 // do more than the rules: without them Haiku drifts into Title Case and
 // sometimes describes the naming job itself.
-const TITLE_PROMPT = [
+export const TITLE_PROMPT = [
   'You name threads in Threadbear, an app for running AI agents, mostly for coding.',
   'Reply with the title only: 2 to 6 words saying what the thread is about.',
   'Sentence case: a capital for the first word and for names only. No quotes, no full stop, no dashes, no emoji.',
@@ -4439,7 +3142,7 @@ export function modelTitle(account: Account, model: string): string {
 
 const EFFORT_TITLES: Record<EffortLevel, string> = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max', ultra: 'Ultra' };
 
-function effortTitle(e: EffortLevel): string {
+export function effortTitle(e: EffortLevel): string {
   return EFFORT_TITLES[e] ?? e;
 }
 
