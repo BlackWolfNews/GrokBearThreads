@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import XCTest
 @testable import Threadbear
 @testable import ThreadbearCore
@@ -270,6 +271,52 @@ final class TranscriptLayoutTests: XCTestCase {
         app.toggleCardCollapsed(threadId: "t", seq: 4)
         app.toggleCardCollapsed(threadId: "t", seq: 9)
         XCTAssertEqual(app.collapsedCards["t"], 9)
+    }
+
+    /// SwiftUI asks the composer's card its size many times a pass, once
+    /// per stack it's nested in and for each probe, and a card of asks
+    /// built and measured on every one (each page of it, with its symbol
+    /// images) froze the app for 5 to 19 seconds a time (5 Nov,
+    /// THREADBEAR-X and -Y). The card has to answer them from what it
+    /// built last, and build again only when it changes.
+    func testTheComposerCardIsBuiltOncePerChangeNotPerSizeQuestion() {
+        let why = String(repeating: "This one needs a proper explanation so it wraps over a few lines. ", count: 3)
+        let asks = (1...3).map { Ask(action: "Pick number \($0)", why: why, options: ["Yes", "No", "Maybe"], optionNotes: ["Does it", "Doesn't", "Waits"]) }
+        let row = TranscriptRow(id: "ak:1", seq: 1, turnId: "t1", content: .asks(AsksCard(seq: 1, asks: asks)))
+        let controller = TranscriptController()
+        let nested = { (row: TranscriptRow) in
+            VStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ComposerCard(row: row, controller: controller)
+                            .padding(.horizontal, 14).padding(.top, 8).padding(.bottom, 10)
+                        Rectangle().frame(height: 0.5)
+                        Text("The message box")
+                    }
+                    .padding(12)
+                }
+                .frame(maxWidth: 780)
+                .padding(.horizontal, 20)
+            }
+        }
+        let host = NSHostingView(rootView: AnyView(nested(row)))
+        host.frame = NSRect(x: 0, y: 0, width: 900, height: 700)
+        ComposerCardHost.renderCount = 0
+        host.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThan(ComposerCardHost.renderCount, 0)
+        XCTAssertLessThanOrEqual(ComposerCardHost.renderCount, 2, "built \(ComposerCardHost.renderCount) times for one layout")
+        // Laid out again with nothing changed: nothing to build.
+        ComposerCardHost.renderCount = 0
+        host.frame.size.height = 640
+        host.layoutSubtreeIfNeeded()
+        XCTAssertEqual(ComposerCardHost.renderCount, 0)
+        // A pick changes the card, so it's built again.
+        var picked = row
+        picked.content = .asks(AsksCard(seq: 1, asks: asks, picks: [0: 1]))
+        host.rootView = AnyView(nested(picked))
+        host.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThan(ComposerCardHost.renderCount, 0)
+        XCTAssertLessThanOrEqual(ComposerCardHost.renderCount, 2)
     }
 
     /// The open card is drawn in the composer (ComposerCard), so its row

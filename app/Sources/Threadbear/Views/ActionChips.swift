@@ -14,22 +14,129 @@ import ThreadbearCore
 struct ActionChips: View {
     @Environment(AppModel.self) private var app
     let thread: ThreadSummary
+    /// The width the shelves have, and each piece's width, both from the
+    /// last layout (`ActionChipsFit`).
+    @State private var room: CGFloat?
+    @State private var widths = ActionChipsFit.Widths()
 
     var body: some View {
         let actions = thread.actions
-        // As many chips as fit, in order, and the rest under "+N": the
-        // first of these that fits the box's width is the one shown. A
-        // scrolling row cut its last chip off mid-word.
-        ViewThatFits(in: .horizontal) {
-            ForEach((0...actions.count).reversed(), id: \.self) { shown in
-                row(Array(actions.prefix(shown)), more: Array(actions.dropFirst(shown)))
-            }
-        }
+        let waiting = thread.patches.filter { $0.untrusted != nil }
+        // As many chips as fit, in order, and the rest under "+N". A
+        // scrolling row cut its last chip off mid-word. Worked out from
+        // each chip's width rather than with a ViewThatFits of a row for
+        // every count: that built every row it tried, about 65 chips for
+        // 10 actions, each time the window asked the composer its size,
+        // and froze the app for 15 seconds (5 Nov, THREADBEAR-Y).
+        let shown = room.flatMap { ActionChipsFit.shown(thread: thread, waiting: waiting.isEmpty ? nil : waiting, widths: widths, room: $0) }
+        let count = shown ?? 0
+        ActionChipsRow(thread: thread, shown: Array(actions.prefix(count)), more: Array(actions.dropFirst(count)), waiting: waiting)
+            // Until the chips are measured: there, a row tall, but not yet
+            // showing a count it hasn't worked out.
+            .opacity(shown == nil ? 0 : 1)
+            .allowsHitTesting(shown != nil)
+            // The width it's offered, never the row's: a row too wide for
+            // it mustn't widen the room it was picked for (and the box).
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { room = $0 }
+            .background(alignment: .topLeading) { measuring(actions, waiting: waiting) }
     }
 
-    private func row(_ shown: [Action], more: [Action]) -> some View {
-        HStack(alignment: .bottom, spacing: zoomed(6)) {
-            let waiting = thread.patches.filter { $0.untrusted != nil }
+    /// Each piece once, out of sight, for its width: every chip, the trust
+    /// chip's shelf and the "+N" one (at the most it could say).
+    private func measuring(_ actions: [Action], waiting: [PatchInfo]) -> some View {
+        HStack(alignment: .top, spacing: 0) {
+            ForEach(actions) { action in
+                ActionChip(action: action, running: app.isRunning(action: action, in: thread.id)) {}
+                    .fixedSize()
+                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { widths.chips[action.id] = $0 }
+            }
+            if !waiting.isEmpty {
+                ActionShelfTab { WaitingPatchesChip(waiting: waiting) {} }
+                    .fixedSize()
+                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { widths.waiting = $0 }
+            }
+            ActionChipsMoreTab(threadId: thread.id, more: [], count: actions.count)
+                .fixedSize()
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { widths.more = $0 }
+        }
+        .fixedSize()
+        .hidden()
+        .accessibilityHidden(true)
+    }
+}
+
+/// How many of a thread's action chips fit in a width, from each chip's
+/// own width and the shelves' fixed parts, the ones ActionChipsRow lays
+/// out with. `testTheRowWidthItWorksOutIsTheRowsWidth` keeps the two the
+/// same.
+enum ActionChipsFit {
+    struct Widths: Equatable {
+        var chips: [String: CGFloat] = [:]
+        /// The trust chip on its shelf.
+        var waiting: CGFloat?
+        /// The "+N" shelf.
+        var more: CGFloat?
+    }
+
+    static var rowSpacing: CGFloat { zoomed(6) }
+    static var tabPadding: CGFloat { zoomed(6) }
+    static var tabSpacing: CGFloat { zoomed(2) }
+    static var badgeSize: CGFloat { zoomed(18) }
+    static var badgePadding: CGFloat { zoomed(2) }
+    static var hairlinePadding: CGFloat { zoomed(2) }
+    static var badgeWidth: CGFloat { badgeSize + badgePadding * 2 }
+    static var hairlineWidth: CGFloat { 1 + hairlinePadding * 2 }
+
+    /// The row's width with the first `shown` actions on shelves and the
+    /// rest under "+N"; nil until every piece it needs is measured.
+    static func width(shown: Int, thread: ThreadSummary, waiting: [PatchInfo]?, widths: Widths) -> CGFloat? {
+        let actions = thread.actions
+        var parts: [CGFloat] = []
+        if waiting != nil {
+            guard let tab = widths.waiting else { return nil }
+            parts.append(tab)
+        }
+        for shelf in ActionShelf.shelves(Array(actions.prefix(shown)), in: thread) {
+            var items: [CGFloat] = [badgeWidth, hairlineWidth]
+            for (index, group) in shelf.patches.enumerated() {
+                if index > 0 { items.append(hairlineWidth) }
+                for action in group {
+                    guard let chip = widths.chips[action.id] else { return nil }
+                    items.append(chip)
+                }
+            }
+            parts.append(tabPadding * 2 + items.reduce(0, +) + tabSpacing * CGFloat(items.count - 1))
+        }
+        if shown < actions.count {
+            guard let more = widths.more else { return nil }
+            parts.append(more)
+        }
+        return parts.reduce(0, +) + rowSpacing * CGFloat(max(parts.count - 1, 0))
+    }
+
+    /// The most chips that fit in `room`, or none when not even one does,
+    /// as a ViewThatFits of a row for each count would pick.
+    static func shown(thread: ThreadSummary, waiting: [PatchInfo]?, widths: Widths, room: CGFloat) -> Int? {
+        for shown in stride(from: thread.actions.count, through: 0, by: -1) {
+            guard let width = width(shown: shown, thread: thread, waiting: waiting, widths: widths) else { return nil }
+            // Half a point for rounding: each piece lands on a whole point.
+            if width <= room + 0.5 { return shown }
+        }
+        return 0
+    }
+}
+
+/// The shelves with `shown` on them and `more` under "+N".
+struct ActionChipsRow: View {
+    @Environment(AppModel.self) private var app
+    let thread: ThreadSummary
+    let shown: [Action]
+    let more: [Action]
+    let waiting: [PatchInfo]
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: ActionChipsFit.rowSpacing) {
             if !waiting.isEmpty {
                 ActionShelfTab {
                     WaitingPatchesChip(waiting: waiting) { app.showPane(.patches) }
@@ -50,25 +157,7 @@ struct ActionChips: View {
                 }
             }
             if !more.isEmpty {
-                ActionShelfTab {
-                    IconMenu {
-                        ForEach(more) { action in
-                            Button(action.title, systemImage: "bolt") { app.runAction(action, in: thread.id) }
-                                .disabled(app.isRunning(action: action, in: thread.id))
-                        }
-                    } label: {
-                        Text("+\(more.count)")
-                            .font(.system(size: TypeScale.chip))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, zoomed(6))
-                            .padding(.vertical, zoomed(4))
-                    }
-                    .menuStyle(.button)
-                    .buttonStyle(.plain)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
-                    .tip(more.map(\.title).joined(separator: ", "))
-                }
+                ActionChipsMoreTab(threadId: thread.id, more: more, count: more.count)
             }
         }
         .fixedSize(horizontal: true, vertical: false)
@@ -78,7 +167,37 @@ struct ActionChips: View {
         Rectangle()
             .fill(Color(nsColor: Theme.cardBorder))
             .frame(width: 1, height: zoomed(14))
-            .padding(.horizontal, zoomed(2))
+            .padding(.horizontal, ActionChipsFit.hairlinePadding)
+    }
+}
+
+/// "+N" on a shelf of its own: the chips that didn't fit, in a menu.
+struct ActionChipsMoreTab: View {
+    @Environment(AppModel.self) private var app
+    let threadId: String
+    let more: [Action]
+    let count: Int
+
+    var body: some View {
+        ActionShelfTab {
+            IconMenu {
+                ForEach(more) { action in
+                    Button(action.title, systemImage: "bolt") { app.runAction(action, in: threadId) }
+                        .disabled(app.isRunning(action: action, in: threadId))
+                }
+            } label: {
+                Text("+\(count)")
+                    .font(.system(size: TypeScale.chip))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, zoomed(6))
+                    .padding(.vertical, zoomed(4))
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .tip(more.map(\.title).joined(separator: ", "))
+        }
     }
 }
 
@@ -90,8 +209,8 @@ private struct ActionShelfTab<Content: View>: View {
 
     var body: some View {
         let shape = UnevenRoundedRectangle(topLeadingRadius: zoomed(10), topTrailingRadius: zoomed(10), style: .continuous)
-        HStack(spacing: zoomed(2)) { content }
-            .padding(.horizontal, zoomed(6))
+        HStack(spacing: ActionChipsFit.tabSpacing) { content }
+            .padding(.horizontal, ActionChipsFit.tabPadding)
             .padding(.vertical, zoomed(4))
             .background(shape.fill(Color.primary.opacity(colorScheme == .dark ? 0.05 : 0.035)))
             .overlay(shape.strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5))
@@ -116,8 +235,8 @@ private struct ShelfBadge: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .frame(width: zoomed(18), height: zoomed(18))
-        .padding(.horizontal, zoomed(2))
+        .frame(width: ActionChipsFit.badgeSize, height: ActionChipsFit.badgeSize)
+        .padding(.horizontal, ActionChipsFit.badgePadding)
         .contentShape(Rectangle())
         .tip(origin.tip("These buttons", projectTitle: title))
     }
@@ -160,13 +279,21 @@ struct WaitingPatchesChip: View {
     }
 }
 
-private struct ActionChip: View {
+struct ActionChip: View {
     let action: Action
     let running: Bool
     let run: () -> Void
     @State private var hovered = false
 
+    #if DEBUG
+    /// How many times a chip's been built, for tests.
+    nonisolated(unsafe) static var bodyCount = 0
+    #endif
+
     var body: some View {
+        #if DEBUG
+        let _ = Self.bodyCount += 1
+        #endif
         Button(action: run) {
             HStack(spacing: zoomed(5)) {
                 if running {

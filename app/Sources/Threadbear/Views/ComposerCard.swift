@@ -26,9 +26,14 @@ struct ComposerCard: NSViewRepresentable {
         view.show(row, collapsed: collapsed)
     }
 
+    /// SwiftUI asks this many times a layout pass, once for each stack
+    /// the card sits in and for each probe, and the window asks again for
+    /// its smallest size. Building the card every time (each page of it,
+    /// with its symbol images) froze the app for 5 to 19 seconds (5 Nov,
+    /// THREADBEAR-X), so the host answers from the card it built last.
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: ComposerCardHost, context: Context) -> CGSize? {
-        let width = proposal.width ?? Theme.maxContentWidth
-        let full = ComposerCardHost.render(row, width: width, page: nsView.page, collapsed: collapsed).height
+        let width = ComposerCardHost.measuringWidth(proposal.width)
+        let full = nsView.rendered(row, width: width, collapsed: collapsed).height
         return CGSize(width: width, height: min(full, nsView.maxHeight))
     }
 }
@@ -53,6 +58,9 @@ final class ComposerCardHost: NSView {
     /// opens on its first unanswered ask.
     private(set) var page = 0
     private var pageSeq: Int?
+    /// The card built for each width it's been asked about, for this row,
+    /// page, collapse and text size; any of those changing starts afresh.
+    private var built: (row: TranscriptRow, page: Int, collapsed: Bool, zoom: Int, renders: [CGFloat: RowRender])?
 
     override var isFlipped: Bool { true }
 
@@ -97,6 +105,9 @@ final class ComposerCardHost: NSView {
     /// its tallest page, so the composer doesn't jump up and down and the
     /// arrows stay put under the pointer while he pages through.
     static func render(_ row: TranscriptRow, width: CGFloat, page: Int = 0, collapsed: Bool = false) -> RowRender {
+        #if DEBUG
+        renderCount += 1
+        #endif
         guard case .asks(let card) = row.content else { return RowRender(height: 0) }
         let measure = { (text: NSAttributedString) in TextMeasurer.current.measure(text, width: width) }
         if collapsed {
@@ -119,6 +130,30 @@ final class ComposerCardHost: NSView {
             if index == shown { (text, size) = (pageText, pageSize) }
         }
         return RowRender(height: tallest, text: text, textSize: size)
+    }
+
+    /// The width to build the card at for a proposed one: the reading
+    /// column when SwiftUI leaves it open or offers no end, and never so
+    /// narrow that TextKit lays the card out a letter a line (the window's
+    /// smallest-size pass offers next to nothing).
+    static func measuringWidth(_ proposed: CGFloat?) -> CGFloat {
+        guard let proposed, proposed.isFinite else { return Theme.maxContentWidth }
+        return max(proposed, zoomed(160))
+    }
+
+    /// `render`, from what was built last when nothing's changed.
+    func rendered(_ row: TranscriptRow, width: CGFloat, collapsed: Bool) -> RowRender {
+        let zoom = TypeScale.percent
+        if let built, built.row == row, built.page == page, built.collapsed == collapsed, built.zoom == zoom {
+            if let render = built.renders[width] { return render }
+        } else {
+            built = (row, page, collapsed, zoom, [:])
+        }
+        let render = Self.render(row, width: width, page: page, collapsed: collapsed)
+        // A few widths while the window's resized; not one for every step.
+        if built!.renders.count >= 8 { built!.renders.removeAll() }
+        built!.renders[width] = render
+        return render
     }
 
     func show(_ row: TranscriptRow, collapsed: Bool = false) {
@@ -168,12 +203,17 @@ final class ComposerCardHost: NSView {
         if let shown, shown.row == row, shown.collapsed == collapsed, shown.width == bounds.width, shown.zoom == zoom { return }
         shown = (row, collapsed, bounds.width, zoom)
         placeToggle(row)
-        let render = Self.render(row, width: bounds.width, page: page, collapsed: collapsed)
+        let render = rendered(row, width: bounds.width, collapsed: collapsed)
         document.frame = NSRect(x: 0, y: 0, width: bounds.width, height: render.height)
         cell.frame = document.bounds
         cell.configure(row: row, render: render, tableWidth: bounds.width, expanded: false)
         if let ask = pendingFocus, cell.focusAnswerBox(ask) { pendingFocus = nil }
     }
+
+    #if DEBUG
+    /// How many times a card's been built, for tests.
+    nonisolated(unsafe) static var renderCount = 0
+    #endif
 
     static var toggleSize: CGFloat { zoomed(22) }
 
