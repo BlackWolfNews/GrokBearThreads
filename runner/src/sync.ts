@@ -2271,6 +2271,9 @@ export class ConvexSync {
         // once, loudly, as nothing else here would show it.
         if (keyRejected(e)) this.onKeyRejected();
         const refused = forbiddenText(e);
+        // Forbidden too: a runner moved onto its own key while the main key
+        // still works has its main-key heartbeat refused that way.
+        if (refused || this.keyRejected) this.restartIfNewKey();
         if (refused && refused !== this.heartbeatRefused) this.deps.log.warn('convex heartbeat refused: this runner key is for another runner', { error: refused, runnerId: this.runnerId });
         else if (!refused && !this.keyRejected) this.deps.log.debug('convex heartbeat failed', { error: String(e) });
         this.heartbeatRefused = refused;
@@ -2287,16 +2290,25 @@ export class ConvexSync {
 
   // The backend turned the key down. Said once (an error in the log, which
   // reaches Sentry from a real install, and a notice for the app), not a
-  // warning a minute. If secrets/convex-key now holds another key (tb
-  // runner add wrote one over ssh), restart onto it: the key is read at
-  // start, and nobody may be at that Mac to restart it.
+  // warning a minute. Then, as for a forbidden heartbeat: if
+  // secrets/convex-key now holds another key (tb runner add wrote one over
+  // ssh), restart onto it, as the key is read at start and nobody may be
+  // at that Mac to restart it.
   private onKeyRejected(): void {
     if (!this.keyRejected) {
       this.keyRejected = true;
       this.deps.log.error('convex turned down this runner\'s key', { runnerId: this.runnerId });
       this.deps.notice?.('error', KEY_REJECTED);
     }
-    const now = this.deps.readKey?.();
+  }
+
+  private restartIfNewKey(): void {
+    let now: string | undefined;
+    try {
+      now = this.deps.readKey?.();
+    } catch {
+      return;
+    }
     if (now && now !== this.deps.key && !this.restartAsked) {
       this.restartAsked = true;
       this.deps.log.info('restarting onto the new key in secrets/convex-key', { runnerId: this.runnerId });

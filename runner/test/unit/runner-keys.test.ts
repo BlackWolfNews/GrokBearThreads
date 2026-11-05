@@ -497,3 +497,32 @@ test('rotate-owner names every other runner still on the main key, and --finish 
   assert.deepEqual((s.convexCalls as { args: string[] }[]).slice(1).map((c) => c.args.join(' ')), ['env set RUNNER_KEY', 'env remove RUNNER_KEY_NEXT']);
   assert.match(s.printed.join('\n'), /Locked out.*befe8df8975c/);
 });
+
+// A runner whose key was revoked keeps its heartbeat row. Only one seen
+// after the revoke can be on the main key (a revoked key is refused).
+test("rotate-owner doesn't count a runner whose key was revoked and hasn't been seen since", async () => {
+  const s = setup(undefined, ['revoked00001', 'revoked00002']);
+  fs.writeFileSync(path.join(s.cfg.home, 'secrets', 'convex-deploy.env'), 'CONVEX_DEPLOY_KEY=prod:x|y\n');
+  s.keys([]);
+  const seen = Date.parse('2026-11-05T10:00:00Z');
+  const post = s.deps.post;
+  const deps = {
+    ...s.deps,
+    now: () => seen + 60_000,
+    post: async (kind: string, fn: string, args: Record<string, unknown>) => {
+      if (fn === 'sync:listRunnerKeys')
+        return {
+          keys: [
+            { runnerId: 'revoked00001', name: 'a', createdAt: '2026-11-01T00:00:00Z', revokedAt: '2026-11-05T10:00:30Z' },
+            { runnerId: 'revoked00002', name: 'b', createdAt: '2026-11-01T00:00:00Z', revokedAt: '2026-11-05T09:00:00Z' },
+          ],
+          rotating: false,
+        };
+      return post(kind, fn, args);
+    },
+  };
+  assert.equal(await runnerKeysCommand(s.cfg, ['rotate-owner'], { keysChecked: true }, deps), 1);
+  const said = s.printed.join('\n');
+  assert.doesNotMatch(said, /revoked00001/, 'last seen before its key was revoked');
+  assert.match(said, /revoked00002/, 'seen an hour after its key was revoked: on the main key');
+});

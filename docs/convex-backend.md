@@ -418,9 +418,10 @@ cloud deployments have `RUNNER_KEY` set to the key in the M5's runner's
 `secrets/convex-key`, and the live `runner.json` has `sync.url` pointing
 at prod, so the mirror is on from the runner's next start. Bruce has a
 runner key of its own on prod (`tb runner add bruce --ssh bruce --id
-cb921b2447ea --replace`), not a copy of `RUNNER_KEY`, and so should the
-Hetzner box (`cloud`, runner `befe8df8975c`), which the 5 Nov rotation
-cut off while it still had the old shared key. To rotate `RUNNER_KEY` with no gap, `tb runner
+cb921b2447ea --replace`), not a copy of `RUNNER_KEY`, and so has the
+Hetzner box (`cloud`, runner `befe8df8975c`, since 07:03 UTC 5 Nov),
+which that day's rotation had cut off while it still had the old shared
+key. To rotate `RUNNER_KEY` with no gap, `tb runner
 rotate-owner` on the M5, restart its runner, then `tb runner rotate-owner
 --finish` (docs/protocol.md, "Runner keys").
 

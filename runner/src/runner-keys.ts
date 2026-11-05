@@ -468,6 +468,7 @@ async function rotateOwner(home: string, key: string, f: Flags, call: (kind: 'qu
 // as still running on the main key. One not seen for longer is a Mac
 // that's gone (or a lost one, which rotating should cut off anyway).
 export const ON_MAIN_KEY_SEEN_MS = 30 * 24 * 60 * 60 * 1000;
+const REVOKE_SLACK_MS = 2 * 60 * 1000; // two heartbeats
 
 // Runners other than this Mac's that rotating the main key would cut off:
 // seen lately with no live runner key, so heartbeating on the main key
@@ -477,7 +478,10 @@ export const ON_MAIN_KEY_SEEN_MS = 30 * 24 * 60 * 60 * 1000;
 // get its own key first (tb runner add), or be named with --lock-out.
 async function onMainKey(call: (kind: 'query' | 'mutation', fn: string, a: Record<string, unknown>) => Promise<unknown>, ownRunnerId: string | undefined, now: number, lockOut: string[] = []): Promise<{ refuse?: string; lockedOut: string[] }> {
   const named = new Set(lockOut.flatMap((x) => x.split(',')).map((x) => x.trim()).filter(Boolean));
-  const found = [...(await knownRunners(call))].filter(([id, r]) => id !== ownRunnerId && !r.keyed && r.lastSeenAt !== undefined && now - r.lastSeenAt < ON_MAIN_KEY_SEEN_MS);
+  // A runner whose key was revoked keeps its heartbeat row; it's only on
+  // the main key if it was seen after the revoke (a revoked key is refused),
+  // give or take a heartbeat in flight.
+  const found = [...(await knownRunners(call))].filter(([id, r]) => id !== ownRunnerId && !r.keyed && r.lastSeenAt !== undefined && now - r.lastSeenAt < ON_MAIN_KEY_SEEN_MS && !(r.revokedAt !== undefined && r.lastSeenAt <= r.revokedAt + REVOKE_SLACK_MS));
   const left = found.filter(([id]) => !named.has(id));
   const lockedOut = found.filter(([id]) => named.has(id)).map(([id]) => id);
   if (!left.length) return { lockedOut };
@@ -494,12 +498,19 @@ async function onMainKey(call: (kind: 'query' | 'mutation', fn: string, a: Recor
 
 // Every runner id the deployment has heard of: ones that have heartbeated,
 // and ones that have (or had) a runner key.
-async function knownRunners(call: (kind: 'query' | 'mutation', fn: string, a: Record<string, unknown>) => Promise<unknown>): Promise<Map<string, { name?: string; lastSeenAt?: number; keyed?: boolean }>> {
+// revokedAt is the latest revoke of a runner with no live key.
+async function knownRunners(call: (kind: 'query' | 'mutation', fn: string, a: Record<string, unknown>) => Promise<unknown>): Promise<Map<string, { name?: string; lastSeenAt?: number; keyed?: boolean; revokedAt?: number }>> {
   const runners = ((await call('query', 'sync:runnersList', {})) ?? []) as { runnerId: string; name?: string; lastSeenAt?: number }[];
   const { keys } = await listKeys(call);
-  const out = new Map<string, { name?: string; lastSeenAt?: number; keyed?: boolean }>();
+  const out = new Map<string, { name?: string; lastSeenAt?: number; keyed?: boolean; revokedAt?: number }>();
   for (const r of runners) out.set(r.runnerId, { ...(r.name ? { name: r.name } : {}), ...(r.lastSeenAt ? { lastSeenAt: r.lastSeenAt } : {}) });
   for (const k of keys) if (!k.revokedAt) out.set(k.runnerId, { ...out.get(k.runnerId), keyed: true, ...(out.get(k.runnerId)?.name ? {} : { name: k.name }) });
+  for (const k of keys) {
+    const at = k.revokedAt ? Date.parse(k.revokedAt) : NaN;
+    const row = out.get(k.runnerId);
+    if (!Number.isFinite(at) || !row || row.keyed) continue;
+    if (row.revokedAt === undefined || at > row.revokedAt) row.revokedAt = at;
+  }
   return out;
 }
 

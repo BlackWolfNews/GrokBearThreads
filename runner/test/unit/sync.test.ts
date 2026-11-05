@@ -1949,3 +1949,22 @@ test('a key the backend turns down is said once, plainly, and a new key on disk 
   assert.equal(sync.status().keyRejected, undefined);
   await sync.stop();
 });
+
+// Moving a runner onto its own key while the main key still works (as
+// Bruce was): its old main-key heartbeat is refused as forbidden, not
+// turned down, and it should still restart onto the new key on disk.
+test('a forbidden heartbeat with a new key on disk restarts onto it too', async () => {
+  const forbidden = () => Object.assign(new Error('forbidden'), { data: { kind: 'forbidden', message: "This runner's key can't act as runner r1 with the main key, as that runner has a key of its own." } });
+  let onDisk = 'k';
+  const restarts: string[] = [];
+  const { h, sync } = setup({ fail: forbidden, extra: { restart: (reason) => void restarts.push(reason), readKey: () => onDisk } });
+  sync.start();
+  await tick();
+  assert.deepEqual(restarts, []);
+  assert.equal(sync.status().keyRejected, undefined, 'forbidden is not a turned-down key');
+  onDisk = 'tbr_new';
+  h.clock.advance(HEARTBEAT_MS);
+  await tick();
+  assert.equal(restarts.length, 1);
+  await sync.stop();
+});
