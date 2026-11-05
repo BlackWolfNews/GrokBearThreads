@@ -102,6 +102,26 @@ final class LocalPreviewSiteTests: XCTestCase {
         XCTAssertNil(site.serve("/pic.png"))
     }
 
+    /// Codex's second review: a NUL in a name passed the extension check
+    /// (`credentials.json\0.html` ends in .html) and then `openat` stopped
+    /// at the NUL and opened `credentials.json`. Control characters and
+    /// names still percent-encoded after decoding are refused outright.
+    func testNulAndControlCharactersAreRefused() throws {
+        try write("credentials.json", "{\"key\": \"secret\"}")
+        try write("index.html", #"<iframe src="credentials.json%00.html"></iframe><img src="a%0Ab.png"><img src="x%2500.png">"#)
+        let site = try site()
+        XCTAssertNil(site.serve("/credentials.json\u{0}.html"))
+        XCTAssertNil(site.serve("/a\nb.png"))
+        XCTAssertNil(site.serve("/x%00.png"))
+        XCTAssertNil(site.serve("/credentials.json"))
+        XCTAssertNil(LocalPreviewSite.resolve("credentials.json%00.html", from: ""))
+        XCTAssertNil(LocalPreviewSite.resolve("a%7Fb.png", from: ""))
+        XCTAssertNil(LocalPreviewSite.resolve("x%2500.png", from: ""))
+        XCTAssertNil(LocalPreviewSite.safeParts("a\u{0}.html"))
+        XCTAssertNil(LocalPreviewSite.safeParts("a\u{85}.png"))
+        XCTAssertNotNil(LocalPreviewSite.safeParts("my pic.png"))
+    }
+
     /// A FIFO named like a picture is refused without hanging the open.
     func testAFifoIsRefused() throws {
         try write("index.html", "<img src=pipe.png>")

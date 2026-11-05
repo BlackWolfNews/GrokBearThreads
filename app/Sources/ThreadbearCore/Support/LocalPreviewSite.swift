@@ -113,7 +113,13 @@ public final class LocalPreviewSite: @unchecked Sendable {
     }
 
     /// The path's parts, or nil for one with `..`, `.`, an empty part or a dotfile.
+    /// Also nil for one with a control character, a backslash or a `%`:
+    /// `openat` stops at a NUL, so `credentials.json\0.html` passed the
+    /// extension check as a page and opened `credentials.json` (Codex's
+    /// second review), and a `%` left after decoding means it was encoded
+    /// twice, which no real asset name needs.
     static func safeParts(_ path: String) -> [String]? {
+        guard !path.unicodeScalars.contains(where: { $0.properties.generalCategory == .control || $0 == "\\" || $0 == "%" }) else { return nil }
         let parts = path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
         guard !parts.isEmpty, parts.allSatisfy({ !$0.isEmpty && !$0.hasPrefix(".") }) else { return nil }
         return parts
@@ -169,6 +175,7 @@ public final class LocalPreviewSite: @unchecked Sendable {
             default: stack.append(String(part))
             }
         }
+        // Where a decoded NUL, control character or leftover `%` is refused.
         guard !stack.isEmpty, safeParts(stack.joined(separator: "/")) != nil else { return nil }
         return stack.joined(separator: "/")
     }
