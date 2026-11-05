@@ -265,6 +265,38 @@ a.appstore:active { transform: scale(.98); }
 .mac { display: block; width: 100%; height: auto; filter: drop-shadow(0 24px 40px rgba(40, 30, 15, .16)) drop-shadow(0 2px 6px rgba(40, 30, 15, .08)); }
 .hero-media .phone { position: absolute; right: 0; bottom: 0; --w: 220px; }
 
+/* The hero's slideshow (scripts/build.mjs's SLIDES, site.js moves it). Every window sits in the
+   same grid cell, so the stage is one window tall and they crossfade over each other; the title
+   and line under it do the same, rising a little as they come in. Without JavaScript only the
+   first shows. */
+.hero-media:has(.showcase) { padding: 0; max-width: 1100px; }
+.showcase { display: flex; flex-direction: column; align-items: center; }
+.slides, .slide-copies { display: grid; width: 100%; }
+.slides > *, .slide-copies > * { grid-area: 1 / 1; }
+.slide { opacity: 0; transform: scale(.985); transition: opacity 700ms var(--ease), transform 900ms var(--ease); }
+.slide.on { opacity: 1; transform: none; }
+.slide-copies { max-width: 640px; margin-top: var(--s-500); text-align: center; }
+.slide-copy { opacity: 0; transform: translateY(12px); transition: opacity 500ms var(--ease), transform 500ms var(--ease); pointer-events: none; }
+.slide-copy.on { opacity: 1; transform: none; pointer-events: auto; transition-delay: 150ms; }
+.slide-copy h2 { font-size: 24px; line-height: 32px; font-weight: 600; letter-spacing: -.02em; color: var(--ink); }
+.slide-copy p { margin-top: var(--s-75); font-size: 16px; line-height: 24px; color: var(--body); }
+/* The dots: the current one stretches into a pill that fills up until the next slide. */
+.dots { display: flex; gap: var(--s-75); margin-top: var(--s-300); }
+.dot { appearance: none; border: 0; background: none; padding: var(--s-75) var(--s-25); cursor: pointer; }
+.dot span {
+  position: relative; display: block; width: 8px; height: 8px; border-radius: var(--r-full); overflow: hidden;
+  background: var(--line); transition: width 500ms var(--ease), background-color 300ms var(--ease);
+}
+.dot:hover span { background: var(--ink-faint); }
+.dot.on span { width: 32px; background: var(--line); }
+.dot span::after { content: ""; position: absolute; inset: 0; background: var(--ink); transform: scaleX(0); transform-origin: left; }
+.dot.on span::after { transform: scaleX(1); transition: transform var(--slide-ms, 6000ms) linear; }
+.showcase.paused .dot.on span::after, .showcase.still .dot.on span::after { transform: scaleX(1); transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  .slide, .slide-copy { transition: opacity 1ms; transform: none; }
+}
+
+
 /* problem to solution */
 .problem, .benefits, .how, .proof-section, .faq, .closing { max-width: 1120px; margin: 0 auto; padding: 0 var(--s-300); }
 .problem-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-300); }
@@ -396,16 +428,27 @@ a.appstore:active { transform: scale(.98); }
 
 /* ---------- Threadbear's own pieces ---------- */
 
-/* The main button, bigger than the header's, with the GitHub mark. While the repo's private it's
-   visibly not a button (skill B9): greyed, no hover, and "Coming soon" beside the label. */
+/* The big button (the hero's and closing's Copy the install prompt). */
 .btn-lg { padding: var(--s-100) var(--s-300); border-radius: var(--r-xl); gap: var(--s-100); }
 .btn-lg .icon { font-size: 20px; }
-.btn.soon { background: var(--well); color: var(--ink-soft); box-shadow: inset 0 0 0 1px var(--line); cursor: not-allowed; }
-.btn.soon:hover { background: var(--well); color: var(--ink-soft); transform: none; }
-.btn.soon small {
-  font-size: 12px; line-height: 16px; font-weight: 600; padding: var(--s-25) var(--s-75); border-radius: var(--r-full);
-  background: var(--card); color: var(--ink-soft); box-shadow: inset 0 0 0 1px var(--line);
+
+/* The install prompt: the prompt itself on the code colours, the copy button under it, and a
+   line saying where to paste it once it's copied (site.js). Without JavaScript the button stays
+   hidden and the prompt can be selected by hand. */
+.install { display: flex; flex-direction: column; align-items: center; gap: var(--s-200); width: 100%; max-width: 640px; }
+.install-prompt {
+  width: 100%; margin: 0; padding: var(--s-200) var(--s-300); border-radius: var(--r-xl); text-align: left;
+  background: #1f1c18; color: #efe9de; box-shadow: var(--lift);
+  font: 13px/20px var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; user-select: all;
 }
+.copy-prompt { display: none; }
+.js .copy-prompt { display: inline-flex; }
+.copy-prompt .icon:nth-of-type(2), .copy-prompt.copied .icon:nth-of-type(1) { display: none; }
+.copy-prompt.copied .icon:nth-of-type(2) { display: block; }
+.install-next { min-height: 24px; font-size: 16px; line-height: 24px; font-weight: 500; color: var(--ink); opacity: 0; transform: translateY(-4px); transition: opacity 300ms var(--ease), transform 500ms var(--ease); }
+.install-next.on { opacity: 1; transform: none; }
+.hero-cta { width: 100%; }
+.closing-cta { flex-direction: column; }
 
 /* A part of the Mac window, cropped at full size so it can be read in a card: a plain white
    panel with a hairline and the usual lift, rather than a window. */

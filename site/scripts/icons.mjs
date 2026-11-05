@@ -12,7 +12,7 @@ const ICONS = {
   "key": "Key", "lock": "Lock", "shield-check": "ShieldCheck", "terminal-window": "TerminalWindow",
   "github-logo": "GithubLogo", "bell": "Bell", "database": "Database", "moon-stars": "MoonStars",
   "qr-code": "QrCode", "coins": "Coins", "code": "Code", "cursor-click": "CursorClick", "wrench": "Wrench",
-  "user-circle": "UserCircle", "git-fork": "GitFork", "desktop": "Desktop",
+  "user-circle": "UserCircle", "git-fork": "GitFork", "desktop": "Desktop", "copy": "Copy", "check": "Check",
 };
 for (const [file, name] of Object.entries(ICONS)) {
   const src = readFileSync(join(pkg, "dist/defs", `${name}.es.js`), "utf8");

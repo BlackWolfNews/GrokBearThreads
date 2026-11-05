@@ -48,6 +48,20 @@ const MAC = {
 };
 for (const [name, [file, width, crop]] of Object.entries(MAC)) webp(join(mac, file), join(screens, `${name}.webp`), width, 82, crop);
 
+// The hero's slideshow: whole windows in dark mode, from a dark run of the same script
+// (app/Tools/screenshots.sh <dir> --appearance dark), its folder in HERO_SHOTS. Not
+// 16b-design-review-all: that scene shows real email addresses.
+const dark = process.env.HERO_SHOTS ?? "/tmp/tb-shots-dark";
+const HERO = {
+  "hero-threads": "1-thread-bottom.png",
+  "hero-patches": "6a-long-reply-streaming.png",
+  "hero-previews": "17b-preview-mockup.png",
+  "hero-questions": "4-question.png",
+  "hero-projects": "15-projects-view.png",
+  "hero-logins": "13a-account-picker.png",
+};
+for (const [name, file] of Object.entries(HERO)) webp(join(dark, file), join(screens, `${name}.webp`), 2200, 80);
+
 // The iPhone app on the FakeBackend's sample threads.
 for (const name of ["inbox", "approval", "question"]) webp(join(phone, `${name}.png`), join(screens, `phone-${name}.webp`), 600);
 

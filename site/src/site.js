@@ -83,3 +83,95 @@ if (tagline) {
   window.addEventListener("scroll", onScroll, { passive: true });
   update();
 }
+
+
+// The hero's slideshow: a new window every few seconds, the dots to jump about, and it holds
+// still while the pointer or focus is on it. With reduced motion it doesn't move on by itself.
+const showcase = document.querySelector(".showcase");
+if (showcase) {
+  const SLIDE_MS = 6000;
+  showcase.style.setProperty("--slide-ms", `${SLIDE_MS}ms`);
+  const slides = [...showcase.querySelectorAll(".slide")];
+  const copies = [...showcase.querySelectorAll(".slide-copy")];
+  const dots = [...showcase.querySelectorAll(".dot")];
+  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (still) showcase.classList.add("still");
+  let current = 0;
+  let timer = 0;
+  const show = (index) => {
+    current = (index + slides.length) % slides.length;
+    for (const [i, list] of [slides, copies, dots].entries()) {
+      list.forEach((el, j) => {
+        el.classList.toggle("on", j === current);
+        // aria-hidden="" doesn't hide anything, so set "true" or take it off.
+        const [name, on] = i < 2 ? ["aria-hidden", j !== current] : ["aria-current", j === current];
+        if (on) el.setAttribute(name, "true");
+        else el.removeAttribute(name);
+      });
+    }
+    // The next window's picture starts loading now, so it's ready when its turn comes.
+    const next = slides[(current + 1) % slides.length];
+    if (next.loading === "lazy") next.loading = "eager";
+    // Restart the dot's fill: drop the class, force a layout, put it back.
+    const dot = dots[current];
+    dot.classList.remove("on");
+    void dot.offsetWidth;
+    dot.classList.add("on");
+    schedule();
+  };
+  const schedule = () => {
+    clearTimeout(timer);
+    if (!still && !showcase.classList.contains("paused")) timer = setTimeout(() => show(current + 1), SLIDE_MS);
+  };
+  dots.forEach((dot, i) => dot.addEventListener("click", () => show(i)));
+  const pause = (on) => {
+    showcase.classList.toggle("paused", on);
+    if (!on) show(current);
+    else clearTimeout(timer);
+  };
+  showcase.addEventListener("pointerenter", () => pause(true));
+  showcase.addEventListener("pointerleave", () => pause(false));
+  showcase.addEventListener("focusin", () => pause(true));
+  showcase.addEventListener("focusout", () => pause(false));
+  // Swipe on a phone.
+  let startX = null;
+  showcase.addEventListener("touchstart", (e) => { startX = e.touches[0].clientX; }, { passive: true });
+  showcase.addEventListener("touchend", (e) => {
+    if (startX === null) return;
+    const dx = e.changedTouches[0].clientX - startX;
+    startX = null;
+    if (Math.abs(dx) > 40) show(current + (dx < 0 ? 1 : -1));
+  });
+  document.addEventListener("visibilitychange", () => (document.hidden ? clearTimeout(timer) : schedule()));
+  schedule();
+}
+
+// The install prompt: the button copies it, then says where it goes. If the clipboard says no
+// (an old browser, or a page not served over https), the prompt gets selected for copying by hand.
+for (const install of document.querySelectorAll(".install")) {
+  const button = install.querySelector(".copy-prompt");
+  const prompt = install.querySelector(".install-prompt");
+  const next = install.querySelector(".install-next");
+  const label = button.querySelector("span");
+  let reset = 0;
+  button.addEventListener("click", async () => {
+    let copied = false;
+    try {
+      await navigator.clipboard.writeText(prompt.textContent);
+      copied = true;
+    } catch {
+      getSelection().selectAllChildren(prompt);
+    }
+    button.classList.toggle("copied", copied);
+    label.textContent = copied ? "Copied" : "Copy the install prompt";
+    next.textContent = copied
+      ? "Now paste it into Claude Code or Codex, and it'll take it from there."
+      : "It's selected, so press ⌘C, then paste it into Claude Code or Codex.";
+    next.classList.add("on");
+    clearTimeout(reset);
+    reset = setTimeout(() => {
+      button.classList.remove("copied");
+      label.textContent = "Copy the install prompt";
+    }, 4000);
+  });
+}
