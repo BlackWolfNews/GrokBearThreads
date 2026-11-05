@@ -22,7 +22,11 @@ File references are where to look.
 - **Apps:** `~/Applications/Threadbear.app` and
   `~/Applications/Threadbear Runner.app`, both built and signed on your Mac.
 - **A LaunchAgent:** `~/Library/LaunchAgents/com.mikerosoft.threadbear.runner.plist`,
-  which keeps the runner going while you're logged in.
+  which keeps the runner going while you're logged in. A runner on a Linux
+  server (INSTALL.md, section 6) has a systemd user service in its place,
+  `~/.config/systemd/user/com.mikerosoft.threadbear.runner.service`, and no
+  apps; it converts pictures with ImageMagick and rsvg-convert, and reads
+  the account's full name from `getent passwd` rather than `id -F`.
 - **A command:** `~/.local/bin/threadbear`.
 - **Files:** the data folder `~/Library/Application Support/Threadbear`
   (threads, settings, `secrets/`, runner releases, and the pinned release

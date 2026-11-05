@@ -505,7 +505,8 @@ folded one shows how many are under it. Its page
 says what's coming up next with a few numbers: how many are on, due in the
 next day, repeating, set by threads, paused, and how often they've run.
 
-If you run Threadbear on more than one Mac, a schedule that starts a new
+If you run Threadbear on more than one Mac (or on a Linux server as well,
+INSTALL.md section 6), a schedule that starts a new
 thread can run on any of them: pick the Mac under Runs on. It runs there
 even while this one is asleep, in that Mac's folder (leave the folder
 empty for its default). Its threads show on your phone and the website, and
