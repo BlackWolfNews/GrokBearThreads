@@ -885,7 +885,7 @@ export function turnReply(events: PersistedEvent[], serverName = 'threadbear'): 
   let lastText = 0;
   let lastWords = 0; // the last text that wasn't a summary
   let lastWork = 0;
-  let lastTool = 0; // the last result from any tool but end_turn and ToolSearch
+  let lastTool = 0; // the last result from any tool but end_turn
   let lastUser = 0;
   for (const e of events.slice(start)) {
     // A Codex child's items carry its prefix (<child>/<id>); Claude's
@@ -907,7 +907,10 @@ export function turnReply(events: PersistedEvent[], serverName = 'threadbear'): 
         const name = names.get(e.itemId);
         open.delete(e.itemId);
         if (name !== undefined && !name.startsWith(ownPrefix) && !PLUMBING_TOOLS.has(name)) lastWork = e.seq;
-        if (name !== undefined && name !== endTurn && !PLUMBING_TOOLS.has(name)) lastTool = e.seq;
+        // ToolSearch too: a status line, ToolSearch for end_turn, then the
+        // answer as narration left the status line standing as the reply
+        // (Codex's review of the 5 Nov 2026 fix, below).
+        if (name !== undefined && name !== endTurn) lastTool = e.seq;
         break;
       }
       default:

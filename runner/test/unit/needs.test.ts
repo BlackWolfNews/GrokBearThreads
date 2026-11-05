@@ -336,6 +336,8 @@ test('turnReply: a reply in words after a narration block is not narration-only;
   // narration (29 Oct 2026): the status line isn't the reply.
   const read = 'mcp__threadbear__read_thread';
   assert.deepEqual(turnReply(log(user(), started, text('Looking into it.', 'b'), call('r1', read), result('r1'), narrated('a'), call('e1', END))), { landed: true, replied: true, narrationOnly: true });
+  // The same with ToolSearch loading end_turn between them.
+  assert.deepEqual(turnReply(log(user(), started, text("I'll lay out three designs.", 'b'), call('t1', 'ToolSearch'), result('t1'), narrated('a'), call('e1', END))), { landed: true, replied: true, narrationOnly: true });
   // Words, then a pin, then end_turn: the words are the reply.
   assert.deepEqual(turnReply(log(user(), started, text('Step 1: ...', 'b'), call('p1', 'mcp__threadbear__pin'), result('p1'), call('e1', END))), { landed: true, replied: true });
 });
