@@ -145,7 +145,7 @@ struct ComposerControls: View {
                 }, openRequest: app.accountPickerRequest)
                 ChipDivider()
             }
-            ComposerChip(icon: settings.modelChipIcon, title: settings.modelChipTitle, help: settings.modelChipHelp, badge: settings.modelChipBadge, popover: {
+            ComposerChip(icon: settings.modelChipIcon, logo: settings.modelChipLogo, title: settings.modelChipTitle, help: settings.modelChipHelp, badge: settings.modelChipBadge, popover: {
                 // The picker reads the thread live, so a pick made while
                 // it's open shows straight away.
                 NSHostingController(rootView: ModelPickerView(threadId: thread?.id, close: $0).environment(app))
@@ -242,6 +242,15 @@ struct ThreadSettings {
     /// The pool's own icon in front of the chip, so which pool a thread is
     /// on shows at a glance; a pinned login's person, or (no pools) the
     /// sparkle the chip always had.
+    /// The provider whose logo leads the model chip instead of
+    /// `modelChipIcon`: the thread's own, unless its pool has an icon Mike
+    /// picked for it (a pinned thread keeps the person).
+    var modelChipLogo: String? {
+        guard usesPools else { return provider }
+        guard let pool else { return nil }
+        return (pool.icon ?? "").isEmpty ? provider : nil
+    }
+
     var modelChipIcon: String {
         guard usesPools else { return "sparkle" }
         guard let pool else { return "person.crop.circle" }
@@ -442,7 +451,8 @@ struct ThreadSettings {
         guard usesPools else {
             return providers.map { ModelPicker.Column(id: $0.id, title: $0.title, symbol: ModelPicker.providerSymbol($0.id)) }
         }
-        return logins.pools.map { ModelPicker.Column(id: $0.id, title: $0.title, subtitle: Pools.railSubtitle($0, accounts: logins.accounts), logins: Pools.logins($0, accounts: logins.accounts).count) }
+        return logins.pools.map { ModelPicker.Column(id: $0.id, title: $0.title, subtitle: Pools.railSubtitle($0, accounts: logins.accounts), logins: Pools.logins($0, accounts: logins.accounts).count,
+                                                    providers: Pools.providers($0, accounts: logins.accounts)) }
     }
 
     /// The column the picker opens on.
@@ -706,6 +716,8 @@ private extension PermissionMode {
 /// the old chips came out as bright as the message text.
 private struct ComposerChip: View {
     let icon: String
+    /// A provider whose logo (ProviderLogo) stands in for `icon`.
+    var logo: String? = nil
     let title: String
     let help: String
     /// After the title: "· 12%" in orange, "Limit reached" in red. Colour
@@ -726,9 +738,15 @@ private struct ComposerChip: View {
             open()
         } label: {
             HStack(spacing: zoomed(4)) {
-                Image(systemName: icon)
-                    .font(.system(size: TypeScale.chip - 1))
-                    .foregroundStyle(Color(nsColor: Theme.faintIcon))
+                Group {
+                    if let logo {
+                        ProviderMark(provider: logo, symbol: icon, side: TypeScale.chip - 1)
+                    } else {
+                        Image(systemName: icon)
+                            .font(.system(size: TypeScale.chip - 1))
+                    }
+                }
+                .foregroundStyle(Color(nsColor: Theme.faintIcon))
                 // No title: an icon-only chip (Runs on).
                 if !title.isEmpty {
                     Text(title)
@@ -953,7 +971,7 @@ struct ModelPickerView: View {
                                 ListHeading(title: title, first: section.id == sections.first?.id)
                             }
                             ForEach(section.rows.filter { !$0.isOlder }) { row in
-                                ModelRow(row: row) {
+                                ModelRow(row: row, provider: section.id) {
                                     settings.pick(row, section: section.id, column: column)
                                     close()
                                 }
@@ -962,7 +980,7 @@ struct ModelPickerView: View {
                             if !older.isEmpty {
                                 ListHeading(title: "Older", first: false)
                                 ForEach(older) { row in
-                                    ModelRow(row: row) {
+                                    ModelRow(row: row, provider: section.id) {
                                         settings.pick(row, section: section.id, column: column)
                                         close()
                                     }
@@ -1021,8 +1039,8 @@ private struct ListHeading: View {
     }
 }
 
-/// The picker's rail. A pool is its title with "3 · 61%" under it; a
-/// provider (no pools) is an icon. The open column is filled in; a pinned
+/// The picker's rail. A pool is its providers' logos over its title, with
+/// "3 · 61%" under it; a provider (no pools) is its logo. The open column is filled in; a pinned
 /// thread's opens on its own login, with no pool filled.
 private struct PickerRail: View {
     let columns: [ModelPicker.Column]
@@ -1034,7 +1052,7 @@ private struct PickerRail: View {
         VStack(spacing: zoomed(4)) {
             ForEach(columns) { column in
                 if let symbol = column.symbol {
-                    IconButton(symbol: symbol, title: column.title, active: column.id == selected) { choose(column.id) }
+                    IconButton(provider: column.id, symbol: symbol, title: column.title, active: column.id == selected) { choose(column.id) }
                 } else {
                     PoolButton(column: column, active: column.id == selected) { choose(column.id) }
                 }
@@ -1048,6 +1066,8 @@ private struct PickerRail: View {
     }
 
     private struct IconButton: View {
+        /// Without pools a column is a provider, so its id names the logo.
+        let provider: String
         let symbol: String
         let title: String
         let active: Bool
@@ -1056,8 +1076,7 @@ private struct PickerRail: View {
 
         var body: some View {
             Button(action: action) {
-                Image(systemName: symbol)
-                    .font(.system(size: zoomed(14), weight: .medium))
+                ProviderMark(provider: provider, symbol: symbol, side: zoomed(16))
                     .foregroundStyle(active ? .primary : .secondary)
                     .frame(width: zoomed(30), height: zoomed(30))
                     .background(
@@ -1082,11 +1101,16 @@ private struct PickerRail: View {
         var body: some View {
             Button(action: action) {
                 VStack(spacing: zoomed(1)) {
-                    if let logins = column.logins, logins > 0 {
-                        Image(nsImage: Bear.heads(min(logins, 3), height: zoomed(12)))
-                            .foregroundStyle(active ? .primary : .secondary)
-                            .padding(.bottom, zoomed(2))
-                            .accessibilityHidden(true)
+                    if !column.providers.isEmpty {
+                        // A mixed pool shows each of its providers' logos.
+                        HStack(spacing: zoomed(4)) {
+                            ForEach(column.providers, id: \.self) { provider in
+                                ProviderMark(provider: provider, symbol: ModelPicker.providerSymbol(provider), side: zoomed(15))
+                            }
+                        }
+                        .foregroundStyle(active ? .primary : .secondary)
+                        .padding(.bottom, zoomed(3))
+                        .accessibilityHidden(true)
                     }
                     // One weight either way: a bolder chosen title
                     // ("Side projects") no longer fitted the rail.
@@ -1106,7 +1130,7 @@ private struct PickerRail: View {
                 }
                 .padding(.horizontal, zoomed(4))
                 .frame(maxWidth: .infinity)
-                .frame(height: zoomed(column.logins ?? 0 > 0 ? 54 : 40))
+                .frame(height: zoomed(column.providers.isEmpty ? 40 : 56))
                 .background(
                     RoundedRectangle(cornerRadius: zoomed(7), style: .continuous)
                         .fill(Color.primary.opacity(active ? 0.1 : hovering ? 0.06 : 0))
@@ -1156,18 +1180,28 @@ private struct PoolFooter: View {
     }
 }
 
-/// A model: its name and the CLI's line about it, a star when it's the
-/// default and a tick when it's the one in use.
+/// A model: its provider's logo in a tile, its name and the CLI's line
+/// about it, and a star when it's the default. The one in use is filled
+/// in rather than ticked (Mike's pick, 5 Nov: docs/model-picker-logos-design,
+/// B). The logo is on every row, even where a list is all one provider's,
+/// so a mixed pool's Claude and Codex models read apart at a glance.
 private struct ModelRow: View {
     let row: ModelPicker.Row
+    let provider: String
     let action: () -> Void
     @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: zoomed(8)) {
-                Image(nsImage: HoneyPot.image(ModelPicker.honey(id: row.id, title: row.title), side: zoomed(22)))
-                    .foregroundStyle(row.isOlder ? .tertiary : .secondary)
+            HStack(spacing: zoomed(10)) {
+                ProviderMark(provider: provider, symbol: ModelPicker.providerSymbol(provider), side: zoomed(15))
+                    .foregroundStyle(row.isSelected ? .primary : .secondary)
+                    .frame(width: zoomed(26), height: zoomed(26))
+                    .background(
+                        RoundedRectangle(cornerRadius: zoomed(7), style: .continuous)
+                            .fill(Color.primary.opacity(0.07))
+                    )
+                    .opacity(row.isOlder ? 0.6 : 1)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: zoomed(1)) {
                     Text(row.title)
@@ -1188,17 +1222,13 @@ private struct ModelRow: View {
                         .tip("The default")
                         .accessibilityLabel("Default")
                 }
-                Image(systemName: "checkmark")
-                    .font(.system(size: zoomed(11), weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .opacity(row.isSelected ? 1 : 0)
-                    .accessibilityHidden(!row.isSelected)
             }
-            .padding(.horizontal, zoomed(10))
+            .padding(.leading, zoomed(6))
+            .padding(.trailing, zoomed(10))
             .padding(.vertical, zoomed(5))
             .background(
-                RoundedRectangle(cornerRadius: zoomed(6), style: .continuous)
-                    .fill(Color.primary.opacity(hovering ? 0.06 : 0))
+                RoundedRectangle(cornerRadius: zoomed(8), style: .continuous)
+                    .fill(Color.primary.opacity(row.isSelected ? 0.1 : hovering ? 0.06 : 0))
             )
             .contentShape(Rectangle())
         }
@@ -1207,6 +1237,27 @@ private struct ModelRow: View {
         // The id the CLI is given, which the name hides.
         .tip(row.id)
         .accessibilityLabel(row.title + (row.isSelected ? ", chosen" : ""))
+    }
+}
+
+/// A provider's logo (ProviderLogo), or its SF Symbol where the app has
+/// none, `side` points across. Takes the foreground style around it.
+private struct ProviderMark: View {
+    let provider: String
+    let symbol: String
+    let side: CGFloat
+
+    var body: some View {
+        if let logo = ProviderLogo.image(provider, side: side) {
+            Image(nsImage: logo)
+                .renderingMode(.template)
+                .resizable()
+                .frame(width: side, height: side)
+        } else {
+            Image(systemName: symbol)
+                .font(.system(size: side * 0.85, weight: .medium))
+                .frame(width: side, height: side)
+        }
     }
 }
 

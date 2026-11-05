@@ -20,25 +20,30 @@ public enum ModelPicker {
         }
     }
 
-    /// A button in the picker's rail: a pool (title, and its logins and
-    /// best room under it) or, from a runner older than pools, a provider
-    /// (an icon).
+    /// A button in the picker's rail: a pool (its providers' logos, its
+    /// title, and its logins and best room under it) or, from a runner
+    /// older than pools, a provider (its logo).
     public struct Column: Sendable, Equatable, Identifiable {
         public var id: String
         public var title: String
         /// "3 · 61%" under a pool's title.
         public var subtitle: String?
-        /// An SF Symbol for a provider's icon.
+        /// An SF Symbol for a provider's icon, where the app has no logo
+        /// for it.
         public var symbol: String?
-        /// A pool's logins, drawn as that many little bear heads.
+        /// A pool's logins.
         public var logins: Int?
+        /// The providers whose logos head a pool's button ("claude",
+        /// "codex"), in the order its logins first name them.
+        public var providers: [String]
 
-        public init(id: String, title: String, subtitle: String? = nil, symbol: String? = nil, logins: Int? = nil) {
+        public init(id: String, title: String, subtitle: String? = nil, symbol: String? = nil, logins: Int? = nil, providers: [String] = []) {
             self.id = id
             self.title = title
             self.subtitle = subtitle
             self.symbol = symbol
             self.logins = logins
+            self.providers = providers
         }
     }
 
@@ -55,24 +60,6 @@ public enum ModelPicker {
             self.title = title
             self.rows = rows
         }
-    }
-
-    /// How full a model's honey pot is drawn in the picker: the bigger
-    /// the model, the fuller. Guessed from the id and name, so a new
-    /// model lands somewhere sensible without a table to keep up.
-    public enum Honey: Sendable, Equatable {
-        case little, half, full
-        /// Full with a star: Fable, the one for the toughest jobs.
-        case special
-    }
-
-    public static func honey(id: String, title: String) -> Honey {
-        let name = (id + " " + title).lowercased()
-        if name.contains("fable") { return .special }
-        for small in ["haiku", "mini", "nano", "flash", "lite", "spark"] where name.contains(small) { return .little }
-        if name.contains("sonnet") { return .half }
-        if name.contains("opus") || name.contains("gpt") || name.contains("astra") { return .full }
-        return .half
     }
 
     /// One model in the list.
@@ -123,8 +110,9 @@ public enum ModelPicker {
         }
     }
 
-    /// The SF Symbol that stands for a provider in the rail, until the
-    /// app has a mark of its own for each.
+    /// The SF Symbol that stands for a provider where the app has no logo
+    /// for it (the picker draws Claude's and Codex's own, ProviderLogo),
+    /// and for a pool's icon in the sidebar and Settings.
     public static func providerSymbol(_ id: String) -> String {
         switch id {
         case "claude": return "sparkle"

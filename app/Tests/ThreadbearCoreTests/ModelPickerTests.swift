@@ -83,14 +83,4 @@ final class ModelPickerTests: XCTestCase {
         XCTAssertEqual(ModelPicker.effortLevels(for: nil, in: choices), efforts)
         XCTAssertEqual(ModelPicker.effortLevels(for: "opus", in: []), efforts)
     }
-
-    func testHoneyFillsByModelSize() {
-        XCTAssertEqual(ModelPicker.honey(id: "claude-opus-5-5", title: "Opus 5.5"), .full)
-        XCTAssertEqual(ModelPicker.honey(id: "sonnet", title: "Sonnet 5.5"), .half)
-        XCTAssertEqual(ModelPicker.honey(id: "claude-haiku-4-5-20251001", title: "Haiku 4.5"), .little)
-        XCTAssertEqual(ModelPicker.honey(id: "claude-fable-5-1", title: "Fable 5.1"), .special)
-        XCTAssertEqual(ModelPicker.honey(id: "gpt-6-astra", title: "GPT-6 Astra"), .full)
-        XCTAssertEqual(ModelPicker.honey(id: "gpt-6-mini", title: "GPT-6 mini"), .little, "mini wins over gpt")
-        XCTAssertEqual(ModelPicker.honey(id: "", title: "Default"), .half, "unknown: half")
-    }
 }

@@ -116,33 +116,6 @@ enum Bear {
         NSBezierPath(ovalIn: NSRect(x: c.x - noseW / 2, y: c.y + r * 0.3 - noseH / 2, width: noseW, height: noseH)).fill()
     }
 
-    /// `count` little heads side by side, one per login in a pool, as a
-    /// template image `height` points tall.
-    @MainActor
-    static func heads(_ count: Int, height: CGFloat) -> NSImage {
-        let key = "heads\(count)@\(height)"
-        if let cached = cache[key] { return cached }
-        // Each head is 8 by 8 on the grid with a little gap.
-        let unit: CGFloat = 8.5
-        let width = height * (CGFloat(count) * unit + 0.5) / 9
-        let image = NSImage(size: NSSize(width: width, height: height), flipped: true) { rect in
-            let scale = rect.height / 9
-            let transform = NSAffineTransform()
-            transform.scale(by: scale)
-            NSGraphicsContext.saveGraphicsState()
-            transform.concat()
-            NSColor.black.set()
-            for i in 0..<count {
-                drawHead(centre: NSPoint(x: 4.5 + CGFloat(i) * unit, y: 5.2), radius: 3.2, earRadius: 1.3, lineWidth: 0.9)
-            }
-            NSGraphicsContext.restoreGraphicsState()
-            return true
-        }
-        image.isTemplate = true
-        cache[key] = image
-        return image
-    }
-
     /// Three stitches across a line: the threadbear bit. `from` to `to`
     /// is the seam; the ticks cross it.
     private static func drawSeam(from a: NSPoint, to b: NSPoint, lineWidth: CGFloat) {
