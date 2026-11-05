@@ -103,8 +103,8 @@ extension AppModel {
 
     // MARK: Opening
 
-    /// A click on a highlight: a file previews in the pane, a page goes
-    /// where "Default" says (openLink).
+    /// A click on a highlight: a file previews in the pane (a project file
+    /// opens in its app), a page goes where "Default" says (openLink).
     /// `external` is Open in the context menu: always the default app or
     /// browser.
     func open(_ highlight: Highlight, in thread: ThreadSummary, external: Bool) {
@@ -112,19 +112,19 @@ extension AppModel {
             // On that Mac: fetched, then its copy here is used.
             openRemoteFile(URL(fileURLWithPath: path), external ? .app : .panel, in: thread, title: highlight.title)
         } else if let path = highlight.path {
-            if external { openExternally(URL(fileURLWithPath: path)) } else { preview(path: path, title: highlight.title, in: thread) }
+            if external || FileLinkAction.opensInItsApp(path) { openExternally(URL(fileURLWithPath: path)) } else { preview(path: path, title: highlight.title, in: thread) }
         } else if let url = highlight.link {
             openLink(url, title: highlight.title, in: thread, external: external)
         }
     }
 
-    /// A link from a highlight or a list panel's row: a file in the pane,
-    /// a page where "Default" says (the browser unless Mike picked the
-    /// panel).
+    /// A link from a highlight or a list panel's row: a file in the pane
+    /// (a project file in its app), a page where "Default" says (the
+    /// browser unless Mike picked the panel).
     func openLink(_ url: URL, title: String? = nil, in thread: ThreadSummary, external: Bool = false) {
         if url.isFileURL, thread.isRemote {
             openRemoteFile(url, external ? .app : .panel, in: thread, title: title)
-        } else if external {
+        } else if external || (url.isFileURL && FileLinkAction.opensInItsApp(url.path)) {
             openExternally(url)
         } else if url.isFileURL {
             preview(path: url.path, title: title ?? url.lastPathComponent, in: thread)
@@ -202,10 +202,10 @@ extension AppModel {
     }
 
     /// A click on a file link in the transcript does what Mike picked in
-    /// its right-click menu (FileLinkAction.click); ⌘-click always opens
-    /// it in its own app.
+    /// its right-click menu (FileLinkAction.click); ⌘-click and a project
+    /// file open in the file's own app (FileLinkAction.forClick).
     func openTranscriptFileLink(_ url: URL, commandKey: Bool) -> Bool {
-        openTranscriptFile(url, commandKey ? .app : FileLinkAction.click)
+        openTranscriptFile(url, FileLinkAction.forClick(on: url.path, commandKey: commandKey, remote: selectedThread?.isRemote == true))
     }
 
     /// `url` is a file URL, perhaps with a `?query` or `#fragment` for the

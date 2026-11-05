@@ -198,6 +198,25 @@ final class FileLinkMenuTests: XCTestCase {
         return NSPoint(x: rect.midX + view.textContainerOrigin.x, y: rect.midY + view.textContainerOrigin.y)
     }
 
+    /// Mike's Default is the panel, which could only show a project as JSON.
+    func testAClickOnAProjectFileOpensItsAppWhateverDefaultSays() {
+        let saved = FileLinkAction.click
+        defer { FileLinkAction.click = saved }
+        FileLinkAction.click = .panel
+        let tandem: (URL) -> URL? = { _ in URL(fileURLWithPath: "/Applications/Tandem.app") }
+        func action(_ path: String, command: Bool = false, remote: Bool = false, app: @escaping (URL) -> URL? = tandem) -> FileLinkAction {
+            FileLinkAction.forClick(on: path, commandKey: command, remote: remote, appFor: app)
+        }
+        XCTAssertEqual(action("/v/Pebble Index mic test.tandem"), .app)
+        XCTAssertEqual(action("/v/notes.md"), .panel)
+        XCTAssertEqual(action("/v/notes.md", command: true), .app)
+        // Another Mac's project is only a copy, without its media.
+        XCTAssertEqual(action("/v/a.tandem", remote: true), .panel)
+        // Missing, or no app for it: the pane says so.
+        XCTAssertEqual(action("/v/a.tandem", app: { _ in nil }), .panel)
+        XCTAssertNil(FileLinkAction.defaultApp(URL(fileURLWithPath: "/nowhere/missing.tandem")))
+    }
+
     func testRightClickOnAPathOffersWaysToOpenIt() throws {
         let view = view("Changed `app/A.swift` today")
         view.fileLinkTarget = { url in FilePathRefs.text(of: url) == "app/A.swift" ? URL(fileURLWithPath: "/repo/app/A.swift") : nil }

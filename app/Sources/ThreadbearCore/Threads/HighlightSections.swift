@@ -214,6 +214,16 @@ public enum PreviewRules {
     public static func previewsInPane(transcriptLink url: URL) -> Bool {
         url.isFileURL && reviewExtensions.contains(url.pathExtension.lowercased())
     }
+
+    /// Project files that mean nothing outside their app: the pane could
+    /// only show a Tandem project as JSON, so a click takes it to Tandem
+    /// whatever "Default" says (Mike asked 5 Nov). "Preview here" and
+    /// "Open in Panel" still show it in the pane if that's really wanted.
+    static let appProjectExtensions: Set<String> = ["tandem"]
+
+    public static func isAppProject(_ path: String) -> Bool {
+        appProjectExtensions.contains((path as NSString).pathExtension.lowercased())
+    }
 }
 
 /// An SF Symbol for a file, by its extension.

@@ -117,6 +117,14 @@ final class HighlightsTests: XCTestCase {
         XCTAssertFalse(PreviewRules.previewsInPane(transcriptLink: URL(string: "https://example.com/a.md")!))
     }
 
+    func testTandemProjectsAreAppProjects() {
+        XCTAssertTrue(PreviewRules.isAppProject("/a/Pebble Index mic test.tandem"))
+        XCTAssertTrue(PreviewRules.isAppProject("/a/B.TANDEM"))
+        // Tandem's hidden folder beside a project isn't one.
+        XCTAssertFalse(PreviewRules.isAppProject("/a/.tandem"))
+        XCTAssertFalse(PreviewRules.isAppProject("/a/notes.md"))
+    }
+
     func testFileIconsByExtension() {
         XCTAssertEqual(FileIcon.symbol(forPath: "/a/notes.md"), "doc.text")
         XCTAssertEqual(FileIcon.symbol(forPath: "/a/mock.html"), "safari")

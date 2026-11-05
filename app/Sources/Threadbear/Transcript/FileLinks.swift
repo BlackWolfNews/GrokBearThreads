@@ -18,6 +18,25 @@ enum FileLinkAction: String, CaseIterable {
         set { UserDefaults.standard.set(newValue.rawValue, forKey: clickKey) }
     }
 
+    /// What a click on a file link in the transcript does: ⌘ always means
+    /// its app, and so does a project file on this Mac (a copy fetched from
+    /// another Mac has none of its media, so that's left to the pane).
+    static func forClick(on path: String, commandKey: Bool, remote: Bool, appFor: (URL) -> URL? = defaultApp) -> FileLinkAction {
+        if commandKey { return .app }
+        return !remote && opensInItsApp(path, appFor: appFor) ? .app : click
+    }
+
+    /// A project file with an app here to open it. Asking for the app means
+    /// a missing file, or a Mac without that app, still gets the pane and
+    /// its "isn't there any more" rather than a click that does nothing.
+    static func opensInItsApp(_ path: String, appFor: (URL) -> URL? = defaultApp) -> Bool {
+        PreviewRules.isAppProject(path) && appFor(URL(fileURLWithPath: path)) != nil
+    }
+
+    static func defaultApp(_ url: URL) -> URL? {
+        FileManager.default.fileExists(atPath: url.path) ? NSWorkspace.shared.urlForApplication(toOpen: url) : nil
+    }
+
     /// The app macOS opens `path` in, for "Open in Xcode".
     static func appName(for path: String) -> String? {
         guard let app = NSWorkspace.shared.urlForApplication(toOpen: URL(fileURLWithPath: path)) else { return nil }

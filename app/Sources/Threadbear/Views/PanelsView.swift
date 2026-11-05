@@ -1029,7 +1029,7 @@ private struct ListPanel: View {
     private func row(_ item: PanelItem, reservesIcon: Bool) -> some View {
         let link = item.url.flatMap(URL.init(string:))
         let open: (() -> Void)? = if let path = item.path {
-            { app.preview(path: path, title: item.title, in: thread) }
+            { app.openLink(URL(fileURLWithPath: path), title: item.title, in: thread) }
         } else if let link {
             { app.openLink(link, title: item.title, in: thread) }
         } else {

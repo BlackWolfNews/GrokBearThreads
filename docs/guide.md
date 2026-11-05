@@ -410,7 +410,8 @@ and it stays folded everywhere. A project's heading folds for that project.
 Click a file and it opens in the panel, with Back to return to the list
 (a text file there has Edit too). A link opens in your browser, unless you
 change Default in its right-click menu to open pages in the panel. An
-edited code file opens in its own app. Right-click any of them for more,
+edited code file opens in its own app, and a Tandem project opens in
+Tandem, here and in a reply. Right-click any of them for more,
 such as Reveal in Finder, or Remove to take it off the list. You can drag
 files out of Highlights into other apps.
 
