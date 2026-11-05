@@ -806,6 +806,10 @@ public enum BackendCompatibility {
     /// sealed with phone:secret. An older backend has neither, so the phone
     /// says to answer it on the Mac.
     public static let secretsAPIVersion = 35
+    /// From 42 phone:update's archive can carry a verdict, how the thread
+    /// went (the done card's Archive menu). Older backends refuse the extra
+    /// field, so the done card archives straight away there, as before.
+    public static let archiveVerdictAPIVersion = 42
 
     /// The line to show, or nil when the backend is fine.
     public static func problem(_ identity: PhoneIdentity) -> String? {
@@ -860,11 +864,20 @@ public enum ThreadsView: String, Sendable, CaseIterable {
     case inbox, hibernating, den
 }
 
+/// How a thread went, picked when archiving it from the done card (backend
+/// API 42), so later sweeps know it was archived on purpose and how it went.
+public enum ArchiveVerdict: String, Sendable, Hashable, CaseIterable {
+    case worked, didntWork, notNeeded
+}
+
 public enum ThreadChange: Sendable, Hashable {
     case snooze(until: Date)
     case snoozeUntilRestart
     case wake
     case archive
+    /// Archive with a verdict: only for a backend of
+    /// `BackendCompatibility.archiveVerdictAPIVersion` or later.
+    case archiveWithVerdict(ArchiveVerdict)
     case unarchive
     case markSeen
     case rename(String)
@@ -876,6 +889,7 @@ public enum ThreadChange: Sendable, Hashable {
         case .snoozeUntilRestart: ["snooze": ["untilRestart": true]]
         case .wake: ["wake": true]
         case .archive: ["archive": true]
+        case let .archiveWithVerdict(verdict): ["archive": true, "verdict": .string(verdict.rawValue)]
         case .unarchive: ["unarchive": true]
         case .markSeen: ["markSeen": true]
         case let .rename(title): ["title": .string(title)]

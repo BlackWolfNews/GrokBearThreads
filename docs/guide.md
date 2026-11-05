@@ -121,7 +121,11 @@ it and the work opens there, with that step lit up. A link to another
 thread opens that thread.
 
 A reply that needs nothing from you ends with a Done card at the top of
-the message box, with an Archive button to put the thread away. When something it talked about is
+the message box, with an Archive button to put the thread away. Archive
+asks how it went first: Worked, Didn't work or Not needed. Your pick goes
+in the thread ("Archived by you: it worked."), so anyone reading it later,
+you or an agent tidying up, can tell it was put away on purpose and how it
+went. When something it talked about is
 still worth doing (a piece it didn't get to, a check that's due), the
 card lists them under "Or carry on". Click any of them to tick them
 (click again to untick), add anything you like in the message box, and
@@ -330,7 +334,8 @@ where.
 When a thread is done, archive it: press ⌘E, hover its row and press the
 box, or swipe the row left with two fingers on the trackpad (or drag it
 left with the mouse) and let go once the space behind it turns blue (a
-quick flick works too). However it's archived (⌘E, a button, or an agent
+quick flick works too). These archive straight away; the Done card's
+Archive asks how it went first. However it's archived (⌘E, a button, or an agent
 or your phone doing it), its row slides off the same way. Archive the
 thread you have open and its page drops into the Archived heading as the
 next thread comes in. When you archive one, a note saying so floats at

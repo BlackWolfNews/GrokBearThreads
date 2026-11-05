@@ -546,6 +546,29 @@ test('a dated snooze or a message clears an until-restart snooze', () => {
   assert.throws(() => h.runner.update({ threadId: thread.id, snoozedUntil: 'later' }), /ISO time or "restart"/);
 });
 
+test('an archive says who did it, and Mike\'s verdict goes in the thread', () => {
+  const h = makeHarness();
+  const { thread } = create(h);
+  // ⌘E or a swipe: Mike, no verdict, no note.
+  const plain = h.runner.update({ threadId: thread.id, archived: true }).thread;
+  assert.equal(plain.archivedBy, 'mike');
+  assert.equal(plain.archiveVerdict, undefined);
+  assert.ok(!h.events(thread.id).some((e) => e.type === 'system.note' && /Archived by you/.test(e.text)));
+  // Back, then the done card's menu: the verdict, and a note saying it.
+  h.runner.update({ threadId: thread.id, archived: false });
+  assert.equal(h.runner.get(thread.id).archivedBy, undefined, 'only while archived');
+  const picked = h.runner.update({ threadId: thread.id, archived: true, verdict: 'worked' }).thread;
+  assert.equal(picked.archivedBy, 'mike');
+  assert.equal(picked.archiveVerdict, 'worked');
+  assert.equal(h.events(thread.id).filter((e) => e.type === 'system.note').at(-1).text, 'Archived by you: it worked.');
+  // Brought back by a message and put away by an agent: the old verdict goes.
+  h.runner.send(thread.id, 'one more thing');
+  assert.equal(h.runner.get(thread.id).archiveVerdict, undefined);
+  const byAgent = h.runner.update({ threadId: thread.id, archived: true, archivedBy: 'agent', verdict: 'worked' }).thread;
+  assert.equal(byAgent.archivedBy, 'agent');
+  assert.equal(byAgent.archiveVerdict, undefined, "only Mike's verdict counts");
+});
+
 test('archive mid-turn interrupts, then releases the CLI; unarchive brings it back', async () => {
   const h = makeHarness();
   const { thread } = create(h);

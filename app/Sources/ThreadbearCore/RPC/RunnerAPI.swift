@@ -318,6 +318,29 @@ public struct NewThreadRequest: Sendable, Hashable {
     }
 }
 
+/// How it went, from the done card's Archive menu (`threads.update`'s
+/// `verdict`), so a thread put away on purpose reads differently from one
+/// that was just cleared away (Mike, 5 Nov).
+public enum ArchiveVerdict: String, Sendable, Hashable, Codable, CaseIterable {
+    case worked, didntWork, notNeeded
+
+    public var label: String {
+        switch self {
+        case .worked: "Worked"
+        case .didntWork: "Didn't work"
+        case .notNeeded: "Not needed"
+        }
+    }
+
+    public var symbol: String {
+        switch self {
+        case .worked: "checkmark"
+        case .didntWork: "xmark"
+        case .notNeeded: "minus"
+        }
+    }
+}
+
 /// Fields for `threads.update`. A nil property is left out; the double
 /// optionals send an explicit `null` to clear a value.
 public struct ThreadUpdate: Sendable, Hashable {
@@ -332,13 +355,17 @@ public struct ThreadUpdate: Sendable, Hashable {
     /// Wins over `snoozedUntil`.
     public var snoozeUntilRestart: Bool
     public var archived: Bool?
+    /// With `archived: true`: Mike's pick from the done card's Archive
+    /// menu, kept on the thread as how it went (`verdict`).
+    public var verdict: ArchiveVerdict?
     public var starred: Bool?
     /// A pool id moves the thread into that pool (and onto one of its
     /// logins at once if its current one isn't in it); `.some(nil)` sends
     /// null, which pins it to the login it's on. `accountId` pins too.
     public var poolId: String??
 
-    public init(title: String? = nil, cwd: String? = nil, accountId: String? = nil, model: String?? = nil, effort: String?? = nil, permissionMode: PermissionMode? = nil, snoozedUntil: Date?? = nil, snoozeUntilRestart: Bool = false, archived: Bool? = nil, starred: Bool? = nil, poolId: String?? = nil) {
+    public init(title: String? = nil, cwd: String? = nil, accountId: String? = nil, model: String?? = nil, effort: String?? = nil, permissionMode: PermissionMode? = nil, snoozedUntil: Date?? = nil, snoozeUntilRestart: Bool = false, archived: Bool? = nil, verdict: ArchiveVerdict? = nil, starred: Bool? = nil, poolId: String?? = nil) {
+        self.verdict = verdict
         self.title = title
         self.cwd = cwd
         self.accountId = accountId
@@ -366,6 +393,7 @@ public struct ThreadUpdate: Sendable, Hashable {
             params["snoozedUntil"] = snoozedUntil.map { .string(ISO8601.format($0)) } ?? .null
         }
         if let archived { params["archived"] = .bool(archived) }
+        if archived == true, let verdict { params["verdict"] = .string(verdict.rawValue) }
         if let starred { params["starred"] = .bool(starred) }
         if let poolId { params["poolId"] = poolId.map { .string($0) } ?? .null }
         return params

@@ -48,7 +48,7 @@ import type {
   TurnOutcome,
 } from './protocol.ts';
 import { agentsStillWorking, ErrorCode, LIMITS, PROTOCOL_VERSION, RpcError, sentByAgent } from './protocol.ts';
-import type { LibrarianStatus, Project, Schedule } from './protocol.ts';
+import type { ArchivedBy, ArchiveVerdict, LibrarianStatus, Project, Schedule } from './protocol.ts';
 import { Projects } from './projects.ts';
 import type { Settings } from './settings.ts';
 import type {
@@ -476,6 +476,14 @@ export type RunnerDeps = {
   // Whether a provider's API can be reached (net-probe.ts), for threads
   // whose turn failed because it couldn't be; tests pass a fake.
   reachable?: Reachable;
+};
+
+// The note Mike's pick from the done card's Archive menu leaves in the
+// thread (threads.update's verdict).
+const ARCHIVE_NOTES: Record<ArchiveVerdict, string> = {
+  worked: 'Archived by you: it worked.',
+  didntWork: "Archived by you: it didn't work.",
+  notNeeded: 'Archived by you: not needed any more.',
 };
 
 const DELTA_INTERVAL_MS = 33; // at most ~30 delta flushes a second per thread
@@ -2032,7 +2040,7 @@ export class Runner {
     if (finished) this.markFinished(st, turn.lastText);
     if (archive && !rt.turn && !rec.archivedAt && !this.stopping) {
       this.emit(st, { type: 'system.note', text: 'Archived, as the agent was asked to once it had finished.' });
-      this.update({ threadId: rec.id, archived: true });
+      this.update({ threadId: rec.id, archived: true, archivedBy: 'agent' });
     }
     if (waitFor && !rt.turn && !rec.archivedAt && !this.stopping) this.waitOn(st, waitFor, snooze);
     else if (snooze && !rt.turn && !rec.archivedAt && !this.stopping) this.snoozeAfterTurn(st, snooze);
@@ -2305,6 +2313,12 @@ export class Runner {
     permissionMode?: PermissionMode;
     snoozedUntil?: string | null; // an ISO time, or 'restart' for until the runner next starts
     archived?: boolean;
+    // Who's archiving it: Mike (the default: the app, the phone, tb), an
+    // agent (update_thread, end_turn's archive) or Threadbear itself. With
+    // Mike's verdict from the done card's Archive menu, so whoever reads
+    // the thread later knows it was put away on purpose, and how it went.
+    archivedBy?: ArchivedBy;
+    verdict?: ArchiveVerdict;
     starred?: boolean;
   }): { thread: ThreadSummary } {
     const st = this.mustGet(params.threadId);
@@ -2481,7 +2495,14 @@ export class Runner {
     if (params.archived !== undefined) {
       if (params.archived) {
         archiving = !rec.archivedAt;
+        const by = params.archivedBy ?? 'mike';
+        const verdict = by === 'mike' ? params.verdict : undefined;
+        // Said in the thread, for the agent or a sweeper reading it later.
+        if (verdict && (archiving || verdict !== rec.archiveVerdict)) this.emit(st, { type: 'system.note', text: ARCHIVE_NOTES[verdict] });
         rec.archivedAt = this.isoNow();
+        rec.archivedBy = by;
+        if (verdict) rec.archiveVerdict = verdict;
+        else delete rec.archiveVerdict;
         stop = true;
       } else delete rec.archivedAt;
     }
@@ -2844,7 +2865,12 @@ export class Runner {
     if (rec.wakeWhen && rec.snoozedUntil) s.wakeWhen = { ...rec.wakeWhen };
     if (rec.waitingOn && rec.snoozedUntil) s.waitingOn = rec.waitingOn.map((w) => ({ threadId: w.threadId, title: w.title, ...(w.done ? { done: true as const } : {}) }));
     if (rec.woke && rec.forceUnread) s.woke = { ...rec.woke };
-    if (rec.archivedAt) s.archivedAt = rec.archivedAt;
+    if (rec.archivedAt) {
+      s.archivedAt = rec.archivedAt;
+      // Archived before who did it was kept: nobody can say.
+      if (rec.archivedBy) s.archivedBy = rec.archivedBy;
+      if (rec.archiveVerdict) s.archiveVerdict = rec.archiveVerdict;
+    }
     if (rec.starredAt) s.starredAt = rec.starredAt;
     if (rec.nativeSessionId && rec.sessionUsed) s.nativeSessionId = rec.nativeSessionId;
     if (rec.contextTokens !== undefined) s.contextTokens = rec.contextTokens;
@@ -2999,7 +3025,7 @@ export class Runner {
     st.rec.forceUnread = false;
     this.emit(st, { type: 'system.note', text });
     this.markDirty(st);
-    if (archive && !st.rt.turn && !st.rec.archivedAt && this.opening(threadId).text === undefined) this.update({ threadId, archived: true });
+    if (archive && !st.rt.turn && !st.rec.archivedAt && this.opening(threadId).text === undefined) this.update({ threadId, archived: true, archivedBy: 'threadbear' });
   }
 }
 

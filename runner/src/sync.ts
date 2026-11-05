@@ -26,8 +26,8 @@ import { extForMediaType, sniffImage } from './media.ts';
 import { makeFunctionReference } from 'convex/server';
 import type { Clock, TimerHandle } from './clock.ts';
 import type { Logger } from './log.ts';
-import { agentsStillWorking, ErrorCode, isEffortLevel } from './protocol.ts';
-import type { Account, ApprovalDecision, ApprovalOption, AskAnswer, EffortLevel, ImageRef, OpenAsk, PersistedEvent, Project, Question, Schedule, ThreadSummary } from './protocol.ts';
+import { agentsStillWorking, ARCHIVE_VERDICTS, ErrorCode, isEffortLevel } from './protocol.ts';
+import type { Account, ArchiveVerdict, ApprovalDecision, ApprovalOption, AskAnswer, EffortLevel, ImageRef, OpenAsk, PersistedEvent, Project, Question, Schedule, ThreadSummary } from './protocol.ts';
 import type { Notification } from './runner.ts';
 import type { ScheduleBackend, StoredSchedule } from './schedules.ts';
 import { ThreadIndex, type RemoteThreads } from './thread-index.ts';
@@ -91,7 +91,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 41;
+export const BACKEND_API_VERSION = 42;
 // From this one an owned schedule can carry `poolId`, the pool that picks
 // its threads' login. An older backend's validator would turn it down.
 export const SCHEDULE_POOLS_API_VERSION = 36;
@@ -353,7 +353,7 @@ export type CommandHost = {
   send(threadId: string, text: string, images: ImageRef[], opts: { origin: 'phone'; answers?: AskAnswer[] }): unknown;
   respondApproval(p: { threadId: string; approvalId: string; decision: ApprovalDecision; message?: string; answers?: Record<string, string> }): unknown;
   answerSecret(p: { threadId: string; approvalId: string; secret?: string; decline?: boolean }): unknown;
-  update(p: { threadId: string; title?: string; snoozedUntil?: string | null; archived?: boolean; starred?: boolean }): unknown;
+  update(p: { threadId: string; title?: string; snoozedUntil?: string | null; archived?: boolean; verdict?: ArchiveVerdict; starred?: boolean }): unknown;
   // Seen up to the last event it has.
   markSeen(threadId: string): unknown;
   create(p: { text: string; images?: ImageRef[]; cwd?: string; accountId?: string; model?: string; effort?: EffortLevel; origin: 'phone' }): { thread: ThreadSummary };
@@ -2558,7 +2558,11 @@ export class ConvexSync {
           const s = a.snooze as { until?: string; untilRestart?: boolean };
           await host.update({ threadId: id, snoozedUntil: s.untilRestart ? 'restart' : s.until ?? null });
         } else if (a.wake) await host.update({ threadId: id, snoozedUntil: null });
-        else if (a.archive) await host.update({ threadId: id, archived: true });
+        else if (a.archive) {
+          // The phone's done card asks how it went first (backend API 42).
+          const verdict = ARCHIVE_VERDICTS.includes(a.verdict as ArchiveVerdict) ? { verdict: a.verdict as ArchiveVerdict } : {};
+          await host.update({ threadId: id, archived: true, ...verdict });
+        }
         else if (a.unarchive) await host.update({ threadId: id, archived: false });
         else if (a.markSeen) await host.markSeen(id);
         else if (typeof a.star === 'boolean') await host.update({ threadId: id, starred: a.star });

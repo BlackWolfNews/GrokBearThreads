@@ -255,6 +255,14 @@ test('update renames and snoozes others, but will not stop its own turn', async 
   assert.equal(ownSnooze.error, true);
   assert.match(ownSnooze.text, /snooze: and when to wake/);
   assert.equal(h.runner.get(me.id).archivedAt, undefined);
+  // An agent's archive says so, and read_thread tells a sweep who did it.
+  const archived = await t.call('update_thread', { threadId: other.id, archived: true });
+  assert.match(archived.text, /archived: \S+ by an agent/);
+  assert.equal(h.runner.get(other.id).archivedBy, 'agent');
+  h.runner.update({ threadId: other.id, archived: false });
+  h.runner.update({ threadId: other.id, archived: true, verdict: 'didntWork' });
+  assert.match((await t.call('list_threads', { include: ['archived'] })).text, /archived by the user: it didn't work/);
+  h.runner.update({ threadId: other.id, archived: false });
   const snoozed = await t.call('update_thread', { threadId: other.id, snooze: '2h' });
   assert.match(snoozed.text, /snoozed until: 2026-10-26T14:00:00\.000Z/);
   await t.call('update_thread', { threadId: other.id, snooze: 'off' });

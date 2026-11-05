@@ -1521,8 +1521,10 @@ enum RowRenderer {
     }
 
     /// The done card: the agent said nothing waits on Mike, so it says
-    /// Done, with Archive (`archive`, as ⌘E does) at the right of that
-    /// line. Any follow-ups it suggested sit under "Or carry on", one
+    /// Done, with Archive (`archive`) at the right of that line, which
+    /// opens a menu asking how it went before it archives (Mike picked
+    /// that from mockups, 5 Nov, so a sweep can tell a thread he put away
+    /// on purpose from one that was just cleared). Any follow-ups it suggested sit under "Or carry on", one
     /// row each with a tick circle, and a click ticks or unticks one
     /// (`next:<n>`): ticked ones go with his next message, so he can pick
     /// several and add to them (30 Oct). Mike found
@@ -1550,7 +1552,8 @@ enum RowRenderer {
         ]
         output.append(symbol("checkmark", label: "Done", font: title, attributes: titleAttributes, color: .systemGreen))
         output.append(NSAttributedString(string: " Done\t", attributes: titleAttributes))
-        output.append(NSAttributedString(string: "\u{00A0}\u{00A0}\u{00A0}Archive\u{00A0}\u{00A0}\u{00A0}", attributes: [
+        // The ▾ says it opens a menu: Archive asks how it went first.
+        output.append(NSAttributedString(string: "\u{00A0}\u{00A0}\u{00A0}Archive\u{00A0}\u{00A0}\u{25BE}\u{00A0}\u{00A0}\u{00A0}", attributes: [
             .font: button, .foregroundColor: AskButtonStyle.plain.textColor, .paragraphStyle: lineStyle, .baselineOffset: buttonOffset,
             .tbAction: "archive", .tbButton: AskButtonStyle.plain.rawValue,
         ]))

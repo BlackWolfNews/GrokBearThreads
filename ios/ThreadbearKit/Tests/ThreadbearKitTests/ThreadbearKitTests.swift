@@ -469,6 +469,22 @@ import UniformTypeIdentifiers
         var den = backend.threads(.den).makeAsyncIterator()
         #expect(try await den.next()?.contains { $0.threadId == "a4" } == true)
     }
+
+    @Test func archiveWithAVerdictMovesToTheDen() async throws {
+        let backend = FakeBackend()
+        _ = try await backend.update(threadId: "a4", change: .archiveWithVerdict(.worked))
+        var den = backend.threads(.den).makeAsyncIterator()
+        #expect(try await den.next()?.contains { $0.threadId == "a4" } == true)
+    }
+
+    /// phone:update's shape (convex/phone.ts): a plain archive stays
+    /// `{archive: true}` for older backends; the verdict rides beside it.
+    @Test func archiveVerdictEncoding() {
+        #expect(ThreadChange.archive.json == ["archive": true])
+        #expect(ThreadChange.archiveWithVerdict(.worked).json == ["archive": true, "verdict": "worked"])
+        #expect(ThreadChange.archiveWithVerdict(.didntWork).json == ["archive": true, "verdict": "didntWork"])
+        #expect(ThreadChange.archiveWithVerdict(.notNeeded).json == ["archive": true, "verdict": "notNeeded"])
+    }
 }
 
 @Suite struct LocalAndErrorTests {

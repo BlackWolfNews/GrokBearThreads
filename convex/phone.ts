@@ -446,7 +446,8 @@ export const update = mutation({
     change: v.union(
       v.object({ snooze: v.object({ until: v.optional(v.string()), untilRestart: v.optional(v.boolean()) }) }),
       v.object({ wake: v.literal(true) }),
-      v.object({ archive: v.literal(true) }),
+      // verdict (API 42): how it went, from the done card's Archive menu.
+      v.object({ archive: v.literal(true), verdict: v.optional(v.union(v.literal('worked'), v.literal('didntWork'), v.literal('notNeeded'))) }),
       v.object({ unarchive: v.literal(true) }),
       v.object({ markSeen: v.literal(true) }),
       v.object({ title: v.string() }),

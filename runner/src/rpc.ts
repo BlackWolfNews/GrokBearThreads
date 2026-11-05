@@ -4,8 +4,8 @@ import crypto from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Runner, Notification, CliControl } from './runner.ts';
 import type { Logger } from './log.ts';
-import { CLI_POLICIES, EFFORT_LEVELS, ErrorCode, PROVIDERS, RpcError, isEffortLevel, isProvider } from './protocol.ts';
-import type { ApprovalDecision, AskAnswer, CliPolicy, EffortLevel, ImageRef, PermissionMode, Provider, ShareAccess, ThreadStartedBy, ThreadSummary } from './protocol.ts';
+import { ARCHIVE_VERDICTS, CLI_POLICIES, EFFORT_LEVELS, ErrorCode, PROVIDERS, RpcError, isEffortLevel, isProvider } from './protocol.ts';
+import type { ArchiveVerdict, ApprovalDecision, AskAnswer, CliPolicy, EffortLevel, ImageRef, PermissionMode, Provider, ShareAccess, ThreadStartedBy, ThreadSummary } from './protocol.ts';
 import { MAX_BYLINE } from './needs.ts';
 import { isMoved, mergeSummaries, type Bucket } from './handover.ts';
 
@@ -414,6 +414,15 @@ export class RpcServer {
         if (p.archived !== undefined) {
           if (typeof p.archived !== 'boolean') throw bad('archived must be a boolean');
           upd.archived = p.archived;
+        }
+        if (p.archivedBy !== undefined) {
+          if (p.archivedBy !== 'mike' && p.archivedBy !== 'agent' && p.archivedBy !== 'threadbear') throw bad('archivedBy must be "mike", "agent" or "threadbear"');
+          upd.archivedBy = p.archivedBy;
+        }
+        if (p.verdict !== undefined) {
+          if (!ARCHIVE_VERDICTS.includes(p.verdict as ArchiveVerdict)) throw bad(`verdict must be one of ${ARCHIVE_VERDICTS.join(', ')}`);
+          if (p.archived !== true) throw bad('verdict goes with archived: true');
+          upd.verdict = p.verdict as ArchiveVerdict;
         }
         if (p.starred !== undefined) {
           if (typeof p.starred !== 'boolean') throw bad('starred must be a boolean');

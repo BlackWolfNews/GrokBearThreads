@@ -641,7 +641,7 @@ test('commands: each pending one is taken once, applied through the runner as fr
   await tick();
   const cmds: Command[] = [
     { commandId: 'c1', kind: 'send', threadId: t.id, args: { text: 'from my phone' }, createdAt: 1 },
-    { commandId: 'c2', kind: 'update', threadId: t.id, args: { archive: true }, createdAt: 2 },
+    { commandId: 'c2', kind: 'update', threadId: t.id, args: { archive: true, verdict: 'worked' }, createdAt: 2 },
     { commandId: 'c3', kind: 'create', args: { text: 'a new one', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }, createdAt: 3 },
     { commandId: 'c4', kind: 'share', threadId: t.id, args: { access: 'link', newLink: true }, createdAt: 4 },
   ];
@@ -649,7 +649,7 @@ test('commands: each pending one is taken once, applied through the runner as fr
   await tick(10);
   push(cmds); // the same list again, as a live query re-run would send
   await tick(10);
-  assert.deepEqual(applied, [`send ${t.id} from my phone phone`, `update {"threadId":"${t.id}","archived":true}`, 'create a new one phone', `share ${t.id} link new`]);
+  assert.deepEqual(applied, [`send ${t.id} from my phone phone`, `update {"threadId":"${t.id}","archived":true,"verdict":"worked"}`, 'create a new one phone', `share ${t.id} link new`]);
   const finished = calls.filter((c) => c.fn === 'sync:finishCommand').map((c) => c.args);
   assert.equal(finished.length, 4);
   assert.ok(finished.every((f) => f.ok === true && f.key === 'k'));

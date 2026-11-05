@@ -142,6 +142,10 @@ final class PendingSendTests: XCTestCase {
         let thread = try JSONDecoder().decode(ThreadSummary.self, from: Data(#"{"id":"th1","title":"Fix it","model":"opus","permissionMode":"full"}"#.utf8))
         let now = Date(timeIntervalSince1970: 1000)
         XCTAssertEqual(ThreadUpdate(archived: true).applied(to: thread, now: now).archivedAt, now)
+        // The done card's Archive menu sends its pick with the archive, and only with one.
+        XCTAssertEqual(ThreadUpdate(archived: true, verdict: .didntWork).params["verdict"], .string("didntWork"))
+        XCTAssertNil(ThreadUpdate(archived: false, verdict: .worked).params["verdict"])
+        XCTAssertNil(ThreadUpdate(archived: true).params["verdict"])
         let until = Date(timeIntervalSince1970: 5000)
         XCTAssertEqual(ThreadUpdate(snoozedUntil: .some(until)).applied(to: thread).snoozedUntil, until)
         XCTAssertTrue(ThreadUpdate(snoozeUntilRestart: true).applied(to: thread).snoozedUntilRestart)

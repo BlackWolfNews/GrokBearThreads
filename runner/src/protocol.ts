@@ -133,6 +133,11 @@ export type RunnerDefaults = {
 
 export type ThreadStatus = 'idle' | 'starting' | 'running' | 'waiting' | 'error' | 'stopped';
 
+// Who archived a thread, and how Mike said it went (Who archived a thread).
+export type ArchivedBy = 'mike' | 'agent' | 'threadbear';
+export type ArchiveVerdict = 'worked' | 'didntWork' | 'notNeeded';
+export const ARCHIVE_VERDICTS: readonly ArchiveVerdict[] = ['worked', 'didntWork', 'notNeeded'];
+
 export type ThreadSummary = {
   id: string;
   title: string;
@@ -170,6 +175,10 @@ export type ThreadSummary = {
   woke?: { at: string; since?: string }; // woke from hibernating by itself, not looked at yet
   onOldRunner?: boolean; // finishing a turn on a runner that handed over (Handovers)
   archivedAt?: string;
+  // Who archived it and, from the done card's Archive menu, the user's word
+  // on how it went; only while archivedAt is set (Who archived a thread).
+  archivedBy?: ArchivedBy;
+  archiveVerdict?: ArchiveVerdict;
   starredAt?: string; // in the Starred section above the Inbox, unless archived
   preview: string;
   lastSeq: number;

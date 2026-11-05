@@ -220,8 +220,18 @@ export function buildThreadbearTools(
     return path.resolve(base, expandHome(f.trim()));
   };
 
+  // Who put it away, and the user's verdict when they gave one from the
+  // done card, so a sweep can tell a thread they confirmed from one an
+  // agent or Threadbear archived.
+  const archivedHow = (t: ThreadSummary): string => {
+    if (!t.archivedBy) return '';
+    const who = t.archivedBy === 'mike' ? 'the user' : t.archivedBy === 'agent' ? 'an agent' : 'Threadbear';
+    const verdict = t.archiveVerdict === 'worked' ? ': it worked' : t.archiveVerdict === 'didntWork' ? ": it didn't work" : t.archiveVerdict === 'notNeeded' ? ': not needed' : '';
+    return ` by ${who}${verdict}`;
+  };
+
   const line = (t: ThreadSummary): string => {
-    const where = t.archivedAt ? 'archived' : t.snoozedUntil ? `snoozed until ${snoozeEnd(t)}` : 'inbox';
+    const where = t.archivedAt ? `archived${archivedHow(t)}` : t.snoozedUntil ? `snoozed until ${snoozeEnd(t)}` : 'inbox';
     const flags = [t.status, where, t.needsYou ? 'needs the user' : '', t.id === selfId ? 'this thread' : ''].filter(Boolean).join(', ');
     return `${t.id.slice(0, 8)}  ${t.title}  [${flags}]  ${t.cwd}  ${t.accountId}  ${relativeTime(t.lastActivityAt, now())}`;
   };
@@ -239,7 +249,7 @@ export function buildThreadbearTools(
       `effort: ${t.effort ?? 'default'}${t.effortInUse ? ` (${t.effortInUse} last turn)` : ''}`,
       `permissions: ${t.permissionMode === 'full' ? 'full access' : t.permissionMode === 'auto' ? 'auto (a classifier checks each action)' : 'ask before edits'}`,
       t.snoozedUntil ? `snoozed until: ${snoozeEnd(t)}` : '',
-      t.archivedAt ? `archived: ${t.archivedAt}` : '',
+      t.archivedAt ? `archived: ${t.archivedAt}${archivedHow(t)}` : '',
       `last activity: ${relativeTime(t.lastActivityAt, now())}`,
       t.costUsd !== undefined ? `cost so far: $${t.costUsd.toFixed(2)}` : '',
     ]
@@ -1194,6 +1204,7 @@ export function buildThreadbearTools(
           upd.snoozedUntil = word === 'off' ? null : word === 'restart' ? 'restart' : parseWhen(snooze, now());
         }
         if (archived !== undefined) upd.archived = archived;
+        if (archived === true) upd.archivedBy = 'agent';
         return describe((await control.update(upd)).thread);
       }),
     ),

@@ -450,7 +450,9 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
     case 'unarchive': {
       const id = await resolveId(client, args[0]);
       if (cmd === 'archive') notSelf(id, STOPS_SELF);
-      await client.call('threads.update', { threadId: id, archived: cmd === 'archive' });
+      // Run from a thread (its agent), it's the agent archiving, not Mike.
+      const by = cmd === 'archive' && process.env.THREADBEAR_THREAD_ID ? { archivedBy: 'agent' } : {};
+      await client.call('threads.update', { threadId: id, archived: cmd === 'archive', ...by });
       return 0;
     }
     case 'highlights': {

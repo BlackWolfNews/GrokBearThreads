@@ -276,7 +276,7 @@ function ThreadView({ token, threadId }: { token: string; threadId: string }) {
 
       <div className="dock">
         {pending ? <CommandState token={token} commandId={pending} onDone={() => setPending(null)} /> : null}
-        <Dock token={token} thread={t} lastSeq={lastSeq} onSent={setPending} onArchive={() => void act({ archive: true })} />
+        <Dock token={token} thread={t} lastSeq={lastSeq} onSent={setPending} onArchive={(verdict) => void act({ archive: true, verdict })} />
       </div>
     </article>
   );
@@ -310,7 +310,17 @@ function MoreMenu({ items }: { items: ({ label: string; icon: ReactNode; run: ()
 // What sits at the bottom, in one rounded box as on the Mac: an approval or
 // question the CLI is waiting on, else the end_turn card of asks, else the
 // done card's follow-ups, then the composer under it.
-function Dock({ token, thread: t, lastSeq, onSent, onArchive }: { token: string; thread: Row; lastSeq?: number; onSent: (id: Id<'commands'>) => void; onArchive: () => void }) {
+// The done card's Archive asks how the thread went before archiving, so
+// later sweeps know it was archived on purpose (backend API 42; the website
+// ships with its backend, so it's always new enough).
+type Verdict = 'worked' | 'didntWork' | 'notNeeded';
+const verdicts: { verdict: Verdict; label: string; icon: ReactNode }[] = [
+  { verdict: 'worked', label: 'Worked', icon: <Icon.Check /> },
+  { verdict: 'didntWork', label: "Didn't work", icon: <Icon.Close /> },
+  { verdict: 'notNeeded', label: 'Not needed', icon: <Icon.Minus /> },
+];
+
+function Dock({ token, thread: t, lastSeq, onSent, onArchive }: { token: string; thread: Row; lastSeq?: number; onSent: (id: Id<'commands'>) => void; onArchive: (verdict: Verdict) => void }) {
   const send = useMutation(api.phone.send);
   const [text, setText] = useState('');
   // Picks on the card of asks: ask index to choice index, for one card.
@@ -379,9 +389,22 @@ function Dock({ token, thread: t, lastSeq, onSent, onArchive }: { token: string;
     <section className="card">
       <h2>
         Done
-        <button className="btn plain" style={{ marginLeft: 'auto' }} onClick={onArchive}>
-          Archive
-        </button>
+        <Pop title="Archive" label="Archive" above>
+          {(close) =>
+            verdicts.map((v) => (
+              <button
+                key={v.verdict}
+                onClick={() => {
+                  onArchive(v.verdict);
+                  close();
+                }}
+              >
+                {v.icon}
+                {v.label}
+              </button>
+            ))
+          }
+        </Pop>
       </h2>
       <div className="choices">
         {next.map((n, i) => {

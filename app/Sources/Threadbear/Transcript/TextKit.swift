@@ -434,6 +434,10 @@ final class TranscriptTextView: NSTextView {
         }
         if let onAction, let action = row(at: point)?.action ?? character(at: point).flatMap({ textStorage?.attribute(.tbAction, at: $0, effectiveRange: nil) as? String }) {
             closeChipCard()
+            // Where the clicked button is, for an action that opens a menu
+            // under it (the done card's Archive), only while it runs.
+            Self.actionAnchor = actionBox(at: point).map { ActionAnchor(view: self, rect: $0) }
+            defer { Self.actionAnchor = nil }
             onAction(action)
             return
         }
@@ -500,6 +504,24 @@ final class TranscriptTextView: NSTextView {
         guard box.insetBy(dx: -zoomed(4), dy: -zoomed(3)).contains(local) else { return nil }
         let index = layoutManager.characterIndexForGlyph(at: glyph)
         return index < storage.length ? index : nil
+    }
+
+    /// The button (`.tbAction` run) a click is running the action of: the
+    /// view and the run's box in it. Set only while `onAction` runs.
+    struct ActionAnchor {
+        weak var view: NSView?
+        var rect: NSRect
+    }
+    static var actionAnchor: ActionAnchor?
+
+    /// The box of the `.tbAction` run at `point`, in this view.
+    private func actionBox(at point: NSPoint) -> NSRect? {
+        guard let layoutManager, let textContainer, let storage = textStorage, let index = character(at: point) else { return nil }
+        var range = NSRange()
+        guard storage.attribute(.tbAction, at: index, longestEffectiveRange: &range, in: NSRange(location: 0, length: storage.length)) != nil else { return nil }
+        let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        let box = layoutManager.boundingRect(forGlyphRange: glyphs, in: textContainer)
+        return box.offsetBy(dx: textContainerOrigin.x, dy: textContainerOrigin.y)
     }
 
     /// The `.tbRow` paragraph whose lines `point` is on, anywhere across

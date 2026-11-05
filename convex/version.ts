@@ -176,4 +176,9 @@
 //    answers as Convex's own does, so any runner's uploader works with it;
 //    the owner's heartbeat can carry ownerKeyRotating, which older runners
 //    ignore.
-export const API_VERSION = 41;
+// 42: phone:update's archive takes a verdict ("worked", "didntWork" or
+//    "notNeeded"), the pick from the done card's Archive menu, which the
+//    runner keeps as the thread's archiveVerdict (docs/protocol.md, "Who
+//    archived a thread"). A phone sends it only to a backend of 42 or
+//    later; an older runner ignores it and just archives.
+export const API_VERSION = 42;

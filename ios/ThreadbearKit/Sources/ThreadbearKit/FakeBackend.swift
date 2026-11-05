@@ -443,7 +443,7 @@ public final class FakeBackend: Backend, @unchecked Sendable {
             case .wake:
                 s.threadsById[threadId]?.snoozedUntil = nil
                 s.threadsById[threadId]?.snoozedUntilRestart = nil
-            case .archive: s.threadsById[threadId]?.archivedAt = .now
+            case .archive, .archiveWithVerdict: s.threadsById[threadId]?.archivedAt = .now
             case .unarchive: s.threadsById[threadId]?.archivedAt = nil
             case .markSeen:
                 s.threadsById[threadId]?.unread = false
