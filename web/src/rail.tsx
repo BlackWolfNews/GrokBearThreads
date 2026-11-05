@@ -6,6 +6,7 @@ import { useQuery } from 'convex/react';
 import type { ReactNode } from 'react';
 import { api } from '../../convex/_generated/api';
 import { useLiveQuery } from './live';
+import { useInbox } from './inbox';
 import { MenuChoice, Pop } from './menu';
 import { go, type RailView, type Route, viewPath } from './route';
 import { build, wakesOf, type ScheduleRow as WakeRow } from './sections';
@@ -20,7 +21,7 @@ import * as Icon from './icons';
 let lastThread: string | undefined;
 
 export function Rail({ token, route }: { token: string; route: Route }) {
-  const inbox = useLiveQuery(api.phone.threads, { token, view: 'inbox' });
+  const inbox = useInbox();
   const schedules = useLiveQuery(api.phone.schedules, { token });
   const runners = useLiveQuery(api.phone.runners, { token });
   const now = Date.now();

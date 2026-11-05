@@ -298,7 +298,11 @@ export default defineSchema({
   // view "overflow": a runner key's thread past its view's cap (sync.ts
   // upsertThreads): out of the lists the phone reads whole, everything
   // else kept; wantView is the view it's really in, which reads by id show.
-  threads: defineTable({ ...threadFields, view: v.union(...[...views, 'overflow' as const].map((x) => v.literal(x))), wantView: v.optional(v.union(...views.map((x) => v.literal(x)))), pushedAt: v.optional(v.number()), pushHeldAt: v.optional(v.number()) })
+  threads: defineTable({ ...threadFields, view: v.union(...[...views, 'overflow' as const].map((x) => v.literal(x))), wantView: v.optional(v.union(...views.map((x) => v.literal(x)))), pushedAt: v.optional(v.number()), pushHeldAt: v.optional(v.number()), updatedMs: v.optional(v.number()) })
+    // phone:threadsSince (API 43): the rows written since a client last heard.
+    // updatedMs moves with what a list shows, not with the mirror's own push
+    // marks, so those re-run nothing.
+    .index('by_updated', ['updatedMs'])
     // The overflowed thread to bring back first when its list has room (sync.ts refill).
     .index('by_runner_want', ['runnerId', 'wantView', 'lastActivityMs'])
     .index('by_threadId', ['threadId'])
@@ -440,6 +444,10 @@ export default defineSchema({
     // Newest joined first, by _creationTime, which every index ends with.
     .index('by_project', ['projectId'])
     .index('by_threadId', ['threadId']),
+
+  // A thread row gone in the last day, so a client following phone:threadsSince
+  // hears of it. One away for longer loads the whole list when it's back anyway.
+  threadGone: defineTable({ threadId: v.string(), at: v.number() }).index('by_at', ['at']),
 
   // The phone's Pocket: short cards agents file for when Mike's out
   // (API 19, the `pocket` tool). They live here rather than on a runner, so

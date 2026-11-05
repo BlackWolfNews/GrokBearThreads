@@ -340,7 +340,8 @@ final class AppModel {
             }
         }
         for view in wanted where listTasks[view] == nil {
-            listTasks[view] = follow(backend.threads(view)) { model, list in
+            let usesChanges = view == .inbox && (apiVersion ?? 0) >= BackendCompatibility.threadChangesAPIVersion
+            listTasks[view] = follow(usesChanges ? backend.inboxChanges() : backend.threads(view)) { model, list in
                 model.pinRunners(list)
                 switch view {
                 case .inbox:
@@ -518,6 +519,13 @@ final class AppModel {
             guard let identity = try? await backend.me() else { return }
             self?.backendProblem = BackendCompatibility.problem(identity)
             self?.apiVersion = identity.apiVersion ?? 0
+            // The inbox started before this was known: over to following its
+            // changes. The list on screen stays until the new one answers.
+            if (identity.apiVersion ?? 0) >= BackendCompatibility.threadChangesAPIVersion, !Task.isCancelled, let self {
+                self.listTasks[.inbox]?.cancel()
+                self.listTasks[.inbox] = nil
+                self.followLists()
+            }
             // An older backend has no phone:counts, and asking would only
             // fail and retry.
             if (identity.apiVersion ?? 0) >= BackendCompatibility.countsAPIVersion, !Task.isCancelled, let self {

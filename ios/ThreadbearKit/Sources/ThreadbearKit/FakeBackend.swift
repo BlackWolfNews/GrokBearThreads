@@ -247,6 +247,8 @@ public final class FakeBackend: Backend, @unchecked Sendable {
         watch { Self.sampleProjects }
     }
 
+    public func inboxChanges() -> AsyncThrowingStream<[PhoneThread], Error> { threads(.inbox) }
+
     public func threads(_ view: ThreadsView) -> AsyncThrowingStream<[PhoneThread], Error> {
         let live = liveThreads(view)
         guard listDelay > .zero else { return live }

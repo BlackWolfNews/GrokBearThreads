@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { useQuery } from 'convex/react';
 import { useLiveQuery } from './live';
+import { useInbox } from './inbox';
 import { api } from '../../convex/_generated/api';
 import { go, threadPath } from './route';
 import { ago } from './format';
@@ -36,7 +37,7 @@ const SHOWS: { show: Filter['show']; label: string; icon: ReactNode }[] = [
 ];
 
 export function Lists({ token, selected, isNew }: { token: string; selected?: string; isNew?: boolean }) {
-  const inbox = useLiveQuery(api.phone.threads, { token, view: 'inbox' });
+  const inbox = useInbox();
   const counts = useLiveQuery(api.phone.counts, { token });
   const schedules = useLiveQuery(api.phone.schedules, { token }) as ScheduleRow[] | undefined;
   const [folded, setFolded] = useState(() => readFolded(localStorage.getItem(FOLDED_KEY)));

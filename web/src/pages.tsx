@@ -8,6 +8,7 @@ import { useMutation } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import { useLiveQuery } from './live';
+import { useInbox } from './inbox';
 import { MessageText } from './messages';
 import { CommandState } from './command-state';
 import { go, threadPath, type RailView, viewPath } from './route';
@@ -438,7 +439,7 @@ export function ProjectPage({ token, id }: { token: string; id: string }) {
 
 export function RunnersList({ token, selected }: { token: string; selected?: string }) {
   const rows = useLiveQuery(api.phone.runners, { token });
-  const inbox = useLiveQuery(api.phone.threads, { token, view: 'inbox' });
+  const inbox = useInbox();
   const now = useClock();
   if (!rows) return <div className="lists muted pad">Loading…</div>;
   const shown = runnersShown(rows, now);
@@ -475,7 +476,7 @@ export function RunnersList({ token, selected }: { token: string; selected?: str
 
 export function RunnerPage({ token, id }: { token: string; id: string }) {
   const rows = useLiveQuery(api.phone.runners, { token });
-  const inbox = useLiveQuery(api.phone.threads, { token, view: 'inbox' });
+  const inbox = useInbox();
   const accounts = useLiveQuery(api.phone.accounts, { token }) as Account[] | undefined;
   const now = useClock();
   if (!rows) return <div className="pad muted">Loading…</div>;

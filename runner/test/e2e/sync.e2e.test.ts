@@ -235,6 +235,36 @@ describe('convex mirror e2e', { skip: LOCAL ? false : 'no local Convex deploymen
     assert.deepEqual(await api('query', 'phone:threadRow', { token, threadId }), doc);
     await api('mutation', 'sync:removeThreads', { key, threadIds: [threadId] });
     await assert.rejects(api('query', 'phone:threadRow', { token, threadId }));
+    // API 43: a list once, then only what changed.
+    const a = 'e2e-a-' + crypto.randomBytes(4).toString('hex');
+    const b = 'e2e-b-' + crypto.randomBytes(4).toString('hex');
+    const start = await api('query', 'phone:threadsAt', { token, view: 'inbox' });
+    assert.equal(typeof start.at, 'number');
+    await api('mutation', 'sync:upsertThreads', { key, threads: [{ ...doc, threadId: a }, { ...doc, threadId: b }] });
+    const since = start.at - 5000;
+    const heard = await api('query', 'phone:threadsSince', { token, since });
+    const ids = heard.rows.map((r: { threadId: string }) => r.threadId);
+    assert.ok(ids.includes(a) && ids.includes(b), JSON.stringify(ids));
+    assert.equal(typeof heard.rows.find((r: { threadId: string }) => r.threadId === a).updatedMs, 'number');
+    const later = Math.max(...heard.rows.map((r: { updatedMs: number }) => r.updatedMs)) + 1;
+    assert.deepEqual((await api('query', 'phone:threadsSince', { token, since: later })).rows, []);
+    await api('mutation', 'sync:upsertThreads', { key, threads: [{ ...doc, threadId: a, view: 'den' }] });
+    await api('mutation', 'sync:removeThreads', { key, threadIds: [b] });
+    const moved = await api('query', 'phone:threadsSince', { token, since: later });
+    assert.equal(moved.rows.find((r: { threadId: string }) => r.threadId === a)?.view, 'den');
+    assert.ok(moved.gone.includes(b));
+    // Removed and made again: the row's what's true, whatever order they came in.
+    await api('mutation', 'sync:upsertThreads', { key, threads: [{ ...doc, threadId: b }] });
+    const back = await api('query', 'phone:threadsSince', { token, since: later });
+    assert.ok(back.rows.some((r: { threadId: string }) => r.threadId === b));
+    assert.equal(back.gone.includes(b), false);
+    await api('mutation', 'sync:removeThreads', { key, threadIds: [b] });
+    // From further back than deletions are kept: load the list again.
+    assert.equal((await api('query', 'phone:threadsSince', { token, since: start.at - 24 * 60 * 60_000 })).more, true);
+    // The runner's own read of its rows still passes its validator.
+    await api('query', 'sync:threadsOf', { key, runnerId });
+    await api('mutation', 'sync:removeThreads', { key, threadIds: [a] });
+
     // Offline again, or the phone's next new thread could pick this runner.
     await api('mutation', 'sync:bye', { key, runnerId });
   });

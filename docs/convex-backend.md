@@ -523,6 +523,14 @@ Queries:
   reads older pages once, with `beforeSeq` (`web/src/transcript.ts`); the
   iPhone still raises `limit` as you scroll back. `phone:thread` stays as API 1 had it (newest 20 text messages plus
   any paged ones, never tool rows), for phone apps built before.
+- `phone:threadsAt({ token, view })` (API 43) → `{ rows, at }`, a list once;
+  `phone:threadsSince({ token, since })` → `{ rows, gone, more? }`, every row
+  written at or after `since` in any view, each with `updatedMs`, and threads
+  gone or out of the lists. The client merges them and asks again from the
+  newest `updatedMs` less 5 seconds (a mutation can commit just after one stamped
+  later), so each run reads only what changed; `more` says to load the list
+  again. The website and the iPhone follow the inbox this way; hibernating and
+  archived stay on `phone:threads`, as they're rarely written.
 - `phone:threadRow({ token, threadId })` (API 37) → the thread's row alone,
   for a client that reads messages with `phone:messages`.
 - `phone:images({ token, threadId, from })` (API 37) → the thread's pictures
@@ -788,6 +796,10 @@ website watches a 30-row tail, reads older pages once, watches pictures apart
 iPhone app still raises `limit` and uses `phone:thread`, which costs about
 70 KB for each message that arrives while a thread is open.
 
+Since measured below: the inbox follows only what changed (API 43), and a
+reading copied from another runner goes up at most every 10 minutes, or at once
+if the login is blocked. The runner that made a reading still writes it at once.
+
 Measured from `npx convex logs --success --jsonl` on 5 Nov. A runner start: 9.6
 MB before, 0.39 MB after (5 rows written), though every 3 days one is still a
 full write. The functions this changed fell from about 375 to 178 MB a day at
@@ -795,9 +807,7 @@ the rate of each hour's sample (0.86 h and 1.05 h, the second with more
 starts), but these are busy daytime samples, not daily figures. By then most
 I/O was live reads for open clients: `phone:threads` about 390 MB a day at that
 rate (39 KB per re-run), `phone:projects` 165 MB (190 KB), `phone:schedules` 68
-MB (157 KB). Those cost nothing with no client open. Next, for the thread
-list: a subscription to only what changed, as `sync:threadIndexSince` does. Also
-new that day: `sync:sharedUsage` (API 39) reads every login's row, and one
+MB (157 KB). Those cost nothing with no client open. Also new that day: `sync:sharedUsage` (API 39) reads every login's row, and one
 reading gets copied to the other runners' rows, so one change is three writes
 and nine re-runs, about 70 MB a day at that rate.
 

@@ -153,6 +153,7 @@ async function clearThread(ctx: MutationCtx, threadId: string, runnerId: string 
 async function dropThread(ctx: MutationCtx, threadId: string, row: Doc<'threads'> | null): Promise<void> {
   if (row) {
     await ctx.db.delete(row._id);
+    await ctx.db.insert('threadGone', { threadId, at: Date.now() });
     await moveView(ctx, row.runnerId, row.view, undefined);
     await refill(ctx, row.runnerId, row.view);
   }
@@ -379,7 +380,7 @@ async function refill(ctx: MutationCtx, runnerId: string, view: View | 'overflow
   if (view !== 'inbox' && view !== 'hibernating') return;
   const back = await ctx.db.query('threads').withIndex('by_runner_want', (q) => q.eq('runnerId', runnerId).eq('wantView', view)).order('desc').first();
   if (!back || back.view !== 'overflow') return;
-  await ctx.db.patch(back._id, { view, wantView: undefined });
+  await ctx.db.patch(back._id, { view, wantView: undefined, updatedMs: Date.now() });
   await moveView(ctx, runnerId, 'overflow', view);
 }
 
@@ -483,7 +484,7 @@ export const upsertThreads = mutation({
           if (!oldest || (oldest.lastActivityMs ?? 0) >= (t.lastActivityMs ?? 0)) stored = { view: 'overflow', wantView: t.view };
           else {
             const was = oldest.view;
-            await ctx.db.patch(oldest._id, { view: 'overflow', wantView: t.view });
+            await ctx.db.patch(oldest._id, { view: 'overflow', wantView: t.view, updatedMs: now });
             await moveView(ctx, oldest.runnerId, was, 'overflow');
           }
         }
@@ -503,14 +504,14 @@ export const upsertThreads = mutation({
       // check) loses it to the owner's.
       if (slug && caller.owner) {
         for (const other of await ctx.db.query('threads').withIndex('by_share_slug', (q) => q.eq('share.slug', slug)).collect()) {
-          if (other.threadId !== t.threadId) await ctx.db.patch(other._id, { share: undefined });
+          if (other.threadId !== t.threadId) await ctx.db.patch(other._id, { share: undefined, updatedMs: now });
         }
       }
       const before = transfer ? null : existing;
       const wantsPush = t.needsYou && before !== null && !before.needsYou && (before.pushedAt ?? 0) < now - PUSH_COOLDOWN_MS;
       // A held push stays held only while the thread still needs Mike.
       const held = t.needsYou && before?.pushHeldAt && !wantsPush ? { pushHeldAt: before.pushHeldAt } : {};
-      const row = { ...t, ...stored };
+      const row = { ...t, ...stored, updatedMs: now };
       // What it was, read before the write replaces the row.
       const was = existing ? { view: existing.view, runnerId: existing.runnerId } : undefined;
       if (existing) await ctx.db.replace(existing._id, { ...row, ...(wantsPush ? { pushedAt: now } : before?.pushedAt ? { pushedAt: before.pushedAt } : {}), ...held });
@@ -822,7 +823,7 @@ export const threadsOf = query({
     await actAs(ctx, caller, runnerId);
     const out = [];
     for await (const row of ctx.db.query('threads').withIndex('by_runnerId', (q) => q.eq('runnerId', runnerId))) {
-      const { _id, _creationTime, pushedAt: _p, pushHeldAt: _h, wantView, ...rest } = row;
+      const { _id, _creationTime, pushedAt: _p, pushHeldAt: _h, updatedMs: _u, wantView, ...rest } = row;
       out.push({ ...rest, view: rest.view === 'overflow' ? (wantView ?? 'inbox') : rest.view });
     }
     return out;
@@ -1853,6 +1854,11 @@ export const pruneOld = internalMutation({
     for (const m of await ctx.db.query('messages').withIndex('by_pagedAt', (q) => q.gt('pagedAt', 0).lt('pagedAt', cutoff)).take(Math.max(0, Math.min(left, PRUNE_MESSAGES)))) {
       await ctx.db.patch(m._id, { pagedAt: undefined });
       left -= Math.ceil(PRUNE_BATCH / PRUNE_MESSAGES);
+    }
+    // What phone:threadsSince told clients went, once they've had a day to hear.
+    for (const t of await ctx.db.query('threadGone').withIndex('by_at', (q) => q.lt('at', cutoff)).take(Math.max(0, left))) {
+      await ctx.db.delete(t._id);
+      left--;
     }
     // Thread tombstones after TOMBSTONE_DAYS: by then whatever was under the
     // id is long gone. A share link's stays, so a public link never comes back.

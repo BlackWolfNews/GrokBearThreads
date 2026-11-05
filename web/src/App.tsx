@@ -5,6 +5,7 @@
 import { Component, Fragment, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useMutation, useQuery } from 'convex/react';
 import { useLiveQuery } from './live';
+import { InboxProvider, useInbox } from './inbox';
 import { useTranscript } from './transcript';
 import { ConvexError } from 'convex/values';
 import { api } from '../../convex/_generated/api';
@@ -34,7 +35,9 @@ export function App() {
   // Keyed on the token so a fresh sign-in clears an earlier auth error.
   return (
     <Catch key={token}>
-      <Shell token={token} route={route} />
+      <InboxProvider token={token}>
+        <Shell token={token} route={route} />
+      </InboxProvider>
     </Catch>
   );
 }
@@ -150,7 +153,7 @@ function ThreadView({ token, threadId }: { token: string; threadId: string }) {
   const t = useLiveQuery(api.phone.threadRow, { token, threadId });
   const shown = useTranscript(token, threadId);
   // For thread: links, as agents may give only the start of an id.
-  const inbox = useLiveQuery(api.phone.threads, { token, view: 'inbox' });
+  const inbox = useInbox();
   const update = useMutation(api.phone.update);
   const [pending, setPending] = useState<Id<'commands'> | null>(null);
   const bottom = useRef<HTMLDivElement>(null);

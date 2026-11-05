@@ -63,6 +63,12 @@ export const PREVIEW_HOLD_MS = 20_000;
 // How often a project goes up only because its lastActivityAt moved. A turn
 // moves it, and a project's row with long notes is tens of KB to read and write.
 export const PROJECT_ACTIVITY_MS = 10 * 60_000;
+// How often a login's row goes up with a reading copied from another runner.
+// One reading used to ripple: each of three runners copied it to its own row,
+// three writes and nine re-runs of every runner's sync:sharedUsage (about 70 MB
+// a day). The runner that made the reading still writes it at once, which is
+// what the others read; a copy on this row is only what a phone shows.
+export const USAGE_COPY_MS = 10 * 60_000;
 // How long a start with a saved record waits before comparing rows with it. A
 // thread's patch links load a moment after the runner starts, so comparing at
 // once sees every thread with links as changed (464 of Mike's 716, each start).
@@ -91,7 +97,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 42;
+export const BACKEND_API_VERSION = 43;
 // From this one an owned schedule can carry `poolId`, the pool that picks
 // its threads' login. An older backend's validator would turn it down.
 export const SCHEDULE_POOLS_API_VERSION = 36;
@@ -903,6 +909,11 @@ export class ConvexSync {
   private projectsTimer?: TimerHandle;
   // Each account as the backend has it, id -> digest without usage.readAt.
   private accountsSent?: Map<string, string>;
+  private accountCopiedAt = new Map<string, number>();
+  // Logins with a copied reading waiting. Its own reading after that goes even
+  // if it matches what's up: otherwise the row's old time says the copy's newer.
+  private accountCopyHeld = new Set<string>();
+  private accountsTimer?: TimerHandle;
   // Project pictures (ICONS_API_VERSION): what the mirror has, projectId ->
   // picture name, read from it once; and whether the list has changed since
   // the pictures were last looked at.
@@ -1039,6 +1050,8 @@ export class ConvexSync {
     this.settling = false;
     this.heldTimer?.cancel();
     this.projectsTimer?.cancel();
+    this.accountsTimer?.cancel();
+    this.accountsTimer = undefined;
     this.cacheTimer?.cancel();
     this.saveCache();
     this.heldTimer = undefined;
@@ -1693,23 +1706,59 @@ export class ConvexSync {
   // this is the first this runner knows of what it has; else what changed.
   // A reading's time isn't a change: Token Stats reads every few minutes
   // whether or not a window has moved, and nothing shows it from the mirror.
+  // Nor is which source it came from, on its own.
   private async sendAccounts(list: Account[], v: number): Promise<void> {
     const key = this.deps.key;
     const docs = list.map((a) => toAccountDoc(a, v));
     const entry = (d: (typeof docs)[number]) => {
       const u = d.usage as Record<string, unknown> | undefined;
       if (!u) return digest(JSON.stringify(d));
-      const { readAt: _readAt, ...usage } = u;
+      const { readAt: _readAt, source: _source, ...usage } = u;
       return digest(JSON.stringify({ ...d, usage }));
     };
     const sent = this.accountsSent;
-    const changed = sent ? docs.filter((d) => sent.get(d.id as string) !== entry(d)) : docs;
+    const now = this.deps.clock.now();
+    let copyWaits = Infinity;
+    const changed = sent
+      ? docs.filter((d) => {
+          const id = d.id as string;
+          const u = d.usage as { source?: string; blocked?: boolean } | undefined;
+          if (sent.get(id) === entry(d)) {
+            const heldOwn = this.accountCopyHeld.has(id) && u?.source !== 'shared';
+            this.accountCopyHeld.delete(id);
+            return heldOwn;
+          }
+          // Blocked goes at once: that's what a phone's picker most needs to know.
+          if (u?.source !== 'shared' || u.blocked) {
+            this.accountCopyHeld.delete(id);
+            return true;
+          }
+          const due = (this.accountCopiedAt.get(id) ?? -Infinity) + USAGE_COPY_MS;
+          if (now >= due) {
+            this.accountCopiedAt.set(id, now);
+            this.accountCopyHeld.delete(id);
+            return true;
+          }
+          this.accountCopyHeld.add(id);
+          copyWaits = Math.min(copyWaits, due);
+          return false;
+        })
+      : docs;
+    if (copyWaits !== Infinity && !this.accountsTimer) {
+      this.accountsTimer = this.deps.clock.setTimeout(() => {
+        this.accountsTimer = undefined;
+        this.dirtyLists.add('accounts');
+        this.scheduleFlush();
+      }, Math.max(0, copyWaits - now));
+    }
     const ids = new Set(docs.map((d) => d.id as string));
     const removed = sent ? [...sent.keys()].filter((id) => !ids.has(id)) : [];
     if (sent && !changed.length && !removed.length) return;
+    const went = new Set(changed.map((d) => d.id as string));
     if (sent && v >= ACCOUNTS_DIFF_API_VERSION) await this.post('mutation', 'sync:upsertAccounts', { key, runnerId: this.runnerId, accounts: changed, removed });
     else await this.post('mutation', 'sync:setAccounts', { key, runnerId: this.runnerId, accounts: docs });
-    this.accountsSent = new Map(docs.map((d) => [d.id as string, entry(d)]));
+    // A copy still waiting stays different from what's remembered, so it goes when due.
+    this.accountsSent = new Map(docs.filter((d) => !sent || went.has(d.id as string) || sent.has(d.id as string)).map((d) => [d.id as string, !sent || went.has(d.id as string) ? entry(d) : (sent.get(d.id as string) ?? entry(d))]));
     this.noteSent();
   }
 

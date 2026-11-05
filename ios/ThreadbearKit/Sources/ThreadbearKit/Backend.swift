@@ -28,6 +28,10 @@ public protocol Backend: Sendable {
     /// backend API 5, so a row can show its project the way the Mac does.
     func projects() -> AsyncThrowingStream<[PhoneProject], Error>
     func threads(_ view: ThreadsView) -> AsyncThrowingStream<[PhoneThread], Error>
+    /// The inbox, read whole once and then only the rows written since
+    /// (backend API 43), so a phone left open doesn't read the whole list for
+    /// every row a runner writes.
+    func inboxChanges() -> AsyncThrowingStream<[PhoneThread], Error>
     /// Archived threads with these words in their title or last reply
     /// (backend API 16), for the search to find ones older than the den's
     /// newest 100. Once, not live: it runs again as the words change.
@@ -166,6 +170,50 @@ public final class ConvexBackend: Backend, @unchecked Sendable {
 
     public func threads(_ view: ThreadsView) -> AsyncThrowingStream<[PhoneThread], Error> {
         live("phone:threads", ["view": .string(view.rawValue)], as: [PhoneThread].self)
+    }
+
+    public func inboxChanges() -> AsyncThrowingStream<[PhoneThread], Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    let first = try Self.decode(ThreadsAtAnswer.self, try await transport.query("phone:threadsAt", args(["view": .string(ThreadsView.inbox.rawValue)])))
+                    var list = InboxChanges(rows: first.rows, at: first.at)
+                    continuation.yield(list.rows)
+                    // Each answer can move where to ask from, which is a new
+                    // subscription; the loop ends when the task is cancelled.
+                    while !Task.isCancelled {
+                        let since = list.since
+                        var reload = false
+                        for try await data in transport.subscribe("phone:threadsSince", args(["since": .number(since)])) {
+                            let answer = try Self.decode(ThreadsSinceAnswer.self, data)
+                            if answer.more == true {
+                                reload = true
+                                break
+                            }
+                            list.merge(answer)
+                            continuation.yield(list.rows)
+                            if list.since != since { break }
+                        }
+                        if reload {
+                            // After the margin: loading now would ask from before
+                            // the same burst and hear `more` again, over and over.
+                            try await Task.sleep(for: .milliseconds(Int(InboxChanges.marginMs) + 1000))
+                            let again = try Self.decode(ThreadsAtAnswer.self, try await transport.query("phone:threadsAt", args(["view": .string(ThreadsView.inbox.rawValue)])))
+                            list = InboxChanges(rows: again.rows, at: again.at)
+                            continuation.yield(list.rows)
+                        } else if list.since == since, !Task.isCancelled {
+                            // The subscription ended with nothing new (a test
+                            // transport); nothing more will come.
+                            break
+                        }
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
     }
 
     public func search(_ text: String) async throws -> [PhoneThread] {
@@ -344,5 +392,54 @@ public enum Answers {
     public static func summary(_ questions: [Question], answers: [String: String]) -> String {
         questions.compactMap { q in answers[q.question].map { questions.count == 1 ? $0 : "\(q.header ?? q.question) \($0)" } }
             .joined(separator: " · ")
+    }
+}
+
+/// phone:threadsAt: a list, and when it was read.
+struct ThreadsAtAnswer: Decodable, Sendable {
+    var rows: [PhoneThread]
+    var at: Double
+}
+
+/// phone:threadsSince: rows written since, in any view, and threads gone.
+struct ThreadsSinceAnswer: Decodable, Sendable {
+    struct Row: Decodable, Sendable {
+        var thread: PhoneThread
+        var view: String
+        var updatedMs: Double
+        private enum Keys: String, CodingKey { case view, updatedMs }
+        init(from decoder: Decoder) throws {
+            thread = try PhoneThread(from: decoder)
+            let c = try decoder.container(keyedBy: Keys.self)
+            view = try c.decode(String.self, forKey: .view)
+            updatedMs = try c.decode(Double.self, forKey: .updatedMs)
+        }
+    }
+    var rows: [Row]
+    var gone: [String]
+    var more: Bool?
+}
+
+/// The inbox as a phone holds it while following phone:threadsSince.
+struct InboxChanges: Sendable {
+    /// A row is stamped by the mutation that wrote it, which can commit just
+    /// after one stamped later, so it asks from a little before the newest.
+    static let marginMs: Double = 5000
+    private(set) var rows: [PhoneThread]
+    private(set) var since: Double
+
+    init(rows: [PhoneThread], at: Double) {
+        self.rows = rows
+        since = at - Self.marginMs
+    }
+
+    mutating func merge(_ answer: ThreadsSinceAnswer) {
+        var byId = Dictionary(rows.map { ($0.threadId, $0) }, uniquingKeysWith: { _, new in new })
+        for row in answer.rows {
+            if row.view == ThreadsView.inbox.rawValue { byId[row.thread.threadId] = row.thread } else { byId[row.thread.threadId] = nil }
+            since = max(since, row.updatedMs - Self.marginMs)
+        }
+        for id in answer.gone { byId[id] = nil }
+        rows = byId.values.sorted { $0.lastActivityAt > $1.lastActivityAt }
     }
 }

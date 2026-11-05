@@ -92,6 +92,51 @@ export const threads = query({
   },
 });
 
+// A list once, and the time to follow it from with threadsSince (API 43). The
+// list re-read whole for every row written was most of the I/O of an open
+// phone or browser: about 39 KB a time, hundreds of times an hour.
+export const threadsAt = query({
+  args: { token: v.string(), view: v.union(...views.map((x) => v.literal(x))) },
+  returns: v.object({ rows: v.array(row), at: v.number() }),
+  handler: async (ctx, { token, view }) => {
+    await checkPhoneToken(ctx, token);
+    const q = ctx.db.query('threads').withIndex('by_view_activity', (x) => x.eq('view', view)).order('desc');
+    const rows = view === 'den' ? await q.take(DEN_LIMIT) : await q.collect();
+    return { rows: rows.map(stripThread), at: Date.now() };
+  },
+});
+
+const SINCE_CAP = 200;
+// threadGone rows last a day (pruneOld, which runs every 6 hours), so asking
+// from further back than this could miss one: load the list again instead.
+const SINCE_OLDEST_MS = 12 * 60 * 60_000;
+
+// Rows written at or after `since`, in any view, and threads gone or out of
+// the lists since then. A client merges them into what it has and asks again
+// from the newest it heard (less CHANGES_MARGIN_MS in its own code), so each
+// run reads only what changed. `more`: too many to send, load the list again.
+export const threadsSince = query({
+  args: { token: v.string(), since: v.number() },
+  returns: v.object({ rows: v.array(v.object({ ...row.fields, updatedMs: v.number() })), gone: v.array(v.string()), more: v.optional(v.boolean()) }),
+  handler: async (ctx, { token, since }) => {
+    await checkPhoneToken(ctx, token);
+    if (since < Date.now() - SINCE_OLDEST_MS) return { rows: [], gone: [], more: true };
+    const docs = await ctx.db.query('threads').withIndex('by_updated', (x) => x.gte('updatedMs', since)).take(SINCE_CAP + 1);
+    const goneRows = await ctx.db.query('threadGone').withIndex('by_at', (x) => x.gte('at', since)).take(SINCE_CAP + 1);
+    if (docs.length > SINCE_CAP || goneRows.length > SINCE_CAP) return { rows: [], gone: [], more: true };
+    const rows = [];
+    // An id that's back since it went has a row, which is what's true now.
+    const here = new Set(docs.map((d) => d.threadId));
+    const gone = goneRows.filter((g) => !here.has(g.threadId)).map((g) => g.threadId);
+    for (const d of docs) {
+      // Out of its list for a runner key's cap: threads doesn't show it either.
+      if (d.view === 'overflow') gone.push(d.threadId);
+      else rows.push({ ...stripThread(d), updatedMs: d.updatedMs ?? since });
+    }
+    return { rows, gone };
+  },
+});
+
 // Archived threads whose title or last reply has these words (API 16): the
 // phone has only the newest DEN_LIMIT of the den, and searches those itself,
 // so this finds the older ones. Convex's full-text search matches whole
@@ -446,7 +491,7 @@ export const update = mutation({
     change: v.union(
       v.object({ snooze: v.object({ until: v.optional(v.string()), untilRestart: v.optional(v.boolean()) }) }),
       v.object({ wake: v.literal(true) }),
-      // verdict (API 42): how it went, from the done card's Archive menu.
+      // verdict (API 43): how it went, from the done card's Archive menu.
       v.object({ archive: v.literal(true), verdict: v.optional(v.union(v.literal('worked'), v.literal('didntWork'), v.literal('notNeeded'))) }),
       v.object({ unarchive: v.literal(true) }),
       v.object({ markSeen: v.literal(true) }),

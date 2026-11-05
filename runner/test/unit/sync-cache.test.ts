@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { makeHarness, tmpDir } from '../helpers/fakes.ts';
-import { ConvexSync, BACKEND_API_VERSION, HEARTBEAT_MS, PREVIEW_HOLD_MS, SETTLE_MS, PROJECT_ACTIVITY_MS, type ThreadDoc } from '../../src/sync.ts';
+import { ConvexSync, BACKEND_API_VERSION, HEARTBEAT_MS, PREVIEW_HOLD_MS, SETTLE_MS, USAGE_COPY_MS, PROJECT_ACTIVITY_MS, type ThreadDoc } from '../../src/sync.ts';
 import { loadSyncCache, SYNC_CACHE_MAX_AGE_MS } from '../../src/sync-cache.ts';
 import { nullLogger } from '../../src/log.ts';
 
@@ -551,6 +551,65 @@ test('accounts: only the login that changed goes, and a reading time alone is no
   publish([acct('a', 40, '2026-11-05T02:00:00Z')]);
   await sync.flushNow();
   assert.deepEqual(s.named('sync:upsertAccounts')[0]!.args.removed, ['b']);
+  await sync.stop();
+});
+
+test('a reading copied from another runner goes at most every ten minutes; its own at once', async () => {
+  const s = setup();
+  const acct = (remainingPercent: number, source: string, blocked = false) => ({ id: 'a', provider: 'claude', title: 'a', usage: { windows: [{ kind: 'week', title: 'Week', remainingPercent }], readAt: 'x', source, ...(blocked ? { blocked: true } : {}) } });
+  const sync = s.make();
+  sync.start();
+  await settle();
+  const publish = (a: unknown) => s.h.runner.publish({ method: 'accounts.updated', params: { accounts: [a] } } as never);
+  publish(acct(50, 'live'));
+  await sync.flushNow();
+  publish(acct(49, 'shared')); // the first copy since starting goes
+  await sync.flushNow();
+  s.calls.length = 0;
+
+  publish(acct(48, 'shared'));
+  await sync.flushNow();
+  assert.deepEqual(s.named('sync:upsertAccounts'), [], 'held back');
+  publish(acct(48, 'tokenStats'));
+  await sync.flushNow();
+  assert.equal(s.named('sync:upsertAccounts').length, 1, 'its own reading goes straight away');
+
+  s.calls.length = 0;
+  publish(acct(47, 'shared'));
+  await sync.flushNow();
+  publish(acct(46, 'shared', true));
+  await sync.flushNow();
+  assert.equal(s.named('sync:upsertAccounts').length, 1, 'at its limit goes straight away');
+
+  s.calls.length = 0;
+  publish(acct(45, 'shared'));
+  await sync.flushNow();
+  assert.deepEqual(s.named('sync:upsertAccounts'), []);
+  s.h.clock.advance(USAGE_COPY_MS + 3000);
+  await settle();
+  assert.equal(s.named('sync:upsertAccounts').length, 1, 'it does go in the end');
+  await sync.stop();
+});
+
+test('its own reading after a held copy goes up, even matching what is there', async () => {
+  const s = setup();
+  const acct = (remainingPercent: number, source: string, readAt: string) => ({ id: 'a', provider: 'claude', title: 'a', usage: { windows: [{ kind: 'week', title: 'Week', remainingPercent }], readAt, source } });
+  const sync = s.make();
+  sync.start();
+  await settle();
+  const publish = (a: unknown) => s.h.runner.publish({ method: 'accounts.updated', params: { accounts: [a] } } as never);
+  publish(acct(50, 'live', 't0'));
+  await sync.flushNow();
+  publish(acct(49, 'shared', 't1')); // goes: the first copy
+  await sync.flushNow();
+  publish(acct(48, 'shared', 't2')); // held
+  await sync.flushNow();
+  s.calls.length = 0;
+  publish(acct(49, 'live', 't3'));
+  await sync.flushNow();
+  const up = s.named('sync:upsertAccounts');
+  assert.equal(up.length, 1);
+  assert.equal((up[0]!.args.accounts as { usage: { readAt: string } }[])[0]!.usage.readAt, 't3');
   await sync.stop();
 });
 

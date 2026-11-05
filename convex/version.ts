@@ -181,4 +181,8 @@
 //    runner keeps as the thread's archiveVerdict (docs/protocol.md, "Who
 //    archived a thread"). A phone sends it only to a backend of 42 or
 //    later; an older runner ignores it and just archives.
-export const API_VERSION = 42;
+// 43: phone:threadsAt and phone:threadsSince, a list read once and then only
+//    the rows written since. Thread rows carry updatedMs. An older phone goes
+//    on using phone:threads, and an older runner's writes go through the same
+//    upsertThreads, which stamps them.
+export const API_VERSION = 43;

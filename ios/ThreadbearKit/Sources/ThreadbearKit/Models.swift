@@ -810,6 +810,9 @@ public enum BackendCompatibility {
     /// went (the done card's Archive menu). Older backends refuse the extra
     /// field, so the done card archives straight away there, as before.
     public static let archiveVerdictAPIVersion = 42
+    /// From 43 phone:threadsSince: the inbox's changes rather than the whole
+    /// list for every row written.
+    public static let threadChangesAPIVersion = 43
 
     /// The line to show, or nil when the backend is fine.
     public static func problem(_ identity: PhoneIdentity) -> String? {
