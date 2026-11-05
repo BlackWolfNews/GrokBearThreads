@@ -86,7 +86,7 @@ export async function mainCheckoutOf(cwd: string): Promise<string | undefined> {
   return (await listCheckouts(cwd))?.find((c) => c.branch === MAIN)?.path;
 }
 
-function realpath(p: string): string {
+export function realpath(p: string): string {
   try {
     return fs.realpathSync(p);
   } catch {
@@ -113,7 +113,8 @@ export function sameSubfolder(cwd: string, from: string, to: string): string {
 
 // --------------------------------------------------------------- making
 
-export type MadeWorktree = { ok: true; worktree: WorktreeRecord; cwd: string } | { ok: false; reason: string };
+// `patchFile`: the worktree's own copy of the patch that asked for it.
+export type MadeWorktree = { ok: true; worktree: WorktreeRecord; cwd: string; patchFile: string } | { ok: false; reason: string };
 
 // Makes the thread's worktree from main in the main checkout. A leftover
 // branch of the thread's name is a reason, never overwritten.
@@ -158,6 +159,7 @@ async function makeWorktreeNow(opts: { cwd: string; threadId: string; patch: Wor
     ok: true,
     worktree: { repo, mainCheckout, path: where, branch, base, ...(keep ? { keep } : {}) },
     cwd: sameSubfolder(opts.cwd, top, where),
+    patchFile: path.join(where, path.relative(top, realpath(opts.patch.file))),
   });
 
   if (keep) {

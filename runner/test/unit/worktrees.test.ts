@@ -15,6 +15,7 @@ import { RunnerClient } from '../../src/client.ts';
 import { readToken } from '../../src/config.ts';
 import { nullLogger } from '../../src/log.ts';
 import { PATIENCE_MS } from '../helpers/patience.ts';
+import { PatchTrust } from '../../src/patch-trust.ts';
 
 // Commits need a name, and Mike's own git config (signing, hooks) mustn't
 // reach the temp repos. Each test file runs in its own process.
@@ -231,6 +232,49 @@ test('a failing setup is shown and the turn starts anyway', async () => {
   assert.equal(setup.exitCode, 4);
   assert.equal(setup.text.trim(), 'no luck');
   assert.ok(h.runner.get(thread.id).worktree);
+});
+
+// The setup runs in the new worktree, from main's commit, which may not be
+// what was trusted in the main checkout (an uncommitted edit there, a
+// script changed on main): it's the worktree's own copy of the patch, and
+// the scripts it names there, that must be trusted (Daybreak, 5 Nov).
+test("setup runs only when the worktree's own copy of the patch is trusted, and it's that copy's setup", async () => {
+  const opts = { actionShell: ['/bin/sh', '-c'], actionTimeoutMs: 10_000 };
+  const file = (main: string) => path.join(main, '.threadbear/patches/checks.ts');
+
+  // Committed: a setup script that does harm. In the main checkout, not
+  // committed: a harmless one, and that's what was trusted.
+  const bad = makeRepo(PATCH(`{ setup: "sh ./setup.sh" }`));
+  commit(bad.main, { 'setup.sh': 'touch .evil-ran\n' }, 'setup');
+  fs.writeFileSync(path.join(bad.main, 'setup.sh'), 'touch .setup-ran\n');
+  const trust = new PatchTrust();
+  trust.trustCurrent([file(bad.main)]);
+  const h = makeHarness(undefined, {}, { ...opts, patchTrust: trust });
+  const { thread } = h.runner.create({ text: 'Go', accountId: 'claude-3', cwd: bad.main });
+  await until(() => h.adapter.sessions.length === 1, 'the CLI to start');
+  const wt = h.runner.get(thread.id).worktree;
+  assert.ok(wt, 'the worktree is still made: the main checkout\'s patch is trusted');
+  const wtPath = h.store.load(thread.id)!.worktree!.path;
+  assert.equal(fs.existsSync(path.join(wtPath, '.evil-ran')), false, "the worktree's setup script didn't run");
+  const events = h.events(thread.id);
+  assert.equal(events.some((e) => e.type === 'action.run'), false);
+  const note = events.filter((e) => e.type === 'system.note').at(-1);
+  assert.match(note?.text ?? '', /^Didn't run the worktree's setup \(sh \.\/setup\.sh\): its copy of the checks patch isn't a version you've trusted\./);
+
+  // Both versions trusted: the worktree's own setup is the one that runs.
+  const good = makeRepo(PATCH(`{ setup: "touch .committed-ran" }`));
+  const t2 = new PatchTrust();
+  t2.trustCurrent([file(good.main)]);
+  fs.writeFileSync(file(good.main), PATCH(`{ setup: "touch .main-ran" }`));
+  fs.utimesSync(file(good.main), new Date(Date.now() + 5000), new Date(Date.now() + 5000));
+  t2.trustCurrent([file(good.main)]);
+  const h2 = makeHarness(undefined, {}, { ...opts, patchTrust: t2 });
+  const made = h2.runner.create({ text: 'Go', accountId: 'claude-3', cwd: good.main });
+  await until(() => h2.adapter.sessions.length === 1, 'the CLI to start');
+  const p2 = h2.store.load(made.thread.id)!.worktree!.path;
+  assert.ok(fs.existsSync(path.join(p2, '.committed-ran')));
+  assert.equal(fs.existsSync(path.join(p2, '.main-ran')), false);
+  assert.equal(h2.events(made.thread.id).find((e) => e.type === 'action.run')?.command, 'touch .committed-ran');
 });
 
 test('threads.create takes worktree: false over RPC, and refuses a worktree that isn\'t a boolean', async () => {

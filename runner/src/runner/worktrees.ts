@@ -7,9 +7,10 @@ import type { RunnerPart } from './part.ts';
 import type { Action, EventBody } from '../protocol.ts';
 import type { ThreadRecord } from '../store.ts';
 import { BIN_DIR, threadEnv } from '../restart.ts';
-import { cleanUpWorktree, makeWorktree, sameSubfolder } from '../worktrees.ts';
+import { cleanUpWorktree, makeWorktree, realpath, sameSubfolder } from '../worktrees.ts';
 import { isDirectory } from '../fsutil.ts';
 import { findWorktreePatch, isInside, runCommand, type PatchSet, worktreePatchFiles } from '../patches.ts';
+import fs from 'node:fs';
 import path from 'node:path';
 import type { ThreadState } from '../runner.ts';
 
@@ -61,7 +62,15 @@ export const worktreesPart = {
     this.log.info('made a worktree', { threadId: rec.id, path: made.worktree.path, branch: made.worktree.branch });
     this.emit(st, { type: 'system.note', text: `Working in a worktree of its own at ${made.worktree.path}, on the branch ${made.worktree.branch}. tb land puts it on main.` }, turnId);
     if (!patch.setup) return;
-    const outcome = await runCommand(patch.setup, {
+    const setup = await this.worktreeSetup(made.patchFile, made.cwd, patch.patch);
+    if (rt.deleted) return;
+    if ('skip' in setup) {
+      this.log.warn("didn't run a worktree's setup", { threadId: rec.id, patch: made.patchFile, reason: setup.skip });
+      this.emit(st, { type: 'system.note', text: `Didn't run the worktree's setup (${patch.setup}): ${setup.skip}` }, turnId);
+      return;
+    }
+    if (!setup.command) return;
+    const outcome = await runCommand(setup.command, {
       cwd: made.worktree.path,
       env: { ...process.env, ...threadEnv(rec.id, this.cfg.home) },
       shell: this.actionShell,
@@ -73,7 +82,7 @@ export const worktreesPart = {
       actionId: `${patch.patch}.worktree-setup`,
       patch: patch.patch,
       title: 'Set up the worktree',
-      command: patch.setup,
+      command: setup.command,
       ok: outcome.ok,
       text: outcome.text,
       truncated: outcome.truncated,
@@ -83,6 +92,34 @@ export const worktreesPart = {
     if (outcome.exitCode !== undefined) body.exitCode = outcome.exitCode;
     this.emit(st, body, rt.turn?.turnId ?? turnId);
     this.markDirty(st);
+  },
+
+  // The setup to run in a new worktree, from the worktree's own copy of the
+  // patch. The patch trusted in the main checkout isn't what runs there:
+  // the worktree is main's commit, which can differ from the main
+  // checkout's files (an uncommitted edit, a script changed on main), and
+  // setup runs by itself. So that copy, with the scripts it names as they
+  // are in the worktree, must be a version Mike trusted (Daybreak, 5 Nov).
+  // Threadbear's own worktrees count as its checkout, so stay trusted.
+  async worktreeSetup(this: Runner, copy: string, cwd: string, id: string): Promise<{ command?: string } | { skip: string }> {
+    let verdict;
+    try {
+      verdict = await this.patchTrust.check(copy, fs.statSync(copy).mtimeMs);
+    } catch (e) {
+      return { skip: `couldn't read its copy of the ${id} patch (${String((e as Error).message ?? e)}).` };
+    }
+    if (!verdict.trusted) {
+      if (verdict.reason === 'unchecked') return { skip: `its copy of the ${id} patch can't be checked: ${verdict.problem}` };
+      return { skip: `its copy of the ${id} patch isn't a version you've trusted. Trust it in Patches, then run the setup yourself if you want it.` };
+    }
+    let again;
+    try {
+      again = await findWorktreePatch(cwd, this.panelsRoot, this.patchCache, undefined, this.patchTrust);
+    } catch (e) {
+      return { skip: `couldn't load its copy of the ${id} patch (${String((e as Error).message ?? e)}).` };
+    }
+    // Trusted, but asking for no setup there: nothing to run.
+    return { command: again && realpath(again.file) === realpath(copy) ? again.setup : undefined };
   },
 
   // A thread whose worktree was removed (it was archived with everything

@@ -44,6 +44,10 @@ for a folder inside an opted-in repo:
 3. `setup` runs in the worktree's root before the first turn starts. Its
    output goes in the transcript as an `action.run` event (`trigger:
    "worktree.setup"`). A failure is shown and the turn starts anyway.
+   It's the worktree's own copy of the patch that's read, and only when
+   that copy (with the scripts it names, as they are in the worktree) is
+   trusted; otherwise a note says the setup was skipped (docs/protocol.md,
+   "Trusting a folder's patches").
 4. The record keeps `worktree: { repo, mainCheckout, path, branch, base }`
    (`base` is main's commit when it was made); the summary carries
    `worktree?: { branch, mainCheckout }` so the app can show it.
