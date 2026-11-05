@@ -635,7 +635,8 @@ enum Automation {
             // says what the space bar would show. "click" is a press on a row
             // through the window ("count" 2 for a double-click), "key" a key code ("command",
             // "shift", "characters"), "crumb" a path bar folder, "pathBar" true
-            // its words, "menu" a row's right-click menu ("" the empty space's).
+            // its words, "menu" a row's right-click menu ("" the empty space's),
+            // "choose" one of its items (with "row", or the empty space's).
             // Each says what's showing.
             guard let pane = FolderPaneView.current else { return "error no folder is showing in the pane" }
             if let mode = c["mode"] as? String {
@@ -662,6 +663,7 @@ enum Automation {
             }
             if let name = c["crumb"] as? String, !pane.debugPickCrumb(name) { return "error no folder called \(name) in the path bar" }
             if c["pathBar"] as? Bool == true { return "ok \(pane.debugPathBar)" }
+            if let title = c["choose"] as? String, !pane.debugChoose(title, name: c["row"] as? String) { return "error no menu item \(title)" }
             if let name = c["menu"] as? String { return "ok \(pane.debugMenu(name: name.isEmpty ? nil : name).joined(separator: " | "))" }
             if c["up"] as? Bool == true { pane.goUp() }
             try? await Task.sleep(for: .milliseconds(500))

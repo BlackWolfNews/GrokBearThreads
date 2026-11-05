@@ -190,8 +190,8 @@ A link to a folder opens it in the side pane, where it works like a Finder
 window. Double-click a folder to go in, or a file to see it there, and the
 back arrow takes you back to where you were. Press the space bar for Quick
 Look, or use the path along the bottom to go up. ⌘↑ goes up too, and ⌘⇧.
-shows hidden files. The button in the bar swaps the list for icons, with
-thumbnails of pictures and videos, and the list sorts by whichever column
+shows hidden files. The button in the bar, or Show as in the right-click menu, swaps the list for
+icons, with thumbnails of pictures and videos, and the list sorts by whichever column
 you click. It works for folders on your other Macs too, though only this
 Mac's files have thumbnails and Quick Look.
 

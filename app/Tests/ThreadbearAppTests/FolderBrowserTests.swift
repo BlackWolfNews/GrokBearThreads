@@ -233,6 +233,26 @@ final class FolderBrowserTests: XCTestCase {
         XCTAssertEqual(opened, ["a.mp4"], "the space bar opens it in the pane instead")
     }
 
+    /// The bar's button is in the right-click menu too, on a row and on the
+    /// empty space, in whichever view is showing.
+    func testTheRightClickMenuSwapsTheView() async throws {
+        FolderViewMode.current = .list
+        defer { UserDefaults.standard.removeObject(forKey: FolderViewMode.key) }
+        let view = pane()
+        try await settled(view) { view.summary.contains("3 rows") }
+        XCTAssertTrue(view.debugMenu(name: "notes.md").contains("Show as icons"))
+        XCTAssertTrue(view.debugMenu(name: nil).contains("Show as icons"))
+
+        XCTAssertTrue(view.debugChoose("Show as icons", name: "notes.md"))
+        XCTAssertTrue(view.summary.hasPrefix("(icons"), view.summary)
+        XCTAssertEqual(FolderViewMode.current, .icons, "kept for the bar's button and the next folder")
+
+        XCTAssertTrue(view.debugMenu(name: nil).contains("Show as a list"))
+        XCTAssertTrue(view.debugChoose("Show as a list", name: nil))
+        XCTAssertTrue(view.summary.hasPrefix("(list"), view.summary)
+        XCTAssertEqual(FolderViewMode.current, .list)
+    }
+
     // MARK: The path bar
 
     func testThePathBarKeepsTheNearestNames() {

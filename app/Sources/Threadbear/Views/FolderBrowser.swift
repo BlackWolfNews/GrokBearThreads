@@ -631,6 +631,8 @@ final class FolderPaneView: NSView, NSOutlineViewDataSource, NSOutlineViewDelega
             menu.addItem(NSMenuItem(title: selection.count > 1 ? "Copy paths" : "Copy path", symbol: "doc.on.doc", action: #selector(menuCopyPath), target: self))
             menu.addItem(.separator())
         }
+        // The bar's button too, in the same words, where a right-click finds it.
+        menu.addItem(NSMenuItem(title: mode == .list ? "Show as icons" : "Show as a list", symbol: mode == .list ? "square.grid.2x2" : "list.bullet", action: #selector(menuMode), target: self))
         let sortItem = NSMenuItem(title: "Sort by", symbol: "arrow.up.arrow.down", action: nil)
         let sorts = NSMenu()
         for (key, title, symbol) in [(FolderSort.Key.name, "Name", "textformat"), (.modified, "Date Modified", "calendar"), (.size, "Size", "scalemass")] {
@@ -669,6 +671,13 @@ final class FolderPaneView: NSView, NSOutlineViewDataSource, NSOutlineViewDelega
         // Same column again turns it round; a new one starts its useful way.
         let ascending = sort.key == key ? !sort.ascending : key == .name
         setSort(FolderSort(key: key, ascending: ascending))
+    }
+
+    @objc private func menuMode() {
+        let next: FolderViewMode = mode == .list ? .icons : .list
+        // Saved for the bar's button and every other folder; shown here at once.
+        FolderViewMode.current = next
+        setMode(next)
     }
 
     @objc private func menuHidden() {
@@ -888,6 +897,14 @@ final class FolderPaneView: NSView, NSOutlineViewDataSource, NSOutlineViewDelega
     var debugPathBar: String { pathBar.debugWords }
 
     func debugPickCrumb(_ name: String) -> Bool { pathBar.debugPick(name) }
+
+    /// Picks an item of the right-click menu of a row, or of the empty space.
+    func debugChoose(_ title: String, name: String?) -> Bool {
+        let menu = menu(for: name.flatMap { row(named: $0) })
+        guard let index = menu.items.firstIndex(where: { $0.title == title }) else { return false }
+        menu.performActionForItem(at: index)
+        return true
+    }
 
     /// The right-click menu of a row, or of the empty space.
     func debugMenu(name: String?) -> [String] {
