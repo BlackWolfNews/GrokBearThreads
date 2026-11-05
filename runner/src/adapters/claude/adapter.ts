@@ -218,6 +218,19 @@ export class ClaudeAdapter implements AgentAdapter {
   }
 }
 
+// How a session starts in a folder whose Claude Code settings run commands
+// that aren't trusted (claude-trust.ts). Leaving out the project source is
+// the only way the SDK has to skip a folder's hooks, .mcp.json servers and
+// status line while keeping Mike's own hooks (disableAllHooks would stop
+// those too), but it also drops the folder's CLAUDE.md. Naming the folder
+// as an extra directory, with CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD
+// (set by the caller), brings CLAUDE.md back without its settings (tried
+// on CLI 2.1.318, 5 Nov 2026), and the rest of the settings come in as flag
+// settings, which sit above user settings as project ones do.
+export function untrustedSettings(cwd: string, settings: Record<string, unknown>): Pick<Options, 'settingSources' | 'settings' | 'additionalDirectories'> {
+  return { settingSources: ['user'], additionalDirectories: [cwd], ...(Object.keys(settings).length ? { settings } : {}) };
+}
+
 // The CLI's rows as the protocol's ModelChoice. The "default" row stands
 // for whatever the CLI would pick, which the account's settings can
 // override, so it's left out: the runner works the default out itself.
@@ -282,11 +295,17 @@ class ClaudeSession implements AgentSession {
     const { opts, deps } = this;
     const env = cliEnv(opts.account);
     this.oneReply = deps.oneReply?.() === true;
+    const untrusted = opts.untrustedProjectSettings;
     const options: Options = {
       cwd: opts.cwd,
       pathToClaudeCodeExecutable: deps.claudePath,
-      env: { ...env, CLAUDE_CODE_TERMINAL_MCP_TOOLS: terminalMcpTools(env.CLAUDE_CODE_TERMINAL_MCP_TOOLS, this.oneReply), ...opts.env },
-      settingSources: ['user', 'project', 'local'],
+      env: {
+        ...env,
+        CLAUDE_CODE_TERMINAL_MCP_TOOLS: terminalMcpTools(env.CLAUDE_CODE_TERMINAL_MCP_TOOLS, this.oneReply),
+        ...opts.env,
+        ...(untrusted ? { CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1' } : {}),
+      },
+      ...(untrusted ? untrustedSettings(opts.cwd, untrusted) : { settingSources: ['user', 'project', 'local'] }),
       systemPrompt: { type: 'preset', preset: 'claude_code', ...(opts.instructions ? { append: opts.instructions } : {}) },
       includePartialMessages: true,
       thinking: { type: 'adaptive', display: 'summarized' },

@@ -96,7 +96,8 @@ import { archiveFromTool, bylineFromTool, END_TURN_TOOL, endTurnAccepted, endTur
 import type { Needs } from './needs.ts';
 import { asksForAppRestart } from './app-restarts.ts';
 import type { ConnectorsStatus } from './connectors.ts';
-import { isPatchFile, PatchTrust, type PatchTrustStore } from './patch-trust.ts';
+import { isPatchFile, PatchTrust, type ClaudeVerdict, type PatchTrustStore } from './patch-trust.ts';
+import { claudeSettingsWithoutCommands } from './claude-trust.ts';
 import {
   EMPTY_PATCH_SET,
   findWorktreePatch,
@@ -325,6 +326,12 @@ type Runtime = {
   // background work or wake grace), and the next message resumes on the
   // new one. Background work is never stopped for it.
   versionMove?: boolean;
+  // The live Claude session started without the folder's own Claude Code
+  // settings, as they run commands that aren't trusted: the hash it
+  // skipped (claude-trust.ts). `claudeNoted` is the last one said in the
+  // thread, so a session restart doesn't say it again.
+  claudeSkipped?: string;
+  claudeNoted?: string;
   // The installed version when the live session was started (what E says
   // new sessions start on), and whether it has got going since.
   startVersion?: string;
@@ -541,6 +548,9 @@ export class Runner {
   sharedPatchSets = new Map<string, { at: number; set: Promise<PatchSet> }>();
   patchReads = new Set<Promise<void>>();
   liveRuns = new Map<string, { doneAt?: number; out: Promise<CommandOutcome> }>();
+  // Each folder's Claude settings verdict for its patch list, read again
+  // as often as the folders are (claudePatchInfo).
+  claudeChecks = new Map<string, { at: number; verdict: ClaudeVerdict }>();
   threads = new Map<string, ThreadState>();
   listeners = new Set<(n: Notification) => void>();
   dirty = new Set<string>();
@@ -1442,6 +1452,10 @@ export class Runner {
     // A folder, account or settings change asked for a fresh CLI, or a CLI
     // update came in since this one started.
     if (rt.session && (rt.releaseWhenIdle || rec.handoff || (rt.versionMove && rt.tasks.length === 0))) this.releaseSession(st);
+    // The folder's Claude Code hooks were trusted since the CLI started
+    // without them, or new ones came that aren't (a pull): a fresh CLI
+    // reads the folder's settings again.
+    else if (rt.session && rec.provider === 'claude' && Boolean(rt.claudeSkipped) === this.patchTrust.checkClaude(rec.cwd).trusted) this.releaseSession(st);
     // Never two live CLIs on one session: wait for a releasing one to exit.
     while (rt.closing) await rt.closing;
     if (rt.turn?.turnId !== msg.turnId) return; // interrupted while waiting
@@ -1576,6 +1590,10 @@ export class Runner {
     rt.versionMove = false;
     rt.started = false;
     rt.startVersion = this.cliList()?.find((c) => c.provider === rec.provider)?.installedVersion;
+    // Read now, not from the patch list's cache: a pull just before this
+    // message may have brought hooks.
+    const claude = rec.provider === 'claude' ? this.patchTrust.checkClaude(rec.cwd) : undefined;
+    rt.claudeSkipped = claude && !claude.trusted ? claude.hash : undefined;
     rt.session = adapter.start(
       {
         threadId: rec.id,
@@ -1593,9 +1611,11 @@ export class Runner {
         allowRules: rec.allowRules ?? [],
         env: threadEnv(rec.id, this.cfg.home),
         ...this.briefFor(rec, resume),
+        ...(rt.claudeSkipped ? { untrustedProjectSettings: claudeSettingsWithoutCommands(rec.cwd) } : {}),
       },
       sink,
     );
+    if (claude && !claude.trusted) this.noteClaudeSkipped(st, claude);
     this.log.info('session started', { threadId: rec.id, resume, accountId: account.id, ...(rec.resumeAt ? { resumeAt: rec.resumeAt } : {}) });
     this.markDirty(st);
   }
@@ -1693,7 +1713,7 @@ export class Runner {
           } else if (ev.type === 'tool.result' && rt.turn.patchEdits?.has(ev.itemId)) {
             const file = rt.turn.patchEdits.get(ev.itemId)!;
             rt.turn.patchEdits.delete(ev.itemId);
-            if (ev.ok) this.trustAgentPatches([file]);
+            if (ev.ok) this.trustAgentPatches([file], true, rec.cwd);
           } else if (ev.type === 'tool.call' && own && ev.kind === 'command') {
             const cmd = Array.isArray(ev.input.command) ? ev.input.command.join(' ') : ev.input.command;
             if (typeof cmd === 'string') {
@@ -2020,7 +2040,7 @@ export class Runner {
     rt.turn = undefined;
     // Patch files the turn wrote some other way than Edit and Write calls
     // (a Codex patch's edit.diff) are trusted as it left them.
-    if (finished) this.trustAgentPatches([...finished.edited].map((p) => path.resolve(rec.cwd, p)), false);
+    if (finished) this.trustAgentPatches([...finished.edited].map((p) => path.resolve(rec.cwd, p)), false, rec.cwd);
     // The turn may have added a patch file or a convex/ folder.
     this.forgetFolders();
     // The folder's turn.end hooks, after a turn the agent finished itself

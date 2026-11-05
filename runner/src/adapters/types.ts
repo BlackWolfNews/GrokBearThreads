@@ -51,6 +51,11 @@ export type StartSessionOptions = {
   // projects (projects.ts). Claude appends it to the system prompt, Codex
   // takes it as developer instructions.
   instructions?: string;
+  // Claude: the folder's Claude Code settings run commands it hasn't
+  // trusted (claude-trust.ts), so the CLI starts without its project and
+  // local settings and gets these instead: the same settings without the
+  // parts that run anything.
+  untrustedProjectSettings?: Record<string, unknown>;
 };
 
 export type TurnResult = {

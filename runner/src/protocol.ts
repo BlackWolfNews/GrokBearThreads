@@ -433,7 +433,9 @@ export type Hook = {
 };
 
 // A patch that applies to a thread's folder and where it came from.
-export type PatchSource = 'builtin' | 'home' | 'project';
+// 'claude': the thread folder's Claude Code settings, listed while they run
+// commands that aren't trusted (claude-trust.ts).
+export type PatchSource = 'builtin' | 'home' | 'project' | 'claude';
 export type PatchInfo = {
   id: string;
   source: PatchSource;

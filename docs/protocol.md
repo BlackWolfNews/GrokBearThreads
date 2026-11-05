@@ -273,7 +273,11 @@ type Hook = {
 
 type PatchInfo = {
   id: string            // "convex", "xcode", or a patch file's name without its extension
-  source: "builtin" | "home" | "project"
+  source: "builtin" | "home" | "project" | "claude" // claude: the thread
+                        // folder's Claude Code settings, listed only while
+                        // they're waiting (see "Trusting a folder's Claude
+                        // Code hooks"); a client that doesn't know it shows
+                        // it as a project's
   file?: string         // the module, for home and project patches
   folder?: string       // set (with projectId) when it came from one of
                         // the thread's projects' folders rather than its
@@ -750,7 +754,7 @@ the summary and then the reply.
 | `approvals.respond` | `{ threadId, approvalId, decision: "allow" \| "allowAlways" \| "deny" \| "answered", message?: string, answers?: Record<string, string> }` | `{}`. `allowAlways` allows matching requests for the rest of this thread only; it never changes the thread's permission mode or saves anything in the project. With `answered`, the app sends the chosen answers in one line as `message` too: the runner keeps it in `approval.resolved` (only `answers` goes to the CLI), so the transcript can show what was chosen |
 | `secrets.answer` | `{ threadId, approvalId, secret?: string, decline?: true }` | `{}`. Answers a `secret.requested` card (Secrets). The runner never logs, emits or mirrors `secret` |
 | `media.import` | `{ path: string }` | `{ image: ImageRef }` copies a file into `inbox/` and reads its size; HEIC becomes JPEG and TIFF or BMP becomes PNG |
-| `patches.trust` | `{ threadId, files: { file, hash }[] }` | `{ trusted: string[] }`. Trusts those versions of the thread's waiting patch files (each a `file` its `patches` lists with `untrusted`, and the `hash` given there), then every thread's patches are read again, so the answer comes once they have been. `-32602` for a file the thread isn't waiting on, or one whose hash has moved on since (look again). See "Trusting a folder's patches" |
+| `patches.trust` | `{ threadId, files: { file, hash }[] }` | `{ trusted: string[] }`. Trusts those versions of the thread's waiting patch files (each a `file` its `patches` lists with `untrusted`, and the `hash` given there), then every thread's patches are read again, so the answer comes once they have been. The `claude` entry's file trusts the folder's Claude Code settings the same way. `-32602` for a file the thread isn't waiting on, or one whose hash has moved on since (look again). See "Trusting a folder's patches" |
 | `actions.run` | `{ threadId, actionId }` | For a prompt action, `{ turnId }`: its prompt was sent as a message (as `threads.send`). For a url action (only an older client calls it for one), `{ ok: true, durationMs }` once the page is opened on the runner's Mac, with nothing in the transcript. For a command action, `{ ok, exitCode?, durationMs, seq }` once the command has finished, with its output in the transcript as the `action.run` event at `seq`. The command runs in the thread's folder through a login shell with the thread's variables (`THREADBEAR_THREAD_ID` and the rest) and is stopped after 10 minutes. `-32602` for an action the thread doesn't have, `-32020` while the same action is still running |
 | `panels.render` | `{ threadId, panelId }` | `{ image?: ImageRef, items?: PanelItem[], note?: string }` draws an `image` panel or fills a `list` panel now. For `xcode.simulator`, a screenshot of the booted simulator (`xcrun simctl io booted screenshot`), written to the same file each time under the thread's `panels/`; with no device booted (or another failure) there's only `note`. For a `list` panel, the rows its patch's `items` function returned (at most 200), or `note` with the error when it threw or took over 20 seconds. Slow: it waits for the screenshot or the function. `-32602` for a panel the thread doesn't have |
 | `panels.convexDeployments` | `{ threadId, panelId, refresh?: boolean }` | `{ deployments: { deployment, deploymentUrl, label }[], note?: string }`. The configured cloud deployment and the project's Development and Production deployments, resolved through the runner's own Convex CLI, run in the project's folder, with read-only queries of `process.env.CONVEX_CLOUD_URL`. Duplicate names are combined; `note` explains unavailable choices. Cached for one minute; `refresh` bypasses the cache. Makes no deploy keys and changes no project settings. `-32602` for a missing or non-cloud panel |
@@ -2294,6 +2298,53 @@ version, and it's that copy's `setup` that runs: the worktree is main's
 commit, which can differ from the main checkout that was trusted.
 Otherwise the setup is skipped with a `system.note` saying why, and the
 thread starts in the worktree anyway.
+
+### Trusting a folder's Claude Code hooks
+
+The runner starts Claude in a thread's folder with that folder's own
+settings, `.claude/settings.json` and `.claude/settings.local.json`, and
+its `.mcp.json` (the folder's, and those of the folders above it, up to
+home). Some of what they hold is a command Claude runs by itself: `hooks`
+(a SessionStart hook runs as the CLI starts), `statusLine`,
+`subagentStatusLine`, `fileSuggestion`, `apiKeyHelper`,
+`proxyAuthHelper`, `awsCredentialExport`, `awsAuthRefresh`,
+`gcpAuthRefresh`, `otelHeadersHelper` and `extraKnownMarketplaces`, and
+an MCP server with a `command` or a `headersHelper`. Claude Code in a
+terminal asks before trusting a folder; the SDK never does, so the runner
+asks instead (`src/claude-trust.ts`), with patch trust's store and rules.
+
+- A folder whose settings have none of those (permissions, env, a model,
+  plugins switched on) asks nothing, and nothing changes. Nor does home,
+  whose `.claude/settings.json` is the user's own.
+- Otherwise the hash covers those parts, by file, and the files inside
+  the folder that their commands name (`bun .claude/hooks/start.mjs`,
+  `"$CLAUDE_PROJECT_DIR"/scripts/x.sh`, a server's args), hashed and not
+  followed. A settings file that isn't plain JSON counts whole. It's kept
+  in `patch-trust.json` in the folder's list, as `claude:<hash>`, under
+  the same folder key, so a worktree counts as its main checkout and
+  Threadbear's own checkout is always trusted.
+- While that version isn't trusted, a Claude thread's `patches` has
+  `{ id: "claude-settings", source: "claude", file, untrusted, hash,
+  helpers? }`: `file` is the first file with something that runs,
+  `helpers` the other files and the scripts. Codex threads don't get it.
+- A Claude session starts without the folder's project and local
+  settings (`settingSources: ["user"]`), and gets them back without the
+  parts that run, merged as Claude merges them, as flag settings (the SDK's
+  `settings`), so permission rules, `env` and the rest still apply. The
+  folder is named as an extra directory with
+  `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`, which brings its
+  CLAUDE.md back without its settings. What doesn't come: the folder's
+  `.claude/skills`, `agents` and `commands`, CLAUDE.md files above the
+  folder, and `.mcp.json` servers. The thread gets a `system.note` saying
+  so, once per version.
+- `patches.trust` with that `file` and `hash` trusts it. A session that
+  started without them is replaced by a fresh one (resuming the same
+  conversation) at the next message, as is one that started with them
+  when a new version arrives that isn't trusted. A CLI's own turns
+  between messages keep what it started with.
+- An agent's Edit or Write to one of the settings files trusts them as it
+  leaves them; to a script they name, only when an earlier version was
+  trusted, as with a patch's helpers.
 
 **Built in**, from the folder alone:
 

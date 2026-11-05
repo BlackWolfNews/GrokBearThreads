@@ -94,7 +94,7 @@ runner, app and phone; it's usually better to hide its entry point.
 | Projects | `runner/src/projects.ts`, `project-icons.ts`; app `Projects.swift`, `Views/Projects*.swift`, `ProjectPage.swift`; the project tools in `threadbear-mcp.ts` |
 | Schedules | `runner/src/schedules.ts`, `cron.ts`; app `Schedules.swift`, `Views/Schedule*.swift`, `ScheduledHome.swift`, `ScheduledList.swift` |
 | Pools and Usage | `runner/src/pools.ts`, `usage*.ts`, `token-tally.ts`, `accounts.ts`; app `PoolsModel.swift`, `Usage.swift`, `Views/UsagePanel.swift` |
-| Patches (project buttons and panels) | `runner/src/patches.ts`, `patch-trust.ts`, `panel-requests.ts`; app `Views/PanelsView.swift`, `ThreadPanels.swift`, `ActionChips.swift` |
+| Patches (project buttons and panels), and trusting a folder's Claude Code hooks | `runner/src/patches.ts`, `patch-trust.ts`, `claude-trust.ts`, `panel-requests.ts`; app `Views/PanelsView.swift`, `ThreadPanels.swift`, `ActionChips.swift` |
 | Design reviews (`show_options`) | `runner/src/reviews.ts`; app `ReviewSession.swift`, `Views/ReviewWindow.swift` |
 | Secrets (`ask_secret` and its card) | `runner/src/secrets.ts`, `runner/src/runner/approvals.ts` (`requestSecret`, `answerSecret`), the tool in `threadbear-mcp.ts`; app `Transcript/Cells.swift` (the card); phone `Threadbear/SecretCard.swift`, `ThreadbearKit/Secrets.swift`; `convex/phone.ts` (`secret`). Leave the tool out of `buildThreadbearTools` to switch it off. |
 | Highlights and `pin` | `runner/src/highlights.ts`; app `Views/HighlightsView.swift`, `HighlightsBoard.swift` |

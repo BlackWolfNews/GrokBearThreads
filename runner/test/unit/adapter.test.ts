@@ -105,6 +105,20 @@ function start(allowRules: string[] = [], extra: Record<string, unknown> = {}, d
   return { session, state, outputs, approvals, adapter };
 }
 
+test("a folder's own settings load normally; with untrusted Claude settings, only Mike's, plus the rest as flag settings and the folder's CLAUDE.md", async () => {
+  const plain = start();
+  assert.deepEqual(plain.state.options.settingSources, ['user', 'project', 'local']);
+  assert.equal(plain.state.options.settings, undefined);
+  assert.equal(plain.state.options.env.CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD, undefined);
+  plain.state.close!();
+  const held = start([], { untrustedProjectSettings: { permissions: { allow: ['Read'] } } });
+  assert.deepEqual(held.state.options.settingSources, ['user']);
+  assert.deepEqual(held.state.options.settings, { permissions: { allow: ['Read'] } });
+  assert.deepEqual(held.state.options.additionalDirectories, [held.state.options.cwd]);
+  assert.equal(held.state.options.env.CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD, '1');
+  held.state.close!();
+});
+
 test('effort: sent at start, changed through flag settings, and read back from the Stop hook', async () => {
   const { session, state, outputs } = start([], { effort: 'low' });
   assert.equal(state.options.effort, 'low');

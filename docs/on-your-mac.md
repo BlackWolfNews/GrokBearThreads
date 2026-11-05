@@ -93,7 +93,11 @@ File references are where to look.
   it can tell you when a dialog has been left waiting. It sees how many, not
   what they say. `THREADBEAR_MAC_SCREEN=off` stops it.
 - **Patches** (`.threadbear/patches/`): code from a folder runs only after
-  you trust that folder (`runner/src/patch-trust.ts`).
+  you trust that folder (`runner/src/patch-trust.ts`). A folder's Claude
+  Code hooks and other commands in its `.claude/settings*.json` and
+  `.mcp.json` are held back the same way (`runner/src/claude-trust.ts`):
+  the runner reads those files and the scripts they name to hash them,
+  and keeps what you trusted in the same `patch-trust.json`.
 - **Menus on macOS 27.2** (`app/Sources/Threadbear/DragSpace.swift`): every
   5 seconds, and before a button opens a menu, the app asks the window
   server which Spaces its own windows are on, and takes them off the drag

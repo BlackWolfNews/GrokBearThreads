@@ -10,7 +10,9 @@ import { ErrorCode, RpcError } from '../protocol.ts';
 import { Projects } from '../projects.ts';
 import { threadEnv } from '../restart.ts';
 import { paths } from '../config.ts';
-import { isPatchFile } from '../patch-trust.ts';
+import { isPatchFile, type ClaudeVerdict } from '../patch-trust.ts';
+import { CLAUDE_PATCH_ID } from '../claude-trust.ts';
+import type { PatchInfo } from '../protocol.ts';
 import { EMPTY_PATCH_SET, hookApplies, loadPatchSet, applyLive, hasLive, projectPanels, renderListPanel, renderPanel, runCommand, type CommandOutcome, type PanelRender, type PatchSet, type ProjectFolder, projectPatchFiles } from '../patches.ts';
 import os from 'node:os';
 import path from 'node:path';
@@ -78,6 +80,9 @@ export const patchesPart = {
     let set: PatchSet;
     try {
       base = await this.loadSharedPatchSet(cwd, this.projects?.foldersFor(rec) ?? [], this.projects?.allFolders() ?? []);
+      // Claude threads only: a Codex thread doesn't read them.
+      const claude = rec.provider === 'claude' ? this.claudePatchInfo(cwd) : undefined;
+      if (claude) base = { ...base, patches: [...base.patches, claude] };
       set = await applyLive(base, { cwd, threadId: rec.id, run: (command, dir) => this.runLiveCommand(rec.id, command, dir) });
     } catch (e) {
       this.log.warn('could not read the folder for patches', { threadId: rec.id, cwd, error: String(e) });
@@ -130,6 +135,7 @@ export const patchesPart = {
   // changed them: the next patch reads go to the disk.
   forgetFolders(this: Runner): void {
     this.folderCache.clear();
+    this.claudeChecks.clear();
     this.sharedPatchSets.clear();
     // A turn may have changed what they read (comments resolved, a handback).
     this.liveRuns.clear();
@@ -185,7 +191,9 @@ export const patchesPart = {
   notePatchChanges(this: Runner, st: ThreadState, before: PatchSet, after: PatchSet): void {
     const was = new Map(before.patches.map((p) => [p.id + '@' + p.source, p]));
     for (const p of after.patches) {
-      if (p.source === 'builtin') continue;
+      // Claude's settings are said when a session starts without them
+      // (noteClaudeSkipped), which is when it matters.
+      if (p.source === 'builtin' || p.source === 'claude') continue;
       const old = was.get(p.id + '@' + p.source);
       if (p.error) {
         if (old?.error !== p.error) this.emit(st, { type: 'system.note', text: `Patch ${p.id} couldn't load: ${p.error}` });
@@ -222,7 +230,9 @@ export const patchesPart = {
       if (!p) throw new RpcError(ErrorCode.badParams, `${file} isn't one of this thread's patches waiting to be trusted`);
       if (p.hash !== hash) throw new RpcError(ErrorCode.badParams, `${path.basename(file)} has changed since it was shown; look again`);
     }
-    const trusted = files.filter(({ file, hash }) => this.patchTrust.trust(file, hash)).map((f) => f.file);
+    const trusted = files
+      .filter(({ file, hash }) => (waiting.find((w) => w.file === file)?.source === 'claude' ? this.patchTrust.trustClaude(st.rec.cwd, hash) : this.patchTrust.trust(file, hash)))
+      .map((f) => f.file);
     this.log.info('patches trusted', { threadId, files: trusted });
     this.rereadAllPatches();
     await this.patchesIdle();
@@ -232,10 +242,40 @@ export const patchesPart = {
   // Trusts patch files an agent wrote, as they are now (patch-trust.ts).
   // `reread` false when the caller reads them again itself.
   // A helper the agent edited carries on the trusted patches importing it.
-  trustAgentPatches(this: Runner, files: string[], reread = true): void {
+  // With `cwd` (the thread's folder), its Claude Code settings and the
+  // scripts they name count too (claude-trust.ts).
+  trustAgentPatches(this: Runner, files: string[], reread = true, cwd?: string): void {
     const done = this.patchTrust.trustCurrent(files.filter(isPatchFile));
     for (const file of files) if (!isPatchFile(file)) done.push(...this.patchTrust.trustDependents(file));
+    if (cwd) for (const file of files) if (!isPatchFile(file) && this.patchTrust.trustClaudeEdit(cwd, file)) done.push(file);
     if (done.length && reread) this.rereadAllPatches();
+  },
+
+  // The thread folder's Claude Code settings, as an entry in its patch
+  // list while they run commands that aren't trusted, so Patches shows
+  // them with a Trust button as it does a waiting patch file.
+  claudePatchInfo(this: Runner, cwd: string): PatchInfo | undefined {
+    const now = this.clock.now();
+    let hit = this.claudeChecks.get(cwd);
+    if (!hit || now - hit.at >= FOLDER_CACHE_MS) {
+      hit = { at: now, verdict: this.patchTrust.checkClaude(cwd) };
+      this.claudeChecks.set(cwd, hit);
+    }
+    const v = hit.verdict;
+    if (v.trusted) return undefined;
+    const helpers = [...v.files.slice(1), ...v.named];
+    return { id: CLAUDE_PATCH_ID, source: 'claude', file: v.files[0], untrusted: v.reason, hash: v.hash, ...(helpers.length ? { helpers } : {}) };
+  },
+
+  // Says in the thread, once per version, that the CLI started without the
+  // folder's Claude Code settings and how to have them.
+  noteClaudeSkipped(this: Runner, st: ThreadState, v: Extract<ClaudeVerdict, { trusted: false }>): void {
+    const { rt } = st;
+    if (rt.claudeNoted === v.hash) return;
+    rt.claudeNoted = v.hash;
+    const what = v.files.map((f) => path.relative(st.rec.cwd, f)).join(' and ');
+    const why = v.reason === 'changed' ? 'they changed since you trusted them' : "you haven't trusted them yet";
+    this.emit(st, { type: 'system.note', text: `Skipped this folder's Claude Code hooks and commands (${what}): ${why}. Its other settings and CLAUDE.md still apply. Trust them in Patches to run them from your next message.` }, rt.turn?.turnId);
   },
 
   // Every thread whose patches have been read reads them again now: a

@@ -46,12 +46,24 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseSync } from 'oxc-parser';
 import { atomicWriteFileSync } from './fsutil.ts';
+import { claudeCommands, isClaudeSettingsFile } from './claude-trust.ts';
 
 export type TrustVerdict =
   | { trusted: true }
   | { trusted: false; reason: 'new' | 'changed'; hash: string; helpers?: string[] }
   // Nothing can trust it as it stands (see the top): `problem` says why.
   | { trusted: false; reason: 'unchecked'; problem: string };
+
+// A folder's Claude Code settings that run commands (claude-trust.ts):
+// trusted, or nothing in them runs anything, or waiting with what would.
+export type ClaudeVerdict =
+  | { trusted: true }
+  | { trusted: false; reason: 'new' | 'changed'; hash: string; files: string[]; named: string[] };
+
+// Claude settings hashes go in the same per-folder list as patch files',
+// with this in front, so a runner from before them keeps them when it
+// saves (they're strings it never matches) and they can be told apart.
+export const CLAUDE_PREFIX = 'claude:';
 
 // Hashes kept per folder: enough for a repo's patches across a few
 // branches and versions, without the file growing for ever.
@@ -82,6 +94,14 @@ export interface PatchTrustStore extends PatchGate {
   // Trusts, as they are now, the patch files that import `file` (an agent
   // edited a helper). Only patches already looked at are known.
   trustDependents(file: string): string[];
+  // The thread folder's Claude Code settings (claude-trust.ts).
+  checkClaude(cwd: string): ClaudeVerdict;
+  trustClaude(cwd: string, hash: string): boolean;
+  // An agent's Edit or Write to `file` in a thread in `cwd`: a settings
+  // file is trusted as it leaves it; a script they name carries on a
+  // version trusted before, but doesn't trust one still waiting. True when
+  // anything was trusted.
+  trustClaudeEdit(cwd: string, file: string): boolean;
   save(): void;
 }
 
@@ -93,6 +113,9 @@ export const TRUST_ALL: PatchTrustStore = {
   trust: () => true,
   trustCurrent: (files) => files,
   trustDependents: () => [],
+  checkClaude: () => ({ trusted: true }),
+  trustClaude: () => true,
+  trustClaudeEdit: () => false,
   save: () => {},
 };
 
@@ -100,6 +123,8 @@ export class PatchTrust implements PatchTrustStore {
   private file?: string;
   private folders = new Map<string, string[]>();
   private always: string[];
+  // Bounds the .mcp.json search (claude-trust.ts); tests set it.
+  private claudeHome?: string;
   // `trusted`: some version of this patch was trusted while this runner
   // has run, so an agent's edit to one of its helpers may carry it on.
   private hashes = new Map<string, HashEntry>();
@@ -109,8 +134,9 @@ export class PatchTrust implements PatchTrustStore {
 
   // `file` undefined keeps it in memory (tests). `always` are folders whose
   // patches are trusted whatever they hold.
-  constructor(opts: { file?: string; always?: string[] } = {}) {
+  constructor(opts: { file?: string; always?: string[]; claudeHome?: string } = {}) {
     this.file = opts.file;
+    this.claudeHome = opts.claudeHome;
     this.always = (opts.always ?? []).map((d) => realpath(path.resolve(d)));
     this.existed = this.load() !== 'missing';
   }
@@ -156,7 +182,34 @@ export class PatchTrust implements PatchTrustStore {
       return { trusted: true };
     }
     const helpers = deps.map((d) => d.path);
-    return { trusted: false, reason: known?.length ? 'changed' : 'new', hash, ...(helpers.length ? { helpers } : {}) };
+    const before = known?.some((h) => !h.startsWith(CLAUDE_PREFIX));
+    return { trusted: false, reason: before ? 'changed' : 'new', hash, ...(helpers.length ? { helpers } : {}) };
+  }
+
+  checkClaude(cwd: string): ClaudeVerdict {
+    this.load();
+    const key = folderKeyOfDir(cwd);
+    if (this.always.some((d) => isInside(key, d))) return { trusted: true };
+    const found = claudeCommands(cwd, this.claudeHome);
+    if (!found) return { trusted: true };
+    const known = (this.folders.get(key) ?? []).filter((h) => h.startsWith(CLAUDE_PREFIX));
+    if (known.includes(CLAUDE_PREFIX + found.hash)) return { trusted: true };
+    return { trusted: false, reason: known.length ? 'changed' : 'new', hash: found.hash, files: found.files, named: found.named };
+  }
+
+  trustClaude(cwd: string, hash: string): boolean {
+    if (!/^[0-9a-f]{64}$/.test(hash)) return false;
+    this.add(folderKeyOfDir(cwd), [CLAUDE_PREFIX + hash]);
+    return true;
+  }
+
+  trustClaudeEdit(cwd: string, file: string): boolean {
+    const verdict = this.checkClaude(cwd);
+    if (verdict.trusted) return false;
+    const target = path.resolve(cwd, file);
+    const settings = isClaudeSettingsFile(target, cwd, this.claudeHome);
+    if (!settings && (verdict.reason !== 'changed' || !verdict.named.includes(target))) return false;
+    return this.trustClaude(cwd, verdict.hash);
   }
 
   // Trusts one version of a patch file, by the hash the app showed. False
@@ -530,9 +583,15 @@ function isInside(dir: string, parent: string): boolean {
 // The folder a patch file's trust is kept under: the one holding its
 // `.threadbear/`, or, in a git worktree, the same place in the main checkout.
 export function folderKey(file: string): string {
+  return folderKeyOfDir(path.dirname(path.dirname(path.dirname(path.resolve(file)))));
+}
+
+// The same for a folder itself: where its Claude Code settings' trust is
+// kept (claude-trust.ts).
+export function folderKeyOfDir(dir: string): string {
   // Real paths: git writes them into a worktree's .git file, and /tmp or
   // a symlinked ~/dev would otherwise be two folders.
-  const folder = realpath(path.dirname(path.dirname(path.dirname(path.resolve(file)))));
+  const folder = realpath(path.resolve(dir));
   const top = worktreeTop(folder);
   if (!top) return folder;
   const main = mainCheckoutOf(top);
