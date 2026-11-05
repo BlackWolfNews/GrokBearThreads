@@ -306,8 +306,10 @@ test('changing only the setup script needs trusting again before a thread runs i
   assert.equal(h.events(thread.id).some((e) => e.type === 'action.run'), false);
   assert.equal(fs.existsSync(path.join(cd.main, '.evil-ran')), false);
   await h.runner.patchesIdle();
+  // The command is followed for the hash too now, so the changed script is
+  // asked about; as it stands it'd be refused anyway (patch-trust tests).
   const info = h.runner.get(thread.id).patches?.find((p) => p.id === 'checks');
-  assert.match(info?.error ?? '', /^Not run: its worktree setup `cd scripts && \.\/setup\.sh` runs by itself/);
+  assert.equal(info?.untrusted, 'changed');
 
   // Named as one script: trusted, then a commit changes only the script.
   const one = makeRepo(PATCH(`{ setup: "./scripts/setup.sh" }`));

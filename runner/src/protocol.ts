@@ -407,7 +407,7 @@ export type Action = {
   prompt?: string; // kind "prompt"
   url?: string; // kind "url": an http or https page
   patch: string;
-  folder?: string; // where the command runs; absent: the thread's folder
+  folder?: string; // where the command runs (a project patch's: the folder holding its .threadbear/); absent: the thread's folder
   projectId?: string; // the project whose folder gave it
   note?: string;
   icon?: string; // an SF Symbol for the chip: the action's own, else its patch's

@@ -444,8 +444,9 @@ test('a script the patch names (its setup, an action) is hashed too, so a pull t
   const trust = new PatchTrust();
   let set = await loadPatchSet(folder, root, new Map(), [], [], undefined, trust);
   // Relative to the folder holding .threadbear/ (where commands run) or to
-  // the patch file. A picture is only shown, never run, so it isn't asked about.
-  assert.deepEqual(set.patches[0].helpers?.map((h) => path.relative(fs.realpathSync(folder), h)).sort(), ['.threadbear/deploy/go.sh', 'scripts/setup.sh']);
+  // the patch file, and what a command reaches after a cd (runner/check.sh).
+  // A picture is only shown, never run, so it isn't asked about.
+  assert.deepEqual(set.patches[0].helpers?.map((h) => path.relative(fs.realpathSync(folder), h)).sort(), ['.threadbear/deploy/go.sh', 'runner/check.sh', 'scripts/setup.sh']);
   trust.trust(file, set.patches[0].hash!);
   set = await loadPatchSet(folder, root, new Map(), [], [], undefined, trust);
   assert.deepEqual(set.actions.map((a) => a.title), ['Deploy']);

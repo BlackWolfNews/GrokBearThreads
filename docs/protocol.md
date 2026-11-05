@@ -2419,13 +2419,28 @@ Programs on PATH and packages aren't followed, as installed: what one
 loads from the repo by its own rules (a test runner's tests, a linter's
 config, `npx bddgen`'s config) is the folder's to change, as
 `node_modules` is for patch files. So a script should run only tools
-it's fine to run on the repo as it is then. An action's `run` isn't held
-to the one-script rule: it runs only when someone presses its chip,
-which shows the command, and the scripts it names are hashed and
-followed as above. Nor is `check`, which runs
-when `tb land` does (the Land chip, or an agent that could run anything
-anyway). A live function (`items`, `when`, `badge`, `summary`) is the
-patch's own code, hashed with it, and `sh` runs what that code says.
+it's fine to run on the repo as it is then.
+
+**Commands a patch writes.** An action's `run` isn't held to the
+one-script rule: it runs only when someone presses its chip, which shows
+the command. But what it runs is hashed however it names it, not only
+past a `./` path: every string in the patch and its helpers (an
+action's `run`, `sh("node scripts/stats.mjs")` in a live function, the
+fixed parts of a template) is followed as a shell command from the
+folder holding `.threadbear/`, as above, and every file of the repo's it
+reaches goes in the hash, so `node scripts/deploy.mjs` asks again when
+only `scripts/deploy.mjs` or one of its imports changes (Daybreak
+verify-fix, 5 Nov). A command that can't be followed (`eval`, say)
+still loads; what it names is hashed. A trusted-by-hash patch's command
+actions run from the folder holding `.threadbear/` (the action's
+`folder`), where they were followed from, and one whose command is
+worked out in code (`'node ' + f`) and reaches a file the hash didn't
+cover refuses the whole patch: its `error` starts `Not run: its action`,
+names the file and says to write the command as plain text. Nor is
+`check` held to the one-script rule, which runs when `tb land` does (the
+Land chip, or an agent that could run anything anyway); it's followed
+the same way. A live function (`items`, `when`, `badge`, `summary`) is
+the patch's own code, hashed with it, and `sh` runs what that code says.
 
 ### Trusting a folder's Claude Code hooks
 

@@ -1386,3 +1386,16 @@ export function reachOf(file: string, opts: FollowOptions): ScriptReach {
   }
   return { files: [...r.files], missing: [...r.missing], ...(r.problem ? { problem: r.problem } : {}) };
 }
+
+// The same for a command a patch writes (an action's `run`, a live
+// function's `sh(...)`), run by a shell in `opts.folder`. `label` names it
+// in a problem. A string that isn't a command only names files to hash.
+export function reachOfCommand(command: string, label: string, opts: FollowOptions): ScriptReach {
+  const r = new Reach(opts);
+  try {
+    r.shell(command, { label, file: opts.folder, argv0: [], dirs: new Set([opts.folder]), vars: new Map(), depth: 0 });
+  } catch (e) {
+    r.problem ??= `couldn't be followed (${(e as Error).message}).`;
+  }
+  return { files: [...r.files], missing: [...r.missing], ...(r.problem ? { problem: r.problem } : {}) };
+}

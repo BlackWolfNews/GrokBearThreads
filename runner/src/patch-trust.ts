@@ -50,7 +50,7 @@ import { fileURLToPath } from 'node:url';
 import { parseSync } from 'oxc-parser';
 import { atomicWriteFileSync } from './fsutil.ts';
 import { claudeCommands, isClaudeSettingsFile } from './claude-trust.ts';
-import { reachOf } from './script-trust.ts';
+import { reachOf, reachOfCommand } from './script-trust.ts';
 
 export type TrustVerdict =
   // `files`: the local files its hash covered, real paths. Absent when the
@@ -325,10 +325,14 @@ export function patchHash(file: string): PatchHash {
     return true;
   };
   const named = new Set<string>();
+  // Every string in the patch and its helpers: any could be a command it
+  // runs (an action's `run`, `sh("node scripts/x.mjs")` in a live function).
+  const commands = new Set<string>();
   const queue: { from: string; text: string }[] = [{ from: root, text: text.toString('utf8') }];
   scan: while (queue.length) {
     const { from, text: src } = queue.shift()!;
-    const { specifiers, problem } = scanModule(src, from);
+    const { specifiers, strings, problem } = scanModule(src, from);
+    for (const s of strings) if (commands.size < 2000 && /\S/.test(s) && s.length < 2000) commands.add(s);
     if (problem && !incomplete) {
       const name = from === root ? path.basename(root) : path.relative(path.dirname(root), from);
       incomplete =
@@ -387,6 +391,23 @@ export function patchHash(file: string): PatchHash {
     }
     for (const m of reach.missing) unnamed.add(m);
     if (reach.problem) (blocked ??= {})[script] = reach.problem;
+  }
+  // Each string followed as a command from the folder, for the files it
+  // names in any form (`node scripts/deploy.mjs` left deploy.mjs out when
+  // only `./` paths counted: Daybreak verify-fix, 5 Nov). An action runs
+  // only when pressed, so what can't be followed doesn't stop it; a
+  // command worked out in code is checked as it loads (actionFiles).
+  const opts = { folder: realpath(folder), top, scanJs: scriptScan, resolveImport: resolveHelper, namedPaths };
+  if (isInside(realpath(folder), top)) {
+    for (const command of commands) {
+      const reach = reachOfCommand(command, 'the command', opts);
+      for (const f of reach.files) {
+        if (seen.has(f) || PICTURES.includes(path.extname(f).toLowerCase())) continue;
+        seen.add(f);
+        deps.push({ path: f, mtimeMs: mtimeOf(f) });
+      }
+      for (const m of reach.missing) if (unnamed.size < 2000) unnamed.add(m);
+    }
   }
   const missing = [...unnamed];
   const extra = { ...(incomplete ? { incomplete } : {}), ...(blocked ? { blocked } : {}) };
@@ -482,6 +503,8 @@ export function scanModule(src: string, file: string): ModuleScan {
     if (TYPE_ONLY.has(node.type)) continue;
     const text = plainString(node);
     if (text !== undefined && strings.size < 5000) strings.add(text);
+    // The fixed parts of `node ${x}`, which may name files too.
+    if (node.type === 'TemplateElement' && typeof node.value?.cooked === 'string' && strings.size < 5000) strings.add(node.value.cooked);
     switch (node.type) {
       case 'ImportDeclaration':
       case 'ExportNamedDeclaration':
@@ -626,6 +649,16 @@ export function automaticCommand(command: string, folder: string, files: string[
   // started: a hook in a thread in a subfolder ran from there, so the
   // script's own relative paths named files nothing had hashed.
   return { run: `cd ${quote(realpath(folder))} && ${[real, ...args].map(quote).join(' ')}` };
+}
+
+// The files of the repo's a command an action runs reaches that the
+// patch's hash didn't cover (`files`), for one worked out in code: the hash
+// only saw its pieces. Empty when all are covered.
+export function unhashedFiles(command: string, folder: string, files: string[]): string[] {
+  const real = realpath(folder);
+  const top = repoTop(real);
+  const reach = reachOfCommand(command, 'the action', { folder: real, top, scanJs: scriptScan, resolveImport: resolveHelper, namedPaths });
+  return reach.files.filter((f) => !files.includes(f) && !PICTURES.includes(path.extname(f).toLowerCase())).map((f) => path.relative(real, f));
 }
 
 // The top of the git checkout (or worktree) `dir` is in, else `dir`.

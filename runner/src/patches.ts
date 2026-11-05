@@ -56,7 +56,7 @@ import type { Action, Hook, ImageRef, Panel, PanelItem, PatchInfo } from './prot
 import { LIMITS } from './protocol.ts';
 import { imageRefFor } from './media.ts';
 import { FolderCache } from './folder-cache.ts';
-import { automaticCommand, TRUST_ALL, worktreeOf, type PatchGate } from './patch-trust.ts';
+import { automaticCommand, TRUST_ALL, unhashedFiles, worktreeOf, type PatchGate } from './patch-trust.ts';
 
 export const CONVEX_DASHBOARD = 'https://dashboard.convex.dev';
 // `npx convex dev` on an anonymous (no account) deployment serves the
@@ -263,7 +263,7 @@ function inFolder(loaded: LoadedPatch, root: ProjectFolder | undefined, infoFold
   return {
     info: { ...loaded.info, folder: infoFolder ?? root.folder, ...tag },
     panels: loaded.panels.map((p) => ({ ...p, ...tag })),
-    actions: loaded.actions.map((a) => ({ ...a, folder: root.folder, ...tag })),
+    actions: loaded.actions.map((a) => ({ ...a, folder: a.folder ?? root.folder, ...tag })),
     hooks: loaded.hooks.map((h) => ({ ...h, folder: root.folder, ...tag })),
   };
 }
@@ -416,13 +416,26 @@ function bindAutomatic(loaded: LoadedPatch, file: string, files: string[], block
     if ('problem' in bound) return refuse(`hook "${hook.title}"`, bound.problem);
     hooks.push({ ...hook, exec: bound.run });
   }
+  // Actions run from the folder holding .threadbear/, where their commands
+  // were followed for the hash from, and one worked out in code mustn't
+  // reach a file the hash didn't cover.
+  const actions: Action[] = [];
+  for (const action of loaded.actions) {
+    if (action.kind === 'command' && action.command) {
+      const missed = unhashedFiles(action.command, folder, [file, ...files]);
+      if (missed.length) {
+        return refuse(`action "${action.title}"`, `runs ${missed[0]}, which patch trust didn't hash: write the command in the patch as plain text, so trusting the patch covers what it runs.`);
+      }
+      actions.push({ ...action, folder: action.folder ?? fs.realpathSync(folder) });
+    } else actions.push(action);
+  }
   let worktree = loaded.worktree;
   if (worktree?.setup) {
     const bound = automaticCommand(worktree.setup, folder, files, blocked);
     if ('problem' in bound) return refuse('worktree setup', bound.problem);
     worktree = { ...worktree, setupRun: bound.run };
   }
-  return { ...loaded, hooks, ...(worktree ? { worktree } : {}) };
+  return { ...loaded, actions, hooks, ...(worktree ? { worktree } : {}) };
 }
 
 // Turns a patch module's default export into actions and panels, with ids
