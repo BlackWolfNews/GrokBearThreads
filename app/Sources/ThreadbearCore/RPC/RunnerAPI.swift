@@ -34,6 +34,7 @@ public extension RPCClient {
         if let effort = request.effort { params["effort"] = .string(effort) }
         if let mode = request.permissionMode { params["permissionMode"] = .string(mode.rawValue) }
         if let title = request.title { params["title"] = .string(title) }
+        if let runnerId = request.runnerId { params["runnerId"] = .string(runnerId) }
         return try await call("threads.create", .object(params), as: ThreadResult.self, timeout: RPCClient.sendTimeout).thread
     }
 
@@ -304,6 +305,9 @@ public struct NewThreadRequest: Sendable, Hashable {
     public var effort: String?
     public var permissionMode: PermissionMode?
     public var title: String?
+    /// Another runner, when this Mac's runner makes it there through
+    /// Convex (docs/protocol.md, "Other runners' threads through the backend").
+    public var runnerId: String?
 
     public init(text: String, images: [ImageRef] = [], cwd: String? = nil, accountId: String? = nil, poolId: String? = nil, model: String? = nil, effort: String? = nil, permissionMode: PermissionMode? = nil, title: String? = nil) {
         self.text = text
@@ -511,6 +515,18 @@ public extension RPCClient {
     /// Other runners' threads for the sidebar (docs/protocol.md, "Other
     /// runners' threads"). A runner from before them answers -32601, which
     /// is none: the sidebar has only this Mac's.
+    /// Another runner's logins for the composer's pickers, from Convex
+    /// through this Mac's runner (`remoteThreads.logins`).
+    func remoteLogins(runnerId: String) async throws -> RunnerLogins {
+        struct Reply: Decodable {
+            var accounts: [Account]
+            var pools: [Pool]?
+            var defaults: RunnerDefaults
+        }
+        let reply = try await call("remoteThreads.logins", .object(["runnerId": .string(runnerId)]), as: Reply.self)
+        return RunnerLogins(accounts: reply.accounts, pools: reply.pools ?? [], defaults: reply.defaults)
+    }
+
     func remoteThreads() async throws -> RemoteThreads {
         do {
             return try await call("remoteThreads.list", .object([:]), as: RemoteThreads.self)

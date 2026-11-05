@@ -185,4 +185,14 @@
 //    the rows written since. Thread rows carry updatedMs. An older phone goes
 //    on using phone:threads, and an older runner's writes go through the same
 //    upsertThreads, which stamps them.
-export const API_VERSION = 43;
+// 44: other runners' threads through the backend (docs/protocol.md, "Other
+//    runners' threads through the backend"): relay.ts, owner only, for the
+//    main Mac's runner to read another runner's thread (remoteTail,
+//    remoteMessages, remoteThread) and ask it to act (queueCommand,
+//    commandState, remoteAccounts). Commands gain kinds `interrupt` and
+//    `call` (allow-listed methods, answered in the command's `result`), and
+//    a pending approval its event's `seq`. A runner older than 44 fails an
+//    interrupt or a call as an unknown command, and its approvals have no
+//    seq, so the main Mac's transcript has no card for them (the
+//    thread still shows it needs you).
+export const API_VERSION = 44;

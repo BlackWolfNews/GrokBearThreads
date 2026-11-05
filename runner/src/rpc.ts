@@ -72,6 +72,15 @@ export type RemoteThreads = {
   search(query: string, limit: number): Promise<ThreadSummary[]>;
 };
 
+// relay.ts's Relay, as the server uses it.
+export type RelayHandler = {
+  owns(threadId: string): boolean;
+  call(threadId: string, method: string, params: Record<string, unknown>): Promise<unknown>;
+  create(runnerId: string, params: Record<string, unknown>): Promise<unknown>;
+  listFolder(runnerId: string, path: string): Promise<unknown>;
+  logins(runnerId: string): Promise<unknown>;
+};
+
 export type RpcServerOptions = {
   host: string;
   port: number;
@@ -90,6 +99,9 @@ export type RpcServerOptions = {
   remote?: RemoteThreads;
   // A draining runner's own server: only the threads it still has.
   onlyOwn?: boolean;
+  // Other runners' threads, through the backend (relay.ts). Without it, or
+  // for a thread it doesn't own, they're unknown here as before.
+  relay?: RelayHandler;
   // hello's `updates` (docs/protocol.md, "Runner updates").
   updates?: () => unknown;
   // The Mac app's hello with its build (docs/protocol.md, "App restarts").
@@ -165,6 +177,17 @@ export class RpcServer {
     let n = 0;
     for (const c of this.conns) if (c.authed && c.ws.readyState === WebSocket.OPEN) n++;
     return n;
+  }
+
+  /** Whether any client is subscribed to a thread (relay.ts watches only then). */
+  isSubscribed(threadId: string): boolean {
+    for (const c of this.conns) if (c.authed && c.subs.has(threadId) && c.ws.readyState === WebSocket.OPEN) return true;
+    return false;
+  }
+
+  /** A notification for clients only, never the runner's own listeners: relay.ts's events are another runner's, which sync must not mirror as this one's. */
+  notifyClients(n: Notification): void {
+    this.broadcast(n);
   }
 
   // Whether the Mac app itself is connected (hello's client), for presence.ts.
@@ -328,6 +351,12 @@ export class RpcServer {
     if (tid !== undefined && THREAD_METHODS.has(method) && !r.has(tid)) {
       if (this.opts.remote?.owns(tid)) return this.forward(conn, method, p, tid);
       if (this.opts.onlyOwn) throw new RpcError(ErrorCode.moved, 'This runner has handed that thread over to the new one.');
+      if (this.opts.relay?.owns(tid)) {
+        return this.opts.relay.call(tid, method, p).then((res) => {
+          if (method === 'threads.subscribe') conn.subs.add(tid);
+          return res;
+        });
+      }
     }
     switch (method) {
       case 'auth':
@@ -361,6 +390,8 @@ export class RpcServer {
         return remote.search(query, limit ?? 50).then((more) => ({ threads: mergeSummaries(local, more).slice(0, limit ?? 50) }));
       }
       case 'threads.create': {
+        // On another runner (docs/protocol.md, "Other runners' threads through the backend").
+        if (typeof p.runnerId === 'string' && this.opts.relay) return this.opts.relay.create(p.runnerId, p);
         if (p.worktree !== undefined && typeof p.worktree !== 'boolean') throw bad('worktree must be a boolean');
         const res = r.create({
           text: optString(p, 'text') ?? '',
@@ -572,6 +603,13 @@ export class RpcServer {
       }
       default: {
         // hasOwn, so "constructor" and friends aren't methods.
+        // A folder on another runner, for the folder browser on one of its threads.
+        if (method === 'files.list' && typeof p.runnerId === 'string' && this.opts.relay) return this.opts.relay.listFolder(p.runnerId, reqString(p, 'path'));
+        if (method === 'files.read' && typeof p.runnerId === 'string') throw new RpcError(ErrorCode.other, 'Files on another runner are kept there for now.');
+        if (method === 'remoteThreads.logins') {
+          if (!this.opts.relay) throw new RpcError(ErrorCode.other, "This Mac's runner can't reach other runners through Convex.");
+          return this.opts.relay.logins(reqString(p, 'runnerId'));
+        }
         const methods = this.opts.methods;
         if (methods && Object.hasOwn(methods, method)) return methods[method](p);
         throw new RpcError(ErrorCode.methodNotFound, `Unknown method ${method}`);

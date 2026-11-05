@@ -3273,6 +3273,88 @@ type RemoteThread = { runnerId: string, threadId: string, title, cwd,
 - **`sync.rpcUrl`** in a runner's `runner.json` is the URL it tells the
   backend (in its heartbeat, API 12) for other Macs to reach it by.
 
+## Other runners' threads through the backend
+
+Full Convex step 5 (5 Nov 2026, backend API 43). The Mac app opens and
+drives another runner's thread without connecting to that runner: it asks
+its own runner, with the normal methods and the thread's id, and this
+runner answers from the backend and sends what the app does to the other
+runner as a `commands` row, as the phone does. The app has no Convex of its
+own and no link to the other Mac; nothing reaches another runner but its
+commands. Only the owner key can do this (`convex/relay.ts`, all owner
+only in Runner keys), so it's the main Mac's runner that answers; a runner
+on a runner key answers `-32000` for another runner's thread. The direct
+link above stays beside it while this is new: the app uses it only with
+**Settings > General > Open other Macs' threads directly** on (off by
+default).
+
+- **Which threads.** A `THREAD_METHODS` request whose `threadId` isn't this
+  runner's (nor a draining runner's) but is in its `remoteThreads` list.
+  `threads.create` with a `runnerId` that's another runner's, and
+  `files.list` with a `runnerId`, go there too.
+- **Reading.** `threads.events` and `threads.subscribe` answer from the
+  thread's `messages` rows (Sync, Messages) and its `threads` row. The rows'
+  seqs are the other runner's, with gaps where events weren't mirrored, and
+  events are made up beside them, so each row's seq `s` becomes four
+  **relay seqs**: `4s` a `turn.started` (the first row of a turn), `4s+1`
+  the row's own event (`user.message`, `assistant.text`, or a `tool.call`
+  with the line as its title and no input), `4s+2` a tool's `tool.result`
+  once anything follows it or its turn has ended, and `4s+3`
+  `turn.completed` at the last row of a turn that has ended (the next row
+  is another turn's, or the thread isn't running), with the row's `needs`,
+  `asks` and `next` on the newest. An open approval, question or secret on
+  the row is placed at `4p+1`, `p` being its event's seq (`pendingApproval.seq`,
+  API 43), and its `approval.resolved` at `4p+2` once the row no longer has
+  it (with the decision if it was answered from this Mac). Every page and
+  event is in relay seqs, and so are `afterSeq` and `beforeSeq`. A page also
+  has `relay: { runnerId, runnerName, atStart? }`; `atStart` says there's
+  nothing older. Events can arrive with gaps and late (a tool's result
+  when the next row comes, an approval's answer after later rows), so the
+  app takes them as they come rather than asking for a catch-up (its
+  ThreadFeed's sparse mode). No deltas: a remote thread shows finished
+  messages and the working line, not live typing.
+- **What's held back.** Tool output, diffs, reasoning, sub-agents and
+  pictures aren't in the backend until full sync (step 4). A tool's result
+  says `The output is kept on <runner>.` and carries `heldBack: { seq }`,
+  the row's own seq, for step 4 to fetch the body by (`sync:remoteBody`,
+  planned). `files.read` with a `runnerId` is `-32000`.
+- **Reads.** A thread is watched only while a client is subscribed to it,
+  through `relay:remoteTail` (its newest 15 rows) and `relay:remoteThread`
+  (its one row); a minute after the last subscriber goes, both stop. Older
+  rows are read once by page (`relay:remoteMessages`, 50 at a time) and kept
+  in this runner for half an hour. A tail that starts past the newest row
+  held (the Mac slept) reads the rows between once, by `afterSeq`, rather
+  than leave a hole.
+- **Acting.** `threads.send` (text and `answers`; pictures are `-32000`),
+  `threads.interrupt`, `approvals.respond`, `secrets.answer` (sealed to the
+  other runner's key from its row, as the phone seals it, so the value
+  never reaches the backend in the clear), `threads.markSeen` (only when
+  the row is unread), `threads.update` (`title`, `archived`, `starred`,
+  `snoozedUntil`; anything else is `-32000`) and `threads.share` each queue
+  one command with `relay:queueCommand`, which sends a thread's command to
+  the runner whose row the thread is, whatever runner it was asked for.
+  The runner watches it with `relay:commandState` (a get by id) until it's
+  taken (sends, interrupts) or done (the rest), at most 20 seconds, and
+  answers with the command's `note` as a `-32000` if it failed. A runner the
+  list says is offline is `-32000` at once. Commands from here carry `from:
+  "mac"`, so the other runner gives the message no `origin`.
+- **New threads there.** `threads.create` with `runnerId` is a `create`
+  command (text, `cwd`, `accountId`, `model`, `effort`; pictures are
+  `-32000`), answered with a summary of the new thread once that runner
+  has made it. `remoteThreads.logins { runnerId }` gives that runner's
+  logins for the pickers, from the backend's `accounts` rows (no pools;
+  `defaults.cwd` is the folder of its newest thread).
+- **Answers from another runner.** `files.list` with `runnerId` and `path`
+  is a `call` command, `{ method: "files.list", params: { path } }`, which
+  that runner answers in the command's `result` (at most 500 entries). Only
+  methods on the allow-list (`convex/relay.ts` `CALLS`, checked again by
+  the runner) can be called, and none that answers with file contents or
+  tool output.
+- **Everything else** about another runner's thread (editing a message,
+  highlights, patches and panels, reviews, explain, hibernate-when, a
+  sub-agent, ticking an ask, changing its login or model) is `-32000`
+  saying to do it on that Mac or turn the direct link on.
+
 ## Sync
 
 The runner mirrors the phone's view of its threads to Threadbear's Convex
@@ -3422,7 +3504,10 @@ the mirror back as state. The Mac app doesn't use it.
   The first message sent to it starts a fresh session with a handoff
   note saying the thread began as a quick ask that a fast model answered
   (see `threads.update` for the note). Like `create`, it finishes with
-  the new thread's id. A failed command
+  the new thread's id. `interrupt` (API 43)
+  stops the thread's turn, and `call` (API 43) runs one allow-listed method
+  and finishes with its answer as `result`; both come only from the main
+  Mac's runner (Other runners' threads through the backend). A failed command
   gets `state: "failed"` and a readable `note`. A draining runner takes
   no commands. Finished commands go after a day.
 - **Failures.** A write that fails is kept and tried again after 5
@@ -3796,6 +3881,12 @@ anyone's); "any runner" is any good key. Anything not sorted is owner only.
 | `audit` | owner only | what the old shared key could have left (`tb runner audit`) |
 | `auditRemove` | owner only | takes out the exact rows `tb runner audit --drop` picks, each only if it's still the version listed |
 | `purgeRunner` | owner only | `tb runner revoke <runnerId> --purge`: everything a runner with no live key wrote, a batch a call |
+| `remoteTail` | owner only | another runner's messages (`convex/relay.ts`, Other runners' threads through the backend) |
+| `remoteMessages` | owner only | the same, a page at a time |
+| `remoteThread` | owner only | another runner's thread row, its open approval and card |
+| `queueCommand` | owner only | work for another runner: a thread's command goes to the runner the backend says has it |
+| `commandState` | owner only | |
+| `remoteAccounts` | owner only | another runner's logins |
 
 `sync:uploadTicketOk` and `sync:redeemUpload` are internal, for
 `/runner/upload`.

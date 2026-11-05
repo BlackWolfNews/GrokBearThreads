@@ -75,10 +75,10 @@ extension AppModel {
                 loadConnectors()
                 loadSettings()
                 // Other runners' threads come back with their own connection.
-                for session in sessions.values where session.state == .loaded && !isRemote(session.threadId) {
+                for session in sessions.values where session.state == .loaded && !viaDirectLink(session.threadId) {
                     await session.subscribe()
                 }
-                for session in sessions.values where session.state != .loaded && !isRemote(session.threadId) {
+                for session in sessions.values where session.state != .loaded && !viaDirectLink(session.threadId) {
                     session.open(width: transcript.width > 0 ? transcript.width : transcript.currentTableWidth)
                 }
                 if let ref = subagentSelection {
@@ -91,7 +91,7 @@ extension AppModel {
                 // new client; only the loop that owns the client clears it.
                 guard self.client === client else { return }
                 self.client = nil
-                for session in sessions.values where !isRemote(session.threadId) { session.connectionLost() }
+                for session in sessions.values where !viaDirectLink(session.threadId) { session.connectionLost() }
                 connection = .lost
                 updateRestart { $0.disconnected(now: Date()) }
                 AppLog.write("connection", "lost the connection to the runner")

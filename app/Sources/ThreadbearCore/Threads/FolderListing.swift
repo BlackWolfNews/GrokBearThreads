@@ -73,8 +73,12 @@ public struct FolderContents: Sendable, Equatable, Decodable {
 public extension RPCClient {
     /// A folder on that runner's Mac (`files.list`), for one of its threads
     /// shown here.
-    func listFolder(path: String) async throws -> FolderContents {
-        try await call("files.list", .object(["path": .string(path)]), as: FolderContents.self)
+    /// With `runnerId`, a folder on that runner, asked through this Mac's
+    /// runner and Convex.
+    func listFolder(path: String, runnerId: String? = nil) async throws -> FolderContents {
+        var params: [String: JSONValue] = ["path": .string(path)]
+        if let runnerId { params["runnerId"] = .string(runnerId) }
+        return try await call("files.list", .object(params), as: FolderContents.self, timeout: RPCClient.sendTimeout)
     }
 }
 

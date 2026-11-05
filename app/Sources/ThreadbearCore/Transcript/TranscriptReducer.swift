@@ -167,7 +167,14 @@ public struct TranscriptModel: Sendable {
         load(events: events)
     }
 
-    public var hasOlderEvents: Bool { firstSeq > 1 }
+    public var hasOlderEvents: Bool { firstSeq > 1 && !knownStart }
+    /// The runner said there's nothing before the first event (a page's
+    /// `relay.atStart`): another runner's thread through Convex, whose first
+    /// seq is rarely 1.
+    public var knownStart = false
+    /// Takes persisted events that arrive behind ones already applied, and
+    /// puts them in order (`ThreadFeed.sparse`).
+    public var sparse = false
 
     /// A row in `rows` (shown in the table).
     public func row(id: String) -> TranscriptRow? {
@@ -258,9 +265,13 @@ public struct TranscriptModel: Sendable {
     public mutating func apply(_ incoming: [Event]) -> TranscriptChange {
         var gap = false
         var rewound = false
+        var late: [Event] = []
         for event in incoming {
             if !event.isTransient {
-                if event.seq <= lastSeq && lastSeq != 0 { continue }
+                if event.seq <= lastSeq && lastSeq != 0 {
+                    if sparse, event.seq >= firstSeq, !events.contains(where: { $0.seq == event.seq }) { late.append(event) }
+                    continue
+                }
                 if lastSeq != 0 && event.seq > lastSeq + 1 { gap = true }
                 events.append(event)
                 if firstSeq == 0 { firstSeq = event.seq }
@@ -270,8 +281,15 @@ public struct TranscriptModel: Sendable {
             }
             reduce(event)
         }
-        // An edit cut rows that are already showing: build them all again
-        // and have the table reload, rather than work out what moved.
+        // An edit cut rows that are already showing, or events came late:
+        // build them all again and have the table reload, rather than work
+        // out what moved.
+        if !late.isEmpty {
+            events = (events + late).sorted { $0.seq < $1.seq }
+            let before = rows.count
+            rebuild()
+            return TranscriptChange(removed: IndexSet(integersIn: 0..<before), inserted: IndexSet(integersIn: 0..<rows.count))
+        }
         if rewound {
             // The runner drops messages queued behind an edited one
             // (docs/protocol.md, "Editing a message").

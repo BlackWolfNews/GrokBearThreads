@@ -1804,15 +1804,20 @@ export const takeCommand = mutation({
   },
 });
 
+// A call's answer is a folder list at most; a day of them stays small.
+const RESULT_MAX_BYTES = 256 * 1024;
+
 export const finishCommand = mutation({
-  args: { key: v.string(), commandId: v.id('commands'), ok: v.boolean(), note: v.optional(v.string()), resultThreadId: v.optional(v.string()) },
+  // result (API 43): a `call`'s answer, kept only for one (relay.ts), at most RESULT_MAX_BYTES.
+  args: { key: v.string(), commandId: v.id('commands'), ok: v.boolean(), note: v.optional(v.string()), resultThreadId: v.optional(v.string()), result: v.optional(v.any()) },
   returns: v.null(),
-  handler: async (ctx, { key, commandId, ok, note, resultThreadId }) => {
+  handler: async (ctx, { key, commandId, ok, note, resultThreadId, result }) => {
     const caller = await runnerAuth(ctx, key, 'finishCommand');
     const c = await ctx.db.get(commandId);
     if (!c) return null;
     if (!mayFinish(caller, c)) throw forbidden("finish that command: it isn't for its runner");
-    await ctx.db.patch(commandId, { state: ok ? 'done' : 'failed', doneAt: Date.now(), ...(note ? { note } : {}), ...(resultThreadId ? { resultThreadId } : {}) });
+    const keep = ok && c.kind === 'call' && result !== undefined && docBytes(result) <= RESULT_MAX_BYTES;
+    await ctx.db.patch(commandId, { state: ok ? 'done' : 'failed', doneAt: Date.now(), ...(note ? { note } : {}), ...(resultThreadId ? { resultThreadId } : {}), ...(keep ? { result } : {}) });
     // A secret's sealed answer (docs/protocol.md, "Secrets") has done its
     // job: only the runner could open it, but it needn't sit here a day.
     if (c.args?.sealed) {

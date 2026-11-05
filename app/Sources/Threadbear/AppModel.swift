@@ -246,6 +246,20 @@ final class AppModel {
         didSet { UserDefaults.standard.set(defaultRunnerId, forKey: Self.defaultRunnerKey) }
     }
     static let defaultRunnerKey = "defaultRunnerId"
+
+    /// Settings > Runners, "Connect to other machines directly": open other
+    /// runners' threads over the tailnet, as before 5 Nov, rather than
+    /// through this Mac's runner and Convex (docs/protocol.md, "Other
+    /// runners' threads through the backend"). Off by default; it goes once
+    /// the Convex way has been used for a while.
+    var directRemoteLink: Bool = UserDefaults.standard.bool(forKey: AppModel.directRemoteLinkKey) {
+        didSet {
+            guard directRemoteLink != oldValue else { return }
+            UserDefaults.standard.set(directRemoteLink, forKey: Self.directRemoteLinkKey)
+            switchedRemoteLink()
+        }
+    }
+    static let directRemoteLinkKey = "directRemoteLink"
     /// Mike picked this draft's runner himself, so the default doesn't
     /// move it when the runner list next changes.
     var newThreadRunnerPicked = false

@@ -564,6 +564,7 @@ export function phoneCommands(runner: Runner, remote?: Pick<Peers, 'owns' | 'cal
     markSeen: (id) => at(id, 'threads.markSeen', { seq: Number.MAX_SAFE_INTEGER }, () => runner.markSeen(id, runner.get(id).lastSeq)),
     create: (p) => runner.create(p),
     share: (id, p) => at(id, 'threads.share', { ...p }, () => runner.share(id, p)),
+    interrupt: (id) => at(id, 'threads.interrupt', {}, () => runner.interrupt(id)),
     quickAsk: (p) => runner.quickAsk(p),
   };
 }

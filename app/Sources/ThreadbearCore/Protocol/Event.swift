@@ -694,6 +694,9 @@ public struct EventsPage: Sendable, Decodable {
     public var firstSeq: Int
     public var lastSeq: Int
     public var inProgress: [InProgress]
+    /// Nothing comes before this page (`relay.atStart`, another runner's
+    /// thread through Convex).
+    public var atStart = false
 
     public init(events: [Event], firstSeq: Int, lastSeq: Int, inProgress: [InProgress] = []) {
         self.events = events
@@ -708,9 +711,11 @@ public struct EventsPage: Sendable, Decodable {
         firstSeq = c.lenientInt(forKey: .firstSeq) ?? (events.first?.seq ?? 0)
         lastSeq = c.lenientInt(forKey: .lastSeq) ?? (events.last?.seq ?? 0)
         inProgress = c.lossyArray(InProgress.self, forKey: .inProgress)
+        struct Relay: Decodable { var atStart: Bool? }
+        atStart = (try? c.decodeIfPresent(Relay.self, forKey: .relay))??.atStart ?? false
     }
 
-    enum CodingKeys: String, CodingKey { case events, firstSeq, lastSeq, inProgress }
+    enum CodingKeys: String, CodingKey { case events, firstSeq, lastSeq, inProgress, relay }
 }
 
 /// Decodes an array, skipping elements that fail to decode instead of failing

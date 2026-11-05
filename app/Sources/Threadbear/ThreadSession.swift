@@ -127,6 +127,7 @@ final class ThreadSession {
                     }
                     if let nextPicks { _ = model.setNextPicks(nextPicks.seq, nextPicks.picked, explain: nextPicks.explain) }
                     model.load(events: page.events, inProgress: page.inProgress)
+                    model.knownStart = page.atStart
                     _ = model.setBackground(background)
                     if debug { print(String(format: "    after model %.0f MB", memoryMB())) }
                     let start = max(0, model.rows.count - Self.initialRows)
@@ -141,6 +142,8 @@ final class ThreadSession {
                     pending = model.pending
                 }
                 feed = ThreadFeed(model: model)
+                // Another runner's thread through Convex: its seqs have gaps.
+                feed.sparse = appModel.viaRelay(threadId)
                 displayStart = prepared.1
                 state = .loaded
                 perfLog.endInterval("open", signpost)
@@ -248,6 +251,19 @@ final class ThreadSession {
 
     func holdForResend(_ id: String) {
         if hasPending(id) { resending.insert(id) }
+    }
+
+    /// Reads the thread again from scratch, when the way it's reached has
+    /// changed (the direct link went on or off).
+    func reload(width: CGFloat) {
+        guard subagentId == nil, loadTask == nil else { return }
+        // The caller has let the old subscription go, over the old way.
+        subscribed = false
+        feed = ThreadFeed()
+        displayStart = 0
+        state = .idle
+        view?.reloadAll()
+        open(width: width)
     }
 
     /// Another runner's thread whose runner can't be reached any more: the
@@ -512,6 +528,7 @@ final class ThreadSession {
                 var copy = feed.model
                 let result = await Task.detached(priority: .userInitiated) { () -> (TranscriptModel, PrependResult) in
                     let result = copy.prepend(olderEvents: page.events)
+                    if page.atStart { copy.knownStart = true }
                     let newStart = max(0, result.added - Self.pageRows)
                     TranscriptController.renders.prepare(Array(copy.rows[newStart..<result.added]), expanded: expanded, width: width)
                     return (copy, result)

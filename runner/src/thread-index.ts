@@ -211,6 +211,11 @@ export class ThreadIndex {
     return this.withTokens(this.remote);
   }
 
+  /** What was last heard, without starting the watch or looking for token files (relay.ts asks on every request). */
+  current(): RemoteThreads {
+    return this.remote;
+  }
+
   private watch(): void {
     if (this.unsubscribe || !this.deps.subscribe || this.refused) return;
     const failed = (e: Error) => this.watchFailed(e);

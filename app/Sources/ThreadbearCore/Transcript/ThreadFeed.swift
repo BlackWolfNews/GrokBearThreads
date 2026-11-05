@@ -30,6 +30,14 @@ public struct ThreadFeed: Sendable {
     /// doesn't have those seqs (or keeps sending ones that can't be read),
     /// and waiting for them would freeze the thread for good.
     public static let maxStalledCatchUps = 3
+    /// Another runner's thread read through Convex (docs/protocol.md, "Other
+    /// runners' threads through the backend"): its seqs have gaps by design
+    /// and an event can come late (an approval's answer after later rows), so
+    /// every persisted event is taken as it comes, never waited on, and the
+    /// model places a late one where it belongs.
+    public var sparse = false {
+        didSet { model.sparse = sparse }
+    }
 
     public init(model: TranscriptModel = TranscriptModel()) {
         self.model = model
@@ -45,6 +53,11 @@ public struct ThreadFeed: Sendable {
         }
         if event.isTransient {
             pending.append(event)
+            return .scheduleFlush
+        }
+        if sparse {
+            pending.append(event)
+            acceptedSeq = max(acceptedSeq, event.seq)
             return .scheduleFlush
         }
         if event.seq <= acceptedSeq { return .none }
@@ -102,6 +115,13 @@ public struct ThreadFeed: Sendable {
     /// gap is still open (the page was limited).
     public mutating func catchUp(_ events: [Event]) -> Action {
         isCatchingUp = false
+        if sparse {
+            for event in events.sorted(by: { $0.seq < $1.seq }) where !event.isTransient {
+                pending.append(event)
+                acceptedSeq = max(acceptedSeq, event.seq)
+            }
+            return pending.isEmpty ? .none : .scheduleFlush
+        }
         let before = acceptedSeq
         for event in events.sorted(by: { $0.seq < $1.seq }) where !event.isTransient && event.seq > acceptedSeq {
             if event.seq == acceptedSeq + 1 {
@@ -192,6 +212,7 @@ public struct ThreadFeed: Sendable {
     /// Replaces the model (after a reload) and forgets queued events that it covers.
     public mutating func reset(_ newModel: TranscriptModel) {
         model = newModel
+        model.sparse = sparse
         acceptedSeq = newModel.lastSeq
         pending.removeAll { !$0.isTransient && $0.seq <= acceptedSeq }
         ahead = ahead.filter { $0.key > acceptedSeq }

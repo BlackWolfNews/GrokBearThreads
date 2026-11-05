@@ -36,6 +36,7 @@ import { UsageStore } from './usage.ts';
 import { UsageHistory } from './usage-history.ts';
 import { TokenTally } from './token-tally.ts';
 import { usageStatsMethods } from './usage-stats.ts';
+import { Relay } from './relay.ts';
 import { RpcServer } from './rpc.ts';
 import { realClock } from './clock.ts';
 import { acquireLock } from './lock.ts';
@@ -467,6 +468,15 @@ async function main(): Promise<void> {
   methods['upstream.check'] = async () => ({ upstream: await upstream.check() });
   const codexWarning = missingCodex(updates.codexBinary(), cfg);
   if (codexWarning) log.warn('codex CLI not found', { path: updates.codexBinary() });
+  // Other runners' threads through the backend, for the Mac app (relay.ts).
+  const relay = new Relay({
+    source: () => sync.relaySource(),
+    remote: () => sync.remoteNow(),
+    subscribed: (threadId) => rpcServer?.isSubscribed(threadId) ?? false,
+    publish: (n) => rpcServer?.notifyClients(n),
+    clock: realClock,
+    log,
+  });
   const server = (rpcServer = new RpcServer({
     host: cfg.host,
     port: cfg.port,
@@ -476,6 +486,7 @@ async function main(): Promise<void> {
     clis: updates,
     methods,
     remote: peers,
+    relay,
     updates: () => (draining ? undefined : runnerUpdates()),
     appHello: (build) => appRestarts.appHello(build),
     helloNotices: () => {

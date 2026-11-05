@@ -35,6 +35,14 @@ struct RunnersSettings: View {
                     RunnerRow(icon: RunnerIcon.symbol(runner.icon), name: runner.name, status: status(runner), isDefault: app.defaultRunnerId == runner.id)
                 }
             }
+
+            SettingsSection("Other machines' threads",
+                            about: "Threads on other machines open through this Mac's runner and Convex, with no network link between the machines. Tool output stays on the machine that ran it for now. Connecting directly reaches the other machine over Tailscale instead, and needs it paired with this Mac.",
+                            ask: "explain how other machines' threads reach this Mac, or pair one for a direct connection.") {
+                @Bindable var app = app
+                Toggle("Connect to other machines directly", isOn: $app.directRemoteLink)
+                    .tip("Open other machines' threads over Tailscale instead of through Convex")
+            }
         }
         .formStyle(.grouped)
         .fixedSize(horizontal: false, vertical: true)
@@ -50,7 +58,7 @@ struct RunnersSettings: View {
     private var selfName: String { app.runners.first(where: \.isSelf)?.name ?? "This Mac" }
 
     private func status(_ runner: RemoteRunner) -> String {
-        if runner.tokenFile == nil { return "Not paired with this Mac" }
+        if app.directRemoteLink, runner.tokenFile == nil { return "Not paired with this Mac" }
         return runner.online ? "Online" : "Offline"
     }
 }

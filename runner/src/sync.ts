@@ -34,6 +34,9 @@ import { ThreadIndex, type RemoteThreads } from './thread-index.ts';
 import { digest, dropSyncCache, loadSyncCache, saveSyncCache, SYNC_CACHE_MAX_AGE_MS } from './sync-cache.ts';
 import { paths, readRunnerJson, writeRunnerJson } from './config.ts';
 import { unplacedPictures } from './pictures.ts';
+import { listFolderFor } from './files.ts';
+// A `call` for files.list answers with at most this many entries (the backend keeps it a day).
+const CALL_ENTRIES = 500;
 
 // At most one write per thread this often while a turn runs: a running
 // thread's preview and working line change many times a second.
@@ -97,7 +100,12 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 43;
+export const BACKEND_API_VERSION = 44;
+// From this one the main Mac reads and steers other runners' threads through
+// the backend (convex/relay.ts): commands can be `interrupt` or `call`, and a
+// pending approval carries its event's seq (docs/protocol.md, "Other
+// runners' threads through the backend").
+export const RELAY_API_VERSION = 44;
 // From this one an owned schedule can carry `poolId`, the pool that picks
 // its threads' login. An older backend's validator would turn it down.
 export const SCHEDULE_POOLS_API_VERSION = 36;
@@ -234,11 +242,12 @@ export type SyncStatus = {
 
 // The approval or question a thread is waiting on, as the phone sees it.
 export type PendingApproval =
-  | { approvalId: string; kind: 'approval'; name: string; title: string; options: ApprovalOption[]; inputSummary?: string }
-  | { approvalId: string; kind: 'question'; questions: Question[] }
+  // seq: the event's (API 43), for the main Mac's transcript of this thread.
+  | { approvalId: string; kind: 'approval'; seq?: number; name: string; title: string; options: ApprovalOption[]; inputSummary?: string }
+  | { approvalId: string; kind: 'question'; seq?: number; questions: Question[] }
   // docs/protocol.md, "Secrets": key is the runner's public key, which the
   // phone seals its answer to.
-  | { approvalId: string; kind: 'secret'; label: string; reason: string; placeholder?: string; key: string };
+  | { approvalId: string; kind: 'secret'; seq?: number; label: string; reason: string; placeholder?: string; key: string };
 
 // The phone's view of a thread: convex/schema.ts's threadFields plus view.
 export type ThreadDoc = {
@@ -356,13 +365,16 @@ type Host = {
 // A thread's commands may go on to a draining runner (handover.ts's
 // phoneCommands), so they can answer later; apply() waits for each.
 export type CommandHost = {
-  send(threadId: string, text: string, images: ImageRef[], opts: { origin: 'phone'; answers?: AskAnswer[] }): unknown;
+  // origin: absent for a message Mike sent from the main Mac (a command `from: "mac"`).
+  send(threadId: string, text: string, images: ImageRef[], opts: { origin?: 'phone'; answers?: AskAnswer[] }): unknown;
   respondApproval(p: { threadId: string; approvalId: string; decision: ApprovalDecision; message?: string; answers?: Record<string, string> }): unknown;
   answerSecret(p: { threadId: string; approvalId: string; secret?: string; decline?: boolean }): unknown;
   update(p: { threadId: string; title?: string; snoozedUntil?: string | null; archived?: boolean; verdict?: ArchiveVerdict; starred?: boolean }): unknown;
   // Seen up to the last event it has.
   markSeen(threadId: string): unknown;
-  create(p: { text: string; images?: ImageRef[]; cwd?: string; accountId?: string; model?: string; effort?: EffortLevel; origin: 'phone' }): { thread: ThreadSummary };
+  create(p: { text: string; images?: ImageRef[]; cwd?: string; accountId?: string; model?: string; effort?: EffortLevel; origin?: 'phone' }): { thread: ThreadSummary };
+  // Stops the thread's turn (a command from the main Mac, API 43).
+  interrupt?(threadId: string): unknown;
   share(threadId: string, p: { access: 'off' | 'link'; newLink?: boolean }): unknown;
   quickAsk(p: { question: string; answer: string; sources?: { title: string; url: string }[]; askedAt?: number }): { thread: ThreadSummary };
 };
@@ -666,7 +678,7 @@ function phoneAnswers(raw: unknown): AskAnswer[] | undefined {
 export function forBackend(d: ThreadDoc, v: number, now: number): ThreadDoc {
   const asks = d.asks !== undefined || d.asksSeq !== undefined || d.next !== undefined;
   const sections = d.needs !== undefined || d.pendingReviews !== undefined || d.waitingForRoom !== undefined;
-  if ((v >= SHARE_API_VERSION || !d.share) && (v >= WOKE_API_VERSION || !d.woke) && (v >= ASKS_API_VERSION || !asks) && (v >= SECTIONS_API_VERSION || !sections) && (v >= STARTED_BY_API_VERSION || !d.startedBy) && (v >= STARS_API_VERSION || !d.starredAt) && (v >= LINKS_API_VERSION || !d.links) && (v >= ASKED_API_VERSION || !d.asked) && (v >= NETWORK_WAIT_API_VERSION || !d.waitingForNetwork) && (v >= SECRETS_API_VERSION || d.pendingApproval?.kind !== 'secret')) return d;
+  if ((v >= SHARE_API_VERSION || !d.share) && (v >= WOKE_API_VERSION || !d.woke) && (v >= ASKS_API_VERSION || !asks) && (v >= SECTIONS_API_VERSION || !sections) && (v >= STARTED_BY_API_VERSION || !d.startedBy) && (v >= STARS_API_VERSION || !d.starredAt) && (v >= LINKS_API_VERSION || !d.links) && (v >= ASKED_API_VERSION || !d.asked) && (v >= NETWORK_WAIT_API_VERSION || !d.waitingForNetwork) && (v >= SECRETS_API_VERSION || d.pendingApproval?.kind !== 'secret') && (v >= RELAY_API_VERSION || d.pendingApproval?.seq === undefined)) return d;
   const out = { ...d };
   if (v < SECTIONS_API_VERSION) {
     delete out.needs;
@@ -676,6 +688,10 @@ export function forBackend(d: ThreadDoc, v: number, now: number): ThreadDoc {
   if (v < SHARE_API_VERSION) delete out.share;
   if (v < NETWORK_WAIT_API_VERSION) delete out.waitingForNetwork;
   if (v < SECRETS_API_VERSION && out.pendingApproval?.kind === 'secret') delete out.pendingApproval;
+  if (v < RELAY_API_VERSION && out.pendingApproval?.seq !== undefined) {
+    const { seq: _seq, ...rest } = out.pendingApproval;
+    out.pendingApproval = rest as PendingApproval;
+  }
   if (v < WOKE_API_VERSION) delete out.woke;
   if (v < STARTED_BY_API_VERSION) delete out.startedBy;
   if (v < LINKS_API_VERSION) delete out.links;
@@ -1384,9 +1400,9 @@ export class ConvexSync {
       return;
     }
     if (e.type === 'approval.requested') {
-      this.pending.set(threadId, { approvalId: e.approvalId, kind: 'approval', name: e.name, title: e.title, options: e.options, ...(inputSummary(e.input) ? { inputSummary: inputSummary(e.input) } : {}) });
+      this.pending.set(threadId, { approvalId: e.approvalId, kind: 'approval', seq: e.seq, name: e.name, title: e.title, options: e.options, ...(inputSummary(e.input) ? { inputSummary: inputSummary(e.input) } : {}) });
     } else if (e.type === 'question.requested') {
-      this.pending.set(threadId, { approvalId: e.approvalId, kind: 'question', questions: e.questions });
+      this.pending.set(threadId, { approvalId: e.approvalId, kind: 'question', seq: e.seq, questions: e.questions });
     } else if (e.type === 'secret.requested') {
       // forBackend drops it for a backend older than SECRETS_API_VERSION.
       const box = this.deps.secretBox;
@@ -1398,7 +1414,7 @@ export class ConvexSync {
         this.deps.log.warn('no key for secrets from the phone', { error: String(err) });
         return;
       }
-      this.pending.set(threadId, { approvalId: e.approvalId, kind: 'secret', label: e.label, reason: e.reason, ...(e.placeholder ? { placeholder: e.placeholder } : {}), key });
+      this.pending.set(threadId, { approvalId: e.approvalId, kind: 'secret', seq: e.seq, label: e.label, reason: e.reason, ...(e.placeholder ? { placeholder: e.placeholder } : {}), key });
     } else if (e.type === 'approval.resolved') {
       if (this.pending.get(threadId)?.approvalId === e.approvalId) this.pending.delete(threadId);
     } else return;
@@ -2365,6 +2381,26 @@ export class ConvexSync {
     }
   }
 
+  /** Other runners' threads as last heard, for relay.ts. */
+  remoteNow(): RemoteThreads {
+    return this.index?.current() ?? { runners: [], threads: [] };
+  }
+
+  /**
+   * What relay.ts reads and queues with: this runner's link to the backend,
+   * with the owner key only (a runner key can't read other runners' threads).
+   * Undefined with sync off or before the backend is at RELAY_API_VERSION.
+   */
+  relaySource(): { post: Post; subscribe?: Subscribe; key: string } | undefined {
+    if (this.off || !this.deps.key || (this.backendApiVersion ?? 0) < RELAY_API_VERSION) return undefined;
+    const subscriber = this.subscriber;
+    return {
+      post: (kind, fn, args) => this.post(kind, fn, args),
+      ...(subscriber ? { subscribe: (fn: string, args: Record<string, unknown>, onUpdate: (v: unknown) => void, onError: (e: Error) => void) => subscriber.subscribe(fn, args, onUpdate, onError) } : {}),
+      key: this.deps.key,
+    };
+  }
+
   /** remoteThreads.list: other runners' threads, empty with sync off. */
   remoteThreads(): RemoteThreads {
     return this.index?.list() ?? { runners: [], threads: [] };
@@ -2516,10 +2552,11 @@ export class ConvexSync {
         const taken = await this.post('mutation', 'sync:takeCommand', { key: this.deps.key, commandId: c.commandId });
         if (taken !== true) continue;
         let resultThreadId: string | undefined;
+        let result: unknown;
         let note: string | undefined;
         let ok = true;
         try {
-          resultThreadId = await this.apply(c);
+          ({ threadId: resultThreadId, result } = (await this.apply(c)) ?? {});
           this.applied++;
         } catch (e) {
           ok = false;
@@ -2532,7 +2569,7 @@ export class ConvexSync {
           else this.deps.log.warn('phone command failed', { kind: c.kind, threadId: c.threadId, error: note });
         }
         if (resultThreadId) await this.writeRowNow(resultThreadId);
-        await this.post('mutation', 'sync:finishCommand', { key: this.deps.key, commandId: c.commandId, ok, ...(note ? { note } : {}), ...(resultThreadId ? { resultThreadId } : {}) });
+        await this.post('mutation', 'sync:finishCommand', { key: this.deps.key, commandId: c.commandId, ok, ...(note ? { note } : {}), ...(resultThreadId ? { resultThreadId } : {}), ...(result !== undefined ? { result } : {}) });
       } catch (e) {
         // Couldn't take or finish it: the next update of the list brings
         // it round again if it's still pending.
@@ -2571,9 +2608,12 @@ export class ConvexSync {
 
   // Applies one command through the runner; returns the new thread's id
   // for a create or a quickAsk. Throws with a readable message for the phone.
-  private async apply(c: Command): Promise<string | undefined> {
+  private async apply(c: Command): Promise<{ threadId?: string; result?: unknown } | undefined> {
     const host = this.deps.commands!;
     const a = c.args ?? {};
+    // Sent from the main Mac through the backend (convex/relay.ts): Mike at a
+    // Mac, not the phone, so his message isn't marked as the phone's.
+    const origin = a.from === 'mac' ? {} : { origin: 'phone' as const };
     const threadId = c.threadId;
     const needThread = (): string => {
       if (!threadId) throw new Error('no thread');
@@ -2582,7 +2622,7 @@ export class ConvexSync {
     switch (c.kind) {
       case 'send': {
         const text = commandText(a);
-        await this.withPhoneImages(a.images, (images) => host.send(needThread(), text, images, { origin: 'phone', ...(phoneAnswers(a.answers) ? { answers: phoneAnswers(a.answers) } : {}) }));
+        await this.withPhoneImages(a.images, (images) => host.send(needThread(), text, images, { ...origin, ...(phoneAnswers(a.answers) ? { answers: phoneAnswers(a.answers) } : {}) }));
         return undefined;
       }
       case 'respond': {
@@ -2637,9 +2677,9 @@ export class ConvexSync {
           ...(typeof a.accountId === 'string' ? { accountId: a.accountId } : {}),
           ...(typeof a.model === 'string' ? { model: a.model } : {}),
           ...(isEffortLevel(a.effort) ? { effort: a.effort } : {}),
-          origin: 'phone',
+          ...origin,
         }));
-        return thread.id;
+        return { threadId: thread.id };
       }
       case 'quickAsk': {
         // A quick ask the phone answered itself (API 9), kept as a thread.
@@ -2656,7 +2696,21 @@ export class ConvexSync {
           sources,
           ...(typeof a.askedAt === 'number' ? { askedAt: a.askedAt } : {}),
         });
-        return thread.id;
+        return { threadId: thread.id };
+      }
+      case 'interrupt': {
+        if (!host.interrupt) throw new Error("This runner can't stop a turn from another Mac.");
+        await host.interrupt(needThread());
+        return undefined;
+      }
+      case 'call': {
+        // Only what relay.ts CALLS allows, checked again here: the backend
+        // isn't trusted to have checked, and nothing here may answer with
+        // file contents or tool output (step 4 brings those, scrubbed).
+        if (a.method !== 'files.list') throw new Error(`${String(a.method)} can't be asked of this runner`);
+        const params = a.params && typeof a.params === 'object' ? (a.params as Record<string, unknown>) : {};
+        const list = listFolderFor({ path: params.path });
+        return { result: { ...list, entries: list.entries.slice(0, CALL_ENTRIES), truncated: list.truncated || list.entries.length > CALL_ENTRIES } };
       }
       case 'share': {
         // The website's Stop sharing, Share again and New link (API 8).
