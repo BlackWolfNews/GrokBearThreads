@@ -236,7 +236,18 @@ final class ThreadSession {
     /// back, and one the runner had queued comes back with its turn.
     func connectionLost() {
         subscribed = false
-        updatePending { $0.removeAll() }
+        // A message a restart turned away is still on its way: it goes again
+        // once the new runner is up (AppModel.clientAfterRestart).
+        let resending = resending
+        updatePending { $0.removeAll { !resending.contains($0.id) } }
+    }
+
+    /// Pending messages waiting to go again on the new runner after a
+    /// restart turned them away; a dropped connection keeps them showing.
+    @ObservationIgnored private var resending: Set<String> = []
+
+    func holdForResend(_ id: String) {
+        if hasPending(id) { resending.insert(id) }
     }
 
     /// Another runner's thread whose runner can't be reached any more: the
@@ -356,6 +367,7 @@ final class ThreadSession {
     /// The runner took it but hasn't shown it: it's queued behind the
     /// running turn.
     func markQueued(_ id: String) {
+        resending.remove(id)
         updatePending { list in
             if let index = list.firstIndex(where: { $0.id == id }) { list[index].queued = true }
         }
@@ -363,6 +375,7 @@ final class ThreadSession {
 
     /// The send failed (its draft goes back in the box).
     func removePending(_ id: String) {
+        resending.remove(id)
         updatePending { $0.removeAll { $0.id == id } }
     }
 

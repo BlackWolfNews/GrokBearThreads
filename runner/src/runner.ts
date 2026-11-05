@@ -1264,7 +1264,9 @@ export class Runner {
     const st = this.mustGet(threadId);
     this.checkAccepting();
     // A thread a draining runner is letting go of is about to be the new
-    // runner's; a message queued here now would be lost on the way.
+    // runner's; a message queued here now would be lost on the way. The Mac
+    // app sends it again on the new runner by these words
+    // (AppModel.turnedAwayByRestart), so keep them.
     if (this.draining && !this.draining.keep.has(threadId)) throw new RpcError(ErrorCode.busy, 'The runner is handing over to a new one; send again in a moment.');
     if (!text && images.length === 0) throw new RpcError(ErrorCode.badParams, 'text or images required');
     // Its turn was made up; a real agent picking it up would only be lost.

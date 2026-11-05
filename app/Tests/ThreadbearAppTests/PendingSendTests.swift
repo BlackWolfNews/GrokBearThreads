@@ -81,6 +81,70 @@ final class PendingSendTests: XCTestCase {
         XCTAssertEqual(session.pending.last?.images, [red, blue])
     }
 
+    /// A send the old runner turns away while restarting (it let the idle
+    /// thread go, or is letting it go, before the new one was up) goes
+    /// again to the new runner once it's connected. It shows as on its way
+    /// the whole time, through the dropped connection, with no error and
+    /// the box left empty (Mike saw "Thread not found", 5 Nov).
+    func testASendTurnedAwayByARestartGoesAgainToTheNewRunner() async throws {
+        let refusals = [
+            (RPCError.threadNotFound, "Thread not found: th1"),
+            (RPCError.busy, "The runner is handing over to a new one; send again in a moment."),
+        ]
+        for (code, message) in refusals {
+            let (app, old) = try await connected()
+            let session = app.session(for: "th1")
+            _ = app.restart(notice: "The runner is restarting onto a new release.")
+            app.drafts["th1"] = Draft(text: "what is Magisk?")
+            app.send(threadId: "th1")
+            try await until { old.waiting("threads.send") }
+            old.fail("threads.send", code: code, message: message)
+            try await Task.sleep(for: .milliseconds(300))
+            // The old runner drops the socket, as it does.
+            session.connectionLost()
+            XCTAssertEqual(session.pending.map(\.text), ["what is Magisk?"], "still on its way while the runner restarts: \(message)")
+            XCTAssertNil(app.drafts["th1"])
+            let new = HoldingTransport()
+            let client = RPCClient(transport: new)
+            try await client.start()
+            app.useClientForTesting(client)
+            try await until { new.waiting("threads.send") }
+            XCTAssertEqual(new.count("threads.send"), 1)
+            new.answer("threads.send", ["turnId": "turn_1"])
+            try await until { session.pending.first?.queued == true }
+            XCTAssertEqual(session.pending.first?.queued, true)
+            XCTAssertNil(app.drafts["th1"])
+            XCTAssertNil(app.errorMessage)
+            // Once it's gone, a later drop clears it as usual.
+            session.connectionLost()
+            XCTAssertTrue(session.pending.isEmpty)
+        }
+    }
+
+    /// Any other busy refusal, or "Thread not found" with no restart, still
+    /// puts the draft back with the error.
+    func testOtherRefusalsDuringARestartStillFail() async throws {
+        let (app, transport) = try await connected()
+        _ = app.restart(notice: "The runner is restarting onto a new release.")
+        app.drafts["th1"] = Draft(text: "Ship it")
+        app.send(threadId: "th1")
+        try await until { transport.waiting("threads.send") }
+        transport.fail("threads.send", message: "Busy")
+        try await until { app.drafts["th1"] != nil }
+        XCTAssertEqual(app.errorMessage, "Busy")
+    }
+
+    func testThreadNotFoundWithNoRestartStillFails() async throws {
+        let (app, transport) = try await connected()
+        app.drafts["th1"] = Draft(text: "Ship it")
+        app.send(threadId: "th1")
+        try await until { transport.waiting("threads.send") }
+        transport.fail("threads.send", code: RPCError.threadNotFound, message: "Thread not found: th1")
+        try await until { app.drafts["th1"] != nil }
+        XCTAssertEqual(app.drafts["th1"]?.text, "Ship it")
+        XCTAssertEqual(app.errorMessage, "Thread not found: th1")
+    }
+
     /// Taken but not shown: queued behind the running turn. A dropped
     /// connection clears it (the runner brings it back with its turn).
     func testATakenMessageWithNoUserMessageShowsAsQueued() async throws {
@@ -195,9 +259,9 @@ private final class HoldingTransport: RPCTransport, @unchecked Sendable {
         push(["jsonrpc": "2.0", "id": id, "result": result])
     }
 
-    func fail(_ method: String, message: String) {
+    func fail(_ method: String, code: Int = -32020, message: String) {
         guard let id = take(method) else { return }
-        push(["jsonrpc": "2.0", "id": id, "error": ["code": -32020, "message": message]])
+        push(["jsonrpc": "2.0", "id": id, "error": ["code": code, "message": message]])
     }
 
     private func take(_ method: String) -> Int? {

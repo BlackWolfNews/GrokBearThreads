@@ -303,7 +303,21 @@ extension AppModel {
         session?.addPending(id: pendingId, text: text, images: images, answers: answers, summarySeq: threads[threadId]?.lastSeq ?? 0)
         Task {
             do {
-                try await client.send(threadId: threadId, text: text, images: images, answers: answers)
+                do {
+                    try await client.send(threadId: threadId, text: text, images: images, answers: answers)
+                } catch {
+                    // Sent in the moment a restarting runner lets go of its
+                    // idle threads, before the new one is up: the old one
+                    // turns it away (Mike saw "Thread not found", 5 Nov). It
+                    // goes again, still showing as on its way through the
+                    // dropped connection, once the new runner is connected.
+                    guard Self.turnedAwayByRestart(error), !isRemote(threadId),
+                          restart.isPending || restart.isRestarting(now: Date()) else { throw error }
+                    session?.holdForResend(pendingId)
+                    guard let next = await clientAfterRestart(sentOn: client) else { throw error }
+                    AppLog.write("rpc", "sending again after the restart: \(threadId)")
+                    try await next.send(threadId: threadId, text: text, images: images, answers: answers)
+                }
                 // Taken but not shown: it's queued behind the running
                 // turn. Its user.message usually comes just before this
                 // reply, but is applied on the next frame, so wait a
@@ -317,6 +331,33 @@ extension AppModel {
                 show(error)
             }
         }
+    }
+
+    /// How long a send bounced by a restart waits for the new runner.
+    static let restartResendWait: Duration = .seconds(30)
+
+    /// A send the restarting runner refused before taking it, so sending
+    /// again can't make two: "Thread not found" once it has let the idle
+    /// thread go, or its handing-over refusal while it's still letting go
+    /// (runner.ts `send`, whose words these are). Not a dropped
+    /// connection, which might have taken the message first.
+    static func turnedAwayByRestart(_ error: Error) -> Bool {
+        switch error {
+        case RPCError.server(RPCError.threadNotFound, _): return true
+        case RPCError.server(RPCError.busy, let message): return message.hasPrefix("The runner is handing over to a new one")
+        default: return false
+        }
+    }
+
+    /// The new runner's client once it's connected, or nil if there's none
+    /// within `restartResendWait`.
+    func clientAfterRestart(sentOn old: RPCClient) async -> RPCClient? {
+        let deadline = ContinuousClock.now + Self.restartResendWait
+        while ContinuousClock.now < deadline {
+            if connection == .connected, let client, client !== old { return client }
+            try? await Task.sleep(for: .milliseconds(200))
+        }
+        return nil
     }
 
     /// Updates panel, From Mike: a new thread in the repo the runner
