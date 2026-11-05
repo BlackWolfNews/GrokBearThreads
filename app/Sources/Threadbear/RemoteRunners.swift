@@ -42,7 +42,7 @@ extension AppModel {
             listed.insert(summary.id)
             madeRemote.remove(summary.id)
             if liveRemote.contains(summary.id), next[summary.id] != nil { continue }
-            next[summary.id] = withRelayCard(summary)
+            next[summary.id] = summary
         }
         let gone = next.values.filter { $0.isRemote && !listed.contains($0.id) && !liveRemote.contains($0.id) && !madeRemote.contains($0.id) }.map(\.id)
         if next != threads { threads = next }
@@ -63,6 +63,7 @@ extension AppModel {
     }
 
     /// A relayed thread's card came or went (ThreadSession.syncOpenCard).
+    /// Any summary stored over it gets the card too (`threads`' didSet).
     func relayCardChanged(_ threadId: String) {
         guard viaRelay(threadId), let thread = threads[threadId] else { return }
         let next = withRelayCard(thread)

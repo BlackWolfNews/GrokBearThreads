@@ -51,3 +51,27 @@ final class RemoteLoginsTests: XCTestCase {
         XCTAssertEqual(ThreadSettings(app: app, thread: remote).accountSections.flatMap(\.items).map(\.id), ["codex-main"])
     }
 }
+
+/// A thread read through Convex takes its asks from the card its open
+/// transcript shows, whatever summary is stored over it: the table's row
+/// and the relay's replies (markSeen's) carry none, and the card's buttons
+/// did nothing without them (6 Nov). With no transcript open there's no
+/// card, so none; this Mac's own threads keep what their runner says.
+@MainActor
+final class RelayCardSummaryTests: XCTestCase {
+    func testARelayedSummaryTakesItsAsksFromTheCardShown() {
+        let app = AppModel()
+        app.directRemoteLink = false
+        let ask = Ask(action: "Start the spike?", options: ["Start the spike", "Not yet"])
+        var remote = ThreadSummary(id: "t1", title: "On Hetzner", status: .idle, needs: "you", asks: [ask], asksSeq: 4)
+        remote.runnerId = "r-cloud"
+        app.threads["t1"] = remote
+        XCTAssertEqual(app.threads["t1"]?.asks, [], "no transcript open, so no card to answer")
+        XCTAssertNil(app.threads["t1"]?.asksSeq)
+        XCTAssertEqual(app.threads["t1"]?.runnerId, "r-cloud")
+
+        app.threads["local"] = ThreadSummary(id: "local", title: "Here", status: .idle, needs: "you", asks: [ask], asksSeq: 4)
+        XCTAssertEqual(app.threads["local"]?.asksSeq, 4)
+        XCTAssertTrue(Decisions.isOpen(app.threads["local"]!))
+    }
+}

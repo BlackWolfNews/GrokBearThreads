@@ -153,6 +153,15 @@ final class AppModel {
             for (id, thread) in threads where thread.runnerId == nil {
                 if let runnerId = oldValue[id]?.runnerId { threads[id]?.runnerId = runnerId }
             }
+            // A thread read through Convex keeps the asks of the card it
+            // shows, whatever summary is stored over it (the table's row,
+            // a reply's): none of those carry them (withRelayCard).
+            if !directRemoteLink {
+                for (id, thread) in threads where thread.runnerId != nil && oldValue[id] != thread {
+                    let carded = withRelayCard(thread)
+                    if carded != thread { threads[id] = carded }
+                }
+            }
             threadsVersion &+= 1
             refreshDockBadge()
             noteFailedAccounts(from: oldValue)
