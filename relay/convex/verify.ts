@@ -9,15 +9,15 @@
 // which only says yes to a nonce it made itself. That proves the caller
 // runs the deployment, so it gets one install per deployment and no shared
 // allowance to use up. Callers can't be told apart by address instead:
-// every backend calls from Convex's own servers. Older backends (forks
-// that haven't updated) still register the old way, from a smaller
-// shared allowance of their own, so using it up blocks only those.
+// every backend calls from Convex's own servers. There's no unchecked way
+// in any more (http.ts says why).
 
 // A Convex cloud deployment's HTTP address, `https://<name>.convex.site`
 // or `https://<name>.<region>.convex.site`, as its CONVEX_SITE_URL says
-// it. Anything else (a self-hosted backend, a custom domain) is null, and
-// registers the old way: the relay only ever calls back to Convex's own
-// hosts.
+// it. Anything else (a self-hosted backend, a custom domain) is null and
+// can't register: the relay only ever calls back to Convex's own hosts,
+// so it can't be pointed at anything else. Self-hosting? Run your own
+// relay (docs/push-relay.md).
 export function convexSite(raw: string | undefined): string | null {
   if (!raw) return null;
   let u: URL;

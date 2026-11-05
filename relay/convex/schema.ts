@@ -17,7 +17,7 @@ export default defineSchema({
     hourSends: v.number(),
     // The deployment it registered for, checked by calling it back
     // (verify.ts), and how often that deployment registered on that UTC
-    // day. None for installs registered the old way.
+    // day. None for installs from before the check (5 Nov 2026).
     deployment: v.optional(v.string()),
     registeredDay: v.optional(v.string()),
     registeredToday: v.optional(v.number()),
@@ -32,8 +32,9 @@ export default defineSchema({
     sends: v.number(),
     failed: v.number(),
     registrations: v.number(),
-    // Of those, the ones registered the old way, without a deployment
-    // check (relay.ts register). Missing on days before 5 Nov 2026.
+    // Of those, the ones registered without a deployment check, which
+    // only happened on 5 Nov 2026 (that way in is gone; kept so old day
+    // rows still match the schema).
     legacyRegistrations: v.optional(v.number()),
   }).index('by_day', ['day']),
 });

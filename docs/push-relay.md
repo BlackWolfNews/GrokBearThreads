@@ -61,10 +61,14 @@ deployment passes, so each deployment gets one install (registering again
 gives it a new key) and nobody can use up anyone else's. The relay only
 calls back to `https://<name>[.<region>].convex.site`.
 
-Older backends, and ones not on Convex's own hosts (self-hosted, a custom
-domain), still register the old way, from a smaller shared allowance:
-using it up blocks only those. Installs that already work are never
-affected. The code is `relay/convex/verify.ts` and `relay.ts`.
+There's no unchecked way in. Backends from before 5 Nov 2026 used one,
+with a shared daily allowance anyone could use up, and it went the same
+day (the relay's only install then was Mike's, which kept working:
+`/send` never asks how an install was made). So an older backend that
+needs a new install has to update, and a backend not on Convex's own
+hosts (self-hosted, a custom domain) can't use this relay: run your own
+(it's `relay/`, with your own Apple key). The code is
+`relay/convex/verify.ts` and `relay.ts`.
 
 ## The project
 
@@ -72,10 +76,9 @@ affected. The code is `relay/convex/verify.ts` and `relay.ts`.
   `threadbear-relay` on team mikec: prod `impartial-hound-393` (Sydney,
   `https://impartial-hound-393.ap-southeast-2.convex.site`), dev
   `clean-terrier-424`. Env: the same `APNS_*` as Threadbear's prod.
-- Limits: 120 sends an hour per install; 20 registrations a day per checked
-  deployment; 100 new installs a day in total registered the old way.
+- Limits: 120 sends an hour per install; 20 registrations a day per
+  deployment.
 - Stats for Mike: `npx convex run relay:stats --prod` in `relay/`.
 - Deploy: `npm ci` then `npx convex deploy` in `relay/`, signed in to the
   Convex CLI as Mike (it isn't part of the runner's backend deploy, which
-  is for each person's own deployment). Either side can go first: an old
-  relay ignores the new fields, and old backends register the old way.
+  is for each person's own deployment).
