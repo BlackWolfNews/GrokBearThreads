@@ -133,6 +133,8 @@ export function commandArgs(kind: Kind, raw: unknown): Record<string, unknown> {
     case 'update':
       out = pick(a, ['snooze', 'wake', 'archive', 'unarchive', 'markSeen', 'title', 'star']);
       if (Object.keys(out).length !== 1) throw bad('an update changes one thing');
+      // How it went, with an archive (API 42), as phone:update takes it.
+      if (out.archive === true && ['worked', 'didntWork', 'notNeeded'].includes(String(a.verdict))) out.verdict = a.verdict;
       break;
     case 'create':
       if (str(a.text) === undefined || !str(a.text)!.trim()) throw bad('a new thread needs text');

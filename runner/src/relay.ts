@@ -513,10 +513,10 @@ export class Relay {
       case 'threads.update': {
         const changes: Record<string, unknown>[] = [];
         if (typeof p.title === 'string') changes.push({ title: p.title });
-        if (typeof p.archived === 'boolean') changes.push(p.archived ? { archive: true } : { unarchive: true });
+        if (typeof p.archived === 'boolean') changes.push(p.archived ? { archive: true, ...(typeof p.verdict === 'string' ? { verdict: p.verdict } : {}) } : { unarchive: true });
         if (typeof p.starred === 'boolean') changes.push({ star: p.starred });
         if ('snoozedUntil' in p) changes.push(p.snoozedUntil === null ? { wake: true } : p.snoozedUntil === 'restart' ? { snooze: { untilRestart: true } } : { snooze: { until: String(p.snoozedUntil) } });
-        const known = new Set(['threadId', 'title', 'archived', 'starred', 'snoozedUntil']);
+        const known = new Set(['threadId', 'title', 'archived', 'verdict', 'starred', 'snoozedUntil']);
         if (Object.keys(p).some((k) => !known.has(k) && p[k] !== undefined)) this.unsupported(w, 'Changing its login, model or settings');
         for (const change of changes) await this.command(w.runnerId, threadId, 'update', change, { done: true });
         return {};
