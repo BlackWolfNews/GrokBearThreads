@@ -189,14 +189,26 @@ public struct RunnerInfo: Sendable, Hashable, Decodable, Identifiable {
     public var lastSeenAt: Date?
     /// The runner answering, the one this app talks to.
     public var isSelf: Bool
+    /// What its last heartbeat said, for the Runners panel. Nil from a
+    /// runner before they were passed on (5 Nov).
+    public var version: String?
+    public var release: String?
+    public var startedAt: Date?
+    /// An old release finishing its threads in a handover.
+    public var draining: Bool
 
-    public init(id: String, name: String, icon: String? = nil, online: Bool = true, lastSeenAt: Date? = nil, isSelf: Bool = false) {
+    public init(id: String, name: String, icon: String? = nil, online: Bool = true, lastSeenAt: Date? = nil, isSelf: Bool = false,
+                version: String? = nil, release: String? = nil, startedAt: Date? = nil, draining: Bool = false) {
         self.id = id
         self.name = name
         self.icon = icon
         self.online = online
         self.lastSeenAt = lastSeenAt
         self.isSelf = isSelf
+        self.version = version
+        self.release = release
+        self.startedAt = startedAt
+        self.draining = draining
     }
 
     public init(from decoder: Decoder) throws {
@@ -208,10 +220,14 @@ public struct RunnerInfo: Sendable, Hashable, Decodable, Identifiable {
         // The answering runner is plainly up; anything else unsaid is offline.
         online = (try? c.decodeIfPresent(Bool.self, forKey: .online)) ?? isSelf
         lastSeenAt = (try? c.decodeIfPresent(String.self, forKey: .lastSeenAt)).flatMap(ISO8601.parse)
+        version = (try? c.decodeIfPresent(String.self, forKey: .version)).flatMap { $0.isEmpty ? nil : $0 }
+        release = (try? c.decodeIfPresent(String.self, forKey: .release)).flatMap { $0.isEmpty ? nil : $0 }
+        startedAt = (try? c.decodeIfPresent(String.self, forKey: .startedAt)).flatMap(ISO8601.parse)
+        draining = (try? c.decodeIfPresent(Bool.self, forKey: .draining)) ?? false
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, icon, online, lastSeenAt
+        case id, name, icon, online, lastSeenAt, version, release, startedAt, draining
         case isSelf = "self"
     }
 }

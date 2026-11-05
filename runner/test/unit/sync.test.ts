@@ -1337,7 +1337,7 @@ test('schedules: a backend of API 9 gets the scheduler attached, and schedules s
   assert.equal(attached.length, 0, 'an older backend keeps them in the file');
   await old.sync.stop();
 
-  const answers: Record<string, unknown> = { 'sync:heartbeat': { apiVersion: SCHEDULES_API_VERSION }, 'sync:claimSchedule': true, 'sync:runnersList': [{ runnerId: 'r2', name: 'bruce', lastSeenAt: 5 }] };
+  const answers: Record<string, unknown> = { 'sync:heartbeat': { apiVersion: SCHEDULES_API_VERSION }, 'sync:claimSchedule': true, 'sync:runnersList': [{ runnerId: 'r2', name: 'bruce', lastSeenAt: 5, version: '0.4.0', startedAt: 's', draining: false, threadCount: 3 }] };
   const f = setup({ answer: (fn) => answers[fn] ?? null, schedules: { attach: (b) => void attached.push(b), inBackend: () => inBackend } });
   f.sync.start();
   await tick();
@@ -1347,7 +1347,7 @@ test('schedules: a backend of API 9 gets the scheduler attached, and schedules s
   const claim = f.calls.find((c) => c.fn === 'sync:claimSchedule')!;
   assert.deepEqual({ ...claim.args, holder: undefined }, { key: 'k', runnerId: 'r1', scheduleId: 's1', holder: undefined, kind: 'due', expect: '2026-10-27T03:00:00.000Z' });
   assert.match(String(claim.args.holder), /^r1:\d+:2026-10-27T00:00:00.000Z$/);
-  assert.deepEqual(await b.runners(), [{ id: 'r2', name: 'bruce', lastSeenAt: 5 }]);
+  assert.deepEqual(await b.runners(), [{ id: 'r2', name: 'bruce', lastSeenAt: 5, version: '0.4.0', startedAt: 's' }]);
   await b.save({ id: 's9', runnerId: 'r2', title: 't', text: 'x', whenText: 'Every day at 0:00', cron: '@daily', paused: false, createdAt: 'c', updatedAt: 'u', runs: 0 });
   assert.deepEqual(f.calls.find((c) => c.fn === 'sync:saveSchedule')!.args.schedule, { id: 's9', runnerId: 'r2', title: 't', text: 'x', whenText: 'Every day at 0:00', paused: false, createdAt: 'c', updatedAt: 'u', runs: 0, cron: '@daily' });
 

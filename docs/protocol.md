@@ -536,6 +536,12 @@ type RunnerInfo = {
   online: boolean       // heard from in the last 3 minutes
   lastSeenAt?: string
   self: boolean         // the runner answering
+  // What its last heartbeat said, for the app's Runners panel. Absent from
+  // an older runner.
+  version?: string      // RUNNER_VERSION
+  release?: string      // the release it runs (release.ts), when it runs one
+  startedAt?: string    // when that runner process started
+  draining?: boolean    // an old release finishing its threads in a handover
 }
 
 // The runner's settings, as the Settings window shows them. Everything here

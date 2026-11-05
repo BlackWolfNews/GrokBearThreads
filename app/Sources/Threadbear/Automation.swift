@@ -1276,6 +1276,21 @@ enum Automation {
             app.projectWhyShown = m.id
             let (who, reason) = HighlightProjects.why(m)
             return "ok " + json([reason ?? "(no reason)", who] + (HighlightProjects.canKeep(m) ? ["Keep"] : []) + ["Take out", "Open project"])
+        case "runners":
+            // The Runners panel: {"show": true} opens it ({"show": false}
+            // closes it). With neither, the icon's tooltip and each
+            // runner's line.
+            if let show = c["show"] as? Bool {
+                app.runnersShown = show
+                guard show else { return "ok closed" }
+                try? await Task.sleep(for: .milliseconds(500))
+                return app.runnersShown ? "ok shown" : "error the panel didn't open"
+            }
+            let running = app.sections.running
+            return "ok " + json([RunnersText.tooltip(app.runners)] + app.runners.map { r in
+                let count = RunnersText.running(on: r, in: running).count
+                return "\(r.name): \(RunnersText.stateLine(r, now: Date()))\(RunnersText.build(r).map { ", " + $0 } ?? "")\(count > 0 ? ", \(count) running" : "")"
+            })
         case "connectors":
             // The Connectors panel: {"show": true} opens it ({"show":
             // false} closes it), {"click": "<service id>"} presses its

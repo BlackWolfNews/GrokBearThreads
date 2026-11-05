@@ -66,6 +66,11 @@ struct ActivityBar: View {
             if let connectors = app.connectors, connectors.state != "off" {
                 ConnectorsActivityButton()
             }
+            // Only with more than one runner: a panel of just this Mac
+            // says nothing new.
+            if app.runners.count > 1 {
+                RunnersActivityButton()
+            }
             // Only while the app or the runner has an update on its way.
             UpdatesActivityButton()
             UsageActivityButton()

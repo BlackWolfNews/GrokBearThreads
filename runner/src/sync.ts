@@ -2360,7 +2360,16 @@ export class ConvexSync {
       runners: async () => {
         const rows = await call('query', 'sync:runnersList', {});
         return Array.isArray(rows)
-          ? (rows as { runnerId: string; name: string; lastSeenAt: number; icon?: string }[]).map((r) => ({ id: r.runnerId, name: r.name, lastSeenAt: r.lastSeenAt, ...(r.icon ? { icon: r.icon } : {}) }))
+          ? (rows as { runnerId: string; name: string; lastSeenAt: number; icon?: string; version?: string; release?: string; startedAt?: string; draining?: boolean }[]).map((r) => ({
+              id: r.runnerId,
+              name: r.name,
+              lastSeenAt: r.lastSeenAt,
+              ...(r.icon ? { icon: r.icon } : {}),
+              ...(r.version ? { version: r.version } : {}),
+              ...(r.release ? { release: r.release } : {}),
+              ...(r.startedAt ? { startedAt: r.startedAt } : {}),
+              ...(r.draining ? { draining: true } : {}),
+            }))
           : [];
       },
     };

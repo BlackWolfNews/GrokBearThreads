@@ -255,6 +255,9 @@ async function main(): Promise<void> {
   // Its runner id and name are the mirror's (sync.ts), since that's how other
   // runners and the backend know this one (step 6, docs/step6-plan.md).
   const syncRunnerId = cfg.sync.runnerId ?? ensureRunnerId(cfg.home);
+  // When this process started: the heartbeat sends it, and runners.list
+  // gives it for this runner too (the app's Runners panel says "up 3h").
+  const startedAt = new Date().toISOString();
   // The kind of Mac this is, for its icon in lists (machine.ts).
   const runnerIcon = cfg.sync.icon ?? (await detectMachineIcon());
   scheduler = new Scheduler({
@@ -263,7 +266,7 @@ async function main(): Promise<void> {
     clock: realClock,
     log,
     elsewhere: (id) => peers.owns(id),
-    self: { id: syncRunnerId, name: cfg.sync.name ?? defaultRunnerName(), icon: runnerIcon },
+    self: { id: syncRunnerId, name: cfg.sync.name ?? defaultRunnerName(), icon: runnerIcon, version: RUNNER_VERSION, release: RELEASE.release, startedAt },
     syncOn: Boolean(cfg.sync.enabled && cfg.sync.url && readSyncKey(cfg.home)),
   });
   scheduler.start();
@@ -359,7 +362,7 @@ async function main(): Promise<void> {
     restart: (reason) => void restarter.request({ when: 'idle', reason }),
     version: RUNNER_VERSION,
     release: RELEASE.release,
-    startedAt: new Date().toISOString(),
+    startedAt,
     clock: realClock,
     log,
   });

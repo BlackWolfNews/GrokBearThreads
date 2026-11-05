@@ -34,8 +34,23 @@ export type StoredSchedule = ScheduleRecord & { runnerId: string; whenText: stri
 
 // What a runner the backend knows of looks like, and what runners.list
 // answers with (docs/protocol.md, RunnerInfo).
-export type BackendRunner = { id: string; name: string; lastSeenAt?: number; icon?: string };
-export type RunnerInfo = { id: string; name: string; icon?: string; online: boolean; lastSeenAt?: string; self: boolean };
+// version, release, startedAt and draining are what each runner's heartbeat
+// last said (sync.ts), for the app's Runners panel.
+export type BackendRunner = { id: string; name: string; lastSeenAt?: number; icon?: string; version?: string; release?: string; startedAt?: string; draining?: boolean };
+export type RunnerInfo = {
+  id: string;
+  name: string;
+  icon?: string;
+  online: boolean;
+  lastSeenAt?: string;
+  self: boolean;
+  version?: string;
+  release?: string;
+  startedAt?: string;
+  draining?: boolean;
+};
+// This runner, as runners.list has it first.
+type SelfRunner = { id: string; name: string; icon?: string; version?: string; release?: string; startedAt?: string };
 
 // The backend's schedules table (sync.ts makes one for Convex; tests pass a
 // fake). Every call can fail when the backend can't be reached.
@@ -135,7 +150,7 @@ export class Scheduler {
   private stopped = false;
   private unlisten?: () => void;
   // This runner, as the backend knows it (sync.runnerId and its name).
-  private self: { id: string; name: string; icon?: string };
+  private self: SelfRunner;
   // Whether this runner has a backend to attach to at all (sync is on).
   // Without one a backend copy on disk is taken back as the runner's own.
   private syncOn: boolean;
@@ -164,7 +179,7 @@ export class Scheduler {
     log: Logger;
     zone?: () => string;
     elsewhere?: (threadId: string) => boolean;
-    self?: { id: string; name: string; icon?: string };
+    self?: SelfRunner;
     syncOn?: boolean;
   }) {
     this.runner = deps.runner;
@@ -341,7 +356,8 @@ export class Scheduler {
 
   /** runners.list: this runner first, then the backend's others by name. */
   async runners(): Promise<RunnerInfo[]> {
-    const me: RunnerInfo = { id: this.self.id, name: this.self.name, ...(this.self.icon ? { icon: this.self.icon } : {}), online: true, self: true };
+    const { id, name, icon, version, release, startedAt } = this.self;
+    const me: RunnerInfo = { id, name, ...(icon ? { icon } : {}), online: true, self: true, ...(version ? { version } : {}), ...(release ? { release } : {}), ...(startedAt ? { startedAt } : {}) };
     if (!this.backend) return [me];
     const now = this.clock.now();
     // Only the main key lists every runner (docs/protocol.md, "Runner keys"):
@@ -363,6 +379,10 @@ export class Scheduler {
         online: r.lastSeenAt !== undefined && now - r.lastSeenAt < ONLINE_MS,
         ...(r.lastSeenAt !== undefined ? { lastSeenAt: new Date(r.lastSeenAt).toISOString() } : {}),
         self: false,
+        ...(r.version ? { version: r.version } : {}),
+        ...(r.release ? { release: r.release } : {}),
+        ...(r.startedAt ? { startedAt: r.startedAt } : {}),
+        ...(r.draining ? { draining: true } : {}),
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
     return [me, ...others];

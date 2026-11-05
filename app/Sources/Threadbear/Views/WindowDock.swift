@@ -37,6 +37,10 @@ enum WindowDock {
     /// activity bar's Connectors icon), open until Mike closes it.
     static let connectors = "threadbear.connectors"
     static let connectorsSymbol = "powerplug"
+    /// Each runner, whether it's up and what's running there (the
+    /// activity bar's Runners icon), open until Mike closes it.
+    static let runners = "threadbear.runners"
+    static let runnersSymbol = "server.rack"
     static let layoutKey = "dockLayout"
     static let threadPanelPrefix = "threadbear.thread:"
 
@@ -78,7 +82,7 @@ enum WindowDock {
     /// A pane section's panel, or nil for the sidebar, the main panel and a
     /// thread's own panel.
     static func section(_ panel: PanelID) -> PaneSection? {
-        panel == threads || panel == main || panel == usage || panel == updates || panel == setup || panel == connectors || pinnedThread(panel) != nil ? nil : PaneSection(id: panel)
+        panel == threads || panel == main || panel == usage || panel == updates || panel == setup || panel == connectors || panel == runners || pinnedThread(panel) != nil ? nil : PaneSection(id: panel)
     }
 
     @MainActor
@@ -96,6 +100,7 @@ enum WindowDock {
         case updates: return "Updates"
         case setup: return "Finish setting up"
         case connectors: return "Connectors"
+        case runners: return "Runners"
         default:
             break
         }
@@ -147,6 +152,7 @@ enum WindowDock {
         case updates: return updatesSymbol
         case setup: return setupSymbol
         case connectors: return connectorsSymbol
+        case runners: return runnersSymbol
         case PaneSection.highlightsId: return "pin"
         case AgentBrowser.panelId: return "globe"
         case PaneSection.patchesId: return "square.dashed"
@@ -207,14 +213,20 @@ extension AppModel {
         set { setShownUnderThreads(WindowDock.connectors, newValue) }
     }
 
+    /// The same for the Runners panel.
+    var runnersShown: Bool {
+        get { dock.isShowing(WindowDock.runners) }
+        set { setShownUnderThreads(WindowDock.runners, newValue) }
+    }
+
     /// Opens one of the activity bar's panels: as a tab beside another
-    /// if one's open (Usage, Updates, Finish setting up and Connectors share the space under
+    /// if one's open (Usage, Updates, Finish setting up, Connectors and Runners share the space under
     /// the threads), else under the threads list, else down the left if
     /// the threads aren't in the dock.
     private func setShownUnderThreads(_ panel: PanelID, _ shown: Bool) {
         guard shown else { return dock.close(panel) }
         let under = dock.layout.group(containing: WindowDock.threads).map { DockDrop.edge(group: $0.id, .bottom) }
-        dock.show(panel, near: [WindowDock.usage, WindowDock.updates, WindowDock.setup, WindowDock.connectors].filter { $0 != panel }, fallback: under ?? .window(.left))
+        dock.show(panel, near: [WindowDock.usage, WindowDock.updates, WindowDock.setup, WindowDock.connectors, WindowDock.runners].filter { $0 != panel }, fallback: under ?? .window(.left))
     }
 }
 
@@ -343,6 +355,7 @@ struct RootView: View {
                 case WindowDock.updates: AnyView(UpdatesPanel().tourTarget(.panel("updates"), withBar: true))
                 case WindowDock.setup: AnyView(SetupPanel().tourTarget(.setupPanel, withBar: true))
                 case WindowDock.connectors: AnyView(ConnectorsPanel().tourTarget(.panel("connectors"), withBar: true))
+                case WindowDock.runners: AnyView(RunnersPanel())
                 case WindowDock.main: AnyView(DetailView().tourTarget(.mainPanel, withBar: true))
                 case let id where WindowDock.pinnedThread(id) != nil:
                     AnyView(PinnedThreadView(threadId: WindowDock.pinnedThread(id)!).id(id))

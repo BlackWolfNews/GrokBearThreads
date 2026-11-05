@@ -1038,7 +1038,16 @@ async function dispatch(client, method, p) {
       return remoteThreads(client);
     case 'runners.list':
       if (oldRunner) throw rpcError(-32601, `Unknown method ${method}`);
-      return { runners: runners.map((r) => ({ id: r.id, name: r.name, icon: r.icon, online: true, lastSeenAt: iso(), self: r.self })) };
+      // With what each one's heartbeat says, for the Runners panel: bruce
+      // a release behind and up for a day.
+      return {
+        runners: runners.map((r) => ({
+          id: r.id, name: r.name, icon: r.icon, online: true, lastSeenAt: iso(), self: r.self,
+          ...(r.self
+            ? { version: '0.1.0+20261105T064853Z-c4d90ca', release: '20261105T064853Z-c4d90ca', startedAt: iso(-16 * 60_000) }
+            : { version: '0.1.0+20261104T221010Z-51ae514', release: '20261104T221010Z-51ae514', startedAt: iso(-26 * 3_600_000) }),
+        })),
+      };
     case 'schedules.create': {
       if (!p.text) throw rpcError(-32602, 'text is required');
       if (Boolean(p.at) === Boolean(p.cron)) throw rpcError(-32602, 'Give exactly one of at and cron');
@@ -2879,8 +2888,9 @@ function rpcError(code, message) {
   return error;
 }
 
-function iso() {
-  return new Date().toISOString();
+// Now, or `offset` ms from now.
+function iso(offset = 0) {
+  return new Date(Date.now() + offset).toISOString();
 }
 
 function sleep(ms) {

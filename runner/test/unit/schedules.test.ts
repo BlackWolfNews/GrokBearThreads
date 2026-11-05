@@ -362,7 +362,7 @@ test('agents schedule messages to their own thread by default', async () => {
 
 // The backend's schedules table as convex/sync.ts keeps it: a row per
 // schedule, claims that lapse, and every change sent to each subscriber.
-function fakeBackend(clock: { now(): number }, runners: { id: string; name: string; icon?: string }[] = []) {
+function fakeBackend(clock: { now(): number }, runners: { id: string; name: string; icon?: string; version?: string; release?: string; startedAt?: string; draining?: boolean }[] = []) {
   const rows = new Map<string, StoredSchedule & { claim?: { holder: string; until: number } }>();
   const subs = new Set<(rows: StoredSchedule[]) => void>();
   const calls: string[] = [];
@@ -511,6 +511,22 @@ test('a due run is claimed, so two runner processes under one id send it once', 
   assert.equal(row.claim, undefined, 'the claim is let go once it ran');
   old.stop();
   now.stop();
+});
+
+test('runners.list gives each runner\'s version, start and whether it\'s updating, for the Runners panel', async () => {
+  const h = makeHarness();
+  const bruce = { ...BRUCE, version: '0.4.0', release: 'r-abc', startedAt: '2026-11-05T01:00:00.000Z', draining: true };
+  const b = fakeBackend(h.clock, [M5, bruce]);
+  const me = { ...M5, version: '0.4.1', release: 'r-def', startedAt: '2026-11-05T02:00:00.000Z' };
+  const m5 = backendScheduler(h, me, path.join(h.home, 'm5'));
+  await m5.attach(b.for('m5', M5.id));
+  const [self, other] = await m5.runners();
+  assert.deepEqual(self, { id: M5.id, name: 'm5', icon: 'laptopcomputer', online: true, self: true, version: '0.4.1', release: 'r-def', startedAt: '2026-11-05T02:00:00.000Z' });
+  assert.equal(other!.version, '0.4.0');
+  assert.equal(other!.release, 'r-abc');
+  assert.equal(other!.startedAt, '2026-11-05T01:00:00.000Z');
+  assert.equal(other!.draining, true);
+  m5.stop();
 });
 
 test('a schedule made for another runner runs there, with that runner\'s folder', async () => {
