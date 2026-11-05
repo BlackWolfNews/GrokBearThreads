@@ -153,7 +153,7 @@ type ThreadSummary = {
   wakeWhen?: { said: string, topic?: string, pending?: true }
                         // hibernated in Mike's words (Hibernate in words);
                         // only while snoozedUntil is set
-  waitingOn?: { threadId, title, done?: true }[] // hibernating until these
+  waitingOn?: { threadId, title, until?, done?: true }[] // hibernating until these
                         // threads finish (end_turn's waitFor); only
                         // while snoozedUntil is set
   startedBy?: { kind, label, icon?, threadId?, threadTitle?, why? } // who
@@ -2038,7 +2038,13 @@ the thread if a sub-agent stalls, so an ask can't stay hidden for good.
   gets a `user.message` with `origin: "runner"` naming each with up to
   2,000 characters of the reply it finished with. A message, a wake or
   another snooze first clears `waitingOn`, so a thread that sends its
-  report wakes it as before and its finishing later does nothing. The
+  report wakes it as before and its finishing later does nothing. An
+  entry can be `{ thread, until }` instead of an id: `until` (up to 200
+  characters, read on after "until": "it reports the I/O saving") is what
+  it waits for that thread to have done. Such a wait ignores finishes and
+  is done when a librarian look at that thread says it's `met` (see the
+  librarian's `waited-on` look), or the thread is archived or deleted;
+  the wake-up message quotes `until` and the librarian's reason. The
   handler refuses its own id, an archived thread, an unknown id and
   `needs: "you"`; one gone by the time the turn ends is left out with a
   note, and if none are left the thread stays in the inbox. Any refused
@@ -2971,7 +2977,15 @@ daily budget, never for private folders). It looks at a thread when:
   folder and its projects' folders, gave no link and said fewer than 400
   characters between Mike and the agent; it counts in `skippedToday`, and
   what they said still counts towards the next one;
-- someone asks (`librarian.run`, `asked`).
+- someone asks (`librarian.run`, `asked`);
+- another thread is hibernating until it has done something (end_turn's
+  `waitFor` with `until`): after any completed turn, its CLI's own too,
+  10 seconds later (`waited-on`, never skipped as quiet). The look lists
+  those threads and their `until`, and its answer's `met` (`{ "<id>":
+  "what shows it has" }`) marks each wait done (`waitMet`), with this
+  thread's latest reply; the waiter wakes once all its waits are done. A
+  private folder's thread gets no looks, so a wait on one only ends at
+  its time.
 
 Those come from the runner's events, and a turn that ends in an older
 runner draining after a handover is only heard there. So on start and

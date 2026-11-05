@@ -1036,6 +1036,31 @@ test('the librarian wakes a thread hibernating on a topic when Mike talks about 
   assert.notEqual(other, waiting);
 });
 
+test('a thread another is waiting on gets a look soon after any turn, and its met wakes the waiter', async () => {
+  const s = setup({
+    models: (p) => {
+      if (!p.prompt.includes('Hibernating threads waiting until this thread has done something')) return reply({ projects: [], new: null, state: {}, why: 'x' });
+      assert.match(p.prompt, new RegExp(`- ${waiter.slice(0, 8)} "Write the plan": until it reports the I/O saving`));
+      return reply({ projects: [], new: null, state: {}, met: { [waiter.slice(0, 8)]: 'It posted the saving', nothere1: 'x' }, why: 'Measured' });
+    },
+  });
+  const { h, create, librarian, finish } = s;
+  const waiter = create('Write the plan').thread.id;
+  const target = create('Measure the I/O saving').thread.id;
+  await finish(waiter);
+  h.clock.advance(SETTLE_MS);
+  await tick(6);
+  h.runner.update({ threadId: waiter, snoozedUntil: new Date(h.clock.now() + 86_400_000).toISOString() });
+  rec(h, waiter).waitingOn = [{ threadId: target, title: 'Measure the I/O saving', until: 'it reports the I/O saving' }];
+  await finish(target);
+  const job = librarian.status().queue.find((j) => j.threadId === target);
+  assert.equal(job?.reason, 'waited-on');
+  h.clock.advance(SETTLE_MS);
+  await tick(8);
+  assert.equal(h.runner.get(waiter).snoozedUntil, undefined);
+  assert.match(librarian.status().recent[0].text, /Woke Write the plan/);
+});
+
 test('a look sees what the thread had attached and messages from the phone', async () => {
   const prompts: string[] = [];
   const s = setup({

@@ -85,7 +85,7 @@ public enum WakeWords {
     /// with the rest; nil for one hibernated the ordinary way.
     public static func row(_ thread: ThreadSummary, now: Date) -> (text: String, tip: String)? {
         if let names = waitingNames(thread) {
-            var tip = "Back when \(names) \(stillGoing(thread).count == 1 ? "finishes" : "finish")"
+            var tip = "Back when \(whatFor(thread))"
             if let time = time(thread) { tip += ", or \(RelativeTime.until(time, now: now)) at the latest" }
             return ("Waiting on \(names)", tip + ".")
         }
@@ -99,8 +99,8 @@ public enum WakeWords {
 
     /// The thread's status line ("Hibernating until you talk about woodworking").
     public static func status(_ thread: ThreadSummary, now: Date) -> String? {
-        if let names = waitingNames(thread) {
-            let base = "Hibernating until \(names) \(stillGoing(thread).count == 1 ? "finishes" : "finish")"
+        if waitingNames(thread) != nil {
+            let base = "Hibernating until \(whatFor(thread))"
             if let time = time(thread) { return base + ", or \(RelativeTime.until(time, now: now))" }
             return base
         }
@@ -114,6 +114,17 @@ public enum WakeWords {
     /// The threads it still waits on (end_turn's waitFor).
     static func stillGoing(_ thread: ThreadSummary) -> [WaitingOn] {
         (thread.waitingOn ?? []).filter { !$0.done }
+    }
+
+    /// What it's still waiting for: "\"Convex I/O\" finishes", or with a
+    /// condition, "\"Convex I/O\" reports the saving".
+    static func whatFor(_ thread: ThreadSummary) -> String {
+        let left = stillGoing(thread)
+        if left.allSatisfy({ $0.until == nil }) {
+            let names = left.map { "\"\($0.title)\"" }.joined(separator: left.count == 2 ? " and " : ", ")
+            return names + (left.count == 1 ? " finishes" : " finish")
+        }
+        return left.map { "\"\($0.title)\" " + ($0.until ?? "finishes") }.joined(separator: "; ")
     }
 
     /// "Convex I/O", or "Convex I/O and 1 more", for the row and status line.

@@ -164,6 +164,9 @@ final class WakeWordsTests: XCTestCase {
             WaitingOn(threadId: "b", title: "Convex I/O", done: true), WaitingOn(threadId: "c", title: "Website"), WaitingOn(threadId: "d", title: "Docs"),
         ])
         XCTAssertEqual(WakeWords.row(three, now: now)?.text, "Waiting on \"Website\" and 1 more")
+        // A condition reads on after the name.
+        let until = ThreadSummary(id: "a", title: "Plan", snoozedUntil: limit, waitingOn: [WaitingOn(threadId: "b", title: "Convex I/O", until: "reports the restart saving")])
+        XCTAssertTrue(ThreadRefs.status(until, now: now).hasPrefix("Hibernating until \"Convex I/O\" reports the restart saving, or "))
         let json = #"{"id":"a","title":"x","cwd":"/","accountId":"c","provider":"claude","permissionMode":"full","status":"idle","live":false,"needsYou":false,"createdAt":"2026-10-29T06:00:00Z","updatedAt":"2026-10-29T06:00:00Z","lastActivityAt":"2026-10-29T06:00:00Z","snoozedUntil":"2026-10-30T06:00:00Z","waitingOn":[{"threadId":"b","title":"Convex I/O","done":true},{"threadId":"c","title":"Website"}],"preview":"","lastSeq":1,"lastSeenSeq":1}"#
         let t = try JSONDecoder().decode(ThreadSummary.self, from: Data(json.utf8))
         XCTAssertEqual(t.waitingOn, [WaitingOn(threadId: "b", title: "Convex I/O", done: true), WaitingOn(threadId: "c", title: "Website")])

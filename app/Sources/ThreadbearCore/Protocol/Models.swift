@@ -1387,11 +1387,15 @@ public struct ThreadWoke: Sendable, Hashable, Codable {
 public struct WaitingOn: Sendable, Hashable, Codable {
     public var threadId: String
     public var title: String
+    /// Waits until it has done this ("it reports the I/O saving"), as the
+    /// librarian judges, rather than for any finish.
+    public var until: String?
     public var done: Bool
 
-    public init(threadId: String, title: String, done: Bool = false) {
+    public init(threadId: String, title: String, until: String? = nil, done: Bool = false) {
         self.threadId = threadId
         self.title = title
+        self.until = until
         self.done = done
     }
 
@@ -1399,6 +1403,7 @@ public struct WaitingOn: Sendable, Hashable, Codable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         threadId = try c.decode(String.self, forKey: .threadId)
         title = try c.decode(String.self, forKey: .title)
+        until = (try? c.decodeIfPresent(String.self, forKey: .until)) ?? nil
         done = (try? c.decodeIfPresent(Bool.self, forKey: .done)) ?? false
     }
 
@@ -1406,10 +1411,11 @@ public struct WaitingOn: Sendable, Hashable, Codable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(threadId, forKey: .threadId)
         try c.encode(title, forKey: .title)
+        try c.encodeIfPresent(until, forKey: .until)
         if done { try c.encode(true, forKey: .done) }
     }
 
-    enum CodingKeys: String, CodingKey { case threadId, title, done }
+    enum CodingKeys: String, CodingKey { case threadId, title, until, done }
 }
 
 public struct WakeWhen: Sendable, Hashable, Codable {

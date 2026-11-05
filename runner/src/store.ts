@@ -60,7 +60,9 @@ export type ThreadRecord = {
   // Hibernating until these threads finish (end_turn's waitFor,
   // runner/hibernation.ts): each counts once it has finished (with no new
   // work since), been archived or been deleted.
-  waitingOn?: { threadId: string; title: string; done?: { at: string; how: 'finished' | 'archived' | 'deleted'; reply?: string } }[];
+  // `until`: waits for something in particular, which the librarian
+  // judges from its looks at that thread (met), not for any finish.
+  waitingOn?: { threadId: string; title: string; until?: string; done?: { at: string; how: 'finished' | 'met' | 'archived' | 'deleted'; reply?: string; why?: string } }[];
   // Its last finished turn (nothing needed, nothing left running) and that
   // turn's reply, for threads waiting on it, including on a runner it
   // moves to (runner/hibernation.ts, reconcileWaits). Cleared by any new

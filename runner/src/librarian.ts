@@ -59,6 +59,10 @@ export type LibrarianHost = {
   // (wake-when.ts), and waking one he just did.
   waitingTopics?(): { threadId: string; title: string; topic: string }[];
   wakeForTopic?(threadId: string, inThreadId: string): boolean;
+  // Threads hibernating until this one has done something in particular
+  // (end_turn's waitFor until), and saying one has.
+  waitedOnFor?(threadId: string): { threadId: string; title: string; until: string }[];
+  waitMet?(waiterId: string, targetId: string, why: string): boolean;
 };
 
 // How long after a turn ends before a look, so a quick follow-up turn
@@ -108,7 +112,7 @@ const POCKET_ADDS_KEPT_MS = 30 * 24 * 60 * 60_000;
 const HEADING_OUT = /\b(heading|going|off|popping|driving|walking) (to|out|over|down|into)\b|\bon my way\b|\bI'?m at\b|\bout and about\b/i;
 
 // Which reason wins when a thread is queued twice.
-const RANK: Record<LibrarianReason, number> = { asked: 0, moved: 1, 'new-folder': 2, 'first-turn': 3, 'first-message': 4, 'catch-up': 5, notes: 6 };
+const RANK: Record<LibrarianReason, number> = { asked: 0, 'waited-on': 1, moved: 1, 'new-folder': 2, 'first-turn': 3, 'first-message': 4, 'catch-up': 5, notes: 6 };
 
 // `early`: the look was from the first message alone, so the first turn's
 // end still gets a look of its own.
@@ -147,6 +151,7 @@ type Answer = {
   // New names for projects the thread is in, by id.
   retitle?: unknown;
   wake?: unknown;
+  met?: unknown;
   pocket?: unknown;
   why?: unknown;
 };
@@ -325,6 +330,13 @@ export class Librarian {
     if (!rec) return;
     if (a.kind === 'moved') {
       this.enqueue(rec.id, 'moved', `Moved to ${this.tilde(a.to)}`, now + SETTLE_MS);
+      this.changed();
+      return;
+    }
+    if (a.kind === 'waited-on') {
+      // Soon, and whatever turn it was (its CLI's own too): a thread is
+      // asleep until this one has done something.
+      this.enqueue(rec.id, 'waited-on', 'A thread is waiting on it', now + SETTLE_MS);
       this.changed();
       return;
     }
@@ -590,6 +602,11 @@ export class Librarian {
       lines.push('', 'Hibernating threads waiting for the user to talk about something:');
       for (const w of waiting) lines.push(`- ${w.threadId.slice(0, 8)} "${w.title}": ${w.topic}`);
     }
+    const waiters = this.host.waitedOnFor?.(rec.id) ?? [];
+    if (waiters.length) {
+      lines.push('', 'Hibernating threads waiting until this thread has done something:');
+      for (const w of waiters) lines.push(`- ${w.threadId.slice(0, 8)} "${w.title}": until ${w.until}`);
+    }
     if (cards) {
       lines.push('', ...pocketPromptLines(rec.id, cards));
     } else {
@@ -778,6 +795,19 @@ export class Librarian {
       for (const id of a.wake) {
         const w = typeof id === 'string' && id.length >= 8 ? waiting.find((x) => x.threadId.startsWith(id)) : undefined;
         if (w && !woke.includes(w.title) && this.host.wakeForTopic?.(w.threadId, rec.id)) woke.push(w.title);
+      }
+      if (woke.length) {
+        said.push(`Woke ${woke.join(' and ')}`);
+        bump('updated');
+      }
+    }
+    // Threads waiting until this one had done something, which it has.
+    if (a.met && typeof a.met === 'object' && !Array.isArray(a.met)) {
+      const waiters = this.host.waitedOnFor?.(rec.id) ?? [];
+      const woke: string[] = [];
+      for (const [id, reason] of Object.entries(a.met as Record<string, unknown>)) {
+        const w = id.length >= 8 ? waiters.find((x) => x.threadId.startsWith(id)) : undefined;
+        if (w && !woke.includes(w.title) && this.host.waitMet?.(w.threadId, rec.id, typeof reason === 'string' ? reason.trim() : '')) woke.push(w.title);
       }
       if (woke.length) {
         said.push(`Woke ${woke.join(' and ')}`);
@@ -1251,6 +1281,7 @@ Reply with JSON only, no prose and no code fence:
  "title": null, or a new title when the thread's title no longer says what it's about (see below),
  "retitle": {"<project id>": "the project's new name"} for a project it's in whose name has gone out of date (see below), else {},
  "wake": ["<ids of hibernating threads the user is talking about here>"], or [] (see below),
+ "met": {"<id of a thread waiting until this one has done something>": "what shows it has, in a few words"}, or {} (see below),
  "pocket": null, or {"save": [{"title": "short name", "text": "the card", "place": "optional", "icon": "optional"}], "remove": ["title"]} (see below),
  "why": "one short line"}
 
@@ -1265,6 +1296,8 @@ Keep the thread's title (title null) unless it no longer says what the thread is
 Keep projects' names too, unless one the thread is in has gone out of date: the thing it's about was renamed (a tool renamed from Paws to BrowserBear leaves "Paws" or a vaguer "Chrome browser control" behind), or a project named for what it does now has a name of its own. Give the new name the user would say, keeping the old words in brackets when they still help: "BrowserBear (Chrome browser control)". A better wording of the same name is no reason, and never rename one marked as named by the user. Most looks rename none.
 
 Some hibernating threads are waiting for the user to talk about something again ("woodworking"). Put one in wake when the user's own messages in this thread are about that: they're working on it, planning it or asking about it. A passing mention, or only the agent bringing it up, isn't enough. Most looks wake none.
+
+Some hibernating threads are waiting until this thread has done something ("until it reports the I/O saving"). Put one in met when this thread's messages, the agent's or the user's, show it has: done, measured, reported or decided, not only planned, started or still going. Most looks meet none.
 
 The Pocket is a deck of short cards on the user's phone, to read at a counter when they're out. Keep this thread's cards true: save one with the same title when a fact on it has changed, and remove one when the messages say it's done with (the parcel's posted, the trip's over). Add a card only when the user, in their own messages here, says they're going somewhere or will need something while out, the messages hold the facts they'd want there, and this thread has no card. A plan for someday isn't enough. If the messages say a card was filed and it isn't listed, the user took it out: leave it. Copy addresses, codes and numbers exactly from the messages and never guess one. The text is only the facts, a line each, with no explanation. The place is what you'd search a map for ("post office"), only if the card is for somewhere. The icon is the closest of ${POCKET_ICONS.join(', ')}, left out if none fits. Most looks change nothing: pocket null.
 

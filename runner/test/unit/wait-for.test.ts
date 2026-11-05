@@ -228,3 +228,22 @@ test('waitFor: held while the runner is starting, then checked', () => {
   h.runner.reconcileWaits();
   assert.equal(h.runner.get(waiter).snoozedUntil, undefined);
 });
+
+test('waitFor until: an ordinary finish is not enough; the librarian saying it has happened wakes it', () => {
+  const { h, waiter, target, turn } = setup();
+  turn(waiter, { needs: 'nothing', waitFor: [{ thread: target, until: 'it reports the I/O saving' }] });
+  let t = h.runner.get(waiter);
+  assert.deepEqual(t.waitingOn, [{ threadId: target, title: h.runner.get(target).title, until: 'it reports the I/O saving' }]);
+  assert.match(h.events(waiter).at(-1).text, /^Hibernating until ".+" does this: it reports the I\/O saving, or .+ at the latest\.$/);
+  assert.deepEqual(h.runner.waitedOnFor(target).map((w) => w.threadId), [waiter]);
+  turn(target, { needs: 'nothing' }, 'Restarted; waiting for the numbers.');
+  assert.ok(h.runner.get(waiter).snoozedUntil, 'a finish alone does not count');
+  turn(target, { needs: 'nothing' }, 'Saved 4.1 MB.');
+  assert.equal(h.runner.waitMet(waiter, target, 'it posted the saving'), true);
+  t = h.runner.get(waiter);
+  assert.equal(t.snoozedUntil, undefined);
+  const text = h.events(waiter).filter((e) => e.type === 'user.message').at(-1).text as string;
+  assert.match(text, /has done what you waited for \(it reports the I\/O saving\): it posted the saving/);
+  assert.match(text, /Saved 4\.1 MB\./);
+  assert.equal(h.runner.waitMet(waiter, target, 'again'), false, 'only once');
+});

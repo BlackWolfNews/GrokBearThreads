@@ -20,7 +20,7 @@ import { SAID_MAX } from './wake-when.ts';
 
 export { parseWhen, relativeFuture, relativeTime };
 import { RUNNER_VERSION, expandHome } from './config.ts';
-import { ALREADY_ENDED, ARCHIVE_ADDED, MAX_WAIT_FOR, SNOOZE_ADDED, snoozeFromTool, endTurnDescription, endTurnForm, endTurnMisfit, END_TURN_TOOL, BULLETS_ONLY, ENDED, takenEndTurn, MAX_BYLINE, NARRATION_ONLY, NO_REPLY, needsFromTool, oneReplyAccepted, offersToTakeItBack, oneReplyAlreadyWritten, summaryFromTool, triedFirstNudged, tryFirstNudge, turnReply, type TurnReply } from './needs.ts';
+import { ALREADY_ENDED, ARCHIVE_ADDED, MAX_UNTIL, MAX_WAIT_FOR, SNOOZE_ADDED, snoozeFromTool, endTurnDescription, endTurnForm, endTurnMisfit, END_TURN_TOOL, BULLETS_ONLY, ENDED, takenEndTurn, MAX_BYLINE, NARRATION_ONLY, NO_REPLY, needsFromTool, oneReplyAccepted, offersToTakeItBack, oneReplyAlreadyWritten, summaryFromTool, triedFirstNudged, tryFirstNudge, turnReply, type TurnReply } from './needs.ts';
 import { asksForAppRestart, type AppRestarts } from './app-restarts.ts';
 import { PANEL_PLACES } from './panel-requests.ts';
 import { nudgedThisTurn, signInNudge, turnSignIns, uncovered, type ConnectorService } from './connectors.ts';
@@ -746,18 +746,18 @@ export function buildThreadbearTools(
   const checkWaitFor = async (waitFor: unknown, needs: string): Promise<void> => {
     if (!Array.isArray(waitFor) || !waitFor.length) return;
     if (needs !== 'nothing') throw new Error('Not ended: waitFor hibernates this thread, so it only goes with needs "nothing". Leave it out while the user has something to do.');
-    for (const id of waitFor) {
-      const full = await resolveOther(String(id));
+    for (const w of waitFor) {
+      const full = await resolveOther(typeof w === 'string' ? w : String(w?.thread ?? ''));
       if (full === selfId) throw new Error("Not ended: waitFor can't name this thread.");
       if ((await control.get(full)).archivedAt) throw new Error(`Not ended: ${full.slice(0, 8)} is archived, so it won't finish. Leave it out of waitFor.`);
     }
   };
 
   const waitForArg = z
-    .array(z.string())
+    .array(z.union([z.string(), z.object({ thread: z.string(), until: z.string().max(MAX_UNTIL) })]))
     .max(MAX_WAIT_FOR)
     .optional()
-    .describe('Ids of threads the rest of this work waits on: it hibernates until they all finish, then wakes with their replies; snooze is then the latest (1 day if left out). With needs "nothing".');
+    .describe('Threads the rest of this work waits on, as ids or { thread, until: "it reports the I/O saving" }: hibernates until each finishes (or has done its until), then wakes with their replies; snooze is the latest (1 day if left out). Needs "nothing".');
 
   // end_turn with one reply (docs/protocol.md, "One reply"): the card and
   // a headline; the reply is the message the agent writes next. Nothing to

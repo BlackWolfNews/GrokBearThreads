@@ -176,6 +176,9 @@ export type RunnerUpdates = {
 // and a folder move.
 export type ThreadActivity =
   | { kind: 'turn.start'; threadId: string }
+  // Any completed turn (its CLI's own too) in a thread another is waiting
+  // on for something in particular, for the librarian to judge (met).
+  | { kind: 'waited-on'; threadId: string }
   | { kind: 'turn.end'; threadId: string; outcome: TurnOutcome; edited: string[]; workedIn?: string[] }
   | { kind: 'moved'; threadId: string; from: string; to: string };
 
@@ -2040,6 +2043,7 @@ export class Runner {
       !rt.taskEndedInTurn && !rt.finished.length;
     this.endTurn(st, ev.seq, outcome === 'failed' ? 'error' : 'idle', outcome, limitHit, netLost);
     if (finished) this.markFinished(st, turn.lastText);
+    if (outcome === 'completed' && this.waitedOnFor(rec.id).length) this.tellActivity({ kind: 'waited-on', threadId: rec.id });
     if (archive && !rt.turn && !rec.archivedAt && !this.stopping) {
       this.emit(st, { type: 'system.note', text: 'Archived, as the agent was asked to once it had finished.' });
       this.update({ threadId: rec.id, archived: true, archivedBy: 'agent' });
@@ -2865,7 +2869,7 @@ export class Runner {
     if (rec.snoozedUntil) s.snoozedUntil = rec.snoozedUntil;
     if (rec.snoozedUntilRestart) s.snoozedUntilRestart = true;
     if (rec.wakeWhen && rec.snoozedUntil) s.wakeWhen = { ...rec.wakeWhen };
-    if (rec.waitingOn && rec.snoozedUntil) s.waitingOn = rec.waitingOn.map((w) => ({ threadId: w.threadId, title: w.title, ...(w.done ? { done: true as const } : {}) }));
+    if (rec.waitingOn && rec.snoozedUntil) s.waitingOn = rec.waitingOn.map((w) => ({ threadId: w.threadId, title: w.title, ...(w.until ? { until: w.until } : {}), ...(w.done ? { done: true as const } : {}) }));
     if (rec.woke && rec.forceUnread) s.woke = { ...rec.woke };
     if (rec.archivedAt) {
       s.archivedAt = rec.archivedAt;

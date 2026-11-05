@@ -363,7 +363,9 @@ works, or words like "until the phone arrives", read the same way as Wake
 when…. It won't put itself away while it's waiting on you. A thread
 whose next step waits on other threads hibernates by itself until they
 finish, then wakes with what they said and carries on; its row says
-Waiting on and which. One waiting on a job that will message it does the
+Waiting on and which. It can also say what it's waiting for a thread to
+do ("until it reports the I/O saving"), and then the librarian reads
+that thread after each of its turns and wakes it once it has. One waiting on a job that will message it does the
 same until the message comes. Either way it has a time it comes back
 anyway, a day unless it says otherwise.
 

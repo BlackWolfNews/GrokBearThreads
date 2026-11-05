@@ -153,12 +153,24 @@ export function snoozeFromTool(input: unknown): string | undefined {
 // end_turn's waitFor: the threads this one hibernates until they finish
 // (runner/hibernation.ts, waitOn). Like snooze, only with needs "nothing".
 export const MAX_WAIT_FOR = 5;
-export function waitForFromTool(input: unknown): string[] | undefined {
+// Each is a thread id, or { thread, until } to wait until it has done
+// something in particular, which the librarian judges (librarian.ts, met).
+export const MAX_UNTIL = 200;
+export type WaitFor = { id: string; until?: string };
+export function waitForFromTool(input: unknown): WaitFor[] | undefined {
   if (!input || typeof input !== 'object') return undefined;
   const w = (input as Record<string, unknown>).waitFor;
   if (!Array.isArray(w)) return undefined;
-  const ids = [...new Set(w.filter((x): x is string => typeof x === 'string').map((x) => x.trim()).filter(Boolean))].slice(0, MAX_WAIT_FOR);
-  return ids.length && needsFromTool(input)?.needs === 'nothing' ? ids : undefined;
+  const out: WaitFor[] = [];
+  for (const x of w) {
+    const o = x && typeof x === 'object' ? (x as Record<string, unknown>) : undefined;
+    const id = (typeof x === 'string' ? x : typeof o?.thread === 'string' ? o.thread : '').trim();
+    const until = typeof o?.until === 'string' ? o.until.replace(/\s+/g, ' ').trim().slice(0, MAX_UNTIL) : '';
+    if (!id || out.some((y) => y.id === id)) continue;
+    out.push(until ? { id, until } : { id });
+    if (out.length === MAX_WAIT_FOR) break;
+  }
+  return out.length && needsFromTool(input)?.needs === 'nothing' ? out : undefined;
 }
 
 // end_turn's byline: a few words for the row of a thread Mike didn't start.
