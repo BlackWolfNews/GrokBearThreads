@@ -130,11 +130,14 @@ final class ProjectPictures {
         loading.insert(url)
         Task {
             defer { loading.remove(url) }
-            guard let (data, _) = try? await URLSession.shared.data(from: url), let image = UIImage(data: data) else {
+            // Capped and downsampled like a reply's pictures: the address comes
+            // from the mirror, and an icon is never shown bigger than a tile.
+            guard let data = try? await CappedDownload.data(from: url, session: .shared, limit: 5 * 1024 * 1024),
+                  let source = try? PictureSource.open(data), let cg = PictureSource.thumbnail(source, maxSide: 512) else {
                 failed.insert(url)
                 return
             }
-            images[url] = image
+            images[url] = UIImage(cgImage: cg)
         }
         return nil
     }

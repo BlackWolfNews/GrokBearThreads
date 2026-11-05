@@ -61,40 +61,44 @@ actor PictureLoader {
     private let decoded = NSCache<NSString, LoadedPicture>()
 
     /// The largest side's pixels decoded: a phone's column doesn't need all
-    /// of a big PNG in memory. Nil for the whole picture.
+    /// of a big PNG in memory. Nil for full screen, which is still held to
+    /// PictureLimits.maxFullScreenSide.
     func picture(_ url: URL, maxPixels: Int?) async throws -> LoadedPicture {
         let key = "\(maxPixels ?? 0) \(url.absoluteString)" as NSString
         if let picture = decoded.object(forKey: key) { return picture }
-        let (data, _) = try await session.data(from: url)
-        let picture = try await decode(data, url: url, maxPixels: maxPixels)
+        // The address is whatever an agent wrote, so the server is anyone's:
+        // read with a byte cap, never the whole response (Daybreak finding 8).
+        let data = try await CappedDownload.data(from: url, session: session)
+        let picture = try await decode(data, url: url, maxPixels: maxPixels ?? PictureLimits.maxFullScreenSide)
         decoded.setObject(picture, forKey: key)
         return picture
     }
 
-    private func decode(_ data: Data, url: URL, maxPixels: Int?) async throws -> LoadedPicture {
-        // An MP4 isn't an image source, or is one with no frames.
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil), CGImageSourceGetCount(source) > 0 else {
+    private func decode(_ data: Data, url: URL, maxPixels: Int) async throws -> LoadedPicture {
+        // An MP4 isn't an image source, or is one with no frames. One whose
+        // header says it's too many pixels throws here, before any decoding:
+        // ImageIO can decode the whole of some formats on the way to a thumbnail.
+        guard let source = try PictureSource.open(data) else {
             return try await decodeVideo(data, url: url, maxPixels: maxPixels)
         }
-        var options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceShouldCacheImmediately: true]
-        if let maxPixels { options[kCGImageSourceThumbnailMaxPixelSize] = maxPixels }
-        guard let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { throw URLError(.cannotDecodeContentData) }
+        guard let cg = PictureSource.thumbnail(source, maxSide: maxPixels) else { throw URLError(.cannotDecodeContentData) }
         let image = UIImage(cgImage: cg)
         guard CGImageSourceGetCount(source) > 1 else { return LoadedPicture(image: image) }
         let ext = (CGImageSourceGetType(source) as String?).flatMap { UTType($0)?.preferredFilenameExtension } ?? "gif"
         return LoadedPicture(image: image, motion: .frames(data), file: try? saved(data, url: url, ext: ext))
     }
 
-    /// The whole file comes down first, as the runner never sends one over
-    /// 10 MB, which also means it plays from the cache with no signal. AVPlayer
-    /// only plays from a URL with the right extension, so it goes in a file.
-    private func decodeVideo(_ data: Data, url: URL, maxPixels: Int?) async throws -> LoadedPicture {
+    /// The whole file comes down first (the runner never sends one over 10 MB,
+    /// and CappedDownload stops anything over PictureLimits.maxBytes), which
+    /// also means it plays from the cache with no signal. AVPlayer only plays
+    /// from a URL with the right extension, so it goes in a file.
+    private func decodeVideo(_ data: Data, url: URL, maxPixels: Int) async throws -> LoadedPicture {
         guard data.count > 12, data[4..<8] == Data("ftyp".utf8) else { throw URLError(.cannotDecodeContentData) }
         let quickTime = data[8..<12] == Data("qt  ".utf8)
         let file = try saved(data, url: url, ext: quickTime ? "mov" : "mp4")
         let generator = AVAssetImageGenerator(asset: AVURLAsset(url: file))
         generator.appliesPreferredTrackTransform = true
-        if let maxPixels { generator.maximumSize = CGSize(width: maxPixels, height: maxPixels) }
+        generator.maximumSize = CGSize(width: maxPixels, height: maxPixels)
         let poster = try await generator.image(at: .zero).image
         return LoadedPicture(image: UIImage(cgImage: poster), motion: .video, file: file)
     }
