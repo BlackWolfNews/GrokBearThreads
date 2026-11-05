@@ -85,22 +85,37 @@ if (tagline) {
 }
 
 
-// The hero's slideshow: a new window every few seconds, the dots to jump about, and it holds
-// still while the pointer or focus is on it. With reduced motion it doesn't move on by itself.
+// The hero's slideshow: each clip plays through, then the next one comes in. The dots jump
+// about, and the current dot fills for as long as its clip runs. It holds still while the pointer
+// or focus is on it, and while it's off screen or the tab's hidden. With reduced motion nothing
+// plays by itself: the dots change which clip's first frame shows.
 const showcase = document.querySelector(".showcase");
 if (showcase) {
-  const SLIDE_MS = 6000;
-  showcase.style.setProperty("--slide-ms", `${SLIDE_MS}ms`);
-  const slides = [...showcase.querySelectorAll(".slide")];
+  const clips = [...showcase.querySelectorAll(".slide")];
   const copies = [...showcase.querySelectorAll(".slide-copy")];
   const dots = [...showcase.querySelectorAll(".dot")];
   const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (still) showcase.classList.add("still");
   let current = 0;
-  let timer = 0;
+  let inView = true;
+  let fallback = 0;
+  const held = () => still || showcase.classList.contains("paused") || !inView || document.hidden;
+  // The dot fills over the clip's length, which is only known once its metadata has loaded.
+  const fillFor = (clip) => showcase.style.setProperty("--slide-ms", `${Math.round((clip.duration || 8) * 1000)}ms`);
+  const play = () => {
+    const clip = clips[current];
+    clearTimeout(fallback);
+    showcase.classList.toggle("held", held());
+    if (held()) return clip.pause();
+    clip.play().catch(() => {
+      // Autoplay refused (Low Power Mode on an iPhone, say): move on by the clock instead.
+      fallback = setTimeout(() => show(current + 1), (clip.duration || 8) * 1000);
+    });
+  };
   const show = (index) => {
-    current = (index + slides.length) % slides.length;
-    for (const [i, list] of [slides, copies, dots].entries()) {
+    clips[current].pause();
+    current = (index + clips.length) % clips.length;
+    for (const [i, list] of [clips, copies, dots].entries()) {
       list.forEach((el, j) => {
         el.classList.toggle("on", j === current);
         // aria-hidden="" doesn't hide anything, so set "true" or take it off.
@@ -109,30 +124,34 @@ if (showcase) {
         else el.removeAttribute(name);
       });
     }
-    // The next window's picture starts loading now, so it's ready when its turn comes.
-    const next = slides[(current + 1) % slides.length];
-    if (next.loading === "lazy") next.loading = "eager";
-    // Restart the dot's fill: drop the class, force a layout, put it back.
+    const clip = clips[current];
+    clip.preload = "auto";
+    clip.currentTime = 0;
+    // The next clip loads while this one plays, so it's ready when its turn comes.
+    clips[(current + 1) % clips.length].preload = "auto";
+    fillFor(clip);
+    if (!clip.duration) clip.addEventListener("loadedmetadata", () => clip === clips[current] && restartFill(), { once: true });
+    restartFill();
+    play();
+  };
+  // Restarts the current dot's fill: drop the class, force a layout, put it back.
+  const restartFill = () => {
+    fillFor(clips[current]);
     const dot = dots[current];
     dot.classList.remove("on");
     void dot.offsetWidth;
     dot.classList.add("on");
-    schedule();
   };
-  const schedule = () => {
-    clearTimeout(timer);
-    if (!still && !showcase.classList.contains("paused")) timer = setTimeout(() => show(current + 1), SLIDE_MS);
-  };
+  clips.forEach((clip, i) => clip.addEventListener("ended", () => i === current && show(current + 1)));
   dots.forEach((dot, i) => dot.addEventListener("click", () => show(i)));
-  const pause = (on) => {
+  const hold = (on) => {
     showcase.classList.toggle("paused", on);
-    if (!on) show(current);
-    else clearTimeout(timer);
+    play();
   };
-  showcase.addEventListener("pointerenter", () => pause(true));
-  showcase.addEventListener("pointerleave", () => pause(false));
-  showcase.addEventListener("focusin", () => pause(true));
-  showcase.addEventListener("focusout", () => pause(false));
+  showcase.addEventListener("pointerenter", (e) => e.pointerType === "mouse" && hold(true));
+  showcase.addEventListener("pointerleave", (e) => e.pointerType === "mouse" && hold(false));
+  showcase.addEventListener("focusin", () => hold(true));
+  showcase.addEventListener("focusout", () => hold(false));
   // Swipe on a phone.
   let startX = null;
   showcase.addEventListener("touchstart", (e) => { startX = e.touches[0].clientX; }, { passive: true });
@@ -142,8 +161,11 @@ if (showcase) {
     startX = null;
     if (Math.abs(dx) > 40) show(current + (dx < 0 ? 1 : -1));
   });
-  document.addEventListener("visibilitychange", () => (document.hidden ? clearTimeout(timer) : schedule()));
-  schedule();
+  if ("IntersectionObserver" in window) {
+    new IntersectionObserver(([entry]) => { inView = entry.isIntersecting; play(); }, { threshold: 0.25 }).observe(showcase);
+  }
+  document.addEventListener("visibilitychange", play);
+  show(0);
 }
 
 // The install prompt: the button copies it, then says where it goes. If the clipboard says no

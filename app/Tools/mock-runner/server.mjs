@@ -820,6 +820,11 @@ async function dispatch(client, method, p) {
       if (waiter) {
         t.approvalWaiters.delete(p.approvalId);
         waiter(p);
+      } else if (p.decision === 'answered' && scriptedTurns().some((x) => x.answer && new RegExp(x.answer, 'i').test(Object.values(p.answers ?? {}).join(' ')))) {
+        // A made-up turn that carries on from the answer (MOCK_SCRIPTED_TURNS, `answer`).
+        const turn = scriptedTurns().find((x) => x.answer && new RegExp(x.answer, 'i').test(Object.values(p.answers ?? {}).join(' ')));
+        setStatus(t.summary.id, 'running', false);
+        playScripted(t.summary.id, 'turn_resolved', Date.now(), turn, () => false);
       } else {
         // A fixture's approval with no fake turn behind it: finish the turn.
         const text = p.decision === 'deny' ? 'OK, I left it alone.' : p.decision === 'answered' ? `Going with ${Object.values(p.answers ?? {}).join(', ') || 'that'}.` : 'Done.';
@@ -1292,6 +1297,10 @@ async function fakeTurn(threadId, text, images, turnId = 'turn_' + crypto.random
     setStatus(threadId, 'error');
     return;
   }
+  // A made-up turn from MOCK_SCRIPTED_TURNS, for recording the site's clips (site/scripts/clips.mjs).
+  const scripted = scriptedTurns().find((s) => s.match && new RegExp(s.match, 'i').test(text));
+  if (scripted) return playScripted(threadId, turnId, started, scripted, () => interrupted);
+
   const thinkId = 'r_' + crypto.randomBytes(4).toString('hex');
   persist(threadId, { type: 'reasoning', itemId: thinkId, text: 'Checking what the message asks for before answering.' }, turnId);
 
@@ -1364,6 +1373,46 @@ const DEMO_ASKS = [
   { action: 'Close issues to collaborators too, with private vulnerability reporting on?', why: 'Turns off public issues on all 41 repos. People could still report security problems privately.', options: ['Yes, close them', 'Leave issues open'], suggested: 0 },
   { action: 'Sign in to GitHub in Chrome so I can check the settings took', where: 'github.com › Settings', why: "Then I'll tick off each repo in [the audit](~/dev/me/misc/security-audit/REPORT.md).", options: ['Done', 'Can you do it?'], links: [{ title: 'Open GitHub sign-in', url: 'https://github.com/login' }, { title: 'See the audit', url: '~/dev/me/misc/security-audit/REPORT.md' }] },
 ];
+
+/**
+ * MOCK_SCRIPTED_TURNS names a JSON file of made-up turns, each
+ * { match (a regex for the message) or answer (one for a question's answer), thinking, tools: [{ name, kind, title, input, result, ms }],
+ *   reply, chunk, chunkMs, end ({ needs, asks } or { needs, next }) }, played at a believable speed
+ * instead of the canned answer. For recording the site's clips; nothing else sets it.
+ */
+let scriptedCache;
+function scriptedTurns() {
+  if (scriptedCache) return scriptedCache;
+  const file = process.env.MOCK_SCRIPTED_TURNS;
+  scriptedCache = file ? JSON.parse(fs.readFileSync(file, 'utf8')) : [];
+  return scriptedCache;
+}
+
+async function playScripted(threadId, turnId, started, turn, interrupted) {
+  const t = threads.get(threadId);
+  await sleep(turn.firstMs ?? 500);
+  if (turn.thinking) persist(threadId, { type: 'reasoning', itemId: 'r_' + crypto.randomBytes(4).toString('hex'), text: turn.thinking }, turnId);
+  for (const tool of turn.tools ?? []) {
+    if (interrupted()) break;
+    const toolId = 'c_' + crypto.randomBytes(4).toString('hex');
+    persist(threadId, { type: 'tool.call', itemId: toolId, name: tool.name ?? 'Bash', kind: tool.kind ?? 'command', title: tool.title, input: tool.input ?? { command: tool.title } }, turnId);
+    await sleep(tool.ms ?? 700);
+    persist(threadId, { type: 'tool.result', itemId: toolId, ok: tool.ok ?? true, text: tool.result ?? '', truncated: false, images: [] }, turnId);
+  }
+  const itemId = 'm_' + crypto.randomBytes(4).toString('hex');
+  t.inProgress.set(itemId, { type: 'assistant.text', text: '' });
+  const size = turn.chunk ?? 5;
+  for (let i = 0; i < turn.reply.length && !interrupted(); i += size) {
+    const chunk = turn.reply.slice(i, i + size);
+    t.inProgress.get(itemId).text += chunk;
+    transient(threadId, { type: 'assistant.text.delta', itemId, text: chunk }, turnId);
+    await sleep(turn.chunkMs ?? 30);
+  }
+  const finalText = t.inProgress.get(itemId).text;
+  t.inProgress.delete(itemId);
+  persist(threadId, { type: 'assistant.text', itemId, text: finalText }, turnId);
+  finishTurn(threadId, turnId, started, interrupted() ? 'interrupted' : 'completed', turn.end);
+}
 
 function finishTurn(threadId, turnId, started, outcome, said) {
   const t = threads.get(threadId);

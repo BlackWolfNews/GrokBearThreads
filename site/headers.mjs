@@ -3,7 +3,8 @@
 
 /**
  * The page only loads its own files: one script (src/site.js, the menu and the scroll reveals),
- * its stylesheet, the fonts and the images. Cloudflare's Web Analytics beacon is allowed in case
+ * its stylesheet, the fonts, the images and the hero's clips (media-src: without it,
+ * default-src 'none' blocks every <video>). Cloudflare's Web Analytics beacon is allowed in case
  * Cloudflare injects it, like it can on mikecann.app. JSON-LD blocks aren't run as scripts.
  */
 const CSP = [
@@ -13,6 +14,7 @@ const CSP = [
   "font-src 'self'",
   "style-src 'self'",
   "img-src 'self'",
+  "media-src 'self'",
   "manifest-src 'self'",
   "base-uri 'none'",
   "form-action 'none'",

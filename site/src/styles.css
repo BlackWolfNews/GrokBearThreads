@@ -265,13 +265,20 @@ a.appstore:active { transform: scale(.98); }
 .mac { display: block; width: 100%; height: auto; filter: drop-shadow(0 24px 40px rgba(40, 30, 15, .16)) drop-shadow(0 2px 6px rgba(40, 30, 15, .08)); }
 .hero-media .phone { position: absolute; right: 0; bottom: 0; --w: 220px; }
 
-/* The hero's slideshow (scripts/build.mjs's SLIDES, site.js moves it). Every window sits in the
+/* The hero's slideshow (scripts/build.mjs's SLIDES, site.js plays it). Every clip sits in the
    same grid cell, so the stage is one window tall and they crossfade over each other; the title
    and line under it do the same, rising a little as they come in. Without JavaScript only the
-   first shows. */
+   first shows, as its poster. */
 .hero-media:has(.showcase) { padding: 0; max-width: 1100px; }
 .showcase { display: flex; flex-direction: column; align-items: center; }
 .slides, .slide-copies { display: grid; width: 100%; }
+/* The clips are the window alone, square cornered with black where its round corners were, so
+   the page rounds them again: 12 px in the 1600 px recording is 0.75% of the width (cqw). */
+.slides { container-type: inline-size; }
+video.slide {
+  display: block; width: 100%; height: auto; aspect-ratio: 1600 / 1058; border-radius: .75cqw; background: #1e1e1e;
+  box-shadow: 0 24px 40px rgba(40, 30, 15, .16), 0 2px 6px rgba(40, 30, 15, .08), 0 0 0 1px rgba(0, 0, 0, .35);
+}
 .slides > *, .slide-copies > * { grid-area: 1 / 1; }
 .slide { opacity: 0; transform: scale(.985); transition: opacity 700ms var(--ease), transform 900ms var(--ease); }
 .slide.on { opacity: 1; transform: none; }
@@ -290,8 +297,11 @@ a.appstore:active { transform: scale(.98); }
 .dot:hover span { background: var(--ink-faint); }
 .dot.on span { width: 32px; background: var(--line); }
 .dot span::after { content: ""; position: absolute; inset: 0; background: var(--ink); transform: scaleX(0); transform-origin: left; }
-.dot.on span::after { transform: scaleX(1); transition: transform var(--slide-ms, 6000ms) linear; }
-.showcase.paused .dot.on span::after, .showcase.still .dot.on span::after { transform: scaleX(1); transition: none; }
+/* An animation rather than a transition, so it can stop where it is while the clip's held. */
+.dot.on span::after { animation: dot-fill var(--slide-ms, 8000ms) linear forwards; }
+.showcase.held .dot.on span::after { animation-play-state: paused; }
+.showcase.still .dot.on span::after { animation: none; transform: scaleX(1); }
+@keyframes dot-fill { to { transform: scaleX(1); } }
 @media (prefers-reduced-motion: reduce) {
   .slide, .slide-copy { transition: opacity 1ms; transform: none; }
 }

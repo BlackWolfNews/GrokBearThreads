@@ -1,0 +1,68 @@
+[
+  {
+    "match": "Advanced tab",
+    "thinking": "Find every place the tab's name shows up, rename it, then run the settings tests.",
+    "tools": [
+      {
+        "title": "rg -n \"Advanced\" app/Sources",
+        "result": "SettingsView.swift:41:  Tab(\"Advanced\")\nSettingsView.swift:88:  // Advanced settings",
+        "ms": 700
+      },
+      {
+        "name": "Read",
+        "kind": "read",
+        "title": "Read SettingsView.swift",
+        "input": {
+          "file_path": "/Users/mike/dev/threadbear/app/Sources/SettingsView.swift"
+        },
+        "ms": 500
+      },
+      {
+        "title": "swift test --filter Settings",
+        "result": "Executed 14 tests, with 0 failures",
+        "ms": 900
+      }
+    ],
+    "reply": "Done. The tab's called **Runner** now, and nothing else in the app still says Advanced. The settings tests pass, all 14 of them.",
+    "chunk": 4,
+    "chunkMs": 28
+  },
+  {
+    "match": "Tail the Convex logs",
+    "thinking": "Pull the last hour of logs and look for errors.",
+    "tools": [
+      {
+        "title": "npx convex logs --history 200",
+        "result": "2 errors in the last hour\nwalks:record  Uncaught Error: walk 7f3a not found",
+        "ms": 900
+      }
+    ],
+    "reply": "Two errors in the last hour, both from **walks:record**: it gets called for a walk that was deleted a moment before. Want me to make it skip a missing walk rather than throw?",
+    "chunk": 4,
+    "chunkMs": 26
+  },
+  {
+    "answer": "green",
+    "firstMs": 400,
+    "thinking": "Green, then: use the system green so it works in dark mode too.",
+    "tools": [
+      {
+        "name": "Read",
+        "kind": "read",
+        "title": "Read Toolbar.swift",
+        "input": {
+          "file_path": "/Users/mike/dev/walkies/Sources/Viewer/Toolbar.swift"
+        },
+        "ms": 500
+      },
+      {
+        "title": "xcodebuild -scheme Walkies build",
+        "result": "** BUILD SUCCEEDED **",
+        "ms": 900
+      }
+    ],
+    "reply": "Green it is. The Share button uses the system green now, so it stands out from the grey buttons beside it and still reads well in dark mode.",
+    "chunk": 4,
+    "chunkMs": 28
+  }
+]

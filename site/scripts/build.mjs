@@ -72,43 +72,44 @@ const PHONE = {
 };
 
 /**
- * The hero's slideshow: one dark mode window per feature, with its title and a line under it,
- * and a dot for each (site.js moves it on every few seconds). Shots from scripts/images.mjs's
- * HERO, the mock runner's demo threads. Every line here should stay true of the app.
+ * The hero's slideshow: a short clip of the app per feature, played one after another, with its
+ * title and a line under it and a dot for each (site.js). The clips are the demo app on the mock
+ * runner's made-up threads, in dark mode, recorded by scripts/clips.mjs into public/clips/, each
+ * with its first frame as a poster. Every line here should stay true of the app and its clip.
  */
 const SLIDES = [
-  ["hero-threads", "Claude Code and Codex, side by side",
+  ["threads", "Claude Code and Codex, side by side",
     "Every thread in one inbox, on the logins you already pay for. Approvals, pictures and the files it changed show up right in the thread.",
-    "The Threadbear Mac app in dark mode: the inbox on the left, a thread about making uploads resume after a crash in the middle with a card asking to run rm -rf .build DerivedData, and the thread's highlights on the right."],
-  ["hero-patches", "Ask for a button and get one",
+    "The Threadbear Mac app in dark mode, going from a Claude thread to a Codex thread, then asking a thread to rename a settings tab while its reply streams in."],
+  ["patches", "Ask for a button and get one",
     "Your agent writes a patch and a few seconds later there's a Deploy button over the message box, or a panel of your own beside the thread.",
-    "A Threadbear thread while the agent is still writing, with Typecheck, Open logs and Deploy to prod buttons over the message box, and a panel on the right with the project's live site, admin page, App Store link and task board."],
-  ["hero-previews", "See what it made without leaving the thread",
+    "A Threadbear thread where the Open logs button above the message box asks the agent to check the Convex logs, then the Patches panel lists the patches the buttons came from."],
+  ["previews", "See what it made without leaving the thread",
     "Pages, mockups and docs your agent makes open in the side pane, and every file, link and commit it touched is kept in Highlights.",
-    "A Threadbear thread with three sub-agents rebuilding landing pages, and a preview of one of the new pages open in the side pane."],
-  ["hero-questions", "Answer it with a click",
+    "A Threadbear thread opening the landing page mockups its sub-agents made, the home page then pricing, in the pane beside it."],
+  ["questions", "Answer it with a click",
     "When an agent needs you, it asks with the choices as buttons, so answering is usually one click.",
-    "A Threadbear thread asking which colour the new Share button should be, with Accent blue, Green and Plain grey to pick from and a box for something else."],
-  ["hero-projects", "Threads sorted into projects",
+    "A Threadbear thread asking which colour the new Share button should be. Green gets picked and the agent carries on with it."],
+  ["projects", "Threads sorted into projects",
     "Threads find their way into the project they're about, and each project keeps its goals and notes, so the next thread picks up where the last one left off.",
-    "Threadbear's projects view: threads grouped under Walkies, Photo sync and Threadbear, with the ones not in a project below."],
-  ["hero-logins", "Every login you've got",
+    "Threadbear's projects view, with threads grouped under Walkies, Threadbear and Photo sync, narrowed to Walkies by typing in the search."],
+  ["logins", "Every login you've got",
     "Pick the Claude or Codex login for each thread and see how much of its limits are left, or put them in a pool and let it pick the one with the most room.",
-    "The account menu in Threadbear, listing four Claude logins and a Codex one, each with how much of its five hour and weekly limits is left."],
+    "Threadbear's model picker, listing pools of logins with how much room each has left, then the thread moved to Opus 5.5 on a login with 12% left."],
 ];
 
 function showcase() {
-  const shots = SLIDES.map(([name, , , alt], i) => {
-    const loading = i === 0 ? 'loading="eager" fetchpriority="high"' : 'loading="lazy"';
-    return `          <img class="mac slide${i === 0 ? " on" : ""}" src="/screens/${name}.webp" alt="${escape(alt)}" width="2200" height="1454" ${loading} decoding="async"${i === 0 ? "" : ' aria-hidden="true"'}>`;
-  });
+  // Muted and playsinline, so phones play them in place without asking. Only the first loads
+  // straight away; site.js loads each next one while the one before plays.
+  const clips = SLIDES.map(([name, , , alt], i) =>
+    `          <video class="slide${i === 0 ? " on" : ""}" src="/clips/${name}.mp4" poster="/clips/${name}.webp" width="1600" height="1058" muted playsinline preload="${i === 0 ? "auto" : "none"}" aria-label="${escape(alt)}"${i === 0 ? "" : ' aria-hidden="true"'}></video>`);
   const copy = SLIDES.map(([, title, text], i) =>
     `          <div class="slide-copy${i === 0 ? " on" : ""}"${i === 0 ? "" : ' aria-hidden="true"'}><h2>${title}</h2><p>${text}</p></div>`);
   const dots = SLIDES.map(([, title], i) =>
     `          <button type="button" class="dot${i === 0 ? " on" : ""}" aria-label="${escape(title)}"${i === 0 ? ' aria-current="true"' : ""}><span></span></button>`);
   return `<div class="showcase" aria-roledescription="carousel" aria-label="What Threadbear does">
         <div class="slides">
-${shots.join("\n")}
+${clips.join("\n")}
         </div>
         <div class="slide-copies" aria-live="polite">
 ${copy.join("\n")}

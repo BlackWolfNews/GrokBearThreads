@@ -12,13 +12,24 @@ const dist = fileURLToPath(new URL("../dist/", import.meta.url));
 const port = Number(process.env.PORT ?? 5176);
 const types = { ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8",
   ".png": "image/png", ".jpg": "image/jpeg", ".webp": "image/webp", ".svg": "image/svg+xml", ".xml": "application/xml",
-  ".txt": "text/plain; charset=utf-8", ".webmanifest": "application/manifest+json" };
+  ".txt": "text/plain; charset=utf-8", ".webmanifest": "application/manifest+json", ".mp4": "video/mp4" };
 
 const isFile = (file) => file.startsWith(dist) && existsSync(file) && statSync(file).isFile();
 
 function send(req, res, status, file, pathname) {
   const type = types[extname(file)] ?? "application/octet-stream";
-  res.writeHead(status, { "Content-Type": type, ...headersFor(pathname, type) });
+  const size = statSync(file).size;
+  // Byte ranges, as Cloudflare serves them: Safari won't play a video without them.
+  const range = status === 200 && /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? "");
+  if (range) {
+    const start = range[1] ? Number(range[1]) : size - Number(range[2]);
+    const end = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+    res.writeHead(206, { "Content-Type": type, "Content-Range": `bytes ${start}-${end}/${size}`, "Content-Length": end - start + 1,
+      "Accept-Ranges": "bytes", ...headersFor(pathname, type) });
+    if (req.method === "HEAD") return res.end();
+    return createReadStream(file, { start, end }).pipe(res);
+  }
+  res.writeHead(status, { "Content-Type": type, "Content-Length": size, "Accept-Ranges": "bytes", ...headersFor(pathname, type) });
   if (req.method === "HEAD") return res.end();
   createReadStream(file).pipe(res);
 }
