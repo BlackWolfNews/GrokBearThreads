@@ -362,14 +362,25 @@ export function ProjectsList({ token, selected }: { token: string; selected?: st
   );
 }
 
+// How many of a project's threads its page asks for first, and how many more
+// each "Show more" adds (phone:projectThreads, newest first).
+const PROJECT_THREADS_FIRST = 50;
+const PROJECT_THREADS_MORE = 100;
+
 export function ProjectPage({ token, id }: { token: string; id: string }) {
   const rows = useLiveQuery(api.phone.projects, { token });
-  const inbox = useLiveQuery(api.phone.threads, { token, view: 'inbox' });
-  const asleep = useLiveQuery(api.phone.threads, { token, view: 'hibernating' });
+  const [limit, setLimit] = useState(PROJECT_THREADS_FIRST);
+  // Archived threads too, so the list matches the "22 threads" in the
+  // sidebar rather than only the ones still in the inbox.
+  const threads = useLiveQuery(api.phone.projectThreads, { token, projectId: id, limit });
+  // A new project starts from the first page again.
+  useEffect(() => setLimit(PROJECT_THREADS_FIRST), [id]);
   if (!rows) return <div className="pad muted">Loading…</div>;
   const p = rows.find((x) => x.id === id);
   if (!p) return <PageGone view="projects" what="That project has gone." />;
-  const threads = [...(inbox ?? []), ...(asleep ?? [])].filter((t) => t.projects?.some((x) => x.id === id)).sort((a, b) => b.lastActivityMs - a.lastActivityMs);
+  const live = (threads ?? []).filter((t) => t.view !== 'den');
+  const archived = (threads ?? []).filter((t) => t.view === 'den');
+  const more = (threads?.length ?? 0) >= limit;
   const block = (title: string, text: string) =>
     text.trim() ? (
       <section className="block">
@@ -384,11 +395,22 @@ export function ProjectPage({ token, id }: { token: string; id: string }) {
         <div className="page-col">
           {block('Goals', p.goals)}
           {block('Where it stands', p.state)}
-          {threads.length ? (
+          {live.length ? (
             <section className="block">
               <h2>Live threads</h2>
-              <ThreadRows rows={threads} />
+              <ThreadRows rows={live} />
             </section>
+          ) : null}
+          {archived.length ? (
+            <section className="block">
+              <h2>Archived</h2>
+              <ThreadRows rows={archived} />
+            </section>
+          ) : null}
+          {more ? (
+            <button className="btn" title="Show older threads in this project" onClick={() => setLimit((n) => n + PROJECT_THREADS_MORE)}>
+              Show more
+            </button>
           ) : null}
           {p.notes.trim() ? (
             <details className="worked">

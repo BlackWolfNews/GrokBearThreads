@@ -27,7 +27,8 @@ Built 28 Oct 2026 (thread 66935d23).
   it (`web/src/pages.tsx`, at `/scheduled`, `/projects`, `/runners`, `/usage`,
   each with `/<id>`), which subscribe only while they're showing. They read,
   they don't change: a schedule or project is edited on the Mac or through
-  an agent. On a phone the rail is a tab bar, with Runners and Usage under
+  an agent. A project's page lists all its threads, live then archived,
+  newest first, from `phone:projectThreads` (Show more for older ones). On a phone the rail is a tab bar, with Runners and Usage under
   More. The pencil beside the search starts a thread (`/new`, `phone:create`)
   on the runner's default folder and login. And a
   thread whose finished turns fold to "Worked for 4m 12s" and the reply

@@ -300,7 +300,23 @@ export default defineSchema({
     runnerId: v.string(),
     hibernating: v.number(),
     den: v.number(),
+    // Set once linkProjects has been run over every thread the runner had
+    // when projectThreads arrived (API 40); later writes keep links current.
+    projectsLinked: v.optional(v.boolean()),
   }).index('by_runnerId', ['runnerId']),
+
+  // Which threads are in which project (API 40), one row per pair, kept by
+  // the writes to `threads`. A thread's projects are an array on its row,
+  // which Convex can't index, so without this a project's page would have
+  // to read every thread to find its own, archived ones included.
+  projectThreads: defineTable({
+    runnerId: v.string(),
+    projectId: v.string(),
+    threadId: v.string(),
+    lastActivityMs: v.number(),
+  })
+    .index('by_project_activity', ['projectId', 'lastActivityMs'])
+    .index('by_threadId', ['threadId']),
 
   // The phone's Pocket: short cards agents file for when Mike's out
   // (API 19, the `pocket` tool). They live here rather than on a runner, so

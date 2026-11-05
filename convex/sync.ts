@@ -43,6 +43,42 @@ async function moveView(ctx: MutationCtx, runnerId: string, from: View | undefin
   if (next.hibernating !== row.hibernating || next.den !== row.den) await ctx.db.patch(row._id, next);
 }
 
+// ------------------------------------------------------------ project links (API 40)
+// Brings a thread's projectThreads rows in line with its row: one per
+// project it's in, carrying its lastActivityMs so a project's threads come
+// out newest first. No row (deleted) drops them all. Writes only what
+// changed, as most thread writes are a status flip in the same projects.
+async function linkThread(ctx: MutationCtx, threadId: string, t: { runnerId: string; lastActivityMs: number; projects?: { id: string }[] } | null): Promise<void> {
+  const want = new Set((t?.projects ?? []).map((p) => p.id));
+  for await (const row of ctx.db.query('projectThreads').withIndex('by_threadId', (q) => q.eq('threadId', threadId))) {
+    if (!t || !want.has(row.projectId)) {
+      await ctx.db.delete(row._id);
+      continue;
+    }
+    want.delete(row.projectId);
+    if (row.lastActivityMs !== t.lastActivityMs || row.runnerId !== t.runnerId) await ctx.db.patch(row._id, { lastActivityMs: t.lastActivityMs, runnerId: t.runnerId });
+  }
+  for (const projectId of want) await ctx.db.insert('projectThreads', { runnerId: t!.runnerId, projectId, threadId, lastActivityMs: t!.lastActivityMs });
+}
+
+// Links every thread a runner already had when this table arrived, a page
+// at a time so no one transaction reads them all. heartbeat starts it once
+// per runner (viewCounts.projectsLinked).
+const LINK_PAGE = 100;
+export const linkProjects = internalMutation({
+  args: { runnerId: v.string(), cursor: v.union(v.string(), v.null()) },
+  returns: v.null(),
+  handler: async (ctx, { runnerId, cursor }) => {
+    const page = await ctx.db
+      .query('threads')
+      .withIndex('by_runnerId', (q) => q.eq('runnerId', runnerId))
+      .paginate({ numItems: LINK_PAGE, cursor });
+    for (const t of page.page) await linkThread(ctx, t.threadId, t);
+    if (!page.isDone) await ctx.scheduler.runAfter(0, internal.sync.linkProjects, { runnerId, cursor: page.continueCursor });
+    return null;
+  },
+});
+
 // A push goes out when a thread starts needing Mike (needsYou goes from
 // false to true), at most one per thread this often, so a status that
 // flaps doesn't ring his phone over and over.
@@ -68,6 +104,7 @@ export const upsertThreads = mutation({
         await moveView(ctx, existing.runnerId, existing.view, undefined);
         await moveView(ctx, t.runnerId, undefined, t.view);
       } else await moveView(ctx, t.runnerId, existing?.view, t.view);
+      await linkThread(ctx, t.threadId, t);
       if (wantsPush) await ctx.scheduler.runAfter(0, internal.push.notify, { threadId: t.threadId });
     }
     return null;
@@ -116,6 +153,7 @@ export const removeThreads = mutation({
         await ctx.db.delete(row._id);
         await moveView(ctx, row.runnerId, row.view, undefined);
       }
+      await linkThread(ctx, threadId, null);
       for await (const m of ctx.db.query('messages').withIndex('by_thread_seq', (q) => q.eq('threadId', threadId))) await ctx.db.delete(m._id);
       await dropImages(ctx, threadId);
       for await (const img of ctx.db.query('replyImages').withIndex('by_thread_seq', (q) => q.eq('threadId', threadId))) {
@@ -246,6 +284,7 @@ export const prune = mutation({
     for await (const row of ctx.db.query('threads').withIndex('by_runnerId', (q) => q.eq('runnerId', runnerId))) {
       if (keepSet.has(row.threadId)) continue;
       await ctx.db.delete(row._id);
+      await linkThread(ctx, row.threadId, null);
       n++;
     }
     await recountViews(ctx, runnerId);
@@ -286,6 +325,13 @@ export const heartbeat = mutation({
     // A runner from before view counts gets its count within a minute of
     // this backend, without waiting for a thread to change.
     if (!(await ctx.db.query('viewCounts').withIndex('by_runnerId', (q) => q.eq('runnerId', runner.runnerId)).unique())) await recountViews(ctx, runner.runnerId);
+    // API 40: link the threads it had before projectThreads, once. Marked
+    // before it runs, so the next heartbeat doesn't start a second pass.
+    const counted = await ctx.db.query('viewCounts').withIndex('by_runnerId', (q) => q.eq('runnerId', runner.runnerId)).unique();
+    if (counted && !counted.projectsLinked) {
+      await ctx.db.patch(counted._id, { projectsLinked: true });
+      await ctx.scheduler.runAfter(0, internal.sync.linkProjects, { runnerId: runner.runnerId, cursor: null });
+    }
     return { apiVersion: API_VERSION, ...(existing ? {} : { firstSeen: true }) };
   },
 });

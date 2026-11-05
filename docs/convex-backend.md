@@ -740,6 +740,16 @@ Backend changes (these deploy prod when they land on main; Mike said yes to
    the projects that changed and the ones gone, with
    `sync:upsertProjects`. Mostly Mike's own cost: his 70-odd projects with
    long notes were about 460 KB each time a turn moved one.
+5. Done (API 40): a project's page reads its threads through
+   `projectThreads`, a small row per thread per project kept by
+   `upsertThreads`, `removeThreads` and `prune`, with
+   `phone:projectThreads` taking the newest few by an index on
+   `projectId` and `lastActivityMs`. A thread's projects are an array on
+   its row, which can't be indexed, so the alternative was reading every
+   thread, archived ones included. Threads from before API 40 are linked
+   once per runner by `sync:linkProjects`, a page at a time, which a
+   heartbeat starts (`viewCounts.projectsLinked`). The "22 threads" on a
+   project is still the runner's own count, sent on its project row.
 
 ### The restart cost (5 Nov 2026, API 37)
 

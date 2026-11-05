@@ -18,6 +18,7 @@ import { spawn, execFile, type ChildProcess } from 'node:child_process';
 import { promisify } from 'node:util';
 import { RunnerClient } from '../../src/client.ts';
 import { readRunnerJson } from '../../src/config.ts';
+import { BACKEND_API_VERSION } from '../../src/sync.ts';
 
 const RUNNER_DIR = path.join(import.meta.dirname, '..', '..');
 const REPO = path.join(RUNNER_DIR, '..');
@@ -218,8 +219,8 @@ describe('convex mirror e2e', { skip: LOCAL ? false : 'no local Convex deploymen
     // Its own each run: the local deployment keeps its rows between runs.
     const runnerId = 'e2e-accounts-' + crypto.randomBytes(4).toString('hex');
     const beat = (r: string) => api('mutation', 'sync:heartbeat', { key, runner: { runnerId: r, name: r, version: 'x', startedAt: 'x', draining: false, threadCount: 0 } });
-    assert.deepEqual(await beat(runnerId), { apiVersion: 37, firstSeen: true });
-    assert.deepEqual(await beat(runnerId), { apiVersion: 37 });
+    assert.deepEqual(await beat(runnerId), { apiVersion: BACKEND_API_VERSION, firstSeen: true });
+    assert.deepEqual(await beat(runnerId), { apiVersion: BACKEND_API_VERSION });
 
     const acct = (id: string, title: string) => ({ id, provider: 'claude', title, usage: { windows: [{ kind: 'week', title: 'Week', remainingPercent: 40 }], readAt: '2026-11-05T00:00:00Z', source: 'x' } });
     const { token } = await api('mutation', 'sync:issueToken', { key, kind: 'browser', name: 'e2e-37' });
@@ -235,6 +236,37 @@ describe('convex mirror e2e', { skip: LOCAL ? false : 'no local Convex deploymen
     await api('mutation', 'sync:removeThreads', { key, threadIds: [threadId] });
     await assert.rejects(api('query', 'phone:threadRow', { token, threadId }));
     // Offline again, or the phone's next new thread could pick this runner.
+    await api('mutation', 'sync:bye', { key, runnerId });
+  });
+
+  test('API 40: a project lists its threads newest first, archived ones too, and follows moves and deletes', async () => {
+    const runnerId = 'e2e-links-' + crypto.randomBytes(4).toString('hex');
+    const pid = 'e2e-proj-' + crypto.randomBytes(4).toString('hex');
+    const other = pid + '-other';
+    const { token } = await api('mutation', 'sync:issueToken', { key, kind: 'browser', name: 'e2e-40' });
+    const doc = (n: number, view: string, projects: string[]) => ({
+      threadId: `${runnerId}-t${n}`, runnerId, title: `T${n}`, cwd: '/x', accountId: 'a', provider: 'claude', status: 'idle', needsYou: false, unread: false, preview: 'p',
+      createdAt: 'x', lastActivityAt: 'x', lastActivityMs: n, view, projects: projects.map((id) => ({ id, title: id })),
+    });
+    const titles = async (projectId: string, limit?: number) =>
+      ((await api('query', 'phone:projectThreads', { token, projectId, ...(limit ? { limit } : {}) })) as { title: string; view: string }[]).map((t) => `${t.title}:${t.view}`);
+    await api('mutation', 'sync:upsertThreads', { key, threads: [doc(1, 'den', [pid]), doc(2, 'inbox', [pid, other]), doc(3, 'hibernating', [pid]), doc(4, 'inbox', [])] });
+    assert.deepEqual(await titles(pid), ['T3:hibernating', 'T2:inbox', 'T1:den']);
+    assert.deepEqual(await titles(other), ['T2:inbox']);
+    assert.deepEqual(await titles(pid, 2), ['T3:hibernating', 'T2:inbox']);
+    // A turn moves T1 to the top; T2 leaves the project; T3 is deleted.
+    await api('mutation', 'sync:upsertThreads', { key, threads: [{ ...doc(1, 'inbox', [pid]), lastActivityMs: 10 }, doc(2, 'inbox', [other])] });
+    await api('mutation', 'sync:removeThreads', { key, threadIds: [`${runnerId}-t3`] });
+    assert.deepEqual(await titles(pid), ['T1:inbox']);
+    // A prune drops the links of the threads it deletes.
+    await api('mutation', 'sync:prune', { key, runnerId, keep: [`${runnerId}-t1`, `${runnerId}-t4`] });
+    assert.deepEqual(await titles(other), []);
+    // The backfill relinks what's there without doubling anything.
+    await api('mutation', 'sync:heartbeat', { key, runner: { runnerId, name: runnerId, version: 'x', startedAt: 'x', draining: false, threadCount: 0 } });
+    await new Promise((r) => setTimeout(r, 1000));
+    assert.deepEqual(await titles(pid), ['T1:inbox']);
+    await assert.rejects(api('query', 'phone:projectThreads', { token: 'tb_wrong', projectId: pid }), /auth|token/);
+    await api('mutation', 'sync:removeThreads', { key, threadIds: [`${runnerId}-t1`, `${runnerId}-t4`] });
     await api('mutation', 'sync:bye', { key, runnerId });
   });
 

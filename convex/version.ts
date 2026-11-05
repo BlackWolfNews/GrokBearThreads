@@ -158,4 +158,9 @@
 //    with an email, so a login signed in on several machines shows the
 //    newest reading on each (docs/protocol.md, Accounts, "Shared
 //    readings"). A runner subscribes only with a backend of 39 or later.
-export const API_VERSION = 39;
+// 40: projectThreads, a row per thread per project kept by the thread
+//    writes, and phone:projectThreads, a project's threads newest first,
+//    archived ones included, so the website's project page can list all of
+//    them. The backend links the threads it already has by itself
+//    (sync:linkProjects); nothing changes on the runner.
+export const API_VERSION = 40;

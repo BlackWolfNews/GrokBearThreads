@@ -292,6 +292,33 @@ export const projects = query({
   },
 });
 
+// A project's threads, newest first, archived ones too (API 40), through
+// projectThreads, so it reads only this project's rows rather than every
+// thread. The website asks for more by raising limit, as phone:messages.
+const PROJECT_THREADS_MAX = 1000;
+export const projectThreads = query({
+  args: { token: v.string(), projectId: v.string(), limit: v.optional(v.number()) },
+  returns: v.array(row),
+  handler: async (ctx, { token, projectId, limit }) => {
+    await checkPhoneToken(ctx, token);
+    const n = Math.max(1, Math.min(PROJECT_THREADS_MAX, Math.floor(limit ?? PAGE_DEFAULT)));
+    const links = await ctx.db
+      .query('projectThreads')
+      .withIndex('by_project_activity', (q) => q.eq('projectId', projectId))
+      .order('desc')
+      .take(n);
+    const out = [];
+    for (const l of links) {
+      const t = await ctx.db
+        .query('threads')
+        .withIndex('by_threadId', (q) => q.eq('threadId', l.threadId))
+        .unique();
+      if (t) out.push(stripThread(t));
+    }
+    return out;
+  },
+});
+
 // The Pocket (API 19; schema.ts, pocketCards). A card's id is its key.
 export const pocket = query({
   args: { token: v.string() },
