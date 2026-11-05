@@ -343,7 +343,10 @@ You can also ask a thread to do it to itself ("hibernate this until
 Thursday", "archive this when you're done"). It finishes its reply first,
 then goes, with a note in the thread saying when it'll be back. A time
 works, or words like "until the phone arrives", read the same way as Wake
-when…. It won't put itself away while it's waiting on you.
+when…. It won't put itself away while it's waiting on you. A thread
+whose next step waits on another thread or a job that will message it
+back hibernates by itself until then, with a time it comes back anyway
+if the message never does.
 
 ## Panels
 <!-- slug: panels -->

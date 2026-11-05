@@ -1943,7 +1943,12 @@ the thread if a sub-agent stalls, so an ask can't stay hidden for good.
   `end_turn` that adds `snooze` gets through as one adding `archive`
   does. On 2 Nov 2026 "let's hibernate this thread until it arrives" could
   only be met by a helper thread, as `update_thread` and `tb snooze`
-  refuse to snooze the thread they run in.
+  refuse to snooze the thread they run in. The description also has an
+  agent hibernate when what's left waits on another thread or a job that
+  will message it back (a message wakes it, see `threads.send`), with a
+  time by which that should have happened. On 5 Nov 2026 a thread
+  waiting on another thread's report ended as done in Mike's inbox,
+  as the description then allowed it only when he asked.
 - **The fallback.** A completed turn with no `end_turn` call is read for
   the "What I need from you" section Mike's own instructions ask for: the
   last line near the end that is just that heading in bold, then its

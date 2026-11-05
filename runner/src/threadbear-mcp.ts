@@ -778,7 +778,7 @@ export function buildThreadbearTools(
         snooze: z
           .string()
           .optional()
-          .describe('Hibernates this thread once the turn is over, until 2h, 1d, tomorrow, an ISO time with its offset, "restart" (the runner next starting) or words saying when ("when the phone arrives"): only when the user asked for that, with needs "nothing". Asked after you called end_turn? Call it again with this.'),
+          .describe('Hibernates this thread once the turn is over, until 2h, 1d, tomorrow, an ISO time with its offset, "restart" (the runner next starting) or words saying when ("when the phone arrives"), with needs "nothing": when the user asked for that, or when the rest waits on another thread or a job that will message this one (a message wakes it), until when that should have happened. Asked after you called end_turn? Call it again with this.'),
       },
       handle(async (input) => {
         checkSnooze(input.snooze);
