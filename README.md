@@ -1,17 +1,106 @@
-# Threadbear
+<!-- The pictures here: the hero and phone shots are the website's (site/public/screens), and the
+     GIFs in docs/readme are its feature clips (site/public/clips, made by site/scripts/clips.mjs),
+     cut down to 880px at 10fps so GitHub shows them playing. Re-make them from the MP4s when the
+     clips change:
+       ffmpeg -i site/public/clips/<name>.mp4 -vf "fps=10,scale=880:-2:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff:max_colors=128[p];[b][p]paletteuse=dither=none:diff_mode=rectangle" docs/readme/<name>.gif
+     The captions are the website's too (site/scripts/build.mjs), so keep the two saying the same. -->
 
-Threadbear is a Mac app for running Claude Code and Codex threads on the
-subscriptions you already have. I made it for myself, and you get the whole
-thing: the source, the Mac app, a little runner that keeps your agents going
-when the app's closed, and a Convex backend in your own account so the
-[iPhone app](https://apps.apple.com/app/id6827837354) and a web page for each
-thread can follow along. When something bugs you, you (or more likely your
-agent) can change it.
+<p align="center">
+  <a href="https://threadbear.mikecann.app"><img src="site/public/img/icon-192.png" width="96" alt="Threadbear's icon, a patched-up teddy bear"></a>
+</p>
 
-There are more pictures and an FAQ at
-[threadbear.mikecann.app](https://threadbear.mikecann.app).
+<h1 align="center">Threadbear</h1>
 
-![Threadbear on a Mac](site/public/screens/mac-thread.webp)
+<p align="center">
+  A Mac app for running your Claude Code and Codex threads, on the subscriptions you already have.<br>
+  You get all of the source, so when something bugs you, you (or more likely your agent) can change it.
+</p>
+
+<p align="center">
+  <b><a href="#installing-it">Install it</a></b> ·
+  <a href="https://threadbear.mikecann.app">Website</a> ·
+  <a href="https://www.youtube.com/watch?v=HCR6jqR0LEI">Watch the launch video</a> ·
+  <a href="https://apps.apple.com/app/id6827837354">iPhone app</a>
+</p>
+
+<p align="center">
+  <img src="site/public/screens/mac-thread.webp" width="960" alt="Threadbear on a Mac: the list of threads, a thread and its Highlights side by side">
+</p>
+
+I made it for myself, and you get the whole thing: the source, the Mac app, a
+little runner that keeps your agents going when the app's closed, and a Convex
+backend in your own account so the iPhone app and a web page for each thread
+can follow along. None of it runs on a server of mine, so I never see any of
+it.
+
+## What it does
+
+### Decisions
+
+When a thread needs you, it says exactly what, with the choices as buttons.
+
+<p align="center"><img src="docs/readme/decisions.gif" width="880" alt="A thread whose last turn ended with three asks, each answered with a click, then the thread goes off to work"></p>
+
+### Options
+
+When the agent isn't sure how something should look, it shows you a few side by side.
+
+<p align="center"><img src="docs/readme/options.gif" width="880" alt="The options window stepping through three designs, then showing them side by side with one picked and a note added"></p>
+
+### Inbox zero
+
+Working threads drop into Running and done ones archive with a click, so your inbox is only what needs you.
+
+<p align="center"><img src="docs/readme/inbox.gif" width="880" alt="Three finished threads archived one after another, leaving the inbox shorter"></p>
+
+### No project picker
+
+Just start a thread. The librarian files it into the right project and keeps its notes up to date.
+
+<p align="center"><img src="docs/readme/librarian.gif" width="880" alt="A new thread started with no folder or project picked, then the Librarian page with the threads it has filed into projects"></p>
+
+### On your phone
+
+It all syncs through your own Convex deployment, so your phone keeps working when your laptop's asleep.
+
+<p align="center"><img src="docs/readme/phone.gif" width="880" alt="Threadbear on an iPhone, scrolling down a thread to a diagram the agent made and opening it full screen"></p>
+
+<p align="center">
+  <img src="site/public/screens/phone-inbox.webp" width="260" alt="The iPhone inbox">
+  <img src="site/public/screens/phone-question.webp" width="260" alt="A thread on the iPhone asking a question, with the answers as buttons">
+  <img src="site/public/screens/phone-approval.webp" width="260" alt="Approving a command from the iPhone">
+</p>
+
+### Patches
+
+A patch is a little TypeScript file that adds panels and buttons, and your agent can write one for you.
+
+<p align="center"><img src="docs/readme/patches.gif" width="880" alt="Patch panels beside a thread: the Convex dashboard, a project's stats panel, then one of its buttons run from above the message box"></p>
+
+### Your own fork
+
+You fork the code, so you can change anything. My changes come as a daily release and a thread brings them in.
+
+<p align="center"><img src="docs/readme/fork.gif" width="880" alt="The Updates panel showing a new release, then Bring Them In starting a thread that merges it and checks it before asking to land"></p>
+
+### A few more things it does
+
+- **Quit the app and your threads keep going.** A separate little process
+  called the runner owns the agents, so closing, quitting or updating the app
+  never stops a turn.
+- **Every thread has its own link.** Open a thread on the web from its menu,
+  then copy its link to open in any browser you're signed in on.
+- **Schedules that run on any of your Macs.** Send a thread a message at a set
+  time, once or over and over, or start a new thread each time, on whichever
+  Mac you pick.
+- **Runs on your own Claude or Codex login.** It drives the official `claude`
+  and `codex` command line tools, logged in as you, and never reads or copies
+  your login tokens.
+
+The [launch video](https://www.youtube.com/watch?v=HCR6jqR0LEI) goes through
+all of it in about 25 minutes, so grab yourself a lovely cup of tea first.
+There's an FAQ at [threadbear.mikecann.app](https://threadbear.mikecann.app),
+and [docs/guide.md](docs/guide.md) is the full guide.
 
 ## Installing it
 
