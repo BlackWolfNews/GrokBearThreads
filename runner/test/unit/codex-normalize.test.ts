@@ -688,7 +688,7 @@ test('a tool call written into a message is cut off it', () => {
   for (const keep of ['All done.', 'It wrote `to=functions.exec` into the reply.', 'Set to=5 and rerun.']) assert.equal(stripLeakedToolCall(keep), keep);
 });
 
-test("an applied patch says which files it left; a proposed, declined or failed one doesn't", () => {
+test("a patch never says it wrote files, applied or not: patch trust can't tie Codex's result to bytes", () => {
   const n = new CodexNormalizer(env().ctx);
   const changes = [
     { path: '/w/a.ts', kind: { type: 'update', move_path: null }, diff: '@@ -1 +1 @@\n-x\n+y\n' },
@@ -705,7 +705,6 @@ test("an applied patch says which files it left; a proposed, declined or failed 
   }
   n.handle('item/started', { threadId: 'th', item: { type: 'fileChange', id: 'ok', changes, status: 'inProgress' } });
   const done = n.handle('item/completed', { threadId: 'th', item: { type: 'fileChange', id: 'ok', changes, status: 'completed' } });
-  assert.deepEqual(wrote(done), [{ kind: 'wrote', itemId: 'ok', files: [{ path: '/w/a.ts' }, { path: '/w/moved.ts' }, { path: '/w/new.ts' }] }]);
-  const r = done.findIndex((o) => o.kind === 'event' && o.event.type === 'tool.result');
-  assert.ok(done.findIndex((o) => o.kind === 'wrote') < r, 'before its result');
+  assert.deepEqual(wrote(done), []);
+  assert.ok(done.some((o) => o.kind === 'event' && o.event.type === 'tool.result' && o.event.ok));
 });

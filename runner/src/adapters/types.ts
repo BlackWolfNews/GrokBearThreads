@@ -108,17 +108,17 @@ export type AdapterOutput =
   | { kind: 'subagent'; update: SubagentUpdate }
   // "Always allow" rules to keep for this thread.
   | { kind: 'allowRules'; rules: string[] }
-  // Files an Edit, Write or patch call left, sent only for one the CLI
-  // says it made, just before its successful tool.result. Never for a
-  // preview (an edit.diff before approval) or a denied or failed edit: the
-  // runner trusts patch files by these alone (patch-trust.ts). `sha256`
-  // is the hash of the bytes the edit wrote when the adapter knows them
-  // (Claude's, rebuilt from the result); without it the runner hashes the
-  // file as this arrives (a Codex patch's update).
+  // Files an Edit or Write call left, sent only for one the CLI says it
+  // made, just before its successful tool.result. Never for a preview (an
+  // edit.diff before approval) or a denied or failed edit: the runner
+  // trusts patch files by these alone (patch-trust.ts). `sha256` is the
+  // hash of the bytes the edit wrote, rebuilt from the result. Only
+  // Claude's adapter sends it: a Codex patch's result doesn't say what it
+  // wrote, so a patch file Codex writes waits for Mike.
   | { kind: 'wrote'; itemId: string; files: AgentWrite[] }
   | { kind: 'result'; result: TurnResult };
 
-export type AgentWrite = { path: string; sha256?: string };
+export type AgentWrite = { path: string; sha256: string };
 
 // A background shell or subagent the CLI reports. `type` is the CLI's own
 // name for it (Claude: local_bash, local_agent, ...), `kind` the protocol's.

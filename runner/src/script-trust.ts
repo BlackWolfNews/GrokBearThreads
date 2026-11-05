@@ -37,6 +37,78 @@ import path from 'node:path';
 
 export type ScriptReach = { files: string[]; missing: string[]; problem?: string };
 
+// One look at the files a hash is made from: each read once, the bytes
+// kept, so what was scanned for what it runs is what's hashed (and, for a
+// patch's own code, what's imported). `prints` is each file's stat taken
+// before its read, and `links` each path as it was named with the real
+// path it led to then, so a cached hash can tell a file was changed (a
+// write moves ctime, which can't be set back; a replace moves the inode)
+// or a symlink on the way to it retargeted.
+export class Reads {
+  readonly prints = new Map<string, string>();
+  readonly bytes = new Map<string, Buffer>();
+  readonly links = new Map<string, string>();
+
+  // `p`'s real path, recorded; undefined when it isn't there.
+  real(p: string): string | undefined {
+    let r: string | undefined;
+    try {
+      r = fs.realpathSync(p);
+    } catch {
+      r = undefined;
+    }
+    this.links.set(p, r ?? '');
+    return r;
+  }
+
+  // A file's bytes (by real path), read once.
+  read(real: string): Buffer | undefined {
+    const hit = this.bytes.get(real);
+    if (hit) return hit;
+    let print: string;
+    let b: Buffer;
+    try {
+      print = fingerprint(real);
+      b = fs.readFileSync(real);
+    } catch {
+      return undefined;
+    }
+    this.prints.set(real, print);
+    this.bytes.set(real, b);
+    return b;
+  }
+
+  // Whether everything looked at is as it was: no file changed, no link
+  // retargeted, nothing that was missing turned up.
+  same(): boolean {
+    for (const [p, print] of this.prints) {
+      try {
+        if (fingerprint(p) !== print) return false;
+      } catch {
+        return false;
+      }
+    }
+    for (const [p, real] of this.links) {
+      let now = '';
+      try {
+        now = fs.realpathSync(p);
+      } catch {
+        // missing
+      }
+      if (now !== real) return false;
+    }
+    return true;
+  }
+}
+
+// What changes when a file's content can have: its inode (a replace), size,
+// mtime, and ctime, which every write and chmod moves and nothing can set
+// back (utimes moves it too).
+export function fingerprint(p: string): string {
+  const st = fs.statSync(p);
+  return `${st.dev}:${st.ino}:${st.size}:${st.mtimeMs}:${st.ctimeMs}:${st.mode}`;
+}
+
 export type FollowOptions = {
   folder: string; // where the command starts: the folder holding .threadbear/
   top: string; // the repo's top; only files inside it are the repo's to change
@@ -45,6 +117,8 @@ export type FollowOptions = {
   scanJs: (src: string, file: string) => { specifiers: string[]; strings: string[]; problem?: string };
   resolveImport: (dir: string, spec: string) => string;
   namedPaths: (src: string) => string[];
+  // Shared with the caller's hash, so it hashes the bytes followed here.
+  reads?: Reads;
 };
 
 // Bounds: a script reaching more than this can't be checked.
@@ -486,9 +560,16 @@ class Reach {
   private visits = new Set<string>();
   private home: string;
   private o: FollowOptions;
+  readonly reads: Reads;
   constructor(o: FollowOptions) {
     this.o = o;
     this.home = o.home ?? os.homedir();
+    this.reads = o.reads ?? new Reads();
+  }
+
+  private text(file: string): string | undefined {
+    const real = this.reads.real(file);
+    return real === undefined ? undefined : this.reads.read(real)?.toString('utf8');
   }
 
   private rel(file: string): string {
@@ -517,14 +598,13 @@ class Reach {
     if (!this.inRepo(abs)) return;
     if (how === 'named' && !looksRunnable(abs)) return;
     const passive = how === 'named' || how === 'load';
-    let real: string;
-    try {
-      real = fs.realpathSync(abs);
-    } catch {
+    const found = this.reads.real(abs);
+    if (found === undefined) {
       if (this.missing.size < 500) this.missing.add(abs);
       if (!passive) this.fail(ctx, line, `runs ${this.rel(abs)}, which isn't a file in the repo now, so patch trust can't see what it'll be.`);
       return;
     }
+    const real = found;
     let st: fs.Stats;
     try {
       st = fs.statSync(real);
@@ -541,12 +621,9 @@ class Reach {
     if (this.visits.has(key)) return;
     if (this.visits.size >= MAX_VISITS) return this.fail(undefined, undefined, `what it runs is more than patch trust follows.`);
     this.visits.add(key);
-    let text: string;
-    try {
-      text = fs.readFileSync(real, 'utf8');
-    } catch {
-      return;
-    }
+    const bytes = this.reads.read(real);
+    if (!bytes) return;
+    const text = bytes.toString('utf8');
     const kind = kindOf(real, text, !passive);
     const label = this.rel(real);
     if (kind === 'binary') {
@@ -1132,7 +1209,7 @@ class Reach {
         if (isFile(f)) {
           this.follow(f, 'load', ctx);
           try {
-            out.push({ dir: d, pkg: JSON.parse(fs.readFileSync(f, 'utf8')) as Record<string, any> });
+            out.push({ dir: d, pkg: JSON.parse(this.text(f) ?? '') as Record<string, any> });
           } catch {
             this.fail(ctx, line, `runs a package script, and ${this.rel(f)} can't be read, so patch trust can't tell what it runs.`);
             return undefined;
@@ -1150,12 +1227,8 @@ class Reach {
   // bun's preload, pnpm's .pnpmfile.cjs (followed as it is).
   private rcLoads(file: string, ctx: Ctx): void {
     const base = path.basename(file);
-    let text = '';
-    try {
-      text = fs.readFileSync(file, 'utf8');
-    } catch {
-      return;
-    }
+    const text = this.text(file);
+    if (text === undefined) return;
     if (base === '.pnpmfile.cjs') return;
     if (base === '.npmrc' && /^\s*(script-shell|node-options|onload-script)\s*=/m.test(text)) {
       return this.fail(undefined, undefined, `${this.rel(file)} sets a shell or code for npm to load, which patch trust can't follow.`);
@@ -1207,7 +1280,7 @@ class Reach {
         if (!isFile(f) || !this.inRepo(f)) continue;
         this.follow(f, 'load', ctx);
         try {
-          this.runScripts(sub, JSON.parse(fs.readFileSync(f, 'utf8')) as Record<string, any>, LIFECYCLE, ctx);
+          this.runScripts(sub, JSON.parse(this.text(f) ?? '') as Record<string, any>, LIFECYCLE, ctx);
         } catch {
           this.fail(ctx, line, `installs ${this.rel(f)}, which can't be read, so patch trust can't tell what it runs.`);
         }
@@ -1220,7 +1293,7 @@ class Reach {
     const ws = Array.isArray(pkg.workspaces) ? pkg.workspaces : Array.isArray(pkg.workspaces?.packages) ? pkg.workspaces.packages : [];
     const yaml = path.join(dir, 'pnpm-workspace.yaml');
     if (isFile(yaml)) {
-      for (const m of fs.readFileSync(yaml, 'utf8').matchAll(/^\s*-\s*["']?([^"'\n#]+?)["']?\s*$/gm)) ws.push(m[1]);
+      for (const m of (this.text(yaml) ?? '').matchAll(/^\s*-\s*["']?([^"'\n#]+?)["']?\s*$/gm)) ws.push(m[1]);
     }
     for (const pattern of ws) {
       if (typeof pattern !== 'string' || pattern.startsWith('!')) continue;
@@ -1335,11 +1408,13 @@ class Reach {
   // A Makefile's recipes are shell commands with make's $(VAR)s in them.
   private makefile(file: string, dir: string, ctx: Ctx, line: number): void {
     if (!this.inRepo(file)) return;
-    this.files.add(fs.realpathSync(file));
+    const real = this.reads.real(file);
+    if (real === undefined) return;
+    this.files.add(real);
     const key = `make ${file}`;
     if (this.visits.has(key)) return;
     this.visits.add(key);
-    const text = fs.readFileSync(file, 'utf8');
+    const text = this.reads.read(real)?.toString('utf8') ?? '';
     const label = this.rel(file);
     const mctx: Ctx = { label, file, argv0: [], dirs: new Set([dir]), vars: new Map(), depth: ctx.depth + 1 };
     if (/\$[({]shell\s/.test(text) || /^\s*(export\s+)?(SHELL|\.SHELLFLAGS)\s*[:+?!]?=/m.test(text)) {

@@ -2386,19 +2386,23 @@ panels or hooks, no live functions, and no worktree for new threads.
   a trusted repo isn't asked about. Only one git made: its `.git` file and
   the repo's record of it must name each other, so a folder can't claim
   to be a worktree of a trusted repo.
-- A patch file a thread's agent writes with an Edit or Write call (or a
-  Codex patch) is trusted as that edit left it: the agent can run
-  anything in the folder already. Only an edit the CLI says it made
-  counts, when its successful result comes in, never the diff shown to
-  approve one, so a denied or failed edit trusts nothing. And only the
-  bytes it wrote: for Claude, the hash of the file rebuilt from the
-  result (a Write's content, an Edit applied to the original text it
-  reports), which the file must still have, in the same read the trust
-  hash is made from; a Codex patch's files as they are when its result
-  arrives. A file written over after that (a command run straight after
-  the edit) isn't covered, and one Claude's result can't be rebuilt for
-  waits. One written another way, like a shell heredoc or a `git pull`,
-  waits.
+- A patch file a Claude thread's agent writes with an Edit or Write call
+  is trusted as that edit left it: the agent can run anything in the
+  folder already. Only an edit the CLI says it made counts, when its
+  successful result comes in, never the diff shown to approve one, so a
+  denied or failed edit trusts nothing. And only the bytes it wrote: the
+  hash of the file rebuilt from the result (a Write's content, an Edit
+  applied to the original text it reports), which the file must still
+  have, in the same read the trust hash is made from. A file written
+  over after that (a command run straight after the edit) isn't
+  covered, and one the result can't be rebuilt for waits. Nor does one
+  edit vouch for files it didn't write: the patch is trusted only when
+  every other file its hash covers (its helpers, the scripts it names)
+  is bytes that were part of a version trusted while the runner has run,
+  or another such edit's. A patch Codex writes waits for Mike: its
+  result doesn't say what bytes it wrote, so a command could have
+  replaced the file before the runner read it. One written another way,
+  like a shell heredoc or a `git pull`, waits.
 - Always trusted: `~/.threadbear/patches` and Threadbear's own checkout
   (the release's `checkout`, else the one the runner runs from).
 - `patches.trust` trusts what the app showed, by hash. Clients show a
@@ -2459,6 +2463,21 @@ and one with helpers is asked about again (`"changed"`), as version 1 never
 saw them. A changed helper is only imported again when the runner restarts
 (Node loads a module once per process); the patch file itself loads again
 when it changes.
+
+What's imported is what was hashed. The hash is made from one read of
+each file, and a trusted patch and its helpers are imported from those
+bytes (`src/verified-imports.ts`, Node's module hooks), never read from
+the folder again, so a command that rewrites one between the check and
+the import changes nothing that runs; a local import from them that
+resolves to a file the hash didn't cover (a helper's symlink retargeted)
+refuses the patch. A cached hash holds only while every file it was
+made from has the same inode, size, mode, mtime and ctime (a write
+can't put ctime back), every path to one still leads to the same real
+file, and nothing that was missing has turned up. A hook or `setup`
+runs its script from the folder, so the patch is hashed afresh just
+before it runs, and it's skipped with a `system.note` if that isn't the
+version that was trusted; what the script reads after it starts is the
+script's to check, as with its data files.
 
 A new thread's worktree `setup` runs only when the worktree's own copy of
 the patch, with the files it names as they are there, is a trusted
@@ -2623,7 +2642,8 @@ trust's store and rules.
 - An agent's Edit or Write to one of the settings files trusts them as it
   leaves them; to a script they name, only when an earlier version was
   trusted, as with a patch's helpers. Either only with the file as that
-  edit left it, as for patch files.
+  edit left it, and every other file the settings' hash covers bytes
+  trusted before or another such edit's, as for patch files.
 
 **Built in**, from the folder alone:
 

@@ -49,8 +49,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseSync } from 'oxc-parser';
 import { atomicWriteFileSync } from './fsutil.ts';
-import { claudeCommands, isClaudeSettingsFile } from './claude-trust.ts';
-import { looksRunnable, reachOf, reachOfCommand } from './script-trust.ts';
+import { claudeCommands } from './claude-trust.ts';
+import { looksRunnable, reachOf, reachOfCommand, Reads } from './script-trust.ts';
 
 export type TrustVerdict =
   // `files`: the local files its hash covered, real paths. Absent when the
@@ -58,7 +58,10 @@ export type TrustVerdict =
   // is how the loader knows not to hold its commands to automaticCommand.
   // `blocked`: scripts it names that run something patch trust can't
   // follow, with why; a command that runs by itself can't be one.
-  | { trusted: true; files?: string[]; blocked?: Record<string, string> }
+  // `hash` and `code` (the patch's import graph as the bytes that hash was
+  // made from, by real path) when it's trusted by hash: the loader imports
+  // those bytes, not the folder's files as they are by then.
+  | { trusted: true; files?: string[]; blocked?: Record<string, string>; hash?: string; root?: string; code?: Map<string, Buffer> }
   | { trusted: false; reason: 'new' | 'changed'; hash: string; helpers?: string[] }
   // Nothing can trust it as it stands (see the top): `problem` says why.
   | { trusted: false; reason: 'unchecked'; problem: string };
@@ -100,20 +103,26 @@ export interface PatchGate {
 export interface PatchTrustStore extends PatchGate {
   readonly existed: boolean;
   trust(file: string, hash: string): boolean;
-  // With `sha256`, only while each file's own bytes hash to it.
-  trustCurrent(files: string[], sha256?: string): string[];
-  // Trusts, as they are now, the patch files that import `file` (an agent
-  // edited a helper), while `file` still hashes to `sha256` (what the edit
-  // wrote). Only patches already looked at are known.
-  trustDependents(file: string, sha256: string): string[];
+  // As they are now, unasked: the first start's seeding.
+  trustCurrent(files: string[]): string[];
+  // An agent's verified edit left `file` as bytes hashing to `sha256`
+  // (an adapter's 'wrote'). Trusts the patch files it's part of (itself,
+  // or ones importing or running it) only while it still has those bytes
+  // and every other file in the patch's hash is bytes trusted before or
+  // another such edit's: one edit doesn't vouch for files it didn't write.
+  // Only patches already looked at are known as importing it.
+  trustAgentWrite(file: string, sha256: string): string[];
+  // Whether `file` hashes to `hash` now, read afresh (no cache): checked
+  // just before a trusted hook or setup script runs.
+  verify(file: string, hash: string): boolean;
   // The thread folder's Claude Code settings (claude-trust.ts).
   checkClaude(cwd: string): ClaudeVerdict;
   trustClaude(cwd: string, hash: string): boolean;
-  // An agent's Edit or Write to `file` in a thread in `cwd`, which wrote
-  // bytes hashing to `sha256`: a settings file is trusted as it leaves it;
-  // a script they name carries on a version trusted before, but doesn't
-  // trust one still waiting. Nothing when the file no longer has those
-  // bytes. True when anything was trusted.
+  // An agent's verified Edit or Write to `file` in a thread in `cwd`,
+  // which wrote bytes hashing to `sha256`: the folder's settings are
+  // trusted as they are only while the file still has those bytes and
+  // every other file they're hashed from is bytes trusted before or
+  // another such edit's. True when they were.
   trustClaudeEdit(cwd: string, file: string, sha256: string): boolean;
   save(): void;
 }
@@ -125,7 +134,8 @@ export const TRUST_ALL: PatchTrustStore = {
   check: async () => ({ trusted: true }),
   trust: () => true,
   trustCurrent: (files) => files,
-  trustDependents: () => [],
+  trustAgentWrite: () => [],
+  verify: () => true,
   checkClaude: () => ({ trusted: true }),
   trustClaude: () => true,
   trustClaudeEdit: () => false,
@@ -141,6 +151,11 @@ export class PatchTrust implements PatchTrustStore {
   // `trusted`: some version of this patch was trusted while this runner
   // has run, so an agent's edit to one of its helpers may carry it on.
   private hashes = new Map<string, HashEntry>();
+  // Bytes, by real path and SHA-256, that were part of a trusted version
+  // of a patch or of a folder's Claude settings while this runner has run,
+  // or that an agent's verified edit wrote. An agent's edit trusts a patch
+  // only when every file in it is one of these.
+  private approved = new Map<string, Set<string>>();
   // Whether there was a trust file when this started. A runner from before
   // trust existed has none, and seeds it from what it was already running.
   readonly existed: boolean;
@@ -185,14 +200,16 @@ export class PatchTrust implements PatchTrustStore {
     this.load();
     const key = folderKey(file);
     if (this.always.some((d) => isInside(key, d))) return { trusted: true };
-    const entry = this.hashOf(file, mtimeMs);
+    void mtimeMs;
+    const entry = this.hashOf(file);
     const { hash, deps } = entry;
     // Before the hash: a stored yes can't vouch for code the hash didn't see.
     if (entry.incomplete) return { trusted: false, reason: 'unchecked', problem: entry.incomplete };
     const known = this.folders.get(key);
     if (known?.includes(hash)) {
       entry.trusted = true;
-      return { trusted: true, files: deps.map((d) => d.path), ...(entry.blocked ? { blocked: entry.blocked } : {}) };
+      this.approveEntry(entry);
+      return { trusted: true, files: deps.map((d) => d.path), hash, root: entry.root, code: entry.code, ...(entry.blocked ? { blocked: entry.blocked } : {}) };
     }
     const helpers = deps.map((d) => d.path);
     const before = known?.some((h) => !h.startsWith(CLAUDE_PREFIX));
@@ -206,7 +223,10 @@ export class PatchTrust implements PatchTrustStore {
     const found = claudeCommands(cwd, this.claudeHome);
     if (!found) return { trusted: true };
     const known = (this.folders.get(key) ?? []).filter((h) => h.startsWith(CLAUDE_PREFIX));
-    if (known.includes(CLAUDE_PREFIX + found.hash)) return { trusted: true };
+    if (known.includes(CLAUDE_PREFIX + found.hash)) {
+      for (const [f, sha] of Object.entries(found.read)) this.approve(f, sha);
+      return { trusted: true };
+    }
     return { trusted: false, reason: known.length ? 'changed' : 'new', hash: found.hash, files: found.files, named: found.named, read: found.read };
   }
 
@@ -217,14 +237,16 @@ export class PatchTrust implements PatchTrustStore {
   }
 
   trustClaudeEdit(cwd: string, file: string, sha256: string): boolean {
+    const target = path.resolve(cwd, file);
+    this.approve(target, sha256);
     const verdict = this.checkClaude(cwd);
     if (verdict.trusted) return false;
-    const target = path.resolve(cwd, file);
     // The hash was made from these bytes, so it vouches for the edit's
-    // output and nothing written over it since.
+    // output and nothing written over it since; and every other file it
+    // was made from must be bytes trusted or written by such an edit: a
+    // settings.local.json a command wrote isn't the edit's to approve.
     if (verdict.read[target] !== sha256) return false;
-    const settings = isClaudeSettingsFile(target, cwd, this.claudeHome);
-    if (!settings && (verdict.reason !== 'changed' || !verdict.named.includes(target))) return false;
+    if (!Object.entries(verdict.read).every(([f, sha]) => this.isApproved(f, sha))) return false;
     return this.trustClaude(cwd, verdict.hash);
   }
 
@@ -236,21 +258,53 @@ export class PatchTrust implements PatchTrustStore {
     return true;
   }
 
-  // Trusts patch files as they are on disk now: an agent's own edits and
-  // the first start's seeding. Files that can't be read are skipped. With
-  // `sha256` (an agent's edit), only a file whose own bytes, as hashed for
-  // trust, hash to it: what the edit wrote, not what's there since.
-  trustCurrent(files: string[], sha256?: string): string[] {
-    return this.trustWhere(files, (entry) => sha256 === undefined || entry.own === sha256);
+  // Trusts patch files as they are on disk now, unasked: the first
+  // start's seeding. Files that can't be read are skipped.
+  trustCurrent(files: string[]): string[] {
+    return this.trustWhere(files, () => true);
   }
 
-  // Only patches trusted before: editing a helper isn't a way to trust a
-  // patch that's still waiting. And only with the helper as the edit left
-  // it, in the bytes the patch's hash was made from.
-  trustDependents(file: string, sha256: string): string[] {
+  trustAgentWrite(file: string, sha256: string): string[] {
     const target = realpath(path.resolve(file));
-    const dependents = [...this.hashes].filter(([, h]) => h.trusted && h.deps.some((d) => d.path === target)).map(([f]) => f);
-    return dependents.length ? this.trustWhere(dependents, (entry) => entry.deps.some((d) => d.path === target && d.sha256 === sha256)) : [];
+    this.approve(target, sha256);
+    const files = isPatchFile(file) ? [file] : [];
+    for (const [f, h] of this.hashes) if (!files.includes(f) && h.deps.some((d) => d.path === target)) files.push(f);
+    // The edited file as the edit left it (the bytes hashed now are its),
+    // and every other file trusted bytes or another verified edit's.
+    return this.trustWhere(files, (entry) => {
+      const parts = [{ path: entry.root, sha256: entry.own }, ...entry.deps];
+      const mine = parts.find((d) => d.path === target);
+      return mine?.sha256 === sha256 && parts.every((d) => d.sha256 === undefined || this.isApproved(d.path, d.sha256));
+    });
+  }
+
+  verify(file: string, hash: string): boolean {
+    this.load();
+    if (this.always.some((d) => isInside(folderKey(file), d))) return true;
+    try {
+      const fresh = patchHash(file);
+      return !fresh.incomplete && fresh.hash === hash;
+    } catch {
+      return false;
+    }
+  }
+
+  private approve(file: string, sha256: string): void {
+    const set = this.approved.get(file) ?? new Set<string>();
+    set.delete(sha256);
+    set.add(sha256);
+    // A few versions a file each: enough to carry an edit on.
+    while (set.size > 50) set.delete(set.values().next().value!);
+    this.approved.set(file, set);
+  }
+
+  private isApproved(file: string, sha256: string): boolean {
+    return this.approved.get(file)?.has(sha256) ?? false;
+  }
+
+  private approveEntry(entry: HashEntry): void {
+    this.approve(entry.root, entry.own);
+    for (const d of entry.deps) if (d.sha256) this.approve(d.path, d.sha256);
   }
 
   private trustWhere(files: string[], accept: (entry: HashEntry) => boolean): string[] {
@@ -260,11 +314,12 @@ export class PatchTrust implements PatchTrustStore {
       if (!isPatchFile(file)) continue;
       let hash: string;
       try {
-        const entry = this.hashOf(file, fs.statSync(file).mtimeMs);
+        const entry = this.hashOf(file);
         // check() refuses it whatever's stored, so storing it would only
         // say it was trusted when it isn't.
         if (entry.incomplete || !accept(entry)) continue;
         entry.trusted = true;
+        this.approveEntry(entry);
         hash = entry.hash;
       } catch {
         continue;
@@ -295,41 +350,66 @@ export class PatchTrust implements PatchTrustStore {
     this.loadedMtime = fs.statSync(this.file).mtimeMs;
   }
 
-  // The patch's hash with its helpers'. Cached until the patch or one of
-  // its helpers changes (a stat each; patches are read every 15 seconds).
-  private hashOf(file: string, mtimeMs: number): HashEntry {
+  // The patch's hash with its helpers'. Cached until anything it was made
+  // from changes: a file's inode, size, mtime, ctime or mode (ctime can't
+  // be set back, so a write that restores the mtime still shows), a
+  // symlink on the way to one retargeted, or a missing one turning up (a
+  // stat and a realpath each; patches are read every 15 seconds).
+  private hashOf(file: string): HashEntry {
     const hit = this.hashes.get(file);
-    if (hit && hit.mtimeMs === mtimeMs && hit.deps.every((d) => mtimeOf(d.path) === d.mtimeMs) && hit.unnamed.every((p) => mtimeOf(p) === undefined)) return hit;
-    const entry = { mtimeMs, ...patchHash(file), trusted: hit?.trusted };
+    if (hit && hit.looked.same()) return hit;
+    const entry: HashEntry = { ...patchHash(file), trusted: hit?.trusted };
     this.hashes.set(file, entry);
     return entry;
   }
 }
 
-// `sha256`: the hash of the bytes the patch's hash was made from.
-type Dep = { path: string; mtimeMs?: number; sha256?: string };
-type HashEntry = PatchHash & { mtimeMs: number; trusted?: boolean };
+// `sha256`: the hash of the bytes the patch's hash was made from (none
+// when it's missing).
+type Dep = { path: string; sha256?: string };
+type HashEntry = PatchHash & { trusted?: boolean };
 
 // `deps` are the local files hashed with it; `unnamed`, paths it names that
 // aren't there (so one turning up changes the hash); `incomplete`, why the
 // hash can't cover everything it loads, when it can't.
 // `blocked`, the named scripts that run something it can't follow, and why.
 // `own`: the hash of the patch file's own bytes, as read for `hash`.
-export type PatchHash = { hash: string; own: string; deps: Dep[]; unnamed: string[]; incomplete?: string; blocked?: Record<string, string> };
+// `code`: the patch file and what it imports, by real path, as the bytes
+// that were hashed: what's imported (patches.ts). `looked`: what Reads saw,
+// to tell a cached hash still holds.
+export type PatchHash = {
+  hash: string;
+  own: string;
+  root: string; // the patch file's real path
+  deps: Dep[];
+  unnamed: string[];
+  code: Map<string, Buffer>;
+  looked: Reads;
+  incomplete?: string;
+  blocked?: Record<string, string>;
+};
 
 // A patch file's hash: its own text's alone when it has no local files,
 // else one over its text and each file's, by path relative to the patch
 // (so a worktree and its main checkout agree). A helper it imports that's
 // missing counts as missing, so adding it later changes the hash.
 export function patchHash(file: string): PatchHash {
-  const text = fs.readFileSync(file);
+  // Every file is read once, through `reads`: the bytes scanned are the
+  // bytes hashed, and the patch's own code is imported from them
+  // (patches.ts), never read from the folder again.
+  const reads = new Reads();
+  const root = reads.real(path.resolve(file)) ?? path.resolve(file);
+  const text = reads.read(root);
+  if (!text) throw new Error(`can't read ${file}`);
   const own = sha256(text);
-  const root = realpath(path.resolve(file));
+  const resolve = (dir: string, spec: string) => resolveHelper(dir, spec, reads);
   // The folder holding `.threadbear/`: where its commands run (a thread's
   // folder, or the worktree's root for setup), so `./setup.sh` is there.
   const folder = path.dirname(path.dirname(path.dirname(root)));
   const seen = new Set([root]);
   const deps: Dep[] = [];
+  // The patch's import graph: what Node loads, served from these bytes.
+  const code = new Map<string, Buffer>([[root, text]]);
   const unnamed = new Set<string>();
   let incomplete: string | undefined;
   const add = (dep: Dep): boolean => {
@@ -357,18 +437,14 @@ export function patchHash(file: string): PatchHash {
           : `patch trust can't check what ${name} line ${problem.line} loads (\`${problem.code}\`). Import local files by a plain path, like './lib/x.ts', and it can.`;
     }
     for (const spec of specifiers) {
-      const target = resolveHelper(path.dirname(from), spec);
+      const target = resolve(path.dirname(from), spec);
       if (seen.has(target)) continue;
       seen.add(target);
-      const mtimeMs = mtimeOf(target);
-      if (!add({ path: target, mtimeMs })) break scan;
-      if (mtimeMs !== undefined && SCANNED.includes(path.extname(target))) {
-        try {
-          queue.push({ from: target, text: fs.readFileSync(target, 'utf8') });
-        } catch {
-          // unreadable: hashed as missing below
-        }
-      }
+      if (!add({ path: target })) break scan;
+      const bytes = isFile(target) ? reads.read(target) : undefined;
+      if (!bytes) continue; // hashed as missing below
+      code.set(target, bytes);
+      if (SCANNED.includes(path.extname(target))) queue.push({ from: target, text: bytes.toString('utf8') });
     }
     // Named files are hashed, and what a named script runs in turn is
     // followed below (script-trust.ts). From both places a path is read
@@ -382,15 +458,16 @@ export function patchHash(file: string): PatchHash {
       const tries = [path.resolve(path.dirname(from), spec), path.resolve(folder, spec)];
       for (const t of tries) {
         if (!looksRunnable(t)) continue;
-        if (!isFile(t)) {
+        const target = isFile(t) ? reads.real(t) : undefined;
+        if (!target) {
+          reads.real(t);
           unnamed.add(t);
           continue;
         }
-        const target = realpath(t);
         named.add(target);
         if (seen.has(target)) continue;
         seen.add(target);
-        if (!add({ path: target, mtimeMs: mtimeOf(target) })) break scan;
+        if (!add({ path: target })) break scan;
       }
     }
   }
@@ -399,14 +476,15 @@ export function patchHash(file: string): PatchHash {
   // `./helper.sh` ran a changed helper unasked (Daybreak verify-fix,
   // 5 Nov). Its own bound, so a big script doesn't stop the patch loading.
   const top = repoTop(realpath(folder));
+  const opts = { folder: realpath(folder), top, scanJs: scriptScan, resolveImport: resolve, namedPaths, reads };
   let blocked: Record<string, string> | undefined;
   for (const script of named) {
     if (!isInside(script, top) || PICTURES.includes(path.extname(script).toLowerCase())) continue;
-    const reach = reachOf(script, { folder: realpath(folder), top, scanJs: scriptScan, resolveImport: resolveHelper, namedPaths });
+    const reach = reachOf(script, opts);
     for (const f of reach.files) {
       if (seen.has(f)) continue;
       seen.add(f);
-      deps.push({ path: f, mtimeMs: mtimeOf(f) });
+      deps.push({ path: f });
     }
     for (const m of reach.missing) unnamed.add(m);
     if (reach.problem) (blocked ??= {})[script] = reach.problem;
@@ -416,35 +494,34 @@ export function patchHash(file: string): PatchHash {
   // only `./` paths counted: Daybreak verify-fix, 5 Nov). An action runs
   // only when pressed, so what can't be followed doesn't stop it; a
   // command worked out in code is checked as it loads (actionFiles).
-  const opts = { folder: realpath(folder), top, scanJs: scriptScan, resolveImport: resolveHelper, namedPaths };
   if (isInside(realpath(folder), top)) {
     for (const command of commands) {
       const reach = reachOfCommand(command, 'the command', opts);
       for (const f of reach.files) {
         if (seen.has(f) || PICTURES.includes(path.extname(f).toLowerCase())) continue;
         seen.add(f);
-        deps.push({ path: f, mtimeMs: mtimeOf(f) });
+        deps.push({ path: f });
       }
       for (const m of reach.missing) if (unnamed.size < 2000) unnamed.add(m);
     }
   }
   const missing = [...unnamed];
+  for (const m of missing) if (!reads.links.has(m)) reads.real(m);
   const extra = { ...(incomplete ? { incomplete } : {}), ...(blocked ? { blocked } : {}) };
-  if (!deps.length) return { hash: own, own, deps, unnamed: missing, ...extra };
   const dir = path.dirname(root);
   const lines = deps
     .map((d) => {
-      let h = 'missing';
-      try {
-        h = sha256(fs.readFileSync(d.path));
-        d.sha256 = h;
-      } catch {
-        // stays missing
-      }
+      const bytes = isFile(d.path) ? reads.read(d.path) : undefined;
+      const h = bytes ? sha256(bytes) : 'missing';
+      if (bytes) d.sha256 = h;
       return `${path.relative(dir, d.path)} ${h}`;
     })
     .sort();
-  return { hash: sha256(Buffer.from(['threadbear-patch-2', own, ...lines].join('\n'))), own, deps, unnamed: missing, ...extra };
+  const hash = deps.length ? sha256(Buffer.from(['threadbear-patch-2', own, ...lines].join('\n'))) : own;
+  // Kept to tell whether a cached hash still holds; the bytes only for
+  // the code that's imported.
+  reads.bytes.clear();
+  return { hash, own, root, deps, unnamed: missing, code, looked: reads, ...extra };
 }
 
 // scanModule for a script a patch's command runs: its problem as words.
@@ -702,25 +779,15 @@ function isFile(p: string): boolean {
 // Where Node (or a bundler-ish habit) would find `spec`: as written, then
 // with a script extension, then as a folder's index. As written when none
 // is there, so it's hashed as missing.
-function resolveHelper(dir: string, spec: string): string {
+function resolveHelper(dir: string, spec: string, reads?: Reads): string {
   const base = path.resolve(dir, spec.replace(/[?#].*$/, ''));
   const tries = [base, ...[...SCANNED, '.json'].map((e) => base + e), ...SCANNED.map((e) => path.join(base, 'index' + e))];
   for (const t of tries) {
-    try {
-      if (fs.statSync(t).isFile()) return realpath(t);
-    } catch {
-      // try the next
-    }
+    // Each try is noted, so one turning up (or a link retargeted) shows.
+    if (isFile(t)) return reads ? (reads.real(t) ?? t) : realpath(t);
+    reads?.real(t);
   }
   return base;
-}
-
-function mtimeOf(file: string): number | undefined {
-  try {
-    return fs.statSync(file).mtimeMs;
-  } catch {
-    return undefined;
-  }
 }
 
 function sha256(data: Buffer): string {

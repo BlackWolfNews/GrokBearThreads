@@ -10,11 +10,11 @@ import { ErrorCode, RpcError } from '../protocol.ts';
 import { Projects } from '../projects.ts';
 import { threadEnv } from '../restart.ts';
 import { paths } from '../config.ts';
-import { fileSha, isPatchFile, type ClaudeVerdict } from '../patch-trust.ts';
+import { isPatchFile, type ClaudeVerdict } from '../patch-trust.ts';
 import type { AgentWrite } from '../adapters/types.ts';
 import { CLAUDE_PATCH_ID } from '../claude-trust.ts';
 import type { PatchInfo } from '../protocol.ts';
-import { EMPTY_PATCH_SET, hookApplies, loadPatchSet, applyLive, hasLive, projectPanels, renderListPanel, renderPanel, runCommand, type CommandOutcome, type PanelRender, type PatchSet, type ProjectFolder, projectPatchFiles } from '../patches.ts';
+import { automaticTrust, EMPTY_PATCH_SET, hookApplies, loadPatchSet, applyLive, hasLive, projectPanels, renderListPanel, renderPanel, runCommand, type CommandOutcome, type PanelRender, type PatchSet, type ProjectFolder, projectPatchFiles } from '../patches.ts';
 import os from 'node:os';
 import path from 'node:path';
 import type { ThreadState, Turn } from '../runner.ts';
@@ -240,24 +240,20 @@ export const patchesPart = {
     return { trusted };
   },
 
-  // Trusts patch files an agent's edit wrote (an adapter's 'wrote', never
-  // a preview), as that edit left them: each file only while its bytes
-  // still hash to `sha256`, checked in the same read the trust hash is
-  // made from (patch-trust.ts). Without `sha256` (a Codex patch), the
-  // bytes there as this runs. `reread` false when the caller reads them
-  // again itself. A helper the agent edited carries on the trusted patches
-  // importing it. With `cwd` (the thread's folder), its Claude Code
-  // settings and the scripts they name count too (claude-trust.ts).
+  // Trusts patch files an agent's verified edit wrote (an adapter's
+  // 'wrote', never a preview), as that edit left them: each only while it
+  // still hashes to `sha256`, checked in the same read the trust hash is
+  // made from, and only when every other file in the patch is bytes
+  // trusted before or another verified edit's (patch-trust.ts). A helper
+  // the agent edited carries on the patches importing it the same way.
+  // With `cwd` (the thread's folder), its Claude Code settings and the
+  // scripts they name count too (claude-trust.ts). `reread` false when
+  // the caller reads them again itself.
   trustAgentPatches(this: Runner, files: AgentWrite[], reread = true, cwd?: string): void {
     const done: string[] = [];
     for (const { path: file, sha256 } of files) {
-      const sha = sha256 ?? fileSha(file);
-      if (!sha) continue;
-      if (isPatchFile(file)) done.push(...this.patchTrust.trustCurrent([file], sha));
-      else {
-        done.push(...this.patchTrust.trustDependents(file, sha));
-        if (cwd && this.patchTrust.trustClaudeEdit(cwd, file, sha)) done.push(file);
-      }
+      done.push(...this.patchTrust.trustAgentWrite(file, sha256));
+      if (cwd && !isPatchFile(file) && this.patchTrust.trustClaudeEdit(cwd, file, sha256)) done.push(file);
     }
     if (done.length && reread) this.rereadAllPatches();
   },
@@ -399,6 +395,17 @@ export const patchesPart = {
   async runHookList(this: Runner, st: ThreadState, hooks: PatchSet['hooks']): Promise<void> {
     for (const hook of hooks) {
       if (st.rt.deleted || this.stopping) return;
+      // A hook bound to a hashed script runs from the folder, so the patch
+      // must still hash to the version that approved it, read afresh now:
+      // a script changed since the last look isn't run.
+      if (hook.exec) {
+        const by = automaticTrust(hook.exec);
+        if (!by || !this.patchTrust.verify(by.file, by.hash)) {
+          this.emit(st, { type: 'system.note', text: `Didn't run the hook "${hook.title}": its patch or a script it runs changed since it was trusted.` });
+          this.rereadAllPatches();
+          continue;
+        }
+      }
       const outcome = await runCommand(hook.exec ?? hook.command, {
         cwd: hook.folder ?? st.rec.cwd,
         env: { ...process.env, ...threadEnv(st.rec.id, this.cfg.home) },

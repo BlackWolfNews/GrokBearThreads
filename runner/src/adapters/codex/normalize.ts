@@ -143,7 +143,6 @@ export class CodexNormalizer {
   // (Codex yielded with them going), and subagents likewise.
   private background = new Map<string, OpenTool>();
   private hidden = new Set<string>(); // items with no row (collab `wait`)
-  private changed = new Map<string, string[]>(); // a started patch's files, until it completes
   private subagents = new Map<string, string>(); // child thread id -> its row's item id
   private childAnswers = new Map<string, string>(); // child thread id -> its last final answer
   private notes = new Set<string>();
@@ -520,7 +519,6 @@ export class CodexNormalizer {
         const paths = changes.map((c) => String(c.path ?? ''));
         const kind: ToolKind = changes.length > 0 && changes.every((c) => c.kind?.type === 'add') ? 'write' : 'edit';
         call('apply_patch', kind, this.patchTitle(changes), { paths });
-        this.changed.set(id, patchFiles(changes));
         out.push(...diffEvents(id, changes));
         break;
       }
@@ -627,16 +625,10 @@ export class CodexNormalizer {
     }
     const wasBackground = this.background.delete(id);
     this.open.delete(id);
-    // The files an applied patch left, for patch trust, hashed by the
-    // runner as this arrives. Never from item/started or patchUpdated: those
-    // are proposals, sent before Mike approves or declines them.
-    const changed = this.changed.get(id);
-    this.changed.delete(id);
-    if (type === 'fileChange' && item.status === 'completed') {
-      const paths = Array.isArray(item.changes) ? patchFiles(item.changes as AnyMsg[]) : (changed ?? []);
-      const files = paths.map((p) => ({ path: p }));
-      if (files.length) out.push({ kind: 'wrote', itemId: id, files });
-    }
+    // No 'wrote' for a patch, applied or not: its result doesn't say what
+    // bytes it wrote, and hashing the file when the result arrives trusted
+    // whatever a command had put there first (Codex review, 5 Nov). A patch
+    // file Codex writes waits for Mike (docs/protocol.md).
     out.push(this.completedResult(type, id, item));
     if (wasBackground) out.push(this.tasks());
   }
@@ -892,15 +884,6 @@ export function parseHunks(diff: string): Hunk[] {
     } else if (cur && (line.startsWith(' ') || line.startsWith('-') || line.startsWith('+'))) cur.lines.push(line);
   }
   return hunks;
-}
-
-// The files a patch's changes leave: where each add or update ends up
-// (an update can move its file), not the ones it deletes.
-function patchFiles(changes: AnyMsg[]): string[] {
-  return changes
-    .filter((c) => c?.kind?.type !== 'delete')
-    .map((c) => String(c?.kind?.move_path ?? c?.path ?? ''))
-    .filter(Boolean);
 }
 
 function diffEvents(itemId: string, changes: AnyMsg[]): AdapterOutput[] {

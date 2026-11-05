@@ -9,7 +9,7 @@ import type { ThreadRecord } from '../store.ts';
 import { BIN_DIR, threadEnv } from '../restart.ts';
 import { cleanUpWorktree, makeWorktree, sameSubfolder } from '../worktrees.ts';
 import { isDirectory } from '../fsutil.ts';
-import { findWorktreePatch, isInside, readWorktreePatch, runCommand, type PatchSet, worktreePatchFiles } from '../patches.ts';
+import { automaticTrust, findWorktreePatch, isInside, readWorktreePatch, runCommand, type PatchSet, worktreePatchFiles } from '../patches.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ThreadState } from '../runner.ts';
@@ -70,6 +70,15 @@ export const worktreesPart = {
       return;
     }
     if (!setup.command) return;
+    // Bound to a hashed script, it runs from the worktree: the copy must
+    // still hash to the version that approved it, read afresh just now.
+    if (setup.run) {
+      const by = automaticTrust(setup.run);
+      if (!by || !this.patchTrust.verify(by.file, by.hash)) {
+        this.emit(st, { type: 'system.note', text: `Didn't run the worktree's setup (${patch.setup}): its patch or a script it runs changed since it was checked.` }, turnId);
+        return;
+      }
+    }
     const outcome = await runCommand(setup.run ?? setup.command, {
       cwd: made.worktree.path,
       env: { ...process.env, ...threadEnv(rec.id, this.cfg.home) },
