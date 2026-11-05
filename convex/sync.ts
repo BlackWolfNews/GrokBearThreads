@@ -809,12 +809,8 @@ export const heartbeat = mutation({
       await ctx.db.patch(counted._id, { projectsLinked: true });
       await ctx.scheduler.runAfter(0, internal.sync.linkProjects, { runnerId: runner.runnerId, cursor: null });
     }
-    // API 44: its projects from before projectHeads, once, so phone:projects
-    // lists them within a minute of this backend.
-    if (counted && !counted.projectHeadsSeeded) {
-      await ctx.db.patch(counted._id, { projectHeadsSeeded: true });
-      await seedHeads(ctx, runner.runnerId);
-    }
+    // API 45: every project from before projectHeads, once.
+    await seedHeads(ctx);
     return { apiVersion: API_VERSION, ...(existing ? {} : { firstSeen: true }), ...(caller.owner && process.env.RUNNER_KEY_NEXT ? { ownerKeyRotating: true } : {}) };
   },
 });
@@ -1480,14 +1476,64 @@ export const schedules = query({
     // A runner key's runner lists only its own: another's schedule is its
     // text, folder and permissions, which aren't this runner's to see. By
     // index, so it's all it reads too: reading the whole table cost about 170
-    // KB a run and re-ran it for every other runner's claim (API 44).
+    // KB a run and re-ran it for every other runner's claim (API 45).
     const rows = caller.owner ? ctx.db.query('schedules') : ctx.db.query('schedules').withIndex('by_runnerId', (q) => q.eq('runnerId', caller.runnerId));
     for await (const row of rows) {
       if (!row.owned) continue;
-      const { _id, _creationTime, owned, claim, ...rest } = row;
+      const { _id, _creationTime, owned, claim, updatedMs: _u, ...rest } = row;
       out.push(rest);
     }
     return out;
+  },
+});
+
+const SCHEDULES_SINCE_CAP = 200;
+// scheduleGone rows last a day (pruneOld, every 6 hours), so asking from further
+// back than this could miss one: read the whole table instead.
+const SCHEDULES_SINCE_OLDEST_MS = 12 * 60 * 60_000;
+
+// With no `since`, the whole table and the time to follow it from; with one,
+// the rows written at or after it and the ids gone since (API 45). A runner
+// asks again from a little before the newest it heard, so each run reads only
+// what changed (runner/src/schedule-follow.ts). `more`: read it whole again.
+// A runner key's runner reads and hears of only its own, by index.
+export const schedulesSince = query({
+  // `fresh`: anything different each time, so a whole read isn't served from
+  // Convex's cache with the `at` of when it was first made.
+  args: { key: v.string(), since: v.optional(v.number()), fresh: v.optional(v.number()) },
+  returns: v.object({
+    rows: v.array(v.object({ ...ownedScheduleDoc.fields, updatedMs: v.optional(v.number()) })),
+    gone: v.array(v.string()),
+    at: v.number(),
+    more: v.optional(v.boolean()),
+  }),
+  handler: async (ctx, { key, since }) => {
+    const caller = await runnerAuth(ctx, key, 'schedulesSince');
+    const own = caller.owner ? undefined : caller.runnerId;
+    const at = Date.now();
+    const shown = (row: Doc<'schedules'>) => {
+      const { _id, _creationTime, owned: _o, claim: _c, ...rest } = row;
+      return rest;
+    };
+    if (since === undefined) {
+      const all = own ? ctx.db.query('schedules').withIndex('by_runnerId', (q) => q.eq('runnerId', own)) : ctx.db.query('schedules');
+      const rows = [];
+      for await (const row of all) if (row.owned) rows.push(shown(row));
+      return { rows, gone: [], at };
+    }
+    if (since < at - SCHEDULES_SINCE_OLDEST_MS) return { rows: [], gone: [], at, more: true };
+    const docs = await (own
+      ? ctx.db.query('schedules').withIndex('by_runner_updated', (q) => q.eq('runnerId', own).gte('updatedMs', since))
+      : ctx.db.query('schedules').withIndex('by_updated', (q) => q.gte('updatedMs', since))
+    ).take(SCHEDULES_SINCE_CAP + 1);
+    const went = await (own
+      ? ctx.db.query('scheduleGone').withIndex('by_runner_at', (q) => q.eq('runnerId', own).gte('at', since))
+      : ctx.db.query('scheduleGone').withIndex('by_at', (q) => q.gte('at', since))
+    ).take(SCHEDULES_SINCE_CAP + 1);
+    if (docs.length > SCHEDULES_SINCE_CAP || went.length > SCHEDULES_SINCE_CAP) return { rows: [], gone: [], at, more: true };
+    // An id that's back since it went has a row, which is what's true now.
+    const here = new Set(docs.map((d) => d.id));
+    return { rows: docs.filter((d) => d.owned).map(shown), gone: went.filter((g) => !here.has(g.id)).map((g) => g.id), at };
   },
 });
 
@@ -1512,11 +1558,13 @@ export const saveSchedule = mutation({
     if (!row && !caller.owner && (await ownedCount(ctx, schedule.runnerId)) >= CAP.schedules) throw tooMany('schedules', CAP.schedules);
     await syncWake(ctx, schedule);
     if (!row) {
-      await ctx.db.insert('schedules', { ...schedule, owned: true });
+      await ctx.db.insert('schedules', { ...schedule, owned: true, updatedMs: Date.now() });
       return null;
     }
     const claim = row.claim && row.nextRunAt === schedule.nextRunAt ? { claim: row.claim } : {};
-    await ctx.db.replace(row._id, { ...schedule, owned: true, ...claim });
+    // Moved to another runner: the one it was on follows only its own rows.
+    if (row.runnerId !== schedule.runnerId) await ctx.db.insert('scheduleGone', { id: row.id, runnerId: row.runnerId, at: Date.now() });
+    await ctx.db.replace(row._id, { ...schedule, owned: true, ...claim, updatedMs: Date.now() });
     return null;
   },
 });
@@ -1532,6 +1580,7 @@ export const deleteSchedule = mutation({
     if (!row) return false;
     await ctx.db.delete(row._id);
     await dropWake(ctx, scheduleId);
+    await ctx.db.insert('scheduleGone', { id: row.id, runnerId: row.runnerId, at: Date.now() });
     return true;
   },
 });
@@ -1575,7 +1624,7 @@ export const adoptSchedules = mutation({
       }
     }
     for (const s of fresh) {
-      await ctx.db.insert('schedules', { ...s, runnerId, owned: true });
+      await ctx.db.insert('schedules', { ...s, runnerId, owned: true, updatedMs: Date.now() });
       await syncWake(ctx, { ...s, runnerId });
     }
     return { held: [] };
@@ -1651,7 +1700,7 @@ export const scheduleRan = mutation({
     // A runner key's run record is cut to fit: the row it's recorded on is
     // read whole with every other schedule (CAP).
     const run = caller.owner ? lastRun : { ...lastRun, at: cutBytes(lastRun.at, 64), outcome: cutBytes(lastRun.outcome, 64), ...(lastRun.threadId !== undefined ? { threadId: cutBytes(lastRun.threadId, 100) } : {}), ...(lastRun.note !== undefined ? { note: cutBytes(lastRun.note, CAP.note) } : {}) };
-    const patch: Record<string, unknown> = { lastRun: run, runs: row.runs + (sent ? 1 : 0) };
+    const patch: Record<string, unknown> = { lastRun: run, runs: row.runs + (sent ? 1 : 0), updatedMs: Date.now() };
     if (row.claim?.holder === holder) patch.claim = undefined;
     if (request !== undefined && row.runRequestedAt === request) patch.runRequestedAt = undefined;
     if (row.updatedAt === expectUpdatedAt) {
@@ -1677,7 +1726,7 @@ export const requestScheduleRun = mutation({
     // refusal to say it's there or whose it is.
     const row = visibleTo(caller, await scheduleRow(ctx, scheduleId));
     if (!row) return false;
-    await ctx.db.patch(row._id, { runRequestedAt: caller.owner ? at : cutBytes(at, 64) });
+    await ctx.db.patch(row._id, { runRequestedAt: caller.owner ? at : cutBytes(at, 64), updatedMs: Date.now() });
     return true;
   },
 });
@@ -1766,11 +1815,11 @@ export const sharedUsage = query({
       mine = new Set();
       for (const a of await ctx.db.query('accounts').withIndex('by_runnerId', (q) => q.eq('runnerId', caller.runnerId)).take(CAP.accounts + 1)) if (a.email) mine.add(`${a.provider}:${a.email.toLowerCase()}`);
     }
-    // Only other runners' rows (API 44): a runner has no use for its own, and
+    // Only other runners' rows (API 45): a runner has no use for its own, and
     // reading them re-ran this for each of its own writes. Two ranges of the
     // index, so a write to the caller's rows isn't in what this read. A runner
     // key's own logins, just above, still are. A runner sending no runnerId
-    // (from before 44) is told about everyone's, and leaves out its own.
+    // (from before 45) is told about everyone's, and leaves out its own.
     const me = caller.owner ? runnerId : caller.runnerId;
     const rows = me
       ? [
@@ -2036,6 +2085,11 @@ export const pruneOld = internalMutation({
     for (const m of await ctx.db.query('messages').withIndex('by_pagedAt', (q) => q.gt('pagedAt', 0).lt('pagedAt', cutoff)).take(Math.max(0, Math.min(left, PRUNE_MESSAGES)))) {
       await ctx.db.patch(m._id, { pagedAt: undefined });
       left -= Math.ceil(PRUNE_BATCH / PRUNE_MESSAGES);
+    }
+    // What sync:schedulesSince told runners went, likewise.
+    for (const t of await ctx.db.query('scheduleGone').withIndex('by_at', (q) => q.lt('at', cutoff)).take(Math.max(0, left))) {
+      await ctx.db.delete(t._id);
+      left--;
     }
     // What phone:threadsSince told clients went, once they've had a day to hear.
     for (const t of await ctx.db.query('threadGone').withIndex('by_at', (q) => q.lt('at', cutoff)).take(Math.max(0, left))) {
@@ -2454,6 +2508,7 @@ export const auditRemove = mutation({
         } else {
           await ctx.db.delete(row._id);
           if (r.kind === 'picture') await deleteIfUnused(ctx, row.storageId);
+          if (r.kind === 'schedule') await ctx.db.insert('scheduleGone', { id: row.id, runnerId: row.runnerId, at: Date.now() });
           n++;
         }
       }
@@ -2505,6 +2560,8 @@ export const purgeRunner = mutation({
       if (left <= 0) break;
       for (const r of await ctx.db.query(table).withIndex('by_runnerId', (q: any) => q.eq('runnerId', runnerId)).take(left)) {
         await ctx.db.delete(r._id);
+        // The owner's runner holds a copy of every schedule, this one's too.
+        if (table === 'schedules') await ctx.db.insert('scheduleGone', { id: (r as Doc<'schedules'>).id, runnerId, at: Date.now() });
         left--;
       }
     }

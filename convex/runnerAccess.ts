@@ -164,6 +164,7 @@ export const ACCESS: Record<string, Access> = {
   // no runner on a runner key needs it, and it can shadow other ids.
   setSchedules: 'owner',
   schedules: 'own',
+  schedulesSince: 'own',
   saveSchedule: 'own',
   deleteSchedule: 'own',
   adoptSchedules: 'own',

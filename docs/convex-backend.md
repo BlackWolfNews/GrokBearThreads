@@ -559,7 +559,7 @@ gives it only the newest 100 of the den.
 
 Also `phone:projects({ token, archived? })`, `phone:schedules({ token })`
 and `phone:accounts({ token })`, the runner's lists as it last sent them
-(docs/protocol.md "Sync" says which fields). Since API 44 `phone:projects`
+(docs/protocol.md "Sync" says which fields). Since API 45 `phone:projects`
 reads `projectHeads` and returns `goals`, `state`, `notes` and `folders` empty;
 `phone:project({ token, runnerId, id })` is one project whole, or null, read
 only when its page is open. Since API 5 a project row
@@ -879,10 +879,10 @@ MB (157 KB). Those cost nothing with no client open. Also new that day: `sync:sh
 reading gets copied to the other runners' rows, so one change is three writes
 and nine re-runs, about 70 MB a day at that rate.
 
-Then, API 44. Measured from the logs on 5 Nov before the change: `sync:schedules`
+Then, API 45. Measured from the logs on 5 Nov before the change: `sync:schedules`
 168 KB a run, `sync:sharedUsage` 16 KB a run. A runner key's `sync:schedules` now
 reads only its own rows, so Bruce and Hetzner no longer pay for, or re-run on, the
-M5's claims; the M5, as owner, still reads them all. `phone:projects` reads
+M5's claims, and every runner of 45 follows only the rows written since (`sync:schedulesSince`), so a run costs a row or two rather than the table. Finished one-offs already go after 7 days (`KEEP_FINISHED_MS`), and they're now read only when a runner starts. `phone:projects` reads
 `projectHeads` rather than `projects`: 79 projects are 199 KB in `projects`, 143 KB
 of it notes, and the fields a list needs are about 30 KB. Editing notes no longer
 re-runs the list. `sync:sharedUsage` leaves out the caller's rows. A day's real

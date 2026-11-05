@@ -31,6 +31,7 @@ import { agentsStillWorking, ARCHIVE_VERDICTS, ErrorCode, isEffortLevel } from '
 import type { Account, ArchiveVerdict, ApprovalDecision, ApprovalOption, AskAnswer, EffortLevel, ImageRef, OpenAsk, PersistedEvent, Project, Question, Schedule, ThreadSummary } from './protocol.ts';
 import type { Notification } from './runner.ts';
 import type { ScheduleBackend, StoredSchedule } from './schedules.ts';
+import { followSchedules } from './schedule-follow.ts';
 import { ThreadIndex, type RemoteThreads } from './thread-index.ts';
 import { digest, dropSyncCache, loadSyncCache, saveSyncCache, SYNC_CACHE_MAX_AGE_MS } from './sync-cache.ts';
 import { paths, readRunnerJson, writeRunnerJson } from './config.ts';
@@ -128,6 +129,9 @@ export const SCRUB_API_VERSION = 47;
 // From this one sync:sharedUsage takes this runner's id and doesn't read its
 // rows, so it doesn't re-run for this runner's own writes.
 export const SHARED_USAGE_OTHERS_API_VERSION = 48;
+// From this one the scheduler follows only the schedules written since it last
+// heard (sync:schedulesSince), rather than the whole table on every change.
+export const SCHEDULES_FOLLOW_API_VERSION = 48;
 export function sharedUsageArgs<K>(key: K, runnerId: string | undefined, backend: number): { key: K; runnerId?: string } {
   // An older backend's validator would turn the extra argument down.
   return runnerId && backend >= SHARED_USAGE_OTHERS_API_VERSION ? { key, runnerId } : { key };
@@ -2594,7 +2598,11 @@ export class ConvexSync {
           onError(new Error('sync is off'));
           return () => {};
         }
-        return this.subscriber.subscribe('sync:schedules', { key }, (v) => onRows(Array.isArray(v) ? (v as StoredSchedule[]) : []), onError);
+        const subscriber = this.subscriber;
+        if ((this.backendApiVersion ?? 0) >= SCHEDULES_FOLLOW_API_VERSION) {
+          return followSchedules<StoredSchedule>((fn, args, onUpdate, fail) => subscriber.subscribe(fn, args, onUpdate, fail), key, onRows, onError);
+        }
+        return subscriber.subscribe('sync:schedules', { key }, (v) => onRows(Array.isArray(v) ? (v as StoredSchedule[]) : []), onError);
       },
       save: async (sc) => {
         await call('mutation', 'sync:saveSchedule', { schedule: toOwnedScheduleDoc(sc, this.backendApiVersion ?? 0) });
@@ -2633,16 +2641,24 @@ export class ConvexSync {
   // ------------------------------------------------------------ shared usage
 
   private unsubSharedUsage?: () => void;
+  private sharedUsageAsked?: string;
 
   // Once: every runner's readings, less this runner's own, to the usage
   // store. Each reading's readAt keeps a copy of a copy from winning over
   // the reading it came from.
   private followSharedUsage(): void {
-    if (this.unsubSharedUsage || !this.subscriber || !this.deps.sharedUsage) return;
+    if (!this.subscriber || !this.deps.sharedUsage) return;
+    // A heartbeat calls this each time: once, unless the backend has come to
+    // take the runner's id since.
+    const args = sharedUsageArgs(this.deps.key, this.runnerId, this.backendApiVersion ?? 0);
+    const asked = JSON.stringify(args);
+    if (this.unsubSharedUsage && this.sharedUsageAsked === asked) return;
+    this.unsubSharedUsage?.();
+    this.sharedUsageAsked = asked;
     const mine = this.runnerId;
     this.unsubSharedUsage = this.subscriber.subscribe(
       'sync:sharedUsage',
-      sharedUsageArgs(this.deps.key, mine, this.backendApiVersion ?? 0),
+      args,
       (v) => this.deps.sharedUsage?.setShared((Array.isArray(v) ? (v as SharedReading[]) : []).filter((r) => r.runnerId !== mine)),
       (e) => {
         this.deps.log.debug('shared usage subscription failed', { error: String(e) });

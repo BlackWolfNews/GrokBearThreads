@@ -424,11 +424,15 @@ export default defineSchema({
     // sync:upsertProjects (API 30) finds the one project it changes.
     .index('by_runner_id', ['runnerId', 'id']),
 
-  // One small row per project, what a list shows (API 44, projectHeads.ts):
+  // One small row per project, what a list shows (API 45, projectHeads.ts):
   // the phone follows the list all the time, and a read costs the whole
   // document, so reading `projects` for it cost every project's notes. Goals,
   // state, notes and folders stay in `projects`, read for one project by
   // phone:project. Only written when one of these fields changes.
+  // Marks that a one-off copy of old rows has been done for the whole
+  // deployment, so readers know the new table is complete.
+  backendMarks: defineTable({ name: v.string() }).index('by_name', ['name']),
+
   projectHeads: defineTable({
     runnerId: v.string(),
     id: v.string(),
@@ -457,8 +461,6 @@ export default defineSchema({
     // Set once linkProjects has been run over every thread the runner had
     // when projectThreads arrived (API 40); later writes keep links current.
     projectsLinked: v.optional(v.boolean()),
-    // Its projects have been copied to projectHeads (API 44), once.
-    projectHeadsSeeded: v.optional(v.boolean()),
     inbox: v.optional(v.number()),
     overflow: v.optional(v.number()),
     total: v.optional(v.number()),
@@ -557,9 +559,23 @@ export default defineSchema({
     poolId: v.optional(v.string()),
     claim: v.optional(v.object({ holder: v.string(), until: v.number() })),
     runRequestedAt: v.optional(v.string()),
+    // When what a runner reads last changed (API 45), for sync:schedulesSince.
+    // A claim doesn't move it: runners aren't told about claims, so a claim
+    // re-runs nobody. Rows from before have none until they're next written,
+    // and are read when a runner first reads the whole table.
+    updatedMs: v.optional(v.number()),
   })
     .index('by_runnerId', ['runnerId'])
-    .index('by_scheduleId', ['id']),
+    .index('by_scheduleId', ['id'])
+    .index('by_updated', ['updatedMs'])
+    .index('by_runner_updated', ['runnerId', 'updatedMs']),
+
+  // A schedule gone or moved off a runner in the last day, so a runner
+  // following sync:schedulesSince hears of it. One away for longer reads the
+  // whole table when it's back anyway.
+  scheduleGone: defineTable({ id: v.string(), runnerId: v.string(), at: v.number() })
+    .index('by_at', ['at'])
+    .index('by_runner_at', ['runnerId', 'at']),
 
   // Pools shared by every runner (API 38, docs/protocol.md, "Pools"): one
   // row per pool, in `order`. Members are logins by provider and email, as

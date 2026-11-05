@@ -65,7 +65,13 @@ export async function syncHeads(ctx: { db: MutationCtx['db'] }, runnerId: string
   for (const p of projects) await syncHead(ctx, p);
 }
 
-// A runner's projects from before this table, the first heartbeat it's seen.
-export async function seedHeads(ctx: { db: MutationCtx['db'] }, runnerId: string): Promise<void> {
-  for await (const p of ctx.db.query('projects').withIndex('by_runnerId', (q) => q.eq('runnerId', runnerId))) await syncHead(ctx, p);
+// Every project from before this table, whichever runner it's on, so one
+// that's offline when this backend arrives doesn't lose its projects. Once, on
+// the first heartbeat any runner sends; until then phone:projects reads
+// `projects`, as it did.
+export const HEADS_MARK = 'projectHeads';
+export async function seedHeads(ctx: { db: MutationCtx['db'] }): Promise<void> {
+  if (await ctx.db.query('backendMarks').withIndex('by_name', (q) => q.eq('name', HEADS_MARK)).first()) return;
+  await ctx.db.insert('backendMarks', { name: HEADS_MARK });
+  for await (const p of ctx.db.query('projects')) await syncHead(ctx, p);
 }

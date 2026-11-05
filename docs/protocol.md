@@ -3368,6 +3368,11 @@ kept in `schedules.json` in the data dir.
   it moves its own `schedules.json` up, under its `runnerId`, and from
   then on the file is only the copy. With sync off, or an older backend,
   schedules stay the runner's own file as before.
+  From backend API 45 a runner reads the table once with
+  `sync:schedulesSince` and then only the rows written since, plus the ids
+  gone (`scheduleGone`, kept a day), asking again from 5 seconds before the
+  newest row it heard. A claim doesn't count as a write for this. An older
+  runner goes on using `sync:schedules`.
 - **Agents** make and change schedules with the `threadbear` tools
   (`schedule_message`, `list_schedules`, `update_schedule`,
   `delete_schedule`); `createdBy` is their thread. By default an agent's
@@ -3638,10 +3643,11 @@ the mirror back as state. The Mac app doesn't use it.
   also `models?` (each `id, title, effortLevels?, defaultEffort?`) and
   `defaultEffort?`, for the phone's new thread pickers). The same at start,
   and the accounts again once a heartbeat first says the backend is at 20.
-  From backend API 44 each project also has a small row in `projectHeads`
+  From backend API 45 each project also has a small row in `projectHeads`
   (no goals, state, notes or folders), written only when what it holds
-  changes apart from `updatedAt`, which `phone:projects` reads; a runner's
-  projects from before are copied there on its next heartbeat, once.
+  changes apart from `updatedAt`, which `phone:projects` reads. Every project
+  from before is copied there on the first heartbeat any runner sends, once
+  (`backendMarks`); until then `phone:projects` reads `projects`.
   `sync:sharedUsage` takes the caller's `runnerId` and doesn't read that
   runner's rows, so it doesn't re-run for the runner's own writes.
 - **Project pictures** (backend API 5). A project's picture goes to the
@@ -4093,6 +4099,7 @@ anyone's); "any runner" is any good key. Anything not sorted is owner only.
 | `adoptPools` | owner only | as `savePools`; a runner key's runner keeps its own until the main Mac sets them |
 | `setSchedules` | owner only | mirrored rows, for a runner on a pre-API 9 schedules.json: no runner key's runner needs it, and it could shadow another runner's ids (its runner stops mirroring, quietly) |
 | `schedules` | its own | lists only its runner's schedules; the owner sees all |
+| `schedulesSince` | its own | as `schedules`, and hears of only its own runner's rows and ids gone |
 | `saveSchedule` | its own | the schedule's `runnerId`, and every row with that id, mirrored ones too: no schedule on another runner; a runner key's ids are UUIDs |
 | `deleteSchedule` | its own | the schedule's runner |
 | `adoptSchedules` | its own | `runnerId`: replaces only its own old mirrored rows; for a runner key all or nothing (UUID ids no other runner has, within its caps), saying which it held back |

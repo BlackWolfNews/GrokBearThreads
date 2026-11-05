@@ -214,5 +214,6 @@
 //    iPhone app has ever read those four. sync:sharedUsage takes the caller's
 //    runnerId and leaves its rows out of what it reads; an older runner sends
 //    none and is told about everyone's, as before. sync:schedules reads only a
-//    runner key's own rows.
+//    runner key's own rows. sync:schedulesSince is the table once and then only
+//    the rows written since; an older runner goes on using sync:schedules.
 export const API_VERSION = 48;

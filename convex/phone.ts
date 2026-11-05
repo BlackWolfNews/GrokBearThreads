@@ -11,6 +11,7 @@ import { checkPhoneToken, hasLiveKey, runnerStatsRows, watchRunnersFor } from '.
 import { API_VERSION } from './version';
 import { imagesFrom, phoneImage, replyImagesFrom } from './share';
 import { runnerName } from './sync';
+import { HEADS_MARK } from './projectHeads';
 
 // A runner not heard from for this long is offline, and a command with no
 // runnerId goes to the main one still online (mainRunner).
@@ -329,7 +330,7 @@ async function iconOf(ctx: QueryCtx, p: { runnerId: string; id: string; icon?: {
   return { icon: { ...(p.icon.symbol ? { symbol: p.icon.symbol } : {}), ...(url ? { url } : {}), by: p.icon.by } };
 }
 
-// The list, from projectHeads (API 44): goals, state, notes and folders come
+// The list, from projectHeads (API 45): goals, state, notes and folders come
 // back empty, and phone:project has them. The iPhone follows this all the time
 // and has only ever read the id, title, archived and icon, so apps already out
 // there get the saving too; reading `projects` cost about 200 KB a run for
@@ -340,16 +341,18 @@ export const projects = query({
   handler: async (ctx, { token, archived }) => {
     await checkPhoneToken(ctx, token);
     const out = [];
-    for await (const p of ctx.db.query('projectHeads')) {
+    // `projects` only until the first heartbeat on this backend has copied them.
+    const ready = await ctx.db.query('backendMarks').withIndex('by_name', (q) => q.eq('name', HEADS_MARK)).first();
+    for await (const p of ready ? ctx.db.query('projectHeads') : ctx.db.query('projects')) {
       if (p.archived && !archived) continue;
-      const { icon: _icon, ...rest } = strip(p);
-      out.push({ ...rest, folders: [], goals: '', state: '', notes: '', ...(await iconOf(ctx, p)) });
+      const { runnerId, id, title, createdBy, createdAt, updatedAt, threadCount, lastActivityAt } = p;
+      out.push({ runnerId, id, title, createdBy, archived: p.archived, createdAt, updatedAt, threadCount, ...(lastActivityAt !== undefined ? { lastActivityAt } : {}), folders: [], goals: '', state: '', notes: '', ...(await iconOf(ctx, p)) });
     }
     return out.sort((a, b) => (b.lastActivityAt ?? b.updatedAt).localeCompare(a.lastActivityAt ?? a.updatedAt));
   },
 });
 
-// One project whole, for its page (API 44). Reads only that project's row, so
+// One project whole, for its page (API 45). Reads only that project's row, so
 // it re-runs only when that project changes.
 export const project = query({
   args: { token: v.string(), runnerId: v.string(), id: v.string() },
@@ -431,7 +434,7 @@ export const schedules = query({
     const out = [];
     // `owned` and `claim` are the backend's own (API 9), not the phone's.
     for await (const s of ctx.db.query('schedules')) {
-      const { owned, claim, ...rest } = strip(s);
+      const { owned, claim, updatedMs: _u, ...rest } = strip(s);
       out.push(rest);
     }
     return out;

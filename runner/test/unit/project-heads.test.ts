@@ -93,20 +93,22 @@ test('a project gone goes from the list, by upsert and by the whole list', async
   assert.deepEqual(s.rows('projectHeads').map((h) => h.id), ['p3']);
 });
 
-test("a runner's projects from before the table are copied on its next heartbeat, once", async () => {
+test('projects from before the table: all copied on the first heartbeat, an offline runner\'s too, once, and listed meanwhile', async () => {
   const s = await setup();
   await s.ctx.db.insert('projects', { ...project('old'), runnerId: M5 });
-  assert.deepEqual(await call(s.ctx, phone.projects, { token: TOKEN }), []);
-  await call(s.ctx, sync.heartbeat, heartbeat(OWNER, M5));
-  assert.deepEqual(((await call(s.ctx, phone.projects, { token: TOKEN })) as any[]).map((p) => p.id), ['old']);
-  // Not read again: a row put in by hand isn't picked up by the next one.
+  await s.ctx.db.insert('projects', { ...project('offline'), runnerId: 'asleep000001' });
+  // Until a heartbeat: still listed, from `projects`, in the list's shape.
+  const before = (await call(s.ctx, phone.projects, { token: TOKEN })) as Record<string, any>[];
+  assert.deepEqual(before.map((p) => p.id).sort(), ['offline', 'old']);
+  assert.equal(before[0]!.notes, '');
+  assert.equal(s.rows('projectHeads').length, 0);
+  await call(s.ctx, sync.heartbeat, heartbeat(BRUCE_KEY, BRUCE));
+  assert.deepEqual(s.rows('projectHeads').map((h) => h.id).sort(), ['offline', 'old']);
+  assert.deepEqual(((await call(s.ctx, phone.projects, { token: TOKEN })) as any[]).map((p) => p.id).sort(), ['offline', 'old']);
+  // Not read again: a row put in by hand isn't picked up by the next heartbeat.
   await s.ctx.db.insert('projects', { ...project('later'), runnerId: M5 });
   await call(s.ctx, sync.heartbeat, heartbeat(OWNER, M5));
-  assert.deepEqual(s.rows('projectHeads').map((h) => h.id), ['old']);
-  // Another runner's are its own to seed.
-  await s.ctx.db.insert('projects', { ...project('b1'), runnerId: BRUCE });
-  await call(s.ctx, sync.heartbeat, heartbeat(BRUCE_KEY, BRUCE));
-  assert.deepEqual(s.rows('projectHeads').map((h) => h.id).sort(), ['b1', 'old']);
+  assert.equal(s.rows('projectHeads').some((h) => h.id === 'later'), false);
 });
 
 test("one runner's list doesn't touch another's", async () => {
@@ -146,4 +148,102 @@ test("sync:schedules gives a runner key its own schedules and the owner everyone
   const ids = (rows: unknown) => (rows as { id: string }[]).map((r) => r.id).sort();
   assert.deepEqual(ids(await call(s.ctx, sync.schedules, { key: BRUCE_KEY })), ['b']);
   assert.deepEqual(ids(await call(s.ctx, sync.schedules, { key: OWNER })), ['b', 'm']);
+});
+
+// ------------------------------------------------------------ sync:schedulesSince
+
+const owned = (id: string, runnerId: string, extra: Record<string, unknown> = {}) => ({ id, runnerId, title: id, text: 'run this', whenText: 'w', paused: false, createdAt: 'c', updatedAt: 'u', runs: 0, ...extra });
+const idsOf = (a: unknown) => (a as { rows: { id: string }[] }).rows.map((r) => r.id).sort();
+
+test('schedulesSince: the whole table once, then only what was written since', async () => {
+  const s = await setup();
+  await call(s.ctx, sync.saveSchedule, { key: OWNER, schedule: owned('a', M5) });
+  await call(s.ctx, sync.saveSchedule, { key: OWNER, schedule: owned('b', M5) });
+  // A row from before the stamp is in the whole read.
+  await s.ctx.db.insert('schedules', { ...owned('old', M5), owned: true });
+  // And a mirrored row isn't a schedule.
+  await s.ctx.db.insert('schedules', { ...owned('mirror', M5), updatedMs: Date.now() });
+  const first = (await call(s.ctx, sync.schedulesSince, { key: OWNER })) as { rows: any[]; at: number };
+  assert.deepEqual(idsOf(first), ['a', 'b', 'old']);
+  for (const r of first.rows) assert.equal(r.claim, undefined);
+  const since = first.at + 10;
+  assert.deepEqual(idsOf(await call(s.ctx, sync.schedulesSince, { key: OWNER, since })), []);
+  await new Promise((r) => setTimeout(r, 15));
+  await call(s.ctx, sync.saveSchedule, { key: OWNER, schedule: owned('a', M5, { title: 'new' }) });
+  const next = (await call(s.ctx, sync.schedulesSince, { key: OWNER, since })) as { rows: any[] };
+  assert.deepEqual(next.rows.map((r) => [r.id, r.title]), [['a', 'new']]);
+  assert.equal(typeof next.rows[0].updatedMs, 'number');
+});
+
+test('schedulesSince: a claim stamps nothing, a run and a requested run do', async () => {
+  const s = await setup();
+  await call(s.ctx, sync.saveSchedule, { key: OWNER, schedule: owned('a', M5, { nextRunAt: '2026-01-01T00:00:00.000Z' }) });
+  const stamp = () => s.rows('schedules').find((r) => r.id === 'a')!.updatedMs;
+  const before = stamp();
+  await new Promise((r) => setTimeout(r, 3));
+  assert.equal(await call(s.ctx, sync.claimSchedule, { key: OWNER, runnerId: M5, scheduleId: 'a', holder: 'h', kind: 'due', expect: '2026-01-01T00:00:00.000Z' }), true);
+  assert.equal(stamp(), before);
+  await call(s.ctx, sync.releaseSchedule, { key: OWNER, scheduleId: 'a', holder: 'h' });
+  assert.equal(stamp(), before);
+  await call(s.ctx, sync.scheduleRan, { key: OWNER, scheduleId: 'a', holder: 'h', lastRun: { at: 'x', outcome: 'sent' }, sent: true, expectUpdatedAt: 'u' });
+  const ran = stamp();
+  assert.ok(ran > before);
+  await new Promise((r) => setTimeout(r, 3));
+  await call(s.ctx, sync.requestScheduleRun, { key: OWNER, scheduleId: 'a', at: 'now' });
+  assert.ok(stamp() > ran);
+});
+
+test('schedulesSince: a schedule deleted or moved is heard of as gone, and an id that came back is a row', async () => {
+  const s = await setup();
+  const since = Date.now() - 1000;
+  await call(s.ctx, sync.saveSchedule, { key: OWNER, schedule: owned('a', M5) });
+  await call(s.ctx, sync.saveSchedule, { key: OWNER, schedule: owned('b', M5) });
+  assert.equal(await call(s.ctx, sync.deleteSchedule, { key: OWNER, scheduleId: 'a' }), true);
+  let got = (await call(s.ctx, sync.schedulesSince, { key: OWNER, since })) as { rows: any[]; gone: string[] };
+  assert.deepEqual([got.rows.map((r) => r.id), got.gone], [['b'], ['a']]);
+  await call(s.ctx, sync.saveSchedule, { key: OWNER, schedule: owned('a', M5) });
+  got = (await call(s.ctx, sync.schedulesSince, { key: OWNER, since })) as { rows: any[]; gone: string[] };
+  assert.deepEqual([idsOf(got), got.gone], [['a', 'b'], []]);
+  // Moved off Bruce by the owner: Bruce follows only its own rows, so it's told.
+  await call(s.ctx, sync.saveSchedule, { key: BRUCE_KEY, schedule: { ...owned('11111111-1111-4111-8111-111111111111', BRUCE) } });
+  await call(s.ctx, sync.saveSchedule, { key: OWNER, schedule: owned('11111111-1111-4111-8111-111111111111', M5) });
+  got = (await call(s.ctx, sync.schedulesSince, { key: BRUCE_KEY, since })) as { rows: any[]; gone: string[] };
+  assert.deepEqual([got.rows, got.gone], [[], ['11111111-1111-4111-8111-111111111111']]);
+});
+
+test("schedulesSince: a runner key hears only of its own, and can't read or learn of another's", async () => {
+  const s = await setup();
+  const since = Date.now() - 1000;
+  const mine = '22222222-2222-4222-8222-222222222222';
+  await call(s.ctx, sync.saveSchedule, { key: OWNER, schedule: owned('secret-m5', M5) });
+  await call(s.ctx, sync.saveSchedule, { key: BRUCE_KEY, schedule: owned(mine, BRUCE) });
+  await call(s.ctx, sync.deleteSchedule, { key: OWNER, scheduleId: 'secret-m5' });
+  assert.deepEqual(idsOf(await call(s.ctx, sync.schedulesSince, { key: BRUCE_KEY })), [mine]);
+  const got = (await call(s.ctx, sync.schedulesSince, { key: BRUCE_KEY, since })) as { rows: any[]; gone: string[] };
+  assert.deepEqual([idsOf(got), got.gone], [[mine], []]);
+});
+
+test('schedulesSince: one the audit takes out is heard of as gone', async () => {
+  const s = await setup();
+  const since = Date.now() - 1000;
+  await call(s.ctx, sync.saveSchedule, { key: OWNER, schedule: owned('a', M5) });
+  const { rows } = (await call(s.ctx, sync.audit, { key: OWNER, section: 'schedules' })) as { rows: { kind: string; id: string; version: string }[] };
+  assert.equal(await call(s.ctx, sync.auditRemove, { key: OWNER, rows: rows.map((r) => ({ kind: r.kind, id: r.id, version: r.version })) }), 1);
+  assert.deepEqual(((await call(s.ctx, sync.schedulesSince, { key: OWNER, since })) as { gone: string[] }).gone, ['a']);
+});
+
+test('schedulesSince: from too long ago, says to read it whole again', async () => {
+  const s = await setup();
+  const got = (await call(s.ctx, sync.schedulesSince, { key: OWNER, since: Date.now() - 13 * 3_600_000 })) as { more?: boolean };
+  assert.equal(got.more, true);
+});
+
+test('the older queries still answer with what their validators allow', async () => {
+  const s = await setup();
+  await call(s.ctx, sync.saveSchedule, { key: OWNER, schedule: owned('a', M5) });
+  const [row] = (await call(s.ctx, sync.schedules, { key: OWNER })) as Record<string, unknown>[];
+  assert.equal('updatedMs' in row!, false);
+  await s.ctx.db.insert('tokens', { hash: await sha256('tb_two'), name: 'p2', expiresAt: Date.now() + 100_000, createdAt: 1 });
+  const [phoneRow] = (await call(s.ctx, phone.schedules, { token: 'tb_two' })) as Record<string, unknown>[];
+  assert.equal('updatedMs' in phoneRow!, false);
 });
