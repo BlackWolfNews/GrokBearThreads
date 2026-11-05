@@ -511,7 +511,7 @@ export const registerDevice = mutation({
       .withIndex('by_apnsToken', (q) => q.eq('apnsToken', apnsToken))
       .unique();
     const key = pushKey ?? existing?.pushKey;
-    const row = { apnsToken, environment, tokenName: t.name, updatedAt: Date.now(), ...(existing?.notify ? { notify: existing.notify } : {}), ...(key ? { pushKey: key } : {}) };
+    const row = { apnsToken, environment, tokenName: t.name, tokenId: t.id, updatedAt: Date.now(), ...(existing?.notify ? { notify: existing.notify } : {}), ...(key ? { pushKey: key } : {}) };
     if (existing) await ctx.db.replace(existing._id, row);
     else await ctx.db.insert('devices', row);
     return null;

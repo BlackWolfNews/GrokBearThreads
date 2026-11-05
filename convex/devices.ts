@@ -2,13 +2,22 @@
 // needs them, and the thread a push is about.
 import { v } from 'convex/values';
 import { internalMutation, internalQuery } from './_generated/server';
+import { hasLiveToken } from './pushTargets';
 
+// Only phones whose token is still good (pushTargets.ts): revoking deletes
+// a phone's row (tokens.ts), but an expired token's phone, or an old row
+// that only names its token, is skipped here.
 export const targets = internalQuery({
   args: {},
   returns: v.array(v.object({ apnsToken: v.string(), environment: v.union(v.literal('sandbox'), v.literal('production')), notify: v.union(v.literal('away'), v.literal('always'), v.literal('off')), pushKey: v.optional(v.string()) })),
   handler: async (ctx) => {
+    const now = Date.now();
+    const tokens = await ctx.db.query('tokens').collect();
     const out = [];
-    for await (const d of ctx.db.query('devices')) out.push({ apnsToken: d.apnsToken, environment: d.environment, notify: d.notify ?? ('away' as const), ...(d.pushKey ? { pushKey: d.pushKey } : {}) });
+    for await (const d of ctx.db.query('devices')) {
+      if (!hasLiveToken(d, tokens, now)) continue;
+      out.push({ apnsToken: d.apnsToken, environment: d.environment, notify: d.notify ?? ('away' as const), ...(d.pushKey ? { pushKey: d.pushKey } : {}) });
+    }
     return out;
   },
 });
@@ -32,6 +41,36 @@ export const saveRelayInstall = internalMutation({
     return null;
   },
 });
+
+// A registration with the relay starting (push.ts relayInstall). Clears
+// any left from earlier ones that never finished.
+export const startRelayCheck = internalMutation({
+  args: { nonce: v.string() },
+  returns: v.null(),
+  handler: async (ctx, { nonce }) => {
+    for await (const row of ctx.db.query('relayChecks')) if (Date.now() - row.createdAt > RELAY_CHECK_MS) await ctx.db.delete(row._id);
+    await ctx.db.insert('relayChecks', { nonce, createdAt: Date.now() });
+    return null;
+  },
+});
+
+// The relay's check (http.ts /relay/verify): true once for a nonce this
+// deployment made in the last few minutes, false for anything else.
+export const takeRelayCheck = internalMutation({
+  args: { nonce: v.string() },
+  returns: v.boolean(),
+  handler: async (ctx, { nonce }) => {
+    const row = await ctx.db
+      .query('relayChecks')
+      .withIndex('by_nonce', (q) => q.eq('nonce', nonce))
+      .first();
+    if (!row) return false;
+    await ctx.db.delete(row._id);
+    return Date.now() - row.createdAt <= RELAY_CHECK_MS;
+  },
+});
+
+const RELAY_CHECK_MS = 5 * 60_000;
 
 export const clearRelayInstall = internalMutation({
   args: {},

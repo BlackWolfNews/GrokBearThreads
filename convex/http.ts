@@ -40,6 +40,21 @@ http.route({
   }),
 });
 
+// The push relay asks here whether a /register that named this deployment
+// really came from it (push.ts relayInstall, relay/convex/http.ts): it posts
+// back the nonce the registration carried, which only this deployment has.
+// Answers nothing else, so it tells a caller only whether a guess was right.
+http.route({
+  path: '/relay/verify',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    const b = (await request.json().catch(() => null)) as { nonce?: unknown } | null;
+    const nonce = typeof b?.nonce === 'string' && /^[0-9a-f]{48}$/.test(b.nonce) ? b.nonce : null;
+    const ok = nonce ? await ctx.runMutation(internal.devices.takeRelayCheck, { nonce }) : false;
+    return new Response(JSON.stringify({ ok }), { status: ok ? 200 : 404, headers: { 'Content-Type': 'application/json' } });
+  }),
+});
+
 registerStaticRoutes(http, components.staticHosting);
 
 export default http;

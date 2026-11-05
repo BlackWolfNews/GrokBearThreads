@@ -34,7 +34,14 @@ export function seal(pushKey: string, text: string): string {
 async function relayInstall(ctx: ActionCtx, url: string): Promise<{ installId: string; installKey: string } | null> {
   const known = await ctx.runQuery(internal.devices.relayInstall, { url });
   if (known) return known;
-  const res = await fetch(`${url}/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version: `api-${API_VERSION}` }) });
+  // The relay checks a registration really comes from the deployment it
+  // names by posting the nonce back to that deployment's /relay/verify
+  // (http.ts), so nobody can use up its allowance of new installs by
+  // calling /register anonymously (relay/convex/http.ts).
+  const deployment = process.env.CONVEX_SITE_URL;
+  const nonce = randomBytes(24).toString('hex');
+  if (deployment) await ctx.runMutation(internal.devices.startRelayCheck, { nonce });
+  const res = await fetch(`${url}/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version: `api-${API_VERSION}`, ...(deployment ? { deployment, nonce } : {}) }) });
   if (!res.ok) {
     console.warn(`[relay] couldn't register: HTTP ${res.status}`);
     return null;

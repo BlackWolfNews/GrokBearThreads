@@ -16,6 +16,7 @@ import { internalMutation } from './_generated/server';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { sha256 } from './lib';
+import { tiedToRevoked } from './pushTargets';
 
 export const tokenKinds = ['phone', 'browser'] as const;
 export type TokenKind = (typeof tokenKinds)[number];
@@ -76,7 +77,22 @@ export async function revokeToken(ctx: MutationCtx, id: string): Promise<boolean
   const row = await ctx.db.get(rowId);
   if (!row) return false;
   if (!row.revokedAt) await ctx.db.patch(rowId, { revokedAt: Date.now() });
+  // Even when it was revoked already, so a phone revoked before this
+  // cleanup existed loses its pushes the next time it's revoked.
+  await dropDevicesOf(ctx, [row]);
   return true;
+}
+
+// Deletes the phones registered for push with these (now revoked) tokens:
+// otherwise a revoked phone still gets every push, title and text.
+// devices:targets skips them too, for expired tokens and old rows. Both
+// tables are a handful of rows, so they're read whole.
+async function dropDevicesOf(ctx: MutationCtx, revoked: { _id: Id<'tokens'>; name: string }[]): Promise<void> {
+  const now = Date.now();
+  const tokens = await ctx.db.query('tokens').collect();
+  for (const d of await ctx.db.query('devices').collect()) {
+    if (revoked.some((r) => tiedToRevoked(d, r, tokens, now))) await ctx.db.delete(d._id);
+  }
 }
 
 export const issue = internalMutation({
@@ -94,12 +110,16 @@ export const revoke = internalMutation({
   returns: v.number(),
   handler: async (ctx, { name }) => {
     let n = 0;
+    const named = [];
     for await (const row of ctx.db.query('tokens')) {
-      if (row.name === name && !row.revokedAt) {
+      if (row.name !== name) continue;
+      named.push(row);
+      if (!row.revokedAt) {
         await ctx.db.patch(row._id, { revokedAt: Date.now() });
         n++;
       }
     }
+    await dropDevicesOf(ctx, named);
     return n;
   },
 });

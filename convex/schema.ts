@@ -398,6 +398,10 @@ export default defineSchema({
     apnsToken: v.string(),
     environment: v.union(v.literal('sandbox'), v.literal('production')),
     tokenName: v.string(),
+    // The phone token it registered with, so revoking that token stops its
+    // pushes (tokens.ts, devices:targets). Rows from before 5 Nov 2026 only
+    // have tokenName.
+    tokenId: v.optional(v.id('tokens')),
     updatedAt: v.number(),
     // When this phone wants a push (phone:setNotifications, API 3):
     // "away" (the default) only while Mike isn't at the Mac, "always", or "off".
@@ -449,4 +453,13 @@ export default defineSchema({
     url: v.string(),
     createdAt: v.number(),
   }),
+
+  // A registration with the push relay in progress (push.ts relayInstall):
+  // the nonce sent with it, which the relay posts back to /relay/verify
+  // (http.ts) to check the request came from this deployment. Used once,
+  // and gone within minutes either way.
+  relayChecks: defineTable({
+    nonce: v.string(),
+    createdAt: v.number(),
+  }).index('by_nonce', ['nonce']),
 });

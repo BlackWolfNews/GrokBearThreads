@@ -3063,7 +3063,8 @@ type Device = {
   phone stopped working. Nothing is cached in the runner.
 - `devices.revoke` marks the token revoked (`sync:revokeToken`); the
   phone's or browser's next call fails as unauthorised and it shows its
-  pairing or sign-in screen.
+  pairing or sign-in screen. The phone's push registration goes with it,
+  so it gets no more notifications (`convex/tokens.ts`).
 - With sync off, `devices.list` returns no devices and `reason` (the
   same as `runner.status`'s `sync.reason`), and `pair` and `revoke` are
   `-32000` with that reason. A backend older than API 6 has none of these

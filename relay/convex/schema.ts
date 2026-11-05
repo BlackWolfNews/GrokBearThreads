@@ -15,7 +15,15 @@ export default defineSchema({
     // Sends in the current hour, for the rate limit.
     hourStart: v.number(),
     hourSends: v.number(),
-  }).index('by_installId', ['installId']),
+    // The deployment it registered for, checked by calling it back
+    // (verify.ts), and how often that deployment registered on that UTC
+    // day. None for installs registered the old way.
+    deployment: v.optional(v.string()),
+    registeredDay: v.optional(v.string()),
+    registeredToday: v.optional(v.number()),
+  })
+    .index('by_installId', ['installId'])
+    .index('by_deployment', ['deployment']),
 
   // Anonymous totals per UTC day: notifications forwarded and installs that
   // sent one. What Mike looks at; nothing per install.
@@ -24,5 +32,8 @@ export default defineSchema({
     sends: v.number(),
     failed: v.number(),
     registrations: v.number(),
+    // Of those, the ones registered the old way, without a deployment
+    // check (relay.ts register). Missing on days before 5 Nov 2026.
+    legacyRegistrations: v.optional(v.number()),
   }).index('by_day', ['day']),
 });

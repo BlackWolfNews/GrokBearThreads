@@ -649,8 +649,8 @@ though you don't need them for any of that. It pairs with your Mac by scanning a
 QR code: on the Mac, Settings (⌘,) > Phone & browser > Show the code, then
 scan it with the iPhone app. Keep the code to yourself: anyone who scans it
 can run your agents. The same tab lists each paired phone and browser with
-when it was paired and until when (90 days), and Revoke signs one out;
-Settings > Unpair this phone on the iPhone forgets it from that side. The
+when it was paired and until when (90 days), and Revoke signs one out and
+stops its notifications; Settings > Unpair this phone on the iPhone forgets it from that side. The
 terminal command setup used to print still works too:
 
     swift ios/scripts/pair-qr.swift --prod --url <your deployment URL>

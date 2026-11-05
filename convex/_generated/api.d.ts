@@ -14,6 +14,7 @@ import type * as http from "../http.js";
 import type * as lib from "../lib.js";
 import type * as phone from "../phone.js";
 import type * as push from "../push.js";
+import type * as pushTargets from "../pushTargets.js";
 import type * as pushText from "../pushText.js";
 import type * as share from "../share.js";
 import type * as sync from "../sync.js";
@@ -33,6 +34,7 @@ declare const fullApi: ApiFromModules<{
   lib: typeof lib;
   phone: typeof phone;
   push: typeof push;
+  pushTargets: typeof pushTargets;
   pushText: typeof pushText;
   share: typeof share;
   sync: typeof sync;

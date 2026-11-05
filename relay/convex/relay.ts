@@ -1,11 +1,17 @@
 // The relay's records: installs and the daily counts (schema.ts).
 import { ConvexError, v } from 'convex/values';
-import { internalMutation, internalQuery } from './_generated/server';
+import { internalMutation, internalQuery, type MutationCtx } from './_generated/server';
 
 // Per install, so one runaway backend can't flood anyone's phone or Apple.
 export const SENDS_PER_HOUR = 120;
-// New installs per UTC day across everyone, against someone scripting it.
-export const REGISTRATIONS_PER_DAY = 500;
+// New installs per UTC day across every caller that registers the old way,
+// without naming a deployment the relay can check (verify.ts). Anyone can
+// use this up, so it's kept small and only older backends depend on it.
+export const LEGACY_REGISTRATIONS_PER_DAY = 100;
+// Registrations a day for one checked deployment. It only registers again
+// when it lost its install, so this only stops a backend stuck in a loop;
+// nobody else can use it up, as only the deployment passes the check.
+export const REGISTRATIONS_PER_DEPLOYMENT_PER_DAY = 20;
 
 export const day = (ms = Date.now()) => new Date(ms).toISOString().slice(0, 10);
 
@@ -20,6 +26,8 @@ function randomHex(bytes: number): string {
   return Array.from(a, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+// The old way, for backends from before 5 Nov 2026: no deployment named,
+// so nothing to check, and a shared daily allowance.
 export const register = internalMutation({
   args: { version: v.optional(v.string()) },
   returns: v.object({ installId: v.string(), installKey: v.string() }),
@@ -29,16 +37,56 @@ export const register = internalMutation({
       .query('days')
       .withIndex('by_day', (q) => q.eq('day', today))
       .unique();
-    if ((counts?.registrations ?? 0) >= REGISTRATIONS_PER_DAY) throw new ConvexError({ kind: 'busy', message: 'too many new installs today; try again tomorrow' });
+    // A day row from before legacyRegistrations counted every install as one.
+    if ((counts?.legacyRegistrations ?? counts?.registrations ?? 0) >= LEGACY_REGISTRATIONS_PER_DAY) throw new ConvexError({ kind: 'busy', message: 'too many new installs today; try again tomorrow' });
     const installId = 'i_' + randomHex(12);
     const installKey = 'k_' + randomHex(24);
     const now = Date.now();
     await ctx.db.insert('installs', { installId, keyHash: await sha256(installKey), createdAt: now, lastSeenAt: now, ...(version ? { version: version.slice(0, 40) } : {}), hourStart: now, hourSends: 0 });
-    if (counts) await ctx.db.patch(counts._id, { registrations: counts.registrations + 1 });
-    else await ctx.db.insert('days', { day: today, sends: 0, failed: 0, registrations: 1 });
+    await countRegistration(ctx, today, true);
     return { installId, installKey };
   },
 });
+
+// For a deployment that passed the check (http.ts, verify.ts): one install
+// per deployment, so registering again gives the same install a new key
+// and the old key stops working. Its hourly send count carries over.
+export const registerVerified = internalMutation({
+  args: { deployment: v.string(), version: v.optional(v.string()) },
+  returns: v.object({ installId: v.string(), installKey: v.string() }),
+  handler: async (ctx, { deployment, version }) => {
+    const today = day();
+    const existing = await ctx.db
+      .query('installs')
+      .withIndex('by_deployment', (q) => q.eq('deployment', deployment))
+      .first();
+    const registeredToday = existing?.registeredDay === today ? (existing.registeredToday ?? 0) : 0;
+    if (registeredToday >= REGISTRATIONS_PER_DEPLOYMENT_PER_DAY) throw new ConvexError({ kind: 'busy', message: 'this deployment registered too often today; try again tomorrow' });
+    const installKey = 'k_' + randomHex(24);
+    const now = Date.now();
+    const fields = { keyHash: await sha256(installKey), lastSeenAt: now, ...(version ? { version: version.slice(0, 40) } : {}), deployment, registeredDay: today, registeredToday: registeredToday + 1 };
+    let installId: string;
+    if (existing) {
+      installId = existing.installId;
+      await ctx.db.patch(existing._id, fields);
+    } else {
+      installId = 'i_' + randomHex(12);
+      await ctx.db.insert('installs', { installId, createdAt: now, hourStart: now, hourSends: 0, ...fields });
+    }
+    await countRegistration(ctx, today, false);
+    return { installId, installKey };
+  },
+});
+
+async function countRegistration(ctx: MutationCtx, today: string, legacy: boolean): Promise<void> {
+  const counts = await ctx.db
+    .query('days')
+    .withIndex('by_day', (q) => q.eq('day', today))
+    .unique();
+  const add = legacy ? 1 : 0;
+  if (counts) await ctx.db.patch(counts._id, { registrations: counts.registrations + 1, legacyRegistrations: (counts.legacyRegistrations ?? counts.registrations) + add });
+  else await ctx.db.insert('days', { day: today, sends: 0, failed: 0, registrations: 1, legacyRegistrations: add });
+}
 
 // Checks the install's key and rate limit, and counts the send.
 export const admit = internalMutation({

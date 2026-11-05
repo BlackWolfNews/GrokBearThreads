@@ -1,7 +1,11 @@
 // The relay's whole API (docs/push-relay.md):
 //
-//   POST /register  { version? }  ->  { installId, installKey }
-//     Once per Threadbear backend, which keeps the pair in its env.
+//   POST /register  { version?, deployment?, nonce? }  ->  { installId, installKey }
+//     Once per Threadbear backend, which keeps the pair in its database.
+//     With `deployment` (its CONVEX_SITE_URL) and `nonce`, the relay first
+//     posts { nonce } to <deployment>/relay/verify and registers only if
+//     that answers { ok: true } (verify.ts says why); 403 if it doesn't.
+//     Without them (backends from before 5 Nov 2026), the old way.
 //
 //   POST /send  Authorization: Bearer <installId>.<installKey>
 //     { deviceToken, environment: "sandbox" | "production", threadId,
@@ -12,6 +16,7 @@
 import { httpRouter } from 'convex/server';
 import { httpAction } from './_generated/server';
 import { internal } from './_generated/api';
+import { convexSite, deploymentVouches } from './verify';
 
 const http = httpRouter();
 
@@ -36,8 +41,16 @@ http.route({
   handler: httpAction(async (ctx, req) => {
     const b = await body(req);
     if (!b) return json({ error: 'bad request' }, 400);
+    const version = str(b.version, 40);
+    // A deployment that isn't on Convex's own hosts registers the old way
+    // (verify.ts convexSite): that's open to anyone anyway, so it gives a
+    // caller nothing it couldn't get by leaving `deployment` out.
+    const site = convexSite(str(b.deployment, 200));
+    const nonce = str(b.nonce, 100);
+    if (site && nonce && !(await deploymentVouches(site, nonce))) return json({ error: "the deployment didn't confirm this registration" }, 403);
     try {
-      return json(await ctx.runMutation(internal.relay.register, { ...(str(b.version, 40) ? { version: str(b.version, 40) } : {}) }));
+      if (site && nonce) return json(await ctx.runMutation(internal.relay.registerVerified, { deployment: site, ...(version ? { version } : {}) }));
+      return json(await ctx.runMutation(internal.relay.register, { ...(version ? { version } : {}) }));
     } catch {
       return json({ error: 'too many new installs today' }, 429);
     }

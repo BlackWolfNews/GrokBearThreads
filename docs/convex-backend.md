@@ -359,7 +359,14 @@ dashboard panel.
   (`convex/pushText.ts`: the question, the approval and its input line,
   "Failed: …", or the reply) to every registered phone, sandbox and
   production installs each to their APNs host. A token Apple reports gone
-  is dropped. Env on both deployments: `APNS_KEY_P8`, `APNS_KEY_ID`,
+  is dropped. Only phones whose token is still good get one: each
+  `devices` row keeps the token it registered with (`tokenId`, since
+  5 Nov 2026; older rows only its name), revoking a token deletes its
+  phones' rows, and `devices:targets` skips an expired or revoked token's
+  (`convex/pushTargets.ts`). A backend without its own Apple key goes
+  through the push relay (`docs/push-relay.md`), and registers with it
+  once, proving it's this deployment through `/relay/verify` in
+  `convex/http.ts` and the `relayChecks` table. Env on both deployments: `APNS_KEY_P8`, `APNS_KEY_ID`,
   `APNS_TEAM_ID` (Poddle's, copied 28 Oct) and `APNS_TOPIC`
   (`com.mikecann.threadbear`). `npx convex run push:test '{"body":"hi"}'
   --prod` sends a test; `npx convex run devices:list --prod` shows the
