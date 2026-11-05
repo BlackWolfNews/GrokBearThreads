@@ -292,19 +292,35 @@ const CLAUDE_AI = /MCP server ["“]([^"”]{1,80})["”] needs you to (?:sign|l
 const GATEWAY = /(?:^|\n)\s*([^\n.]{1,60}?) needs (?:signing|you to sign|to be signed) in again/i;
 const URL_IN_TEXT = /https?:\/\/[^\s"'<>)\]]+/g;
 
+// The gateway's MCP server, as install-clients.sh names it (findGateway
+// reads the same entry): its tools are mcp__connectors__<service>__<tool>.
+export const GATEWAY_TOOL_PREFIX = 'mcp__connectors__';
+
 // A tool result that says a service needs signing in, or undefined. Only
 // MCP tools count (and not Threadbear's own): a grep or a file read that
-// turns up the same words is just text.
-export function signInProblem(toolName: string, text: string): SignInProblem | undefined {
+// turns up the same words is just text. What a connector reads (an email,
+// a Notion page) is anyone's words too, and this becomes a sign-in link
+// the agent puts in front of Mike, so: claude.ai's words only from the
+// server they name, the gateway's only from its own tools, and a link
+// only on the gateway's own origin (`gateway`, its base). No link that
+// is means none: the nudge points at the Connectors panel.
+export function signInProblem(toolName: string, text: string, gateway?: string): SignInProblem | undefined {
   if (!toolName.startsWith('mcp__') || toolName.startsWith('mcp__threadbear__')) return undefined;
   const body = text.slice(0, 4000);
   const ai = CLAUDE_AI.exec(body);
-  if (ai) return { service: ai[1].replace(/^claude\.ai\s+/i, '').trim(), source: 'claude.ai', url: CLAUDE_AI_CONNECTORS_URL };
+  if (ai) {
+    // "claude.ai Gmail" is the server mcp__claude_ai_Gmail__*.
+    const server = 'mcp__' + ai[1].trim().replace(/[^A-Za-z0-9_-]/g, '_') + '__';
+    if (!toolName.startsWith(server)) return undefined;
+    return { service: ai[1].replace(/^claude\.ai\s+/i, '').trim(), source: 'claude.ai', url: CLAUDE_AI_CONNECTORS_URL };
+  }
+  if (!toolName.startsWith(GATEWAY_TOOL_PREFIX)) return undefined;
   const gw = GATEWAY.exec(body);
   // The gateway's stub for a signed-out service: <prefix>__sign_in.
   const stub = /__sign_in$/.test(toolName);
   if (!gw && !stub) return undefined;
-  const urls = body.match(URL_IN_TEXT)?.map((u) => u.replace(/[.,;:]+$/, '')) ?? [];
+  const origin = gateway ? gatewayBase(gateway) : undefined;
+  const urls = origin ? (body.match(URL_IN_TEXT) ?? []).map((u) => u.replace(/[.,;:]+$/, '')).filter((u) => gatewayBase(u) === origin) : [];
   const url = urls.find((u) => u.includes('/admin/connect/')) ?? urls[0];
   const fromName = toolName.split('__').at(-2) ?? '';
   const service = gw?.[1].trim() ?? titleFor(fromName);
@@ -312,8 +328,8 @@ export function signInProblem(toolName: string, text: string): SignInProblem | u
 }
 
 // The sign-in problems in the current turn's events (oldest first, from
-// its turn.started on), one per service.
-export function turnSignIns(events: PersistedEvent[]): SignInProblem[] {
+// its turn.started on), one per service. `gateway`: the gateway's base.
+export function turnSignIns(events: PersistedEvent[], gateway?: string): SignInProblem[] {
   let start = 0;
   for (let i = events.length - 1; i >= 0; i--) {
     if (events[i].type === 'turn.started') {
@@ -326,7 +342,7 @@ export function turnSignIns(events: PersistedEvent[]): SignInProblem[] {
   for (const e of events.slice(start)) {
     if (e.type === 'tool.call') names.set(e.itemId, e.name);
     else if (e.type === 'tool.result') {
-      const p = signInProblem(names.get(e.itemId) ?? '', e.text ?? '');
+      const p = signInProblem(names.get(e.itemId) ?? '', e.text ?? '', gateway);
       if (p && !out.has(p.service.toLowerCase())) out.set(p.service.toLowerCase(), p);
     }
   }

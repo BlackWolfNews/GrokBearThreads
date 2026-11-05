@@ -2514,15 +2514,21 @@ usually sort themselves out).
 
 **Sign-in errors in a thread.** A tool result from an MCP tool (not
 Threadbear's own, not a shell or a file read) that says a service needs
-signing in is a sign-in problem:
+signing in is a sign-in problem. What a connector reads (an email, a
+Notion page) can say the same words, so each kind only counts from its
+own server's tools, and a link is only taken from the gateway's origin:
 
-- claude.ai's: `MCP server "claude.ai Gmail" needs you to sign in again`.
-  The service is the name without `claude.ai`; the page is
+- claude.ai's: `MCP server "claude.ai Gmail" needs you to sign in again`,
+  from that server's own tools (`mcp__claude_ai_Gmail__*`). The service
+  is the name without `claude.ai`; the page is
   `https://claude.ai/settings/connectors`, signed in as the thread's login.
-- the gateway's: a result from a signed-out service's stub tool
-  `<prefix>__sign_in`, or text like `Notion needs signing in again`. The
-  page is the first URL in the text with `/admin/connect/` in it, else the
-  first URL.
+- the gateway's: from the gateway's own tools (`mcp__connectors__*`), a
+  result from a signed-out service's stub tool `<prefix>__sign_in`, or
+  text like `Notion needs signing in again`. The page is the first URL in
+  the text on the gateway's origin (scheme, host and port of its base)
+  with `/admin/connect/` in it, else the first on that origin. With none
+  (or no gateway set up) there's no page, and the nudge points at the
+  app's Connectors panel instead.
 
 When the thread's agent calls `end_turn` and the turn so far has a
 sign-in problem that no ask covers (an ask covers it when one of its
