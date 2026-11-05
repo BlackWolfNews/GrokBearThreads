@@ -3498,7 +3498,9 @@ default).
   `turn.completed` at the last row of a turn that has ended (the next row
   is another turn's, or the thread's row has said for 4 seconds that it
   isn't running, since that runner writes its rows a moment before their
-  messages), with the row's `needs`, `asks` and `next` on the newest. An
+  messages), with the row's `needs`, `asks` and `next` on the newest (each
+  ask keeping its `ticked: true`, as there's no seq after a turn's end for
+  an `asks.ticked`; the app's card starts with those ticked). An
   open approval, question or secret on the row is placed at `8p+1`, `p`
   being its event's seq (`pendingApproval.seq`, API 44; from an older
   runner, with none, at `8m+3` after the newest row `m` held when it was

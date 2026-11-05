@@ -163,7 +163,10 @@ export function relayEvents(threadId: string, rows: RelayRow[], row: RelayThread
     if (ends) {
       const started = Date.parse(turnStart.get(r.turn!) ?? r.at);
       const last = !next;
-      const asks = last && row?.needs === 'you' && row.asks?.length ? row.asks.map(({ ticked: _t, ...a }) => a) : undefined;
+      // Each with its `ticked: true`, as the summary has them: the relay
+      // has no seq after the turn's end for an asks.ticked, and without
+      // them a finished checklist read as outstanding again.
+      const asks = last && row?.needs === 'you' && row.asks?.length ? row.asks.map(({ ticked, ...a }) => (ticked ? { ...a, ticked: true } : a)) : undefined;
       out.push(
         env(base + 7, r, {
           type: 'turn.completed',

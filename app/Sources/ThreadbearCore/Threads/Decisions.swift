@@ -200,7 +200,8 @@ public enum Decisions {
         var out = thread
         if case .asks(let card)? = openCard?.content, card.isOpen, !card.isDone, !card.asks.isEmpty {
             out.needs = "you"
-            out.asks = card.asks
+            // Ticks live on the card, not its asks (asks.ticked).
+            out.asks = card.asks.enumerated().map { i, ask in var ask = ask; ask.ticked = card.ticked.contains(i); return ask }
             out.asksSeq = card.seq
         } else {
             out.needs = nil

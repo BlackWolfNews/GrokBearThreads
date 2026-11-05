@@ -865,7 +865,7 @@ public struct TranscriptModel: Sendable {
                 // picked there and sent from the composer (Mike, 28 Oct).
                 if completion.outcome == .completed, completion.needs == "you", !completion.asks.isEmpty {
                     let cardId = "ak:\(seq)"
-                    append(TranscriptRow(id: cardId, seq: seq, turnId: turnId ?? completion.turnId, content: .asks(AsksCard(seq: seq, asks: completion.asks, picks: askPicks[seq] ?? [:], notes: askNotes[seq] ?? [:]))))
+                    append(TranscriptRow(id: cardId, seq: seq, turnId: turnId ?? completion.turnId, content: .asks(AsksCard(seq: seq, asks: completion.asks, ticked: Set(completion.asks.indices.filter { completion.asks[$0].ticked }), picks: askPicks[seq] ?? [:], notes: askNotes[seq] ?? [:]))))
                     asksRowForSeq[seq] = cardId
                     openAsksRow = cardId
                 } else if completion.outcome == .completed, completion.needs == "nothing" {

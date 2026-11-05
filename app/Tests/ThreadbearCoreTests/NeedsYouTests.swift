@@ -162,6 +162,13 @@ final class NeedsYouTests: XCTestCase {
         XCTAssertEqual(open.asks.map(\.action), ["Start the spike?"])
         XCTAssertEqual(Decisions.answers(asks: open.asks, picks: [0: 0]).map(\.answer.answer), ["Start the spike"])
 
+        // Asks ticked off on that runner come ticked (the relay keeps
+        // `ticked` on them), so a finished checklist isn't outstanding.
+        let checklist = TranscriptModel(events: [done(3, turn: "t1", needs: "you", asks: [["action": "Plug in the drive", "ticked": true], ["action": "Say done"]])])
+        guard case .asks(let card)? = checklist.openCard?.content else { return XCTFail() }
+        XCTAssertEqual(card.ticked, [0])
+        XCTAssertEqual(Decisions.withCard(row, checklist.openCard).asks.map(\.ticked), [true, false])
+
         // Answered: nothing left to pick.
         _ = model.apply([E.event(10, "user.message", ["text": "Start the spike?\nStart the spike", "images": []], turn: "t2")])
         XCTAssertFalse(Decisions.isOpen(Decisions.withCard(open, model.openCard)))
