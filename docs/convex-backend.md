@@ -816,6 +816,11 @@ hour of phone use a day: about 6 MB a day, 185 MB a month, under a fifth of the
 free 1 GB. Heartbeats are 2.4 MB of that and the three-day full write 1.3 MB,
 which grows with threads kept (about 13 KB a thread).
 
+Confirmed live on 5 Nov: `phone:threadsSince` costs 2.4 KB a run against
+`phone:threadsAt`'s 37.5 KB. Next: `sync:schedules`, 160 KB a run, as each
+schedule write makes every runner read all 113 rows, 61 of them finished
+one-offs. It could follow only what changed, as the inbox does.
+
 Not urgent: messages are kept forever, so storage grows about 10 MB a month
 for a typical user. Dropping the messages of threads archived more than a
 month ago would hold it flat if it ever matters.
