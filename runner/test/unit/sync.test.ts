@@ -1215,9 +1215,17 @@ test('sharing: pictures of a shared thread go to file storage, once each, and go
     },
   });
   const t = h.runner.create({ text: 'draw it', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  // The chart was made after the thread started, by its creation time in
+  // the runner's records. A picture already in the folder never goes
+  // (Daybreak verify-fix, 5 Nov: Markdown naming one published it).
+  const started = Date.parse(h.runner.get(t.id).createdAt);
+  fs.utimesSync(pic, new Date(started + 1000), new Date(started + 1000));
+  const old = path.join(h.cfg.defaults.cwd, 'scan.png');
+  fs.writeFileSync(old, pngBytes(9, 9));
+  fs.utimesSync(old, new Date(started - 60_000), new Date(started - 60_000));
   const s = session(h, t.id);
   s.init();
-  s.text('m1', `Here it is:\n\n![The chart](${pic})\n\nand a [link](https://example.com). ![Not mine](${other})`);
+  s.text('m1', `Here it is:\n\n![The chart](${pic})\n\nand a [link](https://example.com). ![Not mine](${other}) ![Was there](${old})`);
   s.result('completed');
   await tick();
 
@@ -1263,6 +1271,8 @@ test('sharing: a shared thread seen before it comes across in a handover has its
   const pic = path.join(h.cfg.defaults.cwd, 'shot.png');
   fs.writeFileSync(pic, pngBytes(4, 4));
   const t = h.runner.create({ text: 'look', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  const started = Date.parse(h.runner.get(t.id).createdAt);
+  fs.utimesSync(pic, new Date(started + 1000), new Date(started + 1000));
   const s = session(h, t.id);
   s.init();
   s.text('m1', `![shot](${pic})`);

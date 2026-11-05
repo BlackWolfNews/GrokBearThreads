@@ -3377,14 +3377,23 @@ type ThreadShare = {
 - As the page is public and a path is only what the agent wrote, a file
   goes up only if it's really a PNG, JPEG, GIF or WebP by its bytes (the
   type sent is the one its bytes say, not its name's), isn't itself a
-  symlink, and is, by its real path, under the thread's folder or the
-  thread's media folder in the data dir (`threads/<id>/media`, where
-  attachments and tool pictures are copied). Not the temp folders, though
-  agents save screenshots there: they hold every app's files, so a
-  Markdown line naming any picture there would publish it. Anything else
-  stays on the Mac with a line in the runner log and shows on the page as
-  its alt text. An agent that wants a picture on a shared page saves it
-  in the thread's folder.
+  symlink, and is, by its real path, in one of two places. The thread's
+  media folder in the data dir (`threads/<id>/media`, where attachments
+  and tool pictures are copied), whatever its age. Or the thread's
+  folder, but only a file created or changed since the thread started
+  (its modification time at or after the thread's `createdAt` in the
+  runner's records): what the agent drew, shot or exported there. A
+  picture that was in the folder before is the folder's own (a scan, a
+  screenshot someone left), and Markdown naming one would publish it, so
+  it stays (Daybreak verify-fix, 5 Nov); so does everything from the
+  folder when the thread's start time can't be read. Not the temp
+  folders, though agents save screenshots there: they hold every app's
+  files, so a Markdown line naming any picture there would publish it.
+  The file is read through one descriptor opened without following a
+  link and checked to be the file at its real path. Anything else stays
+  on the Mac with a line in the runner log and shows on the page as its
+  alt text. An agent that wants a picture on a shared page saves it in
+  the thread's folder as it works (a fresh copy of an older one counts).
 - The thread's row on the mirror has `share: { access, slug }` (backend
   API 8). An older backend gets the row without it, and gets it once a
   heartbeat says it's new enough.

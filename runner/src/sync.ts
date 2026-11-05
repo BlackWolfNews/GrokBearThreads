@@ -1744,7 +1744,9 @@ export class ConvexSync {
       if (!up.has(id) && this.sharedNow.get(img.threadId)) {
         // Only real pictures from the thread's own places, typed by their
         // bytes: the page is public, and a path is only what the agent wrote.
-        const roots = shareRoots(this.cwdOf(img.threadId), this.deps.home ? paths.media(this.deps.home, img.threadId) : undefined);
+        // The thread folder's only from since the thread started: one
+        // that was there before is the folder's own, not the agent's.
+        const roots = shareRoots(this.cwdOf(img.threadId), this.deps.home ? paths.media(this.deps.home, img.threadId) : undefined, this.createdAtOf(img.threadId));
         const file = readShareImage(img.path, roots);
         if ('skip' in file) {
           this.deps.log.warn('shared picture not sent', { threadId: img.threadId, path: img.path, why: file.skip });
@@ -1760,6 +1762,14 @@ export class ConvexSync {
         up.add(id);
       }
       this.pendingImages.shift();
+    }
+  }
+
+  private createdAtOf(threadId: string): string | undefined {
+    try {
+      return this.deps.runner.get(threadId).createdAt;
+    } catch {
+      return undefined;
     }
   }
 

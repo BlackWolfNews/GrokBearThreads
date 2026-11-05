@@ -137,8 +137,7 @@ test('reply images: a file has to really be a picture', () => {
 });
 
 // A shared thread's pictures go to a public page, so only real pictures
-// from the places a thread's pictures come from go up (docs/protocol.md,
-// "Sharing").
+// the thread made or was given go up (docs/protocol.md, "Sharing").
 function pngHeader(w: number, h: number): Buffer {
   const b = Buffer.alloc(24);
   b.writeUInt32BE(0x89504e47, 0);
@@ -148,69 +147,93 @@ function pngHeader(w: number, h: number): Buffer {
   return b;
 }
 
-test('share images: a real picture in the thread folder goes, typed by its bytes', () => {
+// A file as it'd be if written at `at` (ms).
+function writeAt(file: string, bytes: Buffer | string, at: number): string {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, bytes);
+  fs.utimesSync(file, new Date(at), new Date(at));
+  return file;
+}
+
+const STARTED = '2026-11-05T10:00:00.000Z';
+const BEFORE = Date.parse(STARTED) - 60_000;
+const AFTER = Date.parse(STARTED) + 60_000;
+const WHY_BEFORE = "it was in the thread's folder before the thread started, so it isn't the agent's";
+const md = (src: string) => imagesInEvent({ seq: 3, ts: STARTED, type: 'assistant.text', itemId: 'm', text: `Look: ![chart](${src})` } as never);
+
+// Daybreak verify-fix (5 Nov): the remediation test. Assistant Markdown
+// naming a real picture that was already in the thread's folder (a scan, a
+// screenshot someone left there) must not make a public share image; one
+// the agent made there since the thread started still goes.
+test("share images: a picture already in the thread's folder stays on the Mac; one written there after the thread started goes", () => {
   const cwd = tmpDir();
-  // Named .jpg but a PNG: the type comes from the bytes.
-  const file = path.join(cwd, 'shot.jpg');
-  fs.writeFileSync(file, pngHeader(640, 480));
-  const read = readShareImage(file, [cwd]);
+  const media = tmpDir();
+  const roots = shareRoots(cwd, media, STARTED);
+  const old = writeAt(path.join(cwd, 'docs', 'passport-scan.png'), pngHeader(1200, 800), BEFORE);
+  const [img] = md(old);
+  assert.equal(img?.path, old, 'the Markdown names it');
+  assert.deepEqual(readShareImage(img!.path, roots), { skip: WHY_BEFORE });
+  const made = writeAt(path.join(cwd, 'out', 'chart.jpg'), pngHeader(640, 480), AFTER);
+  const read = readShareImage(md(made)[0]!.path, roots);
   assert.ok(!('skip' in read), JSON.stringify(read));
+  // Named .jpg but a PNG: the type comes from the bytes.
   assert.deepEqual([read.mediaType, read.width, read.height], ['image/png', 640, 480]);
+  // Written over since the thread started counts as the agent's too.
+  writeAt(old, pngHeader(2, 2), AFTER);
+  assert.ok(!('skip' in readShareImage(old, roots)));
 });
 
-test("share images: a text file named .png, a symlink and a picture outside the thread's folders stay on the Mac", () => {
+test("share images: the thread's media folder goes whatever its age; without a start time, nothing from the folder does", () => {
+  const cwd = tmpDir();
+  const media = tmpDir();
+  const attached = writeAt(path.join(media, 'a.png'), pngHeader(3, 3), BEFORE);
+  assert.ok(!('skip' in readShareImage(attached, shareRoots(cwd, media, STARTED))));
+  const made = writeAt(path.join(cwd, 'b.png'), pngHeader(3, 3), AFTER);
+  for (const started of [undefined, 'not a date']) {
+    assert.deepEqual(readShareImage(made, shareRoots(cwd, media, started)), { skip: "it isn't in the thread's folder or its media" });
+  }
+  assert.deepEqual(shareRoots(cwd, media, STARTED), [{ dir: media }, { dir: cwd, since: Date.parse(STARTED) }]);
+  assert.deepEqual(shareRoots(undefined, undefined, STARTED), []);
+});
+
+test("share images: a symlink, a text file named .png, a folder link out and a picture outside the thread's folders stay on the Mac, new or not", () => {
   const cwd = tmpDir();
   const elsewhere = tmpDir();
-  const secret = path.join(elsewhere, 'id_rsa');
-  fs.writeFileSync(secret, '-----BEGIN OPENSSH PRIVATE KEY-----');
+  const roots = shareRoots(cwd, undefined, STARTED);
+  const secret = writeAt(path.join(elsewhere, 'id_rsa'), '-----BEGIN OPENSSH PRIVATE KEY-----', AFTER);
   const link = path.join(cwd, 'link.png');
   fs.symlinkSync(secret, link);
-  assert.deepEqual(readShareImage(link, [cwd]), { skip: "it's a link" });
-  // A link to a real picture is refused too: the check is on the link.
-  const realPic = path.join(cwd, 'real.png');
-  fs.writeFileSync(realPic, pngHeader(1, 1));
+  assert.deepEqual(readShareImage(link, roots), { skip: "it's a link" });
+  // A link to a real, new picture is refused too: the check is on the link.
+  const realPic = writeAt(path.join(cwd, 'real.png'), pngHeader(1, 1), AFTER);
   const picLink = path.join(cwd, 'pic-link.png');
   fs.symlinkSync(realPic, picLink);
-  assert.deepEqual(readShareImage(picLink, [cwd]), { skip: "it's a link" });
-  const renamed = path.join(cwd, 'notes.png');
-  fs.writeFileSync(renamed, 'API_KEY=hunter2');
-  assert.deepEqual(readShareImage(renamed, [cwd]), { skip: "it isn't a picture" });
-  const outside = path.join(elsewhere, 'secret.png');
-  fs.writeFileSync(outside, pngHeader(10, 10));
-  assert.deepEqual(readShareImage(outside, [cwd]), { skip: "it isn't in the thread's folder or its media" });
+  assert.deepEqual(readShareImage(picLink, roots), { skip: "it's a link" });
+  const renamed = writeAt(path.join(cwd, 'notes.png'), 'API_KEY=hunter2', AFTER);
+  assert.deepEqual(readShareImage(renamed, roots), { skip: "it isn't a picture" });
+  const outside = writeAt(path.join(elsewhere, 'secret.png'), pngHeader(10, 10), AFTER);
+  assert.deepEqual(readShareImage(outside, roots), { skip: "it isn't in the thread's folder or its media" });
+  // A folder link inside the thread's folder that leads out.
+  fs.symlinkSync(elsewhere, path.join(cwd, 'out'));
+  assert.deepEqual(readShareImage(path.join(cwd, 'out', 'secret.png'), roots), { skip: "it isn't in the thread's folder or its media" });
   // A video can't go on the page, which draws with <img>.
-  const mp4 = path.join(cwd, 'clip.mp4');
-  fs.writeFileSync(mp4, Buffer.concat([Buffer.from([0, 0, 0, 16]), Buffer.from('ftypisom'), Buffer.alloc(4)]));
-  assert.equal('skip' in readShareImage(mp4, [cwd]), true);
-  assert.deepEqual(readShareImage(path.join(cwd, 'gone.png'), [cwd]), { skip: 'the file is gone' });
-});
-
-test("share images: the places are the thread's folder and its media folder, never the temp folders", () => {
-  const roots = shareRoots('/Users/ann/dev/app', '/data/threads/t1/media');
-  assert.deepEqual(roots, ['/Users/ann/dev/app', '/data/threads/t1/media']);
-  assert.deepEqual(shareRoots(undefined, undefined), []);
-  // /Users/x/secret.png is in none of them.
+  const mp4 = writeAt(path.join(cwd, 'clip.mp4'), Buffer.concat([Buffer.from([0, 0, 0, 16]), Buffer.from('ftypisom'), Buffer.alloc(4)]), AFTER);
+  assert.equal('skip' in readShareImage(mp4, roots), true);
+  assert.deepEqual(readShareImage(path.join(cwd, 'gone.png'), roots), { skip: 'the file is gone' });
   assert.deepEqual(readShareImage('/Users/x/secret.png', roots), { skip: "it isn't in the thread's folder or its media" });
 });
 
 // Daybreak verify-fix (5 Nov): the temp folders were allowed, and they hold
-// every app's screenshots, so Markdown naming one published it. The
-// remediation test: assistant Markdown pointing at a real picture that isn't
-// the thread's makes no public share image, wherever it is.
+// every app's screenshots, so Markdown naming one published it.
 test("share images: a real picture in a temp folder that isn't the thread's stays on the Mac", () => {
   const cwd = tmpDir();
   const media = tmpDir();
   for (const dir of [os.tmpdir(), '/tmp']) {
     const other = fs.mkdtempSync(path.join(dir, 'other-app-'));
-    const shot = path.join(other, 'Screenshot.png');
-    fs.writeFileSync(shot, pngHeader(1440, 900));
-    const [img] = imagesInEvent({ seq: 3, ts: '2026-11-05T00:00:00.000Z', type: 'assistant.text', itemId: 'm', text: `![](${shot})` } as never);
+    const shot = writeAt(path.join(other, 'Screenshot.png'), pngHeader(1440, 900), AFTER);
+    const [img] = md(shot);
     assert.equal(img?.path, shot, 'the Markdown names it');
-    assert.deepEqual(readShareImage(img!.path, shareRoots(cwd, media)), { skip: "it isn't in the thread's folder or its media" });
+    assert.deepEqual(readShareImage(img!.path, shareRoots(cwd, media, STARTED)), { skip: "it isn't in the thread's folder or its media" });
     fs.rmSync(other, { recursive: true });
   }
-  // The thread's own media still goes.
-  const own = path.join(media, 'shot.png');
-  fs.writeFileSync(own, pngHeader(2, 2));
-  assert.ok(!('skip' in readShareImage(own, shareRoots(cwd, media))));
 });

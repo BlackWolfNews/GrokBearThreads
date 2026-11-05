@@ -99,14 +99,24 @@ function readCapped(file: string): { bytes: Uint8Array } | { skip: string } {
   return { bytes: new Uint8Array(fs.readFileSync(file)) };
 }
 
-// Where a shared thread's pictures may come from: its folder, and its
-// media folder in the data dir (where attachments and tool pictures are
-// copied). Anything else is somewhere an agent talked into it could point
-// at to publish a file. Not the temp folders, though agents save
+// Where a shared thread's pictures may come from: its media folder in the
+// data dir (where attachments and tool pictures are copied), and its own
+// folder for pictures made there since the thread started (`since`, its
+// creation time from the runner's records), which is what the agent drew,
+// shot or exported. A picture that was in the folder before is the folder's
+// own, and Markdown naming one would publish it (Daybreak verify-fix,
+// 5 Nov), so it shows its caption. Not the temp folders, though agents save
 // screenshots there: they hold every app's, so any picture there was one
-// Markdown line from a public page (Daybreak verify-fix, 5 Nov).
-export function shareRoots(cwd: string | undefined, mediaDir: string | undefined): string[] {
-  return [cwd, mediaDir].filter((d): d is string => Boolean(d));
+// Markdown line from a public page.
+export type ShareRoot = { dir: string; since?: number };
+
+export function shareRoots(cwd: string | undefined, mediaDir: string | undefined, startedAt: string | undefined): ShareRoot[] {
+  const roots: ShareRoot[] = [];
+  if (mediaDir) roots.push({ dir: mediaDir });
+  // No start time to go by: nothing from the folder.
+  const since = startedAt ? Date.parse(startedAt) : NaN;
+  if (cwd && Number.isFinite(since)) roots.push({ dir: cwd, since });
+  return roots;
 }
 
 function under(file: string, dir: string): boolean {
@@ -123,34 +133,65 @@ function realOr(p: string): string {
 }
 
 const OUTSIDE = "it isn't in the thread's folder or its media";
+const BEFORE = "it was in the thread's folder before the thread started, so it isn't the agent's";
 
 // The bytes of a shared thread's picture and what they really are, or why
-// not. It goes to a public page, so: a file under `roots` (by its real
-// path, so a folder link can't lead out), not itself a link, and really a
-// picture whatever its name says. The type comes from the bytes too.
-export function readShareImage(file: string, roots: string[]): { bytes: Uint8Array; mediaType: string; width?: number; height?: number } | { skip: string } {
-  const real = roots.flatMap((r) => [r, realOr(r)]);
-  if (!real.some((r) => under(path.resolve(file), r))) return { skip: OUTSIDE };
+// not. It goes to a public page, so: a file under one of `roots` (by its
+// real path too, so a folder link can't lead out), new enough for that
+// root, not itself a link, and really a picture whatever its name says.
+// The type comes from the bytes. Read through one descriptor opened
+// without following a link, and checked to be the file at the real path,
+// so nothing can be swapped in between the checks and the read.
+export function readShareImage(file: string, roots: ShareRoot[]): { bytes: Uint8Array; mediaType: string; width?: number; height?: number } | { skip: string } {
+  const abs = path.resolve(file);
+  const holding = roots.filter((r) => under(abs, r.dir) || under(abs, realOr(r.dir)));
+  if (!holding.length) return { skip: OUTSIDE };
   let st: fs.Stats;
   try {
-    st = fs.lstatSync(file);
+    st = fs.lstatSync(abs);
   } catch {
     return { skip: 'the file is gone' };
   }
   if (st.isSymbolicLink()) return { skip: "it's a link" };
   if (!st.isFile()) return { skip: "it can't be read" };
-  if (!real.some((r) => under(realOr(file), r))) return { skip: OUTSIDE };
-  let read: ReturnType<typeof readCapped>;
+  const real = realOr(abs);
+  const inside = holding.filter((r) => under(real, realOr(r.dir)));
+  if (!inside.length) return { skip: OUTSIDE };
+  let fd: number;
   try {
-    read = readCapped(file);
+    fd = fs.openSync(abs, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  } catch (e) {
+    return { skip: (e as NodeJS.ErrnoException).code === 'ELOOP' ? "it's a link" : "it can't be read" };
+  }
+  try {
+    const open = fs.fstatSync(fd);
+    let atReal: fs.Stats;
+    try {
+      atReal = fs.statSync(real);
+    } catch {
+      return { skip: 'the file is gone' };
+    }
+    if (!open.isFile() || open.ino !== atReal.ino || open.dev !== atReal.dev) return { skip: "it can't be read" };
+    // The media folder's are always the thread's; the thread folder's only
+    // when written since the thread started.
+    if (!inside.some((r) => r.since === undefined || open.mtimeMs >= r.since)) return { skip: BEFORE };
+    if (open.size > SHARE_IMAGE_BYTES) return { skip: `it's ${Math.round(open.size / 1024 / 1024)} MB` };
+    const bytes = Buffer.alloc(open.size);
+    let got = 0;
+    while (got < bytes.length) {
+      const n = fs.readSync(fd, bytes, got, bytes.length - got, got);
+      if (n === 0) break;
+      got += n;
+    }
+    // Pictures only: the page draws them with <img>.
+    const info = sniffImage(bytes.subarray(0, got));
+    if (!info) return { skip: "it isn't a picture" };
+    return { bytes: new Uint8Array(bytes.subarray(0, got)), mediaType: info.mediaType, ...(info.width ? { width: info.width } : {}), ...(info.height ? { height: info.height } : {}) };
   } catch {
     return { skip: "it can't be read" };
+  } finally {
+    fs.closeSync(fd);
   }
-  if ('skip' in read) return read;
-  // Pictures only: the page draws them with <img>.
-  const info = sniffImage(Buffer.from(read.bytes));
-  if (!info) return { skip: "it isn't a picture" };
-  return { bytes: read.bytes, mediaType: info.mediaType, ...(info.width ? { width: info.width } : {}), ...(info.height ? { height: info.height } : {}) };
 }
 
 // What the phone shows of any thread, shared or not (backend API 24,

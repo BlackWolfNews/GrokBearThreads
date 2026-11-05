@@ -943,9 +943,10 @@ you send from your phone passes through that deployment on its way to the Mac
 and is deleted once the Mac has it.
 A thread you share can be read by anyone with its link, pictures included,
 and only that thread. The pictures are uploaded only while it's shared,
-and only real pictures from the thread's folder or its own attachments
-and screenshots; one an agent points at anywhere else, a temp folder
-included, stays on your Mac and the page shows its caption instead.
+and only real pictures from its own attachments and screenshots, or ones
+made in the thread's folder since the thread started. One an agent points
+at anywhere else, a picture that was already in the folder or a temp
+folder included, stays on your Mac and the page shows its caption instead.
 Notifications to your phone go through a small relay Mike runs, because
 Apple only delivers notifications for his app through his key. The text is
 locked with a key only your phone and your deployment have, so the relay
