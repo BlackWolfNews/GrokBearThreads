@@ -152,6 +152,10 @@ struct DoneCard: View {
                 ForEach(ArchiveVerdict.allCases, id: \.self) { verdict in
                     Button { archive(verdict) } label: { Label(verdict.title, systemImage: verdict.symbol) }
                 }
+                // No verdict: for threads that are just done and fit none of
+                // the three (Mike, 5 Nov), as on the Mac.
+                Divider()
+                Button { archive(nil) } label: { Label("Okey-dokey", systemImage: "archivebox") }
             } label: {
                 Image(systemName: "archivebox")
             }

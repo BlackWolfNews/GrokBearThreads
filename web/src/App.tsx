@@ -279,7 +279,7 @@ function ThreadView({ token, threadId }: { token: string; threadId: string }) {
 
       <div className="dock">
         {pending ? <CommandState token={token} commandId={pending} onDone={() => setPending(null)} /> : null}
-        <Dock token={token} thread={t} lastSeq={lastSeq} onSent={setPending} onArchive={(verdict) => void act({ archive: true, verdict })} />
+        <Dock token={token} thread={t} lastSeq={lastSeq} onSent={setPending} onArchive={(verdict) => void act({ archive: true, ...(verdict ? { verdict } : {}) })} />
       </div>
     </article>
   );
@@ -317,13 +317,16 @@ function MoreMenu({ items }: { items: ({ label: string; icon: ReactNode; run: ()
 // later sweeps know it was archived on purpose (backend API 42; the website
 // ships with its backend, so it's always new enough).
 type Verdict = 'worked' | 'didntWork' | 'notNeeded';
-const verdicts: { verdict: Verdict; label: string; icon: ReactNode }[] = [
+const verdicts: { verdict: Verdict | undefined; label: string; icon: ReactNode }[] = [
   { verdict: 'worked', label: 'Worked', icon: <Icon.Check /> },
   { verdict: 'didntWork', label: "Didn't work", icon: <Icon.Close /> },
   { verdict: 'notNeeded', label: 'Not needed', icon: <Icon.Minus /> },
+  // No verdict: for threads that are just done and fit none of the three
+  // (Mike, 5 Nov), as on the Mac and iPhone.
+  { verdict: undefined, label: 'Okey-dokey', icon: <Icon.Archive /> },
 ];
 
-function Dock({ token, thread: t, lastSeq, onSent, onArchive }: { token: string; thread: Row; lastSeq?: number; onSent: (id: Id<'commands'>) => void; onArchive: (verdict: Verdict) => void }) {
+function Dock({ token, thread: t, lastSeq, onSent, onArchive }: { token: string; thread: Row; lastSeq?: number; onSent: (id: Id<'commands'>) => void; onArchive: (verdict: Verdict | undefined) => void }) {
   const send = useMutation(api.phone.send);
   const [text, setText] = useState('');
   // Picks on the card of asks: ask index to choice index, for one card.
@@ -396,7 +399,7 @@ function Dock({ token, thread: t, lastSeq, onSent, onArchive }: { token: string;
           {(close) =>
             verdicts.map((v) => (
               <button
-                key={v.verdict}
+                key={v.label}
                 onClick={() => {
                   onArchive(v.verdict);
                   close();
