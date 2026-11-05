@@ -117,7 +117,7 @@ export function madeDeployKeys(home: string): Set<string> {
 
 // One look on the other Mac. "checked" at the end, so a look cut short (ssh
 // failing, a timeout) is never taken for a clean one.
-const REMOTE_ADMIN_CHECK = [
+export const REMOTE_ADMIN_CHECK = [
   'd="$HOME/Library/Application Support/Threadbear/secrets"',
   '[ -e "$d/convex-deploy.env" ] && echo deploy-env',
   '[ -e "$HOME/.convex/config.json" ] && echo cli-login',
@@ -189,9 +189,17 @@ function writeKeyFile(file: string, key: string): void {
   fs.renameSync(tmp, file);
 }
 
+// The other Mac runs what ssh sends in its login shell, which on a Mac is
+// zsh, and zsh stops the whole line at a glob that matches nothing (Bruce
+// with no convex-panels folder, 5 Nov 2026). So every command goes through
+// /bin/sh, the shell these commands are written for.
+export function remoteCommand(command: string): string {
+  return `exec /bin/sh -c '${command.replace(/'/g, `'\\''`)}'`;
+}
+
 const realSsh: Ssh = (host, command, input) => {
   // BatchMode: never stop to ask for a password in the middle of this.
-  const r = spawnSync('ssh', [...SSH_OPTIONS, host, command], { input, encoding: 'utf8' });
+  const r = spawnSync('ssh', [...SSH_OPTIONS, host, remoteCommand(command)], { input, encoding: 'utf8' });
   return { ok: r.status === 0, out: r.stdout ?? '', err: (r.stderr ?? '').trim() || (r.error ? String(r.error) : '') };
 };
 
