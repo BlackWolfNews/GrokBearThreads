@@ -1,6 +1,7 @@
 // The thread manager: owns threads, turns, the event log, approvals, idle
 // release and snoozes. Providers plug in through AgentAdapter; the WebSocket
 // server in rpc.ts is a thin layer over the public methods here.
+import { RELEASE } from './release.ts';
 import { reachable, type Reachable } from './net-probe.ts';
 import type { UpstreamStatus } from './upstream.ts';
 import fs from 'node:fs';
@@ -426,6 +427,8 @@ export const DRAIN_SETTLE_MS = 30 * 60_000;
 export const DRAIN_AGENT_MS = 4 * 60 * 60_000;
 
 export type RunnerDeps = {
+  // The release it runs, when not this code's own (tests).
+  release?: string;
   config: Config;
   store: ThreadStore;
   adapters: Record<string, AgentAdapter>;
@@ -535,6 +538,9 @@ export class Runner {
   // (reconcileWaits) would start a CLI whose tools aren't ready, so they
   // wait for main.ts's own reconcileWaits once it's listening.
   holdWaits = false;
+  // The release this runner runs (none from a source checkout), for
+  // threads hibernating until a new one (snoozedUntil "release"). Tests set it.
+  release: string | undefined = RELEASE.release;
   cfg: Config;
   store: ThreadStore;
   adapters: Record<string, AgentAdapter>;
@@ -616,6 +622,7 @@ export class Runner {
   atMac?: () => boolean | undefined;
 
   constructor(deps: RunnerDeps) {
+    if ('release' in deps) this.release = deps.release;
     this.cfg = deps.config;
     this.store = deps.store;
     this.copyTranscript = deps.copyTranscript ?? copySessionTranscript;
@@ -683,7 +690,7 @@ export class Runner {
     // restart waited still gets carried on.
     // A wake-when still being worked out lost its answer with the old
     // runner, so it comes back too.
-    for (const st of this.threads.values()) if (st.rec.snoozedUntilRestart || st.rec.wakeWhen?.pending) this.wake(st, 'restart');
+    for (const st of this.threads.values()) if (this.wakesOnStart(st.rec)) this.wake(st, 'restart');
     // Before anything reads a thread's patches. Every thread on disk,
     // including ones a draining runner still has.
     this.seedPatchTrust(records.map((r) => r.cwd));
@@ -2058,7 +2065,7 @@ export class Runner {
   snoozeAfterTurn(st: ThreadState, when: string): void {
     const { rec } = st;
     let until: string | undefined;
-    if (when.toLowerCase() === 'restart') until = 'restart';
+    if (when.toLowerCase() === 'restart' || when.toLowerCase() === 'release') until = when.toLowerCase();
     else {
       try {
         until = parseWhen(when, this.clock.now());
@@ -2075,12 +2082,13 @@ export class Runner {
       });
       return;
     }
-    if (until !== 'restart' && Date.parse(until) <= this.clock.now()) {
+    if (until !== 'restart' && until !== 'release' && Date.parse(until) <= this.clock.now()) {
       this.emit(st, { type: 'system.note', text: `Not hibernated: the agent asked to wake at ${when}, which has passed.` });
       return;
     }
     const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    const text = until === 'restart' ? 'Hibernating until the runner next starts, as the agent was asked to.' : `Hibernating until ${localWhen(Date.parse(until), timeZone)}, as the agent was asked to.`;
+    const text = until === 'restart' ? 'Hibernating until the runner next starts, as the agent was asked to.'
+      : until === 'release' ? 'Hibernating until the runner starts on a new release, as the agent was asked to.' : `Hibernating until ${localWhen(Date.parse(until), timeZone)}, as the agent was asked to.`;
     this.emit(st, { type: 'system.note', text });
     this.update({ threadId: rec.id, snoozedUntil: until });
   }
@@ -2315,7 +2323,7 @@ export class Runner {
     model?: string | null;
     effort?: EffortLevel | null;
     permissionMode?: PermissionMode;
-    snoozedUntil?: string | null; // an ISO time, or 'restart' for until the runner next starts
+    snoozedUntil?: string | null; // an ISO time, 'restart' for until the runner next starts, or 'release' for until it starts on a new release
     archived?: boolean;
     // Who's archiving it: Mike (the default: the app, the phone, tb), an
     // agent (update_thread, end_turn's archive) or Threadbear itself. With
@@ -2480,16 +2488,20 @@ export class Runner {
       if (params.snoozedUntil !== null && this.bucket(rec) !== 'snoozed') rec.snoozedAt = this.isoNow();
       delete rec.woke;
       delete rec.snoozedUntilRestart;
+      delete rec.untilRelease;
       delete rec.wakeWhen;
       delete rec.waitingOn;
       if (params.snoozedUntil === null) delete rec.snoozedUntil;
-      else if (params.snoozedUntil === 'restart') {
+      else if (params.snoozedUntil === 'restart' || params.snoozedUntil === 'release') {
         rec.snoozedUntil = UNTIL_RESTART;
         rec.snoozedUntilRestart = true;
+        // Until a start on another release than this one. From a source
+        // checkout there's no release to tell apart, so any start does.
+        if (params.snoozedUntil === 'release' && this.release) rec.untilRelease = this.release;
         stop = true;
       } else {
         const t = Date.parse(params.snoozedUntil);
-        if (Number.isNaN(t)) throw new RpcError(ErrorCode.badParams, 'snoozedUntil must be an ISO time or "restart"');
+        if (Number.isNaN(t)) throw new RpcError(ErrorCode.badParams, 'snoozedUntil must be an ISO time, "restart" or "release"');
         rec.snoozedUntil = new Date(t).toISOString();
         stop = true;
       }
@@ -2866,6 +2878,7 @@ export class Runner {
     if (rec.effortInUse) s.effortInUse = rec.effortInUse;
     if (rec.snoozedUntil) s.snoozedUntil = rec.snoozedUntil;
     if (rec.snoozedUntilRestart) s.snoozedUntilRestart = true;
+    if (rec.snoozedUntilRestart && rec.untilRelease) s.snoozedUntilRelease = true;
     if (rec.wakeWhen && rec.snoozedUntil) s.wakeWhen = { ...rec.wakeWhen };
     if (rec.waitingOn && rec.snoozedUntil) s.waitingOn = rec.waitingOn.map((w) => ({ threadId: w.threadId, title: w.title, ...(w.until ? { until: w.until } : {}), ...(w.done ? { done: true as const } : {}) }));
     if (rec.woke && rec.forceUnread) s.woke = { ...rec.woke };

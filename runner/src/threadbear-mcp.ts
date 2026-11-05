@@ -3,6 +3,7 @@
 // them. The runner hands each Claude session its own in-process MCP server
 // ("threadbear"), built with that session's thread id, so "this thread" is
 // always the caller and nothing has to go over the WebSocket.
+import { wakeNote } from './wake-note.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
@@ -816,7 +817,7 @@ export function buildThreadbearTools(
         snooze: z
           .string()
           .optional()
-          .describe('Hibernates this thread once the turn is over, until 2h, 1d, tomorrow, an ISO time with its offset, "restart" (the runner next starting) or words saying when ("when the phone arrives"), with needs "nothing": when the user asked for that, or when the rest waits on a message (one wakes it), until it should have come. Asked after you called end_turn? Call it again with this.'),
+          .describe('Hibernates this thread once the turn is over, until 2h, 1d, tomorrow, an ISO time with its offset, "restart" (the runner next starting), "release" (it starting on a new release) or words saying when ("when the phone arrives"), with needs "nothing": when the user asked for that, or when the rest waits on a message (one wakes it), until it should have come. Asked after you called end_turn? Call it again with this.'),
         waitFor: waitForArg,
       },
       handle(async (input) => {
@@ -910,7 +911,7 @@ export function buildThreadbearTools(
         snooze: z
           .string()
           .optional()
-          .describe('Hibernate this thread once the turn is over, until 30m, 2h, 1d, tomorrow, an ISO time with its offset, "restart" (until the runner next starts), or words saying when ("when the phone arrives"). Only with needs "nothing": when the user has asked for this thread to be snoozed or hibernated, or when the rest waits on a message (one wakes it), until it should have come. If they ask after you have called end_turn, call it again with this.'),
+          .describe('Hibernate this thread once the turn is over, until 30m, 2h, 1d, tomorrow, an ISO time with its offset, "restart" (until the runner next starts), "release" (until it starts on a new release), or words saying when ("when the phone arrives"). Only with needs "nothing": when the user has asked for this thread to be snoozed or hibernated, or when the rest waits on a message (one wakes it), until it should have come. If they ask after you have called end_turn, call it again with this.'),
         waitFor: waitForArg,
       },
       handle(async (args) => {
@@ -1183,7 +1184,7 @@ export function buildThreadbearTools(
         effort: effortEnum.nullable().optional().describe("Reasoning effort, or null for the model's own level (ultra is Codex only)."),
         pool: z.string().nullable().optional().describe('Pool id or title to put the thread in (it moves onto one of its logins from the next turn if its current one isn\'t in it), or null or "pin" to pin it to its current login.'),
         permissionMode: z.enum(['full', 'ask', 'auto']).optional(),
-        snooze: z.string().optional().describe('Snooze until: 30m, 2h, 1d, tomorrow, an ISO time, "restart" (until the runner next starts), or "off" to wake it.'),
+        snooze: z.string().optional().describe('Snooze until: 30m, 2h, 1d, tomorrow, an ISO time, "restart" (until the runner next starts), "release" (until it starts on a new release), or "off" to wake it.'),
         archived: z.boolean().optional().describe('true to archive, false to bring back to the inbox.'),
       },
       handle(async ({ threadId, id: alias, title, mikeAsked, model, effort, pool: p, permissionMode, snooze, archived }) => {
@@ -1201,7 +1202,7 @@ export function buildThreadbearTools(
         if (permissionMode !== undefined) upd.permissionMode = permissionMode;
         if (snooze !== undefined) {
           const word = snooze.trim().toLowerCase();
-          upd.snoozedUntil = word === 'off' ? null : word === 'restart' ? 'restart' : parseWhen(snooze, now());
+          upd.snoozedUntil = word === 'off' ? null : word === 'restart' || word === 'release' ? word : parseWhen(snooze, now());
         }
         if (archived !== undefined) upd.archived = archived;
         if (archived === true) upd.archivedBy = 'agent';
@@ -1258,7 +1259,10 @@ export function buildThreadbearTools(
 }
 
 function snoozeEnd(t: ThreadSummary): string {
-  return t.snoozedUntilRestart ? 'the runner restarts' : t.snoozedUntil ?? '';
+  const note = wakeNote(t);
+  // A time limit goes with what it waits for, unless it's the far-off one.
+  if (note && t.snoozedUntil && !t.snoozedUntilRestart && !t.snoozedUntil.startsWith('9999')) return `${note}, or ${t.snoozedUntil} at the latest`;
+  return note ?? t.snoozedUntil ?? '';
 }
 
 function clip(text: string, max = 2000): string {

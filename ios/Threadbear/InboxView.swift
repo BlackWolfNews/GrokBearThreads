@@ -456,6 +456,8 @@ struct ThreadRow: View {
 
     private var line2: String {
         var parts = [thread.placeText]
+        // What a hibernating thread waits for, before where it is.
+        if let wake = InboxSections.wakeLine(thread, now: model.now) { parts.insert(wake, at: 0) }
         if let runner = model.runnerName(thread.runnerId) { parts.append(runner) }
         if let working = thread.working, thread.isBusy || (thread.pendingApproval == nil && !thread.waitingOnMike) { parts.append(working) }
         return parts.joined(separator: " · ")

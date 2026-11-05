@@ -189,6 +189,13 @@ public struct InboxSections: Sendable, Equatable {
         thread.pendingApproval != nil || thread.status == .waiting
     }
 
+    /// A hibernating row's "Until \"Convex I/O\" finishes", put first on
+    /// its second line; nil while it's awake or waits only for a time.
+    public static func wakeLine(_ thread: PhoneThread, now: Date) -> String? {
+        guard let note = thread.wakeNote, !note.isEmpty, isSnoozed(thread, now: now) else { return nil }
+        return "Until \(note)"
+    }
+
     public static func isSnoozed(_ thread: PhoneThread, now: Date) -> Bool {
         if thread.snoozedUntilRestart == true { return true }
         guard let until = thread.snoozedUntil else { return false }

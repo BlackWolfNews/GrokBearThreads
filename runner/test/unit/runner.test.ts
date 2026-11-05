@@ -543,7 +543,7 @@ test('a dated snooze or a message clears an until-restart snooze', () => {
   h.runner.update({ threadId: thread.id, snoozedUntil: 'restart' });
   h.runner.send(thread.id, 'back to it');
   assert.equal(h.runner.get(thread.id).snoozedUntilRestart, undefined);
-  assert.throws(() => h.runner.update({ threadId: thread.id, snoozedUntil: 'later' }), /ISO time or "restart"/);
+  assert.throws(() => h.runner.update({ threadId: thread.id, snoozedUntil: 'later' }), /ISO time, "restart" or "release"/);
 });
 
 test('an archive says who did it, and Mike\'s verdict goes in the thread', () => {

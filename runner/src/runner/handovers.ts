@@ -163,7 +163,7 @@ export const handoversPart = {
     }
     // Hibernating until the runner restarts: for this thread, coming across
     // is the restart.
-    if (rec.snoozedUntilRestart || rec.wakeWhen?.pending) this.wake(st, 'restart');
+    if (this.wakesOnStart(rec)) this.wake(st, 'restart');
     else if (rec.queue.length && this.bucket(rec) === 'inbox') {
       this.kickQueue(st);
     }

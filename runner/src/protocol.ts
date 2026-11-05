@@ -168,6 +168,7 @@ export type ThreadSummary = {
   lastActivityAt: string;
   snoozedUntil?: string;
   snoozedUntilRestart?: boolean; // hibernating until the runner next starts
+  snoozedUntilRelease?: true; // with snoozedUntilRestart: until it starts on a new release
   // Hibernated in Mike's words ("Hibernate in words"): what he said, the
   // topic it waits for, and pending while the time is worked out.
   wakeWhen?: { said: string; topic?: string; pending?: true };

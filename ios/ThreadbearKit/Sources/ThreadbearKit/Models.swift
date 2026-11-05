@@ -241,6 +241,10 @@ public struct PhoneThread: Codable, Sendable, Hashable, Identifiable {
     @FlexibleDate public var lastActivityAt: Date
     @OptionalFlexibleDate public var snoozedUntil: Date?
     public var snoozedUntilRestart: Bool?
+    /// What it waits for while hibernating, when that's more than a time
+    /// ("\"Convex I/O\" finishes", "the runner updates"; backend API 49). Nil
+    /// for a plain time and from an older runner.
+    public var wakeNote: String?
     /// Back from hibernating by itself and not opened yet: the row says
     /// "Woke up", as the Mac's does.
     public var woke: Woke?

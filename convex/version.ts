@@ -216,4 +216,7 @@
 //    none and is told about everyone's, as before. sync:schedules reads only a
 //    runner key's own rows. sync:schedulesSince is the table once and then only
 //    the rows written since; an older runner goes on using sync:schedules.
-export const API_VERSION = 48;
+// 49: a thread row can carry wakeNote, what a hibernating thread waits for when
+//    it's more than a time ("\"Convex I/O\" finishes", "the runner updates"), for
+//    the phone's and the website's rows. An older runner sends none.
+export const API_VERSION = 49;

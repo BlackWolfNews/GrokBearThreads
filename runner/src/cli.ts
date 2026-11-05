@@ -441,10 +441,11 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
     }
     case 'snooze': {
       const id = notSelf(await resolveId(client, args[0]), STOPS_SELF);
-      // "restart": until the runner next starts.
-      const until = args[1]?.toLowerCase() === 'restart' ? 'restart' : parseWhen(args[1] ?? '1h');
+      // "restart": until the runner next starts; "release": until it starts on a new release.
+      const word = args[1]?.toLowerCase();
+      const until = word === 'restart' || word === 'release' ? word : parseWhen(args[1] ?? '1h');
       const r = await client.call<{ thread: ThreadSummary }>('threads.update', { threadId: id, snoozedUntil: until });
-      console.log(`snoozed until ${r.thread.snoozedUntilRestart ? 'the runner restarts' : r.thread.snoozedUntil}`);
+      console.log(`snoozed until ${r.thread.snoozedUntilRelease ? 'a new release' : r.thread.snoozedUntilRestart ? 'the runner restarts' : r.thread.snoozedUntil}`);
       return 0;
     }
     case 'archive':

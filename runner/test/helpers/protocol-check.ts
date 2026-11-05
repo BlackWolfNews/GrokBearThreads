@@ -192,6 +192,7 @@ export function checkSummary(t: Obj): string[] {
     if (!(w && typeof w === 'object' && isIso(w.since) && Object.keys(w).every((k) => k === 'since'))) problems.push('waitingForNetwork');
   }
   if (t.snoozedUntilRestart !== undefined && (t.snoozedUntilRestart !== true || !isStr(t.snoozedUntil))) problems.push('snoozedUntilRestart');
+  if (t.snoozedUntilRelease !== undefined && (t.snoozedUntilRelease !== true || t.snoozedUntilRestart !== true)) problems.push('snoozedUntilRelease');
   if (t.wakeWhen !== undefined) {
     const w = t.wakeWhen;
     const ok = w && typeof w === 'object' && isStr(w.said) && isStr(t.snoozedUntil) && (w.topic === undefined || isStr(w.topic)) && (w.pending === undefined || w.pending === true) &&
@@ -303,7 +304,7 @@ export function checkSummary(t: Obj): string[] {
   }
   const allowed = new Set([
     'id', 'title', 'cwd', 'accountId', 'provider', 'model', 'permissionMode', 'status', 'live', 'needsYou', 'createdAt', 'updatedAt',
-    'lastActivityAt', 'snoozedUntil', 'snoozedUntilRestart', 'archivedAt', 'archivedBy', 'archiveVerdict', 'starredAt', 'preview', 'lastSeq', 'lastSeenSeq', 'nativeSessionId', 'contextTokens', 'costUsd',
+    'lastActivityAt', 'snoozedUntil', 'snoozedUntilRestart', 'snoozedUntilRelease', 'archivedAt', 'archivedBy', 'archiveVerdict', 'starredAt', 'preview', 'lastSeq', 'lastSeenSeq', 'nativeSessionId', 'contextTokens', 'costUsd',
     'poolId', 'waitingForRoom', 'waitingForNetwork', 'wakeWhen', 'waitingOn',
     'effort', 'modelInUse', 'effortInUse', 'contextWindow', 'panels', 'actions', 'hooks', 'patches', 'background', 'subagents', 'projects', 'worktree',
     'needs', 'asks', 'asksSeq', 'highlightsAt', 'panelRequest', 'share', 'startedBy', 'asked',

@@ -1016,6 +1016,8 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     /// Hibernating until the runner next starts (snoozedUntil is then a
     /// date far off, which the runner never reaches).
     public var snoozedUntilRestart: Bool
+    /// With snoozedUntilRestart: only a start on a new release wakes it.
+    public var snoozedUntilRelease: Bool
     /// Hibernated in Mike's words (protocol "Hibernate in words").
     public var wakeWhen: WakeWhen?
     /// Hibernating until these threads finish (end_turn's waitFor).
@@ -1108,7 +1110,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         provider: String = "claude", model: String? = nil, permissionMode: PermissionMode = .full,
         status: ThreadStatus = .idle, live: Bool = false, needsYou: Bool = false,
         createdAt: Date = Date(), updatedAt: Date = Date(), lastActivityAt: Date = Date(),
-        snoozedUntil: Date? = nil, snoozedUntilRestart: Bool = false, wakeWhen: WakeWhen? = nil, waitingOn: [WaitingOn]? = nil, woke: ThreadWoke? = nil, archivedAt: Date? = nil, starredAt: Date? = nil, onOldRunner: Bool = false, preview: String = "",
+        snoozedUntil: Date? = nil, snoozedUntilRestart: Bool = false, snoozedUntilRelease: Bool = false, wakeWhen: WakeWhen? = nil, waitingOn: [WaitingOn]? = nil, woke: ThreadWoke? = nil, archivedAt: Date? = nil, starredAt: Date? = nil, onOldRunner: Bool = false, preview: String = "",
         lastSeq: Int = 0, lastSeenSeq: Int = 0, nativeSessionId: String? = nil,
         contextTokens: Int? = nil, costUsd: Double? = nil,
         effort: String? = nil, modelInUse: String? = nil, effortInUse: String? = nil, contextWindow: Int? = nil,
@@ -1137,6 +1139,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         self.lastActivityAt = lastActivityAt
         self.snoozedUntil = snoozedUntil
         self.snoozedUntilRestart = snoozedUntilRestart
+        self.snoozedUntilRelease = snoozedUntilRelease
         self.wakeWhen = wakeWhen
         self.waitingOn = waitingOn
         self.woke = woke
@@ -1196,6 +1199,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         lastActivityAt = try date(.lastActivityAt) ?? updatedAt
         snoozedUntil = try date(.snoozedUntil)
         snoozedUntilRestart = ((try? c.decodeIfPresent(Bool.self, forKey: .snoozedUntilRestart)) ?? nil) ?? false
+        snoozedUntilRelease = ((try? c.decodeIfPresent(Bool.self, forKey: .snoozedUntilRelease)) ?? nil) ?? false
         wakeWhen = (try? c.decodeIfPresent(WakeWhen.self, forKey: .wakeWhen)) ?? nil
         waitingOn = (try? c.decodeIfPresent([WaitingOn].self, forKey: .waitingOn)) ?? nil
         woke = (try? c.decodeIfPresent(ThreadWoke.self, forKey: .woke)) ?? nil
@@ -1256,6 +1260,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         try c.encode(ISO8601.format(lastActivityAt), forKey: .lastActivityAt)
         try c.encodeIfPresent(snoozedUntil.map(ISO8601.format), forKey: .snoozedUntil)
         if snoozedUntilRestart { try c.encode(true, forKey: .snoozedUntilRestart) }
+        if snoozedUntilRelease { try c.encode(true, forKey: .snoozedUntilRelease) }
         try c.encodeIfPresent(wakeWhen, forKey: .wakeWhen)
         try c.encodeIfPresent(waitingOn, forKey: .waitingOn)
         try c.encodeIfPresent(woke, forKey: .woke)
@@ -1297,7 +1302,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id, title, cwd, accountId, provider, model, effort, modelInUse, effortInUse, permissionMode, status, live, needsYou, pendingReviews
-        case createdAt, updatedAt, lastActivityAt, snoozedUntil, snoozedUntilRestart, wakeWhen, waitingOn, woke, archivedAt, starredAt, onOldRunner, preview
+        case createdAt, updatedAt, lastActivityAt, snoozedUntil, snoozedUntilRestart, snoozedUntilRelease, wakeWhen, waitingOn, woke, archivedAt, starredAt, onOldRunner, preview
         case lastSeq, lastSeenSeq, nativeSessionId, contextTokens, contextWindow, costUsd, panels, actions, hooks, patches, background, subagents
         case projects, worktree, needs, asks, asksSeq, highlightsAt, schedule, startedBy, asked, poolId, waitingForRoom, waitingForNetwork, panelRequest, share, sample
     }

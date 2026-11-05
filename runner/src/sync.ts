@@ -11,6 +11,7 @@
 // key the deployment's RUNNER_KEY was set to (`npx convex env set`).
 // THREADBEAR_SYNC=off turns it off whatever runner.json says, which
 // check.sh sets so no test runner ever writes to the real project.
+import { wakeNote } from './wake-note.ts';
 import type { PoolBackend } from './shared-pools.ts';
 import type { SharedPool } from './pools.ts';
 import type { SharedReading } from './usage.ts';
@@ -108,7 +109,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 48;
+export const BACKEND_API_VERSION = 49;
 // From this one the main Mac reads and steers other runners' threads through
 // the backend (convex/relay.ts): commands can be `interrupt` or `call`, and a
 // pending approval carries its event's seq (docs/protocol.md, "Other
@@ -216,6 +217,10 @@ export const ACCOUNTS_DIFF_API_VERSION = 37;
 // for the phone's row. An older backend's validator would turn the row
 // down, so it goes without.
 export const ASKED_API_VERSION = 31;
+// From this one a thread's row carries `wakeNote` (wake-note.ts), what a
+// hibernating thread waits for. An older backend's validator would turn the
+// row down, so it goes without.
+export const WAKE_NOTE_API_VERSION = 49;
 // From this one a threadIndex row carries `asked` too, for the Mac's
 // "You: ..." under another runner's threads.
 export const INDEX_ASKED_API_VERSION = 32;
@@ -299,6 +304,7 @@ export type ThreadDoc = {
   lastActivityMs: number;
   snoozedUntil?: string;
   snoozedUntilRestart?: boolean;
+  wakeNote?: string;
   woke?: { at: string; since?: string };
   startedBy?: { kind: string; label: string; icon?: string; why?: string };
   asked?: string;
@@ -658,6 +664,9 @@ export function toThreadDoc(t: ThreadSummary, runnerId: string, now: number, pen
   if (t.model) doc.model = t.model;
   if (t.snoozedUntil) doc.snoozedUntil = t.snoozedUntil;
   if (t.snoozedUntilRestart) doc.snoozedUntilRestart = true;
+  // What it waits for, when it's more than a time (wake-note.ts): the row says it.
+  const note = wakeNote(t);
+  if (note) doc.wakeNote = note;
   if (t.woke) doc.woke = { ...t.woke };
   // Not the thread it came from: the phone's row has no tooltip to name it.
   if (t.startedBy) doc.startedBy = { kind: t.startedBy.kind, label: t.startedBy.label, ...(t.startedBy.icon ? { icon: t.startedBy.icon } : {}), ...(t.startedBy.why ? { why: t.startedBy.why } : {}) };
@@ -734,7 +743,7 @@ function phoneAnswers(raw: unknown): AskAnswer[] | undefined {
 export function forBackend(d: ThreadDoc, v: number, now: number): ThreadDoc {
   const asks = d.asks !== undefined || d.asksSeq !== undefined || d.next !== undefined;
   const sections = d.needs !== undefined || d.pendingReviews !== undefined || d.waitingForRoom !== undefined;
-  if ((v >= SHARE_API_VERSION || !d.share) && (v >= WOKE_API_VERSION || !d.woke) && (v >= ASKS_API_VERSION || !asks) && (v >= SECTIONS_API_VERSION || !sections) && (v >= STARTED_BY_API_VERSION || !d.startedBy) && (v >= STARS_API_VERSION || !d.starredAt) && (v >= LINKS_API_VERSION || !d.links) && (v >= ASKED_API_VERSION || !d.asked) && (v >= NETWORK_WAIT_API_VERSION || !d.waitingForNetwork) && (v >= SECRETS_API_VERSION || d.pendingApproval?.kind !== 'secret') && (v >= RELAY_API_VERSION || d.pendingApproval?.seq === undefined)) return d;
+  if ((v >= SHARE_API_VERSION || !d.share) && (v >= WOKE_API_VERSION || !d.woke) && (v >= ASKS_API_VERSION || !asks) && (v >= SECTIONS_API_VERSION || !sections) && (v >= STARTED_BY_API_VERSION || !d.startedBy) && (v >= STARS_API_VERSION || !d.starredAt) && (v >= LINKS_API_VERSION || !d.links) && (v >= ASKED_API_VERSION || !d.asked) && (v >= WAKE_NOTE_API_VERSION || !d.wakeNote) && (v >= NETWORK_WAIT_API_VERSION || !d.waitingForNetwork) && (v >= SECRETS_API_VERSION || d.pendingApproval?.kind !== 'secret') && (v >= RELAY_API_VERSION || d.pendingApproval?.seq === undefined)) return d;
   const out = { ...d };
   if (v < SECTIONS_API_VERSION) {
     delete out.needs;
@@ -752,6 +761,7 @@ export function forBackend(d: ThreadDoc, v: number, now: number): ThreadDoc {
   if (v < STARTED_BY_API_VERSION) delete out.startedBy;
   if (v < LINKS_API_VERSION) delete out.links;
   if (v < ASKED_API_VERSION) delete out.asked;
+  if (v < WAKE_NOTE_API_VERSION) delete out.wakeNote;
   if (v < STARS_API_VERSION && out.starredAt) {
     // That backend's phones have no Starred section to show it in.
     delete out.starredAt;

@@ -128,7 +128,7 @@ export const hibernationPart = {
     }
     const now = this.clock.now();
     let until: string | undefined;
-    if (when && when.toLowerCase() !== 'restart') {
+    if (when && !['restart', 'release'].includes(when.toLowerCase())) {
       try {
         until = parseWhen(when, now);
       } catch {
@@ -252,6 +252,16 @@ export const hibernationPart = {
     this.log.info('a wait was met', { waiterId, targetId, why });
     this.reconcileWaits();
     return true;
+  },
+
+  // Whether a starting runner (or one taking a thread over from a draining
+  // one) wakes it: hibernating until a restart, or until a new release when
+  // this isn't the one it went to sleep on, or a wake-when whose answer was
+  // lost with the old runner.
+  wakesOnStart(this: Runner, rec: ThreadState['rec']): boolean {
+    if (rec.wakeWhen?.pending) return true;
+    if (!rec.snoozedUntilRestart) return false;
+    return !rec.untilRelease || rec.untilRelease !== this.release;
   },
 
   armSnoozeTimer(this: Runner): void {

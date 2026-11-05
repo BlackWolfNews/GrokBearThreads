@@ -36,6 +36,9 @@ export const threadFields = {
   lastActivityMs: v.number(), // lastActivityAt as a number, for the index
   snoozedUntil: v.optional(v.string()),
   snoozedUntilRestart: v.optional(v.boolean()),
+  // What a hibernating thread waits for when it's more than a time ("\"Convex I/O\" finishes",
+  // "the runner updates"), for the row (runner/src/wake-note.ts).
+  wakeNote: v.optional(v.string()),
   // Back from hibernating by itself and not opened yet: the row says
   // "Woke up" (docs/protocol.md, ThreadSummary.woke).
   woke: v.optional(v.object({ at: v.string(), since: v.optional(v.string()) })),

@@ -674,3 +674,17 @@ private func properties(of data: Data) -> [CFString: Any] {
     #expect(PhoneMessage(seq: 4, role: .user, text: move.text, origin: "schedule", at: at).agentHeader == nil)
     #expect(PhoneMessage(seq: 5, role: .assistant, text: move.text, at: at).agentHeader == nil)
 }
+
+@Test func aHibernatingRowSaysWhatItWaitsFor() throws {
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    var t = PhoneThread(threadId: "t", title: "Plan", lastActivityAt: now, snoozedUntil: now.addingTimeInterval(86_400))
+    #expect(InboxSections.wakeLine(t, now: now) == nil)
+    t.wakeNote = "\"Convex I/O\" finishes"
+    #expect(InboxSections.wakeLine(t, now: now) == "Until \"Convex I/O\" finishes")
+    // From the backend's JSON, and gone once it's awake again.
+    let json = #"{"threadId":"t","runnerId":"mac","title":"Plan","cwd":"~","accountId":"a","provider":"claude","status":"idle","needsYou":false,"unread":false,"preview":"","lastActivityAt":"2026-11-05T00:00:00Z","snoozedUntilRestart":true,"wakeNote":"the runner updates","view":"hibernating"}"#
+    let decoded = try JSONDecoder().decode(PhoneThread.self, from: Data(json.utf8))
+    #expect(InboxSections.wakeLine(decoded, now: now) == "Until the runner updates")
+    t.snoozedUntil = nil
+    #expect(InboxSections.wakeLine(t, now: now) == nil)
+}

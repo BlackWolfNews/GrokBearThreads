@@ -56,6 +56,7 @@ export type ThreadRecord = {
   lastActivityAt: string;
   snoozedUntil?: string;
   snoozedUntilRestart?: boolean; // snoozedUntil is UNTIL_RESTART; start() wakes it
+  untilRelease?: string; // with snoozedUntilRestart: only a start on another release wakes it
   wakeWhen?: WakeWhen; // hibernated in Mike's words (wake-when.ts)
   // Hibernating until these threads finish (end_turn's waitFor,
   // runner/hibernation.ts): each counts once it has finished (with no new

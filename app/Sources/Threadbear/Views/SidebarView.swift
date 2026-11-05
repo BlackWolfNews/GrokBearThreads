@@ -763,6 +763,7 @@ struct ThreadRowView: View {
 
     /// A hibernating thread says when it wakes, where the time would be.
     private var wakeText: String? {
+        if thread.snoozedUntilRelease { return "Back on update" }
         if thread.snoozedUntilRestart { return "Back on restart" }
         if let until = thread.snoozedUntil { return "Back \(RelativeTime.until(until, now: app.now))" }
         return nil

@@ -382,7 +382,10 @@ whose next step waits on other threads hibernates by itself until they
 finish, then wakes with what they said and carries on; its row says
 Waiting on and which. It can also say what it's waiting for a thread to
 do ("until it reports the I/O saving"), and then the librarian reads
-that thread after each of its turns and wakes it once it has. One waiting on a job that will message it does the
+that thread after each of its turns and wakes it once it has. On the
+iPhone and the website a hibernating row starts "Until …" when it waits
+for more than a time. A thread can also hibernate until the runner
+updates to a new release (a restart on the same one leaves it asleep). One waiting on a job that will message it does the
 same until the message comes. Either way it has a time it comes back
 anyway, a day unless it says otherwise.
 
