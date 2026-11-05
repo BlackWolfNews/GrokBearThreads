@@ -1388,7 +1388,7 @@ function scriptedFile() {
   const file = process.env.MOCK_SCRIPTED_TURNS;
   const json = file ? JSON.parse(fs.readFileSync(file, 'utf8')) : {};
   // An array is the turns alone; an object has `turns` and `threads`.
-  scriptedCache = Array.isArray(json) ? { turns: json, threads: {} } : { turns: json.turns ?? [], threads: json.threads ?? {}, dir: path.dirname(file) };
+  scriptedCache = Array.isArray(json) ? { turns: json, threads: {} } : { turns: json.turns ?? [], threads: json.threads ?? {}, dir: file && path.dirname(file) };
   return scriptedCache;
 }
 function scriptedTurns() {
