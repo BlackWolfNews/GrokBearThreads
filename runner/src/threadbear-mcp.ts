@@ -23,7 +23,7 @@ import { RUNNER_VERSION, expandHome } from './config.ts';
 import { ALREADY_ENDED, ARCHIVE_ADDED, SNOOZE_ADDED, snoozeFromTool, endTurnDescription, endTurnForm, endTurnMisfit, END_TURN_TOOL, BULLETS_ONLY, ENDED, takenEndTurn, MAX_BYLINE, NARRATION_ONLY, NO_REPLY, needsFromTool, oneReplyAccepted, offersToTakeItBack, oneReplyAlreadyWritten, summaryFromTool, triedFirstNudged, tryFirstNudge, turnReply, type TurnReply } from './needs.ts';
 import { asksForAppRestart, type AppRestarts } from './app-restarts.ts';
 import { PANEL_PLACES } from './panel-requests.ts';
-import { nudgedThisTurn, signInNudge, turnSignIns, uncovered } from './connectors.ts';
+import { nudgedThisTurn, signInNudge, turnSignIns, uncovered, type ConnectorService } from './connectors.ts';
 import type { PanelPlace } from './protocol.ts';
 import { readRelease, type ReleaseJson } from './release.ts';
 import { userLine } from './user-name.ts';
@@ -126,9 +126,18 @@ export function buildThreadbearTools(
   // headline, and the agent's message after it is the reply (needs.ts).
   // Read once, here, as it changes the tool's own shape: a live session
   // keeps the tool it started with, and the handler goes by that.
-  // gateway: the Connectors gateway's base (config.ts's connectorsUrl),
-  // the only origin a sign-in link from a tool result is taken from.
-  opts: { sleep?: (ms: number) => Promise<void>; provider?: 'claude' | 'codex'; bulletReplies?: () => boolean; oneReply?: () => boolean; pocket?: () => PocketControl | undefined; gateway?: () => string | undefined } = {},
+  // gateway: the Connectors gateway's base (config.ts's connectorsUrl);
+  // gatewayHealth: its /health services, asked fresh, which alone say a
+  // gateway service needs signing in (connectors.ts, signInSignal).
+  opts: {
+    sleep?: (ms: number) => Promise<void>;
+    provider?: 'claude' | 'codex';
+    bulletReplies?: () => boolean;
+    oneReply?: () => boolean;
+    pocket?: () => PocketControl | undefined;
+    gateway?: () => string | undefined;
+    gatewayHealth?: () => Promise<ConnectorService[] | undefined>;
+  } = {},
 ) {
   const codex = opts.provider === 'codex';
   const bulletReplies = () => opts.bulletReplies?.() !== false;
@@ -788,7 +797,7 @@ export function buildThreadbearTools(
         const events = await turnEvents();
         const repeat = repeatEndTurn(events, input);
         if (repeat) return repeat;
-        const missing = uncovered(turnSignIns(events, opts.gateway?.()), needs === 'you' ? asks : []);
+        const missing = uncovered(await turnSignIns(events, opts.gateway?.(), opts.gatewayHealth), needs === 'you' ? asks : []);
         if (missing.length && !nudgedThisTurn(events)) throw new Error(signInNudge(missing));
         if (needs === 'you' && offersToTakeItBack(asks) && !triedFirstNudged(events)) throw new Error(tryFirstNudge());
         let restart = '';
@@ -895,13 +904,13 @@ export function buildThreadbearTools(
         const owed = Boolean(!needsMessage && reply && (!reply.replied || reply.narrationOnly));
         const repeat = repeatEndTurn(await turnEvents(), { ...args, needs });
         if (repeat) return repeat;
-        // A connector that needs Mike to sign in again (a gateway service's
-        // sign_in stub, or claude.ai's "needs you to sign in again") came
+        // A connector that needs Mike to sign in again (a gateway service
+        // its /health says is signed out, or claude.ai's auth error) came
         // up this turn and no ask covers it: refused once, saying which
         // and where, so Mike gets an ask with the page to do it on rather
         // than an error buried in a work group (connectors.ts).
         const events = await turnEvents();
-        const missing = uncovered(turnSignIns(events, opts.gateway?.()), needs === 'you' ? asks : []);
+        const missing = uncovered(await turnSignIns(events, opts.gateway?.(), opts.gatewayHealth), needs === 'you' ? asks : []);
         if (missing.length && !nudgedThisTurn(events)) throw new Error(signInNudge(missing));
         if (needs === 'you' && offersToTakeItBack(asks ?? []) && !triedFirstNudged(events)) throw new Error(tryFirstNudge());
         // Asking Mike to Restart to Update means wanting to know when he
@@ -1307,13 +1316,13 @@ export function serverInstructions(selfId: string, o: { one: boolean; bulletRepl
   );
 }
 
-export function threadbearMcpServer(control: ThreadControl, selfId: string, schedules?: ScheduleControl, projects?: ProjectControl, appRestarts?: AppRestartControl, bulletReplies: () => boolean = () => true, pocket?: () => PocketControl | undefined, oneReply: () => boolean = () => false, gateway?: () => string | undefined): McpSdkServerConfigWithInstance {
+export function threadbearMcpServer(control: ThreadControl, selfId: string, schedules?: ScheduleControl, projects?: ProjectControl, appRestarts?: AppRestartControl, bulletReplies: () => boolean = () => true, pocket?: () => PocketControl | undefined, oneReply: () => boolean = () => false, gateway?: () => string | undefined, gatewayHealth?: () => Promise<ConnectorService[] | undefined>): McpSdkServerConfigWithInstance {
   const one = oneReply();
   const server = createSdkMcpServer({
     name: SERVER_NAME,
     version: RUNNER_VERSION,
     instructions: serverInstructions(selfId, { one, bulletReplies: bulletReplies(), pocket: Boolean(pocket?.()), projects: Boolean(projects) }),
-    tools: buildThreadbearTools(control, selfId, Date.now, schedules, projects, appRestarts, { bulletReplies, pocket, oneReply: () => one, gateway }),
+    tools: buildThreadbearTools(control, selfId, Date.now, schedules, projects, appRestarts, { bulletReplies, pocket, oneReply: () => one, gateway, gatewayHealth }),
   });
   server.tools = [...ALWAYS_ASK_TOOLS].map((name) => ({ name: name.split('__').at(-1)!, permission_policy: 'always_ask' as const }));
   return server;

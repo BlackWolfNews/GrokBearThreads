@@ -2696,23 +2696,28 @@ service is `signed_out` (only Mike can fix that), and a grey dot while the
 gateway is unreachable or a service is connecting or in error (those
 usually sort themselves out).
 
-**Sign-in errors in a thread.** A tool result from an MCP tool (not
-Threadbear's own, not a shell or a file read) that says a service needs
-signing in is a sign-in problem. What a connector reads (an email, a
-Notion page) can say the same words, so each kind only counts from its
-own server's tools, and a link is only taken from the gateway's origin:
+**Sign-in errors in a thread.** A sign-in problem comes from where a tool
+result came from and whether the call failed, never from what the result
+says: what a connector reads (an email, a Notion page) is anyone's words,
+and an email saying "Gmail needs signing in again" made an ask until 5
+Nov. So (`connectors.ts`, `signInSignal`):
 
-- claude.ai's: `MCP server "claude.ai Gmail" needs you to sign in again`,
-  from that server's own tools (`mcp__claude_ai_Gmail__*`). The service
-  is the name without `claude.ai`; the page is
-  `https://claude.ai/settings/connectors`, signed in as the thread's login.
-- the gateway's: from the gateway's own tools (`mcp__connectors__*`), a
-  result from a signed-out service's stub tool `<prefix>__sign_in`, or
-  text like `Notion needs signing in again`. The page is the first URL in
-  the text on the gateway's origin (scheme, host and port of its base)
-  with `/admin/connect/` in it, else the first on that origin. With none
-  (or no gateway set up) there's no page, and the nudge points at the
-  app's Connectors panel instead.
+- claude.ai's: a failed call to one of that server's own tools
+  (`mcp__claude_ai_Gmail__*`) whose result starts with the CLI's auth
+  error, `MCP server "claude.ai Gmail" needs you to sign in again`
+  (optionally after `Error:`). The service is the name without
+  `claude.ai`; the page is `https://claude.ai/settings/connectors`,
+  signed in as the thread's login. A result that worked never counts.
+- the gateway's: a call to a signed-out service's stub tool
+  `mcp__connectors__<prefix>__sign_in`, or a failed call to any of a
+  service's tools (`mcp__connectors__<prefix>__*`, not the gateway's own
+  `connectors__*`). That only names candidates: the prefix, and the id in
+  any `/admin/connect/<id>` link in the result (a prefix can differ from
+  its id, `cf` for `cloudflare`). The runner then asks the gateway's
+  `/health` afresh, and only a candidate it lists as `signed_out` is a
+  problem, with `/health`'s title for it and its connect page. No gateway
+  set up, or no answer from `/health`: no problem, and the agent's own
+  reply is all Mike sees.
 
 When the thread's agent calls `end_turn` and the turn so far has a
 sign-in problem that no ask covers (an ask covers it when one of its

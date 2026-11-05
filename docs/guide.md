@@ -643,7 +643,10 @@ The arrow in the panel checks again, and the ⓘ says more. If the gateway
 can't be reached at all, the panel says so.
 
 When an agent runs into a service that needs signing in, it asks you in its
-reply, with a button that opens the page to do it on. claude.ai's own
+reply, with a button that opens the page to do it on. That's only when the
+gateway itself says the service is signed out (or claude.ai's own sign-in
+error comes back), never because an email or a page the agent read says
+so: those are anyone's words, so a "sign in again" in them asks nothing. claude.ai's own
 connectors are signed in on claude.ai (Settings > Connectors), on the login
 the thread runs on.
 
