@@ -93,6 +93,8 @@ export type UpdateDeps = {
   env?: NodeJS.ProcessEnv;
   // The launcher app above launch.mjs (launcherAppAbove; tests replace it).
   findLauncherApp?: () => string | undefined;
+  // process.platform: only macOS has a launcher app (tests replace it).
+  platform?: NodeJS.Platform;
   // Whenever status() may have changed (runner.updates, main.ts).
   onChange?: () => void;
 };
@@ -477,7 +479,7 @@ export class RunnerUpdater {
       this.checkedAt = new Date(this.deps.clock.now()).toISOString();
       this.commit = main.commit;
       this.subject = main.subject;
-      this.launcherReason = launchAgentBehind(path.join(dir, release.prefix), home, this.deps.env ?? process.env, this.deps.findLauncherApp);
+      this.launcherReason = launchAgentBehind(path.join(dir, release.prefix), home, this.deps.env ?? process.env, this.deps.findLauncherApp, this.deps.platform);
       this.launcherChanged = this.launcherReason !== undefined;
       if (main.commit !== this.backendTried) {
         this.backendTried = main.commit;

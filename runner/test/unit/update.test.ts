@@ -435,7 +435,7 @@ test('appOfExecutable: only the launcher app\'s executable', () => {
 });
 
 test('a check says when the LaunchAgent is behind main, for tb status and the Updates panel', async () => {
-  const h = harness({}, { env: { THREADBEAR_SUPERVISED: '1' }, findLauncherApp: () => undefined });
+  const h = harness({}, { env: { THREADBEAR_SUPERVISED: '1' }, findLauncherApp: () => undefined, platform: 'darwin' });
   // main's runner/ as the updater's clone holds it.
   const launcher = path.join(updateDir(h.home), 'src', 'runner', 'launcher');
   fs.mkdirSync(launcher, { recursive: true });
