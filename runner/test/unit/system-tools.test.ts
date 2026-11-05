@@ -14,6 +14,8 @@ const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../src')
 // Linux. "everywhere": a path both macOS and Ubuntu have. Anything else
 // says what keeps it off Linux (a platform check, or a failure that's
 // already handled), and the files it may appear in.
+// It doesn't see a name built at run time (`'/bin/' + name`) or a bare
+// name left to PATH (`spawn('zsh')`); those want a reviewer's eye.
 const KNOWN: Record<string, { everywhere: true } | { linux: string; files: string[] }> = {
   '/bin/sh': { everywhere: true },
   '/bin/ps': { everywhere: true },
@@ -62,12 +64,13 @@ test('every absolute tool path in src is known to work, or be kept off, on Linux
 
 const has = (...files: string[]) => (f: string) => files.includes(f);
 
-test('lsof: /usr/sbin on a Mac, /usr/bin on Ubuntu, else PATH', () => {
+test('lsof: /usr/sbin on a Mac, /usr/bin on Ubuntu, never from PATH', () => {
   assert.equal(lsofPath({ platform: 'darwin', executable: () => false }), '/usr/sbin/lsof');
   assert.equal(lsofPath({ platform: 'linux', executable: has('/usr/bin/lsof'), env: {} }), '/usr/bin/lsof');
-  assert.equal(lsofPath({ platform: 'linux', executable: has('/opt/x/lsof'), env: { PATH: '/opt/x:/usr/bin' } }), '/opt/x/lsof');
-  // Missing: the bare name, so the error says lsof wasn't found.
-  assert.equal(lsofPath({ platform: 'linux', executable: () => false, env: { PATH: '/usr/bin' } }), 'lsof');
+  assert.equal(lsofPath({ platform: 'linux', executable: has('/usr/sbin/lsof'), env: {} }), '/usr/sbin/lsof');
+  // It vouches for a socket's owner, so one on PATH (a folder someone else
+  // could write to) isn't used: missing fails closed.
+  assert.equal(lsofPath({ platform: 'linux', executable: has('/tmp/x/lsof'), env: { PATH: '/tmp/x:/usr/bin' } }), '/usr/bin/lsof');
 });
 
 test("the login shell: zsh on a Mac; on Linux, $SHELL if it's POSIX-style, else bash, else sh", () => {

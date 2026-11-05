@@ -20,25 +20,19 @@ function isExecutable(file: string): boolean {
   }
 }
 
-// The first of `files` that can be run, then `name` on PATH, else `name`
-// bare (so the error, if it comes, says what was missing).
-function firstOf(files: string[], name: string, p: Required<Probe>): string {
-  for (const f of files) if (p.executable(f)) return f;
-  for (const dir of (p.env.PATH ?? '').split(path.delimiter)) {
-    if (dir && path.isAbsolute(dir) && p.executable(path.join(dir, name))) return path.join(dir, name);
-  }
-  return name;
-}
-
 function probe(p: Probe): Required<Probe> {
   return { platform: p.platform ?? process.platform, executable: p.executable ?? isExecutable, env: p.env ?? process.env };
 }
 
-// lsof: /usr/sbin on a Mac, /usr/bin on Debian and Ubuntu.
+// lsof: /usr/sbin on a Mac, /usr/bin on Debian and Ubuntu. Only these
+// fixed, root-owned places, never PATH: handover.ts trusts what lsof says
+// about who's on the other end of a socket before sending the token, and an
+// `lsof` in a folder on PATH anyone can write to could say anything. When
+// none is there, the path that isn't, so the check fails closed.
 export function lsofPath(p: Probe = {}): string {
   const q = probe(p);
   if (q.platform === 'darwin') return '/usr/sbin/lsof';
-  return firstOf(['/usr/bin/lsof', '/usr/sbin/lsof', '/bin/lsof'], 'lsof', q);
+  return ['/usr/bin/lsof', '/usr/sbin/lsof', '/bin/lsof'].find(q.executable) ?? '/usr/bin/lsof';
 }
 
 // The login shell command actions and patch panels run in, so PATH, nvm
