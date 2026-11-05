@@ -3422,6 +3422,22 @@ schedule on it, and mint phone tokens. Now there are two kinds of key, and
   removes `RUNNER_KEY_NEXT`, and every copy of the old key is dead. While
   `RUNNER_KEY_NEXT` is set the owner's heartbeat answers
   `ownerKeyRotating: true`, and `tb status` and `tb runner list` say so.
+  Both steps refuse, changing nothing, while another runner is still on
+  the main key: one `sync:runnersList` has seen in the last 30 days with
+  no live runner key (the main key can't act as a runner that has one, so
+  it can only be heartbeating on the main key). The refusal names each,
+  with the `tb runner add ... --id <id> --replace` that gives it its own;
+  `--lock-out <id,...>` cuts the ones named off on purpose. (The 5 Nov
+  2026 rotation stranded the cloud runner this way.)
+- **A key turned down.** `runnerAuth` refuses an unknown or revoked key
+  with `ConvexError {kind: "auth", message: "bad runner key"}`. A runner
+  whose heartbeat gets that says so once: an error in its log, a
+  `runner.notice` at error level, and `runner.status`'s `sync` goes to
+  `state: "error"` with `keyRejected: true` and a `lastError` saying what
+  to run. It keeps heartbeating each minute (and clears if the key works
+  again), and once `secrets/convex-key` holds a different key (`tb runner
+  add --ssh` wrote one) it asks for a restart when idle, as the key is
+  read at start.
 - **Runner ids** are checked as they arrive, everywhere one does
   (`lib.ts checkRunnerId`): 1 to 64 letters, digits, `-` or `_`, never
   trimmed, and never `"any"`, which is the phone's "whichever runner". `tb

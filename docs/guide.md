@@ -559,7 +559,10 @@ doesn't list the other Macs' threads. Only the first Mac's key can. A new
 thread from your phone goes to your first Mac, and waits for it while it's
 asleep, unless you pick another Mac for it. Notifications from another
 Mac's threads start with that Mac's name. After moving a Mac onto its own
-key, `tb runner rotate-owner` on your first Mac changes the main key, and
+key, `tb runner rotate-owner` on your first Mac changes the main key (it
+won't while another runner it has seen lately is still on the main key:
+it names each one with the `tb runner add` that gives it its own, or
+`--lock-out` cuts it off on purpose), and
 `tb runner audit` lists the phone tokens, schedules, cards and messages the
 old one could have made, to take out any you don't recognise.
 Its pictures and files come from that Mac as you open them. To start a

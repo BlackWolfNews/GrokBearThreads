@@ -448,3 +448,52 @@ test('the Convex CLI runs from a private folder that lists convex and nothing el
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// The 5 Nov 2026 rotation cut off the cloud runner: it still held the old
+// shared key, and nothing said so until Sentry filled with "bad runner
+// key". A runner the deployment has seen lately with no key of its own
+// can only be heartbeating on the main key, so rotating it out is named
+// first, and only goes ahead once it has a key or Mike says to lock it out.
+test('rotate-owner names every other runner still on the main key, and --finish won\'t cut one off unless --lock-out says so', async () => {
+  const s = setup(undefined, ['befe8df8975c', 'cb921b2447ea', 'oldmac000001']);
+  fs.writeFileSync(path.join(s.cfg.home, 'secrets', 'convex-deploy.env'), 'CONVEX_DEPLOY_KEY=prod:x|y\n');
+  s.keys([]);
+  const now = Date.parse('2026-11-05T10:05:00Z');
+  const post = s.deps.post;
+  const deps = {
+    ...s.deps,
+    now: () => now,
+    post: async (kind: string, fn: string, args: Record<string, unknown>) => {
+      // Bruce has a key of its own; oldmac hasn't been seen for two months.
+      if (fn === 'sync:listRunnerKeys') return { keys: [{ runnerId: 'cb921b2447ea', name: 'bruce', createdAt: 1 }], rotating: rotatingNow };
+      if (fn === 'sync:runnersList') return ((await post(kind, fn, args)) as { runnerId: string; lastSeenAt: number }[]).map((r) => (r.runnerId === 'oldmac000001' ? { ...r, lastSeenAt: now - 60 * 86_400_000 } : r));
+      return post(kind, fn, args);
+    },
+  };
+  let rotatingNow = false;
+  // Starting refuses, naming cloud and what to run, and changes nothing.
+  assert.equal(await runnerKeysCommand(s.cfg, ['rotate-owner'], { keysChecked: true }, deps), 1);
+  const said = s.printed.join('\n');
+  assert.match(said, /befe8df8975c/);
+  assert.match(said, /tb runner add "befe8df8975c-name" --ssh <host> --id befe8df8975c --replace/);
+  assert.doesNotMatch(said, /cb921b2447ea/, 'bruce has its own key');
+  assert.doesNotMatch(said, /oldmac000001/, 'not seen for 30 days');
+  assert.match(said, /--lock-out befe8df8975c/);
+  assert.deepEqual(s.convexCalls, []);
+  // --lock-out naming it goes ahead.
+  s.printed.length = 0;
+  assert.equal(await runnerKeysCommand(s.cfg, ['rotate-owner'], { keysChecked: true, lockOut: ['befe8df8975c'] }, deps), 0);
+  assert.equal(s.convexCalls.length, 1);
+  // --finish checks again: without --lock-out it refuses and sets nothing.
+  rotatingNow = true;
+  s.printed.length = 0;
+  assert.equal(await runnerKeysCommand(s.cfg, ['rotate-owner'], { finish: true }, deps), 1);
+  assert.match(s.printed.join('\n'), /befe8df8975c/);
+  assert.equal(s.convexCalls.length, 1);
+  // A --lock-out for some other runner doesn't count.
+  assert.equal(await runnerKeysCommand(s.cfg, ['rotate-owner'], { finish: true, lockOut: ['cb921b2447ea'] }, deps), 1);
+  assert.equal(s.convexCalls.length, 1);
+  assert.equal(await runnerKeysCommand(s.cfg, ['rotate-owner'], { finish: true, lockOut: ['befe8df8975c'] }, deps), 0);
+  assert.deepEqual((s.convexCalls as { args: string[] }[]).slice(1).map((c) => c.args.join(' ')), ['env set RUNNER_KEY', 'env remove RUNNER_KEY_NEXT']);
+  assert.match(s.printed.join('\n'), /Locked out.*befe8df8975c/);
+});

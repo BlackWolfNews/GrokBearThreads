@@ -352,6 +352,11 @@ async function main(): Promise<void> {
     sharedUsage: usage,
     publish: (n) => runner.publish(n),
     home: cfg.home,
+    // A key the backend turns down (sync.ts KEY_REJECTED): said in the app,
+    // and once tb runner add has written a new one, a restart onto it.
+    notice: (level, message) => runner.notice(level, message),
+    readKey: () => readSyncKey(cfg.home),
+    restart: (reason) => void restarter.request({ when: 'idle', reason }),
     version: RUNNER_VERSION,
     release: RELEASE.release,
     startedAt: new Date().toISOString(),

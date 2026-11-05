@@ -220,6 +220,10 @@ export type SyncStatus = {
   // Schedules a runner key couldn't put in the backend, so all of them stay
   // in this runner's schedules.json (schedules.ts heldLocal; the log says which).
   schedulesHeld?: number;
+  // The backend turned this runner's key down ("bad runner key"): a main
+  // key rotated out from under it, or a runner key revoked. lastError says
+  // what to do.
+  keyRejected?: boolean;
 };
 
 // The approval or question a thread is waiting on, as the phone sees it.
@@ -399,7 +403,27 @@ export type SyncDeps = {
   // runners' threads, and the data dir their tokens are copied into.
   publish?: (n: Notification) => void;
   home?: string;
+  // When the backend turns this runner's key down: a notice for the app,
+  // the key on disk now (readSyncKey, so a new one from tb runner add is
+  // seen), and asking for a restart onto it. Absent in small tests.
+  notice?: (level: 'warning' | 'error', message: string) => void;
+  readKey?: () => string | undefined;
+  restart?: (reason: string) => void;
 };
+
+// What tb status and the app say while the backend turns this runner's
+// key down (keyRejected). Every minute's heartbeat is still tried, so it
+// clears by itself if the old key comes back.
+export const KEY_REJECTED =
+  "The Convex backend turned down this runner's key (bad runner key), so nothing here reaches the phone or the other runners. The main key was probably rotated (tb runner rotate-owner) while this runner still had a copy, or its runner key was revoked. On the main Mac, give it its own: tb runner add <name> --ssh <this host> --id <this runner's id> --replace. It restarts onto the new key by itself.";
+
+// "bad runner key" (convex/lib.ts runnerAuth): kind auth, in the error's
+// data from a post, or as JSON in a subscription's message.
+export function keyRejected(e: unknown): boolean {
+  const kind = (e as { data?: { kind?: unknown } } | null)?.data?.kind;
+  if (kind === 'auth') return true;
+  return /"kind"\s*:\s*"auth"/.test(String((e as Error | null)?.message ?? e ?? ''));
+}
 
 // POST /api/mutation or /api/query on a Convex deployment, the plain HTTP
 // API, so a write needs no client and a fake is one function.
@@ -925,6 +949,8 @@ export class ConvexSync {
   private commandsState: 'off' | 'on' | 'error' = 'off';
   private index?: ThreadIndex;
   private heartbeatRefused?: string;
+  private keyRejected = false;
+  private restartAsked = false;
   private picturesPausedUntil?: number;
   private ownerKeyRotating = false;
   private schedulesRefused = false;
@@ -1076,6 +1102,11 @@ export class ConvexSync {
     if (this.retryAt !== undefined) s.retryAt = new Date(this.retryAt).toISOString();
     if (this.backendApiVersion !== undefined) s.backend = { apiVersion: this.backendApiVersion, expected: BACKEND_API_VERSION };
     if (this.ownerKeyRotating) s.ownerKeyRotating = true;
+    if (this.keyRejected) {
+      s.state = 'error';
+      s.lastError = KEY_REJECTED;
+      s.keyRejected = true;
+    }
     const held = this.deps.schedules?.heldLocal?.().length ?? 0;
     if (held) s.schedulesHeld = held;
     return s;
@@ -2226,6 +2257,7 @@ export class ConvexSync {
     void this.post('mutation', 'sync:heartbeat', { key: this.deps.key, runner }).then(
       (r) => {
         this.sawBackend(r);
+        this.keyRejected = false;
         this.ownerKeyRotating = (r as { ownerKeyRotating?: unknown } | null)?.ownerKeyRotating === true;
         this.lookForReplyImages();
         if ((this.backendApiVersion ?? 0) >= SCHEDULES_API_VERSION && this.running) void this.deps.schedules?.attach(this.scheduleBackend());
@@ -2237,9 +2269,10 @@ export class ConvexSync {
         // A key that isn't this runner's (runner.json's sync.runnerId isn't
         // the one `tb runner add` made it for) fails every heartbeat: said
         // once, loudly, as nothing else here would show it.
+        if (keyRejected(e)) this.onKeyRejected();
         const refused = forbiddenText(e);
         if (refused && refused !== this.heartbeatRefused) this.deps.log.warn('convex heartbeat refused: this runner key is for another runner', { error: refused, runnerId: this.runnerId });
-        else if (!refused) this.deps.log.debug('convex heartbeat failed', { error: String(e) });
+        else if (!refused && !this.keyRejected) this.deps.log.debug('convex heartbeat failed', { error: String(e) });
         this.heartbeatRefused = refused;
         // The version from the file may be why: a heartbeat with a field an
         // older backend's validator refuses can never learn better. Going
@@ -2250,6 +2283,25 @@ export class ConvexSync {
       },
     );
     this.heartbeatTimer = this.deps.clock.setTimeout(() => this.heartbeat(), HEARTBEAT_MS);
+  }
+
+  // The backend turned the key down. Said once (an error in the log, which
+  // reaches Sentry from a real install, and a notice for the app), not a
+  // warning a minute. If secrets/convex-key now holds another key (tb
+  // runner add wrote one over ssh), restart onto it: the key is read at
+  // start, and nobody may be at that Mac to restart it.
+  private onKeyRejected(): void {
+    if (!this.keyRejected) {
+      this.keyRejected = true;
+      this.deps.log.error('convex turned down this runner\'s key', { runnerId: this.runnerId });
+      this.deps.notice?.('error', KEY_REJECTED);
+    }
+    const now = this.deps.readKey?.();
+    if (now && now !== this.deps.key && !this.restartAsked) {
+      this.restartAsked = true;
+      this.deps.log.info('restarting onto the new key in secrets/convex-key', { runnerId: this.runnerId });
+      this.deps.restart?.('new convex key');
+    }
   }
 
   /** remoteThreads.list: other runners' threads, empty with sync off. */

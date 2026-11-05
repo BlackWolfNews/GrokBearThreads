@@ -21,6 +21,7 @@ function setup(
     key?: string;
     answer?: (fn: string) => unknown;
     schedules?: ConstructorParameters<typeof ConvexSync>[0]['schedules'];
+    extra?: Partial<ConstructorParameters<typeof ConvexSync>[0]>;
   } = {},
 ) {
   const h = makeHarness();
@@ -42,6 +43,7 @@ function setup(
     log: nullLogger,
     post,
     schedules: opts.schedules,
+    ...opts.extra,
   });
   const upserts = () => calls.filter((c) => c.fn === 'sync:upsertThreads');
   const docs = () => upserts().flatMap((c) => c.args.threads as ThreadDoc[]);
@@ -1897,5 +1899,53 @@ test('a project picture held back by the upload allowance goes by itself once th
   h.clock.advance(SYNC_COALESCE_MS * 2);
   await tick(20);
   assert.equal(setIcons().length, 1);
+  await sync.stop();
+});
+
+// The 5 Nov 2026 owner-key rotation left the cloud runner on the old key:
+// every heartbeat came back "bad runner key" and all it did was log a
+// warning a minute. Now it says so once, plainly, where Mike looks (tb
+// status, the app's notice, one error in the log), and once tb runner add
+// has put a new key in secrets/convex-key it restarts onto it by itself.
+test('a key the backend turns down is said once, plainly, and a new key on disk restarts the runner onto it', async () => {
+  const rejected = () => Object.assign(new Error('[Request ID: x] Server Error\nUncaught ConvexError: {"kind":"auth","message":"bad runner key"}'), { data: { kind: 'auth', message: 'bad runner key' } });
+  let bad = true;
+  let onDisk = 'k';
+  const notices: { level: string; message: string }[] = [];
+  const restarts: string[] = [];
+  const errors: string[] = [];
+  const log: Logger = { ...nullLogger, error: (msg: string) => void errors.push(msg) };
+  const { h, sync } = setup({
+    fail: () => (bad ? rejected() : undefined),
+    answer: (fn) => (fn === 'sync:heartbeat' ? { apiVersion: BACKEND_API_VERSION } : null),
+    extra: { log, notice: (level, message) => void notices.push({ level, message }), restart: (reason) => void restarts.push(reason), readKey: () => onDisk },
+  });
+  sync.start();
+  await tick();
+  h.clock.advance(HEARTBEAT_MS);
+  await tick();
+  h.clock.advance(HEARTBEAT_MS);
+  await tick();
+  const s = sync.status();
+  assert.equal(s.state, 'error');
+  assert.equal(s.keyRejected, true);
+  assert.match(s.lastError ?? '', /turned down this runner's key/);
+  assert.match(s.lastError ?? '', /tb runner add/);
+  assert.equal(notices.length, 1, 'said once, not every minute');
+  assert.equal(notices[0]!.level, 'error');
+  assert.equal(errors.filter((m) => /key/.test(m)).length, 1);
+  assert.deepEqual(restarts, [], 'same key on disk: nothing to restart onto');
+  // tb runner add writes a new key: the next turned-down heartbeat restarts onto it, once.
+  onDisk = 'tbr_new';
+  h.clock.advance(HEARTBEAT_MS);
+  await tick();
+  h.clock.advance(HEARTBEAT_MS);
+  await tick();
+  assert.equal(restarts.length, 1);
+  // The key working again clears it.
+  bad = false;
+  h.clock.advance(HEARTBEAT_MS);
+  await tick();
+  assert.equal(sync.status().keyRejected, undefined);
   await sync.stop();
 });

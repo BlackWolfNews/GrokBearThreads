@@ -24,8 +24,8 @@ type ConvexCli = (args: string[], input?: string) => Run;
 // deployKeys: the deployment's deploy keys as Convex lists them (undefined:
 // no way to ask, see listDeployKeys). host: this Mac's short name.
 type DeployKey = { name: string; creationTime: number; lastUsedTime?: number | null };
-export type RunnerKeyDeps = { post?: Post; ssh?: Ssh; convex?: ConvexCli; userHome?: string; heads?: () => Promise<{ threadId: string; lastSeq: number }[]>; deployKeys?: () => Promise<DeployKey[] | undefined>; host?: string; print?: (s: string) => void; fail?: (s: string) => void };
-type Flags = { ssh?: string; out?: string; id?: string; json?: boolean; finish?: boolean; replace?: boolean; remove?: string[]; snapshot?: string; keysChecked?: boolean; purge?: boolean };
+export type RunnerKeyDeps = { post?: Post; ssh?: Ssh; convex?: ConvexCli; userHome?: string; heads?: () => Promise<{ threadId: string; lastSeq: number }[]>; deployKeys?: () => Promise<DeployKey[] | undefined>; host?: string; print?: (s: string) => void; fail?: (s: string) => void; now?: () => number };
+type Flags = { ssh?: string; out?: string; id?: string; json?: boolean; finish?: boolean; replace?: boolean; remove?: string[]; snapshot?: string; keysChecked?: boolean; purge?: boolean; lockOut?: string[] };
 
 // Anything another Mac or a runner key wrote, as printed here: no control
 // characters or escape sequences (which could rewrite the terminal), no
@@ -252,7 +252,7 @@ export async function runnerKeysCommand(cfg: Pick<Config, 'home' | 'sync'>, args
     if (sub === 'check') return check(cfg, key, f, deps.ssh ?? realSsh, print, fail, deps.userHome ?? os.homedir(), url);
     if (sub === 'audit') return await auditCommand(f, call, deps.heads, print, fail, cfg.sync.runnerId);
     if (sub === 'rotate-owner') {
-      const code = await rotateOwner(cfg.home, key, f, call, deps.convex ?? realConvex(cfg.home), print, fail, url, deps.deployKeys ?? (() => listDeployKeys(url, process.env.CONVEX_TEAM_TOKEN)));
+      const code = await rotateOwner(cfg.home, key, f, call, deps.convex ?? realConvex(cfg.home), print, fail, url, deps.deployKeys ?? (() => listDeployKeys(url, process.env.CONVEX_TEAM_TOKEN)), cfg.sync.runnerId, (deps.now ?? Date.now)());
       // Finishing kills the old key, not what it made: show that next.
       if (code === 0 && f.finish) await auditCommand({}, call, deps.heads, print, fail, cfg.sync.runnerId);
       return code;
@@ -391,7 +391,7 @@ function check(cfg: Pick<Config, 'home'>, key: string, f: Flags, ssh: Ssh, print
 // then makes it RUNNER_KEY and removes RUNNER_KEY_NEXT, and the old key
 // (and every copy of it, Bruce's included) is dead. Uses this Mac's deploy
 // key for the env vars. The key is never printed.
-async function rotateOwner(home: string, key: string, f: Flags, call: (kind: 'query' | 'mutation', fn: string, a: Record<string, unknown>) => Promise<unknown>, convex: ConvexCli, print: (s: string) => void, fail: (s: string) => number, url: string, keys: () => Promise<DeployKey[] | undefined>): Promise<number> {
+async function rotateOwner(home: string, key: string, f: Flags, call: (kind: 'query' | 'mutation', fn: string, a: Record<string, unknown>) => Promise<unknown>, convex: ConvexCli, print: (s: string) => void, fail: (s: string) => number, url: string, keys: () => Promise<DeployKey[] | undefined>, ownRunnerId: string | undefined, now: number): Promise<number> {
   if (key.startsWith('tbr_')) return fail('This Mac has a runner key, not the main key: run tb runner rotate-owner on the main Mac.');
   if (!deployKey(home)) return fail(`No deploy key in ${path.join(home, 'secrets', 'convex-deploy.env')}, so this can't set the deployment's env vars. Run it on the main Mac, or make one with npx convex deployment token create --prod --save-env <that file>.`);
   // Owner only, so this also says the key in secrets/convex-key is the main key.
@@ -399,6 +399,8 @@ async function rotateOwner(home: string, key: string, f: Flags, call: (kind: 'qu
   const keyFile = path.join(home, 'secrets', 'convex-key');
   if (!f.finish) {
     if (rotating) return fail(`${ROTATING} Or, to start again, remove it first: npx convex env remove --prod RUNNER_KEY_NEXT.`);
+    const stranded = await onMainKey(call, ownRunnerId, now, f.lockOut);
+    if (stranded.refuse) return fail(stranded.refuse);
     // A deploy key can read the new main key as easily as the old, so not
     // while Convex lists any this Mac didn't make, unless Mike has looked
     // at them (--keys-checked), by Convex's own list rather than another
@@ -444,6 +446,9 @@ async function rotateOwner(home: string, key: string, f: Flags, call: (kind: 'qu
     return 0;
   }
   if (!rotating) return fail('RUNNER_KEY_NEXT isn\'t set, so there is nothing to finish. Start with tb runner rotate-owner.');
+  // Again here, as a runner can start on the main key between the two.
+  const stranded = await onMainKey(call, ownRunnerId, now, f.lockOut);
+  if (stranded.refuse) return fail(stranded.refuse);
   // Only the key rotate-owner made: if something put the old key back in
   // secrets/convex-key (setup run meanwhile), promoting it would keep every
   // old copy alive while saying they're dead.
@@ -454,8 +459,37 @@ async function rotateOwner(home: string, key: string, f: Flags, call: (kind: 'qu
   if (!set.ok) return fail(`Setting RUNNER_KEY failed: ${set.err || 'no answer'}. Both keys still work; run --finish again.`);
   const removed = convex(['env', 'remove', 'RUNNER_KEY_NEXT']);
   if (!removed.ok) return fail(`RUNNER_KEY is the new key, but removing RUNNER_KEY_NEXT failed: ${removed.err || 'no answer'}. Run --finish again.`);
+  if (stranded.lockedOut.length) print(`Locked out (--lock-out), as they were on the old main key: ${stranded.lockedOut.join(', ')}. Each needs tb runner add before it can reach the backend again.`);
   print('RUNNER_KEY is the new key and RUNNER_KEY_NEXT is gone, so the old main key no longer works, wherever a copy of it is. Anything that can read env vars still can (a deploy key or Convex login left on another Mac: tb runner check), and what the old key made still works: the audit below lists it (tb runner audit again any time). Rotate the dev deployment the same way if it shares the old key.');
   return 0;
+}
+
+// How recently a runner must have heartbeated for rotate-owner to count it
+// as still running on the main key. One not seen for longer is a Mac
+// that's gone (or a lost one, which rotating should cut off anyway).
+export const ON_MAIN_KEY_SEEN_MS = 30 * 24 * 60 * 60 * 1000;
+
+// Runners other than this Mac's that rotating the main key would cut off:
+// seen lately with no live runner key, so heartbeating on the main key
+// (convex/lib.ts actAs: the main key can't act as a runner with a key of
+// its own). The 5 Nov 2026 rotation stranded the cloud runner this way,
+// unnoticed until Sentry filled with "bad runner key". Each one has to
+// get its own key first (tb runner add), or be named with --lock-out.
+async function onMainKey(call: (kind: 'query' | 'mutation', fn: string, a: Record<string, unknown>) => Promise<unknown>, ownRunnerId: string | undefined, now: number, lockOut: string[] = []): Promise<{ refuse?: string; lockedOut: string[] }> {
+  const named = new Set(lockOut.flatMap((x) => x.split(',')).map((x) => x.trim()).filter(Boolean));
+  const found = [...(await knownRunners(call))].filter(([id, r]) => id !== ownRunnerId && !r.keyed && r.lastSeenAt !== undefined && now - r.lastSeenAt < ON_MAIN_KEY_SEEN_MS);
+  const left = found.filter(([id]) => !named.has(id));
+  const lockedOut = found.filter(([id]) => named.has(id)).map(([id]) => id);
+  if (!left.length) return { lockedOut };
+  const lines = left.map(([id, r], i) => `  ${i + 1}. ${clean(id, 64)}${r.name ? ` "${clean(r.name, 60)}"` : ''}, last seen ${new Date(r.lastSeenAt!).toISOString()}: tb runner add ${JSON.stringify(clean(r.name || id, 60))} --ssh <host> --id ${clean(id, 64)} --replace`);
+  return {
+    lockedOut,
+    refuse: [
+      `Not rotating: ${left.length === 1 ? 'this runner is' : 'these runners are'} still on the main key (seen lately, with no runner key of ${left.length === 1 ? 'its' : 'their'} own), so the new key would cut ${left.length === 1 ? 'it' : 'them'} off. Give each its own key first, on this Mac, with the ssh host that reaches it, and restart its runner:`,
+      ...lines,
+      `Or, to cut one off on purpose (a Mac that's lost or gone), run this again with --lock-out ${left.map(([id]) => clean(id, 64)).join(',')}. Nothing changed.`,
+    ].join('\n'),
+  };
 }
 
 // Every runner id the deployment has heard of: ones that have heartbeated,

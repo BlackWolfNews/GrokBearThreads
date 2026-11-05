@@ -68,6 +68,7 @@ const OPTIONS = {
   drop: { type: 'string', multiple: true },
   snapshot: { type: 'string' },
   'keys-checked': { type: 'boolean' },
+  'lock-out': { type: 'string', multiple: true },
   purge: { type: 'boolean' },
   lines: { type: 'string', short: 'n' },
   follow: { type: 'boolean', short: 'f' },
@@ -138,10 +139,12 @@ const HELP = `tb: talk to the Threadbear runner
   tb runner list [--json]         tb runner revoke <runnerId> [--purge]  (--purge: and take out all it wrote)
   tb runner check [--ssh <host>]  whether a Mac with a runner key also has a deploy key or
                                   Convex login (either can do anything to the deployment)
-  tb runner rotate-owner [--finish]
+  tb runner rotate-owner [--finish] [--lock-out <runnerId,...>]
                                   on the main Mac: a new RUNNER_KEY with no gap (NEXT, restart, finish);
                                   not while Convex lists a deploy key made for another Mac
-                                  (CONVEX_TEAM_TOKEN for the run lets it ask; else --keys-checked)
+                                  (CONVEX_TEAM_TOKEN for the run lets it ask; else --keys-checked),
+                                  nor while another runner is still on the main key (tb runner add
+                                  it first, or --lock-out to cut it off)
   tb runner audit [--drop 2,5 --snapshot <hex>]
                                   what the old shared key could have left (tokens, keys,
                                   schedules, cards, messages, pictures), numbered; --drop
@@ -191,7 +194,7 @@ const COMMAND_FLAGS: Record<string, string[]> = {
   rpc: [],
   land: ['dry-run'],
   pair: [],
-  runner: ['ssh', 'out', 'id', 'json', 'finish', 'replace', 'drop', 'snapshot', 'keys-checked', 'purge'],
+  runner: ['ssh', 'out', 'id', 'json', 'finish', 'replace', 'drop', 'snapshot', 'keys-checked', 'lock-out', 'purge'],
 };
 
 // Read but never listed when a command refuses a flag: an agent that sees
@@ -249,7 +252,7 @@ async function main(argv: string[]): Promise<number> {
   if (cmd === 'pair') return pairCommand(cfg);
   // Straight to the backend with this Mac's key, so no runner needed either.
   if (cmd === 'runner') {
-    const flags = { ...(typeof values.ssh === 'string' ? { ssh: values.ssh } : {}), ...(typeof values.out === 'string' ? { out: values.out } : {}), ...(typeof values.id === 'string' ? { id: values.id } : {}), json: Boolean(values.json), finish: Boolean(values.finish), replace: Boolean(values.replace), ...(Array.isArray(values.drop) ? { remove: values.drop as string[] } : {}), ...(typeof values.snapshot === 'string' ? { snapshot: values.snapshot } : {}), keysChecked: Boolean(values['keys-checked']), purge: Boolean(values.purge) };
+    const flags = { ...(typeof values.ssh === 'string' ? { ssh: values.ssh } : {}), ...(typeof values.out === 'string' ? { out: values.out } : {}), ...(typeof values.id === 'string' ? { id: values.id } : {}), json: Boolean(values.json), finish: Boolean(values.finish), replace: Boolean(values.replace), ...(Array.isArray(values.drop) ? { remove: values.drop as string[] } : {}), ...(typeof values.snapshot === 'string' ? { snapshot: values.snapshot } : {}), keysChecked: Boolean(values['keys-checked']), ...(Array.isArray(values['lock-out']) ? { lockOut: values['lock-out'] as string[] } : {}), purge: Boolean(values.purge) };
     // The audit asks this Mac's runner how far each of its threads goes.
     const heads = async () => {
       const client = await RunnerClient.connect(runnerUrl(cfg), readToken(cfg.home));
