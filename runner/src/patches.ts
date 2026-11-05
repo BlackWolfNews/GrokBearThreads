@@ -375,6 +375,9 @@ async function loadPatchFile(file: string, source: 'home' | 'project', cache: Pa
     } catch (e) {
       return { info: { id, source, file, error: firstLine(e) }, panels: [], actions: [], hooks: [] };
     }
+    // One trust can't check is an error, not a question: there's no
+    // version of it to say yes to (patch-trust.ts).
+    if (!verdict.trusted && verdict.reason === 'unchecked') return { info: { id, source, file, error: `Not run: ${verdict.problem}` }, panels: [], actions: [], hooks: [] };
     if (!verdict.trusted) return { info: { id, source, file, untrusted: verdict.reason, hash: verdict.hash, ...(verdict.helpers ? { helpers: verdict.helpers } : {}) }, panels: [], actions: [], hooks: [] };
   }
   const hit = cache.get(file);

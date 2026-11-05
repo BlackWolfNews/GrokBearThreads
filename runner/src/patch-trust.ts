@@ -26,30 +26,45 @@
 //
 // What's hashed is the patch file and every local file it imports, and
 // theirs in turn (relative or absolute specifiers: `./lib/ask.ts`), so a
-// pull that changes only a helper is asked about too. A patch with no
-// local imports hashes as its own text alone, as it did before helpers
-// counted. Packages (`node:fs`, `zod`) aren't followed: they're the
-// folder's dependencies, not its patch.
+// pull that changes only a helper is asked about too. Files it names in a
+// `./` or `../` path (the script its worktree setup or an action runs) are
+// hashed as well, as they run by themselves too. A patch with no local
+// files hashes as its own text alone, as it did before helpers counted.
+// Packages (`node:fs`, `zod`) aren't followed: they're the folder's
+// dependencies, as `npm install` put them there, and hashing node_modules
+// every 15 seconds would be slow and re-ask after every install.
+//
+// The hash is only worth anything if it covers what will run. A patch that
+// loads code by a name worked out when it runs (`import(name)`,
+// `createRequire`), or reaches more files than are followed, can't be
+// checked, so it isn't loaded at all, trusted or not: its `error` says why.
+// Saying yes to it would trust whatever that name points at later.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { atomicWriteFileSync } from './fsutil.ts';
 
-export type TrustVerdict = { trusted: true } | { trusted: false; reason: 'new' | 'changed'; hash: string; helpers?: string[] };
+export type TrustVerdict =
+  | { trusted: true }
+  | { trusted: false; reason: 'new' | 'changed'; hash: string; helpers?: string[] }
+  // Nothing can trust it as it stands (see the top): `problem` says why.
+  | { trusted: false; reason: 'unchecked'; problem: string };
 
 // Hashes kept per folder: enough for a repo's patches across a few
 // branches and versions, without the file growing for ever.
 export const HASHES_KEPT = 200;
 
-// Version 1 hashed patch files alone. Its hashes are kept as `legacy`, so
-// a patch with helpers that was trusted before helpers counted isn't asked
-// about once more for that alone: the first look takes its version with
-// helpers as trusted (the runner was already running it) and drops the
-// old hash.
-type TrustFile = { version: 1 | 2; folders: Record<string, string[]>; legacy?: Record<string, string[]> };
+// Version 1 hashed patch files alone. Its hashes are read as they are: one
+// for a patch with no helpers is the same in both, and one for a patch
+// with helpers matches nothing now, so it's asked about again. (A first
+// look used to take such a patch's helpers as trusted, but version 1 never
+// saw them, so that trusted whatever a pull had put there: Daybreak, 5 Nov.)
+// A `legacy` list a runner from then wrote is ignored, and goes on the next save.
+type TrustFile = { version: 1 | 2; folders: Record<string, string[]> };
 
-// At most this many helpers are followed from one patch file.
-const MAX_HELPERS = 100;
+// At most this many local files are followed from one patch file; one that
+// reaches more can't be checked.
+export const MAX_HELPERS = 100;
 
 export interface PatchGate {
   // Whether a project's patch file may load. `mtimeMs` keys the hash cache.
@@ -81,7 +96,6 @@ export const TRUST_ALL: PatchTrustStore = {
 export class PatchTrust implements PatchTrustStore {
   private file?: string;
   private folders = new Map<string, string[]>();
-  private legacy = new Map<string, string[]>();
   private always: string[];
   // `trusted`: some version of this patch was trusted while this runner
   // has run, so an agent's edit to one of its helpers may carry it on.
@@ -115,14 +129,10 @@ export class PatchTrust implements PatchTrustStore {
     this.loadedMtime = mtimeMs;
     try {
       const raw = JSON.parse(fs.readFileSync(this.file, 'utf8')) as Partial<TrustFile>;
-      const read = (from: unknown, into: Map<string, string[]>) => {
-        into.clear();
-        for (const [key, list] of Object.entries(from ?? {})) {
-          if (Array.isArray(list)) into.set(key, list.filter((h): h is string => typeof h === 'string'));
-        }
-      };
-      read(raw.folders, this.folders);
-      read(raw.version === 1 ? raw.folders : raw.legacy, this.legacy);
+      this.folders.clear();
+      for (const [key, list] of Object.entries(raw.folders ?? {})) {
+        if (Array.isArray(list)) this.folders.set(key, list.filter((h): h is string => typeof h === 'string'));
+      }
       return 'read';
     } catch {
       return 'broken';
@@ -134,18 +144,11 @@ export class PatchTrust implements PatchTrustStore {
     const key = folderKey(file);
     if (this.always.some((d) => isInside(key, d))) return { trusted: true };
     const entry = this.hashOf(file, mtimeMs);
-    const { hash, own, deps } = entry;
+    const { hash, deps } = entry;
+    // Before the hash: a stored yes can't vouch for code the hash didn't see.
+    if (entry.incomplete) return { trusted: false, reason: 'unchecked', problem: entry.incomplete };
     const known = this.folders.get(key);
     if (known?.includes(hash)) {
-      entry.trusted = true;
-      return { trusted: true };
-    }
-    // Trusted before helpers were hashed: take this version as trusted
-    // once, and forget the old hash (see TrustFile).
-    const old = this.legacy.get(key);
-    if (old?.includes(own)) {
-      this.legacy.set(key, old.filter((h) => h !== own));
-      this.add(key, [hash]);
       entry.trusted = true;
       return { trusted: true };
     }
@@ -171,6 +174,9 @@ export class PatchTrust implements PatchTrustStore {
       let hash: string;
       try {
         const entry = this.hashOf(file, fs.statSync(file).mtimeMs);
+        // check() refuses it whatever's stored, so storing it would only
+        // say it was trusted when it isn't.
+        if (entry.incomplete) continue;
         entry.trusted = true;
         hash = entry.hash;
       } catch {
@@ -205,8 +211,7 @@ export class PatchTrust implements PatchTrustStore {
   // next start doesn't seed again.
   save(): void {
     if (!this.file) return;
-    const legacy = [...this.legacy].filter(([, l]) => l.length);
-    const out: TrustFile = { version: 2, folders: Object.fromEntries(this.folders), ...(legacy.length ? { legacy: Object.fromEntries(legacy) } : {}) };
+    const out: TrustFile = { version: 2, folders: Object.fromEntries(this.folders) };
     atomicWriteFileSync(this.file, JSON.stringify(out, null, 2) + '\n');
     this.loadedMtime = fs.statSync(this.file).mtimeMs;
   }
@@ -215,7 +220,7 @@ export class PatchTrust implements PatchTrustStore {
   // its helpers changes (a stat each; patches are read every 15 seconds).
   private hashOf(file: string, mtimeMs: number): HashEntry {
     const hit = this.hashes.get(file);
-    if (hit && hit.mtimeMs === mtimeMs && hit.deps.every((d) => mtimeOf(d.path) === d.mtimeMs)) return hit;
+    if (hit && hit.mtimeMs === mtimeMs && hit.deps.every((d) => mtimeOf(d.path) === d.mtimeMs) && hit.unnamed.every((p) => mtimeOf(p) === undefined)) return hit;
     const entry = { mtimeMs, ...patchHash(file), trusted: hit?.trusted };
     this.hashes.set(file, entry);
     return entry;
@@ -223,27 +228,50 @@ export class PatchTrust implements PatchTrustStore {
 }
 
 type Dep = { path: string; mtimeMs?: number };
-type HashEntry = { mtimeMs: number; hash: string; own: string; deps: Dep[]; trusted?: boolean };
+type HashEntry = PatchHash & { mtimeMs: number; trusted?: boolean };
 
-// A patch file's hash: its own text's alone when it imports no local
-// files, else one over its text and each helper's, by path relative to
-// the patch (so a worktree and its main checkout agree). A helper that's
+// `deps` are the local files hashed with it; `unnamed`, paths it names that
+// aren't there (so one turning up changes the hash); `incomplete`, why the
+// hash can't cover everything it loads, when it can't.
+export type PatchHash = { hash: string; deps: Dep[]; unnamed: string[]; incomplete?: string };
+
+// A patch file's hash: its own text's alone when it has no local files,
+// else one over its text and each file's, by path relative to the patch
+// (so a worktree and its main checkout agree). A helper it imports that's
 // missing counts as missing, so adding it later changes the hash.
-export function patchHash(file: string): { hash: string; own: string; deps: Dep[] } {
+export function patchHash(file: string): PatchHash {
   const text = fs.readFileSync(file);
   const own = sha256(text);
   const root = realpath(path.resolve(file));
+  // The folder holding `.threadbear/`: where its commands run (a thread's
+  // folder, or the worktree's root for setup), so `./setup.sh` is there.
+  const folder = path.dirname(path.dirname(path.dirname(root)));
   const seen = new Set([root]);
   const deps: Dep[] = [];
+  const unnamed = new Set<string>();
+  let incomplete: string | undefined;
+  const add = (dep: Dep): boolean => {
+    if (deps.length >= MAX_HELPERS) {
+      incomplete ??= `patch trust follows at most ${MAX_HELPERS} local files, and this patch reaches more.`;
+      return false;
+    }
+    deps.push(dep);
+    return true;
+  };
   const queue: { from: string; text: string }[] = [{ from: root, text: text.toString('utf8') }];
-  while (queue.length && deps.length < MAX_HELPERS) {
+  scan: while (queue.length) {
     const { from, text: src } = queue.shift()!;
+    const load = computedLoad(src);
+    if (load && !incomplete) {
+      const name = from === root ? path.basename(root) : path.relative(path.dirname(root), from);
+      incomplete = `patch trust can't check what ${name} line ${load.line} loads (\`${load.code}\`). Import local files by a plain path, like './lib/x.ts', and it can.`;
+    }
     for (const spec of localSpecifiers(src)) {
       const target = resolveHelper(path.dirname(from), spec);
       if (seen.has(target)) continue;
       seen.add(target);
       const mtimeMs = mtimeOf(target);
-      deps.push({ path: target, mtimeMs });
+      if (!add({ path: target, mtimeMs })) break scan;
       if (mtimeMs !== undefined && SCANNED.includes(path.extname(target))) {
         try {
           queue.push({ from: target, text: fs.readFileSync(target, 'utf8') });
@@ -251,10 +279,26 @@ export function patchHash(file: string): { hash: string; own: string; deps: Dep[
           // unreadable: hashed as missing below
         }
       }
-      if (deps.length >= MAX_HELPERS) break;
+    }
+    // Named files are hashed as they are, not followed: a script is its own
+    // program, run by a shell, and what it runs in turn is past what this
+    // follows. Only from the two places a path is read from; a command that
+    // `cd`s first isn't worked out.
+    for (const spec of namedPaths(src)) {
+      const tries = [path.resolve(path.dirname(from), spec), path.resolve(folder, spec)];
+      const found = tries.find(isFile);
+      if (!found) {
+        for (const t of tries) unnamed.add(t);
+        continue;
+      }
+      const target = realpath(found);
+      if (seen.has(target)) continue;
+      seen.add(target);
+      if (!add({ path: target, mtimeMs: mtimeOf(target) })) break scan;
     }
   }
-  if (!deps.length) return { hash: own, own, deps };
+  const missing = [...unnamed];
+  if (!deps.length) return { hash: own, deps, unnamed: missing, ...(incomplete ? { incomplete } : {}) };
   const dir = path.dirname(root);
   const lines = deps
     .map((d) => {
@@ -267,7 +311,7 @@ export function patchHash(file: string): { hash: string; own: string; deps: Dep[
       return `${path.relative(dir, d.path)} ${h}`;
     })
     .sort();
-  return { hash: sha256(Buffer.from(['threadbear-patch-2', own, ...lines].join('\n'))), own, deps };
+  return { hash: sha256(Buffer.from(['threadbear-patch-2', own, ...lines].join('\n'))), deps, unnamed: missing, ...(incomplete ? { incomplete } : {}) };
 }
 
 const SCANNED = ['.ts', '.mts', '.cts', '.js', '.mjs', '.cjs', '.tsx', '.jsx'];
@@ -281,6 +325,50 @@ export function localSpecifiers(src: string): string[] {
   const re = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)(['"`])((?:\.{1,2}\/|\/)[^'"`\n]*)\1/g;
   for (let m; (m = re.exec(src)); ) out.add(m[2]);
   return [...out];
+}
+
+// The first place a module loads code by a name the scan can't read:
+// `import(...)` or `require(...)` of anything but one plain string (a
+// variable, a `${}` template, 'a' + b), and any `createRequire`, whose
+// require can be called by any name. Also a regex: one in a comment or a
+// string counts too, which only keeps a patch out, never lets one in.
+// `x.import(...)` is a method, not a load; `module.require` is one.
+export function computedLoad(src: string): { line: number; code: string } | undefined {
+  const re = /(?<![\w$.])(?:import|require)\s*\(|\bmodule\s*\.\s*require\s*\(|\bcreateRequire\b/g;
+  const plain = /^\s*(?:'[^'\\\n]*'|"[^"\\\n]*"|`[^`\\$]*`)\s*[,)]/;
+  for (let m; (m = re.exec(src)); ) {
+    const isCall = m[0].endsWith('(');
+    if (isCall && plain.test(src.slice(m.index + m[0].length))) continue;
+    const rest = src.slice(m.index).split('\n')[0];
+    const close = rest.indexOf(')');
+    const code = isCall ? (close >= 0 ? rest.slice(0, close + 1) : rest).slice(0, 80) : m[0];
+    return { line: src.slice(0, m.index).split('\n').length, code };
+  }
+  return undefined;
+}
+
+// Paths a module names that start ./ or ../, anywhere: in a command
+// (`setup: "./scripts/setup.sh --fast"`), an argument, a comment. Extra
+// matches only add files to the hash. Pictures are left out: an icon is
+// only ever shown, and redrawing one shouldn't ask about the patch again.
+export function namedPaths(src: string): string[] {
+  const out = new Set<string>();
+  const re = /(?<![\w./\\-])\.\.?\/[^\s'"`;&|()<>{}[\],*?!$=\\]+/g;
+  for (let m; (m = re.exec(src)); ) {
+    const p = m[0].replace(/[.:]+$/, '');
+    if (p.length > 2 && !PICTURES.includes(path.extname(p).toLowerCase())) out.add(p);
+  }
+  return [...out];
+}
+
+const PICTURES = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.icns', '.pdf', '.heic'];
+
+function isFile(p: string): boolean {
+  try {
+    return fs.statSync(p).isFile();
+  } catch {
+    return false;
+  }
 }
 
 // Where Node (or a bundler-ish habit) would find `spec`: as written, then

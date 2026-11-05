@@ -286,8 +286,8 @@ type PatchInfo = {
                         // from its folder is trusted, "changed" when an earlier
                         // version was (see "Trusting a folder's patches")
   hash?: string         // with untrusted: the version patches.trust would trust
-  helpers?: string[]    // with untrusted: the local files it imports (absolute),
-                        // whose text the hash covers too
+  helpers?: string[]    // with untrusted: the local files it imports or names
+                        // (absolute), whose text the hash covers too
 }
 
 type Panel = {
@@ -2248,18 +2248,39 @@ panels or hooks, no live functions, and no worktree for new threads.
   are, since it was already running them.
 
 The hash covers the patch file and the local files it imports, and
-theirs in turn (specifiers starting `./`, `../` or `/`, at most 100), so a
-pull that changes only a helper is asked about too, and `helpers` lists
-them so the app can say what else would run. A patch with no local imports
-hashes as its own text alone. Packages (`node:fs`, anything from
-`node_modules`) aren't followed: they're the folder's dependencies. An
-agent's Edit or Write to a helper carries on the trusted patches that
-import it, as it does for the patch file; it doesn't trust a patch that's
-still waiting. A trust file from before helpers counted (`version: 1`)
-keeps its hashes as `legacy`: the first look at a patch it trusted takes
-that patch's helpers as they are then, once. A changed helper is only
-imported again when the runner restarts (Node loads a module once per
-process); the patch file itself loads again when it changes.
+theirs in turn (specifiers starting `./`, `../` or `/`), so a pull that
+changes only a helper is asked about too, and `helpers` lists them so the
+app can say what else would run. It also covers any existing file the
+patch or a helper names in a path starting `./` or `../`, anywhere in its
+text, from the patch's own folder or the folder holding `.threadbear/`
+(where commands run): the script a worktree `setup`, `check` or action
+`run` calls, so a pull that changes only that script asks again. Those are
+hashed, not followed; pictures (an `icon`) are left out, and a named file
+that isn't there yet changes the hash when it turns up. A patch with no
+local files hashes as its own text alone. Packages (`node:fs`, anything
+from `node_modules`) aren't followed: they're the folder's dependencies.
+
+A patch whose code can't all be seen isn't loaded at all, trusted or not,
+and has `error` (not `untrusted`) saying why, as a stored hash can't vouch
+for code it didn't cover: one that loads code by a name worked out as it
+runs (`import(name)`, `` import(`./${x}`) ``, `require('./a' + b)`, any
+`createRequire`), in the patch file or a helper, or that reaches more than
+100 local files. `patches.trust` can't trust it; changing it to plain
+imports can. An agent's Edit or Write to a helper carries on the trusted
+patches that import it, as it does for the patch file; it doesn't trust a
+patch that's still waiting. A trust file from before helpers counted
+(`version: 1`) is read as it is: a patch with no helpers is still trusted,
+and one with helpers is asked about again (`"changed"`), as version 1 never
+saw them. A changed helper is only imported again when the runner restarts
+(Node loads a module once per process); the patch file itself loads again
+when it changes.
+
+A new thread's worktree `setup` runs only when the worktree's own copy of
+the patch, with the files it names as they are there, is a trusted
+version, and it's that copy's `setup` that runs: the worktree is main's
+commit, which can differ from the main checkout that was trusted.
+Otherwise the setup is skipped with a `system.note` saying why, and the
+thread starts in the worktree anyway.
 
 **Built in**, from the folder alone:
 

@@ -766,8 +766,10 @@ trusted as it wrote it. One that arrives some other way, in a repo you've
 cloned or with a `git pull`, waits: a "patch to trust" chip shows above the
 composer, and Patches lists it as "Not run yet" (or "Changed since you
 trusted it") with a Trust button. Open its file to read it first, and
-any files it imports, which Patches lists under it: a change to one of
-those asks again too. A
+any files it imports or runs (a setup script, say), which Patches lists
+under it: a change to one of those asks again too. A patch that loads code
+by a name it works out as it runs (`import(name)`) can't be checked, so it
+never runs and Patches says why: import its files by a plain path instead. A
 thread's worktree counts as its repo, and patches that were already in
 your folders when this arrived are trusted for you.
 
