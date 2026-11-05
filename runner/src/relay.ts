@@ -100,6 +100,8 @@ type Watch = {
   // When the row last said it isn't running (SETTLE_MS), and the timer that emits then.
   stoppedAt?: number;
   settleTimer?: TimerHandle;
+  // When it was last read whole (load or refresh), so an events-then-subscribe doesn't read twice.
+  readAt?: number;
 };
 
 export type RelayEvent = { seq: number; ts: string; threadId: string; turnId?: string; type: string; [k: string]: unknown };
@@ -297,6 +299,25 @@ export class Relay {
     }
   }
 
+  private async refresh(w: Watch): Promise<void> {
+    const newest = w.rows.size ? Math.max(...w.rows.keys()) : 0;
+    const [row] = await Promise.all([
+      this.read('relay:remoteThread', { threadId: w.threadId }),
+      (async () => {
+        let after = newest;
+        for (;;) {
+          const page = (await this.read('relay:remoteMessages', { threadId: w.threadId, afterSeq: after, limit: PAGE })) as Page;
+          for (const m of page.messages) w.rows.set(m.seq, m);
+          const last = page.messages[page.messages.length - 1]?.seq;
+          if (last === undefined || !page.hasMore) break;
+          after = last;
+        }
+      })(),
+    ]);
+    this.noteRow(w, row as RelayThreadRow | null);
+    w.readAt = this.deps.clock.now();
+  }
+
   private settle(w: Watch): void {
     w.stoppedAt = this.deps.clock.now();
     w.settleTimer?.cancel();
@@ -307,7 +328,12 @@ export class Relay {
   }
 
   private async load(w: Watch): Promise<void> {
-    if (w.loaded) return;
+    if (w.loaded) {
+      // Not watched (nobody subscribed since): what's held may be old, so
+      // read what's come since, once, as a tail would have.
+      if (!w.unsub.length && this.deps.clock.now() - (w.readAt ?? 0) > 2000) await this.refresh(w);
+      return;
+    }
     const [row, page] = await Promise.all([this.read('relay:remoteThread', { threadId: w.threadId }), this.read('relay:remoteMessages', { threadId: w.threadId, limit: PAGE })]);
     const p = page as Page;
     for (const m of p.messages) w.rows.set(m.seq, m);
@@ -315,6 +341,7 @@ export class Relay {
     const r = row as RelayThreadRow | null;
     this.noteRow(w, r);
     // Stopped only just now: its last messages may still be on their way.
+    w.readAt = this.deps.clock.now();
     if (r && !RUNNING.has(r.status) && r.lastActivityAt && this.deps.clock.now() - Date.parse(r.lastActivityAt) < SETTLE_MS) this.settle(w);
     w.loaded = true;
   }
