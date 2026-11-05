@@ -752,9 +752,12 @@ Backend changes (these deploy prod when they land on main; Mike said yes to
    long notes were about 460 KB each time a turn moved one.
 5. Done (API 40): a project's page reads its threads through
    `projectThreads`, a small row per thread per project kept by
-   `upsertThreads`, `removeThreads` and `prune`, with
-   `phone:projectThreads` taking the newest few by an index on
-   `projectId` and `lastActivityMs`. A thread's projects are an array on
+   `upsertThreads` (only when a thread is new, taken over or changes
+   projects), `removeThreads` and `prune`, with `phone:projectThreads`
+   taking the ones that joined last by an index on `projectId` and sorting
+   that page by activity. The first version kept each link's
+   `lastActivityMs` current, a patch on every turn, which took
+   `upsertThreads` from about 4.1 KB to 7 KB a call (35 MB a day). A thread's projects are an array on
    its row, which can't be indexed, so the alternative was reading every
    thread, archived ones included. Threads from before API 40 are linked
    once per runner by `sync:linkProjects`, a page at a time, which a

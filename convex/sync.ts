@@ -385,10 +385,11 @@ async function refill(ctx: MutationCtx, runnerId: string, view: View | 'overflow
 
 // ------------------------------------------------------------ project links (API 40)
 // Brings a thread's projectThreads rows in line with its row: one per
-// project it's in, carrying its lastActivityMs so a project's threads come
-// out newest first. No row (deleted) drops them all. Writes only what
-// changed, as most thread writes are a status flip in the same projects.
-async function linkThread(ctx: MutationCtx, threadId: string, t: { runnerId: string; lastActivityMs: number; projects?: { id: string }[] } | null): Promise<void> {
+// project it's in. No row (deleted) drops them all. A link never carries
+// the thread's activity: keeping that current patched a link on every
+// turn, about 35 MB a day of I/O (thread 9b6113da), so a project's threads
+// come out by when they joined it and phone:projectThreads sorts the page.
+async function linkThread(ctx: MutationCtx, threadId: string, t: { runnerId: string; projects?: { id: string }[] } | null): Promise<void> {
   const want = new Set((t?.projects ?? []).map((p) => p.id));
   for await (const row of ctx.db.query('projectThreads').withIndex('by_threadId', (q) => q.eq('threadId', threadId))) {
     if (!t || !want.has(row.projectId)) {
@@ -396,10 +397,14 @@ async function linkThread(ctx: MutationCtx, threadId: string, t: { runnerId: str
       continue;
     }
     want.delete(row.projectId);
-    if (row.lastActivityMs !== t.lastActivityMs || row.runnerId !== t.runnerId) await ctx.db.patch(row._id, { lastActivityMs: t.lastActivityMs, runnerId: t.runnerId });
+    if (row.runnerId !== t.runnerId) await ctx.db.patch(row._id, { runnerId: t.runnerId });
   }
-  for (const projectId of want) await ctx.db.insert('projectThreads', { runnerId: t!.runnerId, projectId, threadId, lastActivityMs: t!.lastActivityMs });
+  for (const projectId of want) await ctx.db.insert('projectThreads', { runnerId: t!.runnerId, projectId, threadId });
 }
+
+// The project ids on a thread row, in a fixed order, so upsertThreads can
+// tell whether its links need touching without reading them.
+const projectKey = (t: { projects?: { id: string }[] } | null | undefined) => (t?.projects ?? []).map((p) => p.id).sort().join(' ');
 
 // Links every thread a runner already had when this table arrived, a page
 // at a time so no one transaction reads them all. heartbeat starts it once
@@ -518,7 +523,9 @@ export const upsertThreads = mutation({
         // It left a capped list: an overflowed one takes the room.
         if (was && was.view !== row.view) await refill(ctx, t.runnerId, was.view);
       }
-      await linkThread(ctx, t.threadId, row);
+      // Most writes are a status flip in the same projects: only a new
+      // thread, one taken over, or one whose projects changed reads its links.
+      if (!existing || transfer || projectKey(existing) !== projectKey(row)) await linkThread(ctx, t.threadId, row);
       if (wantsPush && (caller.owner || (await pushAllowed(ctx, t.runnerId, now)))) await ctx.scheduler.runAfter(0, internal.push.notify, { threadId: t.threadId });
     }
     return { skipped };

@@ -295,9 +295,11 @@ export const projects = query({
   },
 });
 
-// A project's threads, newest first, archived ones too (API 40), through
-// projectThreads, so it reads only this project's rows rather than every
-// thread. The website asks for more by raising limit, as phone:messages.
+// A project's threads, archived ones too (API 40), through projectThreads,
+// so it reads only this project's rows rather than every thread. It takes
+// the ones that joined the project last, then puts those in order of
+// activity (links don't carry it; schema.ts). The website asks for more by
+// raising limit, as phone:messages.
 const PROJECT_THREADS_MAX = 1000;
 export const projectThreads = query({
   args: { token: v.string(), projectId: v.string(), limit: v.optional(v.number()) },
@@ -307,7 +309,7 @@ export const projectThreads = query({
     const n = Math.max(1, Math.min(PROJECT_THREADS_MAX, Math.floor(limit ?? PAGE_DEFAULT)));
     const links = await ctx.db
       .query('projectThreads')
-      .withIndex('by_project_activity', (q) => q.eq('projectId', projectId))
+      .withIndex('by_project', (q) => q.eq('projectId', projectId))
       .order('desc')
       .take(n);
     const out = [];
@@ -318,7 +320,7 @@ export const projectThreads = query({
         .unique();
       if (t) out.push(stripThread(t));
     }
-    return out;
+    return out.sort((a, b) => b.lastActivityMs - a.lastActivityMs);
   },
 });
 

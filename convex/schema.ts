@@ -433,9 +433,12 @@ export default defineSchema({
     runnerId: v.string(),
     projectId: v.string(),
     threadId: v.string(),
-    lastActivityMs: v.number(),
+    // Written by the first links only (5 Nov): keeping it current cost a
+    // patch per turn, so nothing reads or writes it now.
+    lastActivityMs: v.optional(v.number()),
   })
-    .index('by_project_activity', ['projectId', 'lastActivityMs'])
+    // Newest joined first, by _creationTime, which every index ends with.
+    .index('by_project', ['projectId'])
     .index('by_threadId', ['threadId']),
 
   // The phone's Pocket: short cards agents file for when Mike's out
