@@ -24,4 +24,4 @@ export const APP_STORE_LIVE = true;
  * the card links to it and plays it in place through youtube-nocookie.com, and headers.mjs lets
  * that player and YouTube's thumbnail through the CSP.
  */
-export const LAUNCH_VIDEO_ID = "";
+export const LAUNCH_VIDEO_ID = "HCR6jqR0LEI";
