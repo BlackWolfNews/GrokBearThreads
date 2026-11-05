@@ -258,6 +258,7 @@ extension AppModel {
         remoteClients.onNotification = { [weak self] runnerId, notification in self?.receiveRemote(notification, from: runnerId) }
         remoteClients.onConnected = { [weak self] runnerId, client in self?.remoteConnected(runnerId, client) }
         remoteClients.onClosed = { [weak self] runnerId in self?.remoteClosed(runnerId) }
+        remoteClients.onLog = { AppLog.write("remote", $0) }
     }
 
     private func remoteName(_ runnerId: String) -> String { remoteRunners.first { $0.id == runnerId }?.name ?? runnerId }
