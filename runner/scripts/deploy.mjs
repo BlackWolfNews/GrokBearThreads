@@ -66,6 +66,9 @@ For install-runner.sh:
 
 const DEFAULT_LABEL = 'com.mikerosoft.threadbear.runner';
 const DEFAULT_HOME = path.join(os.homedir(), 'Library', 'Application Support', 'Threadbear');
+// On Linux the data dir keeps its macOS name, so every path in the docs and
+// scripts is the same; systemd takes launchd's place (install-runner.sh).
+const LINUX = process.platform === 'linux';
 // What a release holds from runner/, besides node_modules and release.json.
 const RELEASE_PATHS = ['src', 'bin', 'package.json', 'package-lock.json'];
 const KEEP_RELEASES = 5;
@@ -200,11 +203,18 @@ function setup(v) {
     labelKnown: v.label !== undefined || isDefaultHome,
     follow: v.follow ? path.resolve(expandHome(v.follow)) : undefined,
     target: `gui/${process.getuid()}/${label}`,
-    plist: path.join(env.THREADBEAR_LAUNCH_AGENTS_DIR || path.join(os.homedir(), 'Library', 'LaunchAgents'), `${label}.plist`),
+    // A runner on Linux is a systemd user service of the same name
+    // (install-runner.sh), and its unit file stands in for the plist.
+    linux: LINUX,
+    unit: `${label}.service`,
+    plist: LINUX
+      ? path.join(env.THREADBEAR_SYSTEMD_UNITS_DIR || path.join(os.homedir(), '.config', 'systemd', 'user'), `${label}.service`)
+      : path.join(env.THREADBEAR_LAUNCH_AGENTS_DIR || path.join(os.homedir(), 'Library', 'LaunchAgents'), `${label}.plist`),
     log: isDefaultHome ? path.join(os.homedir(), 'Library', 'Logs', 'threadbear-runner.log') : path.join(home, 'runner.log'),
     threadId,
     inThread: Boolean(threadId) || underRunner,
     launchctl: env.THREADBEAR_LAUNCHCTL || 'launchctl',
+    systemctl: env.THREADBEAR_SYSTEMCTL || 'systemctl',
     npm: path.join(path.dirname(process.execPath), 'npm'),
     runnerDir: path.resolve(import.meta.dirname, '..'),
   };
@@ -242,12 +252,16 @@ function runnerIsAncestor(home) {
 function installedAs(c) {
   if (!c.labelKnown) return fs.existsSync(path.join(c.dir, 'launch.mjs')) ? 'releases' : 'missing';
   if (!fs.existsSync(c.plist)) return 'missing';
-  const r = spawnSync('plutil', ['-convert', 'json', '-o', '-', c.plist], { encoding: 'utf8' });
   let args = [];
-  try {
-    args = JSON.parse(r.stdout).ProgramArguments ?? [];
-  } catch {
-    // unreadable: treated as not running releases
+  if (c.linux) {
+    args = unitExecStart(fs.readFileSync(c.plist, 'utf8'));
+  } else {
+    const r = spawnSync('plutil', ['-convert', 'json', '-o', '-', c.plist], { encoding: 'utf8' });
+    try {
+      args = JSON.parse(r.stdout).ProgramArguments ?? [];
+    } catch {
+      // unreadable: treated as not running releases
+    }
   }
   const launch = path.join(c.dir, 'launch.mjs');
   return args.some((a) => typeof a === 'string' && sameDir(a, launch)) && fs.existsSync(launch) ? 'releases' : 'checkout';
@@ -364,7 +378,22 @@ async function awaitRelease(home, id, before, startMs, pending = false) {
   }
 }
 
+// A systemd unit's ExecStart as its arguments, undoing install-runner.sh's
+// quoting ("..." with \\ and \" escaped, % as %%). [] when there's none.
+function unitExecStart(text) {
+  const line = text.split('\n').find((l) => l.startsWith('ExecStart='));
+  if (!line) return [];
+  const args = [];
+  const re = /"((?:[^"\\]|\\.)*)"|(\S+)/g;
+  for (const m of line.slice('ExecStart='.length).matchAll(re)) {
+    const raw = m[1] !== undefined ? m[1].replace(/\\(.)/g, '$1') : m[2];
+    args.push(raw.replace(/%%/g, '%'));
+  }
+  return args;
+}
+
 function jobLoaded(c) {
+  if (c.linux) return spawnSync(c.systemctl, ['--user', 'is-active', '--quiet', c.unit], { stdio: 'ignore' }).status === 0;
   return spawnSync(c.launchctl, ['print', c.target], { stdio: 'ignore' }).status === 0;
 }
 
@@ -375,15 +404,18 @@ async function kickstart(c) {
   if (!c.labelKnown) {
     throw new Fail(`${c.home} isn't the default data dir, so pass --label with its launchd label to restart it.`);
   }
+  // systemd's restart, like kickstart -k, returns once the old one is gone
+  // and the new one started.
+  const [cmd, args] = c.linux ? [c.systemctl, ['--user', 'restart', c.unit]] : [c.launchctl, ['kickstart', '-k', c.target]];
   const r = await new Promise((resolve) => {
-    const child = spawn(c.launchctl, ['kickstart', '-k', c.target], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let text = '';
     child.stdout.on('data', (d) => (text += d));
     child.stderr.on('data', (d) => (text += d));
     child.on('error', (e) => resolve({ status: null, text: e.message }));
     child.on('close', (status) => resolve({ status, text }));
   });
-  if (r.status !== 0) throw new Fail(`launchctl kickstart -k ${c.target} failed: ${r.text.trim()}`);
+  if (r.status !== 0) throw new Fail(`${restartCommand(c)} failed: ${r.text.trim()}`);
 }
 
 // The threads keeping the runner busy, as { id, title }, or [] when it's
@@ -806,7 +838,7 @@ async function smoke(c, id) {
 // ---------------------------------------------------------------- restart and health
 
 function restartCommand(c) {
-  return `launchctl kickstart -k ${c.target}`;
+  return c.linux ? `systemctl --user restart ${c.unit}` : `launchctl kickstart -k ${c.target}`;
 }
 
 // The tb that goes with this checkout, written out in full in what the
@@ -1061,7 +1093,7 @@ async function wentWrong(c, id, before, r, waitMs) {
         console.error(e.message);
       }
     } else {
-      console.error(`Restart it with its label: launchctl kickstart -k gui/${process.getuid()}/<label>`);
+      console.error(LINUX ? 'Restart it with its label: systemctl --user restart <label>.service' : `Restart it with its label: launchctl kickstart -k gui/${process.getuid()}/<label>`);
     }
   } else {
     console.error('There is no earlier release to go back to.');

@@ -596,11 +596,18 @@ export function launcherSourcesHash(dir: string): string | undefined {
 // process that started launch.mjs, for a plist written before that
 // variable; a supervised runner with neither still runs node as the
 // program.
-export function launchAgentBehind(mainRunner: string, home: string, env: NodeJS.ProcessEnv, findApp: () => string | undefined = launcherAppAbove): string | undefined {
+export function launchAgentBehind(
+  mainRunner: string,
+  home: string,
+  env: NodeJS.ProcessEnv,
+  findApp: () => string | undefined = launcherAppAbove,
+  platform: NodeJS.Platform = process.platform,
+): string | undefined {
   const why: string[] = [];
   if (launcherDiffers(path.join(mainRunner, 'launch.mjs'), path.join(home, 'runner', 'launch.mjs'))) why.push('launch.mjs has changed on main.');
   const onMain = launcherSourcesHash(path.join(mainRunner, 'launcher'));
-  if (onMain && env.THREADBEAR_SUPERVISED === '1') {
+  // Linux has no launcher app (systemd runs node; install-runner.sh).
+  if (onMain && env.THREADBEAR_SUPERVISED === '1' && platform === 'darwin') {
     const app = env.THREADBEAR_RUNNER_APP || findApp();
     if (!app) {
       why.push('The LaunchAgent still runs node, not Threadbear Runner.app, so privacy prompts say "node".');

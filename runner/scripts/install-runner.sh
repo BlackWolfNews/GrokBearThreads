@@ -1,7 +1,9 @@
 #!/bin/bash
 # Installs the Threadbear runner as a launchd LaunchAgent
 # (com.mikerosoft.threadbear.runner) that starts at login and is restarted
-# if it ever exits.
+# if it ever exits. On Linux it's a systemd user service of the same name
+# instead (~/.config/systemd/user/<label>.service), with no Runner.app:
+# everything below about the plist goes for the unit file there.
 #
 #   scripts/install-runner.sh              install (or reinstall) and start it
 #   scripts/install-runner.sh --print      print the plist and change nothing
@@ -50,7 +52,9 @@
 #                  (default: your login shell's PATH, captured now)
 #
 # THREADBEAR_LAUNCHCTL and THREADBEAR_LAUNCH_AGENTS_DIR replace launchctl
-# and ~/Library/LaunchAgents (the tests use both).
+# and ~/Library/LaunchAgents (the tests use both); on Linux,
+# THREADBEAR_SYSTEMCTL and THREADBEAR_SYSTEMD_UNITS_DIR replace systemctl
+# and ~/.config/systemd/user.
 set -euo pipefail
 
 # THREADBARE_* was the old name for these variables: each stands in for its new name.
@@ -61,6 +65,11 @@ RUNNER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NODE="${THREADBEAR_NODE:-$HOME/.nvm/versions/node/v24.22.1/bin/node}"
 LAUNCHCTL="${THREADBEAR_LAUNCHCTL:-launchctl}"
 AGENTS_DIR="${THREADBEAR_LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}"
+# A runner on Linux (INSTALL.md, "A runner on Linux"): systemd keeps it up.
+LINUX=0
+[ "$(uname -s)" = Linux ] && LINUX=1
+SYSTEMCTL="${THREADBEAR_SYSTEMCTL:-systemctl}"
+if [ "$LINUX" = 1 ]; then AGENTS_DIR="${THREADBEAR_SYSTEMD_UNITS_DIR:-$HOME/.config/systemd/user}"; fi
 LABEL="$DEFAULT_LABEL"
 DATA_HOME="$DEFAULT_HOME"
 PORT=""
@@ -131,6 +140,18 @@ LAUNCHER="$RUNNER_APP/Contents/MacOS/Threadbear Runner"
 BUILD_LAUNCHER="$RUNNER_DIR/launcher/build-launcher.sh"
 PLIST="$AGENTS_DIR/$LABEL.plist"
 DOMAIN="gui/$(id -u)"
+UNIT="$LABEL.service"
+[ "$LINUX" = 0 ] || PLIST="$AGENTS_DIR/$UNIT"
+
+# Whether the job is loaded (launchd) or running (systemd): a copy that
+# replacing would stop.
+svc_loaded() {
+  if [ "$LINUX" = 1 ]; then "$SYSTEMCTL" --user is-active --quiet "$UNIT" 2>/dev/null; else "$LAUNCHCTL" print "$DOMAIN/$LABEL" >/dev/null 2>&1; fi
+}
+# Stops the job and stops it starting again.
+svc_remove() {
+  if [ "$LINUX" = 1 ]; then "$SYSTEMCTL" --user disable --now "$UNIT" 2>/dev/null || true; else "$LAUNCHCTL" bootout "$DOMAIN/$LABEL" 2>/dev/null || true; fi
+}
 
 # The pid in <home>/run/runner.pid (plain, or JSON with the pid first).
 runner_pid() {
@@ -202,17 +223,18 @@ if [ "$MODE" = "uninstall" ]; then
     echo "$RUNNER_DIR/launch.mjs doesn't load (above), so this can't check whether threads are busy. Fix it, or add --force." >&2
     exit 1
   fi
-  if [ "$FORCE" = 0 ] && "$LAUNCHCTL" print "$DOMAIN/$LABEL" >/dev/null 2>&1 && [ -x "$NODE" ] \
+  if [ "$FORCE" = 0 ] && svc_loaded && [ -x "$NODE" ] \
     && ! THREADBEAR_NODE="$NODE" bash "$RUNNER_DIR/scripts/deploy-runner.sh" --home "$DATA_HOME" --label "$LABEL" --check-idle; then
     echo "Not removing $LABEL while threads are busy: they'd be cut short. Run it again once they finish, or add --force." >&2
     exit 1
   fi
-  "$LAUNCHCTL" bootout "$DOMAIN/$LABEL" 2>/dev/null || true
+  svc_remove
   rm -f "$PLIST"
+  [ "$LINUX" = 0 ] || "$SYSTEMCTL" --user daemon-reload 2>/dev/null || true
   echo "Removed $LABEL. The data in $DATA_HOME (releases included) is untouched."
   # The app stays too: the privacy grants macOS gave it belong to it, and a
   # reinstall picks it up as it is.
-  [ ! -d "$RUNNER_APP" ] || echo "$RUNNER_APP stays; delete it yourself if you're done with Threadbear."
+  [ "$LINUX" = 1 ] || [ ! -d "$RUNNER_APP" ] || echo "$RUNNER_APP stays; delete it yourself if you're done with Threadbear."
   exit 0
 fi
 
@@ -301,8 +323,57 @@ EOF
 EOF
 }
 
+# The systemd unit, for Linux: the same job as the plist. systemd starts
+# node itself (no launcher app), restarts it whatever way it exits (like
+# KeepAlive; launch.mjs exits 0 for a planned restart), and gives it 30
+# seconds after SIGTERM, like ExitTimeOut. KillMode=mixed sends SIGTERM to
+# launch.mjs alone, so it stops the runner and its CLIs in order, and
+# SIGKILL to anything left after that.
+unit_quote() {
+  # systemd's own quoting: double quotes, with \ and " escaped, and % as %%.
+  printf '"%s"' "$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/%/%%/g')"
+}
+unit() {
+  cat <<EOF
+# Threadbear runner, written by runner/scripts/install-runner.sh. Reinstall
+# rather than edit: the next install writes it again.
+[Unit]
+Description=Threadbear runner ($LABEL)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=$(unit_quote "$NODE") $(unit_quote "$PROGRAM")
+WorkingDirectory=$(unit_quote "$WORKDIR")
+Environment=$(unit_quote "PATH=$AGENT_PATH")
+Environment="LANG=C.UTF-8"
+EOF
+  if [ "$SANDBOX" = 1 ]; then
+    echo "Environment=$(unit_quote "THREADBEAR_HOME=$DATA_HOME")"
+    echo "Environment=$(unit_quote "THREADBEAR_LOG=$LOG")"
+  fi
+  [ -z "$PORT" ] || echo "Environment=$(unit_quote "THREADBEAR_PORT=$PORT")"
+  cat <<EOF
+Restart=always
+RestartSec=5
+KillMode=mixed
+TimeoutStopSec=30
+StandardOutput=append:$LOG
+StandardError=append:$LOG
+
+[Install]
+WantedBy=default.target
+EOF
+}
+
+# The job's file: the plist, or the unit on Linux.
+job_file() {
+  if [ "$LINUX" = 1 ]; then unit; else plist; fi
+}
+
 if [ "$MODE" = "print" ]; then
-  plist
+  job_file
   exit 0
 fi
 
@@ -316,6 +387,11 @@ deploy() {
 # failed: 5: Input/output error"), so it gets a few tries.
 load() {
   local out="" i
+  if [ "$LINUX" = 1 ]; then
+    "$SYSTEMCTL" --user daemon-reload && "$SYSTEMCTL" --user enable --quiet "$UNIT" && "$SYSTEMCTL" --user restart "$UNIT" && return 0
+    echo "systemctl --user couldn't start $UNIT: systemctl --user status $UNIT says why." >&2
+    return 1
+  fi
   for i in 1 2 3 4 5 6 7 8 9 10; do
     if out="$("$LAUNCHCTL" bootstrap "$DOMAIN" "$PLIST" 2>&1)"; then
       "$LAUNCHCTL" kickstart "$DOMAIN/$LABEL" 2>/dev/null || true
@@ -329,6 +405,8 @@ load() {
 
 # Stops the job and starts it again from the plist.
 reload() {
+  # systemd's restart stops the old one first and waits for it.
+  if [ "$LINUX" = 1 ]; then load; return; fi
   "$LAUNCHCTL" bootout "$DOMAIN/$LABEL" 2>/dev/null || true
   # bootout returns before the old job is gone; bootstrap fails until it is.
   for _ in $(seq 1 100); do
@@ -356,7 +434,7 @@ point_current() {
 
 RDIR="$DATA_HOME/runner"
 LOADED=0
-"$LAUNCHCTL" print "$DOMAIN/$LABEL" >/dev/null 2>&1 && LOADED=1
+svc_loaded && LOADED=1
 
 # Everything that can be refused is refused before anything changes.
 # launch.mjs first: it is the LaunchAgent's program, nothing tests it once
@@ -402,8 +480,11 @@ rm -f "$PREV" "$PREV_LAUNCH"
 # .Threadbear Runner.app.old, so a failed install can put it back.
 OLD_APP="$(dirname "$RUNNER_APP")/.$(basename "$RUNNER_APP").old"
 APP_BUILT=0
-rm -rf "$OLD_APP"
-if why="$(bash "$BUILD_LAUNCHER" --check "$RUNNER_APP")"; then
+[ "$LINUX" = 1 ] || rm -rf "$OLD_APP"
+if [ "$LINUX" = 1 ]; then
+  # No app on Linux: nothing there asks for privacy grants.
+  :
+elif why="$(bash "$BUILD_LAUNCHER" --check "$RUNNER_APP")"; then
   echo "Keeping $RUNNER_APP, built from launcher/ as it is."
 else
   echo "$why"
@@ -473,15 +554,20 @@ fail_back() {
     if reload; then
       echo "Back as it was. The log above says what went wrong; fix it and run this again." >&2
     else
-      echo "The old plist didn't load either. Load it by hand: launchctl bootstrap $DOMAIN $(printf '%q' "$PLIST")" >&2
+      if [ "$LINUX" = 1 ]; then
+        echo "The old unit didn't start either: systemctl --user status $UNIT says why." >&2
+      else
+        echo "The old plist didn't load either. Load it by hand: launchctl bootstrap $DOMAIN $(printf '%q' "$PLIST")" >&2
+      fi
     fi
   else
     # Nothing to go back to, so what this run put in comes out again: a
     # loaded plist whose program is gone (or won't start) would otherwise
     # be started by launchd every few seconds for good, and launch.mjs in
     # the data dir would make deploy-runner.sh think a release could start.
-    "$LAUNCHCTL" bootout "$DOMAIN/$LABEL" 2>/dev/null || true
+    svc_remove
     rm -f "$PLIST"
+    [ "$LINUX" = 0 ] || "$SYSTEMCTL" --user daemon-reload 2>/dev/null || true
     if [ "$SWAPPED" = 1 ]; then
       if [ "$HAD_LAUNCH" = 1 ]; then mv -f "$PREV_LAUNCH" "$RDIR/launch.mjs"; else rm -f "$RDIR/launch.mjs"; fi
     fi
@@ -509,8 +595,8 @@ if [ "$FROM_SOURCE" = 0 ]; then
   SWAPPED=1
 fi
 TMP="$(mktemp "$PLIST.XXXXXX")"
-plist > "$TMP"
-plutil -lint "$TMP" >/dev/null
+job_file > "$TMP"
+[ "$LINUX" = 1 ] || plutil -lint "$TMP" >/dev/null
 mv "$TMP" "$PLIST"
 TMP=""
 
@@ -519,7 +605,7 @@ TMP=""
 reload || fail_back "launchd wouldn't load the new plist."
 
 echo "Installed $LABEL"
-echo "  app:    $RUNNER_APP"
+[ "$LINUX" = 1 ] || echo "  app:    $RUNNER_APP"
 echo "  node:   $NODE"
 echo "  runner: $PROGRAM"
 echo "  data:   $DATA_HOME"
@@ -539,7 +625,18 @@ else
 fi
 trap - EXIT
 rm -f "$PREV" "$PREV_LAUNCH"
-rm -rf "$OLD_APP"
+[ "$LINUX" = 1 ] || rm -rf "$OLD_APP"
+if [ "$LINUX" = 1 ]; then
+  echo "Restart it with: systemctl --user restart $UNIT"
+  # A user service stops when its user's last session ends unless lingering
+  # is on, and a server nobody logs into has no session at all.
+  if [ "$(loginctl show-user "$(id -un)" -p Linger --value 2>/dev/null)" != yes ]; then
+    echo
+    echo "So it keeps running with nobody logged in, turn on lingering once:"
+    echo "  sudo loginctl enable-linger $(id -un)"
+  fi
+  exit 0
+fi
 echo "Restart it with: launchctl kickstart -k $DOMAIN/$LABEL"
 # Only a person can grant this, and a Mac nobody sits at needs it: a prompt left
 # waiting there can hold up other apps using the same drive

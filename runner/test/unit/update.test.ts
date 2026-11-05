@@ -405,24 +405,26 @@ test('launchAgentBehind: launch.mjs, a plist that runs node, and an app built fr
   const sup = { THREADBEAR_SUPERVISED: '1', THREADBEAR_RUNNER_APP: app };
 
   const noApp = () => undefined;
-  assert.equal(launchAgentBehind(main, home, sup, noApp), undefined, 'up to date');
+  assert.equal(launchAgentBehind(main, home, sup, noApp, 'darwin'), undefined, 'up to date');
   // Not under launch.mjs (a dev runner, a checkout): nothing to say about the app.
-  assert.equal(launchAgentBehind(main, home, {}, noApp), undefined);
+  assert.equal(launchAgentBehind(main, home, {}, noApp, 'darwin'), undefined);
   // Installed before the app: the plist runs node.
-  assert.match(launchAgentBehind(main, home, { THREADBEAR_SUPERVISED: '1' }, noApp)!, /^The LaunchAgent still runs node, not Threadbear Runner\.app/);
+  assert.match(launchAgentBehind(main, home, { THREADBEAR_SUPERVISED: '1' }, noApp, 'darwin')!, /^The LaunchAgent still runs node, not Threadbear Runner\.app/);
+  // On Linux systemd runs node and there's no app to be behind.
+  assert.equal(launchAgentBehind(main, home, { THREADBEAR_SUPERVISED: '1' }, noApp, 'linux'), undefined);
   // A plist from before THREADBEAR_RUNNER_APP: the app is found above launch.mjs.
-  assert.equal(launchAgentBehind(main, home, { THREADBEAR_SUPERVISED: '1' }, () => app), undefined);
+  assert.equal(launchAgentBehind(main, home, { THREADBEAR_SUPERVISED: '1' }, () => app, 'darwin'), undefined);
   // The app is from older launcher sources, or its build.json is gone.
   built('old');
-  assert.equal(launchAgentBehind(main, home, sup), "Threadbear Runner.app was built from older launcher sources than main's.");
+  assert.equal(launchAgentBehind(main, home, sup, undefined, 'darwin'), "Threadbear Runner.app was built from older launcher sources than main's.");
   fs.rmSync(path.join(app, 'Contents', 'Resources', 'build.json'));
-  assert.match(launchAgentBehind(main, home, sup)!, /older launcher sources/);
+  assert.match(launchAgentBehind(main, home, sup, undefined, 'darwin')!, /older launcher sources/);
   // Both at once, a sentence each.
   fs.writeFileSync(path.join(main, 'launch.mjs'), 'launch 2');
-  assert.equal(launchAgentBehind(main, home, sup), "launch.mjs has changed on main. Threadbear Runner.app was built from older launcher sources than main's.");
+  assert.equal(launchAgentBehind(main, home, sup, undefined, 'darwin'), "launch.mjs has changed on main. Threadbear Runner.app was built from older launcher sources than main's.");
   // A main from before the launcher says nothing about it.
   fs.rmSync(path.join(main, 'launcher'), { recursive: true });
-  assert.equal(launchAgentBehind(main, home, { THREADBEAR_SUPERVISED: '1' }, () => app), 'launch.mjs has changed on main.');
+  assert.equal(launchAgentBehind(main, home, { THREADBEAR_SUPERVISED: '1' }, () => app, 'darwin'), 'launch.mjs has changed on main.');
 });
 
 test('appOfExecutable: only the launcher app\'s executable', () => {
