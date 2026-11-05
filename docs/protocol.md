@@ -3407,7 +3407,9 @@ default).
   rows are read once by page (`relay:remoteMessages`, 50 at a time) and kept
   in this runner for half an hour. A tail that starts past the newest row
   held (the Mac slept) reads the rows between once, by `afterSeq`, rather
-  than leave a hole.
+  than leave a hole. `runner.status` has `relay: { watching, held, reads, bytes }`:
+  threads watched now, rows held, and since start the reads (and live
+  updates) and the JSON bytes they brought back, to measure what it costs.
 - **Acting.** `threads.send` (text and `answers`; pictures are `-32000`),
   `threads.interrupt`, `approvals.respond`, `secrets.answer` (sealed to the
   other runner's key from its row, as the phone seals it, so the value

@@ -205,6 +205,9 @@ export class Relay {
   private made = new Map<string, RemoteThread>();
   private sweepTimer?: TimerHandle;
   private reads = 0;
+  // What those reads brought back, as JSON bytes (about what Convex bills
+  // for the rows they read), so the relay's I/O can be measured.
+  private bytes = 0;
 
   constructor(deps: RelayDeps) {
     this.deps = deps;
@@ -228,10 +231,10 @@ export class Relay {
     return s;
   }
 
-  status(): { watching: number; held: number; reads: number } {
+  status(): { watching: number; held: number; reads: number; bytes: number } {
     let held = 0;
     for (const w of this.watches.values()) held += w.rows.size;
-    return { watching: [...this.watches.values()].filter((w) => w.unsub.length).length, held, reads: this.reads };
+    return { watching: [...this.watches.values()].filter((w) => w.unsub.length).length, held, reads: this.reads, bytes: this.bytes };
   }
 
   private find(threadId: string): RemoteThread | undefined {
@@ -267,7 +270,9 @@ export class Relay {
   private async read(fn: string, args: Record<string, unknown>): Promise<unknown> {
     this.reads++;
     const src = this.src();
-    return src.post('query', fn, { key: src.key, ...args });
+    const out = await src.post('query', fn, { key: src.key, ...args });
+    this.bytes += JSON.stringify(out ?? null).length;
+    return out;
   }
 
   private events(w: Watch): RelayEvent[] {
@@ -387,6 +392,8 @@ export class Relay {
     w.unsub.push(
       src.subscribe('relay:remoteTail', { key: src.key, threadId: w.threadId, limit: TAIL }, (v) => void this.onTail(w, v as Page), failed),
       src.subscribe('relay:remoteThread', { key: src.key, threadId: w.threadId }, (v) => {
+        this.reads++;
+        this.bytes += JSON.stringify(v ?? null).length;
         this.noteRow(w, v as RelayThreadRow | null, true);
         this.emit(w);
       }, failed),
@@ -403,6 +410,7 @@ export class Relay {
 
   private async onTail(w: Watch, tail: Page): Promise<void> {
     this.reads++;
+    this.bytes += JSON.stringify(tail).length;
     const { gapAfter } = mergeTail(w.rows, tail);
     if (gapAfter !== undefined) {
       // More arrived than the tail covers (the Mac slept, the watch was
@@ -532,7 +540,7 @@ export class Relay {
 
   private unsupported(w: Watch | undefined, what: string): never {
     const name = w ? this.runnerName(w.runnerId) : 'the other runner';
-    throw new RpcError(ErrorCode.other, `${what} isn't possible through Convex yet. Do it on ${name}, or turn on the direct link in Settings.`);
+    throw new RpcError(ErrorCode.other, `${what} isn't possible through Convex yet. Do it on ${name}, or turn on Connect to other machines directly in Settings > Runners.`);
   }
 
   /** A thread method about another runner's thread (rpc.ts THREAD_METHODS). */
