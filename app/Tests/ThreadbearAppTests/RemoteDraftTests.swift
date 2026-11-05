@@ -10,7 +10,7 @@ import XCTest
 final class RemoteDraftTests: XCTestCase {
     /// A login an earlier test left as the last one used would be this
     /// Mac's pick instead of claude-here (saved defaults outlive a run).
-    private let keys = [AppModel.lastAccountKey, "lastAccountId.byProvider", "lastAccountId.codex.byProvider"]
+    private let keys = [AppModel.lastAccountKey, "lastAccountId.byProvider", "lastAccountId.codex.byProvider", AppModel.defaultRunnerKey]
 
     override func setUp() {
         super.setUp()
@@ -93,6 +93,37 @@ final class RemoteDraftTests: XCTestCase {
         XCTAssertEqual(app.route("th_bruce"), .remote(bruce))
         XCTAssertNil(app.drafts["new"])
         XCTAssertNil(app.newThreadRunnerId, "the next one starts on this Mac again")
+    }
+
+    /// The starred runner (the machine menu's Default, Settings > Runners):
+    /// new drafts start there, a pick for one draft sticks until it's sent,
+    /// and the next draft is back on the default.
+    func testNewThreadsStartOnTheDefaultRunner() async throws {
+        let (app, local, _) = try await app()
+        XCTAssertNil(app.newThreadRunnerId, "this Mac until a default is set")
+
+        app.setDefaultRunner(bruce.id)
+        XCTAssertEqual(app.newThreadRunnerId, bruce.id)
+        XCTAssertEqual(UserDefaults.standard.string(forKey: AppModel.defaultRunnerKey), bruce.id, "kept across launches")
+        XCTAssertTrue(ThreadSettings(app: app, thread: nil).runnerMenu().items.contains { $0.title == "bruce" && $0.badge != nil }, "the star is on bruce")
+
+        // Mike puts this one on this Mac: a runner list refresh leaves it.
+        app.chooseNewThreadRunner(nil)
+        app.applyDefaultRunner()
+        XCTAssertNil(app.newThreadRunnerId)
+
+        // Sent here, so the next draft goes back to bruce.
+        app.drafts["new"] = Draft(text: "Tidy my notes")
+        app.send(threadId: nil)
+        try await until { app.selection == "th_here" }
+        XCTAssertEqual(local.params("threads.create").count, 1)
+        XCTAssertEqual(app.newThreadRunnerId, bruce.id)
+
+        // An offline default can't take a thread: this Mac instead.
+        app.setDefaultRunner(nil)
+        app.remoteRunners = [RemoteRunner(id: bruce.id, name: "bruce", online: false, rpcUrl: bruce.rpcUrl, tokenFile: bruce.tokenFile)]
+        app.setDefaultRunner(bruce.id)
+        XCTAssertNil(app.newThreadRunnerId)
     }
 
     func testAThisMacDraftNeverGetsARunner() async throws {

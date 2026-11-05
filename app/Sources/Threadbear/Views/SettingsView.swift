@@ -21,6 +21,9 @@ struct SettingsView: View {
             PoolSettings()
                 .tabItem { Label("Pools", systemImage: "square.stack") }
                 .tag(SettingsTab.pools)
+            RunnersSettings()
+                .tabItem { Label("Runners", systemImage: "server.rack") }
+                .tag(SettingsTab.runners)
             DevicesSettings()
                 .tabItem { Label("Phone & browser", systemImage: "iphone") }
                 .tag(SettingsTab.devices)

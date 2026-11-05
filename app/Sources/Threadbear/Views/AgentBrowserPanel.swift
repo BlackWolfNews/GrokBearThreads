@@ -517,12 +517,12 @@ final class AgentSurfaceView: NSView {
     // one the page can't answer past, so this is a small one of ours.
     override func rightMouseDown(with event: NSEvent) {
         let menu = NSMenu()
-        menu.addItem(item("Back") { [weak self] in self?.stream?.send("Runtime.evaluate", ["expression": "history.back()"]) })
-        menu.addItem(item("Forward") { [weak self] in self?.stream?.send("Runtime.evaluate", ["expression": "history.forward()"]) })
-        menu.addItem(item("Reload") { [weak self] in self?.stream?.send("Page.reload") })
+        menu.addItem(item("Back", symbol: "chevron.left") { [weak self] in self?.stream?.send("Runtime.evaluate", ["expression": "history.back()"]) })
+        menu.addItem(item("Forward", symbol: "chevron.right") { [weak self] in self?.stream?.send("Runtime.evaluate", ["expression": "history.forward()"]) })
+        menu.addItem(item("Reload", symbol: "arrow.clockwise") { [weak self] in self?.stream?.send("Page.reload") })
         menu.addItem(.separator())
-        menu.addItem(item("Copy") { [weak self] in self?.editing("copy") })
-        menu.addItem(item("Paste") { [weak self] in self?.editing("paste") })
+        menu.addItem(item("Copy", symbol: "doc.on.doc") { [weak self] in self?.editing("copy") })
+        menu.addItem(item("Paste", symbol: "doc.on.clipboard") { [weak self] in self?.editing("paste") })
         NSMenu.popUpContextMenu(menu, with: event, for: self)
     }
 
@@ -532,10 +532,11 @@ final class AgentSurfaceView: NSView {
         @objc func fire() { run() }
     }
 
-    private func item(_ title: String, _ run: @escaping () -> Void) -> NSMenuItem {
+    /// No `symbol` for a page's own <select> options: they're the page's
+    /// words, which have no icons ("" draws none).
+    private func item(_ title: String, symbol: String = "", _ run: @escaping () -> Void) -> NSMenuItem {
         let action = MenuAction(run)
-        let item = NSMenuItem(title: title, action: #selector(MenuAction.fire), keyEquivalent: "")
-        item.target = action
+        let item = NSMenuItem(title: title, symbol: symbol, action: #selector(MenuAction.fire), target: action)
         item.representedObject = action // the menu item doesn't keep its target
         return item
     }

@@ -531,7 +531,11 @@ this one: run `tb pair` on that Mac and it prints the two files to make here
 and how.
 Its pictures and files come from that Mac as you open them. To start a
 thread on another Mac, pick it with the machine chip on the composer: the
-folder, account and model are then that Mac's. Schedules need your
+folder, account and model are then that Mac's. New threads start on the
+starred one: change it under Default in that chip's menu, or in
+Settings > Runners, which also lists your runners and whether they're
+online. Adding, renaming or pairing a runner is done on its own machine,
+so ask an agent to do it for you. Schedules need your
 Convex backend: with no internet, they wait.
 
 ## Accounts, pools and Usage

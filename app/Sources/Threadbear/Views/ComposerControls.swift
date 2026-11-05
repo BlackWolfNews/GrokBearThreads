@@ -345,14 +345,28 @@ struct ThreadSettings {
     func runnerMenu() -> NSMenu {
         let menu = NSMenu()
         let chosen = app.newThreadRunnerId
+        let byDefault = app.defaultRunnerId
         let here = ActionMenuItem("This Mac", symbol: app.selfRunnerIcon, checked: chosen == nil) { app.chooseNewThreadRunner(nil) }
+        if byDefault == nil { here.markDefault() }
         menu.addItem(here)
         menu.addItem(.separator())
         for runner in app.remoteRunners {
             let item = ActionMenuItem(runner.name, symbol: RunnerIcon.symbol(runner.icon), checked: chosen == runner.id) { app.chooseNewThreadRunner(runner.id) }
             if !runner.online { item.subtitle = "Offline" }
+            if byDefault == runner.id { item.markDefault() }
             menu.addItem(item)
         }
+        // Where new threads start, set right here as the link menus' Default
+        // is; the star above says which it is. Settings > Runners has it too.
+        menu.addItem(.separator())
+        let defaults = NSMenu()
+        defaults.addItem(ActionMenuItem("This Mac", symbol: app.selfRunnerIcon, checked: byDefault == nil) { app.setDefaultRunner(nil) })
+        for runner in app.remoteRunners {
+            defaults.addItem(ActionMenuItem(runner.name, symbol: RunnerIcon.symbol(runner.icon), checked: byDefault == runner.id) { app.setDefaultRunner(runner.id) })
+        }
+        let defaultItem = NSMenuItem(title: "Default", symbol: "star", action: nil)
+        defaultItem.submenu = defaults
+        menu.addItem(defaultItem)
         // On another runner there's no "+": its folders are here.
         if draftRunnerId != nil, app.newThreadLogins != nil {
             menu.addItem(.separator())

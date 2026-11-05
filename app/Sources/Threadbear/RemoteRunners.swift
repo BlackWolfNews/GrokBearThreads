@@ -27,6 +27,7 @@ extension AppModel {
         remoteIndex = remote
         if remoteRunners != remote.runners { remoteRunners = remote.runners }
         applyRemoteIndex()
+        applyDefaultRunner()
     }
 
     /// Puts the table's rows in `threads`, except where that runner's own
@@ -170,7 +171,8 @@ extension AppModel {
     /// with its logins before Mike sends. The folder, login and pool
     /// picked so far were this Mac's, so they go back to that runner's
     /// defaults (and this Mac's when he comes back to it).
-    func chooseNewThreadRunner(_ runnerId: String?) {
+    func chooseNewThreadRunner(_ runnerId: String?, byMike: Bool = true) {
+        if byMike { newThreadRunnerPicked = true }
         guard runnerId != newThreadRunnerId else { return }
         newThreadRunnerId = runnerId
         newThreadRunnerProblem = nil
@@ -190,6 +192,28 @@ extension AppModel {
                 newThreadRunnerProblem = Self.remoteFileReason(error)
             }
         }
+    }
+
+    /// Makes `runnerId` (nil: this Mac) the default, and the runner the
+    /// draft in front of Mike starts on.
+    func setDefaultRunner(_ runnerId: String?) {
+        defaultRunnerId = runnerId
+        newThreadRunnerPicked = false
+        applyDefaultRunner()
+    }
+
+    /// The default runner, if it can take a new thread now (listed, online,
+    /// and paired with this Mac), else this Mac. Nothing happens once Mike
+    /// has picked one for this draft himself.
+    func applyDefaultRunner() {
+        guard !newThreadRunnerPicked else { return }
+        chooseNewThreadRunner(defaultRunnerReady ? defaultRunnerId : nil, byMike: false)
+    }
+
+    /// The default is another runner that a new thread can go to now.
+    var defaultRunnerReady: Bool {
+        guard let id = defaultRunnerId, let runner = remoteRunners.first(where: { $0.id == id }) else { return false }
+        return runner.online && runner.tokenFile != nil
     }
 
     /// The runner a new thread will be made on, when it isn't this Mac.
@@ -228,8 +252,10 @@ extension AppModel {
                 var made = try await client.createThread(newThreadRequest(text: text, images: []))
                 if drafts["new"] == draft { drafts["new"] = nil }
                 // The runner, folder, "Ask before edits" and picks were for
-                // this thread; the next starts on this Mac's defaults.
+                // this thread; the next starts on the defaults again,
+                // the default runner's included (applyDefaultRunner below).
                 newThreadRunnerId = nil
+                newThreadRunnerPicked = false
                 newThreadRunnerProblem = nil
                 newThreadCwd = nil
                 newThreadPermission = .full
@@ -240,6 +266,7 @@ extension AppModel {
                 liveRemote.insert(made.id)
                 threads[made.id] = made
                 select(made.id)
+                applyDefaultRunner()
             } catch let unreachable as RemoteUnreachable {
                 // The draft never left the box.
                 newThreadRunnerProblem = unreachable.detail

@@ -239,6 +239,16 @@ final class AppModel {
     /// (`newThreadLogins`), and the thread is made over its connection.
     /// For one thread, like the folder: back to this Mac after it starts.
     var newThreadRunnerId: String?
+    /// The runner new threads start on when Mike hasn't picked one (the
+    /// starred row in the machine chip's menu, and Settings > Runners): nil
+    /// for this Mac. This Mac's own choice, kept across launches.
+    var defaultRunnerId: String? = UserDefaults.standard.string(forKey: AppModel.defaultRunnerKey) {
+        didSet { UserDefaults.standard.set(defaultRunnerId, forKey: Self.defaultRunnerKey) }
+    }
+    static let defaultRunnerKey = "defaultRunnerId"
+    /// Mike picked this draft's runner himself, so the default doesn't
+    /// move it when the runner list next changes.
+    var newThreadRunnerPicked = false
     /// Why the chosen runner can't be reached, for the composer to say.
     var newThreadRunnerProblem: String?
     /// The account Mike picked for the next new thread, for that draft only:

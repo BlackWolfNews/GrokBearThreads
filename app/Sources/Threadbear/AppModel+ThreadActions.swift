@@ -280,6 +280,10 @@ extension AppModel {
                     newThreadProvider = nil
                     threads[thread.id] = thread
                     select(thread.id)
+                    // "This Mac" was for this thread; the next starts on
+                    // the default runner again.
+                    newThreadRunnerPicked = false
+                    applyDefaultRunner()
                 } catch {
                     // The draft never left the box.
                     show(error)

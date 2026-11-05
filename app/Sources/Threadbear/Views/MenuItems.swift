@@ -158,3 +158,14 @@ final class ActionMenuItem: NSMenuItem {
 
     @objc private func run() { handler() }
 }
+
+extension NSMenuItem {
+    /// A small star at the row's trailing edge: this row is the default,
+    /// as the model picker's star says (ModelRow). A badge rather than a
+    /// picture in the title, so the title stays the plain name that
+    /// scripts and tests find the item by.
+    func markDefault() {
+        badge = NSMenuItemBadge(string: "★")
+    }
+}
+
