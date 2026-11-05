@@ -1157,11 +1157,18 @@ extension ComposerTextView {
         return CardMentions.threadReference(id: id, title: threads[id]?.title ?? "")
     }
 
+    private static func isPlainText(_ type: NSPasteboard.PasteboardType) -> Bool {
+        type == .string || type.rawValue == "NSStringPboardType"
+    }
+
     override func readSelection(from pboard: NSPasteboard, type: NSPasteboard.PasteboardType) -> Bool {
         // A card's link pasted back (or from a message) is a chip again, and
         // so is a thread's id from "Copy thread id" (Mike asked 5 Nov): it
         // goes in as a thread: link with the thread's title.
-        if type == .string, var words = pboard.string(forType: .string), let storage = textStorage,
+        // A real ⌘V asks for the old name of plain text, NSStringPboardType,
+        // not `.string`: checking for `.string` alone missed every paste
+        // (5 Nov).
+        if Self.isPlainText(type), var words = pboard.string(forType: .string), let storage = textStorage,
            !CardMentions.find(in: words).isEmpty || Self.threadReference(words) != nil {
             if let reference = Self.threadReference(words) { words = reference }
             let piece = chips(for: Draft(text: InlinePictures.words(words)))

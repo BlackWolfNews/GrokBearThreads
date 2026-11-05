@@ -422,7 +422,9 @@ enum Automation {
             board.clearContents()
             board.setString(c["text"] as? String ?? "", forType: .string)
             defer { board.releaseGlobally() }
-            return composer.readSelection(from: board, type: .string) ? "ok" : "error paste refused"
+            // The type-less call, as ⌘V makes it: it picks the type itself,
+            // which isn't `.string` (ComposerTextView.isPlainText).
+            return composer.readSelection(from: board) ? "ok" : "error paste refused"
         case "return":
             // `"shift": true` for Shift-Return (a new line, carrying a list on).
             // `"focused": true` presses it where the cursor is, as `type` does.
