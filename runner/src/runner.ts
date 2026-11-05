@@ -264,6 +264,9 @@ export type Turn = {
   // What endTurn was before the latest call, until that call's result says
   // whether it replaced it (a repeat doesn't).
   endTurnBefore?: Record<string, unknown>;
+  // An end_turn of either form was taken (endTurnTaken): ended is only the
+  // one-reply form's, and Codex's bullets form says "Noted. Now write".
+  tookEndTurn?: boolean;
   lastText?: string;
   // The agent's latest end_turn call, and whether one was accepted since
   // Mike last wrote. Text after that is dropped: end_turn has already told
@@ -674,8 +677,6 @@ export class Runner {
     this.flush();
     for (const st of this.threads.values()) if (st.rec.queue.some(q => q.reviewId) && this.bucket(st.rec) === 'inbox') this.kickQueue(st);
     this.armSnoozeTimer();
-    // A thread waited on may have finished while this runner was down.
-    this.reconcileWaits();
     // Waits for room are in thread.json, so they outlive a restart.
     this.armRoomTimer();
     // So are waits for the network.
@@ -1278,6 +1279,9 @@ export class Runner {
         throw new RpcError(ErrorCode.badParams, (e as Error).message);
       }
     });
+    // New work: its last finish no longer says it's done, for threads
+    // waiting on it (runner/hibernation.ts).
+    delete rec.finished;
     // Sending to a snoozed or archived thread brings it back.
     if (rec.snoozedUntil || rec.archivedAt) {
       delete rec.snoozedUntil;
@@ -1694,7 +1698,8 @@ export class Runner {
           if (ev.type === 'tool.result' && ev.itemId === rt.turn.endTurnCall) {
             // Any refusal after one it took, not just ALREADY_ENDED: a bad
             // snooze or waitFor on a repeat once turned an ask into Done.
-            if (endTurnRefusedRepeat(ev) || (!ev.ok && rt.turn.ended)) rt.turn.endTurn = rt.turn.endTurnBefore;
+            if (endTurnRefusedRepeat(ev) || (!ev.ok && (rt.turn.ended || rt.turn.tookEndTurn))) rt.turn.endTurn = rt.turn.endTurnBefore;
+            else if (endTurnTaken(ev)) rt.turn.tookEndTurn = true;
             else if (endTurnAddedArchive(ev)) rt.turn.endTurn = { ...rt.turn.endTurnBefore, archive: true };
             else if (endTurnAddedSnooze(ev)) rt.turn.endTurn = { ...rt.turn.endTurnBefore, snooze: rt.turn.endTurn?.snooze };
           }
@@ -1916,6 +1921,8 @@ export class Runner {
     // "still waiting" and "it's back" read as one breath).
     const wokeBy = rt.finished.map((t) => ({ kind: t.kind, description: t.description }));
     rt.finished = [];
+    // Working again, so not finished for threads waiting on it.
+    delete rec.finished;
     const turnId = crypto.randomUUID();
     this.emit(st, wokeBy.length ? { type: 'turn.started', turnId, wokeBy } : { type: 'turn.started', turnId }, turnId);
     rt.idleTimer?.cancel();
@@ -2005,20 +2012,21 @@ export class Runner {
     // Waiting on other threads (end_turn's waitFor), with snooze as the
     // latest it wakes.
     const waitFor = away && !archive ? waitForFromTool(turn.endTurn) : undefined;
-    this.endTurn(st, ev.seq, outcome === 'failed' ? 'error' : 'idle', outcome, limitHit, netLost);
     // Done, with nothing left running: any thread waiting on this one hears.
     // Not if it put itself away to wait too, as it hasn't finished. An auto
     // turn counts (the one after a sub-agent or background job ends is
     // often where the report is), so this reads end_turn itself, not `away`.
+    // Judged before endTurn, which starts any queued message.
     const finished = outcome === 'completed' && said?.needs === 'nothing' && !rec.queue.length && !archive &&
       !snoozeFromTool(turn.endTurn) && !waitForFromTool(turn.endTurn) &&
       !rec.subagents?.some((a) => a.status === 'running') && !rt.tasks.length;
+    this.endTurn(st, ev.seq, outcome === 'failed' ? 'error' : 'idle', outcome, limitHit, netLost);
     if (finished) this.markFinished(st, turn.lastText);
     if (archive && !rt.turn && !rec.archivedAt && !this.stopping) {
       this.emit(st, { type: 'system.note', text: 'Archived, as the agent was asked to once it had finished.' });
       this.update({ threadId: rec.id, archived: true });
     }
-    if (waitFor && !rt.turn && !rec.archivedAt && !this.stopping) this.waitOn(st, waitFor, snooze, turn.startedAt);
+    if (waitFor && !rt.turn && !rec.archivedAt && !this.stopping) this.waitOn(st, waitFor, snooze);
     else if (snooze && !rt.turn && !rec.archivedAt && !this.stopping) this.snoozeAfterTurn(st, snooze);
   }
 

@@ -58,12 +58,13 @@ export type ThreadRecord = {
   snoozedUntilRestart?: boolean; // snoozedUntil is UNTIL_RESTART; start() wakes it
   wakeWhen?: WakeWhen; // hibernated in Mike's words (wake-when.ts)
   // Hibernating until these threads finish (end_turn's waitFor,
-  // runner/hibernation.ts): each counts once it has finished, been
-  // archived or been deleted since `since` (the waiting turn's start).
-  waitingOn?: { threadId: string; title: string; since: string; done?: { at: string; how: 'finished' | 'archived' | 'deleted'; reply?: string } }[];
+  // runner/hibernation.ts): each counts once it has finished (with no new
+  // work since), been archived or been deleted.
+  waitingOn?: { threadId: string; title: string; done?: { at: string; how: 'finished' | 'archived' | 'deleted'; reply?: string } }[];
   // Its last finished turn (nothing needed, nothing left running) and that
   // turn's reply, for threads waiting on it, including on a runner it
-  // moves to (runner/hibernation.ts, reconcileWaits).
+  // moves to (runner/hibernation.ts, reconcileWaits). Cleared by any new
+  // work (a message, a turn its CLI opens), so no clock is compared.
   finished?: { at: string; reply?: string };
   snoozedAt?: string; // when it was last put away, for how long it slept; may be stale once awake
   woke?: { at: string; since?: string }; // woke by itself and not looked at yet (since = snoozedAt)

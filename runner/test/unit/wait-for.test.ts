@@ -152,3 +152,55 @@ test('end_turn: a refused repeat keeps the card the first one set', () => {
   s.result();
   assert.equal(h.runner.get(waiter).needs, 'you');
 });
+
+test('waitFor: a finish with a message queued behind it is not done', () => {
+  const { h, waiter, target, session, turn } = setup();
+  turn(waiter, { needs: 'nothing', waitFor: [target] });
+  h.runner.send(target, 'first job');
+  const s = session(target);
+  h.runner.send(target, 'second job', [], { queue: true });
+  s.out({ kind: 'event', event: { type: 'tool.call', itemId: 'e1', name: END_TURN, kind: 'mcp', title: 'end_turn', input: { needs: 'nothing' } } });
+  s.text('m1', 'First done.');
+  s.result();
+  assert.ok(h.runner.get(waiter).snoozedUntil, 'still waiting: the queued job started');
+});
+
+test('waitFor: an earlier finish does not count once the thread has new work', () => {
+  const { h, waiter, target, session, turn } = setup();
+  turn(target, { needs: 'nothing' }, 'Unrelated earlier report.');
+  // The waiting turn sets the target going, then waits on it.
+  h.runner.send(waiter, 'go on');
+  h.runner.send(target, 'measure it');
+  const s = session(waiter);
+  s.out({ kind: 'event', event: { type: 'tool.call', itemId: 'e1', name: END_TURN, kind: 'mcp', title: 'end_turn', input: { needs: 'nothing', waitFor: [target] } } });
+  s.text('m1', 'Waiting.');
+  s.result();
+  assert.ok(h.runner.get(waiter).snoozedUntil, 'the old finish is not the answer');
+  const b = session(target);
+  b.out({ kind: 'event', event: { type: 'tool.call', itemId: 'e9', name: END_TURN, kind: 'mcp', title: 'end_turn', input: { needs: 'nothing' } } });
+  b.text('m9', 'The measurement.');
+  b.result();
+  assert.equal(h.runner.get(waiter).snoozedUntil, undefined);
+  assert.match(h.events(waiter).filter((e) => e.type === 'user.message').at(-1).text, /The measurement\./);
+});
+
+test('waitFor: waiting on an idle thread that already finished wakes at once with its reply', () => {
+  const { h, waiter, target, turn } = setup();
+  turn(target, { needs: 'nothing' }, 'Already done.');
+  turn(waiter, { needs: 'nothing', waitFor: [target] });
+  assert.equal(h.runner.get(waiter).snoozedUntil, undefined);
+  assert.match(h.events(waiter).filter((e) => e.type === 'user.message').at(-1).text, /Already done\./);
+});
+
+test("end_turn: a refused repeat keeps the card on Codex's form too", () => {
+  const { h, waiter, session } = setup();
+  h.runner.send(waiter, 'go on');
+  const s = session(waiter);
+  s.out({ kind: 'event', event: { type: 'tool.call', itemId: 'e1', name: END_TURN, kind: 'mcp', title: 'end_turn', input: { needs: 'you', asks: [{ question: 'Deploy it?' }] } } });
+  s.out({ kind: 'event', event: { type: 'tool.result', itemId: 'e1', ok: true, text: 'Noted. Now write your final answer.', truncated: false, images: [] } });
+  s.out({ kind: 'event', event: { type: 'tool.call', itemId: 'e2', name: END_TURN, kind: 'mcp', title: 'end_turn', input: { needs: 'nothing', waitFor: [waiter] } } });
+  s.out({ kind: 'event', event: { type: 'tool.result', itemId: 'e2', ok: false, text: "Not ended: waitFor can't name this thread.", truncated: false, images: [] } });
+  s.text('m1', 'Want me to deploy?');
+  s.result();
+  assert.equal(h.runner.get(waiter).needs, 'you');
+});

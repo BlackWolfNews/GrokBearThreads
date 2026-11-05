@@ -511,6 +511,9 @@ async function main(): Promise<void> {
   restarter.resumeAfterRestart();
   runner.tellStoppedWork();
   runner.carryOnStopped();
+  // A thread waited on may have finished while the runner was down. Only
+  // now: waking one starts its CLI, whose tools need what's set up above.
+  runner.reconcileWaits();
 
   let stopping = false;
   const stop = async (signal: string) => {

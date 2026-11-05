@@ -117,7 +117,7 @@ export type PeersDeps = {
   log: Logger;
   // Where handed-over threads go, and how the peers' notifications reach
   // this runner's clients (and its schedules and restarter).
-  runner: Pick<Runner, 'adopt' | 'publish'>;
+  runner: Pick<Runner, 'adopt' | 'publish'> & Partial<Pick<Runner, 'waitedOnDeleted'>>;
   // Usage readings from the draining runners' turns (drain.usage).
   usage?: (accountId: string, reading: UsageReading) => void;
   // Whenever what status() says changes (runner.updates, main.ts).
@@ -229,6 +229,8 @@ export class Peers {
         break;
       case 'thread.deleted':
         if (typeof id !== 'string' || !peer.threads.delete(id)) return;
+        // A thread here may be waiting on it (end_turn's waitFor).
+        this.deps.runner.waitedOnDeleted?.(id);
         this.deps.onChange?.();
         break;
       case 'runner.notice':

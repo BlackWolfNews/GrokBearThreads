@@ -1970,26 +1970,29 @@ the thread if a sub-agent stalls, so an ask can't stay hidden for good.
   `snooze`, with `waitingOn` on its summary and a `system.note`
   ("Hibernating until "X" finishes, or <time> at the latest."). `snooze`
   is then the latest it wakes, as a time (words aren't read here); left
-  out, a day. A named thread is done when, since the waiting turn
-  started, it has finished a turn (its own or one its CLI opened after a
-  job ended) with `needs: "nothing"`, nothing queued, no sub-agent or
-  background job running and no `snooze` or `waitFor` of its own, or has
-  been archived or deleted. The runner keeps each thread's last finish
-  and its reply on the thread (`finished` in thread.json), and checks the
-  waits whenever one could have come true: a finish, an archive, a
-  delete, a new wait, a start, and a thread coming across from a draining
-  runner (so a finish on the old runner still counts). Once every one is
-  done the thread wakes (a "Woke up … finished." note) and gets a
-  `user.message` with `origin: "runner"` naming each with up to 2,000
-  characters of the reply it finished with. A message, a wake or another
-  snooze first clears `waitingOn`, so a thread that sends its report
-  wakes it as before and its finishing later does nothing. The handler
-  refuses its own id, an archived thread, an unknown id and `needs:
-  "you"`; one gone by the time the turn ends is left out with a note, and
-  if none are left the thread stays in the inbox. Any refused `end_turn`
-  after one it took leaves the first one's card, not just
-  `ALREADY_ENDED`. Before 5 Nov 2026 a thread waiting on another thread
-  could only end as done in Mike's inbox and hope to be messaged.
+  out, a day. A named thread is done once it has finished a turn (its own
+  or one its CLI opened after a job ended) with `needs: "nothing"`,
+  nothing queued, no sub-agent or background job running and no `snooze`
+  or `waitFor` of its own, with no new work since; or has been archived
+  or deleted. The runner keeps each thread's last finish and its reply on
+  the thread (`finished` in thread.json) and drops it at any new work (a
+  message, a turn its CLI opens), so no clocks are compared: waiting on an
+  idle thread that has finished wakes at once with that reply, and one set
+  going in the waiting turn counts only when it finishes that. The waits
+  are checked whenever one could have come true: a finish, an archive, a
+  delete (on a draining runner too), a new wait, a thread coming across
+  from a draining runner, and once a starting runner is listening. Once
+  every one is done the thread wakes (a "Woke up … finished." note) and
+  gets a `user.message` with `origin: "runner"` naming each with up to
+  2,000 characters of the reply it finished with. A message, a wake or
+  another snooze first clears `waitingOn`, so a thread that sends its
+  report wakes it as before and its finishing later does nothing. The
+  handler refuses its own id, an archived thread, an unknown id and
+  `needs: "you"`; one gone by the time the turn ends is left out with a
+  note, and if none are left the thread stays in the inbox. Any refused
+  `end_turn` after one it took (either form) leaves the first one's card,
+  not just `ALREADY_ENDED`. Before 5 Nov 2026 a thread waiting on another
+  thread could only end as done in Mike's inbox and hope to be messaged.
 - **The fallback.** A completed turn with no `end_turn` call is read for
   the "What I need from you" section Mike's own instructions ask for: the
   last line near the end that is just that heading in bold, then its

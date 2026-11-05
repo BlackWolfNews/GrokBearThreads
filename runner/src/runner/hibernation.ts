@@ -101,18 +101,15 @@ export const hibernationPart = {
   // deleted), then wakes with what they said. A thread that never hears
   // wakes at the snooze time, or after a day. Before 5 Nov 2026 a thread
   // waiting on another's report could only end as done, in the inbox.
-  waitOn(this: Runner, st: ThreadState, ids: string[], when: string | undefined, turnStart: number): void {
+  waitOn(this: Runner, st: ThreadState, ids: string[], when: string | undefined): void {
     const { rec } = st;
-    const list: { threadId: string; title: string; since: string }[] = [];
+    const list: { threadId: string; title: string }[] = [];
     const skipped: string[] = [];
-    // From the waiting turn's start, so a thread it set going in that turn
-    // and that finished before the turn was over still counts.
-    const since = new Date(turnStart).toISOString();
     for (const id of ids) {
       const hits = [...this.threads.values()].filter((t) => !t.rt.deleted && (t.rec.id === id || t.rec.id.startsWith(id)));
       const t = hits.length === 1 ? hits[0] : undefined;
       if (!t || t === st || t.rec.archivedAt) skipped.push(id);
-      else if (!list.some((x) => x.threadId === t.rec.id)) list.push({ threadId: t.rec.id, title: t.rec.title, since });
+      else if (!list.some((x) => x.threadId === t.rec.id)) list.push({ threadId: t.rec.id, title: t.rec.title });
     }
     if (!list.length) {
       this.emit(st, { type: 'system.note', text: `Not hibernated: none of the threads it was to wait on (${ids.join(', ')}) are here and still going.` });
@@ -135,7 +132,8 @@ export const hibernationPart = {
     const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const also = skipped.length ? ` (${skipped.join(', ')} isn't a thread here that's still going, so it isn't waited on.)` : '';
     this.emit(st, { type: 'system.note', text: `Hibernating until ${names} ${list.length === 1 ? 'finishes' : 'finish'}, or ${localWhen(Date.parse(until), timeZone)} at the latest.${also}` });
-    // One may have finished already, while this turn was ending.
+    // One may have finished already (while this turn was ending, or before
+    // it with nothing new since): it wakes now with that reply.
     this.reconcileWaits();
   },
 
@@ -168,8 +166,8 @@ export const hibernationPart = {
     this.reconcileWaits();
   },
 
-  // Marks each wait whose thread has finished or been archived since it
-  // began, and wakes any thread whose waits are all done with their
+  // Marks each wait whose thread has finished (with no new work since) or
+  // been archived, and wakes any thread whose waits are all done with their
   // replies. Run whenever that could have changed: a finish, an archive,
   // a delete, a new wait, a start and a thread coming across from a
   // draining runner. A thread not here (still on that runner) waits.
@@ -181,10 +179,9 @@ export const hibernationPart = {
         if (w.done) continue;
         const t = this.threads.get(w.threadId);
         if (!t || t.rt.deleted) continue;
-        const since = Date.parse(w.since);
         const fin = t.rec.finished;
-        if (fin && Date.parse(fin.at) >= since) w.done = { at: fin.at, how: 'finished', ...(fin.reply ? { reply: fin.reply } : {}) };
-        else if (t.rec.archivedAt && Date.parse(t.rec.archivedAt) >= since) w.done = { at: t.rec.archivedAt, how: 'archived' };
+        if (fin) w.done = { at: fin.at, how: 'finished', ...(fin.reply ? { reply: fin.reply } : {}) };
+        else if (t.rec.archivedAt) w.done = { at: t.rec.archivedAt, how: 'archived' };
         else continue;
         w.title = t.rec.title;
         this.markDirty(st);
