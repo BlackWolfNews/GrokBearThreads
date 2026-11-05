@@ -30,45 +30,34 @@ struct DevicesSettings: View {
                 Section {
                     Text("Your threads aren't mirrored to Convex yet (\(reason)), so there's nothing for a phone or browser to read.")
                         .foregroundStyle(.secondary)
-                    Text("Run ./threadbear setup in the repo, then come back here.")
+                    Text("Ask your agent to set it up, or run ./threadbear setup in the repo, then come back here.")
                         .foregroundStyle(.secondary)
                 }
             } else {
-                Section {
-                    LabeledContent {
+                SettingsSection("Add a phone or browser",
+                                about: "The Threadbear iPhone app shows your inbox, lets you reply, approve and start threads, and gets a push when a thread needs you. It reads the Convex mirror, so it works while the Mac is asleep.\n\nThe website is your threads on the web, at \(app.devicesSite ?? "your deployment's .convex.site address"): a link you can paste anywhere. Each browser keeps a key of its own; sign another one in from here too.",
+                                ask: "put the iPhone app on your phone, or change how the mirror is set up.") {
+                    LabeledContent("iPhone") {
                         Button("Show the code…") { pairPhone() }
                             .disabled(pairing)
                             .tip("A code to scan with the Threadbear iPhone app. It pairs the phone with your threads for 90 days.")
-                    } label: {
-                        HStack(spacing: 6) {
-                            Text("iPhone")
-                            InfoTip("The Threadbear iPhone app shows your inbox, lets you reply, approve and start threads, and gets a push when a thread needs you. It reads the Convex mirror, so it works while the Mac is asleep.")
-                        }
                     }
-                    LabeledContent {
+                    LabeledContent("Website") {
                         Button("Open signed in") { openBrowser() }
                             .disabled(opening)
                             .tip("Opens your Threadbear website in \(DefaultBrowser.current()?.name ?? "your browser"), signed in for 90 days")
-                    } label: {
-                        HStack(spacing: 6) {
-                            Text("Website")
-                            InfoTip("Your threads on the web, at \(app.devicesSite ?? "your deployment's .convex.site address"): a link you can paste anywhere. The browser keeps a key of its own; sign another browser in from here too.")
-                        }
                     }
                 }
 
-                Section {
+                SettingsSection("Paired",
+                                about: "Each phone and browser holds a key of its own, good for 90 days. Revoke signs that one out at its next request; pair it again for a new key.",
+                                ask: "explain what a paired phone or browser can see and do.") {
                     if app.devices.isEmpty {
                         Text(app.devicesLoaded ? "Nothing paired yet" : "Loading…")
                             .foregroundStyle(.secondary)
                     }
                     ForEach(app.devices) { device in
                         DeviceRow(device: device) { app.revoke(device) }
-                    }
-                } header: {
-                    HStack(spacing: 6) {
-                        Text("Paired")
-                        InfoTip("Each phone and browser holds a key of its own, good for 90 days. Revoke signs that one out at its next request; pair it again for a new key.")
                     }
                 }
             }
@@ -142,21 +131,6 @@ private struct DeviceRow: View {
         case .browser: "globe"
         case .other: "questionmark.circle"
         }
-    }
-}
-
-/// A small ⓘ with the explanation in its tooltip, so the form's visible
-/// text stays short.
-struct InfoTip: View {
-    let text: String
-    init(_ text: String) { self.text = text }
-
-    var body: some View {
-        Image(systemName: "info.circle")
-            .font(.system(size: 11))
-            .foregroundStyle(.tertiary)
-            .tip(text)
-            .accessibilityLabel(text)
     }
 }
 

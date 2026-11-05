@@ -11,7 +11,9 @@ struct RunnersSettings: View {
 
     var body: some View {
         Form {
-            Section {
+            SettingsSection("Default runner",
+                            about: "Where a new thread runs unless you pick another machine on the composer. This is this Mac's own choice.",
+                            ask: "change it, or to set up another machine to run threads on.") {
                 LabeledContent("New threads start on") {
                     Picker("New threads start on", selection: defaultBinding) {
                         Label("This Mac", systemImage: app.selfRunnerIcon).tag(String?.none)
@@ -25,15 +27,12 @@ struct RunnersSettings: View {
                 }
             }
 
-            Section {
+            SettingsSection("Runners",
+                            about: "The machines your threads can run on. Each runner is set up on its own machine.",
+                            ask: "add one, rename one, pair it with this Mac or change how it runs. It knows how, and a Linux server's steps are in INSTALL.md.") {
                 RunnerRow(icon: app.selfRunnerIcon, name: selfName, status: "This Mac", isDefault: app.defaultRunnerId == nil)
                 ForEach(app.remoteRunners) { runner in
                     RunnerRow(icon: RunnerIcon.symbol(runner.icon), name: runner.name, status: status(runner), isDefault: app.defaultRunnerId == runner.id)
-                }
-            } header: {
-                HStack(spacing: 6) {
-                    Text("Runners")
-                    InfoTip("Each runner is set up on its own machine. To add one, rename one, pair it with this Mac or change how it runs, ask your agent: it knows how, and a Linux server's steps are in INSTALL.md.")
                 }
             }
         }

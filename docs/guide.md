@@ -848,6 +848,13 @@ cleanly later. A thread there gets its own copy of the code to work in, and when
 the change is ready and its checks pass, the agent lands it on your `main`
 branch.
 
+The same goes for settings. The Settings window (⌘,) shows what's set and has
+controls for only a few common things, and the ⓘ beside each section says
+what it is and what to ask your agent. Click it to read it, or hover for a
+quick look. Most settings live in `runner.json` in Threadbear's data folder,
+and an agent can change them or set up anything more involved, so ask one
+first.
+
 Updates then arrive by themselves. Within a few minutes of a change landing
 on `main`, the runner builds it and switches over without cutting off any
 thread that's partway through a turn, and the app builds its new version in

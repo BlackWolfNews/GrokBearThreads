@@ -470,7 +470,8 @@ enum Automation {
             // presses a SwiftUI control with that tooltip, through the window
             // as a real click would go, without moving the pointer.
             if let tip = c["tip"] as? String {
-                guard let window = mainWindow, let content = window.contentView,
+                // {"settings": true}: in the Settings window (open it with `settings`).
+                guard let window = c["settings"] as? Bool == true ? SettingsWindow.current : mainWindow, let content = window.contentView,
                       let anchor = all(TipAnchorView.self, in: content).last(where: { $0.text == tip && !$0.isHiddenOrHasHiddenAncestor })
                 else { return "error no control with the tip \(tip)" }
                 let center = anchor.convert(NSPoint(x: anchor.bounds.midX, y: anchor.bounds.midY), to: nil)
@@ -1135,6 +1136,12 @@ enum Automation {
             if let id = c["panel"] as? String {
                 guard let panel = NSApp.windows.first(where: { ($0 as? DockPanelWindow)?.panel == id && $0.isVisible }) else { return "error \(id) has no window of its own" }
                 window = panel
+            }
+            // {"popover": true}: the popover that's up (an ⓘ's, say), a window
+            // of its own that a capture of the one under it leaves out.
+            if c["popover"] as? Bool == true {
+                guard let popover = NSApp.windows.last(where: { $0.isVisible && String(describing: type(of: $0)).contains("Popover") }) else { return "error no popover" }
+                window = popover
             }
             window.displayIfNeeded()
             try? await Task.sleep(for: .milliseconds(300))

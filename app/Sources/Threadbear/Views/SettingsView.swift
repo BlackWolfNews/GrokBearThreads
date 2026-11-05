@@ -81,7 +81,9 @@ private struct GeneralSettings: View {
     var body: some View {
         SettingsGate { settings in
             Form {
-                Section {
+                SettingsSection("New threads",
+                                about: "Where a new thread starts when you don't pick a folder.",
+                                ask: "change it, or anything else about how threads run. Most settings aren't shown here, and your agent edits them in runner.json.") {
                     LabeledContent("Default folder") {
                         HStack(spacing: 8) {
                             Text(SettingsText.folder(settings.defaultCwd))
@@ -92,8 +94,6 @@ private struct GeneralSettings: View {
                                 .tip("Pick the folder new threads start in")
                         }
                     }
-                } footer: {
-                    Footnote("Where a new thread starts when you don't pick a folder.")
                 }
 
                 // One reply, Bullet replies, the two live-CLI steppers and
@@ -101,23 +101,19 @@ private struct GeneralSettings: View {
                 // as possible, the defaults suit nearly everyone, and anyone
                 // who wants one changed asks an agent to edit runner.json.
 
-                Section {
-                    Toggle(isOn: $activityLog) {
-                        HStack(spacing: 6) {
-                            Text("Keep an activity log")
-                            // What's in it, for anyone wary of turning it
-                            // on; the footnote is why they'd want to.
-                            InfoTip("It notes the buttons, rows and menu items you use (by their tooltips and titles), your shortcuts, the threads and pages you open, and when you send or answer something, never what you type. Agents read it with tb activity.")
-                        }
-                    }
-                    .tip("Note what you click and open in this app")
-                } footer: {
-                    // Why it's worth turning on (Mike, 29 Oct).
-                    Footnote("When you ask a thread to change Threadbear, its agent can check this log first to see how you really use the app. It stays on this Mac for 30 days and Threadbear never sends it anywhere.")
+                // Why it's worth turning on (Mike, 29 Oct), then what's in it,
+                // for anyone wary of turning it on.
+                SettingsSection("Activity log",
+                                about: "When you ask a thread to change Threadbear, its agent can check this log first to see how you really use the app. It notes the buttons, rows and menu items you use (by their tooltips and titles), your shortcuts, the threads and pages you open, and when you send or answer something, never what you type. It stays on this Mac for 30 days and Threadbear never sends it anywhere.",
+                                ask: "read it with tb activity and tell you what's in it.") {
+                    Toggle("Keep an activity log", isOn: $activityLog)
+                        .tip("Note what you click and open in this app")
                 }
 
-                Section {
-                    LabeledContent("Runner version") {
+                SettingsSection("Runner",
+                                about: "The background program that runs your threads. It updates itself.",
+                                ask: "check on it if something seems wrong. Your agent can read its status and logs.") {
+                    LabeledContent("Version") {
                         Text(app.runnerVersion.isEmpty ? "Not connected" : app.runnerVersion)
                             .textSelection(.enabled)
                     }
@@ -155,7 +151,9 @@ private struct ModelSettings: View {
         SettingsGate { settings in
             Form {
                 if settings.models.poolSupported {
-                    Section {
+                    SettingsSection("Small jobs",
+                                    about: "Titles and the librarian use Haiku on one of this pool's Claude logins, the one with the most room, and count towards its usage. When every login is out of room they wait. None turns them off.",
+                                    ask: "change this, or which model and effort new threads start on. Your agent edits them in runner.json.") {
                         Picker("Run on", selection: poolBinding(settings)) {
                             ForEach(claudePools) { pool in
                                 Label(pool.title, systemImage: Pools.symbol(pool, accounts: app.accounts)).labelStyle(.titleAndIcon).tag(Optional(pool.id))
@@ -169,14 +167,12 @@ private struct ModelSettings: View {
                             Label("None", systemImage: "nosign").labelStyle(.titleAndIcon).tag(String?.none)
                         }
                         .tip("Which pool's Claude logins write titles and do the librarian's work")
-                    } header: {
-                        Text("Small jobs")
-                    } footer: {
-                        Footnote("Titles and the librarian use Haiku on one of this pool's Claude logins, the one with the most room, and count towards its usage. When every login is out of room they wait. None turns them off.")
                     }
                 }
 
-                Section {
+                SettingsSection("Private folders",
+                                about: "Nothing from threads in these folders, or in folders inside them, is sent for titles and other small jobs.",
+                                ask: "add several at once. Your agent keeps them in runner.json.") {
                     if settings.models.privateFolders.isEmpty {
                         Text("None yet")
                             .foregroundStyle(.secondary)
@@ -200,10 +196,6 @@ private struct ModelSettings: View {
                     }
                     Button("Add Folder…") { addPrivateFolder(settings.models.privateFolders) }
                         .tip("Keep a folder's threads from ever being sent for titles and other small jobs")
-                } header: {
-                    Text("Private folders")
-                } footer: {
-                    Footnote("Nothing from threads in these folders, or in folders inside them, is sent.")
                 }
 
                 SettingsErrorRow()
@@ -276,7 +268,9 @@ private struct PoolSettings: View {
 
     private var form: some View {
         Form {
-            Section {
+            SettingsSection("Pools",
+                            about: "New threads start on their folder's pool, or on the one you picked last. Each turn runs on a login with room, and the thread moves on when that login runs out.",
+                            ask: "set up pools for you, such as one for work and one for everything else, or to add another login.") {
                 ForEach(draft) { pool in
                     PoolListRow(pool: pool, accounts: app.accounts, selected: pool.id == current?.id) { choose(pool.id) }
                 }
@@ -292,14 +286,12 @@ private struct PoolSettings: View {
                     .tip(draft.count < 2 ? "There has to be at least one pool" : "Delete \(current?.title ?? "this pool")")
                 }
                 .buttonStyle(.borderless)
-            } header: {
-                Text("Pools")
-            } footer: {
-                Footnote("New threads start on their folder's pool, or on the one you picked last. Each turn runs on a login with room, and the thread moves on when that login runs out.")
             }
 
             if let pool = current {
-                Section {
+                SettingsSection(pool.title,
+                                about: "Tick the logins this pool can use. A mixed pool tries providers in this order; within one provider, the login with the most room goes first.",
+                                ask: "change its logins or their order, or add a login that isn't listed.") {
                     // A boxed field with the text from its left edge: the
                     // grouped form's own right-aligned one reads as a label,
                     // so renaming was easy to miss.
@@ -330,13 +322,15 @@ private struct PoolSettings: View {
                                        move: { change(Pools.moving(pool, login: entry.account.id, by: $0)) },
                                        drop: { change(Pools.moving(pool, login: $0, onto: entry.account.id)) })
                     }
-                } header: {
-                    Text(pool.title)
-                } footer: {
-                    Footnote("Tick the logins this pool can use. A mixed pool tries providers in this order; within one provider, the login with the most room goes first.")
                 }
 
-                Section {
+                SettingsSection("Folders",
+                                about: "New threads in these folders, or a folder inside one, start on \(pool.title).",
+                                ask: "add folders for you, or move a project's folders to another pool.") {
+                    if pool.folders.isEmpty {
+                        Text("None yet")
+                            .foregroundStyle(.secondary)
+                    }
                     ForEach(pool.folders, id: \.self) { folder in
                         HStack {
                             Image(systemName: "folder")
@@ -358,12 +352,6 @@ private struct PoolSettings: View {
                     }
                     Button("Add Folder…") { addFolders(to: pool) }
                         .tip("Pick folders whose new threads start on \(pool.title)")
-                } header: {
-                    Text("Folders")
-                } footer: {
-                    Footnote(pool.folders.isEmpty
-                        ? "No folders yet. New threads in a folder added here, or a folder inside one, start on \(pool.title)."
-                        : "New threads in these folders, or a folder inside one, start on \(pool.title).")
                 }
             }
 
@@ -620,17 +608,34 @@ private struct LoginToggleRow: View {
     }
 }
 
-/// A grey line under a section.
-private struct Footnote: View {
-    let text: String
-    init(_ text: String) { self.text = text }
+/// A section of settings: its title, and behind the ⓘ what it is and what to
+/// ask your agent. Agents can edit runner.json and the rest, so the window
+/// shows what's set with few controls, and every section says to ask your
+/// agent first (Mike, 5 Nov). Taking `ask` as the end of a sentence keeps
+/// that line in every one. Sections with only a message or an error in them
+/// stay plain `Section`s (SettingsInfoTests checks).
+struct SettingsSection<Content: View>: View {
+    let title: String
+    let about: String
+    let ask: String
+    @ViewBuilder var content: () -> Content
+
+    init(_ title: String, about: String, ask: String, @ViewBuilder content: @escaping () -> Content) {
+        self.title = title
+        self.about = about
+        self.ask = ask
+        self.content = content
+    }
 
     var body: some View {
-        Text(text)
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .fixedSize(horizontal: false, vertical: true)
+        Section {
+            content()
+        } header: {
+            HStack(spacing: 6) {
+                Text(title)
+                InfoTip("\(about)\n\nAsk your agent to \(ask)")
+            }
+        }
     }
 }
 

@@ -13,6 +13,40 @@ extension View {
     }
 }
 
+/// A small ⓘ with the explanation behind it, so the visible text stays short.
+/// Clicking opens it in a popover (Mike's preference: a hover is easy to miss
+/// and doesn't work for everyone), and the text can be selected there; hovering
+/// still shows it as a tip, for a quick look.
+struct InfoTip: View {
+    let text: String
+    @State private var open = false
+
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Button { open.toggle() } label: {
+            Image(systemName: "info.circle")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                // A little bigger than the icon, as it's small to aim at.
+                .padding(2)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        // No tip over its own popover saying the same thing.
+        .tip(open ? "" : text)
+        .accessibilityLabel(text)
+        .popover(isPresented: $open, arrowEdge: .bottom) {
+            Text(text)
+                .font(.system(size: zoomed(12)))
+                .textSelection(.enabled)
+                .frame(width: zoomed(280), alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(12)
+        }
+    }
+}
+
 private struct TipModifier: ViewModifier {
     let text: String
 
