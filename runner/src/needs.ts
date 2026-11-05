@@ -529,10 +529,16 @@ const CODEX_MESSAGE_END_TURN_DESCRIPTION =
 // replies (today's lost the agent's words in 6 of 16), and wrote the reply
 // twice in 2 runs where putting it inside end_turn did in 9
 // (~/dev/me/misc/end-turn-eval/v3). Codex already worked in this order.
+// The "lost track" line: six times from 30 Oct to 5 Nov 2026 Mike had to
+// ask what a piece of work was ("Sorry, I'm not really following") after a
+// long turn or in a thread another agent started, as the reply reported
+// only the latest step (28cee9ef: one experiment's result, never the plan
+// it was for). One line, only then: he likes replies at their usual length.
 const ONE_REPLY_REPLY =
   'Then write your reply as ordinary text straight after it, as your final message. ' +
   'That reply is the only text the user sees from this turn: everything you write before end_turn folds away into your working, out of sight. So don\'t write your answer before calling it, and call no tools after it. ' +
   'The reply: lead with the point and keep it as short as it can be while they can act on it without reading your working. ' +
+  'If they may have lost track (a long turn, work picked up from another thread, a thread they didn\'t start), open with one line on what the work is for and where it stands, before the latest step. ' +
   'A work report is a few bullets of what changed and the result, each linked to where it can be checked: [tests pass](work:npm test) quotes a few words of a step in your working (the command you ran or its description) and opens it there, lit up; [its own thread](thread:<its id from list_threads>) opens another thread; web pages and files link as usual. ' +
   'An explanation, a draft or an answer to their question is prose, at the length it needs. ' +
   'When you\'re asking something, end the reply with what they need to know to answer it, in full, as they never see your thinking: the draft to approve, the options you weighed. The question itself, and what each answer would do, are in the card under the reply, so don\'t repeat them. ' +
