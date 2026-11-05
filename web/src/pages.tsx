@@ -567,7 +567,7 @@ export function RunnerPage({ token, id }: { token: string; id: string }) {
             <div className="page-note">Asking it for its figures…</div>
           ) : null}
           <dl className="facts">
-            {s?.machine ? (
+            {s?.machine || s?.os ? (
               <>
                 <dt>Machine</dt>
                 <dd>{[s.machine, s.os].filter(Boolean).join(', ')}</dd>
@@ -586,7 +586,7 @@ export function RunnerPage({ token, id }: { token: string; id: string }) {
             ) : null}
             <dt>Threads</dt>
             <dd>
-              {running.length} running, {mine.length} in the inbox
+              {running.length} running, {mine.length} not put away
             </dd>
             {logins.length ? (
               <>

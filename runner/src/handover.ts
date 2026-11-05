@@ -375,6 +375,14 @@ export async function connectDrain(port: number, token: string, legacyHeader: bo
 
 const execFileP = promisify(execFile);
 
+// Where lsof is: /usr/sbin on a Mac, /usr/bin on Linux. A fixed path, not a search
+// of PATH, as what it says decides who gets the bearer token. With /usr/sbin alone
+// every check failed on Linux, and with it the tests a release has to pass, which
+// held the cloud runner on an old release for hours (5 Nov).
+export function lsofPath(exists: (file: string) => boolean = fs.existsSync): string {
+  return ['/usr/sbin/lsof', '/usr/bin/lsof'].find(exists) ?? '/usr/sbin/lsof';
+}
+
 // A connected socket to 127.0.0.1:<port> whose other end is an open file of
 // `pid`, a process of this user, as lsof sees it; otherwise it throws and
 // nothing has been sent. The check is on this very connection (its own
@@ -385,7 +393,7 @@ export async function socketOwnedBy(
   pid: number,
   opts: { attempts?: number; lsof?: (args: string[]) => Promise<string>; uidOf?: (pid: number) => Promise<number | undefined> } = {},
 ): Promise<net.Socket> {
-  const lsof = opts.lsof ?? (async (args) => (await execFileP('/usr/sbin/lsof', args, { encoding: 'utf8' })).stdout);
+  const lsof = opts.lsof ?? (async (args) => (await execFileP(lsofPath(), args, { encoding: 'utf8' })).stdout);
   const uidOf = opts.uidOf ?? (async (p) => {
     const out = (await execFileP('/bin/ps', ['-o', 'uid=', '-p', String(p)], { encoding: 'utf8' }).catch(() => ({ stdout: '' }))).stdout.trim();
     return /^\d+$/.test(out) ? Number(out) : undefined;

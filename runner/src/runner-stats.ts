@@ -118,7 +118,8 @@ export function machineSampler(home: string): () => Promise<MachineStats> {
     const cpuPercent = cpuPercentBetween(last, now);
     last = now;
     const [mem, disk, osLabel] = await Promise.all([memory(), fs.promises.statfs(home), (name ??= osName())]);
-    const model = os.cpus()[0]?.model;
+    // Node says "unknown" on some Arm Linux, the Pixel's among them.
+    const model = os.cpus()[0]?.model.trim();
     const load1 = os.platform() === 'win32' ? undefined : os.loadavg()[0];
     return {
       cpuPercent,
@@ -129,7 +130,7 @@ export function machineSampler(home: string): () => Promise<MachineStats> {
       diskTotal: disk.blocks * disk.bsize,
       ...(load1 !== undefined ? { load1: Math.round(load1 * 100) / 100 } : {}),
       uptimeSec: Math.round(os.uptime()),
-      ...(model ? { machine: model } : {}),
+      ...(model && model.toLowerCase() !== 'unknown' ? { machine: model } : {}),
       ...(osLabel ? { os: osLabel } : {}),
     };
   };

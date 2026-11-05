@@ -603,3 +603,10 @@ test('connectDrain: a challenge draining runner is reached by the challenge, bou
   c.close();
   await server.close();
 });
+
+test('lsof is looked for only where a Mac and Linux keep it', async () => {
+  const { lsofPath } = await import('../../src/handover.ts');
+  assert.equal(lsofPath((f) => f === '/usr/sbin/lsof'), '/usr/sbin/lsof');
+  assert.equal(lsofPath((f) => f === '/usr/bin/lsof'), '/usr/bin/lsof');
+  assert.equal(lsofPath(() => false), '/usr/sbin/lsof', 'neither: fails as a missing tool, and the check refuses');
+});
