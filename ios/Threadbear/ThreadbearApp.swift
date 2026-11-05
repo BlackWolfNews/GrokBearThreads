@@ -7,6 +7,10 @@ struct ThreadbearApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var model = AppModel()
     @State private var quick = QuickAskModel()
+    /// A Quick Ask link that would replace the server already set up, waiting for a yes.
+    @State private var confirmQuickAsk: QuickAskLink?
+    /// A Quick Ask link that couldn't be used (not https, or missing its token).
+    @State private var refusedQuickAsk = false
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
@@ -46,8 +50,31 @@ struct ThreadbearApp: App {
                 // it wants, and passing it on would show a "not a pairing link" error.
                 .onOpenURL { url in
                     if url.host() == "open" { return }
-                    if quick.settings.apply(link: url) { quick.settingsChanged(); return }
-                    Task { await model.pair(with: url) }
+                    switch QuickAskLink.parse(url) {
+                    case .success(let link):
+                        if quick.settings.needsConfirmation(link) { confirmQuickAsk = link; return }
+                        quick.settings.apply(link)
+                        quick.settingsChanged()
+                    case .failure(.unusable): refusedQuickAsk = true
+                    case .failure(.notQuickAsk): Task { await model.pair(with: url) }
+                    }
+                }
+                .alert("Use a different Quick Ask server?",
+                       isPresented: Binding(get: { confirmQuickAsk != nil }, set: { if !$0 { confirmQuickAsk = nil } }),
+                       presenting: confirmQuickAsk) { link in
+                    Button("Use \(link.hostName)") {
+                        quick.settings.apply(link)
+                        quick.settingsChanged()
+                        confirmQuickAsk = nil
+                    }
+                    Button("Cancel", role: .cancel) { confirmQuickAsk = nil }
+                } message: { link in
+                    Text("This link sends your questions to \(link.hostName) instead of \(quick.settings.baseURL.map(QuickAskLink.hostName) ?? "the server you set up"). Only say yes if you just scanned a code from your own server.")
+                }
+                .alert("This Quick Ask link can't be used", isPresented: $refusedQuickAsk) {
+                    Button("OK", role: .cancel) {}
+                } message: {
+                    Text("Quick Ask links need a secure (https) server address and a token. Nothing was changed.")
                 }
         }
     }

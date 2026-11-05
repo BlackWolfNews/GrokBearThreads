@@ -93,3 +93,33 @@ private extension AskBody {
         try JSONDecoder().decode(AskBody.self, from: try #require(data))
     }
 }
+
+struct QuickAskLinkTests {
+    private func link(_ string: String) -> Result<QuickAskLink, QuickAskLink.Refusal> {
+        QuickAskLink.parse(URL(string: string)!)
+    }
+
+    @Test func anHttpsLinkIsTaken() throws {
+        let parsed = try link("threadbear://quickask?url=https%3A%2F%2Fbruce.tail9ef766.ts.net%3A9443&token=aa_0123456789abcdef_x").get()
+        #expect(parsed.server == "https://bruce.tail9ef766.ts.net:9443")
+        #expect(parsed.token == "aa_0123456789abcdef_x")
+        #expect(parsed.hostName == "bruce.tail9ef766.ts.net:9443")
+        // No scheme is https.
+        #expect(try link("threadbear://quickask?url=bruce.example.ts.net&token=t").get().server == "bruce.example.ts.net")
+    }
+
+    @Test func plainHttpAndBrokenLinksAreRefused() {
+        #expect(link("threadbear://quickask?url=http%3A%2F%2Fevil.example&token=t") == .failure(.unusable))
+        #expect(link("threadbear://quickask?url=https%3A%2F%2Fok.example") == .failure(.unusable))
+        #expect(link("threadbear://quickask?url=https%3A%2F%2Fok.example&token=") == .failure(.unusable))
+        #expect(link("threadbear://pair?url=https%3A%2F%2Fok.example&token=t") == .failure(.notQuickAsk))
+    }
+
+    @Test func onlyAnotherHostCountsAsAChange() throws {
+        let parsed = try link("threadbear://quickask?url=https%3A%2F%2Fbruce.example.ts.net%3A9443&token=t").get()
+        #expect(!parsed.changesServer(from: nil))
+        #expect(!parsed.changesServer(from: URL(string: "https://Bruce.example.ts.net:9443/")!))
+        #expect(parsed.changesServer(from: URL(string: "https://bruce.example.ts.net")!))
+        #expect(parsed.changesServer(from: URL(string: "https://evil.example:9443")!))
+    }
+}

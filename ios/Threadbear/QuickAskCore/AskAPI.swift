@@ -194,3 +194,47 @@ nonisolated enum AskFailure: Error, Equatable, Sendable {
         return " (\(detail))"
     }
 }
+
+/// A `threadbear://quickask?url=<server>&token=<aa_…>` link, from Agent Archive's QR code.
+/// Opening one hands every later question, and the token, to whatever server it names, so a
+/// link has to be https (Mike's is `tailscale serve`, which always is), and one that would
+/// replace a server already set up is confirmed first (ThreadbearApp).
+nonisolated struct QuickAskLink: Equatable, Sendable {
+    /// The server as the link gave it, kept as typed (Settings shows it).
+    var server: String
+    var token: String
+
+    enum Refusal: Error, Equatable {
+        /// Not a quickask link at all: something else (pairing) may want it.
+        case notQuickAsk
+        /// A quickask link, but missing its server or token, or not https.
+        case unusable
+    }
+
+    static func parse(_ url: URL) -> Result<QuickAskLink, Refusal> {
+        guard url.scheme == "threadbear", url.host() == "quickask" else { return .failure(.notQuickAsk) }
+        guard let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
+              let server = items.first(where: { $0.name == "url" })?.value,
+              // No scheme is taken as https, as Settings does; plain http never is, as the
+              // token and every question would go over it in the clear.
+              AskAPI.normalizeBaseURL(server)?.scheme?.lowercased() == "https",
+              let token = items.first(where: { $0.name == "token" })?.value, !token.isEmpty
+        else { return .failure(.unusable) }
+        return .success(QuickAskLink(server: server, token: token))
+    }
+
+    /// Host and port, as an alert names it ("bruce.tail9ef766.ts.net:9443").
+    var hostName: String { AskAPI.normalizeBaseURL(server).map(Self.hostName) ?? server }
+
+    static func hostName(_ url: URL) -> String {
+        let host = url.host()?.lowercased() ?? ""
+        return url.port.map { "\(host):\($0)" } ?? host
+    }
+
+    /// Whether this link would point Quick Ask somewhere other than `current`. Only the host
+    /// and port count: a new token for the same server is the usual re-pair.
+    func changesServer(from current: URL?) -> Bool {
+        guard let current else { return false }
+        return Self.hostName(current) != hostName
+    }
+}

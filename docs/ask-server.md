@@ -24,6 +24,14 @@ The token goes in an `Authorization: Bearer <token>` header. Settings warns
 if it doesn't look like Agent Archive's (`aa_<16 hex>_<secret>`), but
 sends whatever you give it.
 
+A server can also hand both over in a link, usually as a QR code:
+`threadbear://quickask?url=<address>&token=<token>`, both URL-encoded.
+A link's address has to be `https://` (or have no scheme), since opening
+it sends the token and every later question there; an `http://` one is
+refused and nothing changes. If Ask already has a server on another host,
+the phone asks before switching, naming the new host. A new token for the
+same host goes straight in.
+
 ## GET /api/quick/ping
 
 Sent as you start talking, and again if the last one was more than 25

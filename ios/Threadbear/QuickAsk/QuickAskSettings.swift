@@ -62,17 +62,17 @@ final class QuickAskSettings {
         setToken("")
     }
 
-    /// `threadbear://quickask?url=<server>&token=<aa_…>`, from a QR code, so the token never goes
-    /// through a clipboard. True when it was one.
-    func apply(link url: URL) -> Bool {
-        guard url.scheme == "threadbear", url.host() == "quickask",
-              let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
-              let server = items.first(where: { $0.name == "url" })?.value, AskAPI.normalizeBaseURL(server) != nil,
-              let token = items.first(where: { $0.name == "token" })?.value, !token.isEmpty else { return false }
-        baseURLString = server
-        setToken(token)
-        return true
+    /// A `threadbear://quickask` link (QuickAskLink, from a QR code, so the token never goes
+    /// through a clipboard). Already https; the caller confirms one that changes the server.
+    func apply(_ link: QuickAskLink) {
+        baseURLString = link.server
+        setToken(link.token)
     }
+
+    /// Whether opening this link would quietly move Quick Ask to another server, which the
+    /// app asks about first: a QR code or a link from anyone could otherwise take every
+    /// later question.
+    func needsConfirmation(_ link: QuickAskLink) -> Bool { link.changesServer(from: baseURL) }
 }
 
 /// The last 20 timings, kept between launches, for Settings › Quick ask.
