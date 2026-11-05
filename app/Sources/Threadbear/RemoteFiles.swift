@@ -76,6 +76,11 @@ extension AppModel {
             throw RPCError.badResponse("not another runner's thread")
         }
         let threadId = thread.id
+        // Through Convex the files stay on that machine: this Mac's runner
+        // would read its own file at that path, which isn't the one meant.
+        if viaRelay(threadId) {
+            throw RPCError.server(code: -32000, message: "This file is kept on \(runnerName(of: thread) ?? "the other machine"). Turn on Connect to other machines directly in Settings > Runners to open it here.")
+        }
         return try await remoteFiles.copy(path, runnerId: runnerId) { [weak self] in
             guard let self else { throw RPCError.disconnected(nil) }
             return try await self.openClient(for: threadId)

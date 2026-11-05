@@ -372,7 +372,7 @@ export type CommandHost = {
   update(p: { threadId: string; title?: string; snoozedUntil?: string | null; archived?: boolean; verdict?: ArchiveVerdict; starred?: boolean }): unknown;
   // Seen up to the last event it has.
   markSeen(threadId: string): unknown;
-  create(p: { text: string; images?: ImageRef[]; cwd?: string; accountId?: string; model?: string; effort?: EffortLevel; origin?: 'phone' }): { thread: ThreadSummary };
+  create(p: { text: string; images?: ImageRef[]; cwd?: string; accountId?: string; model?: string; effort?: EffortLevel; permissionMode?: 'ask' | 'full'; origin?: 'phone' }): { thread: ThreadSummary };
   // Stops the thread's turn (a command from the main Mac, API 43).
   interrupt?(threadId: string): unknown;
   share(threadId: string, p: { access: 'off' | 'link'; newLink?: boolean }): unknown;
@@ -2569,7 +2569,7 @@ export class ConvexSync {
           else this.deps.log.warn('phone command failed', { kind: c.kind, threadId: c.threadId, error: note });
         }
         if (resultThreadId) await this.writeRowNow(resultThreadId);
-        await this.post('mutation', 'sync:finishCommand', { key: this.deps.key, commandId: c.commandId, ok, ...(note ? { note } : {}), ...(resultThreadId ? { resultThreadId } : {}), ...(result !== undefined ? { result } : {}) });
+        await this.post('mutation', 'sync:finishCommand', { key: this.deps.key, commandId: c.commandId, ok, ...(note ? { note } : {}), ...(resultThreadId ? { resultThreadId } : {}), ...(result !== undefined ? { result: JSON.stringify(result) } : {}) });
       } catch (e) {
         // Couldn't take or finish it: the next update of the list brings
         // it round again if it's still pending.
@@ -2677,6 +2677,7 @@ export class ConvexSync {
           ...(typeof a.accountId === 'string' ? { accountId: a.accountId } : {}),
           ...(typeof a.model === 'string' ? { model: a.model } : {}),
           ...(isEffortLevel(a.effort) ? { effort: a.effort } : {}),
+          ...(a.permissionMode === 'ask' || a.permissionMode === 'full' ? { permissionMode: a.permissionMode } : {}),
           ...origin,
         }));
         return { threadId: thread.id };

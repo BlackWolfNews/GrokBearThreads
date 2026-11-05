@@ -139,6 +139,8 @@ export function commandArgs(kind: Kind, raw: unknown): Record<string, unknown> {
     case 'create':
       if (str(a.text) === undefined || !str(a.text)!.trim()) throw bad('a new thread needs text');
       out = pick(a, ['text', 'cwd', 'accountId', 'model', 'effort']);
+      // "Ask before edits" from the composer: left out, the thread gets full access.
+      if (a.permissionMode === 'ask' || a.permissionMode === 'full') out.permissionMode = a.permissionMode;
       break;
     case 'interrupt':
       out = {};
@@ -192,7 +194,13 @@ export const commandState = query({
     await runnerAuth(ctx, key, 'commandState');
     const c = await ctx.db.get(commandId);
     if (!c) return null;
-    return { state: c.state, ...(c.note ? { note: c.note } : {}), ...(c.resultThreadId ? { threadId: c.resultThreadId } : {}), ...(c.result !== undefined ? { result: c.result } : {}) };
+    let result: unknown;
+    try {
+      result = c.result !== undefined ? JSON.parse(c.result) : undefined;
+    } catch {
+      result = undefined;
+    }
+    return { state: c.state, ...(c.note ? { note: c.note } : {}), ...(c.resultThreadId ? { threadId: c.resultThreadId } : {}), ...(result !== undefined ? { result } : {}) };
   },
 });
 

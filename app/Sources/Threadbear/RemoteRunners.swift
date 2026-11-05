@@ -40,10 +40,11 @@ extension AppModel {
             // Never in place of one of this Mac's own.
             if let existing = next[summary.id], !existing.isRemote { continue }
             listed.insert(summary.id)
+            madeRemote.remove(summary.id)
             if liveRemote.contains(summary.id), next[summary.id] != nil { continue }
             next[summary.id] = summary
         }
-        let gone = next.values.filter { $0.isRemote && !listed.contains($0.id) && !liveRemote.contains($0.id) }.map(\.id)
+        let gone = next.values.filter { $0.isRemote && !listed.contains($0.id) && !liveRemote.contains($0.id) && !madeRemote.contains($0.id) }.map(\.id)
         if next != threads { threads = next }
         for id in gone { forget(id) }
     }
@@ -287,7 +288,7 @@ extension AppModel {
                 made.runnerId = runnerId
                 // Its own connection's summaries keep a direct one fresh; a
                 // relayed one waits for the sidebar table's row.
-                if directRemoteLink { liveRemote.insert(made.id) }
+                if directRemoteLink { liveRemote.insert(made.id) } else { madeRemote.insert(made.id) }
                 threads[made.id] = made
                 select(made.id)
                 applyDefaultRunner()

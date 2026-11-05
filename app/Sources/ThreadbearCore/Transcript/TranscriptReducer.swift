@@ -257,6 +257,8 @@ public struct TranscriptModel: Sendable {
     public mutating func trim(keepingLast count: Int) {
         guard events.count > count else { return }
         events = Array(events.suffix(count))
+        // What's gone can be read again.
+        knownStart = false
         firstSeq = events.first?.seq ?? 0
         rebuild()
     }

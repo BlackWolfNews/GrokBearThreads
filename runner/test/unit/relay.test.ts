@@ -20,34 +20,36 @@ const rows: RelayRow[] = [
 ];
 const idle: RelayThreadRow = { runnerId: 'bruce', status: 'idle', needs: 'nothing' };
 
-test('rows become events four seqs apart, with turns, results and ends made up beside them', () => {
+test('rows become events eight seqs apart, with turns, results and ends made up beside them', () => {
   const ev = relayEvents(T, rows, idle, [], false, 'bruce');
   const types = ev.map((e) => `${e.seq}:${e.type}`);
   assert.deepEqual(types, [
-    '12:turn.started',
-    '13:user.message',
-    '21:tool.call',
-    '22:tool.result',
-    '37:assistant.text',
-    '39:turn.completed',
-    '48:turn.started',
-    '49:user.message',
-    '57:tool.call',
-    '58:tool.result',
-    '59:turn.completed',
+    '24:turn.started',
+    '25:user.message',
+    '41:tool.call',
+    '42:tool.result',
+    '73:assistant.text',
+    '79:turn.completed',
+    '96:turn.started',
+    '97:user.message',
+    '113:tool.call',
+    '114:tool.result',
+    '119:turn.completed',
   ]);
   assert.equal(ev.find((e) => e.type === 'tool.result')!.text, 'The output is kept on bruce.');
   assert.deepEqual(ev.find((e) => e.type === 'tool.result')!.heldBack, { seq: 5 });
-  assert.equal(ev.find((e) => e.seq === 39)!.durationMs, 10_000);
-  assert.equal(ev.find((e) => e.seq === 37)!.summary, true);
+  assert.equal(ev.find((e) => e.seq === 79)!.durationMs, 10_000);
+  assert.equal(ev.find((e) => e.seq === 73)!.summary, true);
 });
 
 test('a running turn has no end, and its last tool is still running', () => {
   const ev = relayEvents(T, rows, { runnerId: 'bruce', status: 'running' }, [], false, 'bruce');
-  assert.equal(ev.some((e) => e.seq === 58), false);
-  assert.equal(ev.some((e) => e.seq === 59), false);
+  assert.equal(ev.some((e) => e.seq === 114), false);
+  assert.equal(ev.some((e) => e.seq === 119), false);
   // The earlier turn still ended, at its next row.
-  assert.ok(ev.some((e) => e.seq === 39 && e.type === 'turn.completed'));
+  assert.ok(ev.some((e) => e.seq === 79 && e.type === 'turn.completed'));
+  // Nor does one whose row has only just said it stopped.
+  assert.equal(relayEvents(T, rows, idle, [], false, 'bruce', false).some((e) => e.seq === 119), false);
 });
 
 test('no turn.started for the first row held when older rows may still be its turn', () => {
@@ -57,8 +59,8 @@ test('no turn.started for the first row held when older rows may still be its tu
 
 test("the open card is the last turn's end, and an approval sits at its own seq", () => {
   const asksRow: RelayThreadRow = { runnerId: 'bruce', status: 'idle', needs: 'you', asks: [{ action: 'Pick one', options: ['A', 'B'], ticked: true }] };
-  const ev = relayEvents(T, rows, asksRow, [{ seq: 13, pending: { approvalId: 'ap1', kind: 'approval', name: 'Bash', title: 'Run it', options: ['allow', 'deny'], inputSummary: 'npm test' } }], false, 'bruce');
-  const end = ev.find((e) => e.seq === 59)!;
+  const ev = relayEvents(T, rows, asksRow, [{ slot: 13 * SCALE + 1, pending: { approvalId: 'ap1', kind: 'approval', name: 'Bash', title: 'Run it', options: ['allow', 'deny'], inputSummary: 'npm test' } }], false, 'bruce');
+  const end = ev.find((e) => e.seq === 119)!;
   assert.equal(end.needs, 'you');
   assert.deepEqual(end.asks, [{ action: 'Pick one', options: ['A', 'B'] }]);
   const ap = ev.find((e) => e.type === 'approval.requested')!;
@@ -122,18 +124,19 @@ test('it answers only for threads other runners have, and pages in relay seqs', 
   assert.equal(h.relay.owns(T), true);
   assert.equal(h.relay.owns('mine'), false);
   const page = (await h.relay.call(T, 'threads.events', { threadId: T, limit: 4 })) as { events: { seq: number }[]; relay: { atStart?: boolean } };
-  assert.deepEqual(page.events.map((e) => e.seq), [49, 57, 58, 59]);
+  assert.deepEqual(page.events.map((e) => e.seq), [97, 113, 114, 119]);
   assert.equal(page.relay.atStart, undefined);
-  const older = (await h.relay.call(T, 'threads.events', { threadId: T, beforeSeq: 49, limit: 200 })) as { events: { seq: number }[]; relay: { atStart?: boolean } };
-  assert.deepEqual(older.events.map((e) => e.seq), [12, 13, 21, 22, 37, 39, 48]);
+  const older = (await h.relay.call(T, 'threads.events', { threadId: T, beforeSeq: 97, limit: 200 })) as { events: { seq: number }[]; relay: { atStart?: boolean } };
+  assert.deepEqual(older.events.map((e) => e.seq), [24, 25, 41, 42, 73, 79, 96]);
   assert.equal(older.relay.atStart, true);
 });
 
 test('a subscribe watches a tail and the row, and new rows reach clients only', async () => {
   const h = harness();
   await h.relay.call(T, 'threads.events', { threadId: T });
-  const back = (await h.relay.call(T, 'threads.subscribe', { threadId: T, afterSeq: 59 })) as { events: unknown[] };
-  assert.deepEqual(back.events, []);
+  const back = (await h.relay.call(T, 'threads.subscribe', { threadId: T, afterSeq: 119 })) as { events: { seq: number }[] };
+  // Nothing new; only what could have come late, again (the app ignores seqs it has).
+  assert.ok(back.events.every((e) => e.seq <= 119 && [2, 3, 4, 7].includes(e.seq % SCALE)));
   const tail = h.subs.get('relay:remoteTail')![0]!;
   assert.equal(tail.args.limit, 15);
   assert.ok(h.subs.get('relay:remoteThread'));
@@ -142,7 +145,7 @@ test('a subscribe watches a tail and the row, and new rows reach clients only', 
   tail.onUpdate({ messages: [...rows.slice(-2), { seq: 20, role: 'user', text: 'More', turn: 'cccc3333', at: at(30) }], hasMore: true });
   await new Promise((r) => setImmediate(r));
   const seqs = h.published.map((n) => (n as { params: { event: { seq: number; type: string } } }).params.event).map((e) => `${e.seq}:${e.type}`);
-  assert.deepEqual(seqs, ['80:turn.started', '81:user.message']);
+  assert.deepEqual(seqs, ['160:turn.started', '161:user.message']);
   // An approval comes and is answered from here: its card, then its answer, both late-safe.
   h.subs.get('relay:remoteThread')![0]!.onUpdate({ runnerId: 'bruce', status: 'waiting', pendingApproval: { approvalId: 'ap9', kind: 'approval', seq: 22, name: 'Bash', title: 'Run', options: ['allow', 'deny'] } });
   const respond = h.relay.call(T, 'approvals.respond', { threadId: T, approvalId: 'ap9', decision: 'deny' });
@@ -152,8 +155,37 @@ test('a subscribe watches a tail and the row, and new rows reach clients only', 
   h.subs.get('relay:commandState')![0]!.onUpdate({ state: 'done' });
   await respond;
   const last = h.published.map((n) => (n as { params: { event: { seq: number; type: string; decision?: string } } }).params.event).slice(-2);
-  assert.deepEqual(last.map((e) => `${e.seq}:${e.type}`), ['89:approval.requested', '90:approval.resolved']);
+  assert.deepEqual(last.map((e) => `${e.seq}:${e.type}`), ['177:approval.requested', '178:approval.resolved']);
   assert.equal(last[1]!.decision, 'deny');
+});
+
+test("a turn ends a moment after the row says it stopped, so its last messages come first", async () => {
+  const h = harness();
+  await h.relay.call(T, 'threads.events', { threadId: T });
+  await h.relay.call(T, 'threads.subscribe', { threadId: T, afterSeq: 119 });
+  const row = h.subs.get('relay:remoteThread')![0]!;
+  const tail = h.subs.get('relay:remoteTail')![0]!;
+  row.onUpdate({ runnerId: 'bruce', status: 'running' });
+  tail.onUpdate({ messages: [{ seq: 20, role: 'user', text: 'More', turn: 'cccc3333', at: at(30) }], hasMore: true });
+  await new Promise((r) => setImmediate(r));
+  row.onUpdate({ runnerId: 'bruce', status: 'idle', needs: 'nothing' });
+  const kinds = () => h.published.map((n) => (n as { params: { event: { seq: number; type: string } } }).params.event).map((e) => `${e.seq}:${e.type}`);
+  assert.equal(kinds().includes('167:turn.completed'), false);
+  // Its reply lands after the row said idle.
+  tail.onUpdate({ messages: [{ seq: 20, role: 'user', text: 'More', turn: 'cccc3333', at: at(30) }, { seq: 23, role: 'assistant', text: 'Done', turn: 'cccc3333', at: at(31) }], hasMore: true });
+  await new Promise((r) => setImmediate(r));
+  h.clock.advance(4000);
+  assert.deepEqual(kinds().slice(-2), ['185:assistant.text', '191:turn.completed']);
+});
+
+test('a thread made from here opens before the sidebar lists it', async () => {
+  const h = harness();
+  const made = h.relay.create('bruce', { text: 'Start', permissionMode: 'ask' });
+  await new Promise((r) => setImmediate(r));
+  h.subs.get('relay:commandState')![0]!.onUpdate({ state: 'done', threadId: 'fresh' });
+  await made;
+  assert.equal(h.calls.at(-1)!.args.args && (h.calls.at(-1)!.args.args as { permissionMode?: string }).permissionMode, 'ask');
+  assert.equal(h.relay.owns('fresh'), true);
 });
 
 test('the watch stops a minute after nobody is subscribed', async () => {

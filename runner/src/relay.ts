@@ -12,11 +12,13 @@
 // and carries `heldBack: { runnerId, seq }` for step 4 to fetch the body by.
 //
 // Seqs. The rows' seqs are the other runner's event seqs, with gaps where
-// events weren't mirrored. Each row's seq s becomes four here: 4s a
-// turn.started, 4s+1 the row's own event (or an approval's request), 4s+2 a
-// tool's result (or an approval's resolution), 4s+3 its turn's end. So
-// events made up from a row sit right beside it and stay in order, and every
-// one has a seq of its own. The app takes these threads' events with gaps
+// events weren't mirrored. Each row's seq s becomes eight here: 8s a
+// turn.started, 8s+1 the row's own event, 8s+2 a tool's result, 8s+3 and
+// 8s+4 a card from an older runner that didn't say its seq (placed after the
+// newest row when first seen) and its answer, 8s+7 its turn's end. A card
+// whose event seq p is known goes at 8p+1 and its answer at 8p+2 (p is never
+// a row's seq). So events made up from a row sit right beside it and stay in
+// order, and every one has a seq of its own. The app takes these threads' events with gaps
 // and late ones (ThreadFeed's sparse mode), and pages by these seqs.
 //
 // Reads (docs/full-convex.md, "Read rules"): a thread is watched only while
@@ -31,7 +33,11 @@ import type { Post, Subscribe } from './sync.ts';
 import { ErrorCode, RpcError } from './protocol.ts';
 import { seal } from './secrets.ts';
 
-export const SCALE = 4;
+export const SCALE = 8;
+// The thread's row says it has stopped a moment before its last messages
+// arrive (the other runner writes rows, then messages): its turn ends only
+// once it has said so for this long.
+const SETTLE_MS = 4000;
 const TAIL = 15;
 const PAGE = 50;
 // A watch nobody has subscribed for this long stops; its rows stay a while,
@@ -71,7 +77,8 @@ export type RelayThreadRow = {
   lastActivityAt?: string;
 };
 
-type Card = { pending: Pending; seq: number; resolved?: { decision: string; message?: string } };
+// slot: the request's relay seq; the answer goes at slot + 1.
+export type Card = { pending: Pending; slot: number; resolved?: { decision: string; message?: string } };
 type Watch = {
   threadId: string;
   runnerId: string;
@@ -87,8 +94,12 @@ type Watch = {
   unsub: (() => void)[];
   idleSince?: number;
   usedAt: number;
-  // The newest row the live tail has merged, so a tail past it reads the gap.
   filling?: Promise<void>;
+  // Rows a tail skipped that couldn't all be read yet: tried again with the next tail.
+  hole?: { after: number; until: number };
+  // When the row last said it isn't running (SETTLE_MS), and the timer that emits then.
+  stoppedAt?: number;
+  settleTimer?: TimerHandle;
 };
 
 export type RelayEvent = { seq: number; ts: string; threadId: string; turnId?: string; type: string; [k: string]: unknown };
@@ -111,10 +122,11 @@ const RUNNING = new Set(['running', 'starting', 'waiting']);
 const TOOL_NAMES: Record<string, string> = { command: 'Bash', read: 'Read', edit: 'Edit', write: 'Write', search: 'Grep', web: 'WebFetch', task: 'Task' };
 
 /** A thread's held rows and row as transcript events, oldest first, in relay seqs. Pure, so a page and the live stream agree. */
-export function relayEvents(threadId: string, rows: RelayRow[], row: RelayThreadRow | null, cards: Card[], olderMore: boolean, runnerName: string): RelayEvent[] {
+export function relayEvents(threadId: string, rows: RelayRow[], row: RelayThreadRow | null, cards: Card[], olderMore: boolean, runnerName: string, settled = true): RelayEvent[] {
   const out: RelayEvent[] = [];
   const sorted = [...rows].sort((a, b) => a.seq - b.seq);
-  const running = row ? RUNNING.has(row.status) : true;
+  // Stopped only once it has said so for a moment (SETTLE_MS).
+  const running = row ? RUNNING.has(row.status) || !settled : true;
   const env = (seq: number, r: RelayRow, body: Record<string, unknown>): RelayEvent => ({ seq, ts: r.at, threadId, ...(r.turn ? { turnId: r.turn } : {}), ...body }) as RelayEvent;
   const turnStart = new Map<string, string>();
   for (let i = 0; i < sorted.length; i++) {
@@ -145,7 +157,7 @@ export function relayEvents(threadId: string, rows: RelayRow[], row: RelayThread
       const last = !next;
       const asks = last && row?.needs === 'you' && row.asks?.length ? row.asks.map(({ ticked: _t, ...a }) => a) : undefined;
       out.push(
-        env(base + 3, r, {
+        env(base + 7, r, {
           type: 'turn.completed',
           turnId: r.turn,
           outcome: 'completed',
@@ -159,9 +171,8 @@ export function relayEvents(threadId: string, rows: RelayRow[], row: RelayThread
   }
   // Cards go where their event was: in the turn of the row before them.
   for (const c of cards) {
-    const before = [...sorted].reverse().find((r) => r.seq <= c.seq);
+    const before = [...sorted].reverse().find((r) => r.seq * SCALE <= c.slot);
     const at = before?.at ?? row?.lastActivityAt ?? new Date(0).toISOString();
-    const base = c.seq * SCALE;
     const turn = before?.turn ? { turnId: before.turn } : {};
     const p = c.pending;
     const body =
@@ -170,8 +181,8 @@ export function relayEvents(threadId: string, rows: RelayRow[], row: RelayThread
         : p.kind === 'question'
           ? { type: 'question.requested', approvalId: p.approvalId, questions: p.questions }
           : { type: 'secret.requested', approvalId: p.approvalId, label: p.label, reason: p.reason, ...(p.placeholder ? { placeholder: p.placeholder } : {}) };
-    out.push({ seq: base + 1, ts: at, threadId, ...turn, ...body } as RelayEvent);
-    if (c.resolved) out.push({ seq: base + 2, ts: at, threadId, ...turn, type: 'approval.resolved', approvalId: p.approvalId, ...c.resolved } as RelayEvent);
+    out.push({ seq: c.slot, ts: at, threadId, ...turn, ...body } as RelayEvent);
+    if (c.resolved) out.push({ seq: c.slot + 1, ts: at, threadId, ...turn, type: 'approval.resolved', approvalId: p.approvalId, ...c.resolved } as RelayEvent);
   }
   return out.sort((a, b) => a.seq - b.seq);
 }
@@ -188,6 +199,8 @@ export function mergeTail(rows: Map<number, RelayRow>, tail: Page): { gapAfter?:
 export class Relay {
   private deps: RelayDeps;
   private watches = new Map<string, Watch>();
+  // Threads made from here that the sidebar's list doesn't have yet.
+  private made = new Map<string, RemoteThread>();
   private sweepTimer?: TimerHandle;
   private reads = 0;
 
@@ -220,7 +233,12 @@ export class Relay {
   }
 
   private find(threadId: string): RemoteThread | undefined {
-    return this.deps.remote().threads.find((t) => t.threadId === threadId);
+    const listed = this.deps.remote().threads.find((t) => t.threadId === threadId);
+    if (listed) {
+      this.made.delete(threadId);
+      return listed;
+    }
+    return this.made.get(threadId);
   }
 
   private runner(runnerId: string) {
@@ -251,15 +269,31 @@ export class Relay {
   }
 
   private events(w: Watch): RelayEvent[] {
-    return relayEvents(w.threadId, [...w.rows.values()], w.row, [...w.cards.values()], w.olderMore, this.runnerName(w.runnerId));
+    const settled = w.stoppedAt === undefined || this.deps.clock.now() - w.stoppedAt >= SETTLE_MS;
+    return relayEvents(w.threadId, [...w.rows.values()], w.row, [...w.cards.values()], w.olderMore, this.runnerName(w.runnerId), settled);
   }
 
   // The row's open card, kept so it stays in the transcript once answered;
   // one that's gone from the row has been answered (here, there or on the phone).
-  private noteRow(w: Watch, row: RelayThreadRow | null): void {
+  private noteRow(w: Watch, row: RelayThreadRow | null, live = false): void {
+    const wasRunning = w.row ? RUNNING.has(w.row.status) : true;
     w.row = row;
+    const running = row ? RUNNING.has(row.status) : true;
+    if (!running && wasRunning && live) {
+      // Ends its turn once its last messages have had a moment to arrive.
+      w.stoppedAt = this.deps.clock.now();
+      w.settleTimer?.cancel();
+      w.settleTimer = this.deps.clock.setTimeout(() => {
+        w.settleTimer = undefined;
+        this.emit(w);
+      }, SETTLE_MS);
+    } else if (running) w.stoppedAt = undefined;
     const open = row?.pendingApproval;
-    if (open && open.seq !== undefined && !w.cards.has(open.approvalId)) w.cards.set(open.approvalId, { pending: open, seq: open.seq });
+    if (open && !w.cards.has(open.approvalId)) {
+      // An older runner doesn't say the card's seq: after the newest row.
+      const newest = w.rows.size ? Math.max(...w.rows.keys()) : 0;
+      w.cards.set(open.approvalId, { pending: open, slot: open.seq !== undefined ? open.seq * SCALE + 1 : newest * SCALE + 3 });
+    }
     for (const [id, c] of w.cards) {
       if (c.resolved || open?.approvalId === id) continue;
       c.resolved = w.decided.get(id) ?? { decision: c.pending.kind === 'approval' ? 'allow' : 'answered', message: `Answered on ${this.runnerName(w.runnerId)} or the phone.` };
@@ -317,7 +351,7 @@ export class Relay {
     w.unsub.push(
       src.subscribe('relay:remoteTail', { key: src.key, threadId: w.threadId, limit: TAIL }, (v) => void this.onTail(w, v as Page), failed),
       src.subscribe('relay:remoteThread', { key: src.key, threadId: w.threadId }, (v) => {
-        this.noteRow(w, v as RelayThreadRow | null);
+        this.noteRow(w, v as RelayThreadRow | null, true);
         this.emit(w);
       }, failed),
     );
@@ -327,6 +361,8 @@ export class Relay {
   private unwatch(w: Watch): void {
     for (const u of w.unsub) u();
     w.unsub = [];
+    w.settleTimer?.cancel();
+    w.settleTimer = undefined;
   }
 
   private async onTail(w: Watch, tail: Page): Promise<void> {
@@ -334,27 +370,37 @@ export class Relay {
     const { gapAfter } = mergeTail(w.rows, tail);
     if (gapAfter !== undefined) {
       // More arrived than the tail covers (the Mac slept, the watch was
-      // off): read what's between once, so the transcript has no hole.
-      const fill = (async () => {
-        let after = gapAfter;
-        const until = tail.messages[0]!.seq;
-        for (let i = 0; i < 20 && after < until; i++) {
-          const page = (await this.read('relay:remoteMessages', { threadId: w.threadId, afterSeq: after, limit: PAGE })) as Page;
-          for (const m of page.messages) w.rows.set(m.seq, m);
-          if (!page.messages.length || !page.hasMore) break;
-          after = page.messages[page.messages.length - 1]!.seq;
-        }
-      })();
+      // off): what's between is read once, so the transcript has no hole.
+      const until = tail.messages[0]!.seq;
+      w.hole = { after: Math.min(w.hole?.after ?? gapAfter, gapAfter), until: Math.max(w.hole?.until ?? until, until) };
+    }
+    if (w.hole && !w.filling) {
+      const fill = this.fill(w);
       w.filling = fill;
       try {
         await fill;
-      } catch (e) {
-        this.deps.log.warn('relay could not fill a gap', { threadId: w.threadId, error: String(e) });
       } finally {
         if (w.filling === fill) w.filling = undefined;
       }
     }
     this.emit(w);
+  }
+
+  // Reads a hole's rows page by page, however many: bounded by the thread,
+  // and each read once. One that fails stays a hole, tried with the next tail.
+  private async fill(w: Watch): Promise<void> {
+    try {
+      while (w.hole) {
+        const { after, until } = w.hole;
+        const page = (await this.read('relay:remoteMessages', { threadId: w.threadId, afterSeq: after, limit: PAGE })) as Page;
+        for (const m of page.messages) w.rows.set(m.seq, m);
+        const last = page.messages[page.messages.length - 1]?.seq;
+        if (last === undefined || !page.hasMore || last >= until) w.hole = undefined;
+        else w.hole = { after: last, until: w.hole?.until ?? until };
+      }
+    } catch (e) {
+      this.deps.log.warn('relay could not fill a gap', { threadId: w.threadId, error: String(e) });
+    }
   }
 
   // Everything not yet given to the app from the oldest it has on: new rows,
@@ -460,7 +506,13 @@ export class Relay {
       case 'threads.subscribe': {
         await this.load(w);
         const after = num(p.afterSeq) ?? 0;
-        const events = this.events(w).filter((e) => e.seq > after);
+        // What's past the app's last seq, and anything that can come late
+        // (a tool's result, a card's answer, a turn's end) from what it was
+        // given before: it may have arrived while the app was away, and the
+        // app takes a seq it already has as nothing.
+        const from = w.given.size ? Math.min(...w.given) : after;
+        const late = (seq: number) => seq % SCALE !== 0 && seq % SCALE !== 1;
+        const events = this.events(w).filter((e) => e.seq > after || (e.seq >= from && late(e.seq)));
         for (const e of events) w.given.add(e.seq);
         if (!w.given.size) w.given.add(after);
         this.live(w);
@@ -537,9 +589,26 @@ export class Relay {
     if (Array.isArray(p.images) && p.images.length) this.unsupported(undefined, 'Sending pictures to another Mac');
     const args: Record<string, unknown> = { text: String(p.text ?? '') };
     for (const k of ['cwd', 'accountId', 'model', 'effort']) if (typeof p[k] === 'string') args[k] = p[k];
+    // "Ask before edits": left out, that runner would give it full access.
+    if (p.permissionMode === 'ask' || p.permissionMode === 'full') args.permissionMode = p.permissionMode;
     const done = await this.command(runnerId, undefined, 'create', args, { done: true, ms: CALL_MS });
     if (!done.threadId) throw new RpcError(ErrorCode.other, `${this.runnerName(runnerId)} didn't say which thread it made.`);
     const now = new Date(this.deps.clock.now()).toISOString();
+    // Opened at once, before the sidebar's list has its row.
+    this.made.set(done.threadId, {
+      runnerId,
+      threadId: done.threadId,
+      title: '',
+      cwd: typeof p.cwd === 'string' ? p.cwd : '',
+      accountId: typeof p.accountId === 'string' ? p.accountId : '',
+      provider: typeof p.provider === 'string' ? p.provider : 'claude',
+      status: 'starting',
+      needsYou: false,
+      unread: false,
+      preview: '',
+      createdAt: now,
+      lastActivityAt: now,
+    });
     return {
       thread: {
         id: done.threadId,

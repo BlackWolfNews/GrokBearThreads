@@ -363,7 +363,7 @@ export default defineSchema({
     takenAt: v.optional(v.number()),
     doneAt: v.optional(v.number()),
     resultThreadId: v.optional(v.string()), // for create, once it lands
-    result: v.optional(v.any()), // a call's answer (API 43), from an allow-listed method (relay.ts CALLS)
+    result: v.optional(v.string()), // a call's answer as JSON text (API 43), from an allow-listed method (relay.ts CALLS)
   })
     .index('by_runner_state', ['runnerId', 'state'])
     .index('by_state', ['state'])

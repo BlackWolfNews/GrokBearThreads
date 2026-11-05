@@ -1799,6 +1799,16 @@ export const takeCommand = mutation({
     const c = await ctx.db.get(commandId);
     if (!c || c.state !== 'pending') return false;
     if (!mayTake(caller, c)) throw forbidden("take that command: it isn't for its runner");
+    // A thread's command is for the runner that has the thread now: one
+    // queued before the thread moved to another runner (or went) isn't
+    // applied by the runner that had it, which may keep a copy.
+    if (c.threadId !== undefined && c.runnerId !== 'any') {
+      const t = await ctx.db.query('threads').withIndex('by_threadId', (q) => q.eq('threadId', c.threadId!)).unique();
+      if (t && t.runnerId !== c.runnerId) {
+        await ctx.db.patch(commandId, { state: 'failed', doneAt: Date.now(), note: 'That thread is on another runner now.' });
+        return false;
+      }
+    }
     await ctx.db.patch(commandId, { state: 'taken', takenAt: Date.now() });
     return true;
   },
@@ -1808,15 +1818,16 @@ export const takeCommand = mutation({
 const RESULT_MAX_BYTES = 256 * 1024;
 
 export const finishCommand = mutation({
-  // result (API 43): a `call`'s answer, kept only for one (relay.ts), at most RESULT_MAX_BYTES.
-  args: { key: v.string(), commandId: v.id('commands'), ok: v.boolean(), note: v.optional(v.string()), resultThreadId: v.optional(v.string()), result: v.optional(v.any()) },
+  // result (API 43): a `call`'s answer as JSON text, kept only for one
+  // (relay.ts), at most RESULT_MAX_BYTES. Text, so its size is what's stored.
+  args: { key: v.string(), commandId: v.id('commands'), ok: v.boolean(), note: v.optional(v.string()), resultThreadId: v.optional(v.string()), result: v.optional(v.string()) },
   returns: v.null(),
   handler: async (ctx, { key, commandId, ok, note, resultThreadId, result }) => {
     const caller = await runnerAuth(ctx, key, 'finishCommand');
     const c = await ctx.db.get(commandId);
     if (!c) return null;
     if (!mayFinish(caller, c)) throw forbidden("finish that command: it isn't for its runner");
-    const keep = ok && c.kind === 'call' && result !== undefined && docBytes(result) <= RESULT_MAX_BYTES;
+    const keep = ok && c.kind === 'call' && result !== undefined && utf8Bytes(result) <= RESULT_MAX_BYTES;
     await ctx.db.patch(commandId, { state: ok ? 'done' : 'failed', doneAt: Date.now(), ...(note ? { note } : {}), ...(resultThreadId ? { resultThreadId } : {}), ...(keep ? { result } : {}) });
     // A secret's sealed answer (docs/protocol.md, "Secrets") has done its
     // job: only the runner could open it, but it needn't sit here a day.

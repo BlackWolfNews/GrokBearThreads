@@ -337,6 +337,9 @@ final class AppModel {
     /// connection, which is fuller and fresher than the sidebar table's
     /// row, until that connection closes.
     @ObservationIgnored var liveRemote: Set<String> = []
+    /// Threads made on another runner through Convex that the sidebar table
+    /// doesn't list yet: kept until it does.
+    @ObservationIgnored var madeRemote: Set<String> = []
     /// One connection per other runner, made when one of its threads is
     /// opened.
     @ObservationIgnored var remoteClients = RemoteClients(version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev")
