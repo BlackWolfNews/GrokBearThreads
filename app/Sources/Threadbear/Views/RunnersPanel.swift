@@ -157,9 +157,10 @@ private struct RunnerCard: View {
         runner.isSelf ? app.defaultRunnerId == nil : app.defaultRunnerId == runner.id
     }
 
-    /// This Mac has the runner's token, so its threads open from here.
+    /// Its threads open from here: through Convex, or with the direct link
+    /// on, once this Mac has the runner's token.
     private var paired: Bool {
-        runner.isSelf || app.remoteRunners.first { $0.id == runner.id }?.tokenFile != nil
+        runner.isSelf || !app.directRemoteLink || app.remoteRunners.first { $0.id == runner.id }?.tokenFile != nil
     }
 
     private func dotColor(_ state: RunnersText.State) -> Color {

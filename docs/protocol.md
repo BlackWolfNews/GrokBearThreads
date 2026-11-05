@@ -3329,7 +3329,7 @@ default).
   `threads.interrupt`, `approvals.respond`, `secrets.answer` (sealed to the
   other runner's key from its row, as the phone seals it, so the value
   never reaches the backend in the clear), `threads.markSeen` (only when
-  the row is unread), `threads.update` (`title`, `archived`, `starred`,
+  the row is unread), `threads.update` (`title`, `archived` with its `verdict`, `starred`,
   `snoozedUntil`; anything else is `-32000`) and `threads.share` each queue
   one command with `relay:queueCommand`, which sends a thread's command to
   the runner whose row the thread is, whatever runner it was asked for.
