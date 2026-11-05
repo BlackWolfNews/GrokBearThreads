@@ -588,6 +588,12 @@ reset.
 The first time a pool has a second login, a card by the composer says
 what pools do.
 
+With more than one machine, they all share the same pools, so you set them
+up once from Settings > Pools on any of them. A pool knows its logins by
+email, and each machine uses the ones it's signed in to: a pool of three
+Claude logins is just one on a server signed in to one of them, and a pool
+none of its logins are in doesn't show there.
+
 Usage, near the bottom of the left-hand rail, shows how much room each login
 has left before it hits its limits: the weekly one, and the 5-hour one for
 logins that still have it (Claude Team does, Max plans don't any more).

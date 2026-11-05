@@ -18,7 +18,17 @@ export const poolsPart = {
   // The pools in force: runner.json's, else the built-in ones from the
   // logins found.
   pools(this: Runner, all: Account[] = this.safeAccounts()): Pool[] {
-    return readPools({ pools: this.cfg.pools, accountNotes: this.cfg.accountNotes }, all, this.cfg.poolFolders ?? DEFAULT_POOL_FOLDERS);
+    return this.sharedPools?.pools(all) ?? readPools({ pools: this.cfg.pools, accountNotes: this.cfg.accountNotes }, all, this.cfg.poolFolders ?? DEFAULT_POOL_FOLDERS);
+  },
+
+  // The shared list changed (shared-pools.ts): clients hear if this
+  // runner's pools did.
+  poolsMaybeChanged(this: Runner): void {
+    const pools = this.pools();
+    const key = JSON.stringify(pools);
+    if (key === this.poolsShown) return;
+    this.poolsShown = key;
+    this.notify({ method: 'pools.updated', params: { pools } });
   },
 
   listPools(this: Runner): { pools: Pool[] } {
@@ -41,11 +51,24 @@ export const poolsPart = {
     if (account) this.markRanDry(account);
   },
 
-  // pools.save: replaces the whole list in runner.json (an empty one goes
-  // back to the built-in pools) and tells every client.
-  savePools(this: Runner, raw: unknown): { pools: Pool[] } {
+  // pools.save: replaces the whole list (an empty one goes back to the
+  // built-in pools) and tells every client. With a backend of API 38 the
+  // list is the shared one, which keeps what this runner can't see
+  // (shared-pools.ts); otherwise runner.json's.
+  async savePools(this: Runner, raw: unknown): Promise<{ pools: Pool[] }> {
     const checked = validatePools(raw, this.safeAccounts());
     if ('error' in checked) throw new RpcError(ErrorCode.badParams, checked.error);
+    if (this.sharedPools?.attached) {
+      try {
+        await this.sharedPools.save(checked.pools);
+      } catch (e) {
+        throw new RpcError(ErrorCode.other, `Couldn't save the pools to the backend: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      const pools = this.pools();
+      this.poolsShown = JSON.stringify(pools);
+      this.notify({ method: 'pools.updated', params: { pools } });
+      return { pools };
+    }
     const json = readRunnerJson(this.cfg.home);
     if (checked.pools.length) json.pools = checked.pools;
     else delete json.pools;

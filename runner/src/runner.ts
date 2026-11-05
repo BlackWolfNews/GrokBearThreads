@@ -585,6 +585,10 @@ export class Runner {
   roomTimer?: TimerHandle;
   armingRoom = false;
   poolsShown?: string;
+  // Pools shared through the backend (shared-pools.ts); main.ts sets it
+  // when sync is on. Without it, or until it has a list, the pools are
+  // runner.json's or the built-in ones.
+  sharedPools?: import('./shared-pools.ts').SharedPools;
   ranDry = new Map<string, number>();
   // Threads waiting for the API to be reachable again (waitingForNetwork):
   // one timer probes for all of them, backing off from NET_PROBE_FIRST_MS.

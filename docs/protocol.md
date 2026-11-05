@@ -1377,6 +1377,25 @@ thread to another login when the one it's on runs out of room.
   whole list; `pools.save` writes it. A pool's `accountIds` order only
   decides which provider comes first; within one provider the runner goes
   by room.
+- **Shared between runners** (backend API 38). With a backend, the list
+  lives in its `pools` table and every runner follows it, so a pool is the
+  same on each machine. A shared pool names its logins by provider and
+  email (`members: [{ provider, email }]`), since login ids are each
+  runner's own (`claude-main` is a different login on each machine); a
+  login with no email known is named by `{ provider, runnerId, accountId }`
+  and only counts on that runner. Each runner turns the list into its own
+  `Pool[]`, with `accountIds` its logins that match, in member order, and
+  leaves out a pool none of its logins are in. `pools.list`, `hello` and
+  `pools.updated` carry that, so clients see no difference. `pools.save`
+  on any runner writes the shared list: the pools it was given, in that
+  order, each keeping the members this runner has no login for, then the
+  pools it couldn't see, unchanged. The first runner to meet API 38 with
+  `pools` in its `runner.json` puts them in the table if it's empty
+  (`sync:adoptPools`, first one wins); until the table has pools, each
+  runner keeps its own as before. The runner keeps the last list it saw in
+  `shared-pools.json` in its data folder, so it starts with it while the
+  backend can't be reached. `runner.json`'s `pools` is left as it was, and
+  is used again only with sync off. `defaults.poolId` stays each runner's.
 - **New threads.** A `threads.create` without `accountId` picks the pool:
   `poolId` if given, else the pool whose `folders` holds `cwd` (the
   longest match), else `defaults.poolId` (`runner.json`'s, the pool last

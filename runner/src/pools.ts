@@ -274,3 +274,96 @@ export function findPool(pools: Pool[], q: string): Pool | undefined {
   const t = q.trim().toLowerCase();
   return pools.find((p) => p.id === q.trim()) ?? pools.find((p) => p.id.toLowerCase() === t || p.title.toLowerCase() === t);
 }
+
+// ---------------------------------------------------------- shared pools
+
+// Pools shared between runners through the backend (docs/protocol.md,
+// "Pools", "Shared between runners"). Login ids are each runner's own
+// (claude-main is a different login on each machine), so a shared pool
+// names its logins by provider and email; one with no email known is
+// named by the runner that has it and its id there.
+export type PoolMember = { provider: Provider; email?: string; runnerId?: string; accountId?: string };
+export type SharedPool = { id: string; title: string; members: PoolMember[]; folders?: string[]; icon?: string };
+
+const emailOf = (a: Account): string | undefined => a.email?.trim().toLowerCase() || undefined;
+
+export function memberOf(a: Account, runnerId: string): PoolMember {
+  const email = emailOf(a);
+  return email ? { provider: a.provider, email } : { provider: a.provider, runnerId, accountId: a.id };
+}
+
+const memberKey = (m: PoolMember): string => (m.email ? `${m.provider}:${m.email.toLowerCase()}` : `${m.provider}:${m.runnerId}/${m.accountId}`);
+
+// This runner's login for a member, if it has it.
+function localLogin(m: PoolMember, accounts: Account[], runnerId: string): Account | undefined {
+  if (m.email) {
+    const email = m.email.toLowerCase();
+    return accounts.find((a) => a.provider === m.provider && emailOf(a) === email);
+  }
+  return m.runnerId === runnerId ? accounts.find((a) => a.provider === m.provider && a.id === m.accountId) : undefined;
+}
+
+// The shared list as this runner's pools: each with the logins it has, in
+// member order, and none it has no login for.
+export function fromShared(shared: SharedPool[], accounts: Account[], runnerId: string): Pool[] {
+  const out: Pool[] = [];
+  for (const p of shared) {
+    const ids = [...new Set(p.members.map((m) => localLogin(m, accounts, runnerId)?.id).filter((id): id is string => !!id))];
+    if (!ids.length) continue;
+    out.push({ id: p.id, title: p.title, accountIds: ids, ...(p.folders?.length ? { folders: [...p.folders] } : {}), ...(p.icon ? { icon: p.icon } : {}) });
+  }
+  return out;
+}
+
+// pools.save on this runner, as the new shared list. `saved` is what it was
+// given (its own logins, by id); `previous` the list before. Members this
+// runner has no login for keep their places, the logins it does have fill
+// the places its logins held, in the order given, and any left over join
+// the end. Pools it couldn't see come after its own, unchanged.
+export function toShared(saved: Pool[], previous: SharedPool[], accounts: Account[], runnerId: string): SharedPool[] {
+  const seen = (m: PoolMember) => !!localLogin(m, accounts, runnerId);
+  const out: SharedPool[] = saved.map((p) => {
+    const chosen: PoolMember[] = [];
+    for (const id of p.accountIds) {
+      const a = accounts.find((x) => x.id === id);
+      const m = a && memberOf(a, runnerId);
+      if (m && !chosen.some((c) => memberKey(c) === memberKey(m))) chosen.push(m);
+    }
+    const members: PoolMember[] = [];
+    let next = 0;
+    for (const m of previous.find((x) => x.id === p.id)?.members ?? []) {
+      if (!seen(m)) members.push(m);
+      else if (next < chosen.length) members.push(chosen[next++]!);
+    }
+    members.push(...chosen.slice(next));
+    return { id: p.id, title: p.title, members, ...(p.folders?.length ? { folders: [...p.folders] } : {}), ...(p.icon ? { icon: p.icon } : {}) };
+  });
+  for (const p of previous) {
+    if (!out.some((x) => x.id === p.id) && !p.members.some(seen)) out.push(p);
+  }
+  return out;
+}
+
+// A list from the backend or shared-pools.json, with only the known fields;
+// anything of the wrong shape is skipped.
+export function readShared(raw: unknown): SharedPool[] {
+  if (!Array.isArray(raw)) return [];
+  const out: SharedPool[] = [];
+  for (const r of raw as Record<string, unknown>[]) {
+    if (!r || typeof r.id !== 'string' || typeof r.title !== 'string' || !Array.isArray(r.members)) continue;
+    const members: PoolMember[] = [];
+    for (const m of r.members as Record<string, unknown>[]) {
+      if (!m || !(PROVIDERS as readonly unknown[]).includes(m.provider)) continue;
+      const member: PoolMember = { provider: m.provider as Provider };
+      if (typeof m.email === 'string' && m.email) member.email = m.email.toLowerCase();
+      else if (typeof m.runnerId === 'string' && typeof m.accountId === 'string') Object.assign(member, { runnerId: m.runnerId, accountId: m.accountId });
+      else continue;
+      members.push(member);
+    }
+    const pool: SharedPool = { id: r.id, title: r.title, members };
+    if (Array.isArray(r.folders) && r.folders.every((f) => typeof f === 'string') && r.folders.length) pool.folders = r.folders as string[];
+    if (typeof r.icon === 'string' && r.icon) pool.icon = r.icon;
+    out.push(pool);
+  }
+  return out;
+}

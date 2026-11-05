@@ -11,6 +11,8 @@
 // key the deployment's RUNNER_KEY was set to (`npx convex env set`).
 // THREADBEAR_SYNC=off turns it off whatever runner.json says, which
 // check.sh sets so no test runner ever writes to the real project.
+import type { PoolBackend } from './shared-pools.ts';
+import type { SharedPool } from './pools.ts';
 import { isSealed, type Sealed } from './secrets.ts';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -82,10 +84,12 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 37;
+export const BACKEND_API_VERSION = 38;
 // From this one an owned schedule can carry `poolId`, the pool that picks
 // its threads' login. An older backend's validator would turn it down.
 export const SCHEDULE_POOLS_API_VERSION = 36;
+// Pools shared between runners: the pools table (shared-pools.ts).
+export const SHARED_POOLS_API_VERSION = 38;
 // From this one a thread's row carries its open card of asks and a finished
 // turn's next steps, and a message row can be `summary` (end_turn's
 // bullets), so the phone shows end-of-turn cards. An older backend's
@@ -372,6 +376,8 @@ export type SyncDeps = {
   // a heartbeat says it has one; while inBackend(), schedules.updated isn't
   // mirrored. Absent in small tests.
   schedules?: { attach(backend: ScheduleBackend): void | Promise<void>; inBackend(): boolean };
+  // Follows the shared pools once the backend has them (API 38).
+  pools?: { attach(backend: PoolBackend): void };
   // For the sidebar table (thread-index.ts): telling the app about other
   // runners' threads, and the data dir their tokens are copied into.
   publish?: (n: Notification) => void;
@@ -1981,6 +1987,7 @@ export class ConvexSync {
         this.sawBackend(r);
         this.lookForReplyImages();
         if ((this.backendApiVersion ?? 0) >= SCHEDULES_API_VERSION && this.running) void this.deps.schedules?.attach(this.scheduleBackend());
+        if ((this.backendApiVersion ?? 0) >= SHARED_POOLS_API_VERSION && this.running) this.deps.pools?.attach(this.poolBackend());
         if ((this.backendApiVersion ?? 0) >= THREAD_INDEX_API_VERSION && this.running) this.index?.start();
       },
       (e) => {
@@ -2047,6 +2054,31 @@ export class ConvexSync {
       },
     };
     return this.schedulesTable;
+  }
+
+  // ------------------------------------------------------------ pools
+
+  private poolsTable?: PoolBackend;
+
+  // The backend's shared pools (SHARED_POOLS_API_VERSION) for shared-pools.ts.
+  poolBackend(): PoolBackend {
+    if (this.poolsTable) return this.poolsTable;
+    const key = this.deps.key;
+    const runnerId = this.runnerId;
+    this.poolsTable = {
+      subscribe: (onRows, onError) => {
+        if (!this.subscriber) {
+          onError(new Error('sync is off'));
+          return () => {};
+        }
+        return this.subscriber.subscribe('sync:pools', { key }, (v) => onRows(Array.isArray(v) ? (v as SharedPool[]) : []), onError);
+      },
+      save: async (pools) => {
+        await this.backend('mutation', 'sync:savePools', { key, runnerId, pools });
+      },
+      adopt: async (pools) => (await this.backend('mutation', 'sync:adoptPools', { key, runnerId, pools })) === true,
+    };
+    return this.poolsTable;
   }
 
   // ------------------------------------------------------------ commands

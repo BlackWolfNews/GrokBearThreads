@@ -43,6 +43,8 @@ import { removeTempFiles } from './fsutil.ts';
 import { Models } from './models/index.ts';
 import { SettingsService, modelMethods, settingsMethods } from './settings.ts';
 import { ConvexSync, defaultRunnerName, ensureRunnerId, readSyncKey } from './sync.ts';
+import { SharedPools } from './shared-pools.ts';
+import { readPools } from './pools.ts';
 import { detectMachineIcon } from './machine.ts';
 import { filesMethods } from './files.ts';
 import { devicesMethods } from './devices.ts';
@@ -292,9 +294,25 @@ async function main(): Promise<void> {
   // effort: off without a URL and key, and never in the way of a turn.
   // The RPC server is made further down; presence asks it once it's there.
   let rpcServer: RpcServer | undefined;
+  // Pools shared with the other runners through the backend, once it has
+  // them (docs/protocol.md, "Pools"); the last list seen is kept on disk.
+  const sharedPools = new SharedPools({
+    cachePath: `${cfg.home}/shared-pools.json`,
+    runnerId: syncRunnerId,
+    accounts: () => runner.safeAccounts(),
+    // runner.json's own pools, shaped as the runner reads them.
+    localPools: () => (Array.isArray(runner.cfg.pools) && runner.cfg.pools.length ? readPools({ pools: runner.cfg.pools }, runner.safeAccounts()) : undefined),
+    onChange: () => runner.poolsMaybeChanged(),
+    log,
+  });
+  const syncKey = readSyncKey(cfg.home);
+  if (cfg.sync.enabled && cfg.sync.url && syncKey) {
+    sharedPools.loadCache();
+    runner.sharedPools = sharedPools;
+  }
   const sync = new ConvexSync({
     config: { ...cfg.sync, runnerId: syncRunnerId, icon: runnerIcon },
-    key: readSyncKey(cfg.home),
+    key: syncKey,
     statePath: `${cfg.home}/sync-state.json`,
     cachePath: `${cfg.home}/sync-sent.json`,
     presence: async () => (atMac = isAtMac(rpcServer?.appConnected() ?? false, await hidIdleMs())),
@@ -314,6 +332,7 @@ async function main(): Promise<void> {
     commands: phoneCommands(runner, peers),
     secretBox: runner.secrets,
     schedules: scheduler,
+    pools: sharedPools,
     publish: (n) => runner.publish(n),
     home: cfg.home,
     version: RUNNER_VERSION,

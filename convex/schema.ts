@@ -370,6 +370,21 @@ export default defineSchema({
     .index('by_runnerId', ['runnerId'])
     .index('by_scheduleId', ['id']),
 
+  // Pools shared by every runner (API 38, docs/protocol.md, "Pools"): one
+  // row per pool, in `order`. Members are logins by provider and email, as
+  // login ids are each runner's own; one with no email is named by the
+  // runner that has it and its id there.
+  pools: defineTable({
+    id: v.string(),
+    title: v.string(),
+    members: v.array(v.object({ provider: v.string(), email: v.optional(v.string()), runnerId: v.optional(v.string()), accountId: v.optional(v.string()) })),
+    folders: v.optional(v.array(v.string())),
+    icon: v.optional(v.string()),
+    order: v.number(),
+    updatedAt: v.string(),
+    updatedBy: v.string(),
+  }).index('by_poolId', ['id']),
+
   accounts: defineTable({
     runnerId: v.string(),
     id: v.string(),

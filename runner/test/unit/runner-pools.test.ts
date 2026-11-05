@@ -346,11 +346,11 @@ test('threads.update poolId: null pins, a pool moves onto one of its logins, acc
   assert.throws(() => h.runner.update({ threadId: thread.id, poolId: 'nope' }), (e: RpcError) => e.code === -32602);
 });
 
-test('pools.save replaces the list in runner.json, checks it, and tells clients; an empty list goes back to the built-in ones', () => {
+test('pools.save replaces the list in runner.json, checks it, and tells clients; an empty list goes back to the built-in ones', async () => {
   const h = poolHarness();
   assert.equal(h.runner.listPools().pools[0].builtIn, true);
   const mine: Pool[] = [{ id: 'all', title: 'All', accountIds: ['claude-3', 'codex-main'], folders: ['~/dev'], builtIn: true }];
-  const saved = h.runner.savePools(mine).pools;
+  const saved = (await h.runner.savePools(mine)).pools;
   assert.deepEqual(saved, [{ id: 'all', title: 'All', accountIds: ['claude-3', 'codex-main'], folders: ['~/dev'] }]);
   assert.deepEqual(readRunnerJson(h.home).pools, saved);
   assert.deepEqual(h.runner.listPools().pools, saved);
@@ -358,9 +358,9 @@ test('pools.save replaces the list in runner.json, checks it, and tells clients;
   const told = h.notes.filter((n) => n.method === 'pools.updated');
   assert.equal(told.length, 1);
   assert.deepEqual((told[0] as any).params.pools, saved);
-  assert.throws(() => h.runner.savePools([{ id: 'x', title: 'X', accountIds: ['claude-9'] }]), (e: RpcError) => e.code === -32602 && /claude-9/.test(e.message));
-  assert.throws(() => h.runner.savePools([{ id: 'x', title: 'X', accountIds: [] }]), (e: RpcError) => e.code === -32602);
-  h.runner.savePools([]);
+  await assert.rejects(() => h.runner.savePools([{ id: 'x', title: 'X', accountIds: ['claude-9'] }]), (e: RpcError) => e.code === -32602 && /claude-9/.test(e.message));
+  await assert.rejects(() => h.runner.savePools([{ id: 'x', title: 'X', accountIds: [] }]), (e: RpcError) => e.code === -32602);
+  await h.runner.savePools([]);
   assert.equal(readRunnerJson(h.home).pools, undefined);
   assert.equal(h.runner.listPools().pools[0].id, 'claude');
 });

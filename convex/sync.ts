@@ -820,6 +820,71 @@ export const requestScheduleRun = mutation({
   },
 });
 
+// ------------------------------------------------------------ pools (API 38)
+
+const poolMemberDoc = v.object({ provider: v.string(), email: v.optional(v.string()), runnerId: v.optional(v.string()), accountId: v.optional(v.string()) });
+const sharedPoolDoc = v.object({ id: v.string(), title: v.string(), members: v.array(poolMemberDoc), folders: v.optional(v.array(v.string())), icon: v.optional(v.string()) });
+
+// Every runner subscribes to this and works out its own pools from it.
+export const pools = query({
+  args: { key: v.string() },
+  returns: v.array(sharedPoolDoc),
+  handler: async (ctx, { key }) => {
+    checkRunnerKey(key);
+    const rows = await ctx.db.query('pools').collect();
+    rows.sort((a, b) => a.order - b.order);
+    return rows.map(({ id, title, members, folders, icon }) => ({ id, title, members, ...(folders ? { folders } : {}), ...(icon ? { icon } : {}) }));
+  },
+});
+
+// Replaces the whole list, as the runner that took pools.save has it
+// (it keeps what it can't see itself). Rows that didn't change aren't
+// written, so the other runners' subscriptions don't wake for nothing.
+export const savePools = mutation({
+  args: { key: v.string(), runnerId: v.string(), pools: v.array(sharedPoolDoc) },
+  returns: v.null(),
+  handler: async (ctx, { key, runnerId, pools }) => {
+    checkRunnerKey(key);
+    await writePools(ctx, runnerId, pools);
+    return null;
+  },
+});
+
+// A runner's runner.json pools, the first time it meets API 38: they go in
+// only if the table is empty, so the first runner to arrive sets the list
+// and the rest follow it. True when these were taken.
+export const adoptPools = mutation({
+  args: { key: v.string(), runnerId: v.string(), pools: v.array(sharedPoolDoc) },
+  returns: v.boolean(),
+  handler: async (ctx, { key, runnerId, pools }) => {
+    checkRunnerKey(key);
+    if (pools.length === 0 || (await ctx.db.query('pools').first())) return false;
+    await writePools(ctx, runnerId, pools);
+    return true;
+  },
+});
+
+async function writePools(ctx: { db: MutationCtx['db'] }, runnerId: string, pools: { id: string; title: string; members: { provider: string; email?: string; runnerId?: string; accountId?: string }[]; folders?: string[]; icon?: string }[]): Promise<void> {
+  const ids = new Set<string>();
+  for (const p of pools) {
+    if (!p.id.trim() || ids.has(p.id)) throw new ConvexError(`Pool ids must be unique and not empty: "${p.id}"`);
+    ids.add(p.id);
+  }
+  const existing = await ctx.db.query('pools').collect();
+  for (const row of existing) if (!ids.has(row.id)) await ctx.db.delete(row._id);
+  const now = new Date().toISOString();
+  for (const [order, p] of pools.entries()) {
+    const row = existing.find((r) => r.id === p.id);
+    const doc = { id: p.id, title: p.title, members: p.members, ...(p.folders?.length ? { folders: p.folders } : {}), ...(p.icon ? { icon: p.icon } : {}), order };
+    if (!row) {
+      await ctx.db.insert('pools', { ...doc, updatedAt: now, updatedBy: runnerId });
+      continue;
+    }
+    const same = JSON.stringify({ title: row.title, members: row.members, folders: row.folders, icon: row.icon, order: row.order }) === JSON.stringify({ title: doc.title, members: doc.members, folders: doc.folders, icon: doc.icon, order });
+    if (!same) await ctx.db.replace(row._id, { ...doc, updatedAt: now, updatedBy: runnerId });
+  }
+}
+
 export const setAccounts = mutation({
   args: { key: v.string(), runnerId: v.string(), accounts: v.array(accountDoc) },
   returns: v.null(),

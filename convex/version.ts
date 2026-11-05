@@ -150,4 +150,8 @@
 //    a thread's pictures, with phone:messages' noImages. A runner uses
 //    upsertAccounts only with a backend of 37 or later and ignores firstSeen
 //    from none; an older phone goes on using phone:thread.
-export const API_VERSION = 37;
+// 38: pools shared between runners (docs/protocol.md, "Pools"): the
+//    `pools` table, sync:pools, sync:savePools and sync:adoptPools. A runner
+//    follows it only with a backend of 38 or later; before, each keeps its
+//    own runner.json pools.
+export const API_VERSION = 38;
