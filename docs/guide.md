@@ -477,7 +477,7 @@ only a quick reply is skipped without asking anything.
 
 Each look is one short call to Haiku, Claude's small, cheap model, rather
 than the model your threads run on. It runs on one of your own Claude
-logins: the one with the most room in the pool picked under Runs on (the
+logins: the one the pool would pick next in the pool chosen under Runs on (the
 same pool that writes thread titles, also in Settings › Models), and it
 counts towards that login's usage like any other call. When every login in
 the pool is out of room it waits, and with only Codex logins it doesn't
@@ -498,7 +498,7 @@ the Scheduled view (⌘2), or ask an agent ("look at this again every weekday
 at 9"). The Scheduled view lists them under Active, Paused and Done, with
 when each runs next. One that starts a new thread each time keeps the
 pool the composer was on when you made it, so each run starts on
-whichever of that pool's logins has the most room; ask an agent to put
+whichever of that pool's logins it would pick then; ask an agent to put
 it on another pool or one login. Click a heading to fold it away (Done starts folded); a
 folded one shows how many are under it. Its page
 says what's coming up next with a few numbers: how many are on, due in the
@@ -549,8 +549,9 @@ Codex they don't happen: threads keep the first line of their first message
 as their title.
 
 Logins are grouped into pools, one for Claude and one for Codex to begin
-with (Settings > Pools). A thread in a pool runs on whichever login has the
-most room. When the one it's on gets close to its limit, it moves to
+with (Settings > Pools). A new thread in a pool starts on the login with room whose
+weekly limit resets soonest, so a week's leftover gets spent before it's
+lost rather than draining the login with the most room. When the one it's on gets close to its limit, it moves to
 another login in the pool with room, and carries on from where it was. When
 none has room, the thread waits and carries on by itself once a limit
 resets. With only one login, that means it waits for that login's limit to

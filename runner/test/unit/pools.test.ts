@@ -30,12 +30,12 @@ import {
 const NOW = Date.parse('2026-10-27T08:00:00.000Z');
 const at = (mins: number) => new Date(NOW + mins * 60_000).toISOString();
 
-function acct(id: string, opts: { provider?: 'claude' | 'codex'; note?: string; five?: number; week?: number; resets?: number; blocked?: boolean } = {}): Account {
+function acct(id: string, opts: { provider?: 'claude' | 'codex'; note?: string; five?: number; week?: number; resets?: number; weekResets?: number; blocked?: boolean } = {}): Account {
   const a: Account = { id, provider: opts.provider ?? (id.startsWith('codex') ? 'codex' : 'claude'), title: `${id}@example.com`, configDir: `/tmp/${id}` };
   if (opts.note) a.note = opts.note;
   const windows: UsageWindow[] = [];
   if (opts.five !== undefined) windows.push({ kind: 'five_hour', title: '5-hour', remainingPercent: opts.five, ...(opts.resets !== undefined ? { resetsAt: at(opts.resets) } : {}) });
-  if (opts.week !== undefined) windows.push({ kind: 'weekly', title: 'Weekly', remainingPercent: opts.week });
+  if (opts.week !== undefined) windows.push({ kind: 'weekly', title: 'Weekly', remainingPercent: opts.week, ...(opts.weekResets !== undefined ? { resetsAt: at(opts.weekResets) } : {}) });
   if (windows.length || opts.blocked) a.usage = { windows, readAt: at(0), source: 'live', ...(opts.blocked ? { blocked: true } : {}) };
   return a;
 }
@@ -140,6 +140,29 @@ test('pickInPool: current stays while OK; else most room; unknown after known; p
   assert.equal(pickInPool(CLAUDE, lowCurrent, { provider: 'claude', prefer: 'claude-1' }), 'claude-1', 'a preferred login with unknown usage stays, as pickAccount');
   const dry = [acct('claude-main', { five: 5 }), acct('claude-1', { blocked: true }), acct('claude-3', { five: 2 })];
   assert.equal(pickInPool(CLAUDE, dry, { provider: 'claude' }), undefined);
+});
+
+test('pickInPool: the login whose week resets soonest goes first, while it has room', () => {
+  // Mike's three logins on 5 Nov: the fullest resets in 5 days, the other
+  // two today and tomorrow with a third of their week left.
+  const day = 24 * 60;
+  const list = [acct('claude-main', { five: 95, week: 77, weekResets: 5 * day }), acct('claude-1', { five: 90, week: 35, weekResets: 17 * 60 }), acct('claude-3', { five: 99, week: 37, weekResets: 5 * 60 })];
+  assert.equal(pickInPool(CLAUDE, list, { provider: 'claude', now: NOW }), 'claude-3', 'resets first');
+  assert.equal(pickInPool(CLAUDE, list, { provider: 'claude', now: NOW + 6 * 60 * 60_000 }), 'claude-1', 'once claude-3 has reset, its next reset is unknown');
+  assert.equal(pickInPool(CLAUDE, list, { provider: 'claude', current: 'claude-main', now: NOW }), 'claude-main', 'a thread on a login with room stays put');
+  // Down to the floor: it's left, and the next to reset is used.
+  const low = [list[0], list[1], acct('claude-3', { five: 99, week: 9, weekResets: 5 * 60 })];
+  assert.equal(pickInPool(CLAUDE, low, { provider: 'claude', now: NOW }), 'claude-1');
+  // The tighter 5-hour window counts too.
+  const busy = [list[0], list[1], acct('claude-3', { five: 4, week: 37, weekResets: 5 * 60 })];
+  assert.equal(pickInPool(CLAUDE, busy, { provider: 'claude', now: NOW }), 'claude-1');
+  // The same reset: most room, then prefer.
+  const same = [acct('claude-main', { week: 40, weekResets: 60 }), acct('claude-1', { week: 60, weekResets: 60 }), acct('claude-3', { week: 60, weekResets: 60 })];
+  assert.equal(pickInPool(CLAUDE, same, { provider: 'claude', now: NOW }), 'claude-1');
+  assert.equal(pickInPool(CLAUDE, same, { provider: 'claude', prefer: 'claude-3', now: NOW }), 'claude-3');
+  // A login with no weekly reset known waits behind one with.
+  const mixed = [acct('claude-main', { five: 100 }), acct('claude-1', { five: 50, week: 20, weekResets: 3 * day })];
+  assert.equal(pickInPool(CLAUDE, mixed, { provider: 'claude', now: NOW }), 'claude-1');
 });
 
 test('nextLogin: same provider first, then spill in pool order, then a wait', () => {

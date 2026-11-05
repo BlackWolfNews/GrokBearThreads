@@ -136,26 +136,45 @@ export function poolAccounts(pool: Pool, accounts: Account[]): Account[] {
 }
 
 // Which of the pool's logins of `provider` to run on. `current` stays if
-// it's OK, since every move costs a cold prompt cache. Otherwise the one
-// with the most room at or above the minimum, then the first whose usage
-// isn't known. `prefer` (a new thread's last-used login) wins a tie, and
-// is taken when its usage isn't known, as pickAccount does: nothing says
-// another has more room. undefined when none has room. `exclude` leaves
-// logins out (the one that just ran dry).
-export function pickInPool(pool: Pool, accounts: Account[], o: { provider: Provider; exclude?: string[]; current?: string; prefer?: string }): string | undefined {
+// it's OK, since every move costs a cold prompt cache. Otherwise, of the
+// logins at or above the minimum room, the one whose weekly window resets
+// soonest, as whatever's left in it then is gone (Mike, 5 Nov: the login
+// with the most room got drained and ran out two days early, while two
+// others reset that day with a third of their week unused). Logins with
+// no weekly reset known come after, and the most room breaks a tie. Then
+// the first whose usage isn't known. `prefer` (a new thread's last-used
+// login) wins a tie, and is taken when its usage isn't known, as
+// pickAccount does: nothing says another has more room. undefined when
+// none has room. `exclude` leaves logins out (the one that just ran dry).
+export function pickInPool(pool: Pool, accounts: Account[], o: { provider: Provider; exclude?: string[]; current?: string; prefer?: string; now?: number }): string | undefined {
   const members = poolAccounts(pool, accounts).filter((a) => a.provider === o.provider && !o.exclude?.includes(a.id));
   const current = members.find((a) => a.id === o.current);
   if (current && loginOk(current)) return current.id;
   const preferred = members.find((a) => a.id === o.prefer && !a.usage?.blocked);
   if (preferred && accountRoom(preferred) === undefined) return preferred.id;
-  let best: { id: string; room: number } | undefined;
+  const now = o.now ?? Date.now();
+  let best: { id: string; room: number; reset: number } | undefined;
   for (const a of members) {
     const room = accountRoom(a);
     if (a.usage?.blocked || room === undefined || room < MIN_ROOM_PERCENT) continue;
-    if (!best || room > best.room || (room === best.room && a.id === o.prefer)) best = { id: a.id, room };
+    const reset = weeklyReset(a, now);
+    const better = !best
+      || reset < best.reset
+      || (reset === best.reset && (room > best.room || (room === best.room && a.id === o.prefer)));
+    if (better) best = { id: a.id, room, reset };
   }
   if (best) return best.id;
   return members.find((a) => !a.usage?.blocked && accountRoom(a) === undefined)?.id;
+}
+
+// When a login's weekly window resets, to the minute so two read a few
+// seconds apart still tie; Infinity when there's no weekly window, no
+// reset time, or the reset has passed (the window is full again and its
+// next reset isn't known yet).
+export function weeklyReset(a: Account, now: number): number {
+  const w = a.usage?.windows?.find((x) => x.kind === 'weekly');
+  const t = w?.resetsAt ? Date.parse(w.resetsAt) : NaN;
+  return Number.isFinite(t) && t > now ? Math.round(t / 60_000) : Infinity;
 }
 
 export type NextLogin = { accountId: string; provider: Provider } | { waitUntil: string; accountId?: string };

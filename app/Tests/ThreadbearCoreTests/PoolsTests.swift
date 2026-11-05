@@ -134,6 +134,24 @@ final class PoolsTests: XCTestCase {
         XCTAssertEqual(Pools.pickLogin(claude, accounts: unknown, provider: "claude"), "claude-main", "unknown usage beats too little")
     }
 
+    func testPickLoginSpendsTheWeekThatResetsFirst() {
+        // Mike's three on 5 Nov: the fullest resets in 5 days, the others
+        // today and tomorrow with a third of their week left.
+        let now = at(8)
+        func login(_ id: String, week: Double, resetsIn hours: Double, five: Double = 95) -> Account {
+            Account(id: id, title: id, usage: AccountUsage(windows: [
+                UsageWindow(kind: "five_hour", title: "5-hour", remainingPercent: five),
+                UsageWindow(kind: "weekly", title: "Weekly", remainingPercent: week, resetsAt: now.addingTimeInterval(hours * 3600)),
+            ]))
+        }
+        let three = [login("claude-main", week: 77, resetsIn: 120), login("claude-1", week: 35, resetsIn: 17), login("claude-3", week: 37, resetsIn: 5)]
+        XCTAssertEqual(Pools.pickLogin(claude, accounts: three, provider: "claude", now: now), "claude-3")
+        XCTAssertEqual(Pools.pickLogin(claude, accounts: three, provider: "claude", now: now.addingTimeInterval(6 * 3600)), "claude-1", "after its reset, its next one isn't known")
+        XCTAssertEqual(Pools.pickLogin(claude, accounts: three, provider: "claude", current: "claude-main", now: now), "claude-main")
+        let low = [three[0], three[1], login("claude-3", week: 8, resetsIn: 5)]
+        XCTAssertEqual(Pools.pickLogin(claude, accounts: low, provider: "claude", now: now), "claude-1", "under the floor it's left")
+    }
+
     func testRailSubtitle() {
         XCTAssertEqual(Pools.railSubtitle(claude, accounts: accounts), "3 · 61%")
         XCTAssertEqual(Pools.railSubtitle(convex, accounts: accounts), "1 · 65%")

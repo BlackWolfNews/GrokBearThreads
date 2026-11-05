@@ -91,16 +91,33 @@ public enum Pools {
     }
 
     /// The login a turn of `provider` would run on: `current` while it has
-    /// room (each move costs a cold prompt cache), else the one with the
-    /// most room, else one whose usage isn't known, else the first. Notes
-    /// don't count here: a pool lists only logins it may use.
-    public static func pickLogin(_ pool: Pool, accounts: [Account], provider: String, current: String? = nil) -> String? {
+    /// room (each move costs a cold prompt cache), else, of those with
+    /// room, the one whose weekly window resets soonest (what's left in it
+    /// then is lost), the most room breaking a tie, as the runner's
+    /// `pickInPool`; else one whose usage isn't known, else the first.
+    /// Notes don't count here: a pool lists only logins it may use.
+    public static func pickLogin(_ pool: Pool, accounts: [Account], provider: String, current: String? = nil, now: Date = Date()) -> String? {
         let own = logins(pool, accounts: accounts, provider: provider)
         if let current, let account = own.first(where: { $0.id == current }), hasRoom(account) { return current }
         let open = own.filter(hasRoom)
-        let known = open.compactMap { account in AccountUsageText.room(account.usage).map { (id: account.id, room: $0) } }
-        if let top = known.map(\.room).max() { return known.first { $0.room == top }?.id }
+        let known = open.compactMap { account in
+            AccountUsageText.room(account.usage).map { (id: account.id, room: $0, reset: weeklyReset(account, now: now)) }
+        }
+        var best: (id: String, room: Double, reset: Double)?
+        for login in known {
+            if let have = best, !(login.reset < have.reset || (login.reset == have.reset && login.room > have.room)) { continue }
+            best = login
+        }
+        if let best { return best.id }
         return open.first?.id ?? own.first?.id
+    }
+
+    /// When the login's weekly window resets, in whole minutes so readings
+    /// a few seconds apart tie; infinity with no weekly reset known or one
+    /// already past, as the runner's `weeklyReset`.
+    static func weeklyReset(_ account: Account, now: Date) -> Double {
+        guard let reset = account.usage?.windows.first(where: { $0.kind == "weekly" })?.resetsAt, reset > now else { return .infinity }
+        return (reset.timeIntervalSince1970 / 60).rounded()
     }
 
     /// The best room among the pool's logins; a blocked one counts as none.

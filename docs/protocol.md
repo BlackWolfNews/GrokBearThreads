@@ -1383,12 +1383,16 @@ thread to another login when the one it's on runs out of room.
   `defaults.accountId`). Then, if a `model` is named whose provider has no
   login in that pool (and no `poolId` was given), the first pool that has
   one. The thread's provider is its model's, or the pool's first provider;
-  its login is the one of that provider in the pool with the most room
-  (a login with room unknown counts, after those with room known). A dev
+  its login is the pool's pick of that provider (below, "Which login"). A dev
   runner's `keepAccount` pins new threads to its account instead.
   `defaults.poolId` in `hello` is folder-blind: the app applies folders
   itself (`poolForFolder`, with the shared cases in
   `runner/test/fixtures/pool-folder-cases.json`).
+- **Which login.** Of the pool's logins of a provider that are OK to run
+  on, the one whose weekly window resets soonest, since whatever is left
+  in it then is lost; the most room breaks a tie. Logins with no weekly
+  reset known (or one already past) come after those with one, and a
+  login with room unknown after those with room known.
 - **OK to run on.** A login is OK when it isn't blocked and its room (the
   tighter of the 5-hour and weekly windows) is at least 10%, or its usage
   isn't known.
@@ -1396,8 +1400,8 @@ thread to another login when the one it's on runs out of room.
   login isn't OK, or isn't in its pool any more, it moves first. A thread
   stays on one login as long as it can, since every move costs a cold
   prompt cache.
-- **Where it moves.** The pool login of the thread's provider with the
-  most room. If none has room, the first other provider in pool order that
+- **Where it moves.** The pool's pick of the thread's provider (Which
+  login), leaving out the one it's on. If none has room, the first other provider in pool order that
   has a login with room: a cross-provider move, a handoff like any
   provider change, onto that provider's default model
   (`defaults.models[provider]`, else the account's own) and effort. A
@@ -2880,7 +2884,7 @@ kept in `schedules.json` in the data dir.
   or archived thread comes back to the inbox, as with any message.
 - **New threads** get the schedule's title and settings and are made the
   way `threads.create` makes them. One with a `poolId` starts on that
-  pool's login with the most room at the time, and stays in the pool.
+  pool's pick of its logins at the time (Which login), and stays in the pool.
   Unlike a thread Mike starts, it doesn't change the login or pool the
   next new thread starts on. Their summary's `schedule` says which
   schedule started them, so a client can mark them as scheduled. A repeating schedule whose last thread is
