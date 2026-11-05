@@ -782,6 +782,24 @@ website watches a 30-row tail, reads older pages once, watches pictures apart
 iPhone app still raises `limit` and uses `phone:thread`, which costs about
 70 KB for each message that arrives while a thread is open.
 
+Measured from `npx convex logs --success --jsonl` on 5 Nov. A runner start: 9.6
+MB before, 0.39 MB after (5 rows written), though every 3 days one is still a
+full write. The functions this changed fell from about 375 to 178 MB a day at
+the rate of each hour's sample (0.86 h and 1.05 h, the second with more
+starts), but these are busy daytime samples, not daily figures. By then most
+I/O was live reads for open clients: `phone:threads` about 390 MB a day at that
+rate (39 KB per re-run), `phone:projects` 165 MB (190 KB), `phone:schedules` 68
+MB (157 KB). Those cost nothing with no client open. Next, for the thread
+list: a subscription to only what changed, as `sync:threadIndexSince` does. Also
+new that day: `sync:sharedUsage` (API 39) reads every login's row, and one
+reading gets copied to the other runners' rows, so one change is three writes
+and nine re-runs, about 70 MB a day at that rate.
+
+An estimate for one Mac with the app open, 300 threads, 15 turns and half an
+hour of phone use a day: about 6 MB a day, 185 MB a month, under a fifth of the
+free 1 GB. Heartbeats are 2.4 MB of that and the three-day full write 1.3 MB,
+which grows with threads kept (about 13 KB a thread).
+
 Not urgent: messages are kept forever, so storage grows about 10 MB a month
 for a typical user. Dropping the messages of threads archived more than a
 month ago would hold it flat if it ever matters.
