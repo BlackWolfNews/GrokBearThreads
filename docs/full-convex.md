@@ -93,9 +93,16 @@ Each step lands on its own and is useful without the next.
 - **Done when:** a full day's real rate is known, and it's below the current
   one with a client open.
 - **Status, 5 Nov:** the inbox and usage writes landed in ee0b2dbd (thread
-  9b6113da). The projects list and `sync:schedules` are on branch `read-fixes`,
-  scheduled to land after scrubbing. Left out: `phone:schedules`, which the iPhone
-  still uses, and `sync:upsertProjects`.
+  9b6113da), and the projects list and schedules in 58d8907d (API 48). 20 minutes
+  of prod logs afterwards: `phone:projects` 37 KB a run (was 178), `sync:schedulesSince`
+  a whole read once at 178 KB and then little (`sync:schedules` was 148 KB on every
+  change), and 184 MB/day overall at that rate, late at night with almost no client
+  open, so it doesn't compare with the earlier hourly samples. **Still to come:** a
+  full day's real rate, from the daily 09:00 Perth usage check. Left: `sync:sharedUsage`
+  (12 KB a run but 78 runs in 20 minutes, the biggest cost now), `phone:schedules`
+  (113 to 171 KB a run, the iPhone still uses it) and `sync:upsertProjects` (about
+  56 KB a run). `phone:projectSearch` reads 186 KB a run, only while someone's
+  searching.
 
 ### 2. Secret scrubbing
 
