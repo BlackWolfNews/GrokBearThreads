@@ -195,9 +195,12 @@ public struct RemoteUnreachable: Error, Sendable, Equatable, LocalizedError {
         case refused
         /// It didn't answer, or the connection failed.
         case failed(String)
-        /// Its `rpcUrl` names a different host from the one its token was
-        /// first sent to, so the token wasn't sent (`RunnerHostPin`).
+        /// Its `rpcUrl` names a different host from the one written beside
+        /// its token, so the token wasn't sent (`RunnerHostPin`).
         case hostChanged(pinned: String, seen: String)
+        /// There's no readable host file beside its token (`file`), so the
+        /// token wasn't sent: the mirror's host is never trusted alone.
+        case noHostPin(file: String)
     }
 
     public var runnerId: String
@@ -226,7 +229,11 @@ public struct RemoteUnreachable: Error, Sendable, Equatable, LocalizedError {
         case .refused: return "It didn't accept the token this Mac has for it."
         case .hostChanged(let pinned, let seen):
             return "Its address changed from \(pinned) to \(seen), so this Mac didn't send it its token. "
-                + "If it really moved, delete secrets/runners/\(runnerId).host and open it again."
+                + "If it really moved, run tb pair on that Mac and put the host it prints in secrets/runners/\(runnerId).host here."
+        case .noHostPin(let file):
+            // Never offers the mirror's host: that's the one that can't be trusted.
+            return "This Mac only sends its token to a host it was told about on that Mac. "
+                + "Run tb pair on \(runnerName), then put the host line it prints into \(file) on this Mac and open it again."
         case .failed(let why):
             // Offline or not, the usual cause is a Mac asleep or Tailscale off.
             return online ? "It didn't answer (\(why))." : "It's offline, or Tailscale is off on one of the Macs."
@@ -318,17 +325,15 @@ public final class RemoteClients {
         guard let url = runner.rpcUrl, let host = url.host, !host.isEmpty else { throw RemoteUnreachable(runner, .noAddress) }
         guard let file = runner.tokenFile, let token = readToken(file) else { throw RemoteUnreachable(runner, .noToken) }
         // The rpcUrl comes from the backend's mirror, which any runner with
-        // the shared key can rewrite, so the token only goes to the host it
-        // first went to.
+        // the shared key can rewrite, so the token only goes to the host
+        // copied in beside it, from that Mac (`tb pair`). No pin, or one
+        // that can't be read, means no token: never trust on first use.
         switch RunnerHostPin.decide(host: host, pinned: pins.read(file)) {
         case .send: break
-        case .pin(let first):
-            // Trust on first use: tokens copied in before pins have none.
-            if pins.write(file, first) {
-                onLog?("pinned \(runner.name) (\(runner.id)) to \(first)")
-            } else {
-                onLog?("couldn't pin \(runner.name) (\(runner.id)) to \(first); connecting anyway")
-            }
+        case .noPin:
+            let pinFile = RunnerHostPin.file(forToken: file)
+            onLog?("didn't send \(runner.name) (\(runner.id))'s token: no readable \(pinFile)")
+            throw RemoteUnreachable(runner, .noHostPin(file: pinFile))
         case .refuse(let pinned, let seen):
             onLog?("refused to send \(runner.name) (\(runner.id))'s token to \(seen): it's pinned to \(pinned)")
             throw RemoteUnreachable(runner, .hostChanged(pinned: pinned, seen: seen))
@@ -387,21 +392,23 @@ public final class RemoteClients {
 
 /// Which host a runner's token may go to. The token is copied in by hand,
 /// but where to send it comes from the backend's mirror (`rpcUrl`), which
-/// anyone holding the shared runner key can rewrite. So the host it first
-/// went to is kept beside it (`<id>.host` next to `<id>.token`) and a
-/// different host is refused rather than handed the token. Only the host
-/// is pinned: a new port on the same Mac is still that Mac.
+/// anyone holding the shared runner key can rewrite. So the host is copied
+/// in too, from that Mac (`tb pair` prints it), into `<id>.host` next to
+/// `<id>.token`, and the token goes only there. With no pin the token isn't
+/// sent at all: trusting the mirror's first answer would let whoever wrote
+/// it first have the token. Only the host is pinned: a new port on the same
+/// Mac is still that Mac.
 public enum RunnerHostPin {
     public enum Decision: Sendable, Equatable {
         case send
-        /// Nothing pinned yet: send, and pin this host.
-        case pin(String)
+        /// No pin (or an unreadable one): don't send.
+        case noPin
         case refuse(pinned: String, seen: String)
     }
 
     public static func decide(host: String, pinned: String?) -> Decision {
         let seen = normalized(host)
-        guard let pinned = pinned.map(normalized), !pinned.isEmpty else { return .pin(seen) }
+        guard let pinned = pinned.map(normalized), !pinned.isEmpty else { return .noPin }
         return pinned == seen ? .send : .refuse(pinned: pinned, seen: seen)
     }
 
@@ -417,33 +424,21 @@ public enum RunnerHostPin {
     }
 }
 
-/// Where `RemoteClients` keeps the pins, by token file: files on a real
-/// Mac, memory in tests.
+/// Where `RemoteClients` reads the pins, by token file: files on a real
+/// Mac, a fixed map in tests. Read only: the app never writes a pin, as the
+/// only host it could write is the mirror's.
 public struct RunnerHostPins: Sendable {
+    /// Nil when there's no pin or it can't be read; both refuse.
     public var read: @Sendable (_ tokenFile: String) -> String?
-    /// False when it couldn't be kept.
-    public var write: @Sendable (_ tokenFile: String, _ host: String) -> Bool
 
-    public init(read: @escaping @Sendable (String) -> String?, write: @escaping @Sendable (String, String) -> Bool) {
+    public init(read: @escaping @Sendable (String) -> String?) {
         self.read = read
-        self.write = write
     }
 
-    public static let files = RunnerHostPins(
-        read: { RemoteClients.readTokenFile(RunnerHostPin.file(forToken: $0)) },
-        write: { tokenFile, host in
-            let path = RunnerHostPin.file(forToken: tokenFile)
-            // Owner-only, like the token beside it.
-            return FileManager.default.createFile(atPath: path, contents: Data((host + "\n").utf8), attributes: [.posixPermissions: 0o600])
-        })
+    public static let files = RunnerHostPins(read: { RemoteClients.readTokenFile(RunnerHostPin.file(forToken: $0)) })
 
-    public static func memory() -> RunnerHostPins {
-        final class Box: @unchecked Sendable {
-            let lock = NSLock()
-            var pins: [String: String] = [:]
-        }
-        let box = Box()
-        return RunnerHostPins(read: { file in box.lock.withLock { box.pins[file] } },
-                              write: { file, host in box.lock.withLock { box.pins[file] = host }; return true })
+    /// Pins by token file, as if copied in.
+    public static func memory(_ pins: [String: String] = [:]) -> RunnerHostPins {
+        RunnerHostPins(read: { pins[$0] })
     }
 }

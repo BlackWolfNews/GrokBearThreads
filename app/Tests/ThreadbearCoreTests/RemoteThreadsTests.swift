@@ -175,7 +175,7 @@ final class RemoteClientsTests: XCTestCase {
             }
             made.transports.append((url, token, transport))
             return transport
-        }, readToken: { tokens[$0] }, pins: .memory())
+        }, readToken: { tokens[$0] }, pins: .memory(["/tokens/bruce": "bruce.example.ts.net"]))
     }
 
     func testNoTokenOrAddressCantBeOpened() async {
@@ -281,7 +281,7 @@ final class RemoteClientsTests: XCTestCase {
             let transport = FakeTransport()
             transport.openError = .unauthorized
             return transport
-        }, readToken: { _ in "wrong" }, pins: .memory())
+        }, readToken: { _ in "wrong" }, pins: .memory(["/tokens/bruce": "bruce.example.ts.net"]))
         let bruce = RemoteRunner(id: "r_bruce", name: "bruce", online: true, rpcUrl: url, tokenFile: "/tokens/bruce")
         do {
             _ = try await remote.client(for: bruce)

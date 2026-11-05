@@ -14,6 +14,7 @@ import { findWorktreePatch, isInside } from './patches.ts';
 import { TRUST_ALL } from './patch-trust.ts';
 import { land, landTargetFromGit, type LandTarget } from './worktrees.ts';
 import { activityCommand } from './activity.ts';
+import { pairCommand } from './pair.ts';
 
 const OPTIONS = {
   cwd: { type: 'string' },
@@ -117,6 +118,8 @@ const HELP = `tb: talk to the Threadbear runner
   tb land [--dry-run]             in a thread's own worktree: rebase its branch on main, run
                                   the repo's check, then move main to it (never pushes);
                                   --dry-run stops before main moves
+  tb pair                         what to copy to another Mac (this runner's token file and
+                                  host) so its app can open this Mac's threads
   tb retitle [<threadId>...] [--dry-run] [--json]
                                   a model title for every thread still named by its first line,
                                   or for the ones given (never one named by hand)
@@ -161,6 +164,7 @@ const COMMAND_FLAGS: Record<string, string[]> = {
   export: ['out'],
   rpc: [],
   land: ['dry-run'],
+  pair: [],
 };
 
 // Read but never listed when a command refuses a flag: an agent that sees
@@ -214,6 +218,8 @@ async function main(argv: string[]): Promise<number> {
   if (cmd === 'activity') return activityCommand(cfg, values);
   // Works with no runner too: from any thread/ worktree, by git alone.
   if (cmd === 'land') return landCommand(cfg, Boolean(values['dry-run']));
+  // Read from runner.json alone, on the Mac being paired.
+  if (cmd === 'pair') return pairCommand(cfg);
   const url = runnerUrl(cfg);
   let client: RunnerClient;
   try {

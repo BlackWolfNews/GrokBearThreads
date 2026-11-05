@@ -134,7 +134,8 @@ runner only while that thread is open. Runners never talk to each other.
   Tailscale: `wss://<its MagicDNS name>:<port>/rpc` (`tailscale serve` on
   that Mac, so it's only reachable on the tailnet), with that runner's
   token, copied once into this Mac's data dir
-  (`secrets/runners/<runnerId>.token`). From there it's the normal
+  (`secrets/runners/<runnerId>.token`, with the host to send it to in
+  `<runnerId>.host` beside it; `tb pair` on that Mac prints both). From there it's the normal
   protocol against that runner: `threads.events`, `threads.subscribe`,
   `threads.send`, `approvals.respond`, `threads.update`. The connection
   closes again when the thread does.

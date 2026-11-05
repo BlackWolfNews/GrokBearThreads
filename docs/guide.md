@@ -507,7 +507,9 @@ even while this one is asleep, in that Mac's folder (leave the folder
 empty for its default). Its threads show on your phone and the website, and
 threads made on another Mac show in your sidebar too, with that Mac's
 icon in the row: open one and you're talking to that Mac directly (over
-Tailscale), so it needs that Mac to be on and its key copied to this one.
+Tailscale), so it needs that Mac to be on and its key and host copied to
+this one: run `tb pair` on that Mac and it prints the two files to make here
+and how.
 Its pictures and files come from that Mac as you open them. To start a
 thread on another Mac, pick it with the machine chip on the composer: the
 folder, account and model are then that Mac's. Schedules need your

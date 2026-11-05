@@ -31,9 +31,10 @@ File references are where to look.
   script beside it that prints it for `sudo -A`, removed after 24 hours,
   and `secret-box.key` is the key your phone seals those answers to;
   `runners/<id>.token` is another Mac's runner token, if you copied one
-  in, and the app writes `runners/<id>.host` beside it the first time it
-  connects: the host it sent that token to, so it never sends it anywhere
-  else; `~/Library/Caches/Threadbear/update`;
+  in, and `runners/<id>.host` beside it, which you copy in too (`tb pair`
+  on that Mac prints both): the only host the app sends that token to.
+  The app only reads these; with no `.host` it sends the token nowhere;
+  `~/Library/Caches/Threadbear/update`;
   `~/Library/Caches/Threadbear/remote` (copies of pictures and files from
   threads on your other Macs, at most 512 MB, unused ones go after 30 days);
   `~/Library/Logs/threadbear-runner.log` and `threadbear-update.log`;

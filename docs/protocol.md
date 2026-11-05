@@ -2912,13 +2912,16 @@ type RemoteThread = { runnerId: string, threadId: string, title, cwd,
   unless one of that runner's threads is on screen.
 - **The token goes to one host only.** `rpcUrl` comes from the backend,
   and any runner with the shared key can rewrite another's, so the client
-  pins the host (not the port) the token first went to, in a file beside
-  it (`<id>.host` next to `<id>.token`, the host and a newline, owner
-  only). With no pin yet it trusts the first host it sees and writes one;
-  an `rpcUrl` naming another host after that isn't dialled: the client
-  says the address changed (from which host to which) and that deleting
-  the `.host` file accepts a real move. Copying a `.host` in with the
-  token pins it from the start.
+  sends the token only to the host (not the port) in a file beside it
+  (`<id>.host` next to `<id>.token`, the host and a newline, owner only),
+  copied in from that Mac with the token: `tb pair` there prints both. The
+  client never writes the file and never trusts the mirror's host on its
+  own, not even the first time. No `.host`, or one it can't read: it
+  doesn't dial, and says which file to make and that `tb pair` on that Mac
+  prints the line (it never suggests the mirror's host). An `rpcUrl`
+  naming another host isn't dialled either: the client says the address
+  changed (from which host to which) and that a real move means putting
+  the new host from `tb pair` in the `.host` file.
 - **New threads on another runner** are a `threads.create` on that
   runner's connection, with its folder (a path on that Mac), account,
   model and effort from that runner's `hello`.

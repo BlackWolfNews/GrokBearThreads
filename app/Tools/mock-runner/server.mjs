@@ -361,6 +361,9 @@ fs.writeFileSync(path.join(dataDir, 'secrets/runner-token'), token + '\n', { mod
 // the same token.
 fs.mkdirSync(path.join(dataDir, 'secrets/runners'), { recursive: true });
 fs.writeFileSync(path.join(dataDir, `secrets/runners/${BRUCE}.token`), token + '\n', { mode: 0o600 });
+// And the host beside it, as `tb pair` on Bruce says to copy: the app sends
+// the token nowhere without one (RunnerHostPin). Its rpcUrl is 127.0.0.1.
+fs.writeFileSync(path.join(dataDir, `secrets/runners/${BRUCE}.host`), '127.0.0.1\n', { mode: 0o600 });
 
 // What `hello` and `runner.status` report. mock.restart bumps the version,
 // as a deploy would, so the app's "Runner restarted" note has two to name.
