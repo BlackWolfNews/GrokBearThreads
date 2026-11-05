@@ -80,6 +80,36 @@ final class LocalPreviewSiteTests: XCTestCase {
         XCTAssertNotNil(site.serve("/assets/late.png"), "named by the script")
     }
 
+    /// Codex's review: no symlink is followed anywhere on the way, not even
+    /// to an allowed picture inside the folder, and a file swapped for a link
+    /// after it was first served reads nothing.
+    func testNoSymlinkIsFollowed() throws {
+        let fm = FileManager.default
+        try fm.createDirectory(at: outside.appendingPathComponent("assets"), withIntermediateDirectories: true)
+        try "far".write(to: outside.appendingPathComponent("assets/bg.png"), atomically: true, encoding: .utf8)
+        try write("index.html", "<img src=pic.png><img src=alias.png><img src=linked/bg.png><img src=hard.png>")
+        try fm.createSymbolicLink(at: dir.appendingPathComponent("alias.png"), withDestinationURL: dir.appendingPathComponent("pic.png"))
+        try fm.createSymbolicLink(at: dir.appendingPathComponent("linked"), withDestinationURL: outside.appendingPathComponent("assets"))
+        try fm.linkItem(at: outside.appendingPathComponent("out.png"), to: dir.appendingPathComponent("hard.png"))
+        let site = try site()
+        XCTAssertNil(site.serve("/alias.png"), "a link, even to an allowed picture")
+        XCTAssertNil(site.serve("/linked/bg.png"), "a folder on the way that's a link")
+        XCTAssertNil(site.serve("/hard.png"), "a hard link to a file elsewhere")
+        XCTAssertEqual(site.serve("/pic.png")?.data, Data("x".utf8))
+        // Swapped for a link to the secret beside it, after being served once.
+        try fm.removeItem(at: dir.appendingPathComponent("pic.png"))
+        try fm.createSymbolicLink(at: dir.appendingPathComponent("pic.png"), withDestinationURL: dir.appendingPathComponent(".env"))
+        XCTAssertNil(site.serve("/pic.png"))
+    }
+
+    /// A FIFO named like a picture is refused without hanging the open.
+    func testAFifoIsRefused() throws {
+        try write("index.html", "<img src=pipe.png>")
+        XCTAssertEqual(mkfifo(dir.appendingPathComponent("pipe.png").path, 0o600), 0)
+        let site = try site()
+        XCTAssertNil(site.serve("/pipe.png"))
+    }
+
     /// A stylesheet is only read for names once the page has named it.
     func testNothingIsAllowedBeforeThePageIsServed() throws {
         let site = try XCTUnwrap(LocalPreviewSite(file: dir.appendingPathComponent("index.html")))

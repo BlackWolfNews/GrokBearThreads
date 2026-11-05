@@ -14,7 +14,10 @@ import UniformTypeIdentifiers
 /// - its path has no `..`, no empty part and no part starting with a dot;
 /// - it's one of `assetExtensions` (no `.json`, `.txt`, `.env`, keys...);
 /// - a page or stylesheet served before names it (the page itself always);
-/// - it's inside the folder once symlinks are followed, and a regular file.
+/// - it's reached from the folder without following a symlink anywhere on
+///   the way, and is a regular file with one link, checked on the open file
+///   it's then read from, so swapping it for a link after the check reads
+///   nothing (Codex review).
 public final class LocalPreviewSite: @unchecked Sendable {
     /// The page's folder, symlinks resolved.
     public let root: URL
@@ -42,9 +45,17 @@ public final class LocalPreviewSite: @unchecked Sendable {
         let page = file.lastPathComponent
         guard Self.assetExtensions.contains((page as NSString).pathExtension.lowercased()), !page.hasPrefix(".") else { return nil }
         root = file.deletingLastPathComponent().resolvingSymlinksInPath()
+        // Held open for the site's life: every read starts here, so the
+        // folder being moved or swapped for a link later changes nothing.
+        rootFD = open(root.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+        guard rootFD >= 0 else { return nil }
         self.page = page
         allowed = [page]
     }
+
+    private let rootFD: Int32
+
+    deinit { close(rootFD) }
 
     /// The bytes and MIME type for `path` (from the folder, as in the URL
     /// the page asked for), or nil when it isn't one the page may read.
@@ -54,19 +65,7 @@ public final class LocalPreviewSite: @unchecked Sendable {
         let relative = parts.joined(separator: "/")
         let ext = (relative as NSString).pathExtension.lowercased()
         guard Self.assetExtensions.contains(ext), lock.withLock({ allowed.contains(relative) }) else { return nil }
-        // Following symlinks has to land inside the folder, on a file that
-        // passes the same rules: `logo.png` linked to `.env` beside it, or to
-        // a file elsewhere, is refused.
-        let file = root.appendingPathComponent(relative).resolvingSymlinksInPath()
-        let prefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
-        guard file.path.hasPrefix(prefix), Self.safeParts(String(file.path.dropFirst(prefix.count))) != nil,
-              Self.assetExtensions.contains(file.pathExtension.lowercased()),
-              let attrs = try? FileManager.default.attributesOfItem(atPath: file.path),
-              attrs[.type] as? FileAttributeType == .typeRegular,
-              // A hard link is the same file as one somewhere else.
-              (attrs[.referenceCount] as? NSNumber)?.intValue ?? 1 <= 1,
-              (attrs[.size] as? NSNumber)?.intValue ?? 0 <= Self.maxBytes,
-              let data = try? Data(contentsOf: file) else { return nil }
+        guard let data = Self.read(parts, under: rootFD, maxBytes: Self.maxBytes) else { return nil }
         if Self.scannedExtensions.contains(ext), let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) {
             let dir = (relative as NSString).deletingLastPathComponent
             let found = Self.references(in: text).compactMap { Self.resolve($0, from: dir) }
@@ -74,6 +73,43 @@ public final class LocalPreviewSite: @unchecked Sendable {
         }
         let mime = UTType(filenameExtension: ext)?.preferredMIMEType ?? "application/octet-stream"
         return (data, mime)
+    }
+
+    /// The file at `parts` under the folder open as `rootFD`: each folder on
+    /// the way and the file itself opened with O_NOFOLLOW, so a symlink
+    /// anywhere refuses it (`logo.png` linked to the `.env` beside it, a
+    /// folder linked elsewhere), then checked and read on that one open file.
+    static func read(_ parts: [String], under rootFD: Int32, maxBytes: Int) -> Data? {
+        guard let name = parts.last else { return nil }
+        var dir = rootFD
+        var opened: [Int32] = []
+        defer { opened.forEach { close($0) } }
+        for part in parts.dropLast() {
+            let fd = openat(dir, part, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+            guard fd >= 0 else { return nil }
+            opened.append(fd)
+            dir = fd
+        }
+        // O_NONBLOCK, so a FIFO named like a picture can't hang the open.
+        let fd = openat(dir, name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+        guard fd >= 0 else { return nil }
+        defer { close(fd) }
+        var info = stat()
+        guard fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG,
+              // A hard link is the same file as one somewhere else.
+              info.st_nlink == 1,
+              info.st_size <= maxBytes else { return nil }
+        var out = Data()
+        var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+        while true {
+            let n = buffer.withUnsafeMutableBytes { Darwin.read(fd, $0.baseAddress, $0.count) }
+            if n < 0 { if errno == EINTR { continue } else { return nil } }
+            if n == 0 { break }
+            out.append(buffer, count: n)
+            // It grew after the check.
+            if out.count > maxBytes { return nil }
+        }
+        return out
     }
 
     /// The path's parts, or nil for one with `..`, `.`, an empty part or a dotfile.
