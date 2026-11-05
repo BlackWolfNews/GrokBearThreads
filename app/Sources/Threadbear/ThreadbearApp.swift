@@ -187,6 +187,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         MainActor.assumeIsolated {
             let app = AppModel.shared
             let arguments = CommandLine.arguments
+            // Before any window draws. Automation's --appearance comes later and wins.
+            AppAppearance.saved().apply()
             if AppUpdater.isInstalledApp {
                 HangWatch.start(folder: HangWatch.defaultFolder, build: BuildInfo.read(bundle: Bundle.main.bundleURL)?.short, report: CrashReporting.reportHang)
             }

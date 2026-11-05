@@ -1266,6 +1266,13 @@ a newer release goes into the same thread. A release Mike marks important
 (a security or data fix) starts one straight away. Change how often, or
 turn it off, in Settings (⌘,) > General > Updates from Mike.
 
+### Light and dark
+
+Threadbear follows your Mac's appearance (System Settings > Appearance)
+unless you pick one for it alone: Settings (⌘,) > General > Appearance has
+Same as the Mac, Light and Dark. It changes straight away and stays picked
+the next time the app opens.
+
 ### The activity log
 
 Turn on Keep an activity log in Settings (⌘,) > General and the app notes

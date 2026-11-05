@@ -4,8 +4,9 @@ import ThreadbearCore
 
 /// The Settings window (⌘,): the runner's settings, in the grouped form
 /// every Mac app's settings use. All of it lives in the runner, and this
-/// only shows it and sends changes, apart from the activity log's switch,
-/// which is this Mac's own (ActivityRecorder).
+/// only shows it and sends changes, apart from the appearance and the
+/// activity log's switch, which are this Mac's own (AppAppearance,
+/// ActivityRecorder).
 struct SettingsView: View {
     @Environment(AppModel.self) private var app
 
@@ -80,10 +81,21 @@ private struct SettingsErrorRow: View {
 private struct GeneralSettings: View {
     @Environment(AppModel.self) private var app
     @AppStorage(ActivityRecorder.enabledKey) private var activityLog = false
+    @AppStorage(AppAppearance.key) private var appearance: AppAppearance = .system
 
     var body: some View {
         SettingsGate { settings in
             Form {
+                SettingsSection("Appearance",
+                                about: "Light or dark for Threadbear only. Same as the Mac follows System Settings > Appearance.",
+                                ask: "change it for you.") {
+                    Picker("Appearance", selection: $appearance) {
+                        ForEach(AppAppearance.allCases) { Text($0.title).tag($0) }
+                    }
+                    .tip("Light or dark for Threadbear, whatever the Mac is set to")
+                    .onChange(of: appearance) { _, new in new.apply() }
+                }
+
                 SettingsSection("New threads",
                                 about: "Where a new thread starts when you don't pick a folder.",
                                 ask: "change it, or anything else about how threads run. Most settings aren't shown here, and your agent edits them in runner.json.") {
