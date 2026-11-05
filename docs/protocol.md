@@ -3539,7 +3539,13 @@ default).
   whose thread is another runner's by the time it's taken.
   The runner watches it with `relay:commandState` (a get by id) until it's
   taken (sends, interrupts) or done (the rest), at most 20 seconds, and
-  answers with the command's `note` as a `-32000` if it failed. A runner the
+  answers with the command's `note` as a `-32000` if it failed.
+  `threads.update` and `threads.markSeen` answer `{ thread }` as any runner
+  does: the thread's row, with each change made from here on it until the
+  row shows it or for a minute at most (without them a markSeen answered
+  after an archive would bring the thread back), seqs as the app makes them
+  for a row. `threads.share` only turns a link off (and answers `{ thread }`);
+  making one is `-32000`, as its command gives back no link to show. A runner the
   list says is offline is `-32000` at once. Commands from here carry `from:
   "mac"`, so the other runner gives the message no `origin`.
 - **New threads there.** `threads.create` with `runnerId` is a `create`

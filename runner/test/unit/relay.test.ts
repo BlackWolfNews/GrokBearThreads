@@ -216,6 +216,83 @@ test('sends, stops and changes go to the thread runner; settings that only work 
   await assert.rejects(h.relay.call(T, 'threads.send', { threadId: T, text: 'x', images: [{ path: '/a.png' }] }), /pictures/);
 });
 
+test("a change answers with the thread, as the app decodes any runner's threads.update", async () => {
+  // It answered {} and the app's archive failed with "Key 'thread' not found".
+  const h = harness();
+  const settle = (i: number) => h.subs.get('relay:commandState')![i]!.onUpdate({ state: 'done' });
+  const archive = h.relay.call(T, 'threads.update', { threadId: T, archived: true, verdict: 'worked' });
+  await new Promise((r) => setImmediate(r));
+  settle(0);
+  const { thread } = (await archive) as { thread: Record<string, unknown> };
+  assert.equal(thread.id, T);
+  assert.equal(thread.runnerId, 'bruce');
+  assert.equal(thread.title, 'A thread');
+  assert.equal(typeof thread.archivedAt, 'string');
+  assert.equal(thread.lastSeq, 1, 'still unread');
+  const snooze = h.relay.call(T, 'threads.update', { threadId: T, snoozedUntil: 'restart', starred: true, title: 'Renamed' });
+  await new Promise((r) => setImmediate(r));
+  settle(1);
+  await new Promise((r) => setImmediate(r));
+  settle(2);
+  await new Promise((r) => setImmediate(r));
+  settle(3);
+  const after = ((await snooze) as { thread: Record<string, unknown> }).thread;
+  assert.equal(after.title, 'Renamed');
+  assert.equal(after.snoozedUntilRestart, true);
+  assert.equal(typeof after.starredAt, 'string');
+  assert.equal(after.archivedAt, thread.archivedAt, "the backend's row isn't archived yet, but the archive was done: a later reply mustn't undo it in the app");
+  const markSeen = h.relay.call(T, 'threads.markSeen', { threadId: T, seq: 9 });
+  await new Promise((r) => setImmediate(r));
+  settle(4);
+  const seen = ((await markSeen) as { thread: Record<string, unknown> }).thread;
+  assert.equal(seen.lastSeq, 0);
+  assert.equal(typeof seen.archivedAt, 'string', 'still archived');
+  // A minute on, the row has caught up and is the truth again.
+  h.clock.advance(61_000);
+  const again = h.relay.call(T, 'threads.markSeen', { threadId: T, seq: 9 });
+  await new Promise((r) => setImmediate(r));
+  settle(5);
+  const later = ((await again) as { thread: Record<string, unknown> }).thread;
+  assert.equal(later.archivedAt, undefined);
+  assert.equal(later.title, 'A thread');
+});
+
+test("a change from elsewhere wins once the row shows ours, and one that went through is kept when the next fails", async () => {
+  const h = harness();
+  let n = 0;
+  const answer = async (state: 'done' | 'failed') => {
+    await new Promise((r) => setImmediate(r));
+    h.subs.get('relay:commandState')![n++]!.onUpdate(state === 'done' ? { state } : { state, note: 'bad time' });
+  };
+  // Renamed to A from here; the row catches up, then the phone renames it B.
+  const rename = h.relay.call(T, 'threads.update', { threadId: T, title: 'A' });
+  await answer('done');
+  assert.equal(((await rename) as { thread: { title: string } }).thread.title, 'A');
+  h.remote.threads[0]!.title = 'A';
+  h.remote.threads[0]!.unread = false;
+  assert.equal(((await h.relay.call(T, 'threads.markSeen', { threadId: T, seq: 1 })) as { thread: { title: string } }).thread.title, 'A');
+  h.remote.threads[0]!.title = 'B';
+  assert.equal(((await h.relay.call(T, 'threads.markSeen', { threadId: T, seq: 1 })) as { thread: { title: string } }).thread.title, 'B', "the phone's rename isn't hidden");
+  // A rename that goes through, then a snooze that fails: the rename stays.
+  const both = h.relay.call(T, 'threads.update', { threadId: T, title: 'C', snoozedUntil: 'not a time' });
+  await answer('done');
+  await answer('failed');
+  await assert.rejects(both, /bad time/);
+  assert.equal(((await h.relay.call(T, 'threads.markSeen', { threadId: T, seq: 1 })) as { thread: { title: string } }).thread.title, 'C');
+});
+
+test("a link can be turned off but not made: that command gives back no link, so it shared and then said it failed", async () => {
+  const h = harness();
+  await assert.rejects(h.relay.call(T, 'threads.share', { threadId: T, access: 'link' }), /Sharing a link isn't possible through Convex yet/);
+  await assert.rejects(h.relay.call(T, 'threads.share', { threadId: T, access: 'off', newLink: true }), /isn't possible/);
+  assert.equal(h.calls.filter((c) => c.fn === 'relay:queueCommand').length, 0);
+  const off = h.relay.call(T, 'threads.share', { threadId: T, access: 'off' });
+  await new Promise((r) => setImmediate(r));
+  h.subs.get('relay:commandState')![0]!.onUpdate({ state: 'done' });
+  assert.equal(((await off) as { thread: { id: string } }).thread.id, T);
+  assert.deepEqual(h.calls.at(-1)!.args, { key: 'owner', runnerId: 'bruce', threadId: T, kind: 'share', args: { access: 'off' } });
+});
+
 test('a failed command says why, and an offline runner is said at once', async () => {
   const h = harness();
   const p = h.relay.call(T, 'threads.update', { threadId: T, archived: true });

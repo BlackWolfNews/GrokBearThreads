@@ -39,6 +39,12 @@ export const SCALE = 8;
 // once it has said so for this long.
 const SETTLE_MS = 4000;
 const TAIL = 15;
+// How long a change made from here outranks the other runner's row in
+// replies (Relay.changed): the row catches up within seconds.
+const CHANGED_MS = 60_000;
+// Hibernating until that runner restarts (runner.ts's UNTIL_RESTART, not
+// imported so this module doesn't load the whole runner).
+const UNTIL_RESTART = '9999-12-31T00:00:00.000Z';
 const PAGE = 50;
 // A watch nobody has subscribed for this long stops; its rows stay a while,
 // so opening the thread again reads only what's new.
@@ -203,6 +209,13 @@ export class Relay {
   private watches = new Map<string, Watch>();
   // Threads made from here that the sidebar's list doesn't have yet.
   private made = new Map<string, RemoteThread>();
+  // Changes the other runner has made for us that its backend row may not
+  // show yet, kept a while so each reply carries them all: otherwise a
+  // markSeen answered after an archive, from the row that isn't archived
+  // yet, put the thread back in the app's inbox. Each field goes once the
+  // row shows it (so a later change from the phone isn't hidden) or after
+  // CHANGED_MS, whichever is first.
+  private changed = new Map<string, Map<keyof RemoteThread, { value: unknown; at: number }>>();
   private sweepTimer?: TimerHandle;
   private reads = 0;
   // What those reads brought back, as JSON bytes (about what Convex bills
@@ -244,6 +257,50 @@ export class Relay {
       return listed;
     }
     return this.made.get(threadId);
+  }
+
+  /**
+   * Another runner's thread as a ThreadSummary, from its sidebar row, as the
+   * app makes one (RemoteThreads.swift, `RemoteThread.summary`): no seqs in
+   * the row, so an unread one is lastSeq 1 and lastSeenSeq 0.
+   */
+  private summary(threadId: string): Record<string, unknown> {
+    const now = this.deps.clock.now();
+    const row = this.find(threadId);
+    const t: Partial<RemoteThread> = { ...row };
+    const kept = this.changed.get(threadId);
+    for (const [k, c] of kept ?? []) {
+      if (now - c.at >= CHANGED_MS || (row && shows(k, row[k], c.value))) kept!.delete(k);
+      else (t as Record<string, unknown>)[k] = c.value;
+    }
+    if (kept && !kept.size) this.changed.delete(threadId);
+    const thread: Record<string, unknown> = {
+      id: threadId,
+      title: t.title ?? '',
+      cwd: t.cwd ?? '',
+      accountId: t.accountId ?? '',
+      provider: t.provider || 'claude',
+      status: t.status ?? 'idle',
+      needsYou: t.needsYou ?? false,
+      preview: t.preview ?? '',
+      lastSeq: t.unread ? 1 : 0,
+      lastSeenSeq: 0,
+      runnerId: t.runnerId,
+    };
+    for (const k of ['model', 'createdAt', 'lastActivityAt', 'snoozedUntil', 'archivedAt', 'starredAt', 'startedBy', 'asked'] as const) {
+      if (t[k] !== undefined) thread[k] = t[k];
+    }
+    if (t.lastActivityAt) thread.updatedAt = t.lastActivityAt;
+    if (t.snoozedUntil === UNTIL_RESTART) thread.snoozedUntilRestart = true;
+    return thread;
+  }
+
+  /** A change the other runner has done, for replies until its row shows it (`changed`). */
+  private remember(threadId: string, patch: Partial<RemoteThread>): void {
+    const at = this.deps.clock.now();
+    const kept = this.changed.get(threadId) ?? new Map();
+    for (const [k, value] of Object.entries(patch)) kept.set(k as keyof RemoteThread, { value, at });
+    this.changed.set(threadId, kept);
   }
 
   private runner(runnerId: string) {
@@ -471,6 +528,10 @@ export class Relay {
 
   private sweep(): void {
     const now = this.deps.clock.now();
+    for (const [id, kept] of this.changed) {
+      for (const [k, c] of kept) if (now - c.at >= CHANGED_MS) kept.delete(k);
+      if (!kept.size) this.changed.delete(id);
+    }
     for (const [id, w] of this.watches) {
       if (this.deps.subscribed(id)) {
         w.idleSince = undefined;
@@ -605,23 +666,48 @@ export class Relay {
       }
       case 'threads.markSeen': {
         // A write on the other runner and the backend: only when there's something unread.
-        if (this.find(threadId)?.unread) await this.command(w.runnerId, threadId, 'update', { markSeen: true }).catch(() => undefined);
-        return {};
+        if (this.find(threadId)?.unread) {
+          await this.command(w.runnerId, threadId, 'update', { markSeen: true }).then(
+            () => this.remember(threadId, { unread: false }),
+            () => undefined,
+          );
+        }
+        return { thread: this.summary(threadId) };
       }
       case 'threads.update': {
-        const changes: Record<string, unknown>[] = [];
-        if (typeof p.title === 'string') changes.push({ title: p.title });
-        if (typeof p.archived === 'boolean') changes.push(p.archived ? { archive: true, ...(typeof p.verdict === 'string' ? { verdict: p.verdict } : {}) } : { unarchive: true });
-        if (typeof p.starred === 'boolean') changes.push({ star: p.starred });
-        if ('snoozedUntil' in p) changes.push(p.snoozedUntil === null ? { wake: true } : p.snoozedUntil === 'restart' ? { snooze: { untilRestart: true } } : { snooze: { until: String(p.snoozedUntil) } });
+        // Each command with what it changes on the row, for the reply.
+        const now = new Date(this.deps.clock.now()).toISOString();
+        const t = this.find(threadId);
+        const changes: [Record<string, unknown>, Partial<RemoteThread>][] = [];
+        if (typeof p.title === 'string') changes.push([{ title: p.title }, { title: p.title }]);
+        if (typeof p.archived === 'boolean') {
+          changes.push(p.archived ? [{ archive: true, ...(typeof p.verdict === 'string' ? { verdict: p.verdict } : {}) }, { archivedAt: now }] : [{ unarchive: true }, { archivedAt: undefined }]);
+        }
+        if (typeof p.starred === 'boolean') changes.push([{ star: p.starred }, { starredAt: p.starred ? (t?.starredAt ?? now) : undefined }]);
+        if ('snoozedUntil' in p) {
+          const s = p.snoozedUntil;
+          changes.push(s === null ? [{ wake: true }, { snoozedUntil: undefined }] : s === 'restart' ? [{ snooze: { untilRestart: true } }, { snoozedUntil: UNTIL_RESTART }] : [{ snooze: { until: String(s) } }, { snoozedUntil: String(s) }]);
+        }
         const known = new Set(['threadId', 'title', 'archived', 'verdict', 'starred', 'snoozedUntil']);
         if (Object.keys(p).some((k) => !known.has(k) && p[k] !== undefined)) this.unsupported(w, 'Changing its login, model or settings');
-        for (const change of changes) await this.command(w.runnerId, threadId, 'update', change, { done: true });
-        return {};
+        // Kept as each is done, so one failing after another went through
+        // doesn't lose the one that did.
+        for (const [change, patch] of changes) {
+          await this.command(w.runnerId, threadId, 'update', change, { done: true });
+          this.remember(threadId, patch);
+        }
+        // The app takes `{ thread }` back, as from any runner, and decodes
+        // nothing else: `{}` failed every archive of another runner's thread
+        // with a "Key 'thread' not found" banner after it had gone through.
+        return { thread: this.summary(threadId) };
       }
       case 'threads.share': {
-        await this.command(w.runnerId, threadId, 'share', { access: p.access, ...(p.newLink === true ? { newLink: true } : {}) }, { done: true });
-        return {};
+        // Turning a link on needs the link back, which the command doesn't
+        // give: it shared the thread, then the app said it had failed.
+        // Turning it off needs nothing back.
+        if (p.access !== 'off' || p.newLink === true) return this.unsupported(w, 'Sharing a link');
+        await this.command(w.runnerId, threadId, 'share', { access: 'off' }, { done: true });
+        return { thread: this.summary(threadId) };
       }
       case 'threads.subagent':
         return this.unsupported(w, "Reading a sub-agent's work");
@@ -691,6 +777,14 @@ export class Relay {
     const recent = this.deps.remote().threads.filter((t) => t.runnerId === runnerId).sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt))[0];
     return { accounts, pools: [], defaults: { cwd: recent?.cwd ?? '', accountId: recent?.accountId ?? accounts[0]?.id ?? '', models: {}, efforts: {} } };
   }
+}
+
+// Whether the other runner's row already shows a change made from here:
+// its own times for archiving and starring, so only whether it's set.
+function shows(k: keyof RemoteThread, row: unknown, kept: unknown): boolean {
+  if (k === 'archivedAt' || k === 'starredAt') return (row !== undefined) === (kept !== undefined);
+  if (k === 'snoozedUntil' && typeof row === 'string' && typeof kept === 'string') return Date.parse(row) === Date.parse(kept);
+  return row === kept;
 }
 
 // The row has the input as one line; the card draws it under the key a
