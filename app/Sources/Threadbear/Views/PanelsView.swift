@@ -228,8 +228,10 @@ struct PanelRail: View {
                     app.clickRail(.panel(AgentBrowser.panelId), in: thread)
                 }
                 // The agent handing a page over is the one time it opens by itself.
-                .onChange(of: tabs.reduce(0) { $0 + ($1.handoffs ?? 0) }) { old, new in
-                    if new > old { app.showPane(.panel(AgentBrowser.panelId)) }
+                // A message can clear the runner's one-shot panelRequest. The
+                // waiting tab remains the authority when this thread is opened.
+                .onChange(of: thread.id + tabs.filter { $0.state == "yours" }.map { "\($0.id):\($0.handoffs ?? 0)" }.joined(separator: ",")) { _, _ in
+                    if tabs.contains(where: { $0.state == "yours" }) { app.showPane(.panel(AgentBrowser.panelId)) }
                 }
                 .onAppear {
                     if tabs.contains(where: { $0.state == "yours" }) { app.showPane(.panel(AgentBrowser.panelId)) }

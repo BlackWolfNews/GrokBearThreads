@@ -57,6 +57,18 @@ struct BrowserProfile: Decodable, Identifiable, Equatable {
     }
 }
 
+/// A new handoff picks its tab once. Reopening a panel keeps any choice the
+/// user made afterwards, including after switching to another thread and back.
+struct AgentBrowserChoice {
+    var id: String?
+    private var seen: [String: Int] = [:]
+    mutating func updateHandoff(_ tabs: [AgentTab]) {
+        let pending = tabs.filter { $0.state == "yours" && ($0.handoffs ?? 0) > (seen[$0.id] ?? 0) }
+        if let latest = pending.max(by: { ($0.handoffAt ?? 0) < ($1.handoffAt ?? 0) }) { id = latest.id }
+        for tab in pending { seen[tab.id] = tab.handoffs ?? 0 }
+    }
+}
+
 private struct BrowserPanelState: Decodable {
     var profiles: [BrowserProfile]
     var tabs: [AgentTab]
@@ -86,6 +98,7 @@ final class AgentBrowserModel: ObservableObject {
     private var requestError: String?
     private var timer: Timer?
     private var last: Data?
+    private var choices: [String: AgentBrowserChoice] = [:]
 
     private var chromePid: pid_t?
     /// The app Mike was in, for when Chrome takes the focus.
@@ -129,6 +142,19 @@ final class AgentBrowserModel: ObservableObject {
     }
 
     func tabs(for threadId: String) -> [AgentTab] { tabs.filter { $0.thread == threadId } }
+
+    func selectedTab(for thread: String, in tabs: [AgentTab]) -> String? {
+        var choice = choices[thread] ?? AgentBrowserChoice()
+        choice.updateHandoff(tabs)
+        choices[thread] = choice
+        return choice.id
+    }
+
+    func select(_ id: String?, in thread: String) {
+        var choice = choices[thread] ?? AgentBrowserChoice()
+        choice.id = id
+        choices[thread] = choice
+    }
 
     var available: Bool { port != 0 || FileManager.default.fileExists(atPath: BrowserBear.socket) }
 
@@ -278,12 +304,15 @@ struct AgentBrowserPanel: View {
         .onChange(of: tab?.id) { _, _ in surface.error = nil; surface.connected = false }
         .onChange(of: tabs.map(\.id)) { old, new in
             let added = Set(new).subtracting(old)
-            if let newest = tabs.filter({ added.contains($0.id) }).max(by: { ($0.openedAt ?? 0) < ($1.openedAt ?? 0) }) { chosen = newest.id }
+            if let newest = tabs.filter({ added.contains($0.id) }).max(by: { ($0.openedAt ?? 0) < ($1.openedAt ?? 0) }) {
+                chosen = newest.id
+                model.select(chosen, in: thread.id)
+            }
         }
     }
 
     private func chooseHandoff() {
-        if let handed = tabs.filter({ $0.state == "yours" }).max(by: { ($0.handoffAt ?? 0) < ($1.handoffAt ?? 0) }) { chosen = handed.id }
+        chosen = model.selectedTab(for: thread.id, in: tabs)
     }
 
     private static func shown(_ url: String) -> String { url == "about:blank" ? "" : url }
@@ -329,6 +358,7 @@ struct AgentBrowserPanel: View {
                 ForEach(model.profiles) { profile in
                     Button("New page in \(profile.title)", systemImage: "person.crop.circle") {
                         chosen = nil
+                        model.select(nil, in: thread.id)
                         model.open("about:blank", thread: thread.id, profile: profile.id)
                     }
                     .tip("Open a new page in \(profile.title)")
@@ -350,7 +380,7 @@ struct AgentBrowserPanel: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: zoomed(2)) {
                 ForEach(tabs) { item in
-                    Button { chosen = item.id } label: {
+                    Button { chosen = item.id; model.select(item.id, in: thread.id) } label: {
                         Text(item.title.isEmpty ? item.url : item.title)
                             .font(.system(size: TypeScale.label))
                             .lineLimit(1)

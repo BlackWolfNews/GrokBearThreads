@@ -5,6 +5,19 @@ import Testing
 /// The Browser panel's plain logic. The real checks need Chrome: they're in
 /// BrowserBear's agent/agent-host.mjs comments and were run by hand, 5 Nov 2026.
 struct AgentBrowserTests {
+    @Test func handoffSelectsItsTabButReopeningKeepsTheUsersLaterChoice() {
+        var older = AgentTab(tabId: 1, url: "https://example.com/one", title: "One", state: "yours", handoffs: 1, handoffAt: 10)
+        let newer = AgentTab(tabId: 2, url: "https://example.com/two", title: "Two", state: "working", handoffs: 0, openedAt: 20)
+        var choice = AgentBrowserChoice()
+        choice.updateHandoff([older, newer])
+        #expect(choice.id == older.id)
+        choice.id = newer.id // the user picks another tab after seeing the handoff
+        choice.updateHandoff([older, newer]) // switch threads and back
+        #expect(choice.id == newer.id)
+        older.handoffs = 2; older.handoffAt = 30
+        choice.updateHandoff([older, newer])
+        #expect(choice.id == older.id, "a later handoff can pick the older tab again")
+    }
     @Test func aThreadsTabsDecodeFromTheHostsFile() throws {
         let json = """
         {"tabId":1004,"targetId":"AB","url":"https://example.com/","title":"Example","thread":"t1",

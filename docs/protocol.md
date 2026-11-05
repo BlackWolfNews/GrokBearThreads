@@ -2957,6 +2957,10 @@ BrowserBear uses this only for `handoff`, after checking that the exact Chrome
 tab/profile can be displayed. It marks the tab Your turn and keeps it in the
 Browser panel, including when the panel wasn't previously open. Without a
 connected Mac app or a displayable profile, it uses Chrome's native window.
+The Mac app also opens Browser when its selected thread has a tab marked Your
+turn. That waiting tab survives the one-shot request being cleared by a message,
+so a later return to the thread still shows the handoff. A new handoff selects
+its tab once; reopening preserves any tab the user picked afterwards.
 
 ### The Browser panel
 
