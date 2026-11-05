@@ -197,8 +197,8 @@ nonisolated enum AskFailure: Error, Equatable, Sendable {
 
 /// A `threadbear://quickask?url=<server>&token=<aa_…>` link, from Agent Archive's QR code.
 /// Opening one hands every later question, and the token, to whatever server it names, so a
-/// link has to be https (Mike's is `tailscale serve`, which always is), and one that would
-/// replace a server already set up is confirmed first (ThreadbearApp).
+/// link has to be https (Mike's is `tailscale serve`, which always is), and every one is
+/// confirmed first, naming its host (ThreadbearApp), the first one included.
 nonisolated struct QuickAskLink: Equatable, Sendable {
     /// The server as the link gave it, kept as typed (Settings shows it).
     var server: String
@@ -231,10 +231,12 @@ nonisolated struct QuickAskLink: Equatable, Sendable {
         return url.port.map { "\(host):\($0)" } ?? host
     }
 
-    /// Whether this link would point Quick Ask somewhere other than `current`. Only the host
-    /// and port count: a new token for the same server is the usual re-pair.
+    /// Whether this link would point Quick Ask somewhere other than `current`, for the
+    /// alert's wording. Only the host and port count: a new token for the same server is
+    /// the usual re-pair. No server yet is a change too: that first link is the one an
+    /// attacker's would most likely be.
     func changesServer(from current: URL?) -> Bool {
-        guard let current else { return false }
+        guard let current else { return true }
         return Self.hostName(current) != hostName
     }
 }

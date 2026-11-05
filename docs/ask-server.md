@@ -28,9 +28,10 @@ A server can also hand both over in a link, usually as a QR code:
 `threadbear://quickask?url=<address>&token=<token>`, both URL-encoded.
 A link's address has to be `https://` (or have no scheme), since opening
 it sends the token and every later question there; an `http://` one is
-refused and nothing changes. If Ask already has a server on another host,
-the phone asks before switching, naming the new host. A new token for the
-same host goes straight in.
+refused and nothing changes. The phone asks before using any link, the
+first one included: "Use Quick Ask on <host>?", saying whether it sets up
+Ask, switches it from another host, or gives the same host a new token.
+Nothing changes until you say yes.
 
 ## GET /api/quick/ping
 

@@ -63,16 +63,12 @@ final class QuickAskSettings {
     }
 
     /// A `threadbear://quickask` link (QuickAskLink, from a QR code, so the token never goes
-    /// through a clipboard). Already https; the caller confirms one that changes the server.
+    /// through a clipboard). Already https; the caller has asked first (ThreadbearApp), as
+    /// a QR code or a link from anyone could otherwise take every later question.
     func apply(_ link: QuickAskLink) {
         baseURLString = link.server
         setToken(link.token)
     }
-
-    /// Whether opening this link would quietly move Quick Ask to another server, which the
-    /// app asks about first: a QR code or a link from anyone could otherwise take every
-    /// later question.
-    func needsConfirmation(_ link: QuickAskLink) -> Bool { link.changesServer(from: baseURL) }
 }
 
 /// The last 20 timings, kept between launches, for Settings › Quick ask.

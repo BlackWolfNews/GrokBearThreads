@@ -117,7 +117,8 @@ struct QuickAskLinkTests {
 
     @Test func onlyAnotherHostCountsAsAChange() throws {
         let parsed = try link("threadbear://quickask?url=https%3A%2F%2Fbruce.example.ts.net%3A9443&token=t").get()
-        #expect(!parsed.changesServer(from: nil))
+        // The first link counts as a change: it's asked about like any other.
+        #expect(parsed.changesServer(from: nil))
         #expect(!parsed.changesServer(from: URL(string: "https://Bruce.example.ts.net:9443/")!))
         #expect(parsed.changesServer(from: URL(string: "https://bruce.example.ts.net")!))
         #expect(parsed.changesServer(from: URL(string: "https://evil.example:9443")!))

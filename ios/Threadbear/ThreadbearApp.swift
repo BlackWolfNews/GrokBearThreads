@@ -7,7 +7,7 @@ struct ThreadbearApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var model = AppModel()
     @State private var quick = QuickAskModel()
-    /// A Quick Ask link that would replace the server already set up, waiting for a yes.
+    /// A Quick Ask link waiting for a yes: every one is asked about, the first included.
     @State private var confirmQuickAsk: QuickAskLink?
     /// A Quick Ask link that couldn't be used (not https, or missing its token).
     @State private var refusedQuickAsk = false
@@ -51,15 +51,12 @@ struct ThreadbearApp: App {
                 .onOpenURL { url in
                     if url.host() == "open" { return }
                     switch QuickAskLink.parse(url) {
-                    case .success(let link):
-                        if quick.settings.needsConfirmation(link) { confirmQuickAsk = link; return }
-                        quick.settings.apply(link)
-                        quick.settingsChanged()
+                    case .success(let link): confirmQuickAsk = link
                     case .failure(.unusable): refusedQuickAsk = true
                     case .failure(.notQuickAsk): Task { await model.pair(with: url) }
                     }
                 }
-                .alert("Use a different Quick Ask server?",
+                .alert(confirmQuickAsk.map { "Use Quick Ask on \($0.hostName)?" } ?? "",
                        isPresented: Binding(get: { confirmQuickAsk != nil }, set: { if !$0 { confirmQuickAsk = nil } }),
                        presenting: confirmQuickAsk) { link in
                     Button("Use \(link.hostName)") {
@@ -69,7 +66,7 @@ struct ThreadbearApp: App {
                     }
                     Button("Cancel", role: .cancel) { confirmQuickAsk = nil }
                 } message: { link in
-                    Text("This link sends your questions to \(link.hostName) instead of \(quick.settings.baseURL.map(QuickAskLink.hostName) ?? "the server you set up"). Only say yes if you just scanned a code from your own server.")
+                    Text(Self.quickAskMessage(link, current: quick.settings.baseURL))
                 }
                 .alert("This Quick Ask link can't be used", isPresented: $refusedQuickAsk) {
                     Button("OK", role: .cancel) {}
@@ -77,6 +74,18 @@ struct ThreadbearApp: App {
                     Text("Quick Ask links need a secure (https) server address and a token. Nothing was changed.")
                 }
         }
+    }
+}
+
+extension ThreadbearApp {
+    /// What the Quick Ask alert says: where questions will go, and what it replaces.
+    static func quickAskMessage(_ link: QuickAskLink, current: URL?) -> String {
+        let ending = "Only say yes if you just scanned a code from your own server."
+        guard let current else { return "This link sends your questions and its token to \(link.hostName). \(ending)" }
+        if link.changesServer(from: current) {
+            return "This link sends your questions to \(link.hostName) instead of \(QuickAskLink.hostName(current)). \(ending)"
+        }
+        return "This link gives Quick Ask a new token for \(link.hostName). \(ending)"
     }
 }
 
