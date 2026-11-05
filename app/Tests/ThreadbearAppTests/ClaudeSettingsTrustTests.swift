@@ -10,8 +10,8 @@ final class ClaudeSettingsTrustTests: XCTestCase {
     private let patch = PatchInfo(id: "tools", source: "project", file: "/r/.threadbear/patches/tools.ts", untrusted: "new", hash: String(repeating: "b", count: 64))
 
     func testTheRowSaysHooksAreSkippedRatherThanNotRun() {
-        XCTAssertEqual(PatchesList.waitingText(claude, untrusted: "new"), "Hooks and commands skipped until you trust them")
-        XCTAssertEqual(PatchesList.waitingText(claude, untrusted: "changed"), "Changed since you trusted them, so hooks are skipped")
+        XCTAssertEqual(PatchesList.waitingText(claude, untrusted: "new"), "Hooks, commands and environment settings skipped until you trust them")
+        XCTAssertEqual(PatchesList.waitingText(claude, untrusted: "changed"), "Changed since you trusted them, so they're skipped")
         XCTAssertEqual(PatchesList.waitingText(patch, untrusted: "new"), "Not run yet")
         XCTAssertEqual(PatchesList.sourceName("claude"), "Claude Code settings")
     }

@@ -275,7 +275,7 @@ export const patchesPart = {
     rt.claudeNoted = v.hash;
     const what = v.files.map((f) => path.relative(st.rec.cwd, f)).join(' and ');
     const why = v.reason === 'changed' ? 'they changed since you trusted them' : "you haven't trusted them yet";
-    this.emit(st, { type: 'system.note', text: `Skipped this folder's Claude Code hooks and commands (${what}): ${why}. Its other settings and CLAUDE.md still apply. Trust them in Patches to run them from your next message.` }, rt.turn?.turnId);
+    this.emit(st, { type: 'system.note', text: `Skipped this folder's Claude Code hooks, commands and environment settings (${what}): ${why}. Its other settings and CLAUDE.md still apply. Trust them in Patches to run them from your next message.` }, rt.turn?.turnId);
   },
 
   // Every thread whose patches have been read reads them again now: a

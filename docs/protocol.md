@@ -2309,17 +2309,24 @@ home). Some of what they hold is a command Claude runs by itself: `hooks`
 `subagentStatusLine`, `fileSuggestion`, `apiKeyHelper`,
 `proxyAuthHelper`, `awsCredentialExport`, `awsAuthRefresh`,
 `gcpAuthRefresh`, `otelHeadersHelper` and `extraKnownMarketplaces`, and
-an MCP server with a `command` or a `headersHelper`. Claude Code in a
-terminal asks before trusting a folder; the SDK never does, so the runner
-asks instead (`src/claude-trust.ts`), with patch trust's store and rules.
+an MCP server with a `command` or a `headersHelper`. The settings' `env`
+counts too, as a whole: nothing in it runs, but any variable can send
+Claude's traffic and the user's login elsewhere (`ANTHROPIC_BASE_URL`,
+`ANTHROPIC_API_KEY`, `HTTPS_PROXY`, `CLAUDE_CODE_USE_BEDROCK` and its
+endpoint, `OTEL_*` exporters) or load code (`NODE_OPTIONS`, `PATH`).
+Claude Code in a terminal asks before trusting a folder; the SDK never
+does, so the runner asks instead (`src/claude-trust.ts`), with patch
+trust's store and rules.
 
-- A folder whose settings have none of those (permissions, env, a model,
+- A folder whose settings have none of those (permissions, a model,
   plugins switched on) asks nothing, and nothing changes. Nor does home,
   whose `.claude/settings.json` is the user's own.
 - Otherwise the hash covers those parts, by file, and the files inside
-  the folder that their commands name (`bun .claude/hooks/start.mjs`,
-  `"$CLAUDE_PROJECT_DIR"/scripts/x.sh`, a server's args), hashed and not
-  followed. A settings file that isn't plain JSON counts whole. It's kept
+  the folder that their commands or variables name
+  (`bun .claude/hooks/start.mjs`, `"$CLAUDE_PROJECT_DIR"/scripts/x.sh`, a
+  server's args, `NODE_OPTIONS=--require ./x.js`), hashed and not
+  followed. Settings with commands and no `env` hash as they did before
+  `env` counted, so trusting them holds. A settings file that isn't plain JSON counts whole. It's kept
   in `patch-trust.json` in the folder's list, as `claude:<hash>`, under
   the same folder key, so a worktree counts as its main checkout and
   Threadbear's own checkout is always trusted.
@@ -2329,8 +2336,13 @@ asks instead (`src/claude-trust.ts`), with patch trust's store and rules.
   `helpers` the other files and the scripts. Codex threads don't get it.
 - A Claude session starts without the folder's project and local
   settings (`settingSources: ["user"]`), and gets them back without the
-  parts that run, merged as Claude merges them, as flag settings (the SDK's
-  `settings`), so permission rules, `env` and the rest still apply. The
+  parts that run and without `env`, merged as Claude merges them, as flag
+  settings (the SDK's `settings`), so permission rules and the rest still
+  apply. Flag settings can set what Claude ignores from a repo's own, so
+  those are left out of the copy too: `autoMemoryDirectory`,
+  `modelPicker`, `footerLinksRegexes`, `spellcheck`, and `sandbox`'s
+  `ripgrep`, `filesystem.disabled`, `network.strictAllowlist` and
+  `credentials` `allowPlaintextInject`, `awsPairs` and `sigv4`. The
   folder is named as an extra directory with
   `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`, which brings its
   CLAUDE.md back without its settings. What doesn't come: the folder's

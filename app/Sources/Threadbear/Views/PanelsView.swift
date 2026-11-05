@@ -366,7 +366,7 @@ struct PatchesList: View {
                     Button("Trust") { app.trustPatches([patch], in: thread.id) }
                         .controlSize(.small)
                         .tip(patch.source == "claude"
-                             ? "Let this folder's Claude Code hooks, status line and MCP servers run on your Mac from your next message. Open the files below to read them first."
+                             ? "Let this folder's Claude Code hooks, status line and MCP servers run on your Mac, and its environment settings (which can change where Claude sends your messages) apply, from your next message. Open the files below to read them first."
                              : "Load this patch and let its code run on your Mac from now on. Open the file below to read it first.")
                 }
             } else if let error = patch.error {
@@ -448,7 +448,7 @@ struct PatchesList: View {
     /// say what was held back: the rest of them still apply.
     static func waitingText(_ patch: PatchInfo, untrusted: String) -> String {
         if patch.source == "claude" {
-            return untrusted == "changed" ? "Changed since you trusted them, so hooks are skipped" : "Hooks and commands skipped until you trust them"
+            return untrusted == "changed" ? "Changed since you trusted them, so they're skipped" : "Hooks, commands and environment settings skipped until you trust them"
         }
         return untrusted == "changed" ? "Changed since you trusted it" : "Not run yet"
     }

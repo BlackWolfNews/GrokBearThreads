@@ -783,17 +783,19 @@ your folders when this arrived are trusted for you.
 
 A repo's own Claude Code settings are asked about the same way. When its
 `.claude/settings.json` or `.claude/settings.local.json` has hooks, a
-status line or another command Claude runs by itself, or its `.mcp.json`
-starts an MCP server, Claude starts without those until you trust them:
-the chip says "Hooks to trust", Patches lists "claude-settings" with the
-files and the scripts they run, and the thread says the hooks were
-skipped. The rest of the folder's settings (permission rules, env) and
-its CLAUDE.md still apply; its own skills, agents and slash commands, and
+status line or another command Claude runs by itself, or environment
+settings (`env`, which can change where Claude sends your messages and
+login, like `ANTHROPIC_BASE_URL`, or which keys it uses), or its
+`.mcp.json` starts an MCP server, Claude starts without those until you
+trust them: the chip says "Hooks to trust", Patches lists
+"claude-settings" with the files and the scripts they run, and the
+thread says they were skipped. The rest of the folder's settings
+(permission rules, a model) and its CLAUDE.md still apply; its own skills, agents and slash commands, and
 CLAUDE.md files in the folders above it, wait too. Trust them and your
 next message starts Claude afresh with all of it, carrying on the same
 conversation. A change to them, or to a script they run, asks again; ones
 the agent writes for you are trusted as it wrote them. Settings with no
-commands in them never ask.
+commands or environment settings in them never ask.
 
 A project's page has its own panels and Patches on the right-hand rail:
 the ones its folders give its threads.

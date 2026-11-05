@@ -6,9 +6,10 @@
 // `.mcp.json`. In a terminal, Claude Code asks whether you trust a folder
 // before any of that runs; the SDK never asks, so a cloned repo's
 // SessionStart hook, status line or MCP server would run as the thread's
-// first turn started. This finds the parts that run a command, hashes them
-// with the scripts they name, and says what Claude should be started with
-// while they aren't trusted: the same settings without those parts.
+// first turn started. This finds the parts that run a command, and the
+// env block (which can point Claude at another server), hashes them with
+// the scripts they name, and says what Claude should be started with while
+// they aren't trusted: the same settings without those parts.
 //
 // Trust itself is kept with the patches' (patch-trust.ts), per folder,
 // under the same folder key, so a worktree counts as its main checkout.
@@ -39,6 +40,30 @@ export const COMMAND_KEYS = [
   'otelHeadersHelper',
   'extraKnownMarketplaces',
 ] as const;
+
+// Asked about with the commands, though nothing in it runs by itself:
+// `env`, which Claude sets for the session and everything it starts. Any
+// variable there can send Mike's prompts and login elsewhere
+// (ANTHROPIC_BASE_URL, ANTHROPIC_API_KEY, HTTPS_PROXY,
+// CLAUDE_CODE_USE_BEDROCK with its endpoint, OTEL_* exporters) or load
+// code (NODE_OPTIONS, PATH), and new ones come with each release, so the
+// whole block counts rather than a list of known ones.
+export const ASK_KEYS = [...COMMAND_KEYS, 'env'] as const;
+
+// Settings Claude ignores when a repo sets them but takes from flag
+// settings (SDK 0.3.310's Settings docs), which is how the rest of an
+// untrusted folder's settings reach the session: so they're dropped from
+// that copy, or a repo would get them through it. `sandbox` ones are paths
+// under it; ripgrep is a command.
+const PROJECT_IGNORED = ['autoMemoryDirectory', 'modelPicker', 'footerLinksRegexes', 'spellcheck'];
+const PROJECT_IGNORED_SANDBOX = [
+  ['ripgrep'],
+  ['filesystem', 'disabled'],
+  ['network', 'strictAllowlist'],
+  ['credentials', 'allowPlaintextInject'],
+  ['credentials', 'awsPairs'],
+  ['credentials', 'sigv4'],
+];
 
 const SETTINGS_FILES = ['.claude/settings.json', '.claude/settings.local.json'];
 
@@ -90,18 +115,31 @@ export function claudeCommands(cwd: string, home: string = os.homedir()): Claude
 }
 
 // The folder's project and local settings merged, without the parts that
-// run a command: what Claude is given (as flag settings) while they aren't
-// trusted, so permissions, env and the rest still apply.
+// run a command or set the environment: what Claude is given (as flag
+// settings) while they aren't trusted, so permissions and the rest still
+// apply.
 export function claudeSettingsWithoutCommands(cwd: string): Record<string, unknown> {
   let out: Record<string, unknown> = {};
   for (const rel of SETTINGS_FILES) {
     const read = readJson(path.join(path.resolve(cwd), rel));
     if (!read?.ok || !isObject(read.value)) continue;
     const rest = { ...read.value };
-    for (const k of COMMAND_KEYS) delete rest[k];
+    for (const k of [...ASK_KEYS, ...PROJECT_IGNORED]) delete rest[k];
     // Not settings: the schema link editors use.
     delete rest.$schema;
+    if (isObject(rest.sandbox)) rest.sandbox = withoutPaths(rest.sandbox, PROJECT_IGNORED_SANDBOX);
     out = merge(out, rest);
+  }
+  return out;
+}
+
+// `obj` without the keys at `paths`, copying only what it changes.
+function withoutPaths(obj: Record<string, unknown>, paths: string[][]): Record<string, unknown> {
+  const out = { ...obj };
+  for (const [head, ...tail] of paths) {
+    if (!(head in out)) continue;
+    if (!tail.length) delete out[head];
+    else if (isObject(out[head])) out[head] = withoutPaths(out[head], [tail]);
   }
   return out;
 }
@@ -116,7 +154,7 @@ export function isClaudeSettingsFile(file: string, cwd: string, home: string = o
 function commandParts(value: unknown): Record<string, unknown> | undefined {
   if (!isObject(value)) return undefined;
   const out: Record<string, unknown> = {};
-  for (const k of COMMAND_KEYS) if (hasContent(value[k])) out[k] = value[k];
+  for (const k of ASK_KEYS) if (hasContent(value[k])) out[k] = value[k];
   return Object.keys(out).length ? out : undefined;
 }
 

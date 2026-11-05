@@ -155,7 +155,7 @@ struct WaitingPatchesChip: View {
         }
         .buttonStyle(.plain)
         .tip(waiting.contains { $0.source == "claude" }
-             ? "This folder has Claude Code hooks or patch files that haven't run, because you haven't trusted them yet. Each is code that runs on your Mac. Open Patches to read and trust them."
+             ? "This folder has Claude Code hooks, environment settings or patch files that haven't been used, because you haven't trusted them yet. Each can run code on your Mac or change where Claude sends your messages. Open Patches to read and trust them."
              : "This folder has patch files that haven't run, because you haven't trusted them yet. A patch is code that runs on your Mac. Open Patches to read and trust them.")
     }
 }
