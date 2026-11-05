@@ -104,6 +104,12 @@ extension AppModel {
         return error.localizedDescription
     }
 
+    /// What `files.read` answers for a folder (runner/src/files.ts).
+    static func isFolderError(_ error: Error) -> Bool {
+        if case RPCError.server(_, let message) = error { return message.hasPrefix("Not a file") }
+        return false
+    }
+
     /// The home folder on that Mac, for a `~/` path in its thread: from the
     /// thread's folder or that runner's default one when either is under
     /// /Users, else this Mac's (the runner expands `~` itself anyway).
@@ -121,7 +127,7 @@ extension AppModel {
     /// so there, or in the banner for the other ways of opening it. A
     /// plain click (`automatic`) previews it in the pane whatever it is:
     /// a copy opened in an editor would look like the real file.
-    func openRemoteFile(_ url: URL, _ action: FileLinkAction, in thread: ThreadSummary, title: String? = nil) {
+    func openRemoteFile(_ url: URL, _ action: FileLinkAction, in thread: ThreadSummary, title: String? = nil, back: [PanePreview] = []) {
         let path = url.path
         let name = runnerName(of: thread) ?? "another Mac"
         let title = title ?? (path as NSString).lastPathComponent
@@ -131,6 +137,7 @@ extension AppModel {
             guard openProjectId == nil else { return openRemoteFile(url, .app, in: thread, title: title) }
             var preview = PanePreview(target: .remote(path: path, failed: nil), title: title, from: paneSection(for: thread))
             preview.away = name
+            preview.back = back
             show(preview, in: thread.id)
             let opened = panePreview[thread.id]?.opened
             Task {
@@ -147,6 +154,9 @@ extension AppModel {
                         current.target = .file(copy.path)
                     }
                     current.cut = copy.truncated
+                case .failure(let error) where Self.isFolderError(error):
+                    // A link to a folder there: `files.read` won't, so browse it.
+                    current.target = .folder(path)
                 case .failure(let error):
                     AppLog.write("rpc", "files.read \(path) on \(name) failed: \(error.localizedDescription)")
                     current.target = .remote(path: path, failed: Self.remoteFileReason(error))
@@ -162,6 +172,9 @@ extension AppModel {
                     } else {
                         openExternally(url.query != nil || url.fragment != nil ? FilePathRefs.withQuery(copy.url, query: url.query, fragment: url.fragment) : copy.url)
                     }
+                } catch where Self.isFolderError(error) && openProjectId == nil {
+                    // Nothing here to open it in: the pane can browse it.
+                    openRemoteFile(url, .panel, in: thread, title: title)
                 } catch {
                     AppLog.write("rpc", "files.read \(path) on \(name) failed: \(error.localizedDescription)")
                     errorMessage = "Couldn't get \(title) from \(name). \(Self.remoteFileReason(error))"

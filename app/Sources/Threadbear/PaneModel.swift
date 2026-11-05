@@ -6,6 +6,9 @@ import ThreadbearCore
 struct PanePreview: Equatable {
     enum Target: Equatable {
         case file(String)
+        /// A folder, browsed in the pane (FolderBrowser) rather than Quick
+        /// Look's picture of its icon (Mike, 5 Nov).
+        case folder(String)
         case page(URL)
         /// Words selected in the transcript, explained (`explainers`).
         case explain
@@ -30,20 +33,40 @@ struct PanePreview: Equatable {
     var away: String?
     /// That runner sent only the start of it (over the size cap).
     var cut = false
+    /// What Back goes through before the section: the folders and files
+    /// Mike came through in the browser, last one nearest. Empty for
+    /// anything opened from outside it.
+    var back: [PanePreview] = []
+    /// A folder's selection and open rows, kept here so coming Back to it
+    /// finds it as it was left.
+    var folderMemory = FolderMemory()
 
     var fileURL: URL? {
         if case .file(let path) = target { return URL(fileURLWithPath: path) }
         return nil
     }
 
-    /// What Open hands to the default app or browser.
+    var folderPath: String? {
+        if case .folder(let path) = target { return path }
+        return nil
+    }
+
+    /// What Open hands to the default app or browser. Another Mac's folder
+    /// has no copy here to hand over.
     var externalURL: URL? {
         switch target {
         case .file(let path): URL(fileURLWithPath: path)
+        case .folder(let path): away == nil ? URL(fileURLWithPath: path) : nil
         case .page(let url): url
         case .explain, .remote: nil
         }
     }
+}
+
+/// What a folder in the pane looks like when Mike leaves it.
+struct FolderMemory: Equatable {
+    var selected: [String] = []
+    var expanded: Set<String> = []
 }
 
 /// The pane's Highlights section and its preview (docs/protocol.md,
@@ -147,7 +170,8 @@ extension AppModel {
 
     func preview(path: String, title: String? = nil, in thread: ThreadSummary) {
         if thread.isRemote { return openRemoteFile(URL(fileURLWithPath: path), .panel, in: thread, title: title) }
-        show(PanePreview(target: .file(path), title: title ?? (path as NSString).lastPathComponent, from: paneSection(for: thread)), in: thread.id)
+        let target: PanePreview.Target = FolderListing.isBrowsable(path) ? .folder(path) : .file(path)
+        show(PanePreview(target: target, title: title ?? (path as NSString).lastPathComponent, from: paneSection(for: thread)), in: thread.id)
     }
 
     func preview(page url: URL, title: String, in thread: ThreadSummary) {
@@ -162,7 +186,7 @@ extension AppModel {
         showPane(preview.from)
         // A page kept loaded from an earlier look is read again: the file
         // or the dev server has likely changed since.
-        if let url = preview.externalURL, preview.fileURL.map({ PreviewRules.viewer(forPath: $0.path) == .web }) ?? true {
+        if preview.folderPath == nil, let url = preview.externalURL, preview.fileURL.map({ PreviewRules.viewer(forPath: $0.path) == .web }) ?? true {
             WebPanelPool.shared.reloadIfLoaded(url)
         }
     }
@@ -176,6 +200,54 @@ extension AppModel {
     /// until the next one, though nothing shows it again yet.
     func closePreview(in threadId: String) {
         panePreview[threadId] = nil
+    }
+
+    /// The bar's Back: through the folders and files Mike came through in
+    /// the browser, then out to the section.
+    func previewBack(in threadId: String) {
+        guard let current = panePreview[threadId] else { return }
+        guard var previous = current.back.last else { return closePreview(in: threadId) }
+        previous.back = Array(current.back.dropLast())
+        previous.opened = current.opened + 1
+        panePreview[threadId] = previous
+    }
+
+    // MARK: The folder browser
+
+    /// Goes to a folder from the one showing, which Back then returns to as
+    /// `memory` says. `selecting` is what to show picked there: the folder
+    /// Mike came up out of, as the Finder does.
+    func browseFolder(_ path: String, from memory: FolderMemory, selecting: String? = nil, in thread: ThreadSummary) {
+        guard let current = panePreview[thread.id] else { return }
+        var next = PanePreview(target: .folder(path), title: (path as NSString).lastPathComponent, from: current.from)
+        next.away = current.away
+        next.back = backStack(of: current, leaving: memory)
+        if let selecting { next.folderMemory.selected = [selecting] }
+        show(next, in: thread.id)
+    }
+
+    /// A double-click in the folder browser. A folder goes in; a file shows
+    /// in the pane with Back to here; a package or a project file opens in
+    /// its app, as neither means anything in the pane.
+    func openFromFolder(_ entry: FolderEntry, from memory: FolderMemory, in thread: ThreadSummary) {
+        if entry.isFolder { return browseFolder(entry.path, from: memory, in: thread) }
+        guard let current = panePreview[thread.id] else { return }
+        let back = backStack(of: current, leaving: memory)
+        if thread.isRemote {
+            return openRemoteFile(URL(fileURLWithPath: entry.path), .panel, in: thread, title: entry.name, back: back)
+        }
+        if entry.isPackage || FileLinkAction.opensInItsApp(entry.path) { return openExternally(URL(fileURLWithPath: entry.path)) }
+        var next = PanePreview(target: .file(entry.path), title: entry.name, from: current.from)
+        next.back = back
+        show(next, in: thread.id)
+    }
+
+    private func backStack(of current: PanePreview, leaving memory: FolderMemory) -> [PanePreview] {
+        var current = current
+        current.folderMemory = memory
+        let back = current.back
+        current.back = []
+        return back + [current]
     }
 
     func openExternally(_ url: URL) {
@@ -219,7 +291,7 @@ extension AppModel {
         }
         let path = url.path
         var action = action
-        if action == .automatic { action = PreviewRules.previewsInPane(transcriptLink: url) ? .panel : .app }
+        if action == .automatic { action = PreviewRules.previewsInPane(transcriptLink: url) || FolderListing.isBrowsable(path) ? .panel : .app }
         switch action {
         case .panel:
             // The pane belongs to a thread; on a project page there's none.

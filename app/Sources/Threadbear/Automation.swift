@@ -599,6 +599,8 @@ enum Automation {
             guard let thread = app.selectedThread else { return "error no thread selected" }
             if c["close"] as? Bool == true {
                 app.closePreview(in: thread.id)
+            } else if c["back"] as? Bool == true {
+                app.previewBack(in: thread.id)
             } else if let editing = c["edit"] as? Bool {
                 guard app.panePreview[thread.id]?.fileURL != nil else { return "error no file is open in the pane" }
                 app.setPreviewEditing(editing, in: thread.id)
@@ -623,6 +625,46 @@ enum Automation {
             }
             try? await Task.sleep(for: .milliseconds(300))
             return "ok \(app.panePreview[thread.id].map { "showing \($0.title)" } ?? "no preview")"
+        case "folder":
+            // {"cmd":"folder","open":"name"} is a double-click on that row of
+            // the folder showing in the pane, "select" a click, "expand" its
+            // triangle; "up" true is ⌘↑, "mode" "list" or "icons" the bar's
+            // button, "sort" a column ("name", "modified", "size", with
+            // "ascending"), "hidden" true or false is ⌘⇧., "quickLook" true
+            // says what the space bar would show. "click" is a press on a row
+            // through the window ("count" 2 for a double-click), "key" a key code ("command",
+            // "shift", "characters"), "crumb" a path bar folder, "pathBar" true
+            // its words, "menu" a row's right-click menu ("" the empty space's).
+            // Each says what's showing.
+            guard let pane = FolderPaneView.current else { return "error no folder is showing in the pane" }
+            if let mode = c["mode"] as? String {
+                guard let mode = FolderViewMode(rawValue: mode) else { return "error mode is list or icons" }
+                FolderViewMode.current = mode
+            }
+            if let key = (c["sort"] as? String).flatMap(FolderSort.Key.init(rawValue:)) {
+                pane.setSort(FolderSort(key: key, ascending: c["ascending"] as? Bool ?? true))
+            }
+            if let hidden = c["hidden"] as? Bool { pane.setShowHidden(hidden) }
+            if let name = c["expand"] as? String, !pane.expand(name: name) { return "error no folder called \(name)" }
+            if let name = c["select"] as? String, !pane.select(name: name) { return "error no row called \(name)" }
+            if c["quickLook"] as? Bool == true {
+                try? await Task.sleep(for: .milliseconds(300))
+                return "ok would look at \(pane.quickLookPaths())"
+            }
+            if let name = c["open"] as? String, !pane.open(name: name) { return "error no row called \(name)" }
+            if let name = c["click"] as? String, !pane.debugClick(name: name, count: (c["count"] as? Int) ?? 1) { return "error no row called \(name)" }
+            if let code = c["key"] as? Int {
+                var modifiers: NSEvent.ModifierFlags = []
+                if c["command"] as? Bool == true { modifiers.insert(.command) }
+                if c["shift"] as? Bool == true { modifiers.insert(.shift) }
+                pane.debugKey(UInt16(code), characters: c["characters"] as? String ?? "", modifiers: modifiers)
+            }
+            if let name = c["crumb"] as? String, !pane.debugPickCrumb(name) { return "error no folder called \(name) in the path bar" }
+            if c["pathBar"] as? Bool == true { return "ok \(pane.debugPathBar)" }
+            if let name = c["menu"] as? String { return "ok \(pane.debugMenu(name: name.isEmpty ? nil : name).joined(separator: " | "))" }
+            if c["up"] as? Bool == true { pane.goUp() }
+            try? await Task.sleep(for: .milliseconds(500))
+            return "ok \(app.panePreview[app.selectedThread?.id ?? ""].map { "showing \($0.title)" } ?? "no preview"); \(FolderPaneView.current?.summary ?? "no folder")"
         case "action":
             // {"cmd":"action","id":"reseed.reseed-dev-db"} runs that action of
             // the selected thread and waits for a command to finish.

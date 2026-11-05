@@ -1,4 +1,4 @@
-// files.read (docs/protocol.md, "Other runners' threads"): a file on this
+// files.read and files.list (docs/protocol.md, "Other runners' threads"): a file on this
 // Mac, for a Mac app showing one of this runner's threads from another Mac.
 // Pictures, long tool output (blobs) and file links in a thread's events
 // are paths here, which that app can't open, so it asks for the bytes and
@@ -54,6 +54,47 @@ export function readFileFor(p: { path?: unknown; maxBytes?: unknown; known?: unk
   return { path: file, size: stat.size, modifiedAt, mediaType, data: buf.toString('base64'), truncated: stat.size > length };
 }
 
+export const FILES_LIST_MAX = 5000;
+
+export type FolderEntry = { name: string; isFolder: boolean; hidden: boolean; size?: number; modifiedAt?: string };
+export type FolderList = { path: string; entries: FolderEntry[]; truncated: boolean };
+
+// files.list: a folder on this Mac, for the side pane's folder browser on
+// another Mac. Same trust as files.read. Sent in the order the disk gives
+// them; the app sorts, as Mike picks the column there.
+export function listFolderFor(p: { path?: unknown }): FolderList {
+  if (typeof p.path !== 'string' || !p.path.trim()) throw new RpcError(ErrorCode.badParams, 'path must be a string');
+  const raw = p.path.trim();
+  if (!path.isAbsolute(raw) && !raw.startsWith('~')) throw new RpcError(ErrorCode.badParams, `path must be absolute: ${raw}`);
+  const folder = path.resolve(expandHome(raw));
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(folder);
+  } catch {
+    throw new RpcError(ErrorCode.badParams, `No such folder: ${folder}`);
+  }
+  if (!stat.isDirectory()) throw new RpcError(ErrorCode.badParams, `Not a folder: ${folder}`);
+  let names: string[];
+  try {
+    names = fs.readdirSync(folder);
+  } catch (e) {
+    // No permission, usually: macOS's privacy rules or the folder's own.
+    throw new RpcError(ErrorCode.badParams, `Can't read ${folder}: ${(e as Error).message}`);
+  }
+  const entries = names.slice(0, FILES_LIST_MAX).map((name): FolderEntry => {
+    const hidden = name.startsWith('.');
+    try {
+      // statSync follows a symlink, so a link to a folder opens as one.
+      const s = fs.statSync(path.join(folder, name));
+      return { name, isFolder: s.isDirectory(), hidden, ...(s.isDirectory() ? {} : { size: s.size }), modifiedAt: s.mtime.toISOString() };
+    } catch {
+      // A broken link, or gone since the listing: still there to see.
+      return { name, isFolder: false, hidden };
+    }
+  });
+  return { path: folder, entries, truncated: names.length > entries.length };
+}
+
 export function filesMethods(): Record<string, (p: Record<string, unknown>) => unknown> {
-  return { 'files.read': (p) => readFileFor(p) };
+  return { 'files.read': (p) => readFileFor(p), 'files.list': (p) => listFolderFor(p) };
 }

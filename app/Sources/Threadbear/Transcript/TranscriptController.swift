@@ -908,13 +908,13 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         case "link":
             guard ask.links.indices.contains(n), let url = ask.links[n].target else { return }
             if WorkLinks.reviewId(of: url) != nil { return openReviewLink(url) }
-            // A picture, PDF, text or page shows in the pane; anything else
-            // (a .tandem project, a folder) opens in its own app, as that's
-            // where the ask wants him.
+            // A picture, PDF, text, page or folder shows in the pane; anything
+            // else (a .tandem project) opens in its own app, as that's where
+            // the ask wants him.
             let type = url.isFileURL ? UTType(filenameExtension: url.pathExtension) : nil
             let showable = type.map { t in [UTType.image, .pdf, .text, .html].contains { t.conforms(to: $0) } } ?? false
-            let isFolder = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
-            app.openLink(url, title: ask.links[n].title, in: thread, external: url.isFileURL && (isFolder || !showable))
+            let isFolder = url.isFileURL && FolderListing.isBrowsable(url.path)
+            app.openLink(url, title: ask.links[n].title, in: thread, external: url.isFileURL && !isFolder && !showable)
         default: break
         }
     }

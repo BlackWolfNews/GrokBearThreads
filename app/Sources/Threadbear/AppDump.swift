@@ -356,6 +356,7 @@ struct AppDump: Encodable {
         let preview: String? = app.panePreview[thread.id].map { preview in
             switch preview.target {
             case .file(let path): "file \(path)" + (preview.editing ? " (editing)" : "") + (preview.away.map { " (from \($0)\(preview.cut ? ", cut" : ""))" } ?? "")
+            case .folder(let path): "folder \(path)" + (preview.away.map { " (from \($0))" } ?? "") + (FolderPaneView.current.map { " " + $0.summary } ?? "")
             case .page(let url): "page \(url.absoluteString)"
             case .remote(let path, let failed): "fetching \(path)" + (failed.map { " (failed: \($0))" } ?? "")
             case .explain:

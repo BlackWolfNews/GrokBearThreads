@@ -595,6 +595,9 @@ struct PreviewBody: View {
             }
         case .file(let path):
             fileBody(path)
+        case .folder(let path):
+            FolderBrowser(thread: thread, path: path, preview: preview)
+                .id("\(thread.id) \(path)")
         case .explain:
             ExplainPane(thread: thread)
         }
@@ -624,9 +627,10 @@ struct PreviewButtons: View {
     let preview: PanePreview
 
     var body: some View {
-        PaneHeaderButton(symbol: "chevron.left", help: "Back to \(PreviewBody.name(of: preview.from, in: thread))") {
-            app.closePreview(in: thread.id)
+        PaneHeaderButton(symbol: "chevron.left", help: "Back to \(preview.back.last?.title ?? PreviewBody.name(of: preview.from, in: thread))") {
+            app.previewBack(in: thread.id)
         }
+        if preview.folderPath != nil { FolderModeButton() }
         // A copy of another Mac's file: not edited here (only the copy
         // would change), and its folder is just the cache.
         if let file = preview.fileURL, preview.away == nil {
@@ -638,7 +642,7 @@ struct PreviewButtons: View {
             PaneHeaderButton(symbol: "folder", help: "Reveal in Finder") { app.revealInFinder(file.path) }
         }
         if let url = preview.externalURL {
-            PaneHeaderButton(symbol: "arrow.up.right", help: preview.fileURL == nil ? "Open in browser" : "Open in its app") {
+            PaneHeaderButton(symbol: "arrow.up.right", help: preview.folderPath != nil ? "Open in Finder" : preview.fileURL == nil ? "Open in browser" : "Open in its app") {
                 app.openExternally(url)
             }
         }

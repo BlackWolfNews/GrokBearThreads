@@ -478,6 +478,9 @@ async function dispatch(client, method, p) {
       // Slow enough on bruce that the app's loading state shows.
       if (client.as) await sleep(400);
       return readFile(client, p);
+    case 'files.list':
+      if (client.as) await sleep(400);
+      return listFolder(client, p);
     case 'pools.list':
       if (oldRunner) throw rpcError(-32601, 'Method not found');
       return { pools };
@@ -1806,7 +1809,10 @@ function readFile(client, p) {
   let modifiedAt;
   if (client.as === BRUCE) {
     const content = bruceFile(p.path);
-    if (content === undefined) throw rpcError(-32602, `No such file: ${p.path}`);
+    if (content === undefined) {
+      const isFolder = Object.values(BRUCE_FILES).some((f) => f.startsWith(`${p.path.replace(/\/$/, '')}/`));
+      throw rpcError(-32602, `${isFolder ? 'Not a file' : 'No such file'}: ${p.path}`);
+    }
     bytes = Buffer.isBuffer(content) ? content : Buffer.from(content);
     modifiedAt = bruceModifiedAt;
   } else {
@@ -1824,6 +1830,36 @@ function readFile(client, p) {
   const ext = path.extname(p.path).slice(1).toLowerCase();
   const mediaType = { png: 'image/png', txt: 'text/plain', md: 'text/markdown' }[ext] ?? 'application/octet-stream';
   return { path: p.path, size: bytes.length, modifiedAt, mediaType, data: sent.toString('base64'), truncated: bytes.length > sent.length };
+}
+
+// files.list as the runner answers it (runner/src/files.ts): a made-up
+// folder for bruce's clients (each of bruce's files' folders holds it),
+// the real one on this Mac for this runner's.
+function listFolder(client, p) {
+  if (typeof p.path !== 'string' || !p.path.startsWith('/')) throw rpcError(-32602, `path must be absolute: ${p.path}`);
+  if (client.as === BRUCE) {
+    const files = Object.values(BRUCE_FILES);
+    const within = files.filter((f) => f.startsWith(`${p.path.replace(/\/$/, '')}/`)).map((f) => f.slice(p.path.replace(/\/$/, '').length + 1));
+    if (!within.length) throw rpcError(-32602, `No such folder: ${p.path}`);
+    const names = [...new Set(within.map((f) => f.split('/')[0]))];
+    return {
+      path: p.path, truncated: false,
+      entries: names.map((name) => {
+        const isFolder = !within.includes(name);
+        return { name, isFolder, hidden: name.startsWith('.'), modifiedAt: bruceModifiedAt, ...(isFolder ? {} : { size: 4096 }) };
+      }),
+    };
+  }
+  let stat;
+  try { stat = fs.statSync(p.path); } catch { throw rpcError(-32602, `No such folder: ${p.path}`); }
+  if (!stat.isDirectory()) throw rpcError(-32602, `Not a folder: ${p.path}`);
+  return {
+    path: p.path, truncated: false,
+    entries: fs.readdirSync(p.path).map((name) => {
+      const s = fs.statSync(path.join(p.path, name));
+      return { name, isFolder: s.isDirectory(), hidden: name.startsWith('.'), modifiedAt: s.mtime.toISOString(), ...(s.isDirectory() ? {} : { size: s.size }) };
+    }),
+  };
 }
 
 // Three of bruce's threads, one in each state worth seeing: finished and

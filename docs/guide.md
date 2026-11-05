@@ -186,9 +186,18 @@ A passkey or a password manager's popup is Chrome's own, not part of the page: t
 window button beside the address brings up Chrome's real window for it, and
 pressing it again puts the window away.
 
+A link to a folder opens it in the side pane, where it works like a Finder
+window. Double-click a folder to go in, or a file to see it there, and the
+back arrow takes you back to where you were. Press the space bar for Quick
+Look, or use the path along the bottom to go up. ⌘↑ goes up too, and ⌘⇧.
+shows hidden files. The button in the bar swaps the list for icons, with
+thumbnails of pictures and videos, and the list sorts by whichever column
+you click. It works for folders on your other Macs too, though only this
+Mac's files have thumbnails and Quick Look.
+
 To share a file somewhere else, drag it out of the app: a file link in a
-reply, a picture in the transcript, a file in Highlights, or the picture or
-video showing in the side pane. It drops as the file itself, so you can
+reply, a picture in the transcript, a file in Highlights, a row in a folder
+in the side pane, or the picture or video showing there. It drops as the file itself, so you can
 drag a clip straight into a post on X, or onto the Finder. A web link drags
 out as its address.
 To paste a picture instead, right-click it in the side pane and choose
