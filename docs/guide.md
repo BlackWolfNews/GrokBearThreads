@@ -187,8 +187,13 @@ name and email appear below the address, and its sign-ins stay in Chrome; nothin
 is imported. The profile menu opens a new page in the profile you choose. BrowserBear
 and its extension must be connected to that profile.
 
-When the agent hands over a page already showing in the panel, it says Your turn
-with a Done button. A passkey, a file picker or a password manager's popup belongs
+When the agent needs you to do something in a page, handoff opens this thread's
+Browser panel with Your turn and Done, even if it was closed. It opens straight
+away when you're looking at that thread, or when you next open it; your selected
+thread stays yours. The agent waits for Done or the page to settle after your step.
+Normal browsing by the agent doesn't open the panel. If Threadbear isn't available
+or can't display that tab, handoff opens Chrome's own window instead.
+A passkey, a file picker or a password manager's popup belongs
 to Chrome itself: press the window button beside the address to use Chrome's
 window. Capture and input pause while you use that window; press the button again
 to return to the panel. Closing the panel restores the page's normal size.

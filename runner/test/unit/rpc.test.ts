@@ -24,6 +24,31 @@ async function serve(extra: Partial<ConstructorParameters<typeof RpcServer>[0]> 
   return { h, server, url, port };
 }
 
+test('local tools queue a panel only with a connected Mac app, including through a handover', async () => {
+  const calls: string[] = [];
+  const remote = { owns: (id: string) => id === 'away', call: async (_id: string, method: string) => { calls.push(method); return { available: true, shown: false }; }, summaries: () => [], search: async () => [] };
+  const { h, server, url } = await serve({ remote });
+  const c = await RunnerClient.connect(url, TOKEN);
+  const mac = await RunnerClient.connect(url, TOKEN);
+  try {
+    const { thread } = h.runner.create({ text: 'Browser handoff', accountId: 'claude-3' });
+    assert.deepEqual(await c.call('threads.showPanel', { threadId: thread.id, panel: 'browser' }), { available: false });
+    assert.equal(h.runner.get(thread.id).panelRequest, undefined);
+    assert.deepEqual(await c.call('threads.showPanel', { threadId: 'away', panel: 'browser' }), { available: false });
+    assert.deepEqual(calls, []);
+    await mac.call('hello', { client: 'threadbear-mac' });
+    assert.deepEqual(await c.call('threads.showPanel', { threadId: thread.id, panel: 'browser' }), { available: false }, 'an older Mac app uses the Chrome fallback');
+    await mac.call('hello', { client: 'threadbear-mac', browserPanel: true });
+    const pending = c.call('threads.showPanel', { threadId: thread.id, panel: 'browser' });
+    await patiently(() => Boolean(h.runner.get(thread.id).panelRequest));
+    assert.equal(h.runner.get(thread.id).panelRequest?.panel, 'threadbear.browser');
+    h.clock.advance(2000);
+    assert.equal((await pending).available, true);
+    await c.call('threads.showPanel', { threadId: 'away', panel: 'browser' });
+    assert.deepEqual(calls, ['threads.showPanel']);
+  } finally { c.close(); mac.close(); await server.close(); }
+});
+
 test('challenge auth, hello, and JSON-RPC errors', async () => {
   const { server, url } = await serve();
   const c = await RunnerClient.connect(url, TOKEN);

@@ -104,6 +104,7 @@ const HELP = `tb: talk to the Threadbear runner
   tb actions <threadId> [--json]  the thread's actions, panels and patches (from its folder)
   tb highlights <threadId> [--json]  what the thread made, shared and pinned, and the librarian's brief
   tb panel <threadId> <panelId> [--json]  draws an image panel or fills a list panel now
+  tb show-panel <threadId> <panel> [--json]  opens a panel when the user looks at that thread
   tb run <threadId> <actionId>    run one: a command's output is printed and goes into the thread
   tb schedule "text" (--at WHEN | --cron "0 9 * * 1-5") [--tz ZONE] [--title T]
               [--thread ID | --cwd DIR [--account ID | --pool ID] [--model M] [--effort L] [--ask | --auto]]
@@ -470,6 +471,14 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
       }
       if (h.edited.length) console.log(`\n${h.edited.length} ${h.edited.length === 1 ? 'file' : 'files'} edited`);
       return 0;
+    }
+    case 'show-panel': {
+      const id = await resolveId(client, args[0]);
+      if (!args[1]) throw new Error('Name a panel, such as browser or highlights.');
+      const result = await client.call<{ available: boolean; shown?: boolean }>('threads.showPanel', { threadId: id, panel: args[1] });
+      if (f.json) console.log(JSON.stringify(result));
+      else console.log(!result.available ? 'The Threadbear Mac app is not connected.' : result.shown ? 'The panel is open.' : 'The panel will open when the user next opens that thread.');
+      return result.available ? 0 : 1;
     }
     case 'panel': {
       const id = await resolveId(client, args[0]);

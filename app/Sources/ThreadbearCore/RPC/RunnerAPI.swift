@@ -7,6 +7,7 @@ public extension RPCClient {
     /// (docs/protocol.md, "App restarts"). A dev build has none.
     func hello(client: String = "threadbear-mac", version: String, build: (commit: String, short: String, tree: String)? = nil) async throws -> HelloResult {
         var params: [String: JSONValue] = ["client": .string(client), "version": .string(version)]
+        if client == "threadbear-mac" { params["browserPanel"] = .bool(true) }
         if let build {
             params["build"] = .object(["commit": .string(build.commit), "short": .string(build.short), "tree": .string(build.tree)])
         }

@@ -40,6 +40,7 @@ struct AgentTab: Decodable, Identifiable, Equatable {
     var status: String?
     /// Goes up each time the agent hands this tab to Mike.
     var handoffs: Int?
+    var handoffAt: Double?
     var popup: Bool?
     var openedAt: Double?
     var id: String { "\(profile ?? "agent-chrome")/\(tabId)" }
@@ -269,12 +270,20 @@ struct AgentBrowserPanel: View {
         .onChange(of: tab?.url) { _, url in
             if !addressFocused { address = url.map(Self.shown) ?? "" }
         }
-        .onAppear { address = tab.map { Self.shown($0.url) } ?? "" }
+        .onAppear {
+            chooseHandoff()
+            address = tab.map { Self.shown($0.url) } ?? ""
+        }
+        .onChange(of: tabs.filter { $0.state == "yours" }.map { "\($0.id):\($0.handoffs ?? 0)" }) { _, _ in chooseHandoff() }
         .onChange(of: tab?.id) { _, _ in surface.error = nil; surface.connected = false }
         .onChange(of: tabs.map(\.id)) { old, new in
             let added = Set(new).subtracting(old)
             if let newest = tabs.filter({ added.contains($0.id) }).max(by: { ($0.openedAt ?? 0) < ($1.openedAt ?? 0) }) { chosen = newest.id }
         }
+    }
+
+    private func chooseHandoff() {
+        if let handed = tabs.filter({ $0.state == "yours" }).max(by: { ($0.handoffAt ?? 0) < ($1.handoffAt ?? 0) }) { chosen = handed.id }
     }
 
     private static func shown(_ url: String) -> String { url == "about:blank" ? "" : url }

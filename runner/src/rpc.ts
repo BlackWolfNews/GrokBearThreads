@@ -17,6 +17,7 @@ type Conn = {
   authed: boolean;
   subs: Set<string>;
   client?: string;
+  browserPanel?: boolean;
   authTimer?: NodeJS.Timeout;
   // This connection's auth.challenge nonce (docs/protocol.md, "Auth").
   challenge?: string;
@@ -64,6 +65,7 @@ const THREAD_METHODS = new Set([
   'threads.hibernateWhen',
   'threads.removeHighlight',
   'threads.panelShown',
+  'threads.showPanel',
   'threads.tickAsk',
   'threads.share',
   'approvals.respond',
@@ -213,8 +215,8 @@ export class RpcServer {
   }
 
   // Whether the Mac app itself is connected (hello's client), for presence.ts.
-  appConnected(): boolean {
-    for (const c of this.conns) if (c.authed && c.client === 'threadbear-mac' && c.ws.readyState === WebSocket.OPEN) return true;
+  appConnected(browserPanel = false): boolean {
+    for (const c of this.conns) if (c.authed && c.client === 'threadbear-mac' && (!browserPanel || c.browserPanel) && c.ws.readyState === WebSocket.OPEN) return true;
     return false;
   }
 
@@ -451,6 +453,12 @@ export class RpcServer {
   // its live stream happen in the same tick and nothing can slip between.
   private dispatch(conn: Conn, method: string, p: Record<string, unknown>): unknown {
     const r = this.opts.runner;
+    // A local tool needs to know whether its handoff can reach the Mac app.
+    // Check on the primary, before forwarding to the runner owning the thread.
+    if (method === 'threads.showPanel' && !this.opts.onlyOwn) {
+      const browser = ['browser', 'threadbear.browser'].includes(String(p.panel).trim().toLowerCase());
+      if (!this.appConnected(browser)) return { available: false };
+    }
     const tid = typeof p.threadId === 'string' ? p.threadId : undefined;
     if (tid !== undefined && THREAD_METHODS.has(method) && !r.has(tid)) {
       if (this.opts.remote?.owns(tid)) return this.forward(conn, method, p, tid);
@@ -467,6 +475,7 @@ export class RpcServer {
         return {};
       case 'hello': {
         conn.client = optString(p, 'client');
+        conn.browserPanel = p.browserPanel === true;
         // Only the Mac app's own builds: a dev build has none.
         const build = p.build as Record<string, unknown> | undefined;
         if (conn.client === 'threadbear-mac' && build && typeof build === 'object'
@@ -620,6 +629,8 @@ export class RpcServer {
         return r.removeHighlight(reqString(p, 'threadId'), reqString(p, 'highlightId'));
       case 'threads.panelShown':
         return r.panelShown(reqString(p, 'threadId'), reqString(p, 'requestId'));
+      case 'threads.showPanel':
+        return r.showPanel(reqString(p, 'threadId'), { panel: reqString(p, 'panel') }).then(result => ({ available: true, ...result }));
       case 'threads.share': {
         const access = reqString(p, 'access');
         if (access !== 'off' && access !== 'link') throw bad('access is "off" or "link"');
