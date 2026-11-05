@@ -252,12 +252,10 @@ export type Turn = {
   // sent while it ran, which go straight into the CLI. The turn ends when
   // the CLI has answered them all.
   messages: string[];
-  // Files the turn edited or wrote (edit.diff paths, Write and Edit calls),
-  // for hooks that run only after a change to certain files.
+  // Files the turn edited, wrote or proposed to (edit.diff paths, Write
+  // and Edit calls, denied ones too), for hooks that run only after a
+  // change to certain files. Never trusted from: see 'wrote'.
   edited: Set<string>;
-  // Edit and Write calls on patch files, by item, until their result: the
-  // file is trusted as the agent left it (patch-trust.ts).
-  patchEdits?: Map<string, string>;
   // Folders its shell commands worked in (commandFolders), so the
   // librarian knows the repo a thread in a catch-all folder works on.
   workedIn?: Set<string>;
@@ -1733,20 +1731,13 @@ export class Runner {
             const bullets = endTurnIsOneReply(ev) ? undefined : summaryFromTool(rt.turn.endTurn);
             rt.turn.owedReply = !bullets ? undefined : endTurnAsksForMessage(ev) ? 0 : endTurnOwesReply(ev) ? summaryMarkdown(bullets).length : undefined;
           }
+          // For hooks and the librarian only, never trust: these include
+          // previews (an edit.diff before approval) and edits that were
+          // then denied or failed. Trust comes from 'wrote' alone.
           if (ev.type === 'edit.diff') rt.turn.edited.add(ev.path);
           else if (ev.type === 'tool.call' && (ev.kind === 'edit' || ev.kind === 'write')) {
             const file = ev.input.file_path ?? ev.input.path ?? ev.input.notebook_path;
-            if (typeof file === 'string') {
-              rt.turn.edited.add(file);
-              const full = path.resolve(rec.cwd, file);
-              // Patch files, and helpers a trusted patch may import:
-              // trusted as the agent leaves them (patch-trust.ts).
-              (rt.turn.patchEdits ??= new Map()).set(ev.itemId, full);
-            }
-          } else if (ev.type === 'tool.result' && rt.turn.patchEdits?.has(ev.itemId)) {
-            const file = rt.turn.patchEdits.get(ev.itemId)!;
-            rt.turn.patchEdits.delete(ev.itemId);
-            if (ev.ok) this.trustAgentPatches([file], true, rec.cwd);
+            if (typeof file === 'string') rt.turn.edited.add(file);
           } else if (ev.type === 'tool.call' && own && ev.kind === 'command') {
             const cmd = Array.isArray(ev.input.command) ? ev.input.command.join(' ') : ev.input.command;
             if (typeof cmd === 'string') {
@@ -1875,6 +1866,16 @@ export class Runner {
       }
       case 'subagent':
         this.updateSubagent(st, o.update);
+        break;
+      case 'wrote':
+        // Patch files, and helpers a trusted patch may import, an edit the
+        // CLI says it made: trusted as that edit left them, and only while
+        // the file still has those bytes (patch-trust.ts).
+        this.trustAgentPatches(
+          o.files.map((f) => ({ ...f, path: path.resolve(rec.cwd, f.path) })),
+          true,
+          rec.cwd,
+        );
         break;
       case 'allowRules': {
         const rules = new Set(rec.allowRules ?? []);
@@ -2089,9 +2090,6 @@ export class Runner {
     const finished = rt.turn;
     rt.turn?.interruptTimer?.cancel();
     rt.turn = undefined;
-    // Patch files the turn wrote some other way than Edit and Write calls
-    // (a Codex patch's edit.diff) are trusted as it left them.
-    if (finished) this.trustAgentPatches([...finished.edited].map((p) => path.resolve(rec.cwd, p)), false, rec.cwd);
     // The turn may have added a patch file or a convex/ folder.
     this.forgetFolders();
     // The folder's turn.end hooks, after a turn the agent finished itself

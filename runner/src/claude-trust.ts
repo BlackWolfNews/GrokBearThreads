@@ -76,6 +76,9 @@ export type ClaudeCommands = {
   // Scripts the commands name, inside the folder (absolute), hashed too.
   named: string[];
   hash: string;
+  // Each of those files by the hash of the bytes the hash was made from,
+  // so an agent's edit can be matched to exactly what it wrote.
+  read: Record<string, string>;
 };
 
 // What in `cwd`'s Claude Code settings runs a command, or undefined when
@@ -87,6 +90,7 @@ export function claudeCommands(cwd: string, home: string = os.homedir()): Claude
   if (realpath(dir) === realpath(path.resolve(home))) return undefined;
   const parts: Record<string, unknown> = {};
   const files: string[] = [];
+  const shas: Record<string, string> = {};
   for (const rel of SETTINGS_FILES) {
     const file = path.join(dir, rel);
     const read = readJson(file);
@@ -97,6 +101,7 @@ export function claudeCommands(cwd: string, home: string = os.homedir()): Claude
     if (!found) continue;
     parts[rel] = found;
     files.push(file);
+    shas[file] = read.sha256;
   }
   for (const file of mcpFiles(dir, home)) {
     const read = readJson(file);
@@ -105,13 +110,20 @@ export function claudeCommands(cwd: string, home: string = os.homedir()): Claude
     if (!found) continue;
     parts[path.relative(dir, file)] = found;
     files.push(file);
+    shas[file] = read.sha256;
   }
   if (!files.length) return undefined;
   const named = namedScripts(parts, dir);
   // Relative to the folder, so a worktree and its main checkout agree.
-  const lines = named.map((f) => `${path.relative(dir, f)} ${sha256(readOr(f))}`).sort();
+  const lines = named
+    .map((f) => {
+      const h = sha256(readOr(f));
+      shas[f] ??= h;
+      return `${path.relative(dir, f)} ${h}`;
+    })
+    .sort();
   const hash = sha256(Buffer.from(['threadbear-claude-1', stableJson(parts), ...lines].join('\n')));
-  return { files, named, hash };
+  return { files, named, hash, read: shas };
 }
 
 // The folder's project and local settings merged, without the parts that
@@ -207,17 +219,18 @@ function namedScripts(parts: unknown, dir: string): string[] {
   return [...out];
 }
 
-function readJson(file: string): { ok: true; value: unknown } | { ok: false; text: string } | undefined {
-  let text: string;
+function readJson(file: string): { ok: true; value: unknown; sha256: string } | { ok: false; text: string; sha256: string } | undefined {
+  let bytes: Buffer;
   try {
-    text = fs.readFileSync(file, 'utf8');
+    bytes = fs.readFileSync(file);
   } catch {
     return undefined;
   }
+  const text = bytes.toString('utf8');
   try {
-    return { ok: true, value: JSON.parse(text) };
+    return { ok: true, value: JSON.parse(text), sha256: sha256(bytes) };
   } catch {
-    return text.trim() ? { ok: false, text } : undefined;
+    return text.trim() ? { ok: false, text, sha256: sha256(bytes) } : undefined;
   }
 }
 

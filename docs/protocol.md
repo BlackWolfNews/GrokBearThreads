@@ -2387,9 +2387,18 @@ panels or hooks, no live functions, and no worktree for new threads.
   the repo's record of it must name each other, so a folder can't claim
   to be a worktree of a trusted repo.
 - A patch file a thread's agent writes with an Edit or Write call (or a
-  Codex patch, at the end of the turn) is trusted as it left it: the
-  agent can run anything in the folder already. One written another way,
-  like a shell heredoc or a `git pull`, waits.
+  Codex patch) is trusted as that edit left it: the agent can run
+  anything in the folder already. Only an edit the CLI says it made
+  counts, when its successful result comes in, never the diff shown to
+  approve one, so a denied or failed edit trusts nothing. And only the
+  bytes it wrote: for Claude, the hash of the file rebuilt from the
+  result (a Write's content, an Edit applied to the original text it
+  reports), which the file must still have, in the same read the trust
+  hash is made from; a Codex patch's files as they are when its result
+  arrives. A file written over after that (a command run straight after
+  the edit) isn't covered, and one Claude's result can't be rebuilt for
+  waits. One written another way, like a shell heredoc or a `git pull`,
+  waits.
 - Always trusted: `~/.threadbear/patches` and Threadbear's own checkout
   (the release's `checkout`, else the one the runner runs from).
 - `patches.trust` trusts what the app showed, by hash. Clients show a
@@ -2422,8 +2431,9 @@ a `data:` or `#` specifier), in the patch file or a helper, one the runner
 can't parse, or one that reaches more than 100 local files. Loads are read
 from the parsed syntax (oxc), so comments and strings don't count either way. `patches.trust` can't trust it; changing it to plain
 imports can. An agent's Edit or Write to a helper carries on the trusted
-patches that import it, as it does for the patch file; it doesn't trust a
-patch that's still waiting. A trust file from before helpers counted
+patches that import it, as it does for the patch file (only with the
+helper as that edit left it); it doesn't trust a patch that's still
+waiting. A trust file from before helpers counted
 (`version: 1`) is read as it is: a patch with no helpers is still trusted,
 and one with helpers is asked about again (`"changed"`), as version 1 never
 saw them. A changed helper is only imported again when the runner restarts
@@ -2591,7 +2601,8 @@ trust's store and rules.
   between messages keep what it started with.
 - An agent's Edit or Write to one of the settings files trusts them as it
   leaves them; to a script they name, only when an earlier version was
-  trusted, as with a patch's helpers.
+  trusted, as with a patch's helpers. Either only with the file as that
+  edit left it, as for patch files.
 
 **Built in**, from the folder alone:
 

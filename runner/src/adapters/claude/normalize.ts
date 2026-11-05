@@ -1,9 +1,10 @@
 // Turns Claude Agent SDK messages into protocol events. Pure apart from the
 // injected file helpers, so it can be tested by feeding recorded SDK message
 // sequences through it.
+import crypto from 'node:crypto';
 import type { BackgroundKind, EventBody, Hunk, ImageRef, SubagentStatus, UsageWindow } from '../../protocol.ts';
 import { LIMITS } from '../../protocol.ts';
-import type { AdapterOutput, SubagentUpdate, TurnResult } from '../types.ts';
+import type { AdapterOutput, AgentWrite, SubagentUpdate, TurnResult } from '../types.ts';
 import type { NormalizerContext } from '../context.ts';
 import { EDIT_TOOLS, PlanTracker, computeEditDiff, toolKind, toolTitle, truncateInput } from '../../tools.ts';
 import { diffLines } from '../../diff.ts';
@@ -378,6 +379,12 @@ export class ClaudeNormalizer {
           out.push({ kind: 'event', event: { type: 'edit.diff', itemId: id, path: d.path, hunks: d.hunks } });
         }
       }
+      // What a successful Edit or Write left, for patch trust: never from
+      // beforeApproval's preview, which a denied edit also gets.
+      if (call && EDIT_TOOLS.has(call.name) && !block.is_error) {
+        const w = wroteFromResult(call.name, call.input, tur);
+        if (w) out.push({ kind: 'wrote', itemId: id, files: [w] });
+      }
       const text = texts.join('\n');
       const spilled = this.persistedOutput(id, text, tur);
       out.push({
@@ -587,6 +594,51 @@ export function cutUtf8(text: string, max: number): string {
   // character the cut would split.
   while (end > 0 && (buf[end] & 0xc0) === 0x80) end--;
   return buf.subarray(0, end).toString('utf8');
+}
+
+// The file a successful Edit, MultiEdit or Write left and the hash of the
+// bytes it wrote, rebuilt from what the result says it did: a Write's
+// content, an edit applied to the result's originalFile as the CLI applies
+// it. So patch trust takes only what the edit produced, not whatever is in
+// the file by the time the runner looks (a command run straight after may
+// have changed it). Undefined when it can't be rebuilt (no originalFile,
+// text that has moved): then nothing is trusted, and a patch waits for
+// Mike as one written any other way does.
+export function wroteFromResult(name: string, input: Record<string, unknown>, tur: AnyMsg | undefined): AgentWrite | undefined {
+  const file = (typeof tur?.filePath === 'string' && tur.filePath) || (typeof input.file_path === 'string' ? input.file_path : '');
+  if (!file) return undefined;
+  let after: string | null = null;
+  if (name === 'Write') {
+    after = typeof tur?.content === 'string' ? tur.content : typeof input.content === 'string' ? input.content : null;
+  } else {
+    let text: string | null = typeof tur?.originalFile === 'string' ? tur.originalFile : tur?.originalFile === null ? '' : null;
+    const edits =
+      name === 'MultiEdit'
+        ? Array.isArray(input.edits)
+          ? (input.edits as AnyMsg[])
+          : []
+        : [{ old_string: tur?.oldString ?? input.old_string, new_string: tur?.newString ?? input.new_string, replace_all: tur?.replaceAll ?? input.replace_all }];
+    if (!edits.length) return undefined;
+    for (const e of edits) {
+      if (text === null || typeof e?.old_string !== 'string' || typeof e?.new_string !== 'string') return undefined;
+      text = cliReplace(text, e.old_string, e.new_string, Boolean(e.replace_all));
+    }
+    after = text;
+  }
+  if (after === null) return undefined;
+  return { path: file, sha256: crypto.createHash('sha256').update(Buffer.from(after, 'utf8')).digest('hex') };
+}
+
+// One edit as Claude Code's Edit applies it: an empty old_string makes a
+// new (or empty) file, and deleting text that doesn't end in a newline
+// takes the newline after it too.
+function cliReplace(content: string, oldString: string, newString: string, replaceAll: boolean): string | null {
+  if (oldString === '') return content === '' ? newString : null;
+  const search = newString === '' && !oldString.endsWith('\n') && content.includes(oldString + '\n') ? oldString + '\n' : oldString;
+  const at = content.indexOf(search);
+  if (at < 0) return null;
+  if (replaceAll) return content.split(search).join(newString);
+  return content.slice(0, at) + newString + content.slice(at + search.length);
 }
 
 // jsdiff-style patches mark a missing final newline with a "\ No newline

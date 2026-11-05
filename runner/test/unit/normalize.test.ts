@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { ClaudeNormalizer, type NormalizerContext } from '../../src/adapters/claude/normalize.ts';
+import { ClaudeNormalizer, wroteFromResult, type NormalizerContext } from '../../src/adapters/claude/normalize.ts';
 import type { AdapterOutput } from '../../src/adapters/types.ts';
 import { saveBase64Image } from '../../src/media.ts';
 import { checkEvent } from '../helpers/protocol-check.ts';
@@ -175,6 +176,60 @@ test('diff shown at approval time is not repeated when the result lands', () => 
   const diffs = events(outs).filter((e) => e.type === 'edit.diff');
   assert.equal(diffs.length, 2); // one Edit, one Write
   assert.deepEqual(diffs[0].hunks[0].lines, [' alpha', '-beta', '+BETA', ' gamma']);
+});
+
+const sha = (text: string) => crypto.createHash('sha256').update(text).digest('hex');
+
+test("a successful Edit or Write says what it wrote, by the hash of the bytes rebuilt from the result; a preview or a denied edit says nothing", () => {
+  // A recorded ask-mode run (CLI 2.1): Edit beta -> BETA, then Write "hi".
+  const c = ctx({ '/work/proj/note.txt': 'alpha\nbeta\ngamma\n' });
+  const n = new ClaudeNormalizer(c);
+  const outs: AdapterOutput[] = [];
+  for (const m of load('edit-ask-mode.ndjson')) {
+    outs.push(...n.handle(m));
+    const call = outs.at(-1);
+    if (call?.kind === 'event' && call.event.type === 'tool.call' && call.event.name === 'Edit') {
+      const preview = n.beforeApproval(call.event.itemId, 'Edit', call.event.input);
+      assert.ok(preview.length && preview.every((o) => o.kind === 'event'), 'the preview is only an edit.diff');
+      outs.push(...preview);
+    }
+  }
+  const wrote = outs.filter((o) => o.kind === 'wrote');
+  assert.deepEqual(wrote, [
+    { kind: 'wrote', itemId: 'toolu_019BcoFgUrhyzun1BBVKSy8Z', files: [{ path: '/work/proj/note.txt', sha256: sha('alpha\nBETA\ngamma\n') }] },
+    { kind: 'wrote', itemId: 'toolu_013dHVx9Xb6KVXVZYAH7zSgX', files: [{ path: '/work/proj/new.txt', sha256: sha('hi') }] },
+  ]);
+  // Each just before its result, so the runner hears it before the turn goes on.
+  const next = outs[outs.findIndex((o) => o.kind === 'wrote') + 1];
+  assert.ok(next.kind === 'event' && next.event.type === 'tool.result');
+
+  // Denied: no wrote, though the preview named the file.
+  const d = new ClaudeNormalizer(ctx({ '/work/proj/a.ts': 'x\n' }));
+  const input = { file_path: '/work/proj/a.ts', old_string: 'x', new_string: 'y' };
+  const denied = [
+    ...d.handle({ type: 'assistant', message: { id: 'm1', role: 'assistant', content: [{ type: 'tool_use', id: 'tu1', name: 'Edit', input }] }, parent_tool_use_id: null }),
+    ...d.beforeApproval('tu1', 'Edit', input),
+    ...d.handle({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu1', is_error: true, content: "The user doesn't want to proceed with this tool use." }] }, parent_tool_use_id: null }),
+  ];
+  assert.ok(events(denied).some((e) => e.type === 'edit.diff'));
+  assert.equal(denied.filter((o) => o.kind === 'wrote').length, 0);
+});
+
+test('wroteFromResult rebuilds an edit as Claude Code applies it, and gives up rather than guess', () => {
+  const tur = (o: Record<string, unknown>) => ({ filePath: '/p/a.ts', ...o });
+  // Deleting text without its newline takes the newline too.
+  assert.equal(wroteFromResult('Edit', {}, tur({ originalFile: 'a\nb\nc\n', oldString: 'b', newString: '', replaceAll: false }))?.sha256, sha('a\nc\n'));
+  assert.equal(wroteFromResult('Edit', {}, tur({ originalFile: 'x x x', oldString: 'x', newString: 'y', replaceAll: true }))?.sha256, sha('y y y'));
+  // An empty old_string on a new file makes it.
+  assert.equal(wroteFromResult('Edit', {}, tur({ originalFile: null, oldString: '', newString: 'new\n' }))?.sha256, sha('new\n'));
+  assert.equal(
+    wroteFromResult('MultiEdit', { edits: [{ old_string: 'a', new_string: 'b' }, { old_string: 'b\nb', new_string: 'c' }] }, tur({ originalFile: 'a\nb\n' }))?.sha256,
+    sha('c\n'),
+  );
+  assert.equal(wroteFromResult('Write', { file_path: '/p/a.ts', content: 'from input' }, undefined)?.sha256, sha('from input'));
+  // No original text, or text that isn't there: nothing, so nothing is trusted.
+  assert.equal(wroteFromResult('Edit', { file_path: '/p/a.ts', old_string: 'a', new_string: 'b' }, undefined), undefined);
+  assert.equal(wroteFromResult('Edit', {}, tur({ originalFile: 'abc', oldString: 'zzz', newString: 'y' })), undefined);
 });
 
 test('interrupt mid-stream keeps the partial text and reports interrupted', () => {

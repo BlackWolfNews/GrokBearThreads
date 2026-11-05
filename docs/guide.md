@@ -878,7 +878,8 @@ folder). It shows up within a few seconds. A patch is code that runs on your
 Mac, so keep only the ones you'd be happy to run.
 
 Patches only run once you've trusted them. One the agent writes for you is
-trusted as it wrote it. One that arrives some other way, in a repo you've
+trusted as it wrote it, though not if you turn the edit down, and not a
+change made to it afterwards some other way. One that arrives some other way, in a repo you've
 cloned or with a `git pull`, waits: a "patch to trust" chip shows above the
 composer, and Patches lists it as "Not run yet" (or "Changed since you
 trusted it") with a Trust button. Open its file to read it first, and
