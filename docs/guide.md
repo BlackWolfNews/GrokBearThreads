@@ -713,14 +713,15 @@ The Librarian view lists what it did.
 Your threads also have a website, on your own Convex deployment. To sign a
 browser in, Settings > Phone & browser > Open signed in opens it in your
 browser (or run `npm run web:sign-in` from your Threadbear folder). Each
-thread has its own link: Copy web link in a
-thread's ... menu on the Mac, or the Copy link button on the website, gives
-you one to paste anywhere you're signed in. On your Mac,
+thread has its own link. Share in a thread's ... menu on the Mac has Open on
+the web, to go there now, and Copy web link; the Copy link button on the
+website copies it too. It works anywhere you're signed in. On your Mac,
 `threadbear://thread/<id>` opens a thread in the app instead (the Open
 thread button on a tab BrowserBear has marked for an agent uses it).
 
 To let someone else read a thread, click the share button beside a
-thread's ... menu and pick Anyone with the link, then Copy link. It's a
+thread's ... menu (or Share with others in that menu's Share submenu) and
+pick Anyone with the link, then Copy link. It's a
 read-only page anybody can open, which follows the thread as it carries on.
 It reads like a short write-up: each of your messages, the work folded
 into one "Worked for" line (open it for one line per step), the answer,

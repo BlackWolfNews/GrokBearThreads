@@ -1134,7 +1134,8 @@ enum Automation {
             }
             let share = app.threads[thread.id]?.share
             let link = share.flatMap { $0.isOn ? app.shareLink($0)?.absoluteString : nil } ?? "none"
-            return "ok access \(share?.access.rawValue ?? "off") link \(link) popover \(app.sharePopoverThread == thread.id ? "shown" : "closed")"
+            let web = app.threadWebLink(thread.id)?.absoluteString ?? "none"
+            return "ok access \(share?.access.rawValue ?? "off") link \(link) popover \(app.sharePopoverThread == thread.id ? "shown" : "closed") web \(web)"
         case "updates":
             // The Updates panel: {"show": true} opens it ({"show": false}
             // closes it). {"rightClick": true} right-clicks the icon, which

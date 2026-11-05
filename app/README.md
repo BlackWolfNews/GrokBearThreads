@@ -102,7 +102,9 @@ and the perf run stay away from the real one. Install the runner itself with
   folded ones while it has text.
 - **Header.** One line: the folder's name, then the title. The full path is
   in its tooltip. The ... menu has Snooze, Archive, "Copy transcript as
-  Markdown" and "Copy thread id" (for pointing an agent at the thread).
+  Markdown", "Copy thread id" (for pointing an agent at the thread) and,
+  with a website, a Share submenu: open the thread there, copy its link, or
+  the share popover.
 - **New thread** with ⌘N or the pencil beside the search. The composer sits in the
   middle of the pane under "What should we work on?", with where the thread
   will start ("Starts in misc on mike") under it, and drops to the bottom
@@ -528,7 +530,7 @@ is an error. Commands marked "the open thread" act on `id` when it's given
 | `menu-popover` | `stuck` (true: behave as if macOS had stopped showing menus), `show` or `popup` (`permission`, `folder`, `plus` or `hibernate` with `id`), `click` (a row's title), `fromView` (true with `show`: from a small view that's then freed, as the moon is, and says whether it stayed and sits below) | the popover that stands in for a menu when menus are stuck (MenuWatch): `show` draws one over the window and says its window number, `popup` opens a real menu (stuck, the popover takes its place), `click` picks a row as a click would; alone, lists the rows on show and whether menus are stuck |
 | `drag-space` | `add` (a Space id: puts the main window on it, as a drag on macOS 27.2 leaves it on the drag Space, 31 on Mike's Mac), `misfile` (true: files it under another display's Space instead of its own, as an update restart in the background did), `repair` (true runs DragSpace's repair now) | the main window's Spaces and frame, the displays' own Spaces, how many repairs and refiles have run and whether menus are stuck for another reason |
 | `usage` | `show` (true opens the Usage panel, false closes it), `click` (`Update`, `Update anyway`, `Go back to <version>`, `Automatic`, `Ask me`, `Off` with `provider`, or `Check now`) | the Usage panel as text: each login's room by pool (`#`) and provider (`##`), then the Updates panel's CLIs with their buttons in brackets. `dump` has the same lines while it's open |
-| `share` | `access` (`off` or `link`), `open` (true opens the share popover, false closes it) | sets the selected thread's sharing through the same call as the popover; says its access, link and whether the popover is up |
+| `share` | `access` (`off` or `link`), `open` (true opens the share popover, false closes it) | sets the selected thread's sharing through the same call as the popover; says its access, link, whether the popover is up, and the thread's own web link (what the ... menu's Share submenu opens and copies) |
 | `updates` | `show` (true opens the Updates panel, false closes it), `rightClick` (true right-clicks the icon, which opens or closes the app's update popover), `popover` (false closes that), `preview` (`staged`, `building`, `failed` or `none`: makes up the app's update, for screenshots) | whether the icon has its grey dot for the app or runner, its tooltip, whether the popover is up and its line, and the panel's app and runner lines |
 | `point` | `x`, `y`, `toX`, `scrollX`, `scrollY` | real events at a spot in the window (points from its top left), for SwiftUI controls with nothing to find them by: a click, a drag to `toX`, or a wheel in lines. They go straight to the window, so the pointer stays put |
 | `project-why` | `id` (a project's id, or null to close) | opens the ⓘ popover on that project's heading in the open thread's Highlights; says its reason, who put it there and its buttons |

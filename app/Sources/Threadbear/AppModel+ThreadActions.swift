@@ -404,6 +404,12 @@ extension AppModel {
         websiteURL?.appendingPathComponent("s").appendingPathComponent(share.slug)
     }
 
+    /// A thread's own link on the website, while sync is on. It needs a
+    /// signed-in browser, unlike `shareLink`.
+    func threadWebLink(_ threadId: String) -> URL? {
+        websiteURL?.appendingPathComponent("t").appendingPathComponent(threadId)
+    }
+
     /// Opens the thread if it isn't, and makes its title in the header a field.
     func startRenaming(_ threadId: String? = nil) {
         guard let threadId = threadId ?? selection, threads[threadId] != nil else { return }
