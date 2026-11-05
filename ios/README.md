@@ -56,6 +56,10 @@ prod) makes one, to get onto the phone as a link:
 
     threadbear://pair?url=<https://….convex.cloud>&token=<tb_…>
 
+(the Mac's code adds `&key=<runnerId>:<key>`, the runner's secret-box
+key, without which the phone pairs but won't answer secret cards;
+docs/protocol.md, "Trusting the key")
+
 shown as a QR code that Threadbear's Scan the code (or the Camera) reads. `swift ios/scripts/pair-qr.swift` does all of this, never printing the token or leaving the image on disk, or pasted from the phone's own
 clipboard ("Paste a pairing link"). Not through the Mac clipboard: Quick
 Ask's key leaked that way. The app checks the token with `phone:me` before

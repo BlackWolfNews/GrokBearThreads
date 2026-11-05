@@ -11,7 +11,7 @@ import type { Logger } from '../../src/log.ts';
 
 type Call = { kind: string; fn: string; args: Record<string, unknown> };
 
-function setup(opts: { url?: string; key?: string; fail?: (fn: string) => Error | undefined } = {}) {
+function setup(opts: { url?: string; key?: string; boxKey?: string; fail?: (fn: string) => Error | undefined } = {}) {
   const h = makeHarness();
   const calls: Call[] = [];
   const logged: string[] = [];
@@ -45,6 +45,7 @@ function setup(opts: { url?: string; key?: string; fail?: (fn: string) => Error 
     clock: h.clock,
     log,
     post,
+    ...(opts.boxKey ? { secretBox: { publicKey: () => opts.boxKey!, open: () => '' } } : {}),
   });
   return { sync, calls, logged, methods: devicesMethods(sync) };
 }
@@ -55,6 +56,20 @@ test('links: the pairing link carries the deployment and the token, the sign-in 
   assert.equal(siteOf('https://x.convex.cloud/'), 'https://x.convex.site');
   assert.equal(siteOf('http://127.0.0.1:3210'), undefined);
   assert.equal(siteOf(undefined), undefined);
+});
+
+test('links: the pairing link carries each runner key the phone may seal to', () => {
+  const key = 'pOCSkrZRwni5dyxWn1+puxPZBrRqtoyd+dwrRAn4ogk=';
+  const link = pairingLink('https://x.convex.cloud', 'tb_1', [{ runnerId: '0a1b2c', key }]);
+  assert.equal(link, 'threadbear://pair?url=https%3A%2F%2Fx.convex.cloud&token=tb_1&key=0a1b2c%3ApOCSkrZRwni5dyxWn1%2BpuxPZBrRqtoyd%2BdwrRAn4ogk%3D');
+  assert.deepEqual(new URL(link).searchParams.getAll('key'), [`0a1b2c:${key}`]);
+});
+
+test('pair: the phone link carries this runner\'s id and secret-box key', async () => {
+  const key = 'pOCSkrZRwni5dyxWn1+puxPZBrRqtoyd+dwrRAn4ogk=';
+  const { methods } = setup({ boxKey: key });
+  const phone = (await methods['devices.pair']({ kind: 'phone' })) as { pairingLink?: string };
+  assert.deepEqual(new URL(phone.pairingLink!).searchParams.getAll('key'), [`r1:${key}`]);
 });
 
 test('pair: a phone gets a QR link, a browser a sign-in link, and the token is in the reply and nowhere else', async () => {

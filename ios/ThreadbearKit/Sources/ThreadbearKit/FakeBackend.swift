@@ -57,6 +57,9 @@ public final class FakeBackend: Backend, @unchecked Sendable {
     /// the usual samples, which the App Store shots are of. The key is a
     /// made-up one (the seal test's), so the demo never pins a real runner's.
     static let sampleSecretKey = "pOCSkrZRwni5dyxWn1+puxPZBrRqtoyd+dwrRAn4ogk="
+    /// What the demo keeps as if a pairing link had carried it, so its
+    /// secret card can be answered (the thread is on the default "mac").
+    public static let sampleRunnerKeys = ["mac": sampleSecretKey]
 
     private static func secretThread(now: Date) -> (thread: PhoneThread, messages: [PhoneMessage]) {
         let ago = { (minutes: Double) in now.addingTimeInterval(-minutes * 60) }

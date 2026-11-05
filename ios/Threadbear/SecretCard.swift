@@ -19,9 +19,8 @@ struct SecretCard: View {
     @State private var value = ""
     @State private var busy = false
     @State private var problem: String?
-    /// Checked against the key kept for this runner, and the runner kept
-    /// for this thread, once the card shows (which keeps them, the first
-    /// time), and again on Save.
+    /// Checked against the key kept for this runner (from pairing), and the
+    /// runner kept for this thread, once the card shows and again on Save.
     @State private var trust: RunnerKeyPins.Trust?
 
     var body: some View {
@@ -37,6 +36,12 @@ struct SecretCard: View {
                     .font(.footnote).foregroundStyle(.secondary)
             } else if trust == .changed {
                 Label("This Mac's key changed. Answer it on the Mac.", systemImage: "exclamationmark.shield")
+                    .font(.footnote).foregroundStyle(.orange)
+            } else if trust == .unknown {
+                // Not in the pairing link, so only the mirror says it's one
+                // of yours: nothing is sealed to it.
+                Label("The phone doesn't know this Mac yet, so it won't send it secrets. Answer it on the Mac, or pair the phone again.",
+                      systemImage: "exclamationmark.shield")
                     .font(.footnote).foregroundStyle(.orange)
             } else if trust == .moved {
                 // Threads never change Macs, so this is the backend saying

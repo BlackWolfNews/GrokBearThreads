@@ -108,13 +108,17 @@ final class AppModel {
     var canSendPhotos: Bool { isFake || (apiVersion ?? 0) >= BackendCompatibility.photosAPIVersion }
     /// Whether a secret card can be answered here (backend API 35, phone:secret).
     var canAnswerSecrets: Bool { isFake || (apiVersion ?? 0) >= BackendCompatibility.secretsAPIVersion }
-    /// The demo's kept runner keys, in memory so it never writes the keychain.
-    private let demoRunnerKeys = MemoryRunnerKeyStore()
-    /// Where the first key each runner's secret cards carried is kept
+    /// The demo's kept runner keys, in memory so it never writes the keychain,
+    /// with the sample Mac's as if it came in a pairing link.
+    private let demoRunnerKeys = MemoryRunnerKeyStore(FakeBackend.sampleRunnerKeys)
+    /// Where the runner keys a secret may be sealed to are kept
     /// (docs/protocol.md, "Trusting the key"), per paired deployment.
     var runnerKeys: any RunnerKeyStore {
         guard !isFake, let pairing else { return demoRunnerKeys }
-        return KeychainRunnerKeyStore(scope: pairing.deploymentURL.host() ?? pairing.deploymentURL.absoluteString)
+        return Self.runnerKeys(for: pairing)
+    }
+    private static func runnerKeys(for pairing: Pairing) -> KeychainRunnerKeyStore {
+        KeychainRunnerKeyStore(scope: pairing.deploymentURL.host() ?? pairing.deploymentURL.absoluteString)
     }
     /// Threads whose runner is already pinned this session, so a list
     /// arriving doesn't go to the keychain for every row each time.
@@ -378,6 +382,9 @@ final class AppModel {
         do {
             _ = try await backend.me()
             PairingStore.save(pairing)
+            // The Macs a secret may be sealed to: only these, from the QR
+            // code the Mac drew, never ones the mirror names.
+            RunnerKeyPins.pinFromPairing(pairing.runnerKeys, in: Self.runnerKeys(for: pairing))
             connect(backend, pairing: pairing)
         } catch {
             lastError = "The server didn't accept that token: \(error.localizedDescription)"
@@ -439,8 +446,7 @@ final class AppModel {
         UserDefaults.standard.removeObject(forKey: "pocketSeenUpTo")
         pocketSeenUpTo = nil
         PairingStore.clear()
-        // Pairing again trusts each runner's key afresh, which is how a Mac
-        // whose secret key was deleted on purpose gets answered again.
+        // Pairing again keeps the runner keys its link carries afresh.
         KeychainRunnerKeyStore.clearAll()
         pinnedThreads = []
         stop()

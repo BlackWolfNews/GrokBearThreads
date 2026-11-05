@@ -931,6 +931,23 @@ export class ConvexSync {
     return this.off;
   }
 
+  /**
+   * This runner's id and the public key a phone seals secrets to, for the
+   * pairing link (devices.ts): the phone trusts only runner keys that came
+   * from a Mac this way, never ones the mirror names (docs/protocol.md,
+   * "Trusting the key"). Empty without a key.
+   */
+  pairingKeys(): { runnerId: string; key: string }[] {
+    const box = this.deps.secretBox;
+    if (!box) return [];
+    try {
+      return [{ runnerId: this.runnerId, key: box.publicKey() }];
+    } catch (err) {
+      this.deps.log.warn('no key for secrets from the phone', { error: String(err) });
+      return [];
+    }
+  }
+
   /** The deployment's URL (`sync.url`), while sync is on. */
   url(): string | undefined {
     return this.off ? undefined : this.deps.config.url;

@@ -75,59 +75,68 @@ public enum SecretSeal {
 
 // MARK: Trusting the key
 
-/// Where the first key seen for each runner is kept, and the runner each
-/// thread was first seen on.
+/// Where each runner's key is kept, and the runner each thread was first
+/// seen on.
 public protocol RunnerKeyStore: Sendable {
     func key(for runnerId: String) -> String?
+    /// Keeps a runner's key, replacing one kept before. Only a pairing
+    /// link calls this (`RunnerKeyPins.pinFromPairing`), never a card.
     func save(_ key: String, for runnerId: String)
     func runner(forThread threadId: String) -> String?
     /// Only ever adds: a thread already pinned keeps its first runner.
     func saveRunner(_ runnerId: String, forThread threadId: String)
 }
 
-/// Trust on first use (docs/protocol.md, "Trusting the key"), rather than
-/// sealing to a key the backend could have swapped in. Two pins:
+/// Which runner keys a secret may be sealed to (docs/protocol.md,
+/// "Trusting the key"). Everything on a secret card (the thread's runner
+/// id and the key) comes from the Convex mirror, which anyone holding the
+/// shared runner key can write. So trust has to come from outside it:
 ///
-/// - Each runner's key: the first key a runner's card carries is kept, and
-///   a card with any other key for that runner later is refused.
+/// - Each runner's key: kept only from a pairing link (the QR code the
+///   Mac shows, which carries its runner id and key), or from before this
+///   rule, when the first key a card carried was kept. A card for a runner
+///   with no kept key is refused (`.unknown`), and one with a different
+///   key from the kept one too (`.changed`). Cards never add a key.
 /// - Each thread's runner: the first runner id the phone sees a thread on
-///   (in a list, or on its first secret card) is kept. A thread's runner id
-///   comes from the mirror too, so without this a backend could move a
-///   thread the phone knows onto a fresh runner id carrying its own key,
-///   and that id, never seen before, would be trusted on first use.
-///
-/// So a runner id the phone has never seen is pinned on first use only
-/// when it isn't replacing a different runner for a thread the phone has
-/// already pinned. That keeps normal use free of prompts: a new thread on
-/// the M5 or on another Mac, a new Mac, or a fresh install all pin as they
-/// come. Runners never take over each other's threads (a handover is the
-/// same runner id), so a thread whose runner changed is refused. What's
-/// left open: a brand-new thread on a brand-new runner id, which is
-/// indistinguishable from a new Mac, and a thread moved before this phone
-/// ever saw it.
+///   (in a list, or on a secret card it trusted) is kept, and a card whose
+///   thread has since changed runner is refused (`.moved`), since runners
+///   never take over each other's threads (a handover keeps the runner id).
 public enum RunnerKeyPins {
     public enum Trust: Sendable, Equatable {
-        /// The kept key, or the first one seen (now kept).
+        /// The kept key for this runner.
         case trusted
         /// Not the key this phone kept for that runner.
         case changed
         /// The thread is on a different runner from the one this phone
         /// first saw it on.
         case moved
+        /// A runner this phone has no key for: it wasn't in the pairing
+        /// link, so nothing says it's one of Mike's Macs.
+        case unknown
     }
 
     public static func check(_ key: String, runnerId: String, threadId: String, in store: any RunnerKeyStore) -> Trust {
         // First, and before anything is kept, so a moved thread's runner
-        // and key are never pinned off the back of it.
+        // is never pinned off the back of it.
         if let pinned = store.runner(forThread: threadId), pinned != runnerId { return .moved }
-        if let kept = store.key(for: runnerId) {
-            // Compared as bytes, so a re-encoding of the same key isn't a change.
-            guard Data(base64Encoded: kept) == Data(base64Encoded: key) else { return .changed }
-        } else {
-            store.save(key, for: runnerId)
-        }
+        // Nothing is kept from a card: a runner id and key the mirror made
+        // up would otherwise be trusted on first sight.
+        guard let kept = store.key(for: runnerId) else { return .unknown }
+        // Compared as bytes, so a re-encoding of the same key isn't a change.
+        guard Data(base64Encoded: kept) == Data(base64Encoded: key) else { return .changed }
         store.saveRunner(runnerId, forThread: threadId)
         return .trusted
+    }
+
+    /// Keeps the runner keys a pairing link carried. They come from the
+    /// Mac itself, not the mirror, so each replaces whatever was kept for
+    /// that runner: pairing again is how a Mac whose key was deleted on
+    /// purpose gets answered again. Unusable keys are skipped.
+    public static func pinFromPairing(_ keys: [String: String], in store: any RunnerKeyStore) {
+        for (runnerId, key) in keys where !runnerId.isEmpty && SecretSeal.isUsableKey(key) {
+            if let kept = store.key(for: runnerId), Data(base64Encoded: kept) == Data(base64Encoded: key) { continue }
+            store.save(key, for: runnerId)
+        }
     }
 
     /// Pins the runner of each thread not pinned yet, as the lists arrive,
@@ -161,8 +170,8 @@ public final class MemoryRunnerKeyStore: RunnerKeyStore, @unchecked Sendable {
 /// The real store: one keychain item per runner and one per thread, under
 /// the paired deployment, this device only. Only the app reads it (the notification
 /// extension never shows a secret card), so there's no access group.
-/// Unpairing clears them all (`clearAll`), which is how a runner's key is
-/// trusted again after it's been deleted on purpose.
+/// Unpairing clears them all (`clearAll`); pairing again keeps the keys its
+/// link carries.
 public struct KeychainRunnerKeyStore: RunnerKeyStore {
     static let service = "com.mikecann.threadbear.runnerKey"
     /// Thread pins in a service of their own, so a thread id can never be
@@ -195,7 +204,11 @@ public struct KeychainRunnerKeyStore: RunnerKeyStore {
     }
 
     public func key(for runnerId: String) -> String? { read(base(runnerId)) }
-    public func save(_ key: String, for runnerId: String) { add(key, base(runnerId)) }
+    /// Replaces: only a pairing link's keys come here.
+    public func save(_ key: String, for runnerId: String) {
+        SecItemDelete(base(runnerId) as CFDictionary)
+        add(key, base(runnerId))
+    }
     public func runner(forThread threadId: String) -> String? { read(base(threadId, service: Self.threadService)) }
     public func saveRunner(_ runnerId: String, forThread threadId: String) {
         add(runnerId, base(threadId, service: Self.threadService))

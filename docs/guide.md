@@ -210,7 +210,10 @@ An agent that needs a secret (your Mac's administrator password for a
 `sudo` command, an API key, a token) asks for it in a card in the thread
 instead of in its reply. Type it into the card and click Save securely, or
 Decline. You can answer it on your phone too, where it's sealed so only your
-Mac can read it on the way through.
+Mac can read it on the way through. The phone only sends secrets to Macs
+it learned about from a pairing code, so if it says it doesn't know this
+Mac yet, answer on the Mac, or pair the phone again from the code in that
+Mac's Settings > Phone & browser.
 
 It never goes into the chat: the agent gets a private file holding it,
 which its commands can read for 24 hours, and then it's deleted. That's

@@ -23,11 +23,15 @@ export function siteOf(url: string | undefined): string | undefined {
 }
 
 // What the iPhone app scans (ios/ThreadbearKit Pairing.swift): the
-// deployment and the token in a threadbear://pair link.
-export function pairingLink(url: string, token: string): string {
+// deployment and the token in a threadbear://pair link, and a
+// `key=<runnerId>:<public key>` for each runner whose secret-box key the
+// phone may seal to. The phone takes runner keys only from here, as they
+// come straight from this Mac and not through the mirror.
+export function pairingLink(url: string, token: string, keys: { runnerId: string; key: string }[] = []): string {
   const u = new URL('threadbear://pair');
   u.searchParams.set('url', url);
   u.searchParams.set('token', token);
+  for (const k of keys) u.searchParams.append('key', `${k.runnerId}:${k.key}`);
   return u.toString();
 }
 
@@ -69,7 +73,7 @@ export function devicesMethods(sync: ConvexSync): Record<string, (p: Record<stri
         throw new RpcError(ErrorCode.other, (e as Error).message);
       }
       const device: Device = { id: issued.id, kind: kind as DeviceKind, name: name.trim(), createdAt: new Date().toISOString(), expiresAt: issued.expiresAt, expired: false };
-      return kind === 'phone' ? { device, pairingLink: pairingLink(url, issued.token) } : { device, signInLink: signInLink(site!, issued.token) };
+      return kind === 'phone' ? { device, pairingLink: pairingLink(url, issued.token, sync.pairingKeys()) } : { device, signInLink: signInLink(site!, issued.token) };
     },
     'devices.revoke': async (p): Promise<DeviceList> => {
       const id = p.deviceId;

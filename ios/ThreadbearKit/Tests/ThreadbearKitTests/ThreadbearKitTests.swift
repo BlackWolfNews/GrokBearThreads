@@ -410,6 +410,21 @@ import UniformTypeIdentifiers
         #expect(try #require(Pairing.parse(url)).deploymentURL.host() == "happy-bear-123.convex.cloud")
     }
 
+    /// The runner ids and keys the Mac put in the link (runner/src/devices.ts),
+    /// escaped as URLSearchParams does, and back out of `link`.
+    @Test func carriesRunnerKeys() throws {
+        let key = "pOCSkrZRwni5dyxWn1+puxPZBrRqtoyd+dwrRAn4ogk="
+        let url = URL(string: "threadbear://pair?url=https%3A%2F%2Fx.convex.cloud&token=tb_1&key=0a1b2c%3ApOCSkrZRwni5dyxWn1%2BpuxPZBrRqtoyd%2BdwrRAn4ogk%3D&key=bad%3AAAAA&key=nocolon")!
+        let pairing = try #require(Pairing.parse(url))
+        #expect(pairing.runnerKeys == ["0a1b2c": key])
+        #expect(Pairing.parse(pairing.link) == pairing)
+        // Unescaped, as someone typing a link might.
+        let loose = try #require(Pairing.parse(URL(string: "threadbear://pair?url=https://x.convex.cloud&token=t&key=r1:\(key)")!))
+        #expect(loose.runnerKeys == ["r1": key])
+        // A link from before keys: pairs as ever, with none.
+        #expect(try #require(Pairing.parse(URL(string: "threadbear://pair?url=https://x.convex.cloud&token=t")!)).runnerKeys.isEmpty)
+    }
+
     @Test func refusesOtherHosts() {
         #expect(Pairing.parse(URL(string: "threadbear://pair?url=https://evil.example.com&token=t")!) == nil)
         #expect(Pairing.parse(URL(string: "threadbear://pair?url=http://a.convex.cloud&token=t")!) == nil)

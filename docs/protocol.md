@@ -788,7 +788,7 @@ the summary and then the reply.
 | `settings.get` | `{}` | `{ settings: Settings }` |
 | `settings.update` | `{ defaultCwd?, idleMinutes?, maxLiveCLIs?, followMain?, bulletReplies?, oneReply?, models?: { pool?: string \| null, privateFolders? } }` | `{ settings: Settings }`. Saves what's given to `runner.json` and applies it straight away, except `followMain` (next restart). `defaultCwd` must be an existing folder, `idleMinutes` at least 1, `maxLiveCLIs` 1 to 20, `pool` a pool id or `null`; otherwise `-32602` saying which. Every client gets `settings.updated` |
 | `devices.list` | `{}` | `{ devices: Device[], site?: string, reason?: string }` (see Devices). `site` is the website's root while sync is on; `reason` says why nothing can pair when it's off |
-| `devices.pair` | `{ kind: "phone" \| "browser", name?: string, days?: number }` | `{ device: Device, pairingLink?: string, signInLink?: string }`. Issues a phone token for a new phone or browser (see Devices) and returns the link that carries it: a `threadbear://pair?url=…&token=…` link for a phone, for the app to draw as a QR code, or the website's sign-in link (`<site>/#token=…`) for a browser, for the app to open. `days` is 1 to 365 (default 90). `-32000` while sync is off, or while the backend is older than this |
+| `devices.pair` | `{ kind: "phone" \| "browser", name?: string, days?: number }` | `{ device: Device, pairingLink?: string, signInLink?: string }`. Issues a phone token for a new phone or browser (see Devices) and returns the link that carries it: a `threadbear://pair?url=…&token=…&key=<runnerId>:<key>` link for a phone, for the app to draw as a QR code (the `key` item is this runner's secret-box public key, see Secrets, "Trusting the key"; absent when the runner has none), or the website's sign-in link (`<site>/#token=…`) for a browser, for the app to open. `days` is 1 to 365 (default 90). `-32000` while sync is off, or while the backend is older than this |
 | `devices.revoke` | `{ deviceId }` | `{ devices: Device[] }`. The phone or browser is signed out at its next request. `-32602` for an id that isn't there |
 | `models.run` | `{ job: "classify" \| "extract" \| "summarize" \| "generate", text: string, labels?: string[], fields?: Record<string, string>, maxWords?: number, system?: string, cwd?: string, maxTokens?: number }` | `{ ok: true, value, model }` or `{ ok: false, reason: "no-pool" \| "off" \| "private" \| "no-room" \| "timeout" \| "provider", message }`. One model call by hand (`tb models try`), on the pool like any other, with `feature: "tb"`. `maxTokens` (generate only, 1 to 8000, default 500) caps the answer, reasoning included; `classify` needs 2 or more `labels` and answers one of them; `extract` needs `fields` (name to a plain description) and answers an object of them, `null` where the text doesn't say |
 | `runner.status` | `{}` | `{ version, release?, branch?, pid, startedAt, home, logFile, liveClis, running: string[], background: { threadId, tasks: string[] }[], pendingRestart?: { when, reason?, release?, resumeThreadId?, requestedAt, backgroundUntil?, waitingFor: string[] }, rolledBack?: { from, at }, draining?: { pid, version, release?, since, threads: string[] }[], update?: { state, checkout?, reason?, checkedAt?, commit?, release?, logFile?, launcherChanged?, launcherReason? }, macScreen?: { fullDiskAccess?, dialogs, dialogsSince? }, clis?: CliStatus[] }`. `running` lists the threads that are starting, running or waiting on an approval or a question; `background` the threads whose CLI is still running background shells or subagents (`tasks` describes each). A restart waits for both. `branch` is the branch the release was built from. `rolledBack` is set when this release is running because `launch.mjs` went back to it from `from`, which kept crashing at startup (and nobody has activated it on purpose since). `update` is the runner following main by itself (docs/dev-tools.md): `state` is `off` (`reason` says why), `idle`, `checking`, `building`, `waiting` (`release` is built and starts on the pending restart) or `failed` (`reason` is the error; `logFile` has the build's output); `commit` is main's tip at the last check (`checkedAt`) |
@@ -2051,26 +2051,34 @@ own secret questions were declined (Codex approvals). Now:
   AES-256-GCM with a random 12-byte `nonce`; `box` is ciphertext then
   the 16-byte tag. All base64. Binding the approval id into the key means
   a sealed answer can't be replayed onto another card.
-- **Trusting the key.** The phone keeps the first key it sees for each
-  runner (keychain, by `runnerId`). A different key later is refused with
-  "This Mac's key changed. Answer it on the Mac." rather than sealing to a
-  key the backend could have swapped. Deleting `secret-box.key` on purpose
-  means re-pairing the phone. A thread's `runnerId` comes from the mirror
-  too, so the phone also keeps the runner it first saw each thread on
-  (keychain, by `threadId`), pinned when the thread first shows in a list
-  or on its first secret card. A card on a thread whose `runnerId` differs
-  from its pin is refused ("This thread's Mac changed, so the phone won't
-  send it secrets. Answer it on the Mac.") and nothing about the new runner
-  is kept. Otherwise a backend could move a known thread onto a fresh
-  runner id carrying its own key, and the phone would trust that id on
-  first use. The rule: a never-seen runner id is pinned on first use only
-  if it isn't replacing a different runner for a thread already pinned.
-  Runners never take over each other's threads (a handover keeps the
-  runner id), so normal use (new threads on any Mac, a new Mac, a fresh
-  install) never trips it. Still open: a brand-new thread on a brand-new
-  runner id, which looks just like a new Mac, and a thread moved before
-  the phone first saw it. Changing a runner's `sync.runnerId` on purpose
-  also means re-pairing, which clears both pins.
+- **Trusting the key.** A card's `runnerId` and `key` both come from the
+  mirror, which anyone with the shared runner key can write, so the phone
+  takes neither on trust. It seals only to a runner whose key it already
+  keeps (keychain, by `runnerId`, per deployment), and it keeps keys only
+  from the pairing link: `devices.pair` adds a `key=<runnerId>:<key>`
+  item for the runner that drew the code (its `secret-box.key`, raw
+  X25519, standard base64), and pairing keeps each, replacing any kept
+  before for that runner. A card for a runner with no kept key is refused
+  ("The phone doesn't know this Mac yet, so it won't send it secrets.
+  Answer it on the Mac, or pair the phone again.") and nothing is kept
+  from it. A different key from the kept one is refused with "This Mac's
+  key changed. Answer it on the Mac." Keys kept before this rule (when
+  the first key a card carried was kept) still count, so a phone that
+  already answered a Mac's secrets goes on doing so. A pairing link from
+  before keys still pairs, but its phone can't answer secrets until it's
+  paired with a new code. A second Mac (one whose threads reach the phone
+  through the same deployment) is trusted only on a phone that kept its
+  key before, or once that Mac draws the pairing code. A pairing link
+  opened while the phone is already paired is asked about first ("Pair
+  the phone again?"), as any web page can open one. The phone also keeps
+  the runner it first saw each thread on (keychain, by `threadId`),
+  pinned when the thread first shows in a list or on a trusted secret
+  card. A card on a thread whose `runnerId` differs from its pin is
+  refused ("This thread's Mac changed, so the phone won't send it
+  secrets. Answer it on the Mac."), since runners never take over each
+  other's threads (a handover keeps the runner id). Deleting
+  `secret-box.key` on purpose, or changing a runner's `sync.runnerId`,
+  means pairing the phone again from that Mac.
 - **Keeping.** Files and helpers go 24 hours after they're written: the
   runner sweeps the folder when it starts and hourly. Nothing else keeps
   the value: the runner holds it in memory only long enough to write it.
