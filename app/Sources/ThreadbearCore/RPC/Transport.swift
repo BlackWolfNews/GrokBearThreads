@@ -11,8 +11,11 @@ public protocol RPCTransport: AnyObject, Sendable {
     func close()
 }
 
-/// WebSocket transport built on URLSessionWebSocketTask, with the bearer token
-/// sent on the upgrade request.
+/// WebSocket transport built on URLSessionWebSocketTask. `open()` returns
+/// once the runner has proved it has the token and the app has proved the
+/// same back (`RunnerAuth`, docs/protocol.md "Auth"); the token itself is
+/// never sent, so a listener that took the runner's port while it was down
+/// gets nothing it can reuse.
 public final class WebSocketTransport: NSObject, RPCTransport, URLSessionWebSocketDelegate, @unchecked Sendable {
     private let url: URL
     private let token: String
@@ -21,15 +24,18 @@ public final class WebSocketTransport: NSObject, RPCTransport, URLSessionWebSock
     private var task: URLSessionWebSocketTask?
     private var openContinuation: CheckedContinuation<Void, Error>?
     private var closeCode: Int?
+    private var authTimedOut = false
+    private let authTimeout: Duration
 
-    public init(url: URL, token: String) {
+    public init(url: URL, token: String, authTimeout: Duration = .seconds(5)) {
         self.url = url
         self.token = token
+        self.authTimeout = authTimeout
     }
 
     public func open() async throws {
+        // No Authorization header: the bearer token never leaves the app.
         var request = URLRequest(url: url)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.timeoutInterval = 5
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 3600
@@ -47,6 +53,48 @@ public final class WebSocketTransport: NSObject, RPCTransport, URLSessionWebSock
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             lock.withLock { openContinuation = continuation }
             task.resume()
+        }
+        try await authenticate(task)
+    }
+
+    /// The challenge, before anything the server says is passed on. Nothing
+    /// but a challenge and then the right proof gets through: no fallback to
+    /// the token, whatever the server claims to be.
+    private func authenticate(_ task: URLSessionWebSocketTask) async throws {
+        let timeout = authTimeout
+        let watchdog = Task { [weak self] in
+            try? await Task.sleep(for: timeout)
+            guard !Task.isCancelled, let self else { return }
+            self.lock.withLock { self.authTimedOut = true }
+            task.cancel(with: .policyViolation, reason: nil)
+        }
+        defer { watchdog.cancel() }
+        do {
+            let (request, expected) = try RunnerAuth.answer(challenge: try await authReceive(task), token: token)
+            try await task.send(.string(request))
+            try RunnerAuth.check(reply: try await authReceive(task), expected: expected)
+        } catch let error as RunnerAuth.NotProved {
+            task.cancel(with: .policyViolation, reason: nil)
+            throw RPCError.connectFailed("it didn't prove it's the runner: \(error.reason)")
+        } catch let error as RPCError {
+            throw error
+        } catch {
+            if lock.withLock({ authTimedOut }) { throw RPCError.connectFailed("it didn't prove it's the runner in time") }
+            throw RPCError.disconnected(error.localizedDescription)
+        }
+    }
+
+    private func authReceive(_ task: URLSessionWebSocketTask) async throws -> Data {
+        do {
+            switch try await task.receive() {
+            case .string(let text): return Data(text.utf8)
+            case .data(let data): return data
+            @unknown default: return Data()
+            }
+        } catch {
+            if lock.withLock({ authTimedOut }) { throw RPCError.connectFailed("it didn't prove it's the runner in time") }
+            if lock.withLock({ closeCode }) == 4401 || task.closeCode.rawValue == 4401 { throw RPCError.unauthorized }
+            throw RPCError.disconnected(error.localizedDescription)
         }
     }
 

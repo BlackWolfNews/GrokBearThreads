@@ -326,7 +326,7 @@ async function rpcPatient(home, method, params) {
   try {
     return await rpc(home, method, params);
   } catch (e) {
-    if (e.down || typeof e.code === 'number') throw e;
+    if (e.down || e.notProved || typeof e.code === 'number') throw e;
   }
   return rpc(home, method, params, SLOW_RPC_MS);
 }

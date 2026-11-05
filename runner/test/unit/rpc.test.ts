@@ -7,6 +7,8 @@ import { RpcError } from '../../src/protocol.ts';
 import { nullLogger } from '../../src/log.ts';
 import { checkSequence, checkSummary } from '../helpers/protocol-check.ts';
 import { patiently } from '../helpers/patience.ts';
+import { WebSocket, WebSocketServer } from 'ws';
+import { authProof, isNonce, newNonce } from '../../src/rpc-auth.ts';
 
 const TOKEN = 'test-token-0123456789';
 
@@ -18,7 +20,7 @@ async function serve(extra: Partial<ConstructorParameters<typeof RpcServer>[0]> 
   return { h, server, url, port };
 }
 
-test('bearer header auth, hello, and JSON-RPC errors', async () => {
+test('challenge auth, hello, and JSON-RPC errors', async () => {
   const { server, url } = await serve();
   const c = await RunnerClient.connect(url, TOKEN);
   const hello = await c.call('hello', { client: 'test', version: '1' });
@@ -34,7 +36,7 @@ test('bearer header auth, hello, and JSON-RPC errors', async () => {
   await server.close();
 });
 
-test('first-message auth works; anything else first closes with 4401', async () => {
+test('old clients still get in: first-message auth with the token; anything else first closes with 4401', async () => {
   const { server, url } = await serve();
   const ok = new RunnerClient(url, undefined);
   await ok.opened;
@@ -47,11 +49,210 @@ test('first-message auth works; anything else first closes with 4401', async () 
   bad.sendRaw({ jsonrpc: '2.0', id: 1, method: 'threads.list', params: {} });
   assert.equal((await bad.waitClosed()).code, 4401);
 
-  const wrong = new RunnerClient(url, 'wrong-token');
+  const wrong = new RunnerClient(url, undefined);
   await wrong.opened;
-  wrong.sendRaw({ jsonrpc: '2.0', id: 1, method: 'hello', params: {} });
+  wrong.sendRaw({ jsonrpc: '2.0', id: 1, method: 'auth', params: { token: 'wrong-token' } });
   assert.equal((await wrong.waitClosed()).code, 4401);
   await server.close();
+});
+
+// The upgrade's status and the first message, from a bare ws client.
+function rawConnect(url: string, headers?: Record<string, string>): Promise<{ ws?: WebSocket; status?: number; first?: any }> {
+  return new Promise((resolve) => {
+    const ws = new WebSocket(url, { headers });
+    ws.once('unexpected-response', (_req, res) => {
+      resolve({ status: res.statusCode });
+      ws.terminate();
+    });
+    ws.once('error', () => resolve({}));
+    ws.once('message', (data) => resolve({ ws, first: JSON.parse(data.toString()) }));
+    // A bearer-authed socket gets no challenge, so nothing to wait for.
+    if (headers) ws.once('open', () => setTimeout(() => resolve({ ws }), 50));
+  });
+}
+
+test('challenge auth: the runner challenges, the client proves, the runner proves back', async () => {
+  const { server, url } = await serve();
+  const { ws, first } = await rawConnect(url);
+  assert.equal(first.method, 'auth.challenge');
+  assert.equal(first.params.version, 1);
+  assert.ok(isNonce(first.params.nonce));
+  const clientNonce = newNonce();
+  const reply = new Promise<any>((r) => ws!.once('message', (d) => r(JSON.parse(d.toString()))));
+  ws!.send(JSON.stringify({ jsonrpc: '2.0', id: 'auth', method: 'auth.prove', params: { nonce: clientNonce, proof: authProof(TOKEN, 'client', first.params.nonce, clientNonce) } }));
+  const answer = await reply;
+  assert.equal(answer.id, 'auth');
+  assert.equal(answer.result.proof, authProof(TOKEN, 'runner', first.params.nonce, clientNonce));
+  ws!.close();
+
+  // A proof made without the token, or the runner's own proof played back.
+  for (const proof of [authProof('wrong-token', 'client', 'x', clientNonce), 'nope']) {
+    const { ws: w, first: f } = await rawConnect(url);
+    const closed = new Promise<number>((r) => w!.once('close', (code) => r(code)));
+    w!.send(JSON.stringify({ jsonrpc: '2.0', id: 'auth', method: 'auth.prove', params: { nonce: clientNonce, proof: proof === 'nope' ? authProof(TOKEN, 'runner', f.params.nonce, clientNonce) : proof } }));
+    assert.equal(await closed, 4401);
+  }
+
+  // RunnerClient does all that, and a wrong token is refused.
+  const c = await RunnerClient.connect(url, TOKEN);
+  assert.equal((await c.call('hello', { client: 't', version: '1' })).protocol, 1);
+  c.close();
+  const wrong = new RunnerClient(url, 'wrong-token');
+  await assert.rejects(wrong.opened);
+  assert.equal((await wrong.waitClosed()).code, 4401);
+  await server.close();
+});
+
+test('an old client\'s bearer header still works; a wrong one is turned away at the upgrade', async () => {
+  const { server, url } = await serve();
+  const good = await rawConnect(url, { Authorization: `Bearer ${TOKEN}` });
+  assert.equal(good.first, undefined, 'no challenge for a bearer-authed client');
+  const reply = new Promise<any>((r) => good.ws!.once('message', (d) => r(JSON.parse(d.toString()))));
+  good.ws!.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'hello', params: { client: 't', version: '1' } }));
+  assert.equal((await reply).result.protocol, 1);
+  good.ws!.close();
+  assert.equal((await rawConnect(url, { Authorization: 'Bearer wrong-token' })).status, 401);
+  assert.equal((await rawConnect(url, { Authorization: 'Basic abc' })).status, 401);
+  assert.equal((await rawConnect(url.replace('/rpc', '/other'))).status, 400);
+  await server.close();
+});
+
+// Something else on the runner's port while it's down (another account
+// can bind it then), recording what it's sent. `silent` says nothing,
+// `old` talks like a runner from before the challenge, `challenge` makes
+// one up and answers with a made-up proof.
+async function impostor(mode: 'silent' | 'old' | 'challenge') {
+  const seen: string[] = [];
+  const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+  await new Promise<void>((r) => wss.once('listening', () => r()));
+  wss.on('connection', (ws, req) => {
+    seen.push(JSON.stringify(req.headers));
+    if (mode === 'challenge') ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'auth.challenge', params: { version: 1, nonce: 'b'.repeat(64) } }));
+    if (mode === 'old') ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'runner.notice', params: { level: 'info', message: 'hi' } }));
+    ws.on('message', (d) => {
+      seen.push(d.toString());
+      const id = JSON.parse(d.toString()).id;
+      ws.send(JSON.stringify({ jsonrpc: '2.0', id, result: mode === 'challenge' ? { proof: 'c'.repeat(64) } : {} }));
+    });
+  });
+  const port = (wss.address() as { port: number }).port;
+  const close = () => {
+    for (const ws of wss.clients) ws.terminate();
+    return new Promise<void>((r) => wss.close(() => r()));
+  };
+  return { port, url: `ws://127.0.0.1:${port}/rpc`, seen, close };
+}
+
+test('a listener on the runner\'s port never gets the token from tb or deploy, whatever it pretends to be', async () => {
+  // A path in a variable: rpc-client.mjs has no types.
+  const rpcClient = new URL('../../scripts/rpc-client.mjs', import.meta.url).href;
+  const { connectRpc } = await import(rpcClient);
+  for (const mode of ['silent', 'old', 'challenge'] as const) {
+    const imp = await impostor(mode);
+    const c = new RunnerClient(imp.url, TOKEN, { authTimeoutMs: 300 });
+    await assert.rejects(c.opened, /prove|challenge|isn't the runner/i, mode);
+    await assert.rejects(connectRpc(imp.port, TOKEN, 300), /prove|challenge|isn't the runner/i, mode);
+    for (const for_ of imp.seen) {
+      assert.ok(!for_.includes(TOKEN), `${mode}: the token reached it: ${for_}`);
+      assert.ok(!/"authorization"/i.test(for_), `${mode}: an Authorization header reached it`);
+    }
+    assert.ok(imp.seen.length >= 2, `${mode}: both clients reached it`);
+    (c as any).ws.terminate();
+    await imp.close();
+  }
+});
+
+test('reconnecting after an outage: the impostor that held the port gets nothing, the real runner lets the client in', async () => {
+  const { server, port } = await serve();
+  const url = `ws://127.0.0.1:${port}/rpc`;
+  (await RunnerClient.connect(url, TOKEN)).close();
+  await server.close();
+  // Down; something else takes the port.
+  const seen: string[] = [];
+  const wss = new WebSocketServer({ host: '127.0.0.1', port });
+  await new Promise<void>((r) => wss.once('listening', () => r()));
+  wss.on('connection', (ws, req) => {
+    seen.push(JSON.stringify(req.headers));
+    ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'auth.challenge', params: { version: 1, nonce: 'b'.repeat(64) } }));
+    ws.on('message', (d) => {
+      seen.push(d.toString());
+      ws.send(JSON.stringify({ jsonrpc: '2.0', id: 'auth', result: { proof: 'c'.repeat(64) } }));
+    });
+  });
+  await assert.rejects(RunnerClient.connect(url, TOKEN), /isn't the runner/);
+  assert.ok(seen.length === 2 && seen.every((x) => !x.includes(TOKEN) && !/"authorization"/i.test(x)), seen.join('\n'));
+  // A proof it was given is no good on the real runner, whose nonce is fresh.
+  const replay = JSON.parse(seen[1]!);
+  for (const x of wss.clients) x.terminate();
+  await new Promise<void>((r) => wss.close(() => r()));
+  const back = await serve({ port });
+  const { ws, first } = await rawConnect(url);
+  assert.notEqual(first.params.nonce, 'b'.repeat(64));
+  const closed = new Promise<number>((r) => ws!.once('close', (code) => r(code)));
+  ws!.send(JSON.stringify(replay));
+  assert.equal(await closed, 4401);
+  const c = await RunnerClient.connect(url, TOKEN);
+  assert.equal((await c.call('hello', { client: 't', version: '1' })).protocol, 1);
+  c.close();
+  await back.server.close();
+});
+
+test('before auth: frames over 64 KiB are refused, and only so many sockets may wait', async () => {
+  const { server, url } = await serve({ maxPendingAuth: 3 });
+  // A big frame is closed with 1009 by the frame limit, before the runner
+  // reads (let alone parses) any of it.
+  const big = await rawConnect(url);
+  const closed = new Promise<number>((r) => big.ws!.once('close', (code) => r(code)));
+  big.ws!.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'auth', params: { token: TOKEN, pad: 'x'.repeat(100 * 1024) } }));
+  assert.equal(await closed, 1009);
+  // Even with a valid bearer too much would be refused before auth; with
+  // the challenge, three waiting sockets fill it and the fourth is 503.
+  const waiting = [await rawConnect(url), await rawConnect(url), await rawConnect(url)];
+  assert.ok(waiting.every((w) => w.first?.method === 'auth.challenge'));
+  assert.equal((await rawConnect(url)).status, 503);
+  // A bearer-authed old client isn't waiting, so it still gets in.
+  const old = await rawConnect(url, { Authorization: `Bearer ${TOKEN}` });
+  assert.ok(old.ws);
+  old.ws!.close();
+  // One proving itself frees a slot.
+  const w = waiting[0]!;
+  const n = newNonce();
+  const proved = new Promise<any>((r) => w.ws!.once('message', (d) => r(JSON.parse(d.toString()))));
+  w.ws!.send(JSON.stringify({ jsonrpc: '2.0', id: 'auth', method: 'auth.prove', params: { nonce: n, proof: authProof(TOKEN, 'client', w.first.params.nonce, n) } }));
+  assert.ok((await proved).result.proof);
+  const next = await rawConnect(url);
+  assert.equal(next.first?.method, 'auth.challenge');
+  // So does one refused, at once, even if it never answers the close.
+  assert.equal((await rawConnect(url)).status, 503);
+  (waiting[1]!.ws as any)._socket.removeAllListeners('data');
+  waiting[1]!.ws!.send('not json');
+  await new Promise((r) => setTimeout(r, 50));
+  const after = await rawConnect(url);
+  assert.equal(after.first?.method, 'auth.challenge');
+  for (const x of [...waiting, next, after]) x.ws?.terminate();
+  await server.close();
+});
+
+test('once authenticated, a client can send big frames and gets big transcript pages', async () => {
+  const { server, url } = await serve();
+  const pad = 'y'.repeat(2 * 1024 * 1024);
+  for (const c of [await RunnerClient.connect(url, TOKEN), await RunnerClient.connect(url, TOKEN, { legacyHeader: true })]) {
+    // Over the pre-auth limit, answered rather than closed.
+    await assert.rejects(c.call('nope.method', { pad }), (e: { code: number }) => e.code === -32601);
+    const { thread } = await c.call('threads.create', { text: 'z'.repeat(300 * 1024), accountId: 'claude-3' });
+    const page = await c.call('threads.events', { threadId: thread.id });
+    assert.ok(JSON.stringify(page).length > 300 * 1024, 'a page over the pre-auth limit');
+    assert.equal(c.closeInfo, undefined);
+    c.close();
+  }
+  await server.close();
+});
+
+test('proofs match the Mac app\'s (RunnerAuthTests.swift)', () => {
+  const r = 'a'.repeat(64);
+  const c = '0123456789abcdef'.repeat(4);
+  assert.equal(authProof('test-token-0123456789', 'client', r, c), '785cdd0bc38e9e1390f3652a9e78830d55cbf6f11e686c39d8da357a86c976ed');
+  assert.equal(authProof('test-token-0123456789', 'runner', r, c), 'c7f8ef4ebbf91a047c8b45b185025c3d0aab96a68b0d371bb34130316e3493ad');
 });
 
 test('health endpoint answers without a token', async () => {

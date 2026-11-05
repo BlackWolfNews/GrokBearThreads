@@ -300,7 +300,7 @@ What the runner gives the CLIs it starts is under Tools for agents below.
   runner/                       releases, launch.mjs and state.json (above)
   restart.json                  a restart that's waiting for threads to finish
   restart.done.json             the last one handled, until this release is marked good
-  secrets/runner-token          random bearer token, 0600 (folder 0700)
+  secrets/runner-token          random RPC token, 0600 (folder 0700); clients prove they have it, never send it
   models/usage.ndjson           one line per model call: feature, model, login, tokens (no text)
   inbox/                        images the app imports before sending
   run/children.json             CLI process groups this runner started, and the

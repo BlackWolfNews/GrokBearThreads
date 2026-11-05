@@ -25,6 +25,7 @@ import path from 'node:path';
 import { SAMPLE_THREADS } from '../../../runner/src/samples.ts';
 import { fileURLToPath } from 'node:url';
 import { reviewDraft, reviewReply, sameDraft } from '../../../runner/src/reviews.ts';
+import { authProof, isNonce, newNonce } from '../../../runner/src/rpc-auth.ts';
 
 // What a waiting (untrusted) demo patch gives once it's trusted, by file.
 const waitingPatchGives = new Map();
@@ -420,15 +421,25 @@ function onConnection(ws, request) {
   const client = { ws, subs: new Set(), authed: header === `Bearer ${token}`, as: where === '/bruce/rpc' ? BRUCE : null };
   clients.add(client);
   ws.on('close', () => clients.delete(client));
+  // The real runner's auth challenge (docs/protocol.md, "Auth"), for a
+  // client that didn't send the old bearer header.
+  const challenge = client.authed ? null : newNonce();
+  if (challenge) ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'auth.challenge', params: { version: 1, nonce: challenge } }));
   ws.on('message', (raw) => {
     let message;
     try {
       message = JSON.parse(raw.toString());
     } catch {
+      if (!client.authed) return ws.close(4401, 'unauthorized');
       return reply(client, null, null, { code: -32700, message: 'Parse error' });
     }
     if (!client.authed) {
-      if (message.method === 'auth' && message.params?.token === token) {
+      const p = message.params ?? {};
+      if (message.method === 'auth.prove' && challenge && isNonce(p.nonce) && p.proof === authProof(token, 'client', challenge, p.nonce)) {
+        client.authed = true;
+        return reply(client, message.id, { proof: authProof(token, 'runner', challenge, p.nonce) });
+      }
+      if (message.method === 'auth' && p.token === token) {
         client.authed = true;
         return reply(client, message.id, {});
       }

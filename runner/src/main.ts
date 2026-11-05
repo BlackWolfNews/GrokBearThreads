@@ -658,7 +658,7 @@ async function main(): Promise<void> {
         },
       });
       const { port: drainPort } = await drainServer.listen();
-      writeDrainInfo(cfg.home, { pid: process.pid, port: drainPort, version: RUNNER_VERSION, release: RELEASE.release, since: new Date().toISOString(), threads: runner.keeping() ?? [] });
+      writeDrainInfo(cfg.home, { pid: process.pid, port: drainPort, version: RUNNER_VERSION, release: RELEASE.release, since: new Date().toISOString(), threads: runner.keeping() ?? [], auth: 'challenge' });
       await server.close().catch(() => {});
       lock.release();
       // The agent tools reach the new runner over the port from here.

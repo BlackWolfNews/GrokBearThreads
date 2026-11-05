@@ -209,6 +209,8 @@ before(() => {
   // The launcher app's sources, built by install-runner.sh into the sandbox.
   fs.cpSync(path.join(RUNNER, 'launcher'), path.join(rdir, 'launcher'), { recursive: true });
   fs.copyFileSync(path.join(import.meta.dirname, 'fake-runner.mjs'), path.join(rdir, 'src', 'main.ts'));
+  // rpc-client.mjs and the fake runner both answer the auth challenge with it.
+  fs.copyFileSync(path.join(RUNNER, 'src', 'rpc-auth.ts'), path.join(rdir, 'src', 'rpc-auth.ts'));
   fs.writeFileSync(path.join(rdir, 'bin', 'tb'), '#!/usr/bin/env node\n');
   const pkg = { name: 'fake-runner', version: '9.9.9', private: true, type: 'module', scripts: { typecheck: 'true', test: 'true' } };
   fs.writeFileSync(path.join(rdir, 'package.json'), JSON.stringify(pkg, null, 2) + '\n');

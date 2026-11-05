@@ -89,8 +89,9 @@ the gap is the Mac app, which talks to one runner on this Mac.
   `threads/<threadId>/media/` (images), `threads/<threadId>/blobs/` (tool
   output over 64 KB), `inbox/` (images the app drops before sending),
   logs in `~/Library/Logs/threadbear-runner.log`.
-- Listens on `127.0.0.1:8797`, WebSocket path `/rpc`, bearer token from the
-  secrets file (header on upgrade, or first-message `auth`).
+- Listens on `127.0.0.1:8797`, WebSocket path `/rpc`, authenticated with the
+  token in the secrets file by a challenge both sides answer, so the token
+  itself never goes over the socket (docs/protocol.md, "Auth").
 - launchd LaunchAgent `com.mikerosoft.threadbear.runner`, KeepAlive, with the
   Node path pinned in the plist (`~/.nvm/versions/node/v24.22.1/bin/node`
   today; make it configurable). Its program is `~/Applications/Threadbear

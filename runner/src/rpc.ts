@@ -1,6 +1,7 @@
 // WebSocket JSON-RPC 2.0 server at ws://127.0.0.1:<port>/rpc.
 import http from 'node:http';
 import crypto from 'node:crypto';
+import type { Duplex } from 'node:stream';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Runner, Notification, CliControl } from './runner.ts';
 import type { Logger } from './log.ts';
@@ -8,6 +9,7 @@ import { ARCHIVE_VERDICTS, CLI_POLICIES, EFFORT_LEVELS, ErrorCode, PROVIDERS, Rp
 import type { ArchiveVerdict, ApprovalDecision, AskAnswer, CliPolicy, EffortLevel, ImageRef, PermissionMode, Provider, ShareAccess, ThreadStartedBy, ThreadSummary } from './protocol.ts';
 import { MAX_BYLINE } from './needs.ts';
 import { isMoved, mergeSummaries, type Bucket } from './handover.ts';
+import { AUTH_VERSION, authProof, isNonce, newNonce, proofMatches } from './rpc-auth.ts';
 
 type Conn = {
   id: number;
@@ -16,10 +18,20 @@ type Conn = {
   subs: Set<string>;
   client?: string;
   authTimer?: NodeJS.Timeout;
+  // This connection's auth.challenge nonce (docs/protocol.md, "Auth").
+  challenge?: string;
 };
 
-// A client that hasn't authenticated by then is dropped.
-const AUTH_TIMEOUT_MS = 5000;
+// Until a connection has authenticated (docs/protocol.md, "Auth"), it gets
+// a small frame limit, a short deadline, and only so many of them may wait
+// at once: without these, anyone on the Mac could open sockets and send
+// 64 MiB frames for the runner to buffer and JSON-parse before it even
+// looked at the credentials.
+const AUTH_TIMEOUT_MS = 3000;
+const PREAUTH_MAX_PAYLOAD = 64 * 1024;
+const MAX_PENDING_AUTH = 16;
+// What an authenticated client may send in one frame.
+const MAX_PAYLOAD = 64 * 1024 * 1024;
 // Backpressure for a client that stops reading (a hung app, a debugger):
 // past SKIP_DELTAS_BYTES of unsent data, transient deltas are skipped (the
 // persisted event replaces them anyway); past CLOSE_BYTES the socket is
@@ -108,6 +120,7 @@ export type RpcServerOptions = {
   appHello?: (build: { commit: string; short: string; tree: string }) => void;
   // Tests shorten these.
   authTimeoutMs?: number;
+  maxPendingAuth?: number;
   skipDeltasBytes?: number;
   closeBytes?: number;
   closeGraceMs?: number;
@@ -133,10 +146,19 @@ export class RpcServer {
       res.writeHead(404);
       res.end();
     });
-    this.wss = new WebSocketServer({ server: this.http, path: '/rpc', maxPayload: 64 * 1024 * 1024 });
-    this.wss.on('connection', (ws, req) => this.onConnection(ws, req));
-    // ws re-emits the HTTP server's errors (EADDRINUSE on listen); listen()
-    // reports those, and without a listener here they'd crash the process.
+    // A socket that never finishes its request headers is let go sooner
+    // than Node's minute.
+    this.http.headersTimeout = 10_000;
+    // The upgrade is handled here rather than by ws so a wrong header or
+    // too many connections waiting to authenticate is refused before it
+    // becomes a WebSocket. Every socket starts on the small pre-auth frame
+    // limit; unlock() raises it once the client has authenticated.
+    this.wss = new WebSocketServer({ noServer: true, maxPayload: PREAUTH_MAX_PAYLOAD });
+    this.http.on('upgrade', (req, socket, head) => this.onUpgrade(req, socket, head));
+    // The HTTP server's errors (EADDRINUSE on listen): listen() reports
+    // those, and without a listener here they'd crash the process. ws used
+    // to listen for them when it owned the upgrade.
+    this.http.on('error', (e) => opts.log.warn('rpc server error', { error: String(e) }));
     this.wss.on('error', (e) => opts.log.warn('websocket server error', { error: String(e) }));
     this.unlisten = opts.runner.onNotification((n) => this.broadcast(n));
   }
@@ -203,21 +225,74 @@ export class RpcServer {
     return a.length === b.length && crypto.timingSafeEqual(a, b);
   }
 
-  private onConnection(ws: WebSocket, req: http.IncomingMessage): void {
-    const header = req.headers.authorization ?? '';
-    const m = /^Bearer\s+(.+)$/i.exec(header);
-    const conn: Conn = { id: this.nextId++, ws, authed: Boolean(m && this.tokenOk(m[1].trim())), subs: new Set() };
+  private pendingAuth(): number {
+    let n = 0;
+    for (const c of this.conns) if (!c.authed) n++;
+    return n;
+  }
+
+  private onUpgrade(req: http.IncomingMessage, socket: Duplex, head: Buffer): void {
+    socket.on('error', () => socket.destroy());
+    const refuse = (status: number, text: string) => {
+      if (socket.writable) socket.write(`HTTP/1.1 ${status} ${text}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
+      socket.destroy();
+    };
+    if ((req.url ?? '').split('?')[0] !== '/rpc') return refuse(400, 'Bad Request');
+    // An old client's bearer header (docs/protocol.md, "Before the
+    // challenge"): right, it's in; wrong, it's refused here. No header means
+    // the challenge.
+    const header = req.headers.authorization;
+    let authed = false;
+    if (header !== undefined) {
+      const m = /^Bearer\s+(.+)$/i.exec(header);
+      if (!m || !this.tokenOk(m[1].trim())) return refuse(401, 'Unauthorized');
+      authed = true;
+    } else if (this.pendingAuth() >= (this.opts.maxPendingAuth ?? MAX_PENDING_AUTH)) {
+      return refuse(503, 'Service Unavailable');
+    }
+    this.wss.handleUpgrade(req, socket, head, (ws) => this.onConnection(ws, authed));
+  }
+
+  // Raises an authenticated socket's frame limit. ws has no public way to
+  // change maxPayload on a live socket, so this sets its receiver's
+  // (ws 8.x; rpc.test.ts fails if a ws update moves it).
+  private unlock(conn: Conn): void {
+    conn.authed = true;
+    clearTimeout(conn.authTimer);
+    conn.challenge = undefined;
+    const receiver = (conn.ws as unknown as { _receiver?: { _maxPayload?: unknown } })._receiver;
+    if (receiver && typeof receiver._maxPayload === 'number') receiver._maxPayload = MAX_PAYLOAD;
+    else this.opts.log.warn('could not raise the frame limit for an authenticated client', { conn: conn.id });
+  }
+
+  // Closes an unauthenticated connection with 4401. It stops counting as
+  // waiting at once, and is cut off if it doesn't answer the close soon:
+  // ws would otherwise keep a client that ignores it for 30 s, and 16 of
+  // those would keep the app out.
+  private refuseConn(conn: Conn): void {
+    clearTimeout(conn.authTimer);
+    this.conns.delete(conn);
+    conn.ws.close(4401, 'unauthorized');
+    setTimeout(() => conn.ws.terminate(), 1000).unref();
+  }
+
+  private onConnection(ws: WebSocket, headerAuthed: boolean): void {
+    const conn: Conn = { id: this.nextId++, ws, authed: false, subs: new Set() };
     this.conns.add(conn);
-    if (!conn.authed) {
+    if (headerAuthed) {
+      this.unlock(conn);
+    } else {
       conn.authTimer = setTimeout(() => {
-        if (!conn.authed) ws.close(4401, 'unauthorized');
+        if (!conn.authed) this.refuseConn(conn);
       }, this.opts.authTimeoutMs ?? AUTH_TIMEOUT_MS);
       conn.authTimer.unref();
+      conn.challenge = newNonce();
+      this.send(conn, { jsonrpc: '2.0', method: 'auth.challenge', params: { version: AUTH_VERSION, nonce: conn.challenge } });
     }
     ws.on('message', (data, isBinary) => {
       if (isBinary) {
         // The protocol is text only; before auth, anything else is refused.
-        if (!conn.authed) ws.close(4401, 'unauthorized');
+        if (!conn.authed) this.refuseConn(conn);
         return;
       }
       this.onMessage(conn, data.toString());
@@ -256,26 +331,43 @@ export class RpcServer {
     }
   }
 
+  // The one message a connection may send before it has authenticated
+  // (at most PREAUTH_MAX_PAYLOAD, so parsing it is cheap): auth.prove
+  // answering this connection's challenge, or an old client's auth with
+  // the token itself. Anything else closes it.
+  private onAuthMessage(conn: Conn, raw: string): void {
+    let msg: { id?: string | number | null; method?: unknown; params?: unknown };
+    try {
+      msg = JSON.parse(raw);
+    } catch {
+      return this.refuseConn(conn);
+    }
+    const id = msg && typeof msg === 'object' ? (msg.id ?? null) : null;
+    const p = (msg && typeof msg === 'object' && msg.params && typeof msg.params === 'object' ? msg.params : {}) as Record<string, unknown>;
+    if (msg?.method === 'auth.prove' && conn.challenge && isNonce(p.nonce) && p.nonce !== conn.challenge
+      && proofMatches(authProof(this.opts.token, 'client', conn.challenge, p.nonce), p.proof)) {
+      const proof = authProof(this.opts.token, 'runner', conn.challenge, p.nonce);
+      this.unlock(conn);
+      this.send(conn, { jsonrpc: '2.0', id, result: { proof } });
+      return;
+    }
+    if (msg?.method === 'auth' && this.tokenOk(p.token)) {
+      this.unlock(conn);
+      if (id !== null) this.send(conn, { jsonrpc: '2.0', id, result: {} });
+      return;
+    }
+    this.refuseConn(conn);
+  }
+
   private onMessage(conn: Conn, raw: string): void {
+    if (!conn.authed) return this.onAuthMessage(conn, raw);
     let msg: { jsonrpc?: string; id?: string | number | null; method?: unknown; params?: unknown };
     try {
       msg = JSON.parse(raw);
     } catch {
-      if (!conn.authed) return conn.ws.close(4401, 'unauthorized');
       return this.send(conn, { jsonrpc: '2.0', id: null, error: { code: ErrorCode.parseError, message: 'Parse error' } });
     }
     const id = msg?.id ?? null;
-    if (!conn.authed) {
-      // Clients that can't set headers authenticate with their first message.
-      if (msg?.method === 'auth' && this.tokenOk((msg.params as { token?: unknown } | undefined)?.token)) {
-        conn.authed = true;
-        clearTimeout(conn.authTimer);
-        if (id !== null) this.send(conn, { jsonrpc: '2.0', id, result: {} });
-        return;
-      }
-      conn.ws.close(4401, 'unauthorized');
-      return;
-    }
     if (!msg || typeof msg !== 'object' || Array.isArray(msg) || typeof msg.method !== 'string') {
       return this.send(conn, { jsonrpc: '2.0', id, error: { code: ErrorCode.invalidRequest, message: 'Invalid request' } });
     }

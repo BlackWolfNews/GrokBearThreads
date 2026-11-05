@@ -26,7 +26,10 @@ import type { CommandHost } from './sync.ts';
 import type { DrainProjectOp, MembershipChange, Projects } from './projects.ts';
 import { processInfo } from './proc.ts';
 
-export type DrainInfo = { pid: number; port: number; version: string; release?: string; since: string; threads: string[] };
+// `auth: 'challenge'`: this runner answers the RPC's auth challenge
+// (docs/protocol.md, "Auth"). A drain file without it is from an older
+// runner, which only knows the bearer header.
+export type DrainInfo = { pid: number; port: number; version: string; release?: string; since: string; threads: string[]; auth?: 'challenge' };
 export type Bucket = 'inbox' | 'snoozed' | 'archived';
 export const ALL_BUCKETS: Bucket[] = ['inbox', 'snoozed', 'archived'];
 
@@ -125,7 +128,7 @@ export type PeersDeps = {
   // Stops the process groups a dead draining runner left.
   sweep: (pid: number) => Promise<void>;
   // Tests replace these.
-  connect?: (port: number, token: string) => Promise<PeerClient>;
+  connect?: (port: number, token: string, legacyHeader: boolean) => Promise<PeerClient>;
   alive?: (pid: number) => boolean;
   now?: () => number;
   // How long a draining runner that has closed its connection gets to
@@ -168,10 +171,15 @@ export class Peers {
   }
 
   private async connect(info: DrainInfo): Promise<Peer | undefined> {
-    const connect = this.deps.connect ?? ((port: number, token: string) => RunnerClient.connect(`ws://127.0.0.1:${port}/rpc`, token));
+    const connect = this.deps.connect ?? ((port: number, token: string, legacyHeader: boolean) => RunnerClient.connect(`ws://127.0.0.1:${port}/rpc`, token, { legacyHeader }));
     let client: PeerClient;
     try {
-      client = await connect(info.port, this.deps.token);
+      // The one place a new client may still send the token (docs/
+      // protocol.md, "Before the challenge"): a draining runner from before
+      // the challenge can't answer one, and it's the drain file, in this
+      // runner's own data dir, that says so, never the server. Remove with
+      // the old auth paths.
+      client = await connect(info.port, this.deps.token, info.auth !== 'challenge');
     } catch (e) {
       this.deps.log.error('could not reach a draining runner', { pid: info.pid, port: info.port, error: String(e) });
       return undefined;

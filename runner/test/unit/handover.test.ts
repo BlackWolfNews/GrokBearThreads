@@ -530,3 +530,29 @@ test('a handed-over thread from before `asked` learns it from its log', () => {
   const b = primary(h, [t.id]);
   assert.equal(b.runner.adopt(t.id)?.asked, 'busy one');
 });
+
+test('Peers: the bearer header goes only to a draining runner whose own drain file says it predates the challenge', async () => {
+  // docs/protocol.md, "Before the challenge": the first handover onto a
+  // release with the challenge is from one without it, which can't answer
+  // one. The drain file, in this runner's own data dir, is what says so;
+  // one from a challenge runner gets the challenge.
+  const h = makeHarness();
+  const { writeDrainInfo, Peers } = await import('../../src/handover.ts');
+  writeDrainInfo(h.home, { pid: 454545, port: 1, version: 'old', since: new Date().toISOString(), threads: ['t-old'] });
+  writeDrainInfo(h.home, { pid: 464646, port: 2, version: 'new', since: new Date().toISOString(), threads: ['t-new'], auth: 'challenge' });
+  const asked: [number, boolean][] = [];
+  const client = (threads: string[]) => ({
+    call: async (method: string) => (method === 'drain.hello' ? { threads } : method === 'threads.list' ? { threads: threads.map((id) => ({ id, title: id, lastActivityAt: '' })) } : {}),
+    onNotification: () => () => {},
+    waitClosed: () => new Promise<never>(() => {}),
+    close: () => {},
+  });
+  const peers = new Peers({
+    home: h.home, token: 't', log: nullLogger, sweep: async () => {}, alive: () => true,
+    runner: { adopt: () => undefined, publish: () => {}, waitedOnDeleted: () => {} },
+    connect: async (port, _token, legacy) => (asked.push([port, legacy]), client(port === 1 ? ['t-old'] : ['t-new']) as any),
+  });
+  await peers.connectAll();
+  assert.deepEqual(asked, [[1, true], [2, false]]);
+  peers.close();
+});

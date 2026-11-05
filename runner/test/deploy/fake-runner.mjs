@@ -24,6 +24,9 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
+// Copied beside this file (as src/main.ts) by deploy.test.ts, so releases
+// have it too: the real runner's auth challenge (docs/protocol.md, "Auth").
+import { authProof, isNonce, newNonce } from './rpc-auth.ts';
 
 const here = import.meta.dirname;
 const mode = JSON.parse(fs.readFileSync(path.join(here, 'mode.json'), 'utf8'));
@@ -174,6 +177,8 @@ server.on('upgrade', (req, socket) => {
   socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
   let buf = Buffer.alloc(0);
   let authed = false;
+  const challenge = newNonce();
+  socket.write(frame(JSON.stringify({ jsonrpc: '2.0', method: 'auth.challenge', params: { version: 1, nonce: challenge } })));
   socket.on('error', () => {});
   sockets.add(socket);
   socket.on('close', () => sockets.delete(socket));
@@ -207,7 +212,11 @@ server.on('upgrade', (req, socket) => {
       if (opcode !== 0x1) continue;
       const msg = JSON.parse(payload.toString('utf8'));
       if (!authed) {
-        if (msg.method === 'auth' && msg.params?.token === token) {
+        const p = msg.params ?? {};
+        if (msg.method === 'auth.prove' && isNonce(p.nonce) && p.proof === authProof(token, 'client', challenge, p.nonce)) {
+          authed = true;
+          socket.write(frame(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { proof: authProof(token, 'runner', challenge, p.nonce) } })));
+        } else if (msg.method === 'auth' && p.token === token) {
           authed = true;
           socket.write(frame(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: {} })));
         } else socket.end(Buffer.from([0x88, 0]));

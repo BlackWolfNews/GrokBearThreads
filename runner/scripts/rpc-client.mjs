@@ -6,6 +6,8 @@
 // checkout's node_modules.
 import crypto from 'node:crypto';
 import net from 'node:net';
+// Only node:crypto, so this still needs no node_modules.
+import { answerChallenge } from '../src/rpc-auth.ts';
 
 const GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 
@@ -16,13 +18,24 @@ export class RpcError extends Error {
   }
 }
 
-// Connects to ws://127.0.0.1:<port>/rpc and authenticates with the first
-// message, as the protocol allows. A refused connection rejects with
-// `down: true`: nothing is listening, as while the runner restarts.
+// Connects to ws://127.0.0.1:<port>/rpc and answers the runner's auth
+// challenge (docs/protocol.md, "Auth"): the token never goes out, and the
+// runner has to prove it has it too. A refused connection rejects with
+// `down: true`: nothing is listening, as while the runner restarts. One
+// that sends no challenge (a runner from before 5 Nov 2026, or not the
+// runner) rejects with `notProved: true`.
 export async function connectRpc(port, token, timeoutMs = 3000) {
   const conn = new Connection(port, timeoutMs);
-  await conn.opened;
-  await conn.call('auth', { token });
+  try {
+    await conn.opened;
+    const challenge = await conn.first;
+    const { request, runnerProved } = answerChallenge(token, challenge);
+    const result = await conn.call('auth.prove', request.params);
+    if (!runnerProved(result)) throw Object.assign(new Error("the runner's proof was wrong, so it isn't the runner"), { notProved: true });
+  } catch (e) {
+    conn.close();
+    throw e;
+  }
   return conn;
 }
 
@@ -41,6 +54,17 @@ class Connection {
       this.openOk = resolve;
       this.openFail = reject;
     });
+    // The first message the runner sends: its auth challenge.
+    this.first = new Promise((resolve, reject) => {
+      this.firstOk = resolve;
+      this.firstFail = reject;
+    });
+    this.first.catch(() => {});
+    const firstTimer = setTimeout(() => this.firstFail(Object.assign(new Error("the runner didn't send an auth challenge"), { notProved: true })), timeoutMs);
+    this.first.then(
+      () => clearTimeout(firstTimer),
+      () => clearTimeout(firstTimer),
+    );
     const timer = setTimeout(() => this.destroy(new Error('timed out connecting')), timeoutMs);
     this.opened.then(
       () => clearTimeout(timer),
@@ -63,6 +87,7 @@ class Connection {
     this.closed = true;
     this.socket.destroy();
     this.openFail(err);
+    this.firstFail(err);
     for (const p of this.pending.values()) p.reject(err);
     this.pending.clear();
   }
@@ -117,8 +142,13 @@ class Connection {
     try {
       msg = JSON.parse(text);
     } catch {
-      return;
+      msg = undefined;
     }
+    if (!this.gotFirst) {
+      this.gotFirst = true;
+      return this.firstOk(msg);
+    }
+    if (msg === undefined) return;
     const p = this.pending.get(msg.id);
     if (!p) return; // notifications
     this.pending.delete(msg.id);

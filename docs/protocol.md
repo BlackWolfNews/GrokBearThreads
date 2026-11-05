@@ -7,12 +7,62 @@ upgraded first. Times are ISO 8601 strings in UTC. Ids are strings.
 
 ## Auth
 
-Send `Authorization: Bearer <token>` on the upgrade request. The token is the
-contents of `~/Library/Application Support/Threadbear/secrets/runner-token`.
-If a client can't set headers, its first message may be
-`{"jsonrpc":"2.0","id":1,"method":"auth","params":{"token":"..."}}`.
-Anything else before auth (including a binary frame, or nothing for 5
-seconds) closes the socket with code 4401.
+The token is the contents of
+`~/Library/Application Support/Threadbear/secrets/runner-token` (another
+Mac's: the copy in `secrets/runners/<id>.token`, see Other runners). It
+never travels: the client proves it has it, and the runner proves the same
+back, so the client knows it reached the real runner before it trusts
+anything it's told. Whoever holds the port while the runner is down (another
+account on the Mac can bind 127.0.0.1:8797 then) learns nothing it can use.
+
+1. The client connects with no `Authorization` header. The runner's first
+   message is
+   `{"jsonrpc":"2.0","method":"auth.challenge","params":{"version":1,"nonce":"<64 hex>"}}`,
+   32 fresh random bytes for this connection.
+2. The client picks its own 32 random bytes and sends, as its first message,
+   `{"jsonrpc":"2.0","id":1,"method":"auth.prove","params":{"nonce":"<client's 64 hex>","proof":"<64 hex>"}}`,
+   where `proof` is HMAC-SHA256, keyed with the token's UTF-8 bytes, of
+   `"threadbear-rpc-auth-v1 client\n" + runnerNonce + "\n" + clientNonce`
+   (lowercase hex throughout).
+3. The runner answers `{"result":{"proof":"<64 hex>"}}`: the same HMAC of
+   `"threadbear-rpc-auth-v1 runner\n" + runnerNonce + "\n" + clientNonce`.
+   The client checks it (constant time) before it sends or reads anything
+   else, and closes the socket when it's wrong or missing.
+
+The two strings differ so neither side's proof can be played back as the
+other's, and each side's fresh nonce means an old proof is no good on a new
+connection. A client never sends the token or a bearer header, not even to a
+server that doesn't send a challenge: it closes instead and says the runner
+didn't prove itself (an impostor could just as well pretend to be an old
+runner). What it can't stop is something that already holds the port
+passing the challenge on to a real runner on another port (a draining one,
+see Handovers): that gets one connection for as long as the client keeps it,
+but never the token.
+
+**Before the challenge (old clients).** A runner still takes the two ways
+clients used to authenticate, so an app or `tb` older than the challenge
+keeps working while it updates: `Authorization: Bearer <token>` on the
+upgrade request (no challenge is then sent), or a first message
+`{"jsonrpc":"2.0","id":1,"method":"auth","params":{"token":"..."}}`. Both
+send the token itself, which is what the challenge is for; accepting them
+leaks nothing by itself. They can go once nothing older than 5 Nov 2026
+connects: Mike's Mac app restarted onto a build with the challenge, and
+every release a runner might still hand over from (bruce's and the cloud
+runner's included) newer than that. One exception in this release relies on
+them: a new runner taking over from a draining runner whose `drain-<pid>.json`
+has no `"auth": "challenge"` (one that predates it) connects to it with the
+header, because that runner can't answer a challenge and the file, in the
+runner's own data dir, says so; no server can talk a client into it.
+
+**Limits before auth.** Until a connection has authenticated, a frame is at
+most 64 KiB (more closes it with 1009), there are 3 seconds to finish, and
+anything but `auth.prove` or `auth` (a binary frame, bad JSON, a wrong
+proof) closes it with 4401. At most 16 connections may be waiting to
+authenticate at once; the next upgrade is turned away with HTTP 503. An
+upgrade with an `Authorization` header that's wrong is turned away with HTTP
+401 before it becomes a WebSocket. Once authenticated, a frame can be up to
+64 MiB (what the runner accepts; what it sends, like a big
+`threads.events` page, has no such limit).
 
 ## Types
 
@@ -1056,7 +1106,8 @@ restart wait for busy threads. It hands over instead:
   resume by session id on the new runner), stops its schedules, updates
   and CLI installs, and listens on a port of its own on 127.0.0.1, written
   to `run/drain-<pid>.json` as `{ pid, port, version, release?, since,
-  threads: string[] }`. Same token.
+  threads: string[], auth: "challenge" }`. Same token, and the same
+  challenge (see Auth; `auth` is absent from a runner older than it).
 - The new runner (the *primary*) reads those files at startup, connects to
   each, and doesn't load the kept threads itself. Clients only ever talk to
   the primary: a request about a kept thread (`threads.send`,
@@ -3334,7 +3385,9 @@ type RemoteThread = { runnerId: string, threadId: string, title, cwd,
   and the client then browses it with `files.list`. A sidebar row's actions (archive, hibernate) don't need it open:
   they connect the same way, and that connection closes a minute later
   unless one of that runner's threads is on screen.
-- **The token goes to one host only.** `rpcUrl` comes from the backend,
+- **The token goes to one host only.** The client proves it has the token
+  (Auth) rather than sending it, but it still only dials and proves to the
+  host it was told to by hand. `rpcUrl` comes from the backend,
   and the owner key can rewrite any runner's (before runner keys, every
   runner's key could; see Runner keys), so the client
   sends the token only to the host (not the port) in a file beside it

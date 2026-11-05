@@ -51,7 +51,8 @@ File references are where to look.
   by your first Mac's runner while one is open, and nothing connects to
   that Mac), and `runners/<id>.host` beside it, which you copy in too (`tb pair`
   on that Mac prints both): the only host the app sends that token to.
-  The app only reads these; with no `.host` it sends the token nowhere;
+  The app only reads these, and proves it has the token rather than
+  sending it (docs/protocol.md, "Auth"); with no `.host` it dials nowhere;
   `~/Library/Caches/Threadbear/update`;
   `~/Library/Caches/Threadbear/remote` (copies of pictures and files from
   threads on your other Macs, at most 512 MB, unused ones go after 30 days);
