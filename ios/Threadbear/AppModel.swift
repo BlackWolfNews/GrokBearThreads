@@ -116,6 +116,19 @@ final class AppModel {
         guard !isFake, let pairing else { return demoRunnerKeys }
         return KeychainRunnerKeyStore(scope: pairing.deploymentURL.host() ?? pairing.deploymentURL.absoluteString)
     }
+    /// Threads whose runner is already pinned this session, so a list
+    /// arriving doesn't go to the keychain for every row each time.
+    private var pinnedThreads = Set<String>()
+
+    /// Pins each listed thread's runner the first time it's seen
+    /// (RunnerKeyPins.noteThreads), so a secret card on a thread the
+    /// backend later moves to another runner id is refused.
+    private func pinRunners(_ list: [PhoneThread]) {
+        let fresh = list.filter { !pinnedThreads.contains($0.threadId) }
+        guard !fresh.isEmpty else { return }
+        RunnerKeyPins.noteThreads(fresh.map { ($0.threadId, $0.runnerId) }, in: runnerKeys)
+        pinnedThreads.formUnion(fresh.map(\.threadId))
+    }
 
     /// The models a new thread can start on; empty hides the pickers, as an
     /// older backend would turn an effort down.
@@ -318,6 +331,7 @@ final class AppModel {
         }
         for view in wanted where listTasks[view] == nil {
             listTasks[view] = follow(backend.threads(view)) { model, list in
+                model.pinRunners(list)
                 switch view {
                 case .inbox:
                     model.inbox = list
@@ -428,6 +442,7 @@ final class AppModel {
         // Pairing again trusts each runner's key afresh, which is how a Mac
         // whose secret key was deleted on purpose gets answered again.
         KeychainRunnerKeyStore.clearAll()
+        pinnedThreads = []
         stop()
         backend = nil
         pairing = nil
@@ -468,6 +483,8 @@ final class AppModel {
 
     private func connect(_ backend: any Backend, pairing: Pairing?, registerPush: Bool = true) {
         stop()
+        // Another deployment (or the demo) has its own pins.
+        pinnedThreads = []
         self.backend = backend
         self.pairing = pairing
         isFake = backend is FakeBackend

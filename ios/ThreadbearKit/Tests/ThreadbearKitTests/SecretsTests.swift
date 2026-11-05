@@ -56,14 +56,53 @@ import Testing
     @Test func theFirstKeyIsKeptAndAChangeIsRefused() {
         let store = MemoryRunnerKeyStore()
         let other = Data(repeating: 9, count: 32).base64EncodedString()
-        #expect(RunnerKeyPins.check(Self.recipientPublic, runnerId: "mac", in: store) == .trusted)
+        #expect(RunnerKeyPins.check(Self.recipientPublic, runnerId: "mac", threadId: "t1", in: store) == .trusted)
         #expect(store.key(for: "mac") == Self.recipientPublic)
-        #expect(RunnerKeyPins.check(Self.recipientPublic, runnerId: "mac", in: store) == .trusted)
-        #expect(RunnerKeyPins.check(other, runnerId: "mac", in: store) == .changed)
+        #expect(RunnerKeyPins.check(Self.recipientPublic, runnerId: "mac", threadId: "t1", in: store) == .trusted)
+        #expect(RunnerKeyPins.check(other, runnerId: "mac", threadId: "t1", in: store) == .changed)
         // The refused key never replaces the kept one.
         #expect(store.key(for: "mac") == Self.recipientPublic)
         // Each runner has its own.
-        #expect(RunnerKeyPins.check(other, runnerId: "bruce", in: store) == .trusted)
+        #expect(RunnerKeyPins.check(other, runnerId: "bruce", threadId: "t2", in: store) == .trusted)
+    }
+
+    /// The backend moving a thread the phone knows onto a fresh runner id
+    /// with its own key: refused, and nothing about the new runner is kept.
+    @Test func aThreadMovedToAnotherRunnerIsRefused() {
+        let store = MemoryRunnerKeyStore()
+        let evil = Data(repeating: 7, count: 32).base64EncodedString()
+        #expect(RunnerKeyPins.check(Self.recipientPublic, runnerId: "mac", threadId: "t1", in: store) == .trusted)
+        #expect(RunnerKeyPins.check(evil, runnerId: "fresh", threadId: "t1", in: store) == .moved)
+        #expect(store.key(for: "fresh") == nil)
+        #expect(store.runner(forThread: "t1") == "mac")
+        // Back on its own runner, it's fine again.
+        #expect(RunnerKeyPins.check(Self.recipientPublic, runnerId: "mac", threadId: "t1", in: store) == .trusted)
+    }
+
+    /// A thread seen in a list is pinned then, so a move is caught even on
+    /// its first secret card.
+    @Test func threadsSeenInAListArePinned() {
+        let store = MemoryRunnerKeyStore()
+        RunnerKeyPins.noteThreads([("t1", "mac"), ("t2", "bruce"), ("t3", "")], in: store)
+        #expect(store.runner(forThread: "t1") == "mac")
+        #expect(store.runner(forThread: "t3") == nil)
+        let evil = Data(repeating: 7, count: 32).base64EncodedString()
+        #expect(RunnerKeyPins.check(evil, runnerId: "fresh", threadId: "t1", in: store) == .moved)
+        // A list that later says otherwise doesn't move the pin.
+        RunnerKeyPins.noteThreads([("t1", "fresh")], in: store)
+        #expect(store.runner(forThread: "t1") == "mac")
+        #expect(RunnerKeyPins.check(Self.recipientPublic, runnerId: "bruce", threadId: "t2", in: store) == .trusted)
+    }
+
+    /// Normal use needs no prompts: new threads on known Macs, a new Mac,
+    /// a fresh install with nothing kept.
+    @Test func newThreadsAndNewMacsAreTrustedOnFirstUse() {
+        let store = MemoryRunnerKeyStore()
+        let bruceKey = Data(repeating: 5, count: 32).base64EncodedString()
+        #expect(RunnerKeyPins.check(Self.recipientPublic, runnerId: "mac", threadId: "t1", in: store) == .trusted)
+        #expect(RunnerKeyPins.check(Self.recipientPublic, runnerId: "mac", threadId: "t2", in: store) == .trusted)
+        #expect(RunnerKeyPins.check(bruceKey, runnerId: "bruce", threadId: "t3", in: store) == .trusted)
+        #expect(store.runner(forThread: "t3") == "bruce")
     }
 
     @Test func secretCardsDecode() throws {

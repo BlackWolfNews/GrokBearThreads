@@ -2052,7 +2052,22 @@ own secret questions were declined (Codex approvals). Now:
   runner (keychain, by `runnerId`). A different key later is refused with
   "This Mac's key changed. Answer it on the Mac." rather than sealing to a
   key the backend could have swapped. Deleting `secret-box.key` on purpose
-  means re-pairing the phone.
+  means re-pairing the phone. A thread's `runnerId` comes from the mirror
+  too, so the phone also keeps the runner it first saw each thread on
+  (keychain, by `threadId`), pinned when the thread first shows in a list
+  or on its first secret card. A card on a thread whose `runnerId` differs
+  from its pin is refused ("This thread's Mac changed, so the phone won't
+  send it secrets. Answer it on the Mac.") and nothing about the new runner
+  is kept. Otherwise a backend could move a known thread onto a fresh
+  runner id carrying its own key, and the phone would trust that id on
+  first use. The rule: a never-seen runner id is pinned on first use only
+  if it isn't replacing a different runner for a thread already pinned.
+  Runners never take over each other's threads (a handover keeps the
+  runner id), so normal use (new threads on any Mac, a new Mac, a fresh
+  install) never trips it. Still open: a brand-new thread on a brand-new
+  runner id, which looks just like a new Mac, and a thread moved before
+  the phone first saw it. Changing a runner's `sync.runnerId` on purpose
+  also means re-pairing, which clears both pins.
 - **Keeping.** Files and helpers go 24 hours after they're written: the
   runner sweeps the folder when it starts and hourly. Nothing else keeps
   the value: the runner holds it in memory only long enough to write it.

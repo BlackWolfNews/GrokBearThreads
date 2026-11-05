@@ -19,8 +19,9 @@ struct SecretCard: View {
     @State private var value = ""
     @State private var busy = false
     @State private var problem: String?
-    /// Checked against the key kept for this runner once the card shows
-    /// (which keeps it, the first time), and again on Save.
+    /// Checked against the key kept for this runner, and the runner kept
+    /// for this thread, once the card shows (which keeps them, the first
+    /// time), and again on Save.
     @State private var trust: RunnerKeyPins.Trust?
 
     var body: some View {
@@ -36,6 +37,12 @@ struct SecretCard: View {
                     .font(.footnote).foregroundStyle(.secondary)
             } else if trust == .changed {
                 Label("This Mac's key changed. Answer it on the Mac.", systemImage: "exclamationmark.shield")
+                    .font(.footnote).foregroundStyle(.orange)
+            } else if trust == .moved {
+                // Threads never change Macs, so this is the backend saying
+                // otherwise: nothing is sealed to the new one.
+                Label("This thread's Mac changed, so the phone won't send it secrets. Answer it on the Mac.",
+                      systemImage: "exclamationmark.shield")
                     .font(.footnote).foregroundStyle(.orange)
             } else {
                 SecureField(placeholder ?? "Paste the secret", text: $value)
@@ -72,7 +79,7 @@ struct SecretCard: View {
         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .task(id: "\(runnerId) \(key)") {
             guard model.canAnswerSecrets, SecretSeal.isUsableKey(key) else { return }
-            trust = RunnerKeyPins.check(key, runnerId: runnerId, in: model.runnerKeys)
+            trust = RunnerKeyPins.check(key, runnerId: runnerId, threadId: threadId, in: model.runnerKeys)
         }
     }
 
@@ -82,10 +89,11 @@ struct SecretCard: View {
         let typed = value
         value = ""
         problem = nil
-        // Checked again here, so a key swapped in since the card showed is
-        // never sealed to.
-        guard RunnerKeyPins.check(key, runnerId: runnerId, in: model.runnerKeys) == .trusted else {
-            trust = .changed
+        // Checked again here, so a key or runner swapped in since the card
+        // showed is never sealed to.
+        let now = RunnerKeyPins.check(key, runnerId: runnerId, threadId: threadId, in: model.runnerKeys)
+        guard now == .trusted else {
+            trust = now
             return
         }
         let sealed: SealedSecret
