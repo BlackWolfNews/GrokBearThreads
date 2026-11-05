@@ -20,7 +20,16 @@ Built 28 Oct 2026 (thread 66935d23).
   replies and places, with `phone:search` for archived threads past the
   newest 100; the filter beside it picks needs you, unread, shared, or one
   project or folder; and the arrow keys walk the rows. Folds, the sort and
-  the width are kept in this browser's localStorage. And a
+  the width are kept in this browser's localStorage. Down the left edge
+  is a rail, as on the Mac (`web/src/rail.tsx`): Threads, Scheduled and
+  Projects, a tile per runner with a dot for online, then Usage and a gear
+  (appearance, sign out). Each opens a list in the sidebar and a page beside
+  it (`web/src/pages.tsx`, at `/scheduled`, `/projects`, `/runners`, `/usage`,
+  each with `/<id>`), which subscribe only while they're showing. They read,
+  they don't change: a schedule or project is edited on the Mac or through
+  an agent. On a phone the rail is a tab bar, with Runners and Usage under
+  More. The pencil beside the search starts a thread (`/new`, `phone:create`)
+  on the runner's default folder and login. And a
   thread whose finished turns fold to "Worked for 4m 12s" and the reply
   (`web/src/turns.ts`, a port of the iPhone's `Turns.fold`), with the
   pending approval, the end_turn card of asks or the done card's
@@ -135,5 +144,4 @@ the static-hosting CLI sets: a build without it can't reach Convex.
 - Signing in from a browser without the Mac to hand (e.g. approve a new
   browser from the iPhone app). A QR code for another device's browser is
   still `npm run web:sign-in -- --qr`.
-- Starting a new thread from the web (`phone:create` is there to use).
 - Sharing from the iPhone app or an agent's tools.

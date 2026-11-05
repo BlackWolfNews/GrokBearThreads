@@ -1,16 +1,22 @@
-// Three pages, so no router: "/" is the list, "/t/<threadId>" a thread, and
-// "/s/<slug>" a thread someone shared (no sign-in; share.tsx). Static
+// A few pages, so no router: "/" is the list, "/t/<threadId>" a thread,
+// "/s/<slug>" a thread someone shared (no sign-in; share.tsx), "/new" a new
+// thread, and the rail's views with what's open in them. Static
 // hosting sends every unknown path to index.html, so a link works when
 // opened cold.
 import { useSyncExternalStore } from 'react';
 
-export type Route = { page: 'list' } | { page: 'thread'; threadId: string } | { page: 'share'; slug: string };
+export type RailView = 'scheduled' | 'projects' | 'runners' | 'usage';
+export type Route = { page: 'list' } | { page: 'new' } | { page: 'thread'; threadId: string } | { page: 'share'; slug: string } | { page: RailView; id?: string };
 
 function parse(): Route {
   const s = location.pathname.match(/^\/s\/([^/]+)\/?$/);
   if (s) return { page: 'share', slug: decodeURIComponent(s[1]) };
   const m = location.pathname.match(/^\/t\/([^/]+)\/?$/);
-  return m ? { page: 'thread', threadId: decodeURIComponent(m[1]) } : { page: 'list' };
+  if (m) return { page: 'thread', threadId: decodeURIComponent(m[1]) };
+  if (/^\/new\/?$/.test(location.pathname)) return { page: 'new' };
+  const v = location.pathname.match(/^\/(scheduled|projects|runners|usage)(?:\/([^/]+))?\/?$/);
+  if (v) return { page: v[1] as RailView, ...(v[2] ? { id: decodeURIComponent(v[2]) } : {}) };
+  return { page: 'list' };
 }
 
 let current = parse();
@@ -40,4 +46,8 @@ export function useRoute(): Route {
 
 export function threadPath(threadId: string): string {
   return `/t/${encodeURIComponent(threadId)}`;
+}
+
+export function viewPath(view: RailView, id?: string): string {
+  return id ? `/${view}/${encodeURIComponent(id)}` : `/${view}`;
 }

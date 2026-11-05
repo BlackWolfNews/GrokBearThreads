@@ -221,8 +221,8 @@ export function readOrder(saved: string | null): InboxOrder {
 export const SIDEBAR_DEFAULT = 300;
 export const SIDEBAR_MIN = 220;
 const SIDEBAR_MAX = 600;
-// However wide the sidebar goes, the thread keeps this much.
-const THREAD_MIN = 420;
+// However wide the sidebar goes, the thread keeps 420, beside the 44 of the rail.
+const THREAD_MIN = 464;
 
 export function clampWidth(width: number, windowWidth: number): number {
   const max = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, windowWidth - THREAD_MIN));

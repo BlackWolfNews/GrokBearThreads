@@ -137,3 +137,51 @@ export const Photo = () => (
     <circle cx="5.5" cy="5.8" r=".8" />
   </svg>
 );
+export const Bubbles = () => (
+  <svg {...base}>
+    <path d="M2 3.5h9v6H5.5L3 11.5v-2H2zM12.5 6.5H14V12h-1v1.8L10.8 12H7" />
+  </svg>
+);
+export const Clock = () => (
+  <svg {...base}>
+    <circle cx="8" cy="8" r="6" />
+    <path d="M8 4.5V8l2.5 1.5" />
+  </svg>
+);
+export const Stack = () => (
+  <svg {...base}>
+    <path d="m8 2 6 3-6 3-6-3zM2 8l6 3 6-3M2 11l6 3 6-3" />
+  </svg>
+);
+export const Bars = () => (
+  <svg {...base}>
+    <path d="M2.5 13.5V9M6.2 13.5v-8M9.9 13.5V8M13.5 13.5v-11" />
+  </svg>
+);
+export const Gear = () => (
+  <svg {...base}>
+    <circle cx="8" cy="8" r="2.2" />
+    <path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2M3.6 3.6 5 5M11 11l1.4 1.4M3.6 12.4 5 11M11 5l1.4-1.4" />
+  </svg>
+);
+export const Pencil = () => (
+  <svg {...base}>
+    <path d="M9 3H2.5v10.5H13V7M6.5 9.5l.5-2.5 6-5 1.5 1.5-5 6z" />
+  </svg>
+);
+export const SignOut = () => (
+  <svg {...base}>
+    <path d="M6.5 2.5h-4v11h4M10 5l3 3-3 3M13 8H6" />
+  </svg>
+);
+export const Globe = () => (
+  <svg {...base}>
+    <circle cx="8" cy="8" r="6" />
+    <path d="M2 8h12M8 2c2 2 2.8 4 2.8 6S10 12 8 14c-2-2-2.8-4-2.8-6S6 4 8 2z" />
+  </svg>
+);
+export const Server = () => (
+  <svg {...base}>
+    <path d="M2.5 2.5h11V7h-11zM2.5 9h11v4.5h-11zM5 4.75h.01M5 11.25h.01" />
+  </svg>
+);

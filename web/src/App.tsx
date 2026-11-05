@@ -10,12 +10,14 @@ import { ConvexError } from 'convex/values';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import { go, threadPath, useRoute } from './route';
-import { signOut, useToken } from './token';
+import { useToken } from './token';
 import { MessageText, Pictures, picturesByRow, ToolRun, Worked, type PageMessage } from './messages';
 import { CommandState } from './command-state';
 import { previewOf, ShareControl, SharePage } from './share';
 import { busy, Lists, ResizeHandle, type Row, useSidebarWidth } from './sidebar';
 import { Pop } from './menu';
+import { Rail } from './rail';
+import { NewThread, ProjectPage, ProjectsList, RunnerPage, RunnersList, ScheduledList, SchedulePage, UsageList, UsagePage } from './pages';
 import { duration, fold, splitTurns, type Item } from './turns';
 import { folderName, sender } from './format';
 import * as Icon from './icons';
@@ -90,59 +92,55 @@ class Catch extends Component<{ children: ReactNode }, { error: unknown }> {
 
 function Shell({ token, route }: { token: string; route: ReturnType<typeof useRoute> }) {
   const selected = route.page === 'thread' ? route.threadId : undefined;
+  const id = route.page === 'scheduled' || route.page === 'projects' || route.page === 'runners' || route.page === 'usage' ? route.id : undefined;
   const [width, setWidth] = useSidebarWidth();
   const shell = useRef<HTMLDivElement>(null);
+  // On a phone there's one column: a list, or what's open from it.
+  const open = !!selected || !!id || route.page === 'new';
   return (
-    <div ref={shell} className={`shell ${selected ? 'has-thread' : ''}`} style={{ '--sidebar-width': `${width}px` } as CSSProperties}>
+    <div ref={shell} className={`shell ${open ? 'has-thread' : ''}`} style={{ '--sidebar-width': `${width}px` } as CSSProperties}>
+      <Rail token={token} route={route} />
       <aside className="sidebar">
-        <header className="bar">
-          <a
-            className="brand"
-            href="/"
-            onClick={(e) => {
-              e.preventDefault();
-              go('/');
-            }}
-          >
-            <img src="/icon.png" alt="" width={22} height={22} />
-            Threadbear
-          </a>
-          <Runners token={token} />
-        </header>
-        <Lists token={token} selected={selected} />
-        <footer className="foot">
-          <span>Signed in on this browser</span>
-          <span>·</span>
-          <button className="linkish" onClick={signOut}>
-            Sign out
-          </button>
-        </footer>
+        {route.page === 'scheduled' ? (
+          <ScheduledList token={token} selected={id} />
+        ) : route.page === 'projects' ? (
+          <ProjectsList token={token} selected={id} />
+        ) : route.page === 'runners' ? (
+          <RunnersList token={token} selected={id} />
+        ) : route.page === 'usage' ? (
+          <UsageList token={token} selected={id} />
+        ) : (
+          <Lists token={token} selected={selected} isNew={route.page === 'new'} />
+        )}
         <ResizeHandle shell={shell} width={width} setWidth={setWidth} />
       </aside>
-      <main className="main">{selected ? <ThreadView key={selected} token={token} threadId={selected} /> : <Empty />}</main>
+      <main className="main">
+        {selected ? (
+          <ThreadView key={selected} token={token} threadId={selected} />
+        ) : route.page === 'new' ? (
+          <NewThread token={token} />
+        ) : route.page === 'scheduled' && id ? (
+          <SchedulePage key={id} token={token} id={id} />
+        ) : route.page === 'projects' && id ? (
+          <ProjectPage key={id} token={token} id={id} />
+        ) : route.page === 'runners' && id ? (
+          <RunnerPage key={id} token={token} id={id} />
+        ) : route.page === 'usage' && id ? (
+          <UsagePage key={id} token={token} id={id} />
+        ) : (
+          <Empty text={route.page === 'scheduled' ? 'Pick a schedule.' : route.page === 'projects' ? 'Pick a project.' : route.page === 'runners' ? 'Pick a runner.' : route.page === 'usage' ? 'Pick a login.' : 'Pick a thread.'} />
+        )}
+      </main>
     </div>
   );
 }
 
-function Empty() {
+function Empty({ text }: { text: string }) {
   return (
     <div className="empty">
       <img src="/icon.png" alt="" width={88} height={88} />
-      <p>Pick a thread.</p>
+      <p>{text}</p>
     </div>
-  );
-}
-
-function Runners({ token }: { token: string }) {
-  const runners = useLiveQuery(api.phone.runners, { token });
-  if (!runners) return null;
-  const online = runners.filter((r) => Date.now() - Date.parse(r.lastSeenAt) < 3 * 60_000);
-  const names = online.map((r) => r.name).join(', ');
-  return (
-    <span className="runners" title={online.length ? `Online: ${names}` : 'No runner online. Messages wait until the Mac is back.'}>
-      <span className={`dot ${online.length ? 'ok' : ''}`} />
-      <span className="names">{online.length ? names : 'Mac offline'}</span>
-    </span>
   );
 }
 

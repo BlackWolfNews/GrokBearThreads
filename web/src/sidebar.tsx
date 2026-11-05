@@ -35,7 +35,7 @@ const SHOWS: { show: Filter['show']; label: string; icon: ReactNode }[] = [
   { show: 'shared', label: 'Shared by link', icon: <Icon.Link /> },
 ];
 
-export function Lists({ token, selected }: { token: string; selected?: string }) {
+export function Lists({ token, selected, isNew }: { token: string; selected?: string; isNew?: boolean }) {
   const inbox = useLiveQuery(api.phone.threads, { token, view: 'inbox' });
   const counts = useLiveQuery(api.phone.counts, { token });
   const schedules = useLiveQuery(api.phone.schedules, { token }) as ScheduleRow[] | undefined;
@@ -132,6 +132,18 @@ export function Lists({ token, selected }: { token: string; selected?: string })
       <div className="search-row">
         <SearchBox value={query} onChange={setQuery} />
         <FilterMenu filter={filter} setFilter={setFilter} rows={[...(inbox ?? []), ...(snoozed ?? []), ...(den ?? [])]} />
+        <a
+          className={`icon-btn ${isNew ? 'lit-btn' : ''}`}
+          href="/new"
+          title="Start a new thread"
+          aria-label="Start a new thread"
+          onClick={(e) => {
+            e.preventDefault();
+            go('/new');
+          }}
+        >
+          <Icon.Pencil />
+        </a>
       </div>
       {!ready ? (
         <div className="lists muted pad">Loading…</div>

@@ -1,0 +1,62 @@
+// node --test web/src/view-logic.test.ts
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { isOnline, matchesSchedule, runnersShown, runnerState, scheduleSections, sinceWords, tightest, untilWords } from './view-logic.ts';
+
+const NOW = Date.parse('2026-11-05T10:00:00Z');
+const ago = (ms: number) => new Date(NOW - ms).toISOString();
+const MIN = 60_000;
+const run = (name: string, ms: number, draining = false) => ({ runnerId: name, name, lastSeenAt: ago(ms), draining });
+
+test('online runners come first, and one gone for a week is left out', () => {
+  const rows = [run('zed', MIN), run('asleep', 10 * MIN), run('bruce', MIN), run('old', 8 * 24 * 60 * MIN)];
+  assert.deepEqual(runnersShown(rows, NOW).map((r) => r.name), ['bruce', 'zed', 'asleep']);
+  assert.ok(isOnline(run('a', 2 * MIN), NOW));
+  assert.ok(!isOnline(run('a', 4 * MIN), NOW));
+});
+
+test('a runner says how it is and when it was last heard from', () => {
+  assert.equal(runnerState(run('a', 12_000), NOW), 'Online, heard from 12s ago');
+  assert.equal(runnerState(run('a', 12_000, true), NOW), 'Updating, heard from 12s ago');
+  assert.equal(runnerState(run('a', 3 * 3600_000), NOW), 'Offline, last heard from 3h ago');
+});
+
+test('times read short', () => {
+  assert.equal(sinceWords(NOW - 90_000, NOW), '1m');
+  assert.equal(sinceWords(NOW + 5000, NOW), '0s');
+  assert.equal(untilWords(ago(-20 * MIN), NOW), 'in 20m');
+  assert.equal(untilWords(ago(-49 * 3600_000), NOW), 'in 2d');
+  assert.equal(untilWords(ago(MIN), NOW), 'due');
+  assert.equal(untilWords(undefined, NOW), '');
+});
+
+test('schedules go under the Mac\'s headings, in its orders', () => {
+  const s = (id: string, o = {}) => ({ id, title: id, whenText: 'x', ...o });
+  const out = scheduleSections([
+    s('later', { nextRunAt: '2026-11-06T00:00:00Z' }),
+    s('soon', { nextRunAt: '2026-11-05T11:00:00Z' }),
+    s('none'),
+    s('resting', { paused: true }),
+    s('awake', { paused: true }),
+    s('ran', { finishedAt: '2026-11-01T00:00:00Z' }),
+    s('ranLater', { finishedAt: '2026-11-02T00:00:00Z', paused: true }),
+  ]);
+  assert.deepEqual(out.active.map((x) => x.id), ['soon', 'later', 'none']);
+  assert.deepEqual(out.paused.map((x) => x.id), ['awake', 'resting']);
+  assert.deepEqual(out.done.map((x) => x.id), ['ranLater', 'ran']);
+});
+
+test('schedule search looks in the title, the time and the message', () => {
+  const s = { title: 'Morning brief', whenText: 'Every weekday at 7:00', text: 'Read TASK.md' };
+  assert.ok(matchesSchedule(s, ' MORNING '));
+  assert.ok(matchesSchedule(s, 'weekday'));
+  assert.ok(matchesSchedule(s, 'task.md'));
+  assert.ok(matchesSchedule(s, ''));
+  assert.ok(!matchesSchedule(s, 'evening'));
+});
+
+test('a login\'s room is its tightest window', () => {
+  assert.equal(tightest([{ title: '5h', remainingPercent: 80 }, { title: 'week', remainingPercent: 30 }])?.title, 'week');
+  assert.equal(tightest([]), undefined);
+  assert.equal(tightest(undefined), undefined);
+});

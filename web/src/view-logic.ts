@@ -1,0 +1,63 @@
+// The small decisions behind the rail's views (rail.tsx, pages.tsx), with no
+// React so the tests can run them bare.
+
+export type RunnerRow = { runnerId: string; name: string; lastSeenAt: string; draining: boolean };
+export type ScheduleRow = { id: string; title: string; whenText: string; paused?: boolean; finishedAt?: string; nextRunAt?: string; threadId?: string };
+
+// Heard from in this long counts as online, as the backend's ONLINE_MS.
+const ONLINE_MS = 3 * 60_000;
+// A runner not heard from in this long has probably gone for good, so its
+// tile goes. It keeps a row in the backend, and its threads stay where they are.
+const FORGOTTEN_MS = 7 * 24 * 3600_000;
+
+export const isOnline = (r: { lastSeenAt: string }, now: number) => now - Date.parse(r.lastSeenAt) < ONLINE_MS;
+
+// The runners worth showing: online ones first, then by name.
+export function runnersShown<T extends RunnerRow>(rows: T[], now: number): T[] {
+  return rows
+    .filter((r) => now - Date.parse(r.lastSeenAt) < FORGOTTEN_MS)
+    .sort((a, b) => Number(isOnline(b, now)) - Number(isOnline(a, now)) || a.name.localeCompare(b.name));
+}
+
+export function runnerState(r: RunnerRow, now: number): string {
+  if (!isOnline(r, now)) return `Offline, last heard from ${sinceWords(Date.parse(r.lastSeenAt), now)} ago`;
+  return r.draining ? `Updating, heard from ${sinceWords(Date.parse(r.lastSeenAt), now)} ago` : `Online, heard from ${sinceWords(Date.parse(r.lastSeenAt), now)} ago`;
+}
+
+// "12s", "4m", "3h", "2d"
+export function sinceWords(at: number, now: number): string {
+  const s = Math.max(0, Math.round((now - at) / 1000));
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h`;
+  return `${Math.floor(s / 86400)}d`;
+}
+
+// "in 20m", "in 3h", "in 2d", "due" once its time has passed.
+export function untilWords(iso: string | undefined, now: number): string {
+  if (!iso) return '';
+  const at = Date.parse(iso);
+  return at <= now ? 'due' : `in ${sinceWords(now, at)}`;
+}
+
+// As the Mac: active soonest first, paused by name, done most recent first. A
+// one-off that has run is done even if it was paused first.
+export function scheduleSections<T extends ScheduleRow>(rows: T[]) {
+  const done = rows.filter((s) => s.finishedAt).sort((a, b) => b.finishedAt!.localeCompare(a.finishedAt!));
+  const paused = rows.filter((s) => !s.finishedAt && s.paused).sort((a, b) => a.title.localeCompare(b.title));
+  const active = rows.filter((s) => !s.finishedAt && !s.paused).sort((a, b) => (a.nextRunAt ?? '￿').localeCompare(b.nextRunAt ?? '￿') || a.title.localeCompare(b.title));
+  return { active, paused, done };
+}
+
+export function matchesSchedule(s: { title: string; whenText: string; text?: string }, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  return !q || [s.title, s.whenText, s.text ?? ''].some((x) => x.toLowerCase().includes(q));
+}
+
+type UsageWindow = { title: string; remainingPercent: number; resetsAt?: string };
+
+// How much room a login has: its tightest window, or undefined when it has
+// never said.
+export function tightest(windows: UsageWindow[] | undefined): UsageWindow | undefined {
+  return windows?.length ? [...windows].sort((a, b) => a.remainingPercent - b.remainingPercent)[0] : undefined;
+}

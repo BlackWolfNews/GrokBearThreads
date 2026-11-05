@@ -747,7 +747,11 @@ website copies it too. It works anywhere you're signed in. Its sidebar works
 like the Mac's: drag its edge to resize it (double-click to reset), click a
 heading to fold it, sort the Inbox from the arrows on its heading, and search
 or filter from the top. The filter is only on the website: it picks threads
-that need you, unread or shared ones, or one project or folder. On your Mac,
+that need you, unread or shared ones, or one project or folder. The rail down
+its left edge opens your schedules, projects, runners and each login's usage to
+read; changing them is still done on the Mac or by asking an agent. The gear
+has the appearance and Sign out, and the pencil beside the search starts a new
+thread on a runner's default folder and login. On your Mac,
 `threadbear://thread/<id>` opens a thread in the app instead (the Open
 thread button on a tab BrowserBear has marked for an agent uses it).
 

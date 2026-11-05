@@ -189,7 +189,7 @@ test('the sidebar stays between its limits and leaves the thread room', () => {
   assert.equal(clampWidth(100, 1600), SIDEBAR_MIN);
   assert.equal(clampWidth(350.4, 1600), 350);
   assert.equal(clampWidth(5000, 2560), 600);
-  assert.equal(clampWidth(5000, 900), 480);
+  assert.equal(clampWidth(5000, 900), 436);
   assert.equal(clampWidth(5000, 500), SIDEBAR_MIN);
   assert.equal(readWidth(null), SIDEBAR_DEFAULT);
   assert.equal(readWidth('banana'), SIDEBAR_DEFAULT);
