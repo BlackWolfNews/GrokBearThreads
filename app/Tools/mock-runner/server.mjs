@@ -391,7 +391,12 @@ function listen(port) {
   const server = new WebSocketServer({ host: '127.0.0.1', port, maxPayload: 64 * 1024 * 1024 });
   server.on('listening', () => {
     const { port } = server.address();
-    fs.writeFileSync(path.join(dataDir, 'runner.json'), JSON.stringify({ port, mock: true }, null, 2));
+    // Renamed into place like the real runner's (atomicWriteFileSync): a
+    // reader that caught it half written saw no port, fell back to 8797,
+    // the live runner's, and was refused as unauthorized (testPools, 5 Nov).
+    const config = path.join(dataDir, 'runner.json');
+    fs.writeFileSync(`${config}.tmp`, JSON.stringify({ port, mock: true }, null, 2));
+    fs.renameSync(`${config}.tmp`, config);
     log(`listening on ws://127.0.0.1:${port}/rpc with ${threads.size} threads`);
     // Written whole and renamed into place, so a reader never sees it empty.
     if (args['ready-file']) {

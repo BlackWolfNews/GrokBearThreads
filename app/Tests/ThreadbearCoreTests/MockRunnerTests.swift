@@ -31,13 +31,21 @@ final class MockRunnerTests: XCTestCase {
         process.standardError = FileHandle.nullDevice
         try process.run()
         self.process = process
-        let runnerJSON = dataDir.appendingPathComponent("runner.json")
-        for _ in 0..<200 where !FileManager.default.fileExists(atPath: runnerJSON.path) {
+        // Wait for the mock's own port, not just the file: without one,
+        // RunnerConfig.endpoint falls back to 8797, the live runner's, which
+        // refuses the mock's token as unauthorized.
+        for _ in 0..<200 where Self.mockPort(dataDir) == nil {
             try await Task.sleep(for: .milliseconds(25))
         }
-        guard FileManager.default.fileExists(atPath: runnerJSON.path) else {
+        guard Self.mockPort(dataDir) != nil else {
             throw XCTSkip("the mock runner didn't start")
         }
+    }
+
+    private static func mockPort(_ dataDir: URL) -> Int? {
+        guard let data = try? Data(contentsOf: dataDir.appendingPathComponent("runner.json")),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return object["port"] as? Int
     }
 
     override func tearDown() async throws {
