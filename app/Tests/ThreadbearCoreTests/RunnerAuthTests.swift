@@ -14,24 +14,40 @@ final class RunnerAuthTests: XCTestCase {
         // Worked out with runner/src/rpc-auth.ts's authProof.
         let runnerNonce = String(repeating: "a", count: 64)
         let clientNonce = String(repeating: "0123456789abcdef", count: 4)
-        XCTAssertEqual(RunnerAuth.proof(token: token, role: .client, runnerNonce: runnerNonce, clientNonce: clientNonce),
-                       "785cdd0bc38e9e1390f3652a9e78830d55cbf6f11e686c39d8da357a86c976ed")
-        XCTAssertEqual(RunnerAuth.proof(token: token, role: .runner, runnerNonce: runnerNonce, clientNonce: clientNonce),
-                       "c7f8ef4ebbf91a047c8b45b185025c3d0aab96a68b0d371bb34130316e3493ad")
+        XCTAssertEqual(RunnerAuth.proof(token: token, role: .client, runnerNonce: runnerNonce, clientNonce: clientNonce, port: 8797),
+                       "3ff1854cab19b025f45ba2df4f40da330a65cee664c32eb9c3a69e471b570a0a")
+        XCTAssertEqual(RunnerAuth.proof(token: token, role: .runner, runnerNonce: runnerNonce, clientNonce: clientNonce, port: 8797),
+                       "8230a5ad1a4a1ddeab7cee6ffcd1a4ab7b4926a1b8a1fe23eeccd12faef46d5a")
+    }
+
+    func testProofsAreBoundToTheDialedLoopbackPort() throws {
+        XCTAssertEqual(RunnerAuth.loopbackPort(URL(string: "ws://127.0.0.1:8797/rpc")!), 8797)
+        XCTAssertEqual(RunnerAuth.loopbackPort(URL(string: "ws://localhost:9000/rpc")!), 9000)
+        XCTAssertNil(RunnerAuth.loopbackPort(URL(string: "wss://bruce.example.ts.net/rpc")!))
+        // A challenge passed on from a runner on 9001 says 9001; a client that
+        // dialed 8797 binds its proof to 8797 all the same, so the runner on
+        // 9001 turns it down. Another Mac's runner is taken at its word.
+        let challenge = Data(#"{"method":"auth.challenge","params":{"nonce":"\#(String(repeating: "a", count: 64))","port":9001}}"#.utf8)
+        let clientNonce = String(repeating: "0123456789abcdef", count: 4)
+        let local = try RunnerAuth.answer(challenge: challenge, token: token, dialedPort: 8797, clientNonce: clientNonce)
+        XCTAssertTrue(local.request.contains("3ff1854cab19b025f45ba2df4f40da330a65cee664c32eb9c3a69e471b570a0a"))
+        let remote = try RunnerAuth.answer(challenge: challenge, token: token, dialedPort: nil, clientNonce: clientNonce)
+        XCTAssertEqual(remote.expected, RunnerAuth.proof(token: token, role: .runner, runnerNonce: String(repeating: "a", count: 64), clientNonce: clientNonce, port: 9001))
+        XCTAssertNotEqual(remote.expected, local.expected)
     }
 
     func testAnswerNeverCarriesTheTokenAndChecksTheRunnersProof() throws {
         let runnerNonce = RunnerAuth.newNonce()
         XCTAssertTrue(RunnerAuth.isNonce(runnerNonce))
-        let challenge = Data(#"{"jsonrpc":"2.0","method":"auth.challenge","params":{"version":1,"nonce":"\#(runnerNonce)"}}"#.utf8)
-        let (request, expected) = try RunnerAuth.answer(challenge: challenge, token: token)
+        let challenge = Data(#"{"jsonrpc":"2.0","method":"auth.challenge","params":{"version":1,"nonce":"\#(runnerNonce)","port":8797}}"#.utf8)
+        let (request, expected) = try RunnerAuth.answer(challenge: challenge, token: token, dialedPort: 8797)
         XCTAssertFalse(request.contains(token))
         let sent = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(request.utf8)) as? [String: Any])
         XCTAssertEqual(sent["method"] as? String, "auth.prove")
         let params = try XCTUnwrap(sent["params"] as? [String: String])
         let clientNonce = try XCTUnwrap(params["nonce"])
-        XCTAssertEqual(params["proof"], RunnerAuth.proof(token: token, role: .client, runnerNonce: runnerNonce, clientNonce: clientNonce))
-        XCTAssertEqual(expected, RunnerAuth.proof(token: token, role: .runner, runnerNonce: runnerNonce, clientNonce: clientNonce))
+        XCTAssertEqual(params["proof"], RunnerAuth.proof(token: token, role: .client, runnerNonce: runnerNonce, clientNonce: clientNonce, port: 8797))
+        XCTAssertEqual(expected, RunnerAuth.proof(token: token, role: .runner, runnerNonce: runnerNonce, clientNonce: clientNonce, port: 8797))
 
         XCTAssertNoThrow(try RunnerAuth.check(reply: Data(#"{"jsonrpc":"2.0","id":"auth","result":{"proof":"\#(expected)"}}"#.utf8), expected: expected))
         // Its own proof played back, a wrong one, none, or another message.
@@ -45,7 +61,8 @@ final class RunnerAuthTests: XCTestCase {
         for first in [#"{"jsonrpc":"2.0","method":"runner.notice","params":{"level":"info","message":"hi"}}"#,
                       #"{"jsonrpc":"2.0","method":"auth.challenge","params":{"nonce":"short"}}"#,
                       #"{"jsonrpc":"2.0","id":1,"result":{}}"#, "not json"] {
-            XCTAssertThrowsError(try RunnerAuth.answer(challenge: Data(first.utf8), token: token), first)
+            XCTAssertThrowsError(try RunnerAuth.answer(challenge: Data(first.utf8), token: token, dialedPort: nil), first)
+            XCTAssertThrowsError(try RunnerAuth.answer(challenge: Data(first.utf8), token: token, dialedPort: 8797), first)
         }
     }
 

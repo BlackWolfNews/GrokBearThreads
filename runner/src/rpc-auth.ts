@@ -18,10 +18,20 @@ export function isNonce(x: unknown): x is string {
   return typeof x === 'string' && /^[0-9a-f]{64}$/.test(x);
 }
 
+// Which server a proof is for: a runner's main server (the one on the
+// runner's port, that every client talks to) or a draining runner's own,
+// and the TCP port it listens on. Both proofs are bound to it, so a
+// challenge relayed from a runner on another port (a draining one, say, by
+// whatever took the main port while the runner was down) can't be answered
+// by a client that connected here (docs/protocol.md, "Auth").
+export type AuthServer = 'primary' | 'drain';
+export type AuthChannel = { server: AuthServer; port: number };
+
 // The role is in what's signed so a runner's proof can't be played back as
 // a client's (or the other way round) on a connection with the same nonces.
-export function authProof(token: string, role: AuthRole, runnerNonce: string, clientNonce: string): string {
-  return crypto.createHmac('sha256', Buffer.from(token, 'utf8')).update(`${AUTH_CONTEXT} ${role}\n${runnerNonce}\n${clientNonce}`).digest('hex');
+export function authProof(token: string, role: AuthRole, runnerNonce: string, clientNonce: string, channel: AuthChannel): string {
+  const text = `${AUTH_CONTEXT} ${role}\n${runnerNonce}\n${clientNonce}\n${channel.server} ${channel.port}`;
+  return crypto.createHmac('sha256', Buffer.from(token, 'utf8')).update(text).digest('hex');
 }
 
 export function proofMatches(expected: string, candidate: unknown): boolean {
@@ -31,23 +41,38 @@ export function proofMatches(expected: string, candidate: unknown): boolean {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+const isPort = (x: unknown): x is number => Number.isInteger(x) && (x as number) > 0 && (x as number) < 65536;
+
+// The port a client binds its proof to: the one it dialed, for a loopback
+// URL (what a relay on this Mac would change), else the one the runner says
+// it listens on (behind `tailscale serve`, the dialed port is the proxy's).
+export function loopbackPort(url: string): number | undefined {
+  const u = new URL(url);
+  if (!['127.0.0.1', 'localhost', '[::1]', '::1'].includes(u.hostname)) return undefined;
+  return u.port ? Number(u.port) : u.protocol === 'wss:' ? 443 : 80;
+}
+
 // A client's side of it. `challenge` is the runner's first message; it
 // gives the auth.prove request to send and a check for the runner's answer.
 // Anything that isn't a challenge throws: a client never falls back to
-// sending the token.
-export function answerChallenge(token: string, challenge: unknown, id: number | string = 1): {
+// sending the token. `port` is the loopback port the client dialed (see
+// loopbackPort); `server` which kind of server it meant to reach.
+export function answerChallenge(token: string, challenge: unknown, opts: { id?: number | string; port?: number; server?: AuthServer } = {}): {
   request: { jsonrpc: '2.0'; id: number | string; method: 'auth.prove'; params: { nonce: string; proof: string } };
   runnerProved: (result: unknown) => boolean;
 } {
-  const msg = challenge as { method?: unknown; params?: { nonce?: unknown } } | null;
-  const runnerNonce = msg && typeof msg === 'object' ? msg.params?.nonce : undefined;
-  if (msg?.method !== 'auth.challenge' || !isNonce(runnerNonce)) {
+  const msg = challenge as { method?: unknown; params?: { nonce?: unknown; port?: unknown } } | null;
+  const params = msg && typeof msg === 'object' ? msg.params : undefined;
+  const runnerNonce = params?.nonce;
+  const port = opts.port ?? params?.port;
+  if (msg?.method !== 'auth.challenge' || !isNonce(runnerNonce) || !isPort(port)) {
     throw new RunnerNotProvedError("The runner didn't send an auth challenge, so it isn't the runner or it's older than this client (it updates itself from main).");
   }
+  const channel: AuthChannel = { server: opts.server ?? 'primary', port };
   const clientNonce = newNonce();
   return {
-    request: { jsonrpc: '2.0', id, method: 'auth.prove', params: { nonce: clientNonce, proof: authProof(token, 'client', runnerNonce, clientNonce) } },
-    runnerProved: (result) => proofMatches(authProof(token, 'runner', runnerNonce, clientNonce), (result as { proof?: unknown } | null)?.proof),
+    request: { jsonrpc: '2.0', id: opts.id ?? 1, method: 'auth.prove', params: { nonce: clientNonce, proof: authProof(token, 'client', runnerNonce, clientNonce, channel) } },
+    runnerProved: (result) => proofMatches(authProof(token, 'runner', runnerNonce, clientNonce, channel), (result as { proof?: unknown } | null)?.proof),
   };
 }
 

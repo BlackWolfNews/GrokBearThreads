@@ -9,7 +9,7 @@ import { ARCHIVE_VERDICTS, CLI_POLICIES, EFFORT_LEVELS, ErrorCode, PROVIDERS, Rp
 import type { ArchiveVerdict, ApprovalDecision, AskAnswer, CliPolicy, EffortLevel, ImageRef, PermissionMode, Provider, ShareAccess, ThreadStartedBy, ThreadSummary } from './protocol.ts';
 import { MAX_BYLINE } from './needs.ts';
 import { isMoved, mergeSummaries, type Bucket } from './handover.ts';
-import { AUTH_VERSION, authProof, isNonce, newNonce, proofMatches } from './rpc-auth.ts';
+import { AUTH_VERSION, authProof, isNonce, newNonce, proofMatches, type AuthChannel } from './rpc-auth.ts';
 
 type Conn = {
   id: number;
@@ -265,15 +265,21 @@ export class RpcServer {
     else this.opts.log.warn('could not raise the frame limit for an authenticated client', { conn: conn.id });
   }
 
-  // Closes an unauthenticated connection with 4401. It stops counting as
-  // waiting at once, and is cut off if it doesn't answer the close soon:
-  // ws would otherwise keep a client that ignores it for 30 s, and 16 of
-  // those would keep the app out.
+  // Closes an unauthenticated connection with 4401, and cuts it off if it
+  // doesn't answer the close within a second: ws would otherwise keep a
+  // client that ignores it for 30 s. It counts as waiting until it's gone,
+  // so refused sockets can't pile up past the cap.
   private refuseConn(conn: Conn): void {
     clearTimeout(conn.authTimer);
-    this.conns.delete(conn);
     conn.ws.close(4401, 'unauthorized');
     setTimeout(() => conn.ws.terminate(), 1000).unref();
+  }
+
+  // What this server's proofs are bound to (docs/protocol.md, "Auth"): the
+  // kind of server and the port it listens on.
+  private channel(): AuthChannel {
+    const addr = this.http.address();
+    return { server: this.opts.onlyOwn ? 'drain' : 'primary', port: typeof addr === 'object' && addr ? addr.port : this.opts.port };
   }
 
   private onConnection(ws: WebSocket, headerAuthed: boolean): void {
@@ -287,7 +293,7 @@ export class RpcServer {
       }, this.opts.authTimeoutMs ?? AUTH_TIMEOUT_MS);
       conn.authTimer.unref();
       conn.challenge = newNonce();
-      this.send(conn, { jsonrpc: '2.0', method: 'auth.challenge', params: { version: AUTH_VERSION, nonce: conn.challenge } });
+      this.send(conn, { jsonrpc: '2.0', method: 'auth.challenge', params: { version: AUTH_VERSION, nonce: conn.challenge, port: this.channel().port } });
     }
     ws.on('message', (data, isBinary) => {
       if (isBinary) {
@@ -297,12 +303,18 @@ export class RpcServer {
       }
       this.onMessage(conn, data.toString());
     });
-    const gone = () => {
+    ws.on('close', () => {
       clearTimeout(conn.authTimer);
       this.conns.delete(conn);
-    };
-    ws.on('close', gone);
-    ws.on('error', gone);
+    });
+    // A protocol error (a frame over the limit, bad UTF-8): ws closes with
+    // 1009 or 1002 and waits up to 30 s for the other side to answer. Cut it
+    // off now; it stays counted (against the pending cap, if it hadn't
+    // authenticated) until its 'close'.
+    ws.on('error', () => {
+      clearTimeout(conn.authTimer);
+      ws.terminate();
+    });
   }
 
   private send(conn: Conn, obj: unknown): void {
@@ -345,8 +357,8 @@ export class RpcServer {
     const id = msg && typeof msg === 'object' ? (msg.id ?? null) : null;
     const p = (msg && typeof msg === 'object' && msg.params && typeof msg.params === 'object' ? msg.params : {}) as Record<string, unknown>;
     if (msg?.method === 'auth.prove' && conn.challenge && isNonce(p.nonce) && p.nonce !== conn.challenge
-      && proofMatches(authProof(this.opts.token, 'client', conn.challenge, p.nonce), p.proof)) {
-      const proof = authProof(this.opts.token, 'runner', conn.challenge, p.nonce);
+      && proofMatches(authProof(this.opts.token, 'client', conn.challenge, p.nonce, this.channel()), p.proof)) {
+      const proof = authProof(this.opts.token, 'runner', conn.challenge, p.nonce, this.channel());
       this.unlock(conn);
       this.send(conn, { jsonrpc: '2.0', id, result: { proof } });
       return;

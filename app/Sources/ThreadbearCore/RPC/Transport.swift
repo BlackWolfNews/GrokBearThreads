@@ -70,7 +70,7 @@ public final class WebSocketTransport: NSObject, RPCTransport, URLSessionWebSock
         }
         defer { watchdog.cancel() }
         do {
-            let (request, expected) = try RunnerAuth.answer(challenge: try await authReceive(task), token: token)
+            let (request, expected) = try RunnerAuth.answer(challenge: try await authReceive(task), token: token, dialedPort: RunnerAuth.loopbackPort(url))
             try await task.send(.string(request))
             try RunnerAuth.check(reply: try await authReceive(task), expected: expected)
         } catch let error as RunnerAuth.NotProved {

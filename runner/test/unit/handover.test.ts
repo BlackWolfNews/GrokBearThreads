@@ -556,3 +556,50 @@ test('Peers: the bearer header goes only to a draining runner whose own drain fi
   assert.deepEqual(asked, [[1, true], [2, false]]);
   peers.close();
 });
+
+test('connectDrain: the bearer header goes only over a socket whose other end is the draining runner itself', async () => {
+  const { connectDrain, socketOwnedBy } = await import('../../src/handover.ts');
+  const { WebSocketServer } = await import('ws');
+  const { spawn } = await import('node:child_process');
+  // The listener is this test's process, so it plays the old draining
+  // runner whose pid the drain file names.
+  const seen: (string | undefined)[] = [];
+  const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+  await new Promise<void>((r) => wss.once('listening', () => r()));
+  wss.on('connection', (ws, req) => {
+    seen.push(req.headers.authorization);
+    ws.on('message', (d) => ws.send(JSON.stringify({ jsonrpc: '2.0', id: JSON.parse(d.toString()).id, result: { ok: true } })));
+  });
+  const port = (wss.address() as { port: number }).port;
+  const c = await connectDrain(port, 'tok', true, process.pid);
+  assert.deepEqual(await c.call('drain.hello'), { ok: true });
+  c.close();
+  assert.deepEqual(seen, ['Bearer tok']);
+
+  // The drain file's pid is alive and ours, but something else has its port
+  // (here, this process for a sleep's pid): nothing is sent.
+  const other = spawn('/bin/sleep', ['30'], { stdio: 'ignore' });
+  try {
+    await assert.rejects(connectDrain(port, 'tok', true, other.pid!, { attempts: 2 }), /isn't process/);
+    // Someone else's process: refused before it even connects.
+    await assert.rejects(socketOwnedBy(port, process.pid, { uidOf: async () => 0 }), /isn't this user's/);
+    await new Promise((r) => setTimeout(r, 100));
+    assert.deepEqual(seen, ['Bearer tok'], 'no request reached the listener');
+  } finally {
+    other.kill();
+  }
+  for (const ws of wss.clients) ws.terminate();
+  await new Promise<void>((r) => wss.close(() => r()));
+});
+
+test('connectDrain: a challenge draining runner is reached by the challenge, bound to its kind of server', async () => {
+  const { connectDrain } = await import('../../src/handover.ts');
+  const { RpcServer } = await import('../../src/rpc.ts');
+  const h = makeHarness();
+  const server = new RpcServer({ host: '127.0.0.1', port: 0, token: 'tok', runner: h.runner, log: nullLogger, onlyOwn: true });
+  const { port } = await server.listen();
+  const c = await connectDrain(port, 'tok', false, 1);
+  assert.equal((await c.call('hello', { client: 't', version: '1' })).protocol, 1);
+  c.close();
+  await server.close();
+});

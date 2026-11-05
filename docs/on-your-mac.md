@@ -66,7 +66,10 @@ File references are where to look.
   ask for permission the first time that's somewhere like Documents. The runner also runs `ps`, and `sample` (in a
   sandbox, through `sandbox-exec`) on a thread's own CLI, when a turn has been quiet for a minute,
   to tell a CLI frozen on a macOS prompt from a long job. The sample is a
-  temp file, deleted straight after. `mac-screen.json` in the data folder
+  temp file, deleted straight after. Taking over from a draining runner
+  older than 5 Nov 2026, it runs `lsof` on that runner's pid once, to check
+  the connection it's about to send the token over is really that runner's.
+  `mac-screen.json` in the data folder
   remembers what it's said about dialogs on the screen (below).
 
 ## What runs in the background

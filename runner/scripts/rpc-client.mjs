@@ -29,7 +29,8 @@ export async function connectRpc(port, token, timeoutMs = 3000) {
   try {
     await conn.opened;
     const challenge = await conn.first;
-    const { request, runnerProved } = answerChallenge(token, challenge);
+    // Always the runner's main server, on 127.0.0.1 at `port`.
+    const { request, runnerProved } = answerChallenge(token, challenge, { port });
     const result = await conn.call('auth.prove', request.params);
     if (!runnerProved(result)) throw Object.assign(new Error("the runner's proof was wrong, so it isn't the runner"), { notProved: true });
   } catch (e) {

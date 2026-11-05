@@ -178,7 +178,9 @@ server.on('upgrade', (req, socket) => {
   let buf = Buffer.alloc(0);
   let authed = false;
   const challenge = newNonce();
-  socket.write(frame(JSON.stringify({ jsonrpc: '2.0', method: 'auth.challenge', params: { version: 1, nonce: challenge } })));
+  // Its own listening port, as the real runner binds its proofs to.
+  const channel = { server: 'primary', port: socket.localPort };
+  socket.write(frame(JSON.stringify({ jsonrpc: '2.0', method: 'auth.challenge', params: { version: 1, nonce: challenge, port: channel.port } })));
   socket.on('error', () => {});
   sockets.add(socket);
   socket.on('close', () => sockets.delete(socket));
@@ -213,9 +215,9 @@ server.on('upgrade', (req, socket) => {
       const msg = JSON.parse(payload.toString('utf8'));
       if (!authed) {
         const p = msg.params ?? {};
-        if (msg.method === 'auth.prove' && isNonce(p.nonce) && p.proof === authProof(token, 'client', challenge, p.nonce)) {
+        if (msg.method === 'auth.prove' && isNonce(p.nonce) && p.proof === authProof(token, 'client', challenge, p.nonce, channel)) {
           authed = true;
-          socket.write(frame(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { proof: authProof(token, 'runner', challenge, p.nonce) } })));
+          socket.write(frame(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { proof: authProof(token, 'runner', challenge, p.nonce, channel) } })));
         } else if (msg.method === 'auth' && p.token === token) {
           authed = true;
           socket.write(frame(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: {} })));

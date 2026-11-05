@@ -10,8 +10,11 @@
 // - ThreadRouter: what the agent tools drive, on either side, so they reach
 //   a thread wherever it is.
 import type { SecretAnswer, SecretRequest } from './runner/approvals.ts';
+import { execFile } from 'node:child_process';
 import fs from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { paths } from './config.ts';
 import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 import type { Logger } from './log.ts';
@@ -128,7 +131,7 @@ export type PeersDeps = {
   // Stops the process groups a dead draining runner left.
   sweep: (pid: number) => Promise<void>;
   // Tests replace these.
-  connect?: (port: number, token: string, legacyHeader: boolean) => Promise<PeerClient>;
+  connect?: (port: number, token: string, legacyHeader: boolean, pid: number) => Promise<PeerClient>;
   alive?: (pid: number) => boolean;
   now?: () => number;
   // How long a draining runner that has closed its connection gets to
@@ -171,7 +174,7 @@ export class Peers {
   }
 
   private async connect(info: DrainInfo): Promise<Peer | undefined> {
-    const connect = this.deps.connect ?? ((port: number, token: string, legacyHeader: boolean) => RunnerClient.connect(`ws://127.0.0.1:${port}/rpc`, token, { legacyHeader }));
+    const connect = this.deps.connect ?? ((port: number, token: string, legacy: boolean, pid: number) => connectDrain(port, token, legacy, pid));
     let client: PeerClient;
     try {
       // The one place a new client may still send the token (docs/
@@ -179,7 +182,7 @@ export class Peers {
       // the challenge can't answer one, and it's the drain file, in this
       // runner's own data dir, that says so, never the server. Remove with
       // the old auth paths.
-      client = await connect(info.port, this.deps.token, info.auth !== 'challenge');
+      client = await connect(info.port, this.deps.token, info.auth !== 'challenge', info.pid);
     } catch (e) {
       this.deps.log.error('could not reach a draining runner', { pid: info.pid, port: info.port, error: String(e) });
       return undefined;
@@ -356,6 +359,53 @@ export class Peers {
     for (const p of this.peers.values()) p.client.close();
     this.peers.clear();
   }
+}
+
+// A draining runner's own server: by the challenge, bound to its kind of
+// server so nothing on the main port can pass a challenge on to it; or,
+// for one from before the challenge, with the bearer header, but only over
+// a socket whose other end is that runner's (socketOwnedBy). Its port can
+// be taken by someone else while its pid lives on: shutdown closes the
+// server before the drain file goes.
+export async function connectDrain(port: number, token: string, legacyHeader: boolean, pid: number, owned: Parameters<typeof socketOwnedBy>[2] = {}): Promise<RunnerClient> {
+  const url = `ws://127.0.0.1:${port}/rpc`;
+  if (!legacyHeader) return RunnerClient.connect(url, token, { server: 'drain' });
+  return RunnerClient.connect(url, token, { legacyHeader: true, socket: await socketOwnedBy(port, pid, owned) });
+}
+
+const execFileP = promisify(execFile);
+
+// A connected socket to 127.0.0.1:<port> whose other end is an open file of
+// `pid`, a process of this user, as lsof sees it; otherwise it throws and
+// nothing has been sent. The check is on this very connection (its own
+// local port), so whoever has the port can't change between the check and
+// what goes over it. Tests pass lsof and ps stand-ins.
+export async function socketOwnedBy(
+  port: number,
+  pid: number,
+  opts: { attempts?: number; lsof?: (args: string[]) => Promise<string>; uidOf?: (pid: number) => Promise<number | undefined> } = {},
+): Promise<net.Socket> {
+  const lsof = opts.lsof ?? (async (args) => (await execFileP('/usr/sbin/lsof', args, { encoding: 'utf8' })).stdout);
+  const uidOf = opts.uidOf ?? (async (p) => {
+    const out = (await execFileP('/bin/ps', ['-o', 'uid=', '-p', String(p)], { encoding: 'utf8' }).catch(() => ({ stdout: '' }))).stdout.trim();
+    return /^\d+$/.test(out) ? Number(out) : undefined;
+  });
+  if ((await uidOf(pid)) !== process.getuid?.()) throw new Error(`process ${pid} isn't this user's`);
+  const socket = net.connect({ host: '127.0.0.1', port });
+  await new Promise<void>((resolve, reject) => {
+    socket.once('connect', () => resolve());
+    socket.once('error', reject);
+  });
+  const want = `n127.0.0.1:${port}->127.0.0.1:${socket.localPort}`;
+  // The runner may not have accepted the connection yet; it does within
+  // a moment.
+  for (let i = 0; i < (opts.attempts ?? 10); i++) {
+    const out = await lsof(['-nP', '-a', '-p', String(pid), `-iTCP@127.0.0.1:${port}`, '-F', 'n']).catch(() => '');
+    if (out.split('\n').includes(want)) return socket;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  socket.destroy();
+  throw new Error(`the listener on port ${port} isn't process ${pid}`);
 }
 
 // ------------------------------------------------------------ PrimaryLink

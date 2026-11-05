@@ -21,10 +21,14 @@ public enum RunnerAuth {
         public var errorDescription: String? { reason }
     }
 
-    /// HMAC-SHA256 keyed with the token's UTF-8 bytes, lowercase hex.
-    public static func proof(token: String, role: Role, runnerNonce: String, clientNonce: String) -> String {
+    /// HMAC-SHA256 keyed with the token's UTF-8 bytes, lowercase hex. Bound
+    /// to the runner's main server ("primary", the only kind the app talks
+    /// to) and the port it listens on, so a challenge something on this
+    /// port passes on from a runner on another one (a draining runner)
+    /// can't be answered.
+    public static func proof(token: String, role: Role, runnerNonce: String, clientNonce: String, port: Int) -> String {
         let key = SymmetricKey(data: Data(token.utf8))
-        let message = Data("\(context) \(role.rawValue)\n\(runnerNonce)\n\(clientNonce)".utf8)
+        let message = Data("\(context) \(role.rawValue)\n\(runnerNonce)\n\(clientNonce)\nprimary \(port)".utf8)
         return hex(HMAC<SHA256>.authenticationCode(for: message, using: key))
     }
 
@@ -44,20 +48,26 @@ public enum RunnerAuth {
     /// to send and the proof the runner has to send back. Anything but a
     /// challenge throws: the app never falls back to sending the token, as
     /// an impostor could just pretend to be an old runner.
-    public static func answer(challenge message: Data, token: String, clientNonce: String = newNonce()) throws -> (request: String, expected: String) {
+    ///
+    /// `dialedPort` is the port of a loopback URL, what a relay on this Mac
+    /// would have to change; for another Mac (behind `tailscale serve`, so
+    /// the dialed port is the proxy's) it's nil and the runner's own word
+    /// for its port is used.
+    public static func answer(challenge message: Data, token: String, dialedPort: Int?, clientNonce: String = newNonce()) throws -> (request: String, expected: String) {
         guard let object = try? JSONSerialization.jsonObject(with: message) as? [String: Any],
               object["method"] as? String == "auth.challenge",
               let params = object["params"] as? [String: Any],
-              let runnerNonce = params["nonce"] as? String, isNonce(runnerNonce)
+              let runnerNonce = params["nonce"] as? String, isNonce(runnerNonce),
+              let port = dialedPort ?? (params["port"] as? Int), (1...65535).contains(port)
         else {
             throw NotProved(reason: "it didn't send an auth challenge, so it's not the runner, or it's a runner older than this app (it updates itself from main)")
         }
         let request: [String: Any] = [
             "jsonrpc": "2.0", "id": requestId, "method": "auth.prove",
-            "params": ["nonce": clientNonce, "proof": proof(token: token, role: .client, runnerNonce: runnerNonce, clientNonce: clientNonce)],
+            "params": ["nonce": clientNonce, "proof": proof(token: token, role: .client, runnerNonce: runnerNonce, clientNonce: clientNonce, port: port)],
         ]
         let text = String(decoding: try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys]), as: UTF8.self)
-        return (text, proof(token: token, role: .runner, runnerNonce: runnerNonce, clientNonce: clientNonce))
+        return (text, proof(token: token, role: .runner, runnerNonce: runnerNonce, clientNonce: clientNonce, port: port))
     }
 
     /// Checks the runner's answer to auth.prove. Throws `NotProved` for a
@@ -69,6 +79,12 @@ public enum RunnerAuth {
         guard let result = object["result"] as? [String: Any], let proof = result["proof"] as? String,
               constantTimeEqual(proof, expected)
         else { throw NotProved(reason: "its proof was wrong, so it isn't the runner") }
+    }
+
+    /// The port of a loopback URL (see `answer`), nil for any other host.
+    public static func loopbackPort(_ url: URL) -> Int? {
+        guard let host = url.host, ["127.0.0.1", "localhost", "::1"].contains(host) else { return nil }
+        return url.port ?? (url.scheme == "wss" ? 443 : 80)
     }
 
     static func constantTimeEqual(_ a: String, _ b: String) -> Bool {

@@ -424,7 +424,9 @@ function onConnection(ws, request) {
   // The real runner's auth challenge (docs/protocol.md, "Auth"), for a
   // client that didn't send the old bearer header.
   const challenge = client.authed ? null : newNonce();
-  if (challenge) ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'auth.challenge', params: { version: 1, nonce: challenge } }));
+  // Bound to its own listening port, as the real runner's are.
+  const channel = { server: 'primary', port: request.socket.localPort };
+  if (challenge) ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'auth.challenge', params: { version: 1, nonce: challenge, port: channel.port } }));
   ws.on('message', (raw) => {
     let message;
     try {
@@ -435,9 +437,9 @@ function onConnection(ws, request) {
     }
     if (!client.authed) {
       const p = message.params ?? {};
-      if (message.method === 'auth.prove' && challenge && isNonce(p.nonce) && p.proof === authProof(token, 'client', challenge, p.nonce)) {
+      if (message.method === 'auth.prove' && challenge && isNonce(p.nonce) && p.proof === authProof(token, 'client', challenge, p.nonce, channel)) {
         client.authed = true;
-        return reply(client, message.id, { proof: authProof(token, 'runner', challenge, p.nonce) });
+        return reply(client, message.id, { proof: authProof(token, 'runner', challenge, p.nonce, channel) });
       }
       if (message.method === 'auth' && p.token === token) {
         client.authed = true;

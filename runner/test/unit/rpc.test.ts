@@ -8,9 +8,13 @@ import { nullLogger } from '../../src/log.ts';
 import { checkSequence, checkSummary } from '../helpers/protocol-check.ts';
 import { patiently } from '../helpers/patience.ts';
 import { WebSocket, WebSocketServer } from 'ws';
+import crypto from 'node:crypto';
+import net from 'node:net';
 import { authProof, isNonce, newNonce } from '../../src/rpc-auth.ts';
 
 const TOKEN = 'test-token-0123456789';
+// What the runner's main server binds its proofs to.
+const main = (port: number) => ({ server: 'primary' as const, port });
 
 async function serve(extra: Partial<ConstructorParameters<typeof RpcServer>[0]> = {}) {
   const h = makeHarness();
@@ -72,24 +76,25 @@ function rawConnect(url: string, headers?: Record<string, string>): Promise<{ ws
 }
 
 test('challenge auth: the runner challenges, the client proves, the runner proves back', async () => {
-  const { server, url } = await serve();
+  const { server, url, port } = await serve();
   const { ws, first } = await rawConnect(url);
   assert.equal(first.method, 'auth.challenge');
   assert.equal(first.params.version, 1);
+  assert.equal(first.params.port, port);
   assert.ok(isNonce(first.params.nonce));
   const clientNonce = newNonce();
   const reply = new Promise<any>((r) => ws!.once('message', (d) => r(JSON.parse(d.toString()))));
-  ws!.send(JSON.stringify({ jsonrpc: '2.0', id: 'auth', method: 'auth.prove', params: { nonce: clientNonce, proof: authProof(TOKEN, 'client', first.params.nonce, clientNonce) } }));
+  ws!.send(JSON.stringify({ jsonrpc: '2.0', id: 'auth', method: 'auth.prove', params: { nonce: clientNonce, proof: authProof(TOKEN, 'client', first.params.nonce, clientNonce, main(port)) } }));
   const answer = await reply;
   assert.equal(answer.id, 'auth');
-  assert.equal(answer.result.proof, authProof(TOKEN, 'runner', first.params.nonce, clientNonce));
+  assert.equal(answer.result.proof, authProof(TOKEN, 'runner', first.params.nonce, clientNonce, main(port)));
   ws!.close();
 
   // A proof made without the token, or the runner's own proof played back.
-  for (const proof of [authProof('wrong-token', 'client', 'x', clientNonce), 'nope']) {
+  for (const proof of [authProof('wrong-token', 'client', 'x', clientNonce, main(port)), 'nope']) {
     const { ws: w, first: f } = await rawConnect(url);
     const closed = new Promise<number>((r) => w!.once('close', (code) => r(code)));
-    w!.send(JSON.stringify({ jsonrpc: '2.0', id: 'auth', method: 'auth.prove', params: { nonce: clientNonce, proof: proof === 'nope' ? authProof(TOKEN, 'runner', f.params.nonce, clientNonce) : proof } }));
+    w!.send(JSON.stringify({ jsonrpc: '2.0', id: 'auth', method: 'auth.prove', params: { nonce: clientNonce, proof: proof === 'nope' ? authProof(TOKEN, 'runner', f.params.nonce, clientNonce, main(port)) : proof } }));
     assert.equal(await closed, 4401);
   }
 
@@ -198,7 +203,7 @@ test('reconnecting after an outage: the impostor that held the port gets nothing
 });
 
 test('before auth: frames over 64 KiB are refused, and only so many sockets may wait', async () => {
-  const { server, url } = await serve({ maxPendingAuth: 3 });
+  const { server, url, port } = await serve({ maxPendingAuth: 3 });
   // A big frame is closed with 1009 by the frame limit, before the runner
   // reads (let alone parses) any of it.
   const big = await rawConnect(url);
@@ -218,15 +223,18 @@ test('before auth: frames over 64 KiB are refused, and only so many sockets may 
   const w = waiting[0]!;
   const n = newNonce();
   const proved = new Promise<any>((r) => w.ws!.once('message', (d) => r(JSON.parse(d.toString()))));
-  w.ws!.send(JSON.stringify({ jsonrpc: '2.0', id: 'auth', method: 'auth.prove', params: { nonce: n, proof: authProof(TOKEN, 'client', w.first.params.nonce, n) } }));
+  w.ws!.send(JSON.stringify({ jsonrpc: '2.0', id: 'auth', method: 'auth.prove', params: { nonce: n, proof: authProof(TOKEN, 'client', w.first.params.nonce, n, main(port)) } }));
   assert.ok((await proved).result.proof);
   const next = await rawConnect(url);
   assert.equal(next.first?.method, 'auth.challenge');
-  // So does one refused, at once, even if it never answers the close.
+  // So does one refused, once it's gone: within a second even if it never
+  // answers the close, and not before, so refused sockets can't pile up.
   assert.equal((await rawConnect(url)).status, 503);
   (waiting[1]!.ws as any)._socket.removeAllListeners('data');
   waiting[1]!.ws!.send('not json');
   await new Promise((r) => setTimeout(r, 50));
+  assert.equal((await rawConnect(url)).status, 503, 'still counted until it has gone');
+  await patiently(() => (server as any).pendingAuth() < 3);
   const after = await rawConnect(url);
   assert.equal(after.first?.method, 'auth.challenge');
   for (const x of [...waiting, next, after]) x.ws?.terminate();
@@ -248,11 +256,97 @@ test('once authenticated, a client can send big frames and gets big transcript p
   await server.close();
 });
 
+// Whatever holds port P passing everything through to a real runner on
+// another port, as something that took the main port while the runner was
+// down could with a draining runner's.
+async function relay(backend: string) {
+  const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+  await new Promise<void>((r) => wss.once('listening', () => r()));
+  const backendCloses: number[] = [];
+  wss.on('connection', (front) => {
+    const back = new WebSocket(backend);
+    const early: string[] = [];
+    back.on('open', () => early.splice(0).forEach((m) => back.send(m)));
+    back.on('message', (d) => front.readyState === WebSocket.OPEN && front.send(d.toString()));
+    front.on('message', (d) => (back.readyState === WebSocket.OPEN ? back.send(d.toString()) : early.push(d.toString())));
+    back.on('close', (code) => {
+      backendCloses.push(code);
+      front.terminate();
+    });
+    front.on('close', () => back.terminate());
+  });
+  const port = (wss.address() as { port: number }).port;
+  const close = () => {
+    for (const ws of wss.clients) ws.terminate();
+    return new Promise<void>((r) => wss.close(() => r()));
+  };
+  return { url: `ws://127.0.0.1:${port}/rpc`, backendCloses, close };
+}
+
+test('a challenge relayed from a runner on another port can\'t be answered: the proofs are bound to the port and kind of server', async () => {
+  const drain = await serve({ onlyOwn: true });
+  const other = await serve();
+  for (const backend of [drain, other]) {
+    const r = await relay(backend.url);
+    await assert.rejects(RunnerClient.connect(r.url, TOKEN), /isn't the runner|prove|closed|accept/i);
+    const { connectRpc } = await import(new URL('../../scripts/rpc-client.mjs', import.meta.url).href);
+    await assert.rejects(connectRpc(Number(new URL(r.url).port), TOKEN, 1000));
+    await patiently(() => r.backendCloses.length >= 2);
+    assert.deepEqual(r.backendCloses, [4401, 4401], 'the real runner turned the relayed proof down');
+    await r.close();
+  }
+  // Straight to them, each is fine; the drain server only for a client
+  // that meant to reach one (the primary, in a handover).
+  (await RunnerClient.connect(other.url, TOKEN)).close();
+  (await RunnerClient.connect(drain.url, TOKEN, { server: 'drain' })).close();
+  await assert.rejects(RunnerClient.connect(drain.url, TOKEN));
+  await drain.server.close();
+  await other.server.close();
+});
+
+// A bare upgrade, then a text frame header that says 65,537 bytes, and then
+// nothing: no payload, no answer to the close.
+function oversizedFrame(port: number): Promise<net.Socket> {
+  return new Promise((resolve, reject) => {
+    const sock = net.connect(port, '127.0.0.1', () => {
+      sock.write(`GET /rpc HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ${crypto.randomBytes(16).toString('base64')}\r\nSec-WebSocket-Version: 13\r\n\r\n`);
+    });
+    sock.once('data', (d) => {
+      if (!d.toString('latin1').startsWith('HTTP/1.1 101')) return reject(new Error(d.toString('latin1').split('\r\n')[0]));
+      const head = Buffer.alloc(14);
+      head[0] = 0x81;
+      head[1] = 0x80 | 127;
+      head.writeBigUInt64BE(65537n, 2);
+      sock.write(head);
+      resolve(sock);
+    });
+    sock.on('error', () => {});
+  });
+}
+
+test('a socket refused for an oversized frame is cut off at once and counts as waiting until it\'s gone', async () => {
+  const { server, port } = await serve({ maxPendingAuth: 1 });
+  const pending = () => (server as any).pendingAuth() as number;
+  for (let i = 0; i < 4; i++) {
+    const sock = await oversizedFrame(port);
+    const t0 = Date.now();
+    await new Promise((r) => sock.once('close', r));
+    assert.ok(Date.now() - t0 < 1000, 'terminated, not left in ws\'s 30 s close');
+    await patiently(() => pending() === 0);
+  }
+  // While one is still there, the next is turned away.
+  const held = await rawConnect(`ws://127.0.0.1:${port}/rpc`);
+  assert.equal(pending(), 1);
+  assert.equal((await rawConnect(`ws://127.0.0.1:${port}/rpc`)).status, 503);
+  held.ws!.terminate();
+  await server.close();
+});
+
 test('proofs match the Mac app\'s (RunnerAuthTests.swift)', () => {
   const r = 'a'.repeat(64);
   const c = '0123456789abcdef'.repeat(4);
-  assert.equal(authProof('test-token-0123456789', 'client', r, c), '785cdd0bc38e9e1390f3652a9e78830d55cbf6f11e686c39d8da357a86c976ed');
-  assert.equal(authProof('test-token-0123456789', 'runner', r, c), 'c7f8ef4ebbf91a047c8b45b185025c3d0aab96a68b0d371bb34130316e3493ad');
+  assert.equal(authProof('test-token-0123456789', 'client', r, c, main(8797)), '3ff1854cab19b025f45ba2df4f40da330a65cee664c32eb9c3a69e471b570a0a');
+  assert.equal(authProof('test-token-0123456789', 'runner', r, c, main(8797)), '8230a5ad1a4a1ddeab7cee6ffcd1a4ab7b4926a1b8a1fe23eeccd12faef46d5a');
 });
 
 test('health endpoint answers without a token', async () => {

@@ -1,6 +1,6 @@
 // Small JSON-RPC client for the runner, used by the tb CLI and the tests.
 import { WebSocket } from 'ws';
-import { answerChallenge, RunnerNotProvedError } from './rpc-auth.ts';
+import { answerChallenge, loopbackPort, RunnerNotProvedError, type AuthServer } from './rpc-auth.ts';
 
 type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void };
 
@@ -24,6 +24,13 @@ export type RunnerClientOptions = {
   // from what a server says (docs/protocol.md, "Auth").
   legacyHeader?: boolean;
   authTimeoutMs?: number;
+  // The kind of server this means to reach, which the proofs are bound to:
+  // 'drain' for a draining runner's own server (handover.ts), else the
+  // runner's main one.
+  server?: AuthServer;
+  // An already connected socket to speak over (handover.ts checks whose
+  // the other end is before the bearer header goes out on it).
+  socket?: import('node:net').Socket;
 };
 
 export class RunnerClient {
@@ -42,7 +49,11 @@ export class RunnerClient {
   // Without one (tests), it resolves when the socket opens.
   constructor(url: string, token?: string, opts: RunnerClientOptions = {}) {
     const legacy = Boolean(token && opts.legacyHeader);
-    this.ws = new WebSocket(url, legacy ? { headers: { Authorization: `Bearer ${token}` } } : undefined);
+    const socket = opts.socket;
+    this.ws = new WebSocket(url, {
+      ...(legacy ? { headers: { Authorization: `Bearer ${token}` } } : {}),
+      ...(socket ? { createConnection: () => socket } : {}),
+    });
     this.opened = new Promise((resolve, reject) => {
       this.ws.once('error', reject);
       this.ws.once('close', (code) => reject(new Error(code === 4401 ? "the runner didn't accept the token" : `connection closed (${code})`)));
@@ -63,7 +74,7 @@ export class RunnerClient {
         if (!check) {
           let answer: ReturnType<typeof answerChallenge>;
           try {
-            answer = answerChallenge(token, msg, AUTH_ID);
+            answer = answerChallenge(token, msg, { id: AUTH_ID, port: loopbackPort(url), server: opts.server });
           } catch (e) {
             return fail(e as Error);
           }

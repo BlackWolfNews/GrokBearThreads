@@ -17,15 +17,21 @@ account on the Mac can bind 127.0.0.1:8797 then) learns nothing it can use.
 
 1. The client connects with no `Authorization` header. The runner's first
    message is
-   `{"jsonrpc":"2.0","method":"auth.challenge","params":{"version":1,"nonce":"<64 hex>"}}`,
-   32 fresh random bytes for this connection.
+   `{"jsonrpc":"2.0","method":"auth.challenge","params":{"version":1,"nonce":"<64 hex>","port":8797}}`:
+   32 fresh random bytes for this connection, and the TCP port it listens on.
 2. The client picks its own 32 random bytes and sends, as its first message,
    `{"jsonrpc":"2.0","id":1,"method":"auth.prove","params":{"nonce":"<client's 64 hex>","proof":"<64 hex>"}}`,
    where `proof` is HMAC-SHA256, keyed with the token's UTF-8 bytes, of
-   `"threadbear-rpc-auth-v1 client\n" + runnerNonce + "\n" + clientNonce`
-   (lowercase hex throughout).
+   `"threadbear-rpc-auth-v1 client\n" + runnerNonce + "\n" + clientNonce + "\n" + server + " " + port`
+   (lowercase hex throughout). `server` is `primary` for the runner's main
+   server, the one on its port that every client talks to, and `drain` for
+   a draining runner's own (Handovers), which only a primary taking over
+   from it means to reach. `port` is the one the client dialed when it
+   dialed a loopback address, and the challenge's `port` otherwise (another
+   Mac behind `tailscale serve`, where the dialed port is the proxy's).
 3. The runner answers `{"result":{"proof":"<64 hex>"}}`: the same HMAC of
-   `"threadbear-rpc-auth-v1 runner\n" + runnerNonce + "\n" + clientNonce`.
+   `"threadbear-rpc-auth-v1 runner\n" + runnerNonce + "\n" + clientNonce + "\n" + server + " " + port`,
+   with its own kind of server and its own listening port.
    The client checks it (constant time) before it sends or reads anything
    else, and closes the socket when it's wrong or missing.
 
@@ -34,10 +40,17 @@ other's, and each side's fresh nonce means an old proof is no good on a new
 connection. A client never sends the token or a bearer header, not even to a
 server that doesn't send a challenge: it closes instead and says the runner
 didn't prove itself (an impostor could just as well pretend to be an old
-runner). What it can't stop is something that already holds the port
-passing the challenge on to a real runner on another port (a draining one,
-see Handovers): that gets one connection for as long as the client keeps it,
-but never the token.
+runner).
+
+The last line binds the proofs to the connection. Something holding the
+runner's port while it's down could pass a challenge on from a real runner
+on another port (a draining one, say) and pass the client's answer back;
+without it, that would leave it holding a connection the runner had let in.
+With it, the client's proof is for the port it dialed (or, on another Mac,
+for a `primary`), and the runner on the other port, or a draining runner,
+works out a different one and closes the socket. Nothing protects the
+messages after auth beyond that (no encryption on loopback); the binding is
+what keeps a relay from getting that far.
 
 **Before the challenge (old clients).** A runner still takes the two ways
 clients used to authenticate, so an app or `tb` older than the challenge
@@ -52,13 +65,21 @@ runner's included) newer than that. One exception in this release relies on
 them: a new runner taking over from a draining runner whose `drain-<pid>.json`
 has no `"auth": "challenge"` (one that predates it) connects to it with the
 header, because that runner can't answer a challenge and the file, in the
-runner's own data dir, says so; no server can talk a client into it.
+runner's own data dir, says so; no server can talk a client into it. Even
+then the header only goes over a connection whose other end, as `lsof`
+sees it, is an open file of that pid, a process of the same user: the
+draining runner closes its server before its drain file goes, so its port
+can be someone else's while its pid lives on. Anything else counts as the
+draining runner gone.
 
 **Limits before auth.** Until a connection has authenticated, a frame is at
 most 64 KiB (more closes it with 1009), there are 3 seconds to finish, and
 anything but `auth.prove` or `auth` (a binary frame, bad JSON, a wrong
-proof) closes it with 4401. At most 16 connections may be waiting to
-authenticate at once; the next upgrade is turned away with HTTP 503. An
+proof) closes it with 4401, cut off a second later if it doesn't answer the
+close; a frame over the limit, or any other protocol error, is cut off at
+once. At most 16 connections may be waiting to authenticate at once,
+refused ones counting until they've gone; the next upgrade is turned away
+with HTTP 503. An
 upgrade with an `Authorization` header that's wrong is turned away with HTTP
 401 before it becomes a WebSocket. Once authenticated, a frame can be up to
 64 MiB (what the runner accepts; what it sends, like a big
