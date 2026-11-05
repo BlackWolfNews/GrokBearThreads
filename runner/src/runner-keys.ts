@@ -163,14 +163,30 @@ export const SSH_OPTIONS = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '-
 // Threadbear's data dir on the other Mac, as that Mac's shell sees it.
 const REMOTE_HOME = '"$HOME/Library/Application Support/Threadbear"';
 
+// The Convex CLI won't run `env` outside a folder whose package.json lists
+// convex (rotate-owner failed from the data folder, 5 Nov 2026). The repo's
+// own folders would do, but their .env.local names the dev deployment, so
+// it runs in an empty private folder that only says it uses convex: then the
+// deploy key alone picks the deployment.
+export function convexScratchDir(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tb-convex-'));
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'tb-convex-env', private: true, dependencies: { convex: '*' } }));
+  return dir;
+}
+
 const realConvex =
   (home: string): ConvexCli =>
   (args, input) => {
     const env: NodeJS.ProcessEnv = { ...process.env, CONVEX_DEPLOY_KEY: deployKey(home) ?? '' };
     // Only the deploy key picks the deployment.
     delete env.CONVEX_DEPLOYMENT;
-    const r = spawnSync(process.execPath, [CONVEX_BIN, ...args], { cwd: home, env, input, encoding: 'utf8' });
-    return { ok: r.status === 0, out: r.stdout ?? '', err: (r.stderr ?? '').trim() || (r.error ? String(r.error) : '') };
+    const cwd = convexScratchDir();
+    try {
+      const r = spawnSync(process.execPath, [CONVEX_BIN, ...args], { cwd, env, input, encoding: 'utf8' });
+      return { ok: r.status === 0, out: r.stdout ?? '', err: (r.stderr ?? '').trim() || (r.error ? String(r.error) : '') };
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
   };
 
 function deployKey(home: string): string | undefined {

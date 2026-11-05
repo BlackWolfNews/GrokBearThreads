@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { tmpDir } from '../helpers/fakes.ts';
-import { runnerKeysCommand, remoteCommand, REMOTE_ADMIN_CHECK } from '../../src/runner-keys.ts';
+import { runnerKeysCommand, remoteCommand, REMOTE_ADMIN_CHECK, convexScratchDir } from '../../src/runner-keys.ts';
 import { spawnSync } from 'node:child_process';
 
 const URL_ = 'https://opulent-moose-249.ap-southeast-2.convex.cloud';
@@ -434,4 +434,17 @@ test('the remote admin check still finds a panel key name, quotes and all', () =
   const r = spawnSync('/bin/zsh', ['-c', remoteCommand(REMOTE_ADMIN_CHECK)], { env: { HOME: home, PATH: '/usr/bin:/bin' }, encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.stdout.trim().split('\n'), ['panel threadbear-panel-bruce-abc123', 'checked']);
+});
+
+// The Convex CLI's env commands need a folder whose package.json lists
+// convex; rotate-owner ran from the data folder and failed (5 Nov 2026).
+test('the Convex CLI runs from a private folder that lists convex and nothing else', () => {
+  const dir = convexScratchDir();
+  try {
+    assert.equal(fs.statSync(dir).mode & 0o077, 0);
+    assert.deepEqual(fs.readdirSync(dir), ['package.json']);
+    assert.ok(JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).dependencies.convex);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
