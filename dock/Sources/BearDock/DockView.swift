@@ -813,21 +813,25 @@ struct PanelMenu: View {
     @Environment(\.dockContent) private var content
 
     var body: some View {
-        if controller.layout.hiddenTitles.contains(panel) {
-            Button("Show Title", systemImage: "eye") { controller.setTitleHidden(panel, false) }
-        } else {
-            // With tabs the bar has to stay, so say when it'll take effect.
-            Button(tabbed ? "Hide Title When on Its Own" : "Hide Title", systemImage: "eye.slash") { controller.setTitleHidden(panel, true) }
+        Group {
+            if controller.layout.hiddenTitles.contains(panel) {
+                Button("Show Title", systemImage: "eye") { controller.setTitleHidden(panel, false) }
+            } else {
+                // With tabs the bar has to stay, so say when it'll take effect.
+                Button(tabbed ? "Hide Title When on Its Own" : "Hide Title", systemImage: "eye.slash") { controller.setTitleHidden(panel, true) }
+            }
+            if controller.layout.isFloating(panel) {
+                Button("Put Back in Main Window", systemImage: "rectangle.portrait.and.arrow.forward") { controller.putBack(panel) }
+            } else if controller.layout.canFloat(panel) {
+                Button("Open in New Window", systemImage: "macwindow.badge.plus") { controller.openInWindow(panel) }
+            }
+            if content.closable(panel) {
+                Divider()
+                Button("Close \(content.title(panel))", systemImage: "xmark") { controller.close(panel) }
+            }
         }
-        if controller.layout.isFloating(panel) {
-            Button("Put Back in Main Window", systemImage: "rectangle.portrait.and.arrow.forward") { controller.putBack(panel) }
-        } else if controller.layout.canFloat(panel) {
-            Button("Open in New Window", systemImage: "macwindow.badge.plus") { controller.openInWindow(panel) }
-        }
-        if content.closable(panel) {
-            Divider()
-            Button("Close \(content.title(panel))", systemImage: "xmark") { controller.close(panel) }
-        }
+        // macOS hides a SwiftUI menu's icons without this on the items.
+        .labelStyle(.titleAndIcon)
     }
 }
 

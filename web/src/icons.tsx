@@ -59,6 +59,17 @@ export const Archive = () => (
     <path d="M1.8 2.5h12.4v3H1.8zM2.8 5.5v8h10.4v-8M6.3 8.5h3.4" />
   </svg>
 );
+export const Sun = () => (
+  <svg {...base}>
+    <circle cx="8" cy="8" r="2.8" />
+    <path d="M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1" />
+  </svg>
+);
+export const StarOff = () => (
+  <svg {...base}>
+    <path d="M6.6 5 8 1.8l1.9 3.9 4.3.6-2.5 2.4M11.4 11.4l.5 2.5L8 11.6l-3.8 2 .7-4.3-3.1-3 2.6-.4M2 2l12 12" />
+  </svg>
+);
 export const Star = () => (
   <svg {...base}>
     <path d="m8 1.8 1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z" />

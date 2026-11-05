@@ -144,7 +144,7 @@ private struct ScheduleRowView: View {
             }
         }
         .onHover { hovering = $0 }
-        .contextMenu {
+        .iconContextMenu {
             Button("Edit…", systemImage: "pencil") { app.editSchedule(schedule.id) }
             Button("Run now", systemImage: "play") { app.runSchedule(schedule.id) }
             if !schedule.isFinished {

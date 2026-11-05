@@ -174,7 +174,7 @@ private struct ProjectHeader: View {
         .padding(.top, zoomed(12))
         .padding(.bottom, zoomed(2))
         .tip("Open \(project.title)")
-        .contextMenu { ProjectMenu(project: project) }
+        .iconContextMenu { ProjectMenu(project: project) }
         .accessibilityAddTraits(.isHeader)
     }
 
@@ -238,9 +238,9 @@ struct ProjectMenu: View {
         Button(project.notion == nil ? "Add Notion Page…" : "Notion Page…", systemImage: "checklist") { app.linkProjectNotion(project.id) }
         let others = app.projects.filter { $0.id != project.id && !$0.archived }
         if !others.isEmpty {
-            Menu("Merge into", systemImage: "arrow.triangle.merge") {
+            IconMenu("Merge into", systemImage: "arrow.triangle.merge") {
                 ForEach(others) { other in
-                    Button(other.title) { app.mergeProject(project.id, into: other.id) }
+                    Button(other.title, systemImage: "square.stack") { app.mergeProject(project.id, into: other.id) }
                 }
             }
         }

@@ -10,6 +10,7 @@
 #                          [--appearance light|dark] [--size WxH] [--id NAME]
 #   Tools/dev-app.sh do '<json>'... [--timeout S]
 #   Tools/dev-app.sh shot <file.png> [--sheet] [--settings]   (the sheet over it, the Settings window, or with both the sheet over Settings)
+#   Tools/dev-app.sh menu <file.png> '{"x":854,"y":19}'   (a real menu, opened and captured; realMenu in app/README.md)
 #   Tools/dev-app.sh dump [--json]
 #   Tools/dev-app.sh rebuild
 #   Tools/dev-app.sh log [-f] [-n N] [--mock | --automation]
@@ -537,6 +538,24 @@ cmd_do() {
   done
 }
 
+# Opens a real menu and captures its window, the only way to see its icons.
+# It's on the screen for a second, over whatever's in front.
+cmd_menu() {
+  local file="${1:-}" spec="${2:-}"
+  [ -n "$file" ] && [ -n "$spec" ] || die "usage: menu <file.png> '{\"x\":854,\"y\":19}' (see realMenu in README)"
+  case "$file" in /*) ;; *) file="$PWD/$file" ;; esac
+  local idfile; idfile="$(mktemp)"; rm -f "$idfile" "$file"
+  local extra="\"cmd\":\"realMenu\",\"hold\":1.0,\"idFile\":\"$idfile\","
+  cmd_do "{$extra${spec#\{}" &
+  local waiting=$! i
+  for i in $(seq 1 60); do [ -s "$idfile" ] && break; sleep 0.05; done
+  [ -s "$idfile" ] && /usr/sbin/screencapture -o -x -l "$(cat "$idfile")" "$file" >/dev/null 2>&1
+  wait "$waiting"
+  rm -f "$idfile"
+  [ -s "$file" ] || die "no menu shot"
+  echo "menu shot $file"
+}
+
 cmd_shot() {
   local file="" sheet=false settings=false
   while [ $# -gt 0 ]; do
@@ -751,6 +770,7 @@ case "$command" in
   start) cmd_start "$@" ;;
   do) cmd_do "$@" ;;
   shot) cmd_shot "$@" ;;
+  menu) cmd_menu "$@" ;;
   dump) cmd_dump "$@" ;;
   rebuild) cmd_rebuild "$@" ;;
   log) cmd_log "$@" ;;

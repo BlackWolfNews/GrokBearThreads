@@ -406,6 +406,14 @@ public enum CliText {
 
     public static let policies = ["auto", "notify", "off"]
 
+    public static func policySymbol(_ policy: String) -> String {
+        switch policy {
+        case "auto": return "arrow.triangle.2.circlepath"
+        case "notify": return "bell"
+        default: return "nosign"
+        }
+    }
+
     /// "Checked at 9:40 am", "Checked Mon 9:40 am".
     public static func checkedLine(_ clis: [CliStatus], now: Date, calendar: Calendar = .current) -> String? {
         guard let checked = clis.compactMap(\.checkedAt).max() else { return nil }

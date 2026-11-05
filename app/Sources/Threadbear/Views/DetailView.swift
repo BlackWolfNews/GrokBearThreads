@@ -211,7 +211,7 @@ struct ThreadMenuButton: View {
         let homePage = project == nil && pinned == nil && app.showsHomePage
         let session = (pinned ?? app.selection).map { app.session(for: $0) }
         let hasMenu = (thread != nil && !homePage) || project != nil
-        Menu {
+        IconMenu {
             if let project {
                 ProjectMenu(project: project)
             } else if let thread, !homePage {
@@ -461,7 +461,7 @@ private struct ProjectIconButton: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .tip(guessed ? "The librarian put this thread in \(title). Right-click to keep it there or take it out. In \(thread.cwd.abbreviatingHome)" : "\(title), in \(thread.cwd.abbreviatingHome). Click to open the project")
-        .contextMenu {
+        .iconContextMenu {
             Button("Open \(title)", systemImage: "arrow.right.circle") { app.openProjectPage(membership.id) }
             Divider()
             if !membership.pinned {
@@ -470,9 +470,9 @@ private struct ProjectIconButton: View {
             Button("Take it out of \(title)", systemImage: "minus.circle") { app.setProjects(thread.id, remove: [membership.id]) }
             let others = app.projectsToAdd(thread)
             if !others.isEmpty {
-                Menu("Add to another project", systemImage: "plus.square.on.square") {
+                IconMenu("Add to another project", systemImage: "plus.square.on.square") {
                     ForEach(others) { project in
-                        Button(project.title) { app.setProjects(thread.id, add: [project.id]) }
+                        Button(project.title, systemImage: "square.stack") { app.setProjects(thread.id, add: [project.id]) }
                     }
                 }
             }

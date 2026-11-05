@@ -236,8 +236,8 @@ private struct ReviewTitlebarButtons: View {
             }
             icon("arrow.up.backward", "Show the thread this came from", back)
             if session.review.isPending {
-                Menu {
-                    Button("Cancel review", role: .destructive) { confirmingCancel = true }
+                IconMenu {
+                    Button("Cancel review", systemImage: "xmark.circle", role: .destructive) { confirmingCancel = true }
                 } label: { Image(systemName: "ellipsis") }
                     .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().frame(width: 26)
                     .tip("More")

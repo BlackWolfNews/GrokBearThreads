@@ -163,7 +163,7 @@ struct ComposerControls: View {
                 .layoutPriority(1)
                 // Right-click send for later, as Mail and Slack do. Not on
                 // another Mac's thread: its schedules are made from there.
-                .contextMenu {
+                .iconContextMenu {
                     if app.schedulesSupported, remote == nil, !draftAway { Button("Schedule…", systemImage: "clock", action: onSchedule) }
                 }
         }
@@ -275,17 +275,14 @@ struct ThreadSettings {
     /// the message later.
     func plusMenu(attach: @escaping () -> Void, schedule: (() -> Void)? = nil) -> NSMenu {
         let menu = NSMenu()
-        let images = ActionMenuItem("Attach images…", handler: attach)
-        images.image = NSImage(systemSymbolName: "photo", accessibilityDescription: nil)
+        let images = ActionMenuItem("Attach images…", symbol: "photo", handler: attach)
         menu.addItem(images)
-        let folder = NSMenuItem(title: "Folder", action: nil, keyEquivalent: "")
-        folder.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
+        let folder = NSMenuItem(title: "Folder", symbol: "folder", action: nil)
         folder.submenu = folderMenu()
         menu.addItem(folder)
         if let schedule {
             menu.addItem(.separator())
-            let later = ActionMenuItem("Schedule…", handler: schedule)
-            later.image = NSImage(systemSymbolName: "clock", accessibilityDescription: nil)
+            let later = ActionMenuItem("Schedule…", symbol: "clock", handler: schedule)
             menu.addItem(later)
         }
         return menu
@@ -296,12 +293,12 @@ struct ThreadSettings {
         let menu = NSMenu()
         let current = cwd
         for folder in recentFolders(including: current) {
-            let item = ActionMenuItem(folder.abbreviatingHome, checked: folder == current) { setCwd(folder) }
+            let item = ActionMenuItem(folder.abbreviatingHome, symbol: "folder", checked: folder == current) { setCwd(folder) }
             if ComposerChips.sameFolder(folder, logins.defaults.cwd) { item.subtitle = "Default" }
             menu.addItem(item)
         }
         menu.addItem(.separator())
-        menu.addItem(ActionMenuItem("Choose…") { chooseFolder() })
+        menu.addItem(ActionMenuItem("Choose…", symbol: "folder.badge.plus") { chooseFolder() })
         return menu
     }
 
@@ -315,14 +312,12 @@ struct ThreadSettings {
         var folders = app.remoteFolders(runnerId)
         if !current.isEmpty, !folders.contains(current) { folders.insert(current, at: 0) }
         for folder in folders.prefix(8) {
-            let item = ActionMenuItem(folder, checked: folder == current) { setCwd(folder) }
-            item.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
+            let item = ActionMenuItem(folder, symbol: "folder", checked: folder == current) { setCwd(folder) }
             if folder == logins.defaults.cwd { item.subtitle = "Default" }
             menu.addItem(item)
         }
         if !folders.isEmpty { menu.addItem(.separator()) }
-        let other = ActionMenuItem("Other…") { typeRemoteFolder() }
-        other.image = NSImage(systemSymbolName: "character.cursor.ibeam", accessibilityDescription: nil)
+        let other = ActionMenuItem("Other…", symbol: "character.cursor.ibeam") { typeRemoteFolder() }
         menu.addItem(other)
         return menu
     }
@@ -350,21 +345,18 @@ struct ThreadSettings {
     func runnerMenu() -> NSMenu {
         let menu = NSMenu()
         let chosen = app.newThreadRunnerId
-        let here = ActionMenuItem("This Mac", checked: chosen == nil) { app.chooseNewThreadRunner(nil) }
-        here.image = NSImage(systemSymbolName: app.selfRunnerIcon, accessibilityDescription: nil)
+        let here = ActionMenuItem("This Mac", symbol: app.selfRunnerIcon, checked: chosen == nil) { app.chooseNewThreadRunner(nil) }
         menu.addItem(here)
         menu.addItem(.separator())
         for runner in app.remoteRunners {
-            let item = ActionMenuItem(runner.name, checked: chosen == runner.id) { app.chooseNewThreadRunner(runner.id) }
-            item.image = NSImage(systemSymbolName: RunnerIcon.symbol(runner.icon), accessibilityDescription: nil)
+            let item = ActionMenuItem(runner.name, symbol: RunnerIcon.symbol(runner.icon), checked: chosen == runner.id) { app.chooseNewThreadRunner(runner.id) }
             if !runner.online { item.subtitle = "Offline" }
             menu.addItem(item)
         }
         // On another runner there's no "+": its folders are here.
         if draftRunnerId != nil, app.newThreadLogins != nil {
             menu.addItem(.separator())
-            let folder = NSMenuItem(title: "Folder", action: nil, keyEquivalent: "")
-            folder.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
+            let folder = NSMenuItem(title: "Folder", symbol: "folder", action: nil)
             folder.submenu = folderMenu()
             menu.addItem(folder)
         }
@@ -620,8 +612,7 @@ struct ThreadSettings {
         // for Claude (or if a thread is somehow on it already).
         let modes: [PermissionMode] = provider == "claude" || permissionMode == .auto ? [.full, .auto, .ask] : [.full, .ask]
         for mode in modes {
-            let item = ActionMenuItem(mode.composerTitle, checked: permissionMode == mode) { setPermission(mode) }
-            item.image = NSImage(systemSymbolName: mode.composerIcon, accessibilityDescription: nil)
+            let item = ActionMenuItem(mode.composerTitle, symbol: mode.composerIcon, checked: permissionMode == mode) { setPermission(mode) }
             item.subtitle = mode.composerHelp
             menu.addItem(item)
         }

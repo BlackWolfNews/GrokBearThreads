@@ -18,6 +18,17 @@ public struct RepeatChoice: Sendable, Hashable {
             case .custom: return "Custom"
             }
         }
+
+        public var symbol: String {
+            switch self {
+            case .hourly: return "clock"
+            case .daily: return "sun.max"
+            case .weekdays: return "briefcase"
+            case .weekly: return "calendar"
+            case .monthly: return "calendar.badge.clock"
+            case .custom: return "slider.horizontal.3"
+            }
+        }
     }
 
     public var kind: Kind

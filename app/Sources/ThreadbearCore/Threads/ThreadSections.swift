@@ -44,6 +44,14 @@ public enum InboxOrder: String, Sendable, CaseIterable {
         case .oldest: return "Oldest first"
         }
     }
+
+    public var symbol: String {
+        switch self {
+        case .needsYou: return "hand.raised"
+        case .newest: return "arrow.down"
+        case .oldest: return "arrow.up"
+        }
+    }
 }
 
 /// The sidebar's sections.

@@ -12,6 +12,49 @@ extension NSMenuItem {
     }
 }
 
+/// A SwiftUI `Menu` that shows its items' icons. macOS hides them, in every
+/// menu SwiftUI makes, unless `.labelStyle(.titleAndIcon)` is on the items:
+/// on the `Menu` itself does nothing, and the item still reports an image,
+/// so nothing but looking at the open menu shows it (Mike, 5 Nov; the icons
+/// added on 28 Oct never showed). MenuIconsTests holds every menu to this.
+struct IconMenu<Items: View, Title: View>: View {
+    @ViewBuilder let content: () -> Items
+    @ViewBuilder let label: () -> Title
+
+    var body: some View {
+        Menu {
+            content().labelStyle(.titleAndIcon)
+        } label: {
+            label()
+        }
+    }
+}
+
+extension IconMenu where Title == Label<Text, Image> {
+    /// A submenu. It needs the style as well: it doesn't reach down from the
+    /// menu it's in.
+    init(_ title: String, systemImage: String, @ViewBuilder content: @escaping () -> Items) {
+        self.content = content
+        self.label = { Label(title, systemImage: systemImage) }
+    }
+}
+
+/// Menu bar items with their icons showing (see `IconMenu`).
+struct IconMenuItems<Items: View>: View {
+    @ViewBuilder let items: () -> Items
+
+    var body: some View {
+        items().labelStyle(.titleAndIcon)
+    }
+}
+
+extension View {
+    /// `.contextMenu` with its items' icons showing (see `IconMenu`).
+    func iconContextMenu<Items: View>(@ViewBuilder _ items: @escaping () -> Items) -> some View {
+        contextMenu { items().labelStyle(.titleAndIcon) }
+    }
+}
+
 /// Keeps the AppKit view behind a chip or button so its menu can open from
 /// it: a plain Button that pops an NSMenu. The Hibernate moon moved to this
 /// from SwiftUI's `Menu` on 31 Oct, when its menu stopped showing; the cause
@@ -103,11 +146,12 @@ struct MenuAnchorView: NSViewRepresentable {
 final class ActionMenuItem: NSMenuItem {
     private let handler: () -> Void
 
-    init(_ title: String, checked: Bool = false, handler: @escaping () -> Void) {
+    init(_ title: String, symbol: String, checked: Bool = false, handler: @escaping () -> Void) {
         self.handler = handler
         super.init(title: title, action: #selector(run), keyEquivalent: "")
         target = self
         state = checked ? .on : .off
+        image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
     }
 
     required init(coder: NSCoder) { fatalError() }

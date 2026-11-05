@@ -534,21 +534,18 @@ private struct ConvexPanel: View {
                             .lineLimit(1)
                             .tip(convex.team.map { "Convex project \(project), team \($0)" } ?? "Convex project \(project)")
                     }
-                    Menu {
+                    IconMenu {
                         ForEach(choices, id: \.deployment) { choice in
-                            Button {
-                                pool.selectConvex(choice.deployment, for: convex)
-                            } label: {
-                                if selected == choice.deployment {
-                                    Label("\(choice.label) · \(choice.deployment)", systemImage: "checkmark")
-                                } else {
-                                    Text("\(choice.label) · \(choice.deployment)")
-                                }
-                            }
+                            // A real tick beside the icon: the tick used to
+                            // be the icon, so it was hidden along with all of them.
+                            Toggle("\(choice.label) · \(choice.deployment)", systemImage: "server.rack", isOn: Binding(
+                                get: { selected == choice.deployment },
+                                set: { _ in pool.selectConvex(choice.deployment, for: convex) }
+                            ))
                             .tip("Show \(choice.deployment) in this panel")
                         }
                         Divider()
-                        Button("Refresh deployments") { refresh += 1 }
+                        Button("Refresh deployments", systemImage: "arrow.clockwise") { refresh += 1 }
                             .tip("Look up this project's development and production deployments again")
                     } label: {
                         Text(label)
@@ -1038,7 +1035,7 @@ private struct ListPanel: View {
         return PaneRow(icon: ListPanel.icon(item), iconColor: ListPanel.colour(item.tone), title: item.title,
                        trailingSymbol: item.tone == .done && item.icon != nil ? "checkmark" : nil,
                        detail: item.detail, reservesIcon: reservesIcon, action: open)
-            .contextMenu {
+            .iconContextMenu {
                 if let path = item.path {
                     FileMenu(path: path, thread: thread, title: item.title)
                 } else if let link {

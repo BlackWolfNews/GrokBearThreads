@@ -252,11 +252,14 @@ private struct CliRow: View {
                 // A menu, not a segmented control: two rows of three
                 // buttons were most of the popover's noise, and the choice
                 // is set once and left.
-                Menu {
+                IconMenu {
                     ForEach(CliText.policies, id: \.self) { policy in
-                        Button { app.setCliPolicy(cli.provider, policy) } label: {
-                            if policy == cli.policy { Label(CliText.policyTitle(policy), systemImage: "checkmark") } else { Text(CliText.policyTitle(policy)) }
-                        }
+                        // A real tick beside the icon: the tick used to be
+                        // the icon, so it was hidden along with all of them.
+                        Toggle(CliText.policyTitle(policy), systemImage: CliText.policySymbol(policy), isOn: Binding(
+                            get: { policy == cli.policy },
+                            set: { _ in app.setCliPolicy(cli.provider, policy) }
+                        ))
                     }
                 } label: {
                     Text("Updates: " + CliText.policyTitle(cli.policy))

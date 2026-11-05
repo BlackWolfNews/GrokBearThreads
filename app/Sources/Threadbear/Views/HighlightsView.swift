@@ -184,7 +184,7 @@ struct HighlightsView: View {
             app.editSchedule(row.id)
         }
         .tip("Edit the schedule")
-        .contextMenu {
+        .iconContextMenu {
             Button("Edit", systemImage: "pencil") { app.editSchedule(row.id) }
             Button("Show all schedules", systemImage: "clock") { app.showSchedules() }
         }
@@ -236,7 +236,7 @@ struct HighlightsView: View {
                        titleTruncation: item.path == nil ? .tail : .middle,
                        action: isCommit ? nil : { app.open(item, in: thread, external: false) })
             .fileDrag(item.path.map(URL.init(fileURLWithPath:)) ?? item.link)
-            .contextMenu {
+            .iconContextMenu {
                 if let path = item.path {
                     FileMenu(path: path, thread: thread, title: item.title)
                 } else if let url = item.link {
@@ -255,7 +255,7 @@ struct HighlightsView: View {
             if let url = link.link { app.openLink(url, title: link.title, in: thread) }
         }
         .tip("Open \(address)")
-        .contextMenu {
+        .iconContextMenu {
             if let url = link.link { LinkMenu(url: url, thread: thread, title: link.title) }
         }
     }
@@ -279,7 +279,7 @@ struct HighlightsView: View {
                 }
                 .tip("Open in its app")
                 .fileDrag(URL(fileURLWithPath: path))
-                .contextMenu { FileMenu(path: path, thread: thread, title: (path as NSString).lastPathComponent) }
+                .iconContextMenu { FileMenu(path: path, thread: thread, title: (path as NSString).lastPathComponent) }
             }
         }
     }
@@ -549,7 +549,7 @@ struct LinkMenu: View {
         if PreviewRules.isWebPage(url) {
             Divider()
             Picker(selection: $click) {
-                ForEach(WebLinkAction.allCases, id: \.self) { Label($0.title, systemImage: $0.symbol).tag($0) }
+                ForEach(WebLinkAction.allCases, id: \.self) { Label($0.title, systemImage: $0.symbol).labelStyle(.titleAndIcon).tag($0) }
             } label: {
                 Label("Default", systemImage: "cursorarrow.click")
             }

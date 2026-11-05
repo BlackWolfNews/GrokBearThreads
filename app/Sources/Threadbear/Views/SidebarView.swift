@@ -297,12 +297,12 @@ private struct InboxOrderMenu: View {
     @State private var hovering = false
 
     var body: some View {
-        Menu {
+        IconMenu {
             Picker("Sort", selection: Binding(
                 get: { app.inboxOrder },
                 set: { order in withAnimation(.snappy(duration: 0.2)) { app.inboxOrder = order } }
             )) {
-                ForEach(InboxOrder.allCases, id: \.self) { Text($0.title).tag($0) }
+                ForEach(InboxOrder.allCases, id: \.self) { Label($0.title, systemImage: $0.symbol).tag($0) }
             }
             .pickerStyle(.inline)
             .labelsHidden()
@@ -753,7 +753,7 @@ struct ThreadRowView: View {
         // The whole title, which the row often cuts short, and where it runs.
         // The status and project marks have their own tips over this one.
         .tip((thread.title.isEmpty ? "Untitled" : thread.title) + "\n" + (place.map { "\($0), in " } ?? "") + thread.cwd.abbreviatingHome)
-        .contextMenu { ThreadMenu(thread: thread) }
+        .iconContextMenu { ThreadMenu(thread: thread) }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         .accessibilityAction { select() }
@@ -1125,11 +1125,11 @@ struct ThreadProjectsMenu: View {
     let thread: ThreadSummary
 
     var body: some View {
-        Menu("Projects", systemImage: "square.stack") {
+        IconMenu("Projects", systemImage: "square.stack") {
             let live = app.projects.filter { !$0.archived }.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
             ForEach(live) { project in
                 let inIt = thread.projects.contains { $0.id == project.id }
-                Toggle(project.title, isOn: Binding(
+                Toggle(project.title, systemImage: "square.stack", isOn: Binding(
                     get: { inIt },
                     set: { on in app.setProjects(thread.id, add: on ? [project.id] : [], remove: on ? [] : [project.id]) }
                 ))
@@ -1145,7 +1145,7 @@ struct SnoozeMenu: View {
     let threadId: String
 
     var body: some View {
-        Menu("Hibernate", systemImage: "moon.zzz") { SnoozeMenuItems(threadId: threadId) }
+        IconMenu("Hibernate", systemImage: "moon.zzz") { SnoozeMenuItems(threadId: threadId) }
     }
 }
 
@@ -1157,7 +1157,7 @@ struct SnoozeMenuItems: View {
 
     var body: some View {
         ForEach(Snooze.presets(now: app.now)) { preset in
-            Button(preset.title) {
+            Button(preset.title, systemImage: preset.symbol) {
                 app.snooze(threadId, until: Snooze.date(for: preset.id, now: Date()))
             }
         }
@@ -1187,31 +1187,28 @@ enum SnoozeNSMenu {
         func allowed() -> Bool { BusyConfirm.allowed(.snooze, threadId: threadId, app: app) }
         let menu = NSMenu()
         for preset in Snooze.presets(now: app.now) {
-            menu.addItem(ActionMenuItem(preset.title) {
+            menu.addItem(ActionMenuItem(preset.title, symbol: preset.symbol) {
                 guard allowed() else { return }
                 app.snooze(threadId, until: Snooze.date(for: preset.id, now: Date()))
             })
         }
         if app.restartPending {
-            let restart = ActionMenuItem(Snooze.untilRestartTitle) {
+            let restart = ActionMenuItem(Snooze.untilRestartTitle, symbol: "arrow.clockwise") {
                 guard allowed() else { return }
                 app.snoozeUntilRestart(threadId)
             }
-            restart.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: nil)
             menu.addItem(restart)
         }
         menu.addItem(.separator())
-        let pick = ActionMenuItem("Pick a time…") {
+        let pick = ActionMenuItem("Pick a time…", symbol: "calendar") {
             guard allowed() else { return }
             SnoozePicker.show(threadId: threadId, app: app)
         }
-        pick.image = NSImage(systemSymbolName: "calendar", accessibilityDescription: nil)
         menu.addItem(pick)
-        let words = ActionMenuItem(WakeWords.menuTitle) {
+        let words = ActionMenuItem(WakeWords.menuTitle, symbol: "text.bubble") {
             guard allowed() else { return }
             WakeWhenPrompt.show(threadId: threadId, app: app)
         }
-        words.image = NSImage(systemSymbolName: "text.bubble", accessibilityDescription: nil)
         menu.addItem(words)
         return menu
     }

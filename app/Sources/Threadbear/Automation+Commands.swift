@@ -468,6 +468,71 @@ extension Automation {
         return "ok " + json(describe(menu, indent: ""))
     }
 
+    /// Opens a real menu for `dev-app.sh menu` to photograph, as nothing
+    /// else can see what a menu draws: SwiftUI's items report an image even
+    /// while they hide it, which is how icons went missing for a week
+    /// (IconMenu). `{"x","y"}` (in the window, from its top left) clicks
+    /// there, `right: true` to right-click; `{"main": "Thread"}` opens that
+    /// menu of the menu bar; `sub` opens one of its submenus instead, once
+    /// the menu's read. The menu's window number goes in the file `idFile`,
+    /// and it stays up `hold` seconds so the shell can capture it (this temp
+    /// app has no Screen Recording permission). Says the items it found.
+    static func realMenu(_ c: [String: Any], window: NSWindow?) -> String {
+        guard let window, let view = window.contentView else { return "error no window" }
+        var titles: [String] = []
+        let idFile = c["idFile"] as? String
+        let hold = c["hold"] as? Double ?? 0.2
+        let sub = c["sub"] as? String
+        var submenu: NSMenu?
+        let watch = NotificationCenter.default.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: nil) { note in
+            guard let menu = note.object as? NSMenu else { return }
+            let isSub = menu === submenu
+            if !isSub {
+                titles = menu.items.map { $0.isSeparatorItem ? "---" : $0.title + ($0.submenu != nil ? " >" : "") }
+                if let sub { submenu = menu.items.first { $0.title == sub }?.submenu }
+            }
+            // Timers: the main queue can't break into a menu's tracking.
+            let opened = Timer(timeInterval: 0.15, repeats: false) { _ in
+                MainActor.assumeIsolated {
+                    guard let idFile, sub == nil || isSub else { return }
+                    // Of the pair it opens, the larger has the menu and its shadow.
+                    let open = NSApp.windows.filter { $0.level.rawValue >= NSWindow.Level.popUpMenu.rawValue && $0.isVisible }
+                    if let top = open.max(by: { $0.frame.width < $1.frame.width }) {
+                        try? String(top.windowNumber).write(toFile: idFile, atomically: true, encoding: .utf8)
+                    }
+                }
+            }
+            RunLoop.main.add(opened, forMode: .common)
+            let close = Timer(timeInterval: sub != nil && !isSub ? 0.2 : hold, repeats: false) { _ in
+                MainActor.assumeIsolated { menu.cancelTrackingWithoutAnimation() }
+            }
+            RunLoop.main.add(close, forMode: .common)
+        }
+        defer { NotificationCenter.default.removeObserver(watch) }
+        if let name = c["main"] as? String {
+            guard let menu = NSApp.mainMenu?.items.first(where: { $0.title == name })?.submenu else { return "error no menu \(name)" }
+            menu.update()
+            menu.popUp(positioning: nil, at: NSPoint(x: view.bounds.midX, y: view.bounds.midY), in: view)
+        } else {
+            guard let x = c["x"] as? Double, let y = c["y"] as? Double else { return "error realMenu needs x and y, or main" }
+            let right = c["right"] as? Bool == true
+            let point = NSPoint(x: x, y: view.bounds.height - y)
+            func event(_ type: NSEvent.EventType, _ number: Int) -> NSEvent? {
+                NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                   windowNumber: window.windowNumber, context: nil, eventNumber: number, clickCount: 1, pressure: 1)
+            }
+            guard let down = event(right ? .rightMouseDown : .leftMouseDown, 1), let up = event(right ? .rightMouseUp : .leftMouseUp, 2) else { return "error no event" }
+            NSApp.postEvent(up, atStart: false)
+            window.sendEvent(down)
+        }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        if let submenu { submenu.popUp(positioning: nil, at: NSPoint(x: view.bounds.midX, y: view.bounds.midY), in: view) }
+        else if sub != nil { return "error no submenu \(sub ?? "") in " + json(titles) }
+        // Menus stuck (MenuWatch): the click opened a popover, no menu to cancel.
+        if titles.isEmpty { MenuPopover.close() }
+        return titles.isEmpty ? "error no menu opened" : "ok " + json(titles)
+    }
+
     /// The popover menus stand in for once macOS stops showing the app's
     /// menus (MenuWatch): `stuck` true makes this run behave as if it had;
     /// `show` (`permission`, `folder`, `plus` or `hibernate`, with `id` for

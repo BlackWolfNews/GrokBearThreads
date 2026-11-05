@@ -5,6 +5,16 @@ public struct SnoozePreset: Sendable, Hashable, Identifiable {
     public var title: String
     public var date: Date
 
+    /// Its icon in a menu.
+    public var symbol: String {
+        switch id {
+        case "evening": return "sunset"
+        case "tomorrow": return "sunrise"
+        case "monday": return "briefcase"
+        default: return "clock"
+        }
+    }
+
     public init(id: String, title: String, date: Date) {
         self.id = id
         self.title = title

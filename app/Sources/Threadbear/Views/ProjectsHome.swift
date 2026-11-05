@@ -124,7 +124,7 @@ private struct ProjectCardView: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .tip("Open \(card.project.title)")
-        .contextMenu { ProjectMenu(project: card.project) }
+        .iconContextMenu { ProjectMenu(project: card.project) }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
     }

@@ -64,7 +64,7 @@ private struct IconButton: View {
     @State private var hovering = false
 
     var body: some View {
-        Menu {
+        IconMenu {
             Button("Choose a Picture…", systemImage: "photo") { app.chooseProjectIcon(project.id) }
             if project.icon?.isChosen == true {
                 Button("Use the Librarian's Icon", systemImage: "books.vertical") { app.setProjectIconAutomatic(project.id) }
@@ -585,7 +585,7 @@ private struct ProjectThreadRow: View {
         .onTapGesture { app.openThread(thread.id) }
         .onHover { hovering = $0 }
         .tip(by)
-        .contextMenu {
+        .iconContextMenu {
             Button("Open", systemImage: "arrow.right.circle") { app.openThread(thread.id) }
             if membership?.pinned == false {
                 Button("Keep it in \(project.title)", systemImage: "pin") { app.setProjects(thread.id, add: [project.id]) }

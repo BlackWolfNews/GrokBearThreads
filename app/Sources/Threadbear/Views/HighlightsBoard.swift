@@ -253,7 +253,7 @@ private struct BoardCard: View {
         }
         .onHover { hovering = $0 }
         .tip("Mention this card in your message")
-        .contextMenu {
+        .iconContextMenu {
             Button("Mention in Message", systemImage: "text.bubble") { app.mentionInComposer(task, in: thread.id) }
             Button("Open in Notion", systemImage: "arrow.up.forward.square") { openInNotion() }
             if let other {

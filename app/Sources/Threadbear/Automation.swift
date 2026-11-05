@@ -1106,6 +1106,8 @@ enum Automation {
             return composerMenu(c, app: app)
         case "menu-popover":
             return menuPopover(c, app: app)
+        case "realMenu":
+            return realMenu(c, window: window)
         case "drag-space":
             return dragSpace(c)
         case "usage":

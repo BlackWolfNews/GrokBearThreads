@@ -52,102 +52,114 @@ struct ThreadbearApp: App {
         .restorationBehavior(.disabled)
         .commands {
             CommandGroup(after: .appInfo) {
-                // Only while a newer build is staged (AppUpdater).
-                if let staged = updater.staged {
-                    Button("Restart to Update to \(staged.short)") { updater.restartToUpdate() }
+                IconMenuItems {
+                    // Only while a newer build is staged (AppUpdater).
+                    if let staged = updater.staged {
+                        Button("Restart to Update to \(staged.short)", systemImage: "arrow.clockwise") { updater.restartToUpdate() }
+                    }
                 }
             }
             CommandGroup(replacing: .newItem) {
-                Button("New Thread") { app.newThread() }
-                    .keyboardShortcut("n")
+                IconMenuItems {
+                    Button("New Thread", systemImage: "square.and.pencil") { app.newThread() }
+                        .keyboardShortcut("n")
+                }
             }
             // In the View menu, as the Electron agent apps and Safari have
             // it. ⌘= is the key under the + sign, so ⌘+ works without shift.
             CommandGroup(after: .toolbar) {
-                Button("Zoom In") { zoom.zoomIn() }
-                    .keyboardShortcut("=")
-                    .disabled(!zoom.canZoomIn)
-                Button("Zoom Out") { zoom.zoomOut() }
-                    .keyboardShortcut("-")
-                    .disabled(!zoom.canZoomOut)
-                Button("Actual Size") { zoom.reset() }
-                    .keyboardShortcut("0")
-                    .disabled(zoom.isDefault)
-                Divider()
-                // The sidebar's panel, with the key other Mac apps use.
-                Button(app.dock.layout.contains(WindowDock.threads) ? "Hide Threads" : "Show Threads") { app.toggleThreadsPanel() }
-                    .keyboardShortcut("s", modifiers: [.command, .control])
-                // The pane sections (Highlights, a project's panels, Patches)
-                // open in the dock (WindowDock).
-                Button(app.panelsShown ? "Hide Panels" : "Show Panels") { app.togglePanels() }
-                    .keyboardShortcut("p", modifiers: [.command, .option])
-                Button("Reset Panel Layout") { app.dock.setLayout(WindowDock.defaultLayout) }
+                IconMenuItems {
+                    Button("Zoom In", systemImage: "plus.magnifyingglass") { zoom.zoomIn() }
+                        .keyboardShortcut("=")
+                        .disabled(!zoom.canZoomIn)
+                    Button("Zoom Out", systemImage: "minus.magnifyingglass") { zoom.zoomOut() }
+                        .keyboardShortcut("-")
+                        .disabled(!zoom.canZoomOut)
+                    Button("Actual Size", systemImage: "1.magnifyingglass") { zoom.reset() }
+                        .keyboardShortcut("0")
+                        .disabled(zoom.isDefault)
+                    Divider()
+                    // The sidebar's panel, with the key other Mac apps use.
+                    Button(app.dock.layout.contains(WindowDock.threads) ? "Hide Threads" : "Show Threads", systemImage: "sidebar.left") { app.toggleThreadsPanel() }
+                        .keyboardShortcut("s", modifiers: [.command, .control])
+                    // The pane sections (Highlights, a project's panels, Patches)
+                    // open in the dock (WindowDock).
+                    Button(app.panelsShown ? "Hide Panels" : "Show Panels", systemImage: "sidebar.right") { app.togglePanels() }
+                        .keyboardShortcut("p", modifiers: [.command, .option])
+                    Button("Reset Panel Layout", systemImage: "rectangle.3.group") { app.dock.setLayout(WindowDock.defaultLayout) }
+                }
             }
             // Back and forward through the threads and views, as Safari
             // and Finder have them. The mouse's side buttons do the same
             // (MouseNavigation).
             CommandMenu("Go") {
-                Button("Back") { app.goBack() }
-                    .keyboardShortcut("[")
-                    .disabled(!app.canGoBack)
-                Button("Forward") { app.goForward() }
-                    .keyboardShortcut("]")
-                    .disabled(!app.canGoForward)
+                IconMenuItems {
+                    Button("Back", systemImage: "chevron.left") { app.goBack() }
+                        .keyboardShortcut("[")
+                        .disabled(!app.canGoBack)
+                    Button("Forward", systemImage: "chevron.right") { app.goForward() }
+                        .keyboardShortcut("]")
+                        .disabled(!app.canGoForward)
+                }
             }
             // Help has no help book to open: the tour is what there is.
             CommandGroup(replacing: .help) {
-                Button("Take the Tour") { Tour.shared.start() }
-                Button("Finish Setting Up") { app.showSetup() }
+                IconMenuItems {
+                    Button("Take the Tour", systemImage: "map") { Tour.shared.start() }
+                    Button("Finish Setting Up", systemImage: "checklist") { app.showSetup() }
+                }
             }
             CommandMenu("Thread") {
-                Button(app.selectedThread?.isArchived == true ? "Unarchive" : "Archive") { app.toggleArchive() }
-                    .keyboardShortcut("e")
+                IconMenuItems {
+                    Button(app.selectedThread?.isArchived == true ? "Unarchive" : "Archive", systemImage: app.selectedThread?.isArchived == true ? "tray.and.arrow.up" : "archivebox") { app.toggleArchive() }
+                        .keyboardShortcut("e")
+                        .disabled(app.selection == nil)
+                    IconMenu("Hibernate", systemImage: "moon.zzz") {
+                        // Titles follow app.now (so the menu rebuilds as time
+                        // passes); the date is worked out when the item is chosen.
+                        ForEach(Snooze.presets(now: app.now)) { preset in
+                            Button(preset.title, systemImage: preset.symbol) { app.snooze(until: Snooze.date(for: preset.id, now: Date())) }
+                        }
+                        if app.restartPending {
+                            Button(Snooze.untilRestartTitle, systemImage: "arrow.clockwise") { app.snoozeUntilRestart() }
+                        }
+                        Divider()
+                        Button("Pick a time…", systemImage: "calendar") {
+                            if let id = app.selection { SnoozePicker.show(threadId: id, app: app) }
+                        }
+                        Button(WakeWords.menuTitle, systemImage: "text.bubble") {
+                            if let id = app.selection { WakeWhenPrompt.show(threadId: id, app: app) }
+                        }
+                    }
                     .disabled(app.selection == nil)
-                Menu("Hibernate") {
-                    // Titles follow app.now (so the menu rebuilds as time
-                    // passes); the date is worked out when the item is chosen.
-                    ForEach(Snooze.presets(now: app.now)) { preset in
-                        Button(preset.title) { app.snooze(until: Snooze.date(for: preset.id, now: Date())) }
-                    }
-                    if app.restartPending {
-                        Button(Snooze.untilRestartTitle) { app.snoozeUntilRestart() }
-                    }
+                    Button("Stop", systemImage: "stop.circle") { app.interrupt() }
+                        .keyboardShortcut(".")
+                        .disabled(app.selectedThread?.status.isBusy != true)
                     Divider()
-                    Button("Pick a time…") {
-                        if let id = app.selection { SnoozePicker.show(threadId: id, app: app) }
+                    Button("Copy Transcript as Markdown", systemImage: "doc.plaintext") {
+                        if let id = app.selection { app.session(for: id).copyTranscript() }
                     }
-                    Button(WakeWords.menuTitle) {
-                        if let id = app.selection { WakeWhenPrompt.show(threadId: id, app: app) }
-                    }
+                    .keyboardShortcut("c", modifiers: [.command, .shift])
+                    .disabled(app.selection == nil)
+                    Divider()
+                    // ⌘1 to ⌘4 in the activity bar's order, as VS Code numbers
+                    // its views. Hibernating and Archive are sections of the
+                    // inbox now: these unfold them.
+                    Button("Show Inbox", systemImage: "tray") { app.sidebarMode = .inbox }
+                        .keyboardShortcut("1")
+                    Button("Show Scheduled", systemImage: "clock") { app.showSchedules() }
+                        .keyboardShortcut("2")
+                        .disabled(!app.schedulesSupported)
+                    Button("Show Projects", systemImage: "square.stack") { app.showProjects() }
+                        .keyboardShortcut("3")
+                        .disabled(!app.projectsSupported)
+                    Button("Show Librarian", systemImage: "books.vertical") { app.showLibrarian() }
+                        .keyboardShortcut("4")
+                        .disabled(!app.projectsSupported)
+                    Divider()
+                    Button("Show Hibernating", systemImage: "moon.zzz") { app.showHibernating() }
+                    Button("Show Archived", systemImage: "archivebox") { app.showArchive() }
                 }
-                .disabled(app.selection == nil)
-                Button("Stop") { app.interrupt() }
-                    .keyboardShortcut(".")
-                    .disabled(app.selectedThread?.status.isBusy != true)
-                Divider()
-                Button("Copy Transcript as Markdown") {
-                    if let id = app.selection { app.session(for: id).copyTranscript() }
-                }
-                .keyboardShortcut("c", modifiers: [.command, .shift])
-                .disabled(app.selection == nil)
-                Divider()
-                // ⌘1 to ⌘4 in the activity bar's order, as VS Code numbers
-                // its views. Hibernating and Archive are sections of the
-                // inbox now: these unfold them.
-                Button("Show Inbox") { app.sidebarMode = .inbox }
-                    .keyboardShortcut("1")
-                Button("Show Scheduled") { app.showSchedules() }
-                    .keyboardShortcut("2")
-                    .disabled(!app.schedulesSupported)
-                Button("Show Projects") { app.showProjects() }
-                    .keyboardShortcut("3")
-                    .disabled(!app.projectsSupported)
-                Button("Show Librarian") { app.showLibrarian() }
-                    .keyboardShortcut("4")
-                    .disabled(!app.projectsSupported)
-                Divider()
-                Button("Show Hibernating") { app.showHibernating() }
-                Button("Show Archived") { app.showArchive() }
             }
         }
         // ⌘, (the app menu's Settings…): the runner's settings.

@@ -367,10 +367,10 @@ function ThreadView({ token, threadId }: { token: string; threadId: string }) {
         <ShareControl token={token} threadId={threadId} share={t.share} preview={previewOf(t.title, messages, pictures)} />
         <MoreMenu
           items={[
-            { label: 'Copy link', run: () => void navigator.clipboard.writeText(location.origin + location.pathname) },
-            { label: t.starredAt ? 'Unstar' : 'Star', run: () => void act({ star: !t.starredAt }) },
-            t.view === 'hibernating' || t.snoozedUntil ? { label: 'Wake', run: () => void act({ wake: true }) } : t.view === 'inbox' ? { label: 'Hibernate', run: () => void act({ snooze: { untilRestart: true } }) } : null,
-            t.view === 'den' ? { label: 'Bring back', run: () => void act({ unarchive: true }) } : { label: 'Archive', run: () => void act({ archive: true }) },
+            { label: 'Copy link', icon: <Icon.Link />, run: () => void navigator.clipboard.writeText(location.origin + location.pathname) },
+            { label: t.starredAt ? 'Unstar' : 'Star', icon: t.starredAt ? <Icon.StarOff /> : <Icon.Star />, run: () => void act({ star: !t.starredAt }) },
+            t.view === 'hibernating' || t.snoozedUntil ? { label: 'Wake', icon: <Icon.Sun />, run: () => void act({ wake: true }) } : t.view === 'inbox' ? { label: 'Hibernate', icon: <Icon.Moon />, run: () => void act({ snooze: { untilRestart: true } }) } : null,
+            t.view === 'den' ? { label: 'Bring back', icon: <Icon.Inbox />, run: () => void act({ unarchive: true }) } : { label: 'Archive', icon: <Icon.Archive />, run: () => void act({ archive: true }) },
           ]}
         />
       </header>
@@ -409,7 +409,7 @@ function ThreadView({ token, threadId }: { token: string; threadId: string }) {
   );
 }
 
-function MoreMenu({ items }: { items: ({ label: string; run: () => void } | null)[] }) {
+function MoreMenu({ items }: { items: ({ label: string; icon: ReactNode; run: () => void } | null)[] }) {
   const ref = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
     const close = (e: MouseEvent) => {
@@ -433,6 +433,7 @@ function MoreMenu({ items }: { items: ({ label: string; run: () => void } | null
                 if (ref.current) ref.current.open = false;
               }}
             >
+              {i.icon}
               {i.label}
             </button>
           ) : null,

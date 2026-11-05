@@ -51,9 +51,9 @@ struct ActionChips: View {
             }
             if !more.isEmpty {
                 ActionShelfTab {
-                    Menu {
+                    IconMenu {
                         ForEach(more) { action in
-                            Button(action.title) { app.runAction(action, in: thread.id) }
+                            Button(action.title, systemImage: "bolt") { app.runAction(action, in: thread.id) }
                                 .disabled(app.isRunning(action: action, in: thread.id))
                         }
                     } label: {

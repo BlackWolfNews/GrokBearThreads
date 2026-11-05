@@ -155,15 +155,15 @@ private struct ModelSettings: View {
                     Section {
                         Picker("Run on", selection: poolBinding(settings)) {
                             ForEach(claudePools) { pool in
-                                Text(pool.title).tag(Optional(pool.id))
+                                Label(pool.title, systemImage: Pools.symbol(pool, accounts: app.accounts)).labelStyle(.titleAndIcon).tag(Optional(pool.id))
                             }
                             // A pool deleted since it was picked, so the
                             // picker still says what's set.
                             if let id = settings.models.pool, !claudePools.contains(where: { $0.id == id }) {
-                                Text("\(id), which has no Claude login").tag(Optional(id))
+                                Label("\(id), which has no Claude login", systemImage: "exclamationmark.triangle").labelStyle(.titleAndIcon).tag(Optional(id))
                             }
                             Divider()
-                            Text("None").tag(String?.none)
+                            Label("None", systemImage: "nosign").labelStyle(.titleAndIcon).tag(String?.none)
                         }
                         .tip("Which pool's Claude logins write titles and do the librarian's work")
                     } header: {

@@ -117,7 +117,7 @@ struct ScheduleEditor: View {
                     Picker("Repeat", selection: $state.repeatChoice.kind) {
                         ForEach(RepeatChoice.Kind.allCases) { kind in
                             if kind == .custom { Divider() }
-                            Text(kind.title).tag(kind)
+                            Label(kind.title, systemImage: kind.symbol).labelStyle(.titleAndIcon).tag(kind)
                         }
                     }
                     .labelsHidden()
@@ -271,11 +271,12 @@ struct ScheduleEditor: View {
         let others = app.runners.filter { !$0.isSelf }
         if state.isNew, !others.isEmpty {
             Picker("Runs on", selection: $state.runnerId) {
-                Label("This Mac", systemImage: app.selfRunnerIcon).tag(String?.none)
+                Label("This Mac", systemImage: app.selfRunnerIcon).labelStyle(.titleAndIcon).tag(String?.none)
                 Divider()
                 ForEach(others) { runner in
                     // Still a choice: it runs once that Mac is back.
                     Label(runner.online ? runner.name : "\(runner.name) (offline)", systemImage: RunnerIcon.symbol(runner.icon))
+                        .labelStyle(.titleAndIcon)
                         .tag(Optional(runner.id))
                 }
             }
@@ -357,9 +358,9 @@ private struct FolderMenu: View {
     @Binding var cwd: String
 
     var body: some View {
-        Menu {
+        IconMenu {
             ForEach(recent, id: \.self) { folder in
-                Button(folder.abbreviatingHome) { cwd = folder }
+                Button(folder.abbreviatingHome, systemImage: "folder") { cwd = folder }
             }
             Divider()
             Button("Choose…", systemImage: "folder.badge.plus") { choose() }

@@ -48,7 +48,7 @@ struct ThreadShareMenu: View {
     let link: URL
 
     var body: some View {
-        Menu("Share", systemImage: "square.and.arrow.up") {
+        IconMenu("Share", systemImage: "square.and.arrow.up") {
             Button("Open on the web", systemImage: "safari") { NSWorkspace.shared.open(link) }
             Button("Copy web link", systemImage: "link") { app.copyToPasteboard(link.absoluteString) }
             Divider()
@@ -100,7 +100,7 @@ struct SharePopover: View {
 
             Picker(selection: Binding(get: { access }, set: { change(to: $0) })) {
                 ForEach(ThreadShare.Access.allCases, id: \.self) { a in
-                    Label(ShareText.title(a), systemImage: ShareText.symbol(a)).tag(a)
+                    Label(ShareText.title(a), systemImage: ShareText.symbol(a)).labelStyle(.titleAndIcon).tag(a)
                 }
             } label: {
                 EmptyView()

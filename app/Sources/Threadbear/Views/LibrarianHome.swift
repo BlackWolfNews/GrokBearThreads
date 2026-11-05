@@ -68,16 +68,16 @@ private struct LibrarianSettings: View {
                             .foregroundStyle(.secondary)
                         Picker("Runs on", selection: Binding(get: { settings.models.pool }, set: { app.updateSettings(SettingsUpdate(pool: .some($0))) })) {
                             ForEach(app.claudePools) { pool in
-                                Text(pool.title).tag(Optional(pool.id))
+                                Label(pool.title, systemImage: Pools.symbol(pool, accounts: app.accounts)).labelStyle(.titleAndIcon).tag(Optional(pool.id))
                             }
                             // What's set but can't take a look: None (from
                             // Settings), or a pool deleted since or with no
                             // Claude login. Shown so the picker still says
                             // what's set; not offered.
                             if let id = settings.models.pool, !app.claudePools.contains(where: { $0.id == id }) {
-                                Text("\(id), which has no Claude login").tag(Optional(id))
+                                Label("\(id), which has no Claude login", systemImage: "exclamationmark.triangle").labelStyle(.titleAndIcon).tag(Optional(id))
                             } else if settings.models.pool == nil {
-                                Text("No pool").tag(String?.none)
+                                Label("No pool", systemImage: "nosign").labelStyle(.titleAndIcon).tag(String?.none)
                             }
                         }
                         .labelsHidden()

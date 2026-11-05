@@ -6,8 +6,12 @@ import XCTest
 /// source: AppKit items made with `NSMenuItem(title:symbol:…)` or given an
 /// image straight after, and in SwiftUI's `.contextMenu { }` blocks and the
 /// shared menus (`struct …Menu: View`), a `Button("…")` or `Menu("…")`
-/// with a written title needs `systemImage:`. Items built from data (a
-/// project's name, a snooze preset) are left plain.
+/// with a written title needs `systemImage:`.
+///
+/// That isn't enough to see them: macOS hides a SwiftUI menu's icons unless
+/// `.labelStyle(.titleAndIcon)` is on its items (5 Nov; every one added on
+/// 28 Oct was hidden). So the app's menus have to use `IconMenu` and
+/// `.iconContextMenu`, which put it there.
 final class MenuIconsTests: XCTestCase {
     private func sources() -> [URL] {
         let root = URL(fileURLWithPath: #filePath)
@@ -36,12 +40,28 @@ final class MenuIconsTests: XCTestCase {
         }
     }
 
+    /// BearDock can't see the app's wrappers: its one shared menu, PanelMenu,
+    /// sets the style itself.
+    func testSwiftUIMenusShowTheirIcons() throws {
+        let bare = try NSRegularExpression(pattern: #"(\.contextMenu\s*\{(?!\s*PanelMenu)|^\s*Menu\s*\{|^\s*Menu\(")"#, options: .anchorsMatchLines)
+        var found: [String] = []
+        for file in sources() where !["MenuItems.swift", "DemoApp.swift"].contains(file.lastPathComponent) {
+            let text = try String(contentsOf: file, encoding: .utf8)
+            for match in bare.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+                let line = text.prefix(match.range.location).filter { $0 == "\n" }.count + 1
+                found.append("\(file.lastPathComponent):\(line)")
+            }
+        }
+        XCTAssertEqual(found, [], "macOS hides these menus' icons: use IconMenu or .iconContextMenu")
+    }
+
     func testRightClickMenuItemsHaveIcons() throws {
         let literal = try NSRegularExpression(pattern: #"\b(Button|Menu)\((\"|[^)]*\?\s*\")"#)
         var found: [String] = []
         for file in sources() {
             let text = try String(contentsOf: file, encoding: .utf8)
             let menus = try blocks(in: text, after: #"\.contextMenu\s*\{"#) + blocks(in: text, after: #"struct \w*Menu(Items)?: View \{"#)
+                + blocks(in: text, after: #"IconMenu\s*\{"#) + blocks(in: text, after: #"\.iconContextMenu\s*\{"#)
             for (offset, body) in menus {
                 for line in body.split(separator: "\n") {
                     let code = String(line.split(separator: "//", maxSplits: 1, omittingEmptySubsequences: false).first ?? line)
