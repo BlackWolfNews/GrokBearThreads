@@ -202,4 +202,7 @@
 //    heartbeat; phone:schedule and a `schedule` command, for Pause and Run now.
 //    A runner sends these only to a backend of 45 or later, and a runner from
 //    before fails a schedule command with "unknown command".
-export const API_VERSION = 45;
+// 46: sync:watchRunnersFromMac and sync:runnerStatsList, the Mac app's Runners
+//    panel's figures through the main Mac's runner (runners.stats). Owner key
+//    only.
+export const API_VERSION = 46;

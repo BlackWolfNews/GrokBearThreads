@@ -7,7 +7,7 @@ import { ConvexError, v, type Infer } from 'convex/values';
 import { mutation, query, type QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { threadFields, views } from './schema';
-import { checkPhoneToken, hasLiveKey } from './lib';
+import { checkPhoneToken, hasLiveKey, runnerStatsRows, watchRunnersFor } from './lib';
 import { API_VERSION } from './version';
 import { imagesFrom, phoneImage, replyImagesFrom } from './share';
 import { runnerName } from './sync';
@@ -438,12 +438,7 @@ export const runnerStats = query({
   returns: v.array(v.object({ runnerId: v.string(), at: v.string(), cpuPercent: v.number(), cores: v.number(), memUsed: v.number(), memTotal: v.number(), diskFree: v.number(), diskTotal: v.number(), load1: v.optional(v.number()), uptimeSec: v.number(), machine: v.optional(v.string()), os: v.optional(v.string()) })),
   handler: async (ctx, { token }) => {
     await checkPhoneToken(ctx, token);
-    const out = [];
-    for await (const s of ctx.db.query('runnerStats')) {
-      const { _id, _creationTime, at, ...rest } = s;
-      out.push({ ...rest, at: new Date(at).toISOString() });
-    }
-    return out;
+    return runnerStatsRows(ctx);
   },
 });
 
@@ -462,17 +457,13 @@ export const accounts = query({
 
 // The Runners view is open (API 45): runners report their figures until this
 // lapses. The website calls it every 30 seconds while it's showing, so a closed
-// tab stops them within WATCH_MS.
-const WATCH_MS = 45_000;
+// tab stops them within RUNNER_WATCH_MS (lib.ts).
 export const watchRunners = mutation({
   args: { token: v.string() },
   returns: v.null(),
   handler: async (ctx, { token }) => {
     await checkPhoneToken(ctx, token);
-    const until = Date.now() + WATCH_MS;
-    const row = await ctx.db.query('runnerWatch').first();
-    if (row) await ctx.db.patch(row._id, { until });
-    else await ctx.db.insert('runnerWatch', { until });
+    await watchRunnersFor(ctx);
     return null;
   },
 });

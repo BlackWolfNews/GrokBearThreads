@@ -175,6 +175,9 @@ export const ACCESS: Record<string, Access> = {
   // runner; the figures are only ever its own (API 45).
   runnerWatch: 'shared',
   setRunnerStats: 'own',
+  // Every runner's figures, and waking them all to report: the main Mac's.
+  watchRunnersFromMac: 'owner',
+  runnerStatsList: 'owner',
   setAccounts: 'own',
   upsertAccounts: 'own',
   // Usage readings of logins its own runner has, from any Mac.

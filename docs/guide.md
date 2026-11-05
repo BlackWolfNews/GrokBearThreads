@@ -614,7 +614,11 @@ With more than one runner, Runners (the rack icon near the bottom of the
 left-hand rail) opens a panel with each one: whether it's online and for
 how long, or when it was last heard from, the commit it runs, and the
 threads running there, which open with a click. A grey dot on the icon
-means one is offline or updating.
+means one is offline or updating. Click a runner's name to see its CPU,
+memory and disk, what machine it is and how long that machine has been
+up. A bar turns orange when memory is 90% used or disk is under 10 GB free.
+The figures come every 10 seconds while the details are open and the
+window can be seen; a runner too old to send them says so.
 
 ## Accounts, pools and Usage
 <!-- slug: accounts -->

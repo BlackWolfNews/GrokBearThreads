@@ -468,6 +468,8 @@ async function main(): Promise<void> {
   methods['upstream.status'] = () => ({ upstream: upstream.status() });
   // Other runners' threads, for the Mac app's sidebar (step 6 part 2).
   methods['remoteThreads.list'] = () => sync.remoteThreads();
+  // Every runner's machine figures, for the Mac app's Runners panel.
+  methods['runners.stats'] = async () => ({ stats: await sync.runnerStats() });
   // A file here, for a Mac app showing one of this runner's threads from
   // another Mac (files.ts).
   Object.assign(methods, filesMethods());

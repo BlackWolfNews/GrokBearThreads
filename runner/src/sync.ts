@@ -102,12 +102,16 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 45;
+export const BACKEND_API_VERSION = 46;
 // From this one the main Mac reads and steers other runners' threads through
 // the backend (convex/relay.ts): commands can be `interrupt` or `call`, and a
 // pending approval carries its event's seq (docs/protocol.md, "Other
 // runners' threads through the backend").
 export const RELAY_API_VERSION = 44;
+// From this one the Mac app's Runners panel can ask for every runner's machine
+// figures (runners.stats): sync:watchRunnersFromMac and sync:runnerStatsList,
+// on top of the website's runnerStats rows (API 45).
+export const MAC_RUNNER_STATS_API_VERSION = 46;
 // From this one an owned schedule can carry `poolId`, the pool that picks
 // its threads' login. An older backend's validator would turn it down.
 export const SCHEDULE_POOLS_API_VERSION = 36;
@@ -329,6 +333,23 @@ export class WokeRows {
 }
 
 // One call to the deployment's HTTP API; tests pass a fake.
+// One runner's figures, as sync:runnerStatsList gives them (runner-stats.ts).
+export type RunnerStatsRow = {
+  runnerId: string;
+  at: string;
+  cpuPercent: number;
+  cores: number;
+  memUsed: number;
+  memTotal: number;
+  diskFree: number;
+  diskTotal: number;
+  load1?: number;
+  uptimeSec: number;
+  machine?: string;
+  os?: string;
+};
+const STATS_WATCH_EVERY_MS = 20_000;
+
 export type Post = (kind: 'mutation' | 'query', fn: string, args: Record<string, unknown>) => Promise<unknown>;
 
 // A live query on the deployment (the commands the phone has queued):
@@ -2429,6 +2450,44 @@ export class ConvexSync {
       log: this.deps.log,
     });
     this.stats.start();
+  }
+
+  // ------------------------------------------------------------ runner figures
+
+  private statsWatchSentAt = 0;
+  private statsForbidden = false;
+
+  /**
+   * runners.stats: each runner's latest CPU, memory and disk, for the Mac
+   * app's Runners panel while a runner's details are open. Asking marks the
+   * figures wanted, as the website's Runners view does (runner-stats.ts), so
+   * every runner reports every few seconds until nobody asks for a while.
+   * Empty with sync off, on an older backend, or on a runner key, which
+   * can't see other runners.
+   */
+  async runnerStats(): Promise<RunnerStatsRow[]> {
+    if (!this.running || this.statsForbidden || (this.backendApiVersion ?? 0) < MAC_RUNNER_STATS_API_VERSION) return [];
+    const key = this.deps.key;
+    const now = this.deps.clock.now();
+    // The watch lasts 45 s in the backend; once every 20 s keeps it going
+    // through a slow answer without a write on every ask.
+    if (now - this.statsWatchSentAt >= STATS_WATCH_EVERY_MS) {
+      this.statsWatchSentAt = now;
+      void this.post('mutation', 'sync:watchRunnersFromMac', { key }).catch((e) => {
+        this.statsWatchSentAt = 0;
+        this.deps.log.debug('runner watch failed', { error: String(e) });
+      });
+    }
+    try {
+      const rows = await this.post('query', 'sync:runnerStatsList', { key });
+      return Array.isArray(rows) ? (rows as RunnerStatsRow[]) : [];
+    } catch (e) {
+      if (forbiddenText(e)) {
+        this.statsForbidden = true;
+        return [];
+      }
+      throw e;
+    }
   }
 
   /** remoteThreads.list: other runners' threads, empty with sync off. */

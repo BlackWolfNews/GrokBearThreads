@@ -863,6 +863,7 @@ the summary and then the reply.
 | `schedules.delete` | `{ scheduleId }` | `{}` |
 | `schedules.run` | `{ scheduleId }` | `{ schedule: Schedule, threadId?: string, turnId?: string, queued?: boolean }` runs it now, as if it were due, even when paused. A repeating schedule keeps its `nextRunAt`; a one-off is finished. For a schedule on another runner it answers at once with `queued: true` and no thread: that runner runs it when it next hears (`runRequestedAt` is set until then) |
 | `runners.list` | `{}` | `{ runners: RunnerInfo[] }`, this runner first, then the rest by name. Without a backend, just this runner |
+| `runners.stats` | `{}` | `{ stats: RunnerMachineStats[] }`: each runner's latest machine figures, `{ runnerId, at, cpuPercent, cores, memUsed, memTotal, diskFree, diskTotal, load1?, uptimeSec, machine?, os? }` (bytes; `uptimeSec` is the machine's). Asking marks them wanted (`sync:watchRunnersFromMac`, at most every 20 s), so every runner reports every 10 s until nobody has asked for 45 s. The Mac app asks only while a runner's details are open in the Runners panel and its window can be seen. Empty with sync off, on an older backend, or on a runner key. A runner older than this answers `-32601` |
 | `remoteThreads.list` | `{}` | `RemoteThreads`: other runners' threads for the sidebar (see "Other runners' threads"). Empty with sync off, or before the backend (API 12) has answered. A runner older than this answers `-32601` |
 | `files.read` | `{ path: string, maxBytes?: number, known?: { size, modifiedAt } }` | `{ path, size, modifiedAt, mediaType, data, truncated }` (`data` base64, at most `maxBytes`, default 16 MB, never over 48 MB; `truncated` when the file is longer), or `{ path, unchanged: true, size, modifiedAt }` when `known` matches the file. A file on this runner's Mac, for a Mac app showing one of its threads from another Mac (see "Other runners' threads"). `-32602` for a relative path, a missing file or a folder |
 | `files.list` | `{ path: string }` | `{ path, entries: [{ name, isFolder, hidden, size?, modifiedAt? }], truncated }` (`size` for a file only; `isFolder` follows a symlink; `hidden` is a dotfile; at most 5000 entries, in no set order, `truncated` when the folder has more). A folder on this runner's Mac, for the side pane's folder browser on another Mac (see "Other runners' threads"). `-32602` for a relative path, a missing folder or a file |
@@ -3654,7 +3655,9 @@ the mirror back as state. The Mac app doesn't use it.
   `runnerWatch`. Each runner subscribes to that (`sync:runnerWatch`), and while
   it's in the future sends its machine's CPU, memory and disk every 10 seconds
   to a row of its own (`sync:setRunnerStats`; `runner/src/runner-stats.ts`).
-  With nobody looking nothing's written. The heartbeat carries only `pressure`
+  The Mac app's runner details do the same through the main Mac's runner
+  (API 46, `runners.stats`): `sync:watchRunnersFromMac` and
+  `sync:runnerStatsList`, owner key only. With nobody looking nothing's written. The heartbeat carries only `pressure`
   (`memory` or `disk`, looked for every 5 minutes), which rarely changes, as
   every phone's runner list re-runs when that row does.
 - **Commands.** The phone's mutations (`convex/phone.ts`) add a row to
@@ -4058,6 +4061,8 @@ anyone's); "any runner" is any good key. Anything not sorted is owner only.
 | `scheduleRan` | its own | the schedule's runner |
 | `runnerWatch` | any runner | a time, nothing about any runner |
 | `setRunnerStats` | its own | the `runnerId` it reports for; `machine` and `os` cut to 128 bytes |
+| `watchRunnersFromMac` | owner only | wakes every runner to report |
+| `runnerStatsList` | owner only | every runner's figures |
 | `requestScheduleRun` | its own | the schedule's runner, so only the owner asks another runner to run one |
 | `runnersList` | owner only | every runner's id and name, which a Mac posing as another would want; a runner key's scheduler lists only its own runner |
 | `pendingCommands` | its own | `runnerId` only: `"any"` commands wait for the owner key |

@@ -8,7 +8,7 @@ import type { Doc, Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import { threadFields, views } from './schema';
 import { API_VERSION } from './version';
-import { actAs, checkRunnerId, forbidden, hasLiveKey, runnerAuth, sha256 } from './lib';
+import { actAs, checkRunnerId, forbidden, hasLiveKey, runnerAuth, runnerStatsRows, sha256, watchRunnersFor } from './lib';
 import { cutBytes, docBytes, mayClaim, NAME_CHARS, mayFinish, mayTake, mayTouch, mayUseStorage, mayWrite, nameSkeleton, normalName, ownsCard, SCHEDULE_ID, utf8Bytes, type Caller } from './runnerAccess';
 import { dropWake, seedWakes, syncWake } from './wakes';
 import { issueToken as makeToken, listTokens as allTokens, revokeToken as revokeOne, tokenInfo, tokenKind, MAX_DAYS } from './tokens';
@@ -811,6 +811,31 @@ export const runnerWatch = query({
     await runnerAuth(ctx, key, 'runnerWatch');
     const row = await ctx.db.query('runnerWatch').first();
     return row ? { until: row.until } : null;
+  },
+});
+
+// The Mac app's runner details are open (API 46): the same watch as the
+// website's (phone:watchRunners), through the main Mac's runner. Owner only,
+// as it wakes every runner.
+export const watchRunnersFromMac = mutation({
+  args: { key: v.string() },
+  returns: v.null(),
+  handler: async (ctx, { key }) => {
+    await runnerAuth(ctx, key, 'watchRunnersFromMac');
+    await watchRunnersFor(ctx);
+    return null;
+  },
+});
+
+// Every runner's latest figures for the Mac app's Runners panel (API 46), as
+// phone:runnerStats gives them to the website. Owner only: they're every
+// runner's.
+export const runnerStatsList = query({
+  args: { key: v.string() },
+  returns: v.array(v.object({ runnerId: v.string(), at: v.string(), cpuPercent: v.number(), cores: v.number(), memUsed: v.number(), memTotal: v.number(), diskFree: v.number(), diskTotal: v.number(), load1: v.optional(v.number()), uptimeSec: v.number(), machine: v.optional(v.string()), os: v.optional(v.string()) })),
+  handler: async (ctx, { key }) => {
+    await runnerAuth(ctx, key, 'runnerStatsList');
+    return runnerStatsRows(ctx);
   },
 });
 

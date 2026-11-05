@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
-import { ConvexSync, forBackend, ASKED_API_VERSION, LINKS_API_VERSION, PROJECTS_DIFF_API_VERSION, STARS_API_VERSION, NETWORK_WAIT_API_VERSION, BACKEND_API_VERSION, TURNS_API_VERSION, ICONS_API_VERSION, RUNNER_ICON_API_VERSION, SCHEDULES_API_VERSION, SHARE_API_VERSION, WOKE_API_VERSION, STARTED_BY_API_VERSION, SECTIONS_API_VERSION, MODELS_API_VERSION, REPLY_IMAGES_API_VERSION, REPLY_IMAGES_LOOKBACK_MS, REPLY_IMAGES_SCANS_PER_FLUSH, toAccountDoc, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, convexUploader, pictureName, type ThreadDoc } from '../../src/sync.ts';
+import { ConvexSync, forBackend, ASKED_API_VERSION, LINKS_API_VERSION, PROJECTS_DIFF_API_VERSION, STARS_API_VERSION, NETWORK_WAIT_API_VERSION, BACKEND_API_VERSION, MAC_RUNNER_STATS_API_VERSION, TURNS_API_VERSION, ICONS_API_VERSION, RUNNER_ICON_API_VERSION, SCHEDULES_API_VERSION, SHARE_API_VERSION, WOKE_API_VERSION, STARTED_BY_API_VERSION, SECTIONS_API_VERSION, MODELS_API_VERSION, REPLY_IMAGES_API_VERSION, REPLY_IMAGES_LOOKBACK_MS, REPLY_IMAGES_SCANS_PER_FLUSH, toAccountDoc, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, convexUploader, pictureName, type ThreadDoc } from '../../src/sync.ts';
 import type { Project } from '../../src/protocol.ts';
 import type { ScheduleBackend } from '../../src/schedules.ts';
 import { nullLogger, type Logger } from '../../src/log.ts';
@@ -2020,4 +2020,41 @@ test('a forbidden heartbeat with a new key on disk restarts onto it too', async 
   await tick();
   assert.equal(restarts.length, 1);
   await sync.stop();
+});
+
+test('runners.stats marks the figures wanted at most every 20 s, and is empty where it can\'t be had', async () => {
+  const row = { runnerId: 'r2', at: '2026-11-05T08:00:00.000Z', cpuPercent: 12, cores: 8, memUsed: 4, memTotal: 8, diskFree: 50, diskTotal: 100, uptimeSec: 60 };
+  let forbid = false;
+  const answer = (fn: string) => {
+    if (fn === 'sync:heartbeat') return { apiVersion: MAC_RUNNER_STATS_API_VERSION };
+    if (fn === 'sync:runnerStatsList') {
+      if (forbid) throw Object.assign(new Error('forbidden'), { data: { kind: 'forbidden', message: "This runner's key can't list runners." } });
+      return [row];
+    }
+    return null;
+  };
+  const { h, sync, calls } = setup({ answer });
+  assert.deepEqual(await sync.runnerStats(), [], 'not before it has started');
+  sync.start();
+  await tick();
+  assert.deepEqual(await sync.runnerStats(), [row]);
+  assert.deepEqual(await sync.runnerStats(), [row]);
+  const watches = () => calls.filter((c) => c.fn === 'sync:watchRunnersFromMac').length;
+  assert.equal(watches(), 1, 'one watch for two asks close together');
+  h.clock.advance(21_000);
+  await sync.runnerStats();
+  assert.equal(watches(), 2);
+  forbid = true;
+  assert.deepEqual(await sync.runnerStats(), [], "a runner key can't see the others");
+  const asked = calls.filter((c) => c.fn === 'sync:runnerStatsList').length;
+  await sync.runnerStats();
+  assert.equal(calls.filter((c) => c.fn === 'sync:runnerStatsList').length, asked, 'and stops asking');
+  await sync.stop();
+
+  const old = setup({ answer: (fn) => (fn === 'sync:heartbeat' ? { apiVersion: MAC_RUNNER_STATS_API_VERSION - 1 } : null) });
+  old.sync.start();
+  await tick();
+  assert.deepEqual(await old.sync.runnerStats(), [], 'an older backend has none');
+  assert.equal(old.calls.filter((c) => c.fn === 'sync:runnerStatsList').length, 0);
+  await old.sync.stop();
 });
