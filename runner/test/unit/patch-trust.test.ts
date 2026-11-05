@@ -12,11 +12,20 @@ import { RpcError } from '../../src/protocol.ts';
 
 // A patch file that leaves a mark when it's imported, so a test can tell
 // whether any of its code ran, not just whether its actions came through.
+// Where a test patch says it ran: outside its folder. A file the patch
+// names inside its folder counts towards its hash once it's there (patch
+// trust follows every path a patch names), so a mark there changed the
+// hash the first time it ran. That only showed on Linux: on macOS the temp
+// folder is behind a symlink (/var is /private/var), so the mark's path
+// never looked like it was inside the folder.
+const MARKS = tmpDir();
+
 function writePatch(folder: string, name: string, title: string): { file: string; mark: string } {
   const dir = path.join(folder, '.threadbear', 'patches');
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, `${name}.ts`);
-  const mark = path.join(folder, `${name}-${title.replace(/\W/g, '')}.ran`);
+  const where = crypto.createHash('sha1').update(folder).digest('hex').slice(0, 8);
+  const mark = path.join(MARKS, `${where}-${name}-${title.replace(/\W/g, '')}.ran`);
   fs.writeFileSync(file, `import fs from 'node:fs';\nfs.writeFileSync(${JSON.stringify(mark)}, 'x');\nexport default { actions: [{ title: ${JSON.stringify(title)}, run: "true" }] };\n`);
   // A later version must have a later mtime, or the cache keeps the old one.
   const later = new Date(Date.now() + Math.random() * 1000 + 1000);
