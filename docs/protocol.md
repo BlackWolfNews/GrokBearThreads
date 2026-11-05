@@ -3316,10 +3316,14 @@ type ThreadShare = {
 - As the page is public and a path is only what the agent wrote, a file
   goes up only if it's really a PNG, JPEG, GIF or WebP by its bytes (the
   type sent is the one its bytes say, not its name's), isn't itself a
-  symlink, and is, by its real path, under the thread's folder, the
-  thread's own folder in the data dir (where attachments and tool pictures
-  are copied), `os.tmpdir()` or `/tmp`. Anything else stays on the Mac
-  with a line in the runner log and shows on the page as its alt text.
+  symlink, and is, by its real path, under the thread's folder or the
+  thread's media folder in the data dir (`threads/<id>/media`, where
+  attachments and tool pictures are copied). Not the temp folders, though
+  agents save screenshots there: they hold every app's files, so a
+  Markdown line naming any picture there would publish it. Anything else
+  stays on the Mac with a line in the runner log and shows on the page as
+  its alt text. An agent that wants a picture on a shared page saves it
+  in the thread's folder.
 - The thread's row on the mirror has `share: { access, slug }` (backend
   API 8). An older backend gets the row without it, and gets it once a
   heartbeat says it's new enough.

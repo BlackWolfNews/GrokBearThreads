@@ -99,12 +99,14 @@ function readCapped(file: string): { bytes: Uint8Array } | { skip: string } {
   return { bytes: new Uint8Array(fs.readFileSync(file)) };
 }
 
-// Where a shared thread's pictures may come from: its folder, its own
-// folder in the data dir (media/, where attachments and tool pictures are
-// copied) and the temp folders agents save screenshots in. Anything else
-// is somewhere an agent talked into it could point at to publish a file.
-export function shareRoots(cwd: string | undefined, threadDir: string | undefined): string[] {
-  return [cwd, threadDir, os.tmpdir(), '/tmp'].filter((d): d is string => Boolean(d));
+// Where a shared thread's pictures may come from: its folder, and its
+// media folder in the data dir (where attachments and tool pictures are
+// copied). Anything else is somewhere an agent talked into it could point
+// at to publish a file. Not the temp folders, though agents save
+// screenshots there: they hold every app's, so any picture there was one
+// Markdown line from a public page (Daybreak verify-fix, 5 Nov).
+export function shareRoots(cwd: string | undefined, mediaDir: string | undefined): string[] {
+  return [cwd, mediaDir].filter((d): d is string => Boolean(d));
 }
 
 function under(file: string, dir: string): boolean {
@@ -120,7 +122,7 @@ function realOr(p: string): string {
   }
 }
 
-const OUTSIDE = "it isn't in the thread's folder, its media or a temp folder";
+const OUTSIDE = "it isn't in the thread's folder or its media";
 
 // The bytes of a shared thread's picture and what they really are, or why
 // not. It goes to a public page, so: a file under `roots` (by its real

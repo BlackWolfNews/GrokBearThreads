@@ -1182,14 +1182,18 @@ function pngBytes(w: number, h: number): Buffer {
 }
 
 test('sharing: pictures of a shared thread go to file storage, once each, and go when it stops', async () => {
-  const dir = tmpDir();
-  const pic = path.join(dir, 'chart.png');
+  const h = makeHarness();
+  // In the thread's folder: a picture anywhere else stays on the Mac.
+  const pic = path.join(h.cfg.defaults.cwd, 'chart.png');
   const png = pngBytes(32, 16);
   fs.writeFileSync(pic, png);
+  // And one in a temp folder that isn't the thread's, which never goes
+  // (Daybreak verify-fix, 5 Nov: another app's screenshot was one line away).
+  const other = path.join(tmpDir(), 'Screenshot.png');
+  fs.writeFileSync(other, pngBytes(8, 8));
   const calls: Call[] = [];
   const uploads: string[] = [];
   let stored: { seq: number; path: string }[] = [];
-  const h = makeHarness();
   const sync = new ConvexSync({
     config: { enabled: true, url: 'https://x.convex.cloud', runnerId: 'r1' },
     key: 'k',
@@ -1213,7 +1217,7 @@ test('sharing: pictures of a shared thread go to file storage, once each, and go
   const t = h.runner.create({ text: 'draw it', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
   const s = session(h, t.id);
   s.init();
-  s.text('m1', `Here it is:\n\n![The chart](${pic})\n\nand a [link](https://example.com).`);
+  s.text('m1', `Here it is:\n\n![The chart](${pic})\n\nand a [link](https://example.com). ![Not mine](${other})`);
   s.result('completed');
   await tick();
 
@@ -1254,11 +1258,10 @@ test('sharing: pictures of a shared thread go to file storage, once each, and go
 });
 
 test('sharing: a shared thread seen before it comes across in a handover has its pictures sent once it arrives', async () => {
-  const dir = tmpDir();
-  const pic = path.join(dir, 'shot.png');
-  fs.writeFileSync(pic, pngBytes(4, 4));
   const calls: Call[] = [];
   const h = makeHarness();
+  const pic = path.join(h.cfg.defaults.cwd, 'shot.png');
+  fs.writeFileSync(pic, pngBytes(4, 4));
   const t = h.runner.create({ text: 'look', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
   const s = session(h, t.id);
   s.init();

@@ -177,7 +177,7 @@ test("share images: a text file named .png, a symlink and a picture outside the 
   assert.deepEqual(readShareImage(renamed, [cwd]), { skip: "it isn't a picture" });
   const outside = path.join(elsewhere, 'secret.png');
   fs.writeFileSync(outside, pngHeader(10, 10));
-  assert.deepEqual(readShareImage(outside, [cwd]), { skip: "it isn't in the thread's folder, its media or a temp folder" });
+  assert.deepEqual(readShareImage(outside, [cwd]), { skip: "it isn't in the thread's folder or its media" });
   // A video can't go on the page, which draws with <img>.
   const mp4 = path.join(cwd, 'clip.mp4');
   fs.writeFileSync(mp4, Buffer.concat([Buffer.from([0, 0, 0, 16]), Buffer.from('ftypisom'), Buffer.alloc(4)]));
@@ -185,13 +185,32 @@ test("share images: a text file named .png, a symlink and a picture outside the 
   assert.deepEqual(readShareImage(path.join(cwd, 'gone.png'), [cwd]), { skip: 'the file is gone' });
 });
 
-test("share images: the places are the thread's folder, its data folder and the temp folders", () => {
-  const roots = shareRoots('/Users/ann/dev/app', '/data/threads/t1');
-  assert.ok(roots.includes('/Users/ann/dev/app'));
-  assert.ok(roots.includes('/data/threads/t1'));
-  assert.ok(roots.includes(os.tmpdir()));
-  assert.ok(roots.includes('/tmp'));
-  assert.deepEqual(shareRoots(undefined, undefined), [os.tmpdir(), '/tmp']);
+test("share images: the places are the thread's folder and its media folder, never the temp folders", () => {
+  const roots = shareRoots('/Users/ann/dev/app', '/data/threads/t1/media');
+  assert.deepEqual(roots, ['/Users/ann/dev/app', '/data/threads/t1/media']);
+  assert.deepEqual(shareRoots(undefined, undefined), []);
   // /Users/x/secret.png is in none of them.
-  assert.deepEqual(readShareImage('/Users/x/secret.png', roots), { skip: "it isn't in the thread's folder, its media or a temp folder" });
+  assert.deepEqual(readShareImage('/Users/x/secret.png', roots), { skip: "it isn't in the thread's folder or its media" });
+});
+
+// Daybreak verify-fix (5 Nov): the temp folders were allowed, and they hold
+// every app's screenshots, so Markdown naming one published it. The
+// remediation test: assistant Markdown pointing at a real picture that isn't
+// the thread's makes no public share image, wherever it is.
+test("share images: a real picture in a temp folder that isn't the thread's stays on the Mac", () => {
+  const cwd = tmpDir();
+  const media = tmpDir();
+  for (const dir of [os.tmpdir(), '/tmp']) {
+    const other = fs.mkdtempSync(path.join(dir, 'other-app-'));
+    const shot = path.join(other, 'Screenshot.png');
+    fs.writeFileSync(shot, pngHeader(1440, 900));
+    const [img] = imagesInEvent({ seq: 3, ts: '2026-11-05T00:00:00.000Z', type: 'assistant.text', itemId: 'm', text: `![](${shot})` } as never);
+    assert.equal(img?.path, shot, 'the Markdown names it');
+    assert.deepEqual(readShareImage(img!.path, shareRoots(cwd, media)), { skip: "it isn't in the thread's folder or its media" });
+    fs.rmSync(other, { recursive: true });
+  }
+  // The thread's own media still goes.
+  const own = path.join(media, 'shot.png');
+  fs.writeFileSync(own, pngHeader(2, 2));
+  assert.ok(!('skip' in readShareImage(own, shareRoots(cwd, media))));
 });

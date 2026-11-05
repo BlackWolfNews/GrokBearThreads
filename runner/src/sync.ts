@@ -1744,7 +1744,7 @@ export class ConvexSync {
       if (!up.has(id) && this.sharedNow.get(img.threadId)) {
         // Only real pictures from the thread's own places, typed by their
         // bytes: the page is public, and a path is only what the agent wrote.
-        const roots = shareRoots(this.cwdOf(img.threadId), this.deps.home ? paths.thread(this.deps.home, img.threadId) : undefined);
+        const roots = shareRoots(this.cwdOf(img.threadId), this.deps.home ? paths.media(this.deps.home, img.threadId) : undefined);
         const file = readShareImage(img.path, roots);
         if ('skip' in file) {
           this.deps.log.warn('shared picture not sent', { threadId: img.threadId, path: img.path, why: file.skip });
