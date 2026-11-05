@@ -295,23 +295,30 @@ final class MovingImageView: UIImageView {
         }
     }
 
-    /// On `queue`: decodes frame `index`, shows it, and comes back for the next.
+    /// On `queue`: decodes frame `index`, shows it, and only once it's on
+    /// screen comes back for the next. So there's never more than one decoded
+    /// frame waiting: while the main thread is stuck, the chain waits with it,
+    /// rather than queueing a frame every tick (Codex's second review). The
+    /// frame's time counts from when it was shown, so a stall slows the
+    /// picture down instead of skipping through it.
     nonisolated private func step(_ player: Player, _ run: Run, index: Int, loop: Int) {
         guard !run.stopped, let frame = player.plan.frame(player.source, at: index) else { return }
+        let wraps = index + 1 == player.plan.delays.count
+        let next = wraps ? 0 : index + 1
+        let loop = wraps ? loop + 1 : loop
+        let last = wraps && player.plan.loopCount > 0 && loop >= player.plan.loopCount
+        let delay = player.plan.delays[index]
         DispatchQueue.main.async { [weak self] in
             MainActor.assumeIsolated {
                 guard let self, !run.stopped else { return }
                 self.image = UIImage(cgImage: frame)
             }
-        }
-        var next = index + 1, loop = loop
-        if next == player.plan.delays.count {
-            next = 0
-            loop += 1
-            if player.plan.loopCount > 0, loop >= player.plan.loopCount { return }
-        }
-        Self.queue.asyncAfter(deadline: .now() + player.plan.delays[index]) { [weak self] in
-            self?.step(player, run, index: next, loop: loop)
+            // The next decode is only scheduled from here, after this frame
+            // has been handed over: the one place the chain goes on.
+            guard !last, !run.stopped else { return }
+            Self.queue.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.step(player, run, index: next, loop: loop)
+            }
         }
     }
 }
