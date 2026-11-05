@@ -19,22 +19,34 @@ test('a phone registered with a token gets pushes only while that token is live'
   assert.equal(hasLiveToken(phone, [tok('t1', 'iphone', { revokedAt: now - 1 }), tok('t2', 'iphone')], now), false);
 });
 
-test('an old phone row with only a token name follows any live token of that name', () => {
+test('an old phone row with only a token name gets no pushes, whatever tokens have its name', () => {
+  // Token names aren't unique, so a name can't say which phone a row is:
+  // the phone registers again with its token on its next launch.
   const old = { tokenName: 'iphone' };
-  assert.equal(hasLiveToken(old, [tok('t1', 'iphone', { revokedAt: now - 1 }), tok('t2', 'iphone')], now), true);
-  assert.equal(hasLiveToken(old, [tok('t1', 'iphone', { revokedAt: now - 1 }), tok('t2', 'ipad')], now), false);
-  assert.equal(hasLiveToken(old, [tok('t1', 'iphone', { expiresAt: now - 1 })], now), false);
+  assert.equal(hasLiveToken(old, [tok('t2', 'iphone')], now), false);
+  assert.equal(hasLiveToken(old, [tok('t1', 'iphone', { revokedAt: now - 1 }), tok('t2', 'iphone')], now), false);
+  assert.equal(hasLiveToken(old, [], now), false);
 });
 
-test('revoking a token drops its phones and old rows of its name nothing else covers', () => {
+test('two phones paired under one name: revoking one leaves its old row no push', () => {
+  // Mike's lost phone has an old name-only row; his new one is paired as
+  // "iphone" too, with a row of its own token.
+  const lost = { tokenName: 'iphone' };
+  const kept = { tokenId: 't2', tokenName: 'iphone' };
   const revoked = { _id: 't1', name: 'iphone' };
-  const after = [tok('t1', 'iphone', { revokedAt: now }), tok('t3', 'ipad')];
-  assert.equal(tiedToRevoked({ tokenId: 't1', tokenName: 'iphone' }, revoked, after, now), true);
-  assert.equal(tiedToRevoked({ tokenId: 't3', tokenName: 'ipad' }, revoked, after, now), false);
-  assert.equal(tiedToRevoked({ tokenName: 'iphone' }, revoked, after, now), true);
-  assert.equal(tiedToRevoked({ tokenName: 'ipad' }, revoked, after, now), false);
-  // A second live "iphone" token still covers the old row.
-  assert.equal(tiedToRevoked({ tokenName: 'iphone' }, revoked, [...after, tok('t2', 'iphone')], now), false);
+  const after = [tok('t1', 'iphone', { revokedAt: now }), tok('t2', 'iphone')];
+  assert.equal(hasLiveToken(lost, after, now), false);
+  assert.equal(tiedToRevoked(lost, revoked), true);
+  assert.equal(hasLiveToken(kept, after, now), true);
+  assert.equal(tiedToRevoked(kept, revoked), false);
+});
+
+test('revoking a token drops its phones and old rows of its name', () => {
+  const revoked = { _id: 't1', name: 'iphone' };
+  assert.equal(tiedToRevoked({ tokenId: 't1', tokenName: 'iphone' }, revoked), true);
+  assert.equal(tiedToRevoked({ tokenId: 't3', tokenName: 'ipad' }, revoked), false);
+  assert.equal(tiedToRevoked({ tokenName: 'iphone' }, revoked), true);
+  assert.equal(tiedToRevoked({ tokenName: 'ipad' }, revoked), false);
 });
 
 test('the relay only calls back to a Convex cloud deployment address', () => {

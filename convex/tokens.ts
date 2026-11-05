@@ -83,15 +83,14 @@ export async function revokeToken(ctx: MutationCtx, id: string): Promise<boolean
   return true;
 }
 
-// Deletes the phones registered for push with these (now revoked) tokens:
-// otherwise a revoked phone still gets every push, title and text.
-// devices:targets skips them too, for expired tokens and old rows. Both
-// tables are a handful of rows, so they're read whole.
+// Deletes the phones registered for push with these (now revoked) tokens,
+// and old rows that only name them (pushTargets.ts): otherwise a revoked
+// phone still gets every push, title and text. devices:targets skips an
+// expired token's phones and every old row too. The table is a handful of
+// rows, so it's read whole.
 async function dropDevicesOf(ctx: MutationCtx, revoked: { _id: Id<'tokens'>; name: string }[]): Promise<void> {
-  const now = Date.now();
-  const tokens = await ctx.db.query('tokens').collect();
   for (const d of await ctx.db.query('devices').collect()) {
-    if (revoked.some((r) => tiedToRevoked(d, r, tokens, now))) await ctx.db.delete(d._id);
+    if (revoked.some((r) => tiedToRevoked(d, r))) await ctx.db.delete(d._id);
   }
 }
 

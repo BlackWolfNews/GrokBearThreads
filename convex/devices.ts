@@ -6,7 +6,7 @@ import { hasLiveToken } from './pushTargets';
 
 // Only phones whose token is still good (pushTargets.ts): revoking deletes
 // a phone's row (tokens.ts), but an expired token's phone, or an old row
-// that only names its token, is skipped here.
+// with no tokenId (from before 5 Nov 2026), is skipped here.
 export const targets = internalQuery({
   args: {},
   returns: v.array(v.object({ apnsToken: v.string(), environment: v.union(v.literal('sandbox'), v.literal('production')), notify: v.union(v.literal('away'), v.literal('always'), v.literal('off')), pushKey: v.optional(v.string()) })),
@@ -19,6 +19,23 @@ export const targets = internalQuery({
       out.push({ apnsToken: d.apnsToken, environment: d.environment, notify: d.notify ?? ('away' as const), ...(d.pushKey ? { pushKey: d.pushKey } : {}) });
     }
     return out;
+  },
+});
+
+// Deletes the old rows with no tokenId, which get no pushes any more
+// (pushTargets.ts); a paired phone has made itself a new one by starting
+// up. Tidying only: npx convex run devices:dropUnlinked --prod
+export const dropUnlinked = internalMutation({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) => {
+    let n = 0;
+    for await (const d of ctx.db.query('devices')) {
+      if (d.tokenId) continue;
+      await ctx.db.delete(d._id);
+      n++;
+    }
+    return n;
   },
 });
 

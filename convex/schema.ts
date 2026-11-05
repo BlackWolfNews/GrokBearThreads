@@ -403,7 +403,7 @@ export default defineSchema({
     tokenName: v.string(),
     // The phone token it registered with, so revoking that token stops its
     // pushes (tokens.ts, devices:targets). Rows from before 5 Nov 2026 only
-    // have tokenName.
+    // have tokenName and get no pushes (pushTargets.ts).
     tokenId: v.optional(v.id('tokens')),
     updatedAt: v.number(),
     // When this phone wants a push (phone:setNotifications, API 3):

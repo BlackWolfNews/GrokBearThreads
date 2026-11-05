@@ -11,18 +11,21 @@ export type TokenState = { _id: string; name: string; expiresAt: number; revoked
 const live = (t: TokenState, now: number) => !t.revokedAt && t.expiresAt >= now;
 
 // A row registered since 5 Nov 2026 has its token's id and follows that
-// token. An older one only has the token's name, so it counts while some
-// live token has that name: a phone re-paired under the same name keeps
-// its pushes, and one whose name has no live token left gets none.
+// token. An older one only has the token's name, and gets nothing: names
+// aren't unique (tokens.ts issueToken), so while a second phone was paired
+// under the same name, a revoked phone's old row would have kept getting
+// pushes. A paired phone registers again with its token every time it
+// starts (ios/Threadbear/ThreadbearApp.swift askForNotifications), which
+// gives it a row with an id.
 export function hasLiveToken(device: DeviceLink, tokens: TokenState[], now: number): boolean {
-  if (device.tokenId) return tokens.some((t) => t._id === device.tokenId && live(t, now));
-  return tokens.some((t) => t.name === device.tokenName && live(t, now));
+  if (!device.tokenId) return false;
+  return tokens.some((t) => t._id === device.tokenId && live(t, now));
 }
 
-// The rows to delete once `revoked` is revoked (`tokens` already says so):
-// the ones registered with it, and older name-only rows of its name that
-// no live token covers any more.
-export function tiedToRevoked(device: DeviceLink, revoked: { _id: string; name: string }, tokens: TokenState[], now: number): boolean {
+// The rows to delete once `revoked` is revoked: the ones registered with
+// it, and every older name-only row of its name, even while another live
+// token has that name (the row could be either phone's).
+export function tiedToRevoked(device: DeviceLink, revoked: { _id: string; name: string }): boolean {
   if (device.tokenId) return device.tokenId === revoked._id;
-  return device.tokenName === revoked.name && !hasLiveToken(device, tokens, now);
+  return device.tokenName === revoked.name;
 }

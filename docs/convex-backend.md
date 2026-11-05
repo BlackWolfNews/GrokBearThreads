@@ -361,9 +361,12 @@ dashboard panel.
   production installs each to their APNs host. A token Apple reports gone
   is dropped. Only phones whose token is still good get one: each
   `devices` row keeps the token it registered with (`tokenId`, since
-  5 Nov 2026; older rows only its name), revoking a token deletes its
-  phones' rows, and `devices:targets` skips an expired or revoked token's
-  (`convex/pushTargets.ts`). A backend without its own Apple key goes
+  5 Nov 2026), revoking a token deletes its phones' rows, and
+  `devices:targets` skips an expired or revoked token's
+  (`convex/pushTargets.ts`). Older rows only have the token's name, which
+  isn't unique, so they get no pushes and go when a token of that name is
+  revoked (`devices:dropUnlinked` clears them all); a paired phone makes
+  itself a new row by registering again each time the app starts. A backend without its own Apple key goes
   through the push relay (`docs/push-relay.md`), and registers with it
   once, proving it's this deployment through `/relay/verify` in
   `convex/http.ts` and the `relayChecks` table. Env on both deployments: `APNS_KEY_P8`, `APNS_KEY_ID`,
