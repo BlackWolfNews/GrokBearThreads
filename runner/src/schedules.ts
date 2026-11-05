@@ -80,6 +80,7 @@ export type CreateScheduleParams = {
   threadId?: string;
   cwd?: string;
   accountId?: string;
+  poolId?: string;
   model?: string;
   effort?: EffortLevel;
   permissionMode?: PermissionMode;
@@ -99,6 +100,8 @@ export type UpdateScheduleParams = {
   paused?: boolean;
   cwd?: string;
   accountId?: string;
+  // null takes it out of its pool (back to the folder's or the default).
+  poolId?: string | null;
   model?: string | null;
   effort?: EffortLevel | null;
   permissionMode?: PermissionMode;
@@ -404,6 +407,7 @@ export class Scheduler {
     if ((p.cron === undefined) === (p.at === undefined)) throw bad('Give either at (once) or cron (repeating).');
     const runnerId = p.runnerId?.trim() ? await this.resolveRunner(p.runnerId) : this.self.id;
     const away = runnerId !== this.self.id;
+    if (p.accountId && p.poolId) throw bad('Give accountId or poolId, not both: a pool picks the login.');
     if (away && p.threadId) throw bad("A schedule that sends to a thread runs on that thread's runner; leave runnerId out.");
     const now = this.iso();
     const rec: ScheduleRecord = {
@@ -426,12 +430,14 @@ export class Scheduler {
       // runs; no folder means its default.
       if (p.cwd?.trim()) rec.cwd = p.cwd.trim();
       if (p.accountId) rec.accountId = p.accountId;
+      if (p.poolId) rec.poolId = p.poolId;
       if (p.model) rec.model = p.model;
       if (p.effort) rec.effort = p.effort;
       if (p.permissionMode) rec.permissionMode = p.permissionMode;
     } else {
       rec.cwd = this.checkedFolder(p.cwd);
       if (p.accountId) rec.accountId = this.checkedAccount(p.accountId);
+      if (p.poolId) rec.poolId = this.checkedPool(p.poolId);
       if (p.model) rec.model = p.model;
       if (p.effort) rec.effort = p.effort;
       if (p.permissionMode) rec.permissionMode = p.permissionMode;
@@ -480,11 +486,22 @@ export class Scheduler {
     if (!rec.threadId) {
       if (p.cwd !== undefined) rec.cwd = away ? p.cwd.trim() || undefined : this.checkedFolder(p.cwd);
       if (rec.cwd === undefined) delete rec.cwd;
-      if (p.accountId !== undefined) rec.accountId = away ? p.accountId : this.checkedAccount(p.accountId);
+      if (p.accountId !== undefined && p.poolId) throw bad('Give accountId or poolId, not both: a pool picks the login.');
+      // One or the other, as threads.update has it: a login pins it, a
+      // pool picks one each run.
+      if (p.accountId !== undefined) {
+        rec.accountId = away ? p.accountId : this.checkedAccount(p.accountId);
+        delete rec.poolId;
+      }
+      if (p.poolId === null || p.poolId === '') delete rec.poolId;
+      else if (p.poolId !== undefined) {
+        rec.poolId = away ? p.poolId : this.checkedPool(p.poolId);
+        delete rec.accountId;
+      }
       if (p.model !== undefined) setOrDelete(rec, 'model', p.model);
       if (p.effort !== undefined) setOrDelete(rec, 'effort', p.effort);
       if (p.permissionMode !== undefined) rec.permissionMode = p.permissionMode;
-    } else if ([p.cwd, p.accountId, p.model, p.effort, p.permissionMode].some((x) => x !== undefined)) {
+    } else if ([p.cwd, p.accountId, p.poolId, p.model, p.effort, p.permissionMode].some((x) => x !== undefined)) {
       throw bad("This schedule sends to a thread, so it has no folder, account or model of its own; change the thread's.");
     }
     rec.updatedAt = this.iso();
@@ -700,6 +717,7 @@ export class Scheduler {
         // Made on another runner, the folder is as it was typed there.
         cwd: rec.cwd ? path.resolve(expandHome(rec.cwd)) : undefined,
         accountId: rec.accountId,
+        poolId: rec.poolId,
         model: rec.model,
         effort: rec.effort,
         permissionMode: rec.permissionMode,
@@ -840,6 +858,12 @@ export class Scheduler {
     return id;
   }
 
+  private checkedPool(id: string): string {
+    const pools = this.runner.hello().pools;
+    if (!pools.some((x) => x.id === id)) throw bad(`No pool called ${id}. Pools: ${pools.map((x) => x.id).join(', ')}`);
+    return id;
+  }
+
   private iso(): string {
     return new Date(this.clock.now()).toISOString();
   }
@@ -874,6 +898,7 @@ export function scheduleMethods(s: Scheduler): Record<string, (p: Record<string,
         threadId: str(p, 'threadId'),
         cwd: str(p, 'cwd'),
         accountId: str(p, 'accountId'),
+        poolId: str(p, 'poolId'),
         model: str(p, 'model'),
         effort: effort(p.effort) ?? undefined,
         permissionMode: mode(p.permissionMode),
@@ -891,6 +916,7 @@ export function scheduleMethods(s: Scheduler): Record<string, (p: Record<string,
         if (v !== undefined) upd[k] = v;
       }
       if (p.timezone !== undefined) upd.timezone = p.timezone === null ? null : str(p, 'timezone');
+      if (p.poolId !== undefined) upd.poolId = p.poolId === null ? null : str(p, 'poolId');
       if (p.model !== undefined) upd.model = p.model === null ? null : str(p, 'model');
       if (p.effort !== undefined) upd.effort = effort(p.effort);
       if (p.permissionMode !== undefined) upd.permissionMode = mode(p.permissionMode);

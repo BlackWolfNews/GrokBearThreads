@@ -8,6 +8,8 @@ import { Scheduler, scheduleMethods, type ScheduleBackend, type StoredSchedule }
 import { buildThreadbearTools } from '../../src/threadbear-mcp.ts';
 import { ErrorCode, RpcError } from '../../src/protocol.ts';
 import { nullLogger } from '../../src/log.ts';
+import { readRunnerJson } from '../../src/config.ts';
+import { toOwnedScheduleDoc, SCHEDULE_POOLS_API_VERSION } from '../../src/sync.ts';
 
 const MIN = 60_000;
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -246,6 +248,39 @@ test('pause, resume, edit and run now', async () => {
   sched.stop();
 });
 
+// The standup that needed the login with Slack (5 Nov): a pool lets a
+// schedule's threads start on whichever of its logins has room.
+test('a new-thread schedule can run on a pool instead of one login', async () => {
+  const { h, sched } = setup();
+  const m = scheduleMethods(sched);
+  const before = readRunnerJson(h.home).defaults ?? {};
+  const pools = h.runner.hello().pools.map((x) => x.id);
+  assert.ok(pools.includes('claude'), `the harness has a claude pool: ${pools.join(', ')}`);
+  await assert.rejects(sched.create({ text: 'x', cron: '@daily', poolId: 'nope' }), /No pool called nope/);
+  await assert.rejects(sched.create({ text: 'x', cron: '@daily', poolId: 'claude', accountId: 'claude-3' }), /not both/);
+
+  const sc = await sched.create({ text: 'Draft the standup', cron: '0 9 * * 1-5', poolId: 'claude' });
+  assert.equal(sc.poolId, 'claude');
+  const ran = await sched.runNow(sc.id);
+  const t = h.runner.get(ran.threadId!);
+  assert.equal(t.poolId, 'claude', 'its thread is in the pool, so it moves when a login runs dry');
+  assert.deepEqual(readRunnerJson(h.home).defaults ?? {}, before, "a schedule's run doesn't change what the next new thread starts on");
+
+  // One or the other: a login pins it, a pool takes the pin away, null leaves neither.
+  const pinned = (await m['schedules.update']({ scheduleId: sc.id, accountId: 'claude-3' })) as { schedule: { accountId?: string; poolId?: string } };
+  assert.deepEqual([pinned.schedule.accountId, pinned.schedule.poolId], ['claude-3', undefined]);
+  const pooled = await sched.update({ scheduleId: sc.id, poolId: 'claude' });
+  assert.deepEqual([pooled.accountId, pooled.poolId], [undefined, 'claude']);
+  const neither = (await m['schedules.update']({ scheduleId: sc.id, poolId: null })) as { schedule: { accountId?: string; poolId?: string } };
+  assert.deepEqual([neither.schedule.accountId, neither.schedule.poolId], [undefined, undefined]);
+
+  // A backend older than 36 would turn the whole row down.
+  const row = { ...sched.find(sc.id), poolId: 'claude', runnerId: 'r1' };
+  assert.equal(toOwnedScheduleDoc(row, SCHEDULE_POOLS_API_VERSION).poolId, 'claude');
+  assert.ok(!('poolId' in toOwnedScheduleDoc(row, SCHEDULE_POOLS_API_VERSION - 1)));
+  sched.stop();
+});
+
 test('the methods check what they are given', async () => {
   const { h, sched } = setup();
   const m = scheduleMethods(sched);
@@ -302,6 +337,14 @@ test('agents schedule messages to their own thread by default', async () => {
   await call('update_schedule', { scheduleId: dailyId, model: null, effort: null });
   assert.deepEqual([(await sched.find(dailyId)).model, (await sched.find(dailyId)).effort], [undefined, undefined]);
   assert.match((await call('update_schedule', { scheduleId: dailyId, account: 'nobody' })).text, /No account nobody/);
+  const pooled = await call('update_schedule', { scheduleId: dailyId, pool: 'Claude' });
+  assert.match(pooled.text, /\(claude pool, /, pooled.text);
+  assert.deepEqual([(await sched.find(dailyId)).accountId, (await sched.find(dailyId)).poolId], [undefined, 'claude']);
+  await call('update_schedule', { scheduleId: dailyId, pool: null });
+  assert.equal((await sched.find(dailyId)).poolId, undefined);
+  const viaPool = await call('schedule_message', { text: 'Evening summary', cron: '0 18 * * *', new_thread: true, pool: 'claude' });
+  assert.match(viaPool.text, /claude pool/, viaPool.text);
+  assert.equal((await call('schedule_message', { text: 'x', when: '1h', pool: 'claude' })).error, true, 'pool is for new threads');
 
   const id = sched.list()[0].id.slice(0, 8);
   const refused = await call('update_schedule', { scheduleId: id, account: 'claude-3' });

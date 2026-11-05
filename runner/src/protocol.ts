@@ -746,6 +746,9 @@ export type Schedule = {
   threadId?: string;
   cwd?: string;
   accountId?: string;
+  // A pool picks its login each run instead (docs/protocol.md, Pools).
+  // Never set with accountId.
+  poolId?: string;
   model?: string;
   effort?: EffortLevel;
   permissionMode?: PermissionMode;

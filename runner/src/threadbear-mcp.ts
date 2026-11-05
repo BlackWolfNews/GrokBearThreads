@@ -253,7 +253,7 @@ export function buildThreadbearTools(
   const scheduleLine = async (sc: Schedule): Promise<string> => {
     const state = sc.finishedAt ? 'done' : sc.paused ? 'paused' : sc.nextRunAt ? `next ${relativeFuture(sc.nextRunAt, now())} (${sc.nextRunAt})` : 'no more runs';
     // A new-thread one says what it runs on, so a change to it shows.
-    const on = [sc.accountId, sc.model, sc.effort, sc.permissionMode && sc.permissionMode !== 'full' ? sc.permissionMode : undefined].filter(Boolean).join(', ');
+    const on = [sc.accountId, sc.poolId && `${sc.poolId} pool`, sc.model, sc.effort, sc.permissionMode && sc.permissionMode !== 'full' ? sc.permissionMode : undefined].filter(Boolean).join(', ');
     const target = sc.threadId ? (sc.threadId === selfId ? 'this thread' : `thread ${sc.threadId.slice(0, 8)} ${await titleOf(sc.threadId)}`) : `a new thread in ${sc.cwd ?? 'its default folder'}${on ? ` (${on})` : ''}`;
     const last = sc.lastRun && sc.lastRun.outcome !== 'sent' ? `; last run ${sc.lastRun.outcome}: ${sc.lastRun.note ?? ''}` : '';
     const where = sc.runnerName ? ` on ${sc.runnerName}` : '';
@@ -424,6 +424,7 @@ export function buildThreadbearTools(
         new_thread: z.boolean().optional().describe('Start a new thread each time instead of sending to a thread.'),
         folder: z.string().optional().describe("With new_thread: its working folder. Default: this thread's folder."),
         account: z.string().optional().describe('With new_thread: account id or email (Claude or Codex; see list_accounts). Default: the one with the most room, on the provider last used.'),
+        pool: z.string().optional().describe('With new_thread, instead of account: pool id or title (list_accounts); each run starts on its login with the most room.'),
         model: z.string().optional().describe("With new_thread: model id, one of the account's (list_accounts shows them)."),
         effort: effortEnum.optional().describe('With new_thread: reasoning effort (ultra is Codex only).'),
         permissionMode: z.enum(['full', 'ask', 'auto']).optional().describe('With new_thread: "full" (default), "ask" or "auto".'),
@@ -432,7 +433,7 @@ export function buildThreadbearTools(
           .optional()
           .describe("With new_thread: the runner (machine) it runs on, by name, e.g. studio-mac. Default: this thread's runner. Only when the user asks for another machine; the folder and account are then that machine's (a path there, or left out for its default)."),
       },
-      handle(async ({ text, when, cron, timezone, title, threadId, id: alias, new_thread, folder: f, account: acc, model, effort, permissionMode, runner }) => {
+      handle(async ({ text, when, cron, timezone, title, threadId, id: alias, new_thread, folder: f, account: acc, pool: pl, model, effort, permissionMode, runner }) => {
         if ((when === undefined) === (cron === undefined)) throw new Error('Give exactly one of when (once) and cron (repeating).');
         if (runner && !new_thread) throw new Error("runner is for new_thread schedules; one that sends to a thread runs on that thread's runner.");
         // On another runner the folder and account are that machine's, so
@@ -440,9 +441,9 @@ export function buildThreadbearTools(
         const target = !new_thread
           ? { threadId: await resolve(threadId ?? alias) }
           : runner
-            ? { cwd: f, accountId: acc, model, effort, permissionMode, runnerId: runner }
-            : { cwd: await folder(f ?? '.'), accountId: await account(acc), model, effort, permissionMode };
-        if (!new_thread && (f || acc || model || effort || permissionMode)) throw new Error('folder, account, model, effort and permissionMode are for new_thread schedules; a thread keeps its own.');
+            ? { cwd: f, accountId: acc, poolId: pl, model, effort, permissionMode, runnerId: runner }
+            : { cwd: await folder(f ?? '.'), accountId: await account(acc), poolId: pl === undefined ? undefined : pool(pl), model, effort, permissionMode };
+        if (!new_thread && (f || acc || pl || model || effort || permissionMode)) throw new Error('folder, account, pool, model, effort and permissionMode are for new_thread schedules; a thread keeps its own.');
         const sc = await mustSchedules().create({
           text,
           title,
@@ -466,7 +467,7 @@ export function buildThreadbearTools(
     ),
     tool(
       'update_schedule',
-      'Changes a schedule: its message, title or time, or pauses and resumes it. Setting when makes it a one-off, setting cron makes it repeat. A new_thread one also takes schedule_message\'s folder, account, model, effort and permissionMode (null model or effort: the default).',
+      'Changes a schedule: its message, title or time, or pauses and resumes it. Setting when makes it a one-off, setting cron makes it repeat. A new_thread one also takes schedule_message\'s folder, account or pool, model, effort and permissionMode (null pool, model or effort: the default).',
       {
         scheduleId: z.string().describe('Schedule id or a unique prefix (list_schedules shows them).'),
         text: z.string().optional(),
@@ -477,18 +478,27 @@ export function buildThreadbearTools(
         paused: z.boolean().optional(),
         folder: z.string().optional(),
         account: z.string().optional(),
+        pool: z.string().nullable().optional(),
         model: z.string().nullable().optional(),
         effort: effortEnum.nullable().optional(),
         permissionMode: z.enum(['full', 'ask', 'auto']).optional(),
       },
-      handle(async ({ scheduleId, text, title, when, cron, timezone, paused, folder: f, account: acc, model, effort, permissionMode }) => {
+      handle(async ({ scheduleId, text, title, when, cron, timezone, paused, folder: f, account: acc, pool: pl, model, effort, permissionMode }) => {
         const s = mustSchedules();
         const current = await s.find(scheduleId);
-        // A schedule on another runner checks its account there, so a login
-        // this Mac doesn't have goes as given. (In the backend every
+        // A schedule on another runner checks its account and pool there, so
+        // a login or pool this Mac doesn't have goes as given. (In the backend every
         // schedule has a runnerId; the Scheduler still checks this
         // runner's own.)
         const accountId = acc === undefined ? undefined : current.runnerId ? await account(acc).catch(() => acc) : await account(acc);
+        let poolId = pl;
+        if (pl) {
+          try {
+            poolId = pool(pl);
+          } catch (e) {
+            if (!current.runnerId) throw e;
+          }
+        }
         const sc = await s.update({
           scheduleId: current.id,
           text,
@@ -499,6 +509,7 @@ export function buildThreadbearTools(
           paused,
           cwd: f === undefined ? undefined : await folder(f),
           accountId,
+          poolId,
           model,
           effort,
           permissionMode,

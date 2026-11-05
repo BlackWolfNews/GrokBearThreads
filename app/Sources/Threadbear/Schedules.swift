@@ -20,6 +20,9 @@ struct ScheduleEditorState: Identifiable, Equatable {
     /// Settings for a new thread each time, as the composer would use.
     var cwd = ""
     var accountId: String?
+    /// The composer's pool, which then picks each run's login rather than
+    /// the one it happened to be on (`accountId` goes unsent).
+    var poolId: String?
     var model: String?
     var effort: String?
     var ask = false
@@ -150,6 +153,7 @@ extension AppModel {
         state.fromThreadId = thread?.id
         state.cwd = draftKey == nil ? defaults.cwd : settings.cwd
         state.accountId = settings.account
+        state.poolId = settings.pool?.id
         state.model = settings.model
         state.effort = settings.effort
         // The editor only offers Ask or Full; Auto carries over as the safer one.
@@ -203,7 +207,7 @@ extension AppModel {
             } else {
                 saved = try await client.createSchedule(NewScheduleRequest(
                     text: text, title: title.isEmpty ? nil : title, when: state.when, threadId: state.threadId,
-                    cwd: state.cwd, accountId: state.accountId, model: state.model, effort: state.effort,
+                    cwd: state.cwd, accountId: state.accountId, poolId: state.poolId, model: state.model, effort: state.effort,
                     permissionMode: state.ask ? .ask : .full
                 ))
             }

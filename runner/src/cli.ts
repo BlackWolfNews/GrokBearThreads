@@ -93,13 +93,13 @@ const HELP = `tb: talk to the Threadbear runner
   tb panel <threadId> <panelId> [--json]  draws an image panel or fills a list panel now
   tb run <threadId> <actionId>    run one: a command's output is printed and goes into the thread
   tb schedule "text" (--at WHEN | --cron "0 9 * * 1-5") [--tz ZONE] [--title T]
-              [--thread ID | --cwd DIR [--account ID] [--model M] [--effort L] [--ask | --auto]]
+              [--thread ID | --cwd DIR [--account ID | --pool ID] [--model M] [--effort L] [--ask | --auto]]
                                   sends the text later: once (--at 30m, 2h, 1d, tomorrow
                                   or an ISO time) or on a cron; to a thread with --thread,
                                   otherwise to a new thread each time
   tb schedules [--json]           tb schedules run|pause|resume|delete <scheduleId>
   tb schedules update <scheduleId> [--text T] [--title T] [--at WHEN | --cron C] [--tz ZONE]
-              [--cwd DIR] [--account ID] [--model M] [--effort L] [--ask | --auto | --full]
+              [--cwd DIR] [--account ID | --pool ID] [--model M] [--effort L] [--ask | --auto | --full]
                                   changes a schedule; folder, account, model, effort and
                                   access only for one that starts a new thread
   tb projects [--archived] [--json]  the projects, their folders and thread counts
@@ -145,8 +145,8 @@ const COMMAND_FLAGS: Record<string, string[]> = {
   delete: [],
   accounts: ['json'],
   pools: ['json'],
-  schedule: ['at', 'cron', 'tz', 'title', 'thread', 'cwd', 'account', 'model', 'effort', 'ask', 'auto', 'json'],
-  schedules: ['json', 'text', 'title', 'at', 'cron', 'tz', 'cwd', 'account', 'model', 'effort', 'ask', 'auto', 'full'],
+  schedule: ['at', 'cron', 'tz', 'title', 'thread', 'cwd', 'account', 'pool', 'model', 'effort', 'ask', 'auto', 'json'],
+  schedules: ['json', 'text', 'title', 'at', 'cron', 'tz', 'cwd', 'account', 'pool', 'model', 'effort', 'ask', 'auto', 'full'],
   projects: ['json', 'archived'],
   librarian: ['json'],
   settings: ['json'],
@@ -526,6 +526,7 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
       else {
         if (f.cwd) params.cwd = path.resolve(String(f.cwd));
         if (f.account) params.accountId = f.account;
+        if (f.pool) params.poolId = f.pool;
         if (f.model) params.model = f.model;
         if (f.effort) params.effort = f.effort;
         if (f.ask) params.permissionMode = 'ask';
@@ -567,6 +568,8 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
         if (f.tz !== undefined) params.timezone = f.tz || null;
         if (f.cwd) params.cwd = path.resolve(String(f.cwd));
         if (f.account) params.accountId = f.account;
+        // --pool "" takes it out of its pool.
+        if (f.pool !== undefined) params.poolId = f.pool || null;
         if (f.model !== undefined) params.model = f.model || null;
         if (f.effort !== undefined) params.effort = f.effort || null;
         if ([f.ask, f.auto, f.full].filter(Boolean).length > 1) throw new Error('Give one of --ask, --auto and --full.');
@@ -767,7 +770,7 @@ function parseWhen(s: string): string {
 function printSchedules(list: Schedule[]): void {
   for (const sc of list) {
     const state = sc.finishedAt ? 'done' : sc.paused ? 'paused' : sc.nextRunAt ? `next ${relativeFuture(sc.nextRunAt, Date.now())}` : 'no more runs';
-    const on = [sc.accountId, sc.model, sc.effort].filter(Boolean).join(', ');
+    const on = [sc.accountId, sc.poolId && `${sc.poolId} pool`, sc.model, sc.effort].filter(Boolean).join(', ');
     const target = sc.threadId ? `thread ${sc.threadId.slice(0, 8)}` : `new thread in ${sc.cwd}${on ? ` (${on})` : ''}`;
     const last = sc.lastRun && sc.lastRun.outcome !== 'sent' ? `  (last run ${sc.lastRun.outcome}: ${sc.lastRun.note ?? ''})` : '';
     console.log(`${sc.id.slice(0, 8)}  ${sc.title}  [${sc.whenText}, ${state}]  ${target}${last}`);

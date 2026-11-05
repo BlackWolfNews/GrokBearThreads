@@ -69,7 +69,10 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 35;
+export const BACKEND_API_VERSION = 36;
+// From this one an owned schedule can carry `poolId`, the pool that picks
+// its threads' login. An older backend's validator would turn it down.
+export const SCHEDULE_POOLS_API_VERSION = 36;
 // From this one a thread's row carries its open card of asks and a finished
 // turn's next steps, and a message row can be `summary` (end_turn's
 // bullets), so the phone shows end-of-turn cards. An older backend's
@@ -677,7 +680,7 @@ export function toScheduleDoc(s: Schedule) {
 
 // A schedule as sync:saveSchedule and sync:adoptSchedules take it: the
 // validator's fields only.
-export function toOwnedScheduleDoc(s: StoredSchedule) {
+export function toOwnedScheduleDoc(s: StoredSchedule, apiVersion = BACKEND_API_VERSION) {
   const out: Record<string, unknown> = {
     id: s.id,
     runnerId: s.runnerId,
@@ -692,6 +695,8 @@ export function toOwnedScheduleDoc(s: StoredSchedule) {
   for (const k of ['at', 'cron', 'timezone', 'threadId', 'cwd', 'accountId', 'model', 'effort', 'permissionMode', 'createdBy', 'nextRunAt', 'finishedAt', 'runRequestedAt'] as const) {
     if (s[k] !== undefined) out[k] = s[k];
   }
+  // An older backend's validator would turn the whole schedule down.
+  if (s.poolId !== undefined && apiVersion >= SCHEDULE_POOLS_API_VERSION) out.poolId = s.poolId;
   if (s.lastRun) {
     out.lastRun = { at: s.lastRun.at, outcome: s.lastRun.outcome, ...(s.lastRun.threadId ? { threadId: s.lastRun.threadId } : {}), ...(s.lastRun.note ? { note: s.lastRun.note } : {}) };
   }
@@ -1706,13 +1711,13 @@ export class ConvexSync {
         return this.subscriber.subscribe('sync:schedules', { key }, (v) => onRows(Array.isArray(v) ? (v as StoredSchedule[]) : []), onError);
       },
       save: async (sc) => {
-        await call('mutation', 'sync:saveSchedule', { schedule: toOwnedScheduleDoc(sc) });
+        await call('mutation', 'sync:saveSchedule', { schedule: toOwnedScheduleDoc(sc, this.backendApiVersion ?? 0) });
       },
       remove: async (scheduleId) => {
         await call('mutation', 'sync:deleteSchedule', { scheduleId });
       },
       adopt: async (rows) => {
-        await call('mutation', 'sync:adoptSchedules', { runnerId, schedules: rows.map(toOwnedScheduleDoc) });
+        await call('mutation', 'sync:adoptSchedules', { runnerId, schedules: rows.map((r) => toOwnedScheduleDoc(r, this.backendApiVersion ?? 0)) });
       },
       claim: async (scheduleId, kind, expect) => (await call('mutation', 'sync:claimSchedule', { runnerId, scheduleId, holder, kind, expect })) === true,
       release: async (scheduleId) => {

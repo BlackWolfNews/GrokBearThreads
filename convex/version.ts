@@ -138,4 +138,8 @@
 //    answer (or a decline) as a respond command, and finishCommand drops
 //    the sealed answer from the row. A runner sends a secret card only to a
 //    backend of 35 or later; an older phone shows the thread waiting.
-export const API_VERSION = 35;
+// 36: an owned schedule can carry `poolId`, the pool that picks the login
+//    each of its threads starts on, instead of `accountId`. A runner sends
+//    it only to a backend of 36 or later; an older runner ignores it and
+//    starts the thread on its folder's pool.
+export const API_VERSION = 36;

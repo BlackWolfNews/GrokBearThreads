@@ -54,6 +54,8 @@ public struct Schedule: Sendable, Hashable, Decodable, Identifiable {
     /// New-thread settings.
     public var cwd: String?
     public var accountId: String?
+    /// Or the pool that picks the login each run; never both.
+    public var poolId: String?
     public var model: String?
     public var effort: String?
     public var permissionMode: PermissionMode?
@@ -79,7 +81,7 @@ public struct Schedule: Sendable, Hashable, Decodable, Identifiable {
     public init(
         id: String, title: String, text: String = "", at: Date? = nil, cron: String? = nil, timezone: String? = nil,
         whenText: String = "", threadId: String? = nil, cwd: String? = nil, accountId: String? = nil,
-        model: String? = nil, effort: String? = nil, permissionMode: PermissionMode? = nil, paused: Bool = false,
+        poolId: String? = nil, model: String? = nil, effort: String? = nil, permissionMode: PermissionMode? = nil, paused: Bool = false,
         createdAt: Date = Date(), updatedAt: Date = Date(), createdBy: String? = nil, nextRunAt: Date? = nil,
         finishedAt: Date? = nil, runs: Int = 0, lastRun: LastRun? = nil, runnerId: String? = nil,
         runnerName: String? = nil, runnerIcon: String? = nil, runRequestedAt: Date? = nil
@@ -94,6 +96,7 @@ public struct Schedule: Sendable, Hashable, Decodable, Identifiable {
         self.threadId = threadId
         self.cwd = cwd
         self.accountId = accountId
+        self.poolId = poolId
         self.model = model
         self.effort = effort
         self.permissionMode = permissionMode
@@ -126,6 +129,7 @@ public struct Schedule: Sendable, Hashable, Decodable, Identifiable {
         threadId = string(.threadId)
         cwd = string(.cwd)
         accountId = string(.accountId)
+        poolId = string(.poolId).flatMap { $0.isEmpty ? nil : $0 }
         model = string(.model)
         effort = string(.effort)
         permissionMode = try? c.decodeIfPresent(PermissionMode.self, forKey: .permissionMode)
@@ -144,7 +148,7 @@ public struct Schedule: Sendable, Hashable, Decodable, Identifiable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, text, at, cron, timezone, whenText, threadId, cwd, accountId, model, effort, permissionMode
+        case id, title, text, at, cron, timezone, whenText, threadId, cwd, accountId, poolId, model, effort, permissionMode
         case paused, createdAt, updatedAt, createdBy, nextRunAt, finishedAt, runs, lastRun
         case runnerId, runnerName, runnerIcon, runRequestedAt
     }

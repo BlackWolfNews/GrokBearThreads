@@ -363,6 +363,9 @@ export default defineSchema({
     effort: v.optional(v.string()),
     permissionMode: v.optional(v.string()),
     createdBy: v.optional(v.string()),
+    // Since API 36: the pool that picks its threads' login, instead of
+    // accountId.
+    poolId: v.optional(v.string()),
     claim: v.optional(v.object({ holder: v.string(), until: v.number() })),
     runRequestedAt: v.optional(v.string()),
   })

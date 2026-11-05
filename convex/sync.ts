@@ -654,6 +654,7 @@ const ownedScheduleDoc = v.object({
   permissionMode: v.optional(v.string()),
   createdBy: v.optional(v.string()),
   runRequestedAt: v.optional(v.string()),
+  poolId: v.optional(v.string()),
 });
 
 const lastRunDoc = v.object({ at: v.string(), outcome: v.string(), threadId: v.optional(v.string()), note: v.optional(v.string()) });

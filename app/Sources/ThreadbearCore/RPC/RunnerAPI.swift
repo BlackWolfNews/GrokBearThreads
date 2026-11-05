@@ -528,6 +528,8 @@ public struct NewScheduleRequest: Sendable, Hashable {
     public var threadId: String?
     public var cwd: String?
     public var accountId: String?
+    /// The pool that picks each run's login, instead of `accountId`.
+    public var poolId: String?
     public var model: String?
     public var effort: String?
     public var permissionMode: PermissionMode?
@@ -536,14 +538,15 @@ public struct NewScheduleRequest: Sendable, Hashable {
     public var runnerId: String?
 
     public init(text: String, title: String? = nil, when: ScheduleWhen, threadId: String? = nil, cwd: String? = nil,
-                accountId: String? = nil, model: String? = nil, effort: String? = nil, permissionMode: PermissionMode? = nil,
-                runnerId: String? = nil) {
+                accountId: String? = nil, poolId: String? = nil, model: String? = nil, effort: String? = nil,
+                permissionMode: PermissionMode? = nil, runnerId: String? = nil) {
         self.text = text
         self.title = title
         self.when = when
         self.threadId = threadId
         self.cwd = cwd
         self.accountId = accountId
+        self.poolId = poolId
         self.model = model
         self.effort = effort
         self.permissionMode = permissionMode
@@ -559,7 +562,8 @@ public struct NewScheduleRequest: Sendable, Hashable {
         } else {
             // New-thread settings only mean something without a thread.
             if let cwd { params["cwd"] = .string(cwd) }
-            if let accountId { params["accountId"] = .string(accountId) }
+            // The runner takes one or the other; a pool picks the login.
+            if let poolId { params["poolId"] = .string(poolId) } else if let accountId { params["accountId"] = .string(accountId) }
             if let model { params["model"] = .string(model) }
             if let effort { params["effort"] = .string(effort) }
             if let permissionMode { params["permissionMode"] = .string(permissionMode.rawValue) }

@@ -171,6 +171,10 @@ final class ScheduleTests: XCTestCase {
         XCTAssertEqual(fresh["permissionMode"], .string("ask"))
         XCTAssertEqual(fresh["title"], .string("T"))
         XCTAssertNil(fresh["threadId"])
+        // A pool picks the login, so the composer's login stays out.
+        let pooled = NewScheduleRequest(text: "hi", when: .cron("0 9 * * *"), cwd: "/x", accountId: "claude-3", poolId: "claude").params
+        XCTAssertEqual(pooled["poolId"], .string("claude"))
+        XCTAssertNil(pooled["accountId"])
     }
 
     func testCreateParamsCarryTheRunnerOnlyForANewThread() {
