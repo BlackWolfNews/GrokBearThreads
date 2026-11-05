@@ -340,10 +340,18 @@ const iconOf = (p: object) => (p as { icon?: { url?: string } }).icon?.url;
 export function ProjectsList({ token, selected }: { token: string; selected?: string }) {
   const rows = useLiveQuery(api.phone.projects, { token });
   const [query, setQuery] = useState('');
-  if (!rows) return <div className="lists muted pad">Loading…</div>;
   const q = query.trim().toLowerCase();
-  // Titles only: goals and state aren't in the list (phone:projects).
-  const shown = rows.filter((p) => !q || p.title.toLowerCase().includes(q));
+  // Goals and state aren't in the list (phone:projects), so those are asked about
+  // only once typing has paused, as it reads every project's whole row.
+  const [asked, setAsked] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setAsked(q), 400);
+    return () => clearTimeout(t);
+  }, [q]);
+  const deep = useLiveQuery(api.phone.projectSearch, asked ? { token, text: asked } : 'skip');
+  if (!rows) return <div className="lists muted pad">Loading…</div>;
+  const inDepth = new Set((deep ?? []).map((m) => `${m.runnerId}/${m.id}`));
+  const shown = rows.filter((p) => !q || p.title.toLowerCase().includes(q) || inDepth.has(`${p.runnerId}/${p.id}`));
   return (
     <div className="lists-wrap">
       <div className="search-row">

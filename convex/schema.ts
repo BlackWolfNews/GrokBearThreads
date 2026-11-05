@@ -424,7 +424,7 @@ export default defineSchema({
     // sync:upsertProjects (API 30) finds the one project it changes.
     .index('by_runner_id', ['runnerId', 'id']),
 
-  // One small row per project, what a list shows (API 45, projectHeads.ts):
+  // One small row per project, what a list shows (API 48, projectHeads.ts):
   // the phone follows the list all the time, and a read costs the whole
   // document, so reading `projects` for it cost every project's notes. Goals,
   // state, notes and folders stay in `projects`, read for one project by
@@ -559,7 +559,7 @@ export default defineSchema({
     poolId: v.optional(v.string()),
     claim: v.optional(v.object({ holder: v.string(), until: v.number() })),
     runRequestedAt: v.optional(v.string()),
-    // When what a runner reads last changed (API 45), for sync:schedulesSince.
+    // When what a runner reads last changed (API 48), for sync:schedulesSince.
     // A claim doesn't move it: runners aren't told about claims, so a claim
     // re-runs nobody. Rows from before have none until they're next written,
     // and are read when a runner first reads the whole table.

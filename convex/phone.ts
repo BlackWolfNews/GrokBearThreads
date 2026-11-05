@@ -330,7 +330,7 @@ async function iconOf(ctx: QueryCtx, p: { runnerId: string; id: string; icon?: {
   return { icon: { ...(p.icon.symbol ? { symbol: p.icon.symbol } : {}), ...(url ? { url } : {}), by: p.icon.by } };
 }
 
-// The list, from projectHeads (API 45): goals, state, notes and folders come
+// The list, from projectHeads (API 48): goals, state, notes and folders come
 // back empty, and phone:project has them. The iPhone follows this all the time
 // and has only ever read the id, title, archived and icon, so apps already out
 // there get the saving too; reading `projects` cost about 200 KB a run for
@@ -352,7 +352,25 @@ export const projects = query({
   },
 });
 
-// One project whole, for its page (API 45). Reads only that project's row, so
+// Which projects' goals or state have these words, for the website's search box
+// (API 48). The list doesn't carry those, so this reads the big rows, and only
+// while someone has typed something. Ids only: the list has the rest.
+export const projectSearch = query({
+  args: { token: v.string(), text: v.string() },
+  returns: v.array(v.object({ runnerId: v.string(), id: v.string() })),
+  handler: async (ctx, { token, text }) => {
+    await checkPhoneToken(ctx, token);
+    const q = text.trim().toLowerCase();
+    if (!q) return [];
+    const out = [];
+    for await (const p of ctx.db.query('projects')) {
+      if ([p.goals, p.state].some((x) => x.toLowerCase().includes(q))) out.push({ runnerId: p.runnerId, id: p.id });
+    }
+    return out;
+  },
+});
+
+// One project whole, for its page (API 48). Reads only that project's row, so
 // it re-runs only when that project changes.
 export const project = query({
   args: { token: v.string(), runnerId: v.string(), id: v.string() },

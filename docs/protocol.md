@@ -3643,7 +3643,7 @@ the mirror back as state. The Mac app doesn't use it.
   also `models?` (each `id, title, effortLevels?, defaultEffort?`) and
   `defaultEffort?`, for the phone's new thread pickers). The same at start,
   and the accounts again once a heartbeat first says the backend is at 20.
-  From backend API 45 each project also has a small row in `projectHeads`
+  From backend API 48 each project also has a small row in `projectHeads`
   (no goals, state, notes or folders), written only when what it holds
   changes apart from `updatedAt`, which `phone:projects` reads. Every project
   from before is copied there on the first heartbeat any runner sends, once

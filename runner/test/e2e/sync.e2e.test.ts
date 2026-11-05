@@ -345,6 +345,30 @@ describe('convex mirror e2e', { skip: LOCAL ? false : 'no local Convex deploymen
     await api('mutation', 'sync:bye', { key, runnerId });
   });
 
+  test('API 48: the project list is small rows, one project is whole, and search reaches goals and state', async () => {
+    const runnerId = 'e2e-heads-' + crypto.randomBytes(4).toString('hex');
+    const pid = 'e2e-head-' + crypto.randomBytes(4).toString('hex');
+    const word = 'zq' + crypto.randomBytes(5).toString('hex');
+    const secret = `sk-${'e2e3'.repeat(12)}`;
+    await api('mutation', 'sync:heartbeat', { key, runner: { runnerId, name: runnerId, version: 'x', startedAt: 'x', draining: false, threadCount: 0 } });
+    const { token } = (await api('mutation', 'sync:issueToken', { key, kind: 'browser', name: 'e2e-48' })) as { token: string };
+    const doc = { id: pid, title: `Title ${secret}`, folders: ['/x'], goals: `the ${word} goal`, state: 'going', notes: 'long notes', createdBy: 'user', archived: false, createdAt: 'x', updatedAt: 'x', threadCount: 0 };
+    await api('mutation', 'sync:setProjects', { key, runnerId, projects: [doc] });
+    type Row = { runnerId: string; id: string; title: string; goals: string; notes: string };
+    const listed = ((await api('query', 'phone:projects', { token })) as Row[]).find((p) => p.id === pid)!;
+    assert.equal(listed.title, 'Title [REDACTED]', 'the small row has the scrubbed title');
+    assert.equal(listed.goals, '');
+    assert.equal(listed.notes, '');
+    const whole = (await api('query', 'phone:project', { token, runnerId, id: pid })) as Row;
+    assert.equal(whole.goals, `the ${word} goal`);
+    assert.equal(whole.notes, 'long notes');
+    assert.deepEqual(await api('query', 'phone:projectSearch', { token, text: word.toUpperCase() }), [{ runnerId, id: pid }]);
+    assert.deepEqual(await api('query', 'phone:projectSearch', { token, text: 'no-project-says-this' }), []);
+    await api('mutation', 'sync:setProjects', { key, runnerId, projects: [] });
+    assert.ok(!((await api('query', 'phone:projects', { token })) as Row[]).some((p) => p.id === pid), 'its small row goes with it');
+    await api('mutation', 'sync:bye', { key, runnerId });
+  });
+
   test('API 40: a project lists its threads newest first, archived ones too, and follows moves and deletes', async () => {
     const runnerId = 'e2e-links-' + crypto.randomBytes(4).toString('hex');
     const pid = 'e2e-proj-' + crypto.randomBytes(4).toString('hex');

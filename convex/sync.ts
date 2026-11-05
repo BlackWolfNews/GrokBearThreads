@@ -809,7 +809,7 @@ export const heartbeat = mutation({
       await ctx.db.patch(counted._id, { projectsLinked: true });
       await ctx.scheduler.runAfter(0, internal.sync.linkProjects, { runnerId: runner.runnerId, cursor: null });
     }
-    // API 45: every project from before projectHeads, once.
+    // API 48: every project from before projectHeads, once.
     await seedHeads(ctx);
     return { apiVersion: API_VERSION, ...(existing ? {} : { firstSeen: true }), ...(caller.owner && process.env.RUNNER_KEY_NEXT ? { ownerKeyRotating: true } : {}) };
   },
@@ -1493,7 +1493,7 @@ const SCHEDULES_SINCE_CAP = 200;
 const SCHEDULES_SINCE_OLDEST_MS = 12 * 60 * 60_000;
 
 // With no `since`, the whole table and the time to follow it from; with one,
-// the rows written at or after it and the ids gone since (API 45). A runner
+// the rows written at or after it and the ids gone since (API 48). A runner
 // asks again from a little before the newest it heard, so each run reads only
 // what changed (runner/src/schedule-follow.ts). `more`: read it whole again.
 // A runner key's runner reads and hears of only its own, by index.
@@ -2590,7 +2590,7 @@ export const purgeRunner = mutation({
 // by hand, dry run unless told otherwise. It says which rows and how many,
 // never what was in them. Nothing changes for a runner: what it remembers
 // sending is unaffected, so it re-sends nothing. The owner key's only.
-const SCRUB_TABLES = ['messages', 'threads', 'threadIndex', 'projects', 'schedules', 'pocketCards', 'accounts', 'commands', 'replyImages', 'shareImages', 'pools', 'runners', 'tokens', 'runnerKeys', 'runnerStats', 'projectIcons'] as const;
+const SCRUB_TABLES = ['messages', 'threads', 'threadIndex', 'projects', 'schedules', 'pocketCards', 'accounts', 'commands', 'replyImages', 'shareImages', 'pools', 'runners', 'tokens', 'runnerKeys', 'runnerStats', 'projectIcons', 'projectHeads'] as const;
 
 export const scrubStoredBatch = mutation({
   args: {

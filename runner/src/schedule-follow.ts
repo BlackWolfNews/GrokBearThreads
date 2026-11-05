@@ -1,7 +1,7 @@
 // The scheduler wants the whole schedules table, now and whenever it changes.
 // Reading it whole on every change cost about 170 KB a run on each of three
 // runners, and every run of a schedule writes it. So: read it once, then only
-// the rows written since (sync:schedulesSince, API 45), as the inbox does. A
+// the rows written since (sync:schedulesSince, API 48), as the inbox does. A
 // row written can commit a moment after one stamped later, so each ask starts a
 // little before the newest row heard, which only re-reads a row or two.
 export const SCHEDULE_MARGIN_MS = 5000;
