@@ -131,6 +131,7 @@ export const reviewsPart = {
       delete next.snoozedUntil;
       delete next.snoozedUntilRestart;
       delete next.wakeWhen;
+      delete next.waitingOn;
       delete next.archivedAt;
     }
     this.store.save(next);
@@ -138,6 +139,7 @@ export const reviewsPart = {
       delete st.rec.snoozedUntil;
       delete st.rec.snoozedUntilRestart;
       delete st.rec.wakeWhen;
+      delete st.rec.waitingOn;
       delete st.rec.archivedAt;
     }
     // Preserve the record object used by any in-flight deliver() callback.

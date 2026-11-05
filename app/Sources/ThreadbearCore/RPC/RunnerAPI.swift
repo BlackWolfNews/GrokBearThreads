@@ -391,7 +391,7 @@ public struct ThreadUpdate: Sendable, Hashable {
         } else if let snoozedUntil {
             thread.snoozedUntil = snoozedUntil
             thread.snoozedUntilRestart = false
-            if snoozedUntil == nil { thread.wakeWhen = nil }
+            if snoozedUntil == nil { thread.wakeWhen = nil; thread.waitingOn = nil }
         }
         if let archived { thread.archivedAt = archived ? (thread.archivedAt ?? now) : nil }
         if let starred { thread.starredAt = starred ? (thread.starredAt ?? now) : nil }

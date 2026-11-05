@@ -20,7 +20,7 @@ import { SAID_MAX } from './wake-when.ts';
 
 export { parseWhen, relativeFuture, relativeTime };
 import { RUNNER_VERSION, expandHome } from './config.ts';
-import { ALREADY_ENDED, ARCHIVE_ADDED, SNOOZE_ADDED, snoozeFromTool, endTurnDescription, endTurnForm, endTurnMisfit, END_TURN_TOOL, BULLETS_ONLY, ENDED, takenEndTurn, MAX_BYLINE, NARRATION_ONLY, NO_REPLY, needsFromTool, oneReplyAccepted, offersToTakeItBack, oneReplyAlreadyWritten, summaryFromTool, triedFirstNudged, tryFirstNudge, turnReply, type TurnReply } from './needs.ts';
+import { ALREADY_ENDED, ARCHIVE_ADDED, MAX_WAIT_FOR, SNOOZE_ADDED, snoozeFromTool, endTurnDescription, endTurnForm, endTurnMisfit, END_TURN_TOOL, BULLETS_ONLY, ENDED, takenEndTurn, MAX_BYLINE, NARRATION_ONLY, NO_REPLY, needsFromTool, oneReplyAccepted, offersToTakeItBack, oneReplyAlreadyWritten, summaryFromTool, triedFirstNudged, tryFirstNudge, turnReply, type TurnReply } from './needs.ts';
 import { asksForAppRestart, type AppRestarts } from './app-restarts.ts';
 import { PANEL_PLACES } from './panel-requests.ts';
 import { nudgedThisTurn, signInNudge, turnSignIns, uncovered, type ConnectorService } from './connectors.ts';
@@ -731,6 +731,24 @@ export function buildThreadbearTools(
     if (snooze.trim().length > SAID_MAX) throw new Error(`Not ended: snooze is more than ${SAID_MAX} characters. Say when to wake more briefly.`);
   };
 
+  // waitFor is checked before the turn ends too, so a wrong id is said to
+  // the agent rather than in a note it never sees.
+  const checkWaitFor = async (waitFor: unknown, needs: string): Promise<void> => {
+    if (!Array.isArray(waitFor) || !waitFor.length) return;
+    if (needs !== 'nothing') throw new Error('Not ended: waitFor hibernates this thread, so it only goes with needs "nothing". Leave it out while the user has something to do.');
+    for (const id of waitFor) {
+      const full = await resolveOther(String(id));
+      if (full === selfId) throw new Error("Not ended: waitFor can't name this thread.");
+      if ((await control.get(full)).archivedAt) throw new Error(`Not ended: ${full.slice(0, 8)} is archived, so it won't finish. Leave it out of waitFor.`);
+    }
+  };
+
+  const waitForArg = z
+    .array(z.string())
+    .max(MAX_WAIT_FOR)
+    .optional()
+    .describe('Ids of threads the rest of this work waits on: it hibernates until they all finish, then wakes with their replies; snooze is then the latest (1 day if left out). With needs "nothing".');
+
   // end_turn with one reply (docs/protocol.md, "One reply"): the card and
   // a headline; the reply is the message the agent writes next. Nothing to
   // check for a reply, as it comes after; only a second call, a sign-in no
@@ -788,12 +806,14 @@ export function buildThreadbearTools(
         snooze: z
           .string()
           .optional()
-          .describe('Hibernates this thread once the turn is over, until 2h, 1d, tomorrow, an ISO time with its offset, "restart" (the runner next starting) or words saying when ("when the phone arrives"), with needs "nothing": when the user asked for that, or when the rest waits on another thread or a job that will message this one (a message wakes it), until when that should have happened. Asked after you called end_turn? Call it again with this.'),
+          .describe('Hibernates this thread once the turn is over, until 2h, 1d, tomorrow, an ISO time with its offset, "restart" (the runner next starting) or words saying when ("when the phone arrives"), with needs "nothing": when the user asked for that, or when the rest waits on a message (one wakes it), until it should have come. Asked after you called end_turn? Call it again with this.'),
+        waitFor: waitForArg,
       },
       handle(async (input) => {
         checkSnooze(input.snooze);
         const parsed = needsFromTool(input);
         const needs = parsed?.needs ?? 'nothing';
+        await checkWaitFor(input.waitFor, needs);
         const asks = parsed?.asks ?? [];
         const events = await turnEvents();
         const repeat = repeatEndTurn(events, input);
@@ -874,10 +894,12 @@ export function buildThreadbearTools(
         snooze: z
           .string()
           .optional()
-          .describe('Hibernate this thread once the turn is over, until 30m, 2h, 1d, tomorrow, an ISO time with its offset, "restart" (until the runner next starts), or words saying when ("when the phone arrives"). Only when the user has asked for this thread to be snoozed or hibernated, and only with needs "nothing". If they ask after you have called end_turn, call it again with this.'),
+          .describe('Hibernate this thread once the turn is over, until 30m, 2h, 1d, tomorrow, an ISO time with its offset, "restart" (until the runner next starts), or words saying when ("when the phone arrives"). Only with needs "nothing": when the user has asked for this thread to be snoozed or hibernated, or when the rest waits on a message (one wakes it), until it should have come. If they ask after you have called end_turn, call it again with this.'),
+        waitFor: waitForArg,
       },
       handle(async (args) => {
         checkSnooze(args.snooze);
+        await checkWaitFor(args.waitFor, needsFromTool(args)?.needs ?? 'nothing');
         // Archive wins over snooze in the runner, so only one is said.
         const { archive: archived } = args;
         const archive = archived || Boolean(args.snooze?.trim());

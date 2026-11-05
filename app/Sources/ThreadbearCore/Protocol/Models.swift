@@ -1018,6 +1018,8 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     public var snoozedUntilRestart: Bool
     /// Hibernated in Mike's words (protocol "Hibernate in words").
     public var wakeWhen: WakeWhen?
+    /// Hibernating until these threads finish (end_turn's waitFor).
+    public var waitingOn: [WaitingOn]?
     /// Came back from hibernating by itself and not looked at yet: the
     /// row says "Woke up" until then.
     public var woke: ThreadWoke?
@@ -1106,7 +1108,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         provider: String = "claude", model: String? = nil, permissionMode: PermissionMode = .full,
         status: ThreadStatus = .idle, live: Bool = false, needsYou: Bool = false,
         createdAt: Date = Date(), updatedAt: Date = Date(), lastActivityAt: Date = Date(),
-        snoozedUntil: Date? = nil, snoozedUntilRestart: Bool = false, wakeWhen: WakeWhen? = nil, woke: ThreadWoke? = nil, archivedAt: Date? = nil, starredAt: Date? = nil, onOldRunner: Bool = false, preview: String = "",
+        snoozedUntil: Date? = nil, snoozedUntilRestart: Bool = false, wakeWhen: WakeWhen? = nil, waitingOn: [WaitingOn]? = nil, woke: ThreadWoke? = nil, archivedAt: Date? = nil, starredAt: Date? = nil, onOldRunner: Bool = false, preview: String = "",
         lastSeq: Int = 0, lastSeenSeq: Int = 0, nativeSessionId: String? = nil,
         contextTokens: Int? = nil, costUsd: Double? = nil,
         effort: String? = nil, modelInUse: String? = nil, effortInUse: String? = nil, contextWindow: Int? = nil,
@@ -1136,6 +1138,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         self.snoozedUntil = snoozedUntil
         self.snoozedUntilRestart = snoozedUntilRestart
         self.wakeWhen = wakeWhen
+        self.waitingOn = waitingOn
         self.woke = woke
         self.archivedAt = archivedAt
         self.starredAt = starredAt
@@ -1194,6 +1197,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         snoozedUntil = try date(.snoozedUntil)
         snoozedUntilRestart = ((try? c.decodeIfPresent(Bool.self, forKey: .snoozedUntilRestart)) ?? nil) ?? false
         wakeWhen = (try? c.decodeIfPresent(WakeWhen.self, forKey: .wakeWhen)) ?? nil
+        waitingOn = (try? c.decodeIfPresent([WaitingOn].self, forKey: .waitingOn)) ?? nil
         woke = (try? c.decodeIfPresent(ThreadWoke.self, forKey: .woke)) ?? nil
         archivedAt = try date(.archivedAt)
         starredAt = try date(.starredAt)
@@ -1253,6 +1257,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         try c.encodeIfPresent(snoozedUntil.map(ISO8601.format), forKey: .snoozedUntil)
         if snoozedUntilRestart { try c.encode(true, forKey: .snoozedUntilRestart) }
         try c.encodeIfPresent(wakeWhen, forKey: .wakeWhen)
+        try c.encodeIfPresent(waitingOn, forKey: .waitingOn)
         try c.encodeIfPresent(woke, forKey: .woke)
         try c.encodeIfPresent(archivedAt.map(ISO8601.format), forKey: .archivedAt)
         try c.encodeIfPresent(starredAt.map(ISO8601.format), forKey: .starredAt)
@@ -1292,7 +1297,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id, title, cwd, accountId, provider, model, effort, modelInUse, effortInUse, permissionMode, status, live, needsYou, pendingReviews
-        case createdAt, updatedAt, lastActivityAt, snoozedUntil, snoozedUntilRestart, wakeWhen, woke, archivedAt, starredAt, onOldRunner, preview
+        case createdAt, updatedAt, lastActivityAt, snoozedUntil, snoozedUntilRestart, wakeWhen, waitingOn, woke, archivedAt, starredAt, onOldRunner, preview
         case lastSeq, lastSeenSeq, nativeSessionId, contextTokens, contextWindow, costUsd, panels, actions, hooks, patches, background, subagents
         case projects, worktree, needs, asks, asksSeq, highlightsAt, schedule, startedBy, asked, poolId, waitingForRoom, waitingForNetwork, panelRequest, share, sample
     }
@@ -1377,6 +1382,36 @@ public struct ThreadWoke: Sendable, Hashable, Codable {
 /// When a thread hibernated in Mike's words wakes: what he said, the topic
 /// it waits for him to bring up (the librarian listens), and `pending`
 /// while the runner's model works out the time.
+/// A thread a hibernating one waits on (end_turn's waitFor); done once it
+/// has finished, been archived or been deleted.
+public struct WaitingOn: Sendable, Hashable, Codable {
+    public var threadId: String
+    public var title: String
+    public var done: Bool
+
+    public init(threadId: String, title: String, done: Bool = false) {
+        self.threadId = threadId
+        self.title = title
+        self.done = done
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        threadId = try c.decode(String.self, forKey: .threadId)
+        title = try c.decode(String.self, forKey: .title)
+        done = (try? c.decodeIfPresent(Bool.self, forKey: .done)) ?? false
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(threadId, forKey: .threadId)
+        try c.encode(title, forKey: .title)
+        if done { try c.encode(true, forKey: .done) }
+    }
+
+    enum CodingKeys: String, CodingKey { case threadId, title, done }
+}
+
 public struct WakeWhen: Sendable, Hashable, Codable {
     public var said: String
     public var topic: String?

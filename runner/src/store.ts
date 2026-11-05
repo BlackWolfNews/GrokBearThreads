@@ -57,6 +57,9 @@ export type ThreadRecord = {
   snoozedUntil?: string;
   snoozedUntilRestart?: boolean; // snoozedUntil is UNTIL_RESTART; start() wakes it
   wakeWhen?: WakeWhen; // hibernated in Mike's words (wake-when.ts)
+  // Hibernating until these threads finish (end_turn's waitFor,
+  // runner/hibernation.ts); done once each has.
+  waitingOn?: { threadId: string; title: string; done?: { at: string; how: 'finished' | 'archived' | 'deleted' } }[];
   snoozedAt?: string; // when it was last put away, for how long it slept; may be stale once awake
   woke?: { at: string; since?: string }; // woke by itself and not looked at yet (since = snoozedAt)
   archivedAt?: string;

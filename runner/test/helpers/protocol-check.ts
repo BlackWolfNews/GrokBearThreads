@@ -196,6 +196,12 @@ export function checkSummary(t: Obj): string[] {
       Object.keys(w).every((k) => ['said', 'topic', 'pending'].includes(k));
     if (!ok) problems.push('wakeWhen');
   }
+  if (t.waitingOn !== undefined) {
+    const w = t.waitingOn;
+    const ok = Array.isArray(w) && w.length > 0 && isStr(t.snoozedUntil) &&
+      w.every((x: any) => x && isStr(x.threadId) && isStr(x.title) && (x.done === undefined || x.done === true) && Object.keys(x).every((k) => ['threadId', 'title', 'done'].includes(k)));
+    if (!ok) problems.push('waitingOn');
+  }
   for (const k of ['effort', 'effortInUse']) if (t[k] !== undefined && !EFFORTS.includes(t[k])) problems.push(k);
   for (const k of ['contextTokens', 'contextWindow', 'costUsd']) if (t[k] !== undefined && !isNum(t[k])) problems.push(k);
   if (t.panels !== undefined) {
@@ -296,7 +302,7 @@ export function checkSummary(t: Obj): string[] {
   const allowed = new Set([
     'id', 'title', 'cwd', 'accountId', 'provider', 'model', 'permissionMode', 'status', 'live', 'needsYou', 'createdAt', 'updatedAt',
     'lastActivityAt', 'snoozedUntil', 'snoozedUntilRestart', 'archivedAt', 'starredAt', 'preview', 'lastSeq', 'lastSeenSeq', 'nativeSessionId', 'contextTokens', 'costUsd',
-    'poolId', 'waitingForRoom', 'waitingForNetwork', 'wakeWhen',
+    'poolId', 'waitingForRoom', 'waitingForNetwork', 'wakeWhen', 'waitingOn',
     'effort', 'modelInUse', 'effortInUse', 'contextWindow', 'panels', 'actions', 'hooks', 'patches', 'background', 'subagents', 'projects', 'worktree',
     'needs', 'asks', 'asksSeq', 'highlightsAt', 'panelRequest', 'share', 'startedBy', 'asked',
   ]);

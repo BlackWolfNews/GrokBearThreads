@@ -349,9 +349,11 @@ Thursday", "archive this when you're done"). It finishes its reply first,
 then goes, with a note in the thread saying when it'll be back. A time
 works, or words like "until the phone arrives", read the same way as Wake
 when…. It won't put itself away while it's waiting on you. A thread
-whose next step waits on another thread or a job that will message it
-back hibernates by itself until then, with a time it comes back anyway
-if the message never does.
+whose next step waits on other threads hibernates by itself until they
+finish, then wakes with what they said and carries on; its row says
+Waiting on and which. One waiting on a job that will message it does the
+same until the message comes. Either way it has a time it comes back
+anyway, a day unless it says otherwise.
 
 ## Panels
 <!-- slug: panels -->

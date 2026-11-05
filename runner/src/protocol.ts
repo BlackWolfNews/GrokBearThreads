@@ -166,6 +166,7 @@ export type ThreadSummary = {
   // Hibernated in Mike's words ("Hibernate in words"): what he said, the
   // topic it waits for, and pending while the time is worked out.
   wakeWhen?: { said: string; topic?: string; pending?: true };
+  waitingOn?: { threadId: string; title: string; done?: true }[]; // hibernating until these finish
   woke?: { at: string; since?: string }; // woke from hibernating by itself, not looked at yet
   onOldRunner?: boolean; // finishing a turn on a runner that handed over (Handovers)
   archivedAt?: string;

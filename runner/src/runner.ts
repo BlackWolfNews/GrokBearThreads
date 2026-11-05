@@ -92,7 +92,7 @@ import { parseWhen } from './when.ts';
 import { emptyHighlights, observe as observeHighlights, pinItem, remove as removeHighlight, unpin as unpinHighlight, upsert as upsertHighlight, view as highlightsView, absolute, type ThreadHighlights } from './highlights.ts';
 import { SERVER_NAME, approvalTitle } from './threadbear-mcp.ts';
 import { PANEL_ACK_WAIT_MS, PANEL_PLACES, resolvePanel } from './panel-requests.ts';
-import { archiveFromTool, bylineFromTool, END_TURN_TOOL, endTurnAccepted, endTurnAddedArchive, endTurnAddedSnooze, snoozeFromTool, endTurnAsksForMessage, endTurnIsOneReply, endTurnOwesReply, endTurnRefusedRepeat, endTurnTaken, endTurnWantsReply, needsFromText, needsFromTool, replyWithoutRepeat, splitReplySection, summaryFromTool, summaryMarkdown } from './needs.ts';
+import { archiveFromTool, bylineFromTool, END_TURN_TOOL, endTurnAccepted, endTurnAddedArchive, endTurnAddedSnooze, snoozeFromTool, waitForFromTool, endTurnAsksForMessage, endTurnIsOneReply, endTurnOwesReply, endTurnRefusedRepeat, endTurnTaken, endTurnWantsReply, needsFromText, needsFromTool, replyWithoutRepeat, splitReplySection, summaryFromTool, summaryMarkdown } from './needs.ts';
 import type { Needs } from './needs.ts';
 import { asksForAppRestart } from './app-restarts.ts';
 import type { ConnectorsStatus } from './connectors.ts';
@@ -1281,6 +1281,7 @@ export class Runner {
       delete rec.snoozedUntil;
       delete rec.snoozedUntilRestart;
       delete rec.wakeWhen;
+      delete rec.waitingOn;
       delete rec.archivedAt;
       rt.releaseWhenIdle = false;
     }
@@ -1997,12 +1998,20 @@ export class Runner {
     const archive = away && archiveFromTool(turn.endTurn);
     // Hibernating likewise (end_turn's snooze). Archive wins if it asked for both.
     const snooze = away && !archive ? snoozeFromTool(turn.endTurn) : undefined;
+    // Waiting on other threads (end_turn's waitFor), with snooze as the
+    // latest it wakes.
+    const waitFor = away && !archive ? waitForFromTool(turn.endTurn) : undefined;
     this.endTurn(st, ev.seq, outcome === 'failed' ? 'error' : 'idle', outcome, limitHit, netLost);
+    // Done, with nothing left running: any thread waiting on this one hears.
+    // Not if it put itself away to wait too, as it hasn't finished.
+    const finished = away && !snooze && !waitFor && !rec.subagents?.some((a) => a.status === 'running');
+    if (finished && !archive) this.waitedOnFinished(rec.id, 'finished');
     if (archive && !rt.turn && !rec.archivedAt && !this.stopping) {
       this.emit(st, { type: 'system.note', text: 'Archived, as the agent was asked to once it had finished.' });
       this.update({ threadId: rec.id, archived: true });
     }
-    if (snooze && !rt.turn && !rec.archivedAt && !this.stopping) this.snoozeAfterTurn(st, snooze);
+    if (waitFor && !rt.turn && !rec.archivedAt && !this.stopping) this.waitOn(st, waitFor, snooze);
+    else if (snooze && !rt.turn && !rec.archivedAt && !this.stopping) this.snoozeAfterTurn(st, snooze);
   }
 
   // end_turn's snooze, once the turn is over: a time as update_thread
@@ -2430,6 +2439,7 @@ export class Runner {
       delete rec.woke;
       delete rec.snoozedUntilRestart;
       delete rec.wakeWhen;
+      delete rec.waitingOn;
       if (params.snoozedUntil === null) delete rec.snoozedUntil;
       else if (params.snoozedUntil === 'restart') {
         rec.snoozedUntil = UNTIL_RESTART;
@@ -2451,6 +2461,7 @@ export class Runner {
         stop = true;
       } else delete rec.archivedAt;
     }
+    if (archiving) this.waitedOnFinished(rec.id, 'archived');
     if (params.starred === true) rec.starredAt ??= this.isoNow();
     else if (params.starred === false) delete rec.starredAt;
     if (accountChanged && rt.turn && rt.session && !stop) {
@@ -2487,6 +2498,7 @@ export class Runner {
     const { rec, rt } = st;
     rt.deleted = true;
     this.threads.delete(threadId);
+    this.waitedOnFinished(threadId, 'deleted');
     this.dirty.delete(threadId);
     rt.idleTimer?.cancel();
     rt.deltaTimer?.cancel();
@@ -2806,6 +2818,7 @@ export class Runner {
     if (rec.snoozedUntil) s.snoozedUntil = rec.snoozedUntil;
     if (rec.snoozedUntilRestart) s.snoozedUntilRestart = true;
     if (rec.wakeWhen && rec.snoozedUntil) s.wakeWhen = { ...rec.wakeWhen };
+    if (rec.waitingOn && rec.snoozedUntil) s.waitingOn = rec.waitingOn.map((w) => ({ threadId: w.threadId, title: w.title, ...(w.done ? { done: true as const } : {}) }));
     if (rec.woke && rec.forceUnread) s.woke = { ...rec.woke };
     if (rec.archivedAt) s.archivedAt = rec.archivedAt;
     if (rec.starredAt) s.starredAt = rec.starredAt;

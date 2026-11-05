@@ -153,6 +153,9 @@ type ThreadSummary = {
   wakeWhen?: { said: string, topic?: string, pending?: true }
                         // hibernated in Mike's words (Hibernate in words);
                         // only while snoozedUntil is set
+  waitingOn?: { threadId, title, done?: true }[] // hibernating until these
+                        // threads finish (end_turn's waitFor); only
+                        // while snoozedUntil is set
   startedBy?: { kind, label, icon?, threadId?, threadTitle?, why? } // who
                         // started it when Mike didn't (Who started a thread)
   asked?: string        // Mike's last message to it, one line, <= 140 chars
@@ -1961,6 +1964,25 @@ the thread if a sub-agent stalls, so an ask can't stay hidden for good.
   time by which that should have happened. On 5 Nov 2026 a thread
   waiting on another thread's report ended as done in Mike's inbox,
   as the description then allowed it only when he asked.
+- **Waiting on threads.** `end_turn` also takes `waitFor?: string[]`, up
+  to 5 thread ids (or unique prefixes) on this runner, with `needs:
+  "nothing"`. Once the turn is over it hibernates on the same terms as
+  `snooze`, with `waitingOn` on its summary and a `system.note`
+  ("Hibernating until "X" finishes, or <time> at the latest."). `snooze`
+  is then the latest it wakes, as a time (words aren't read here); left
+  out, a day. A named thread is done when it finishes a turn with `needs:
+  "nothing"`, nothing queued, no sub-agent running and no `snooze` or
+  `waitFor` of its own, or is archived or deleted. Once every one is done
+  the thread wakes (a "Woke up … finished." note) and gets a
+  `user.message` with `origin: "runner"` naming each with up to 2,000
+  characters of its last reply. A message, a wake or another snooze first
+  clears `waitingOn`, so a thread that sends its report wakes it as
+  before and its finishing later does nothing. The handler refuses its
+  own id, an archived thread, an unknown id and `needs: "you"`; one gone by the
+  time the turn ends is left out with a note, and if none are left the
+  thread stays in the inbox. Before 5 Nov 2026 a thread waiting on
+  another thread could only end as done in Mike's inbox and hope to be
+  messaged.
 - **The fallback.** A completed turn with no `end_turn` call is read for
   the "What I need from you" section Mike's own instructions ask for: the
   last line near the end that is just that heading in bold, then its

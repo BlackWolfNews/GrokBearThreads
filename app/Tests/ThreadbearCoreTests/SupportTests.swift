@@ -153,6 +153,23 @@ final class WakeWordsTests: XCTestCase {
         XCTAssertNil(WakeWords.status(plain, now: now))
     }
 
+    func testWaitingOnThreadsNamesThemWithTheLatestTime() throws {
+        let limit = now.addingTimeInterval(86_400)
+        let one = ThreadSummary(id: "a", title: "Plan", snoozedUntil: limit, waitingOn: [WaitingOn(threadId: "b", title: "Convex I/O")])
+        XCTAssertEqual(WakeWords.row(one, now: now)?.text, "Waiting on \"Convex I/O\"")
+        XCTAssertTrue(WakeWords.row(one, now: now)!.tip.hasPrefix("Back when \"Convex I/O\" finishes, or "))
+        XCTAssertTrue(ThreadRefs.status(one, now: now).hasPrefix("Hibernating until \"Convex I/O\" finishes, or "))
+        // Done ones drop out of the name; two left read as one and 1 more.
+        let three = ThreadSummary(id: "a", title: "Plan", snoozedUntil: limit, waitingOn: [
+            WaitingOn(threadId: "b", title: "Convex I/O", done: true), WaitingOn(threadId: "c", title: "Website"), WaitingOn(threadId: "d", title: "Docs"),
+        ])
+        XCTAssertEqual(WakeWords.row(three, now: now)?.text, "Waiting on \"Website\" and 1 more")
+        let json = #"{"id":"a","title":"x","cwd":"/","accountId":"c","provider":"claude","permissionMode":"full","status":"idle","live":false,"needsYou":false,"createdAt":"2026-10-29T06:00:00Z","updatedAt":"2026-10-29T06:00:00Z","lastActivityAt":"2026-10-29T06:00:00Z","snoozedUntil":"2026-10-30T06:00:00Z","waitingOn":[{"threadId":"b","title":"Convex I/O","done":true},{"threadId":"c","title":"Website"}],"preview":"","lastSeq":1,"lastSeenSeq":1}"#
+        let t = try JSONDecoder().decode(ThreadSummary.self, from: Data(json.utf8))
+        XCTAssertEqual(t.waitingOn, [WaitingOn(threadId: "b", title: "Convex I/O", done: true), WaitingOn(threadId: "c", title: "Website")])
+        XCTAssertEqual(try JSONDecoder().decode(ThreadSummary.self, from: JSONEncoder().encode(t)).waitingOn, t.waitingOn)
+    }
+
     func testDecodesFromTheRunner() throws {
         let json = #"{"id":"a","title":"x","cwd":"/","accountId":"c","provider":"claude","permissionMode":"full","status":"idle","live":false,"needsYou":false,"createdAt":"2026-10-29T06:00:00Z","updatedAt":"2026-10-29T06:00:00Z","lastActivityAt":"2026-10-29T06:00:00Z","snoozedUntil":"9999-12-31T00:00:00.000Z","wakeWhen":{"said":"soon","pending":true},"preview":"","lastSeq":1,"lastSeenSeq":1}"#
         let t = try JSONDecoder().decode(ThreadSummary.self, from: Data(json.utf8))

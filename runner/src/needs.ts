@@ -150,6 +150,17 @@ export function snoozeFromTool(input: unknown): string | undefined {
   return needsFromTool(input)?.needs === 'nothing' ? s.trim() : undefined;
 }
 
+// end_turn's waitFor: the threads this one hibernates until they finish
+// (runner/hibernation.ts, waitOn). Like snooze, only with needs "nothing".
+export const MAX_WAIT_FOR = 5;
+export function waitForFromTool(input: unknown): string[] | undefined {
+  if (!input || typeof input !== 'object') return undefined;
+  const w = (input as Record<string, unknown>).waitFor;
+  if (!Array.isArray(w)) return undefined;
+  const ids = [...new Set(w.filter((x): x is string => typeof x === 'string').map((x) => x.trim()).filter(Boolean))].slice(0, MAX_WAIT_FOR);
+  return ids.length && needsFromTool(input)?.needs === 'nothing' ? ids : undefined;
+}
+
 // end_turn's byline: a few words for the row of a thread Mike didn't start.
 export const MAX_BYLINE = 80;
 export function bylineFromTool(input: unknown): string | undefined {
@@ -388,7 +399,7 @@ const NEXT_ROW =
 
 // Hibernating itself, in every form's description (snoozeFromTool).
 const END_TURN_SNOOZE =
-  'snooze hibernates this thread once the turn is over, with needs "nothing" only, until a time ("2h", "1d", "tomorrow", an ISO time with its offset, or "restart") or words saying when ("when the phone arrives"). Use it when the user asks for this thread to be snoozed or hibernated, or when the rest waits on another thread or a job that will message this one (a message wakes it): then give the time that should have happened by. ';
+  'snooze hibernates this thread once the turn is over, with needs "nothing" only, until a time ("2h", "1d", "tomorrow", an ISO time with its offset, or "restart") or words saying when ("when the phone arrives"). Use it when the user asks for this thread to be snoozed or hibernated, or when the rest waits on a message (one wakes it), until it should have come; waitFor names threads it waits on, which wake it when they finish. ';
 
 // Handing a step over, in every form's description. This used to say to offer
 // "Can you do it?" when the agent could plausibly do the step itself, which told
@@ -583,8 +594,8 @@ export function endTurnIsOneReply(result: { ok: boolean; text: string }): boolea
 // (thread 1b770c6a).
 export function endTurnMisfit(problem: string, oneReply: boolean): string {
   const shape = oneReply
-    ? '{ headline?, needs?, asks?: { question, options?: { label, does? }[], suggested?, links? }[], next?, archive?, snooze? }, then write your reply after it, as ordinary text: that reply is the only text the user sees from the turn.'
-    : '{ needs?, summary?: string[], asks?: { action, why, reply?, options?: string[], suggested?, links? }[], next?, archive?, snooze? }, after writing your reply as ordinary text, with nothing after the call.';
+    ? '{ headline?, needs?, asks?: { question, options?: { label, does? }[], suggested?, links? }[], next?, archive?, snooze?, waitFor? }, then write your reply after it, as ordinary text: that reply is the only text the user sees from the turn.'
+    : '{ needs?, summary?: string[], asks?: { action, why, reply?, options?: string[], suggested?, links? }[], next?, archive?, snooze?, waitFor? }, after writing your reply as ordinary text, with nothing after the call.';
   return `Not ended: those arguments don't fit end_turn.\n${problem}\nCall it with ${shape} Go by this rather than the tool's description, which can be out of date in a session this old, and reloading it won't change that.`;
 }
 

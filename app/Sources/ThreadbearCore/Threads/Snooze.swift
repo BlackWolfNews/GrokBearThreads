@@ -84,6 +84,11 @@ public enum WakeWords {
     /// What a Hibernating row shows where its time would be, and the tooltip
     /// with the rest; nil for one hibernated the ordinary way.
     public static func row(_ thread: ThreadSummary, now: Date) -> (text: String, tip: String)? {
+        if let names = waitingNames(thread) {
+            var tip = "Back when \(names) \(stillGoing(thread).count == 1 ? "finishes" : "finish")"
+            if let time = time(thread) { tip += ", or \(RelativeTime.until(time, now: now)) at the latest" }
+            return ("Waiting on \(names)", tip + ".")
+        }
         guard let wake = thread.wakeWhen else { return nil }
         if wake.pending { return ("Thinking…", "Working out when from \"\(wake.said)\"") }
         guard let topic = wake.topic else { return nil }
@@ -94,11 +99,28 @@ public enum WakeWords {
 
     /// The thread's status line ("Hibernating until you talk about woodworking").
     public static func status(_ thread: ThreadSummary, now: Date) -> String? {
+        if let names = waitingNames(thread) {
+            let base = "Hibernating until \(names) \(stillGoing(thread).count == 1 ? "finishes" : "finish")"
+            if let time = time(thread) { return base + ", or \(RelativeTime.until(time, now: now))" }
+            return base
+        }
         guard let wake = thread.wakeWhen else { return nil }
         if wake.pending { return "Hibernating, working out until when" }
         guard let topic = wake.topic else { return nil }
         if let time = time(thread) { return "Hibernating until you talk about \(topic), or \(RelativeTime.until(time, now: now))" }
         return "Hibernating until you talk about \(topic)"
+    }
+
+    /// The threads it still waits on (end_turn's waitFor).
+    static func stillGoing(_ thread: ThreadSummary) -> [WaitingOn] {
+        (thread.waitingOn ?? []).filter { !$0.done }
+    }
+
+    /// "Convex I/O", or "Convex I/O and 1 more", for the row and status line.
+    static func waitingNames(_ thread: ThreadSummary) -> String? {
+        let left = stillGoing(thread)
+        guard let first = left.first else { return nil }
+        return left.count == 1 ? "\"\(first.title)\"" : "\"\(first.title)\" and \(left.count - 1) more"
     }
 
     // The runner's 9999-12-31 is beyond this; any real time is well before.
