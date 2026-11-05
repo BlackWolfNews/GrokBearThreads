@@ -159,9 +159,9 @@ test('ps, lsof and CLI matching', () => {
   assert.equal(cpuTime('12:03.50'), 723.5);
   assert.equal(cpuTime('1:02:03.00'), 3723);
   assert.equal(cpuTime('2-01:00:00.00'), 2 * 86_400 + 3600);
-  assert.deepEqual(parsePs('  9896 39636   0:00.52 /bin/zsh -c source x\n39636 30110 1:02.00 /Users/m/.local/bin/claude --resume=abc\n'), [
-    { pid: 9896, ppid: 39636, cpuSeconds: 0.52, command: '/bin/zsh -c source x' },
-    { pid: 39636, ppid: 30110, cpuSeconds: 62, command: '/Users/m/.local/bin/claude --resume=abc' },
+  assert.deepEqual(parsePs('  9896 39636   0:00.52    01:05 /bin/zsh -c source x\n39636 30110 1:02.00 1-02:00:00 /Users/m/.local/bin/claude --resume=abc\n'), [
+    { pid: 9896, ppid: 39636, cpuSeconds: 0.52, ageSeconds: 65, command: '/bin/zsh -c source x' },
+    { pid: 39636, ppid: 30110, cpuSeconds: 62, ageSeconds: 86_400 + 7200, command: '/Users/m/.local/bin/claude --resume=abc' },
   ]);
   assert.deepEqual([...parseLsof('p9896\nf1\nn/private/tmp/claude-501/p/s/tasks/bwjre5i4r.output\np12\nf1\nn/dev/null\n')], [
     [9896, '/private/tmp/claude-501/p/s/tasks/bwjre5i4r.output'],
@@ -181,25 +181,53 @@ test('a browserbear handoff --wait is left alone until its own timeout, then cou
   s.result('completed');
   const started = h.clock.now();
   probe.files.set('b2', { startedAt: started, lastOutputAt: started });
+  // The script sleeps ten minutes before the handoff starts.
+  const handoffStarted = started + 10 * MIN;
   const shell = (cpuSeconds: number): BackgroundShell => ({
     taskId: 'b2',
     cpuSeconds,
     commands: ['zsh', 'node'],
-    args: ["/bin/zsh -c source /x/shell-snapshots/snapshot-zsh.sh && eval 'browserbear handoff 12 --wait --timeout 3600'", 'node /Users/m/.local/bin/browserbear handoff 12 --wait --timeout 3600'],
+    processes: [
+      { command: "/bin/zsh -c source /x/shell-snapshots/snapshot-zsh.sh && eval 'sleep 600; browserbear handoff 12 --wait --timeout 3600'", startedAt: started },
+      { command: 'node /Users/m/.local/bin/browserbear handoff 12 --wait --timeout 3600', startedAt: handoffStarted },
+    ],
   });
   probe.shellsBySession.set(session(h), [shell(0.1)]);
 
-  // Quiet and idle for 55 minutes, well past 30, but it said it'd wait an hour.
-  for (let i = 0; i < 11; i++) {
+  // Quiet and idle for 70 minutes, well past 30, but the handoff said it'd
+  // wait an hour from when it started.
+  for (let i = 0; i < 14; i++) {
     h.clock.advance(5 * MIN);
     await jobs.sweep();
   }
   assert.deepEqual(nudges(h, thread.id), []);
 
   // Past its timeout and the grace: it should have exited, so it's stuck.
-  h.clock.advance(60 * MIN + WAIT_GRACE_MS - 55 * MIN);
+  h.clock.advance(handoffStarted + 60 * MIN + WAIT_GRACE_MS - h.clock.now());
   await jobs.sweep();
   probe.shellsBySession.set(session(h), [shell(0.2)]);
+  h.clock.advance(5 * MIN);
+  await jobs.sweep();
+  assert.equal(nudges(h, thread.id).length, 1);
+});
+
+test('a stuck loop whose shell text only mentions a handoff still counts', async () => {
+  const { h, probe, jobs, thread, s } = setUp();
+  s.out({ kind: 'tasks', tasks: [waiter] });
+  s.result('completed');
+  const started = h.clock.now();
+  probe.files.set('b1', { startedAt: started, lastOutputAt: started });
+  const line = "/bin/zsh -c source /x/shell-snapshots/snapshot-zsh.sh && eval 'false && browserbear handoff 12 --wait --timeout 86400; while true; do sleep 3; done'";
+  const shell = (cpuSeconds: number): BackgroundShell => ({
+    taskId: 'b1',
+    cpuSeconds,
+    commands: ['zsh', 'sleep'],
+    processes: [{ command: line, startedAt: started }, { command: 'sleep 3', startedAt: h.clock.now() }],
+  });
+  probe.shellsBySession.set(session(h), [shell(0.1)]);
+  h.clock.advance(35 * MIN);
+  await jobs.sweep();
+  probe.shellsBySession.set(session(h), [shell(0.3)]);
   h.clock.advance(5 * MIN);
   await jobs.sweep();
   assert.equal(nudges(h, thread.id).length, 1);
@@ -208,10 +236,14 @@ test('a browserbear handoff --wait is left alone until its own timeout, then cou
 test('which command lines wait on the user, and for how long', () => {
   assert.equal(waitsOnUserMs('node /Users/m/.local/bin/browserbear handoff 12 --wait --timeout 3600'), 3600_000);
   assert.equal(waitsOnUserMs('node /x/browserbear/cli.mjs handoff https://a.b --until-url *done*'), 20 * MIN);
-  assert.equal(waitsOnUserMs('browserbear handoff 3 --wait --timeout nope'), 20 * MIN);
-  // Not waiting, or not browserbear: judged as usual.
+  assert.equal(waitsOnUserMs('/opt/homebrew/bin/node /x/browserbear handoff 3 --wait --timeout nope'), 20 * MIN);
+  // Read as browserbear reads its flags: anywhere, the last one winning.
+  assert.equal(waitsOnUserMs('node /x/browserbear --timeout 7200 handoff 12 --wait'), 7200_000);
+  assert.equal(waitsOnUserMs('node /x/browserbear handoff 12 --wait --timeout 1800 --timeout 7200'), 7200_000);
+  // Not waiting, not browserbear, or only a shell's text naming it: judged as usual.
   assert.equal(waitsOnUserMs('node /x/browserbear handoff 12'), undefined);
   assert.equal(waitsOnUserMs('node /x/browserbear snapshot 12 --wait'), undefined);
   assert.equal(waitsOnUserMs('sleep 3600'), undefined);
-  assert.equal(waitsOnUserMs("until ! pgrep -f snip2.py; do sleep 3; done"), undefined);
+  assert.equal(waitsOnUserMs("/bin/zsh -c eval 'browserbear handoff 12 --wait --timeout 86400'"), undefined);
+  assert.equal(waitsOnUserMs('until ! pgrep -f snip2.py; do sleep 3; done'), undefined);
 });
