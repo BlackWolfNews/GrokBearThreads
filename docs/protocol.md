@@ -3693,23 +3693,20 @@ type ThreadShare = {
 - As the page is public and a path is only what the agent wrote, a file
   goes up only if it's really a PNG, JPEG, GIF or WebP by its bytes (the
   type sent is the one its bytes say, not its name's), isn't itself a
-  symlink, and is, by its real path, in one of two places. The thread's
-  media folder in the data dir (`threads/<id>/media`, where attachments
-  and tool pictures are copied), whatever its age. Or the thread's
-  folder, but only a file created or changed since the thread started
-  (its modification time at or after the thread's `createdAt` in the
-  runner's records): what the agent drew, shot or exported there. A
-  picture that was in the folder before is the folder's own (a scan, a
-  screenshot someone left), and Markdown naming one would publish it, so
-  it stays (Daybreak verify-fix, 5 Nov); so does everything from the
-  folder when the thread's start time can't be read. Not the temp
-  folders, though agents save screenshots there: they hold every app's
-  files, so a Markdown line naming any picture there would publish it.
-  The file is read through one descriptor opened without following a
-  link and checked to be the file at its real path. Anything else stays
-  on the Mac with a line in the runner log and shows on the page as its
-  alt text. An agent that wants a picture on a shared page saves it in
-  the thread's folder as it works (a fresh copy of an older one counts).
+  symlink, and is, by its real path, in the thread's media folder in the
+  data dir (`threads/<id>/media`, where attachments and tool pictures are
+  copied). Nowhere else: a Markdown path is only text the agent wrote,
+  maybe at a repo's or a web page's say, so it can't publish a file from
+  the thread's folder, however new (pictures made there since the thread
+  started went, and that was still Markdown publishing a local file:
+  Daybreak verify-fix, 5 Nov), or from the temp folders, which hold every
+  app's screenshots. The file is read through one descriptor opened
+  without following a link and checked to be the file at its real path.
+  Anything else stays on the Mac with a line in the runner log and shows
+  on the page as its alt text. An agent that wants a picture on a shared
+  page copies it into the media folder, which every CLI the runner starts
+  is told as `THREADBEAR_MEDIA_DIR` (`mkdir -p` it first; it may not be
+  there yet), and writes that path in its Markdown.
 - The thread's row on the mirror has `share: { access, slug }` (backend
   API 8). An older backend gets the row without it, and gets it once a
   heartbeat says it's new enough.
@@ -3770,6 +3767,7 @@ same. There's no tool for restarting the runner: that's `runner.restart`.
 | `THREADBEAR_HOME` | the runner's data dir, where `tb` looks for a runner (agents may point it at a dev runner) |
 | `THREADBEAR_RUNNER_HOME` | the runner's data dir too, which agents never change: the scripts' guards against restarting the runner a thread runs on go by it |
 | `THREADBEAR_RUNNER_VERSION` | the runner's version, as in `hello` |
+| `THREADBEAR_MEDIA_DIR` | the thread's media folder (`<data dir>/threads/<id>/media`): the only place a shared page's pictures come from (see "Sharing") |
 
 The runner also puts its own `bin/` (the release's, or the checkout's for a
 runner run from source) at the front of `PATH`, so a bare `tb` in a thread

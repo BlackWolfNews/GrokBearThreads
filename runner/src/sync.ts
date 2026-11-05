@@ -21,7 +21,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { ConvexClient } from 'convex/browser';
 import { phonePicture } from './project-icons.ts';
-import { imagesInEvent, readReplyImage, readShareImage, replyImagesInEvent, shareRoots, type ReplyImage, type ShareImage } from './share-images.ts';
+import { imagesInEvent, readReplyImage, readShareImage, replyImagesInEvent, type ReplyImage, type ShareImage } from './share-images.ts';
 import { extForMediaType, sniffImage } from './media.ts';
 import { makeFunctionReference } from 'convex/server';
 import type { Clock, TimerHandle } from './clock.ts';
@@ -1911,10 +1911,9 @@ export class ConvexSync {
       if (!up.has(id) && this.sharedNow.get(img.threadId)) {
         // Only real pictures from the thread's own places, typed by their
         // bytes: the page is public, and a path is only what the agent wrote.
-        // The thread folder's only from since the thread started: one
-        // that was there before is the folder's own, not the agent's.
-        const roots = shareRoots(this.cwdOf(img.threadId), this.deps.home ? paths.media(this.deps.home, img.threadId) : undefined, this.createdAtOf(img.threadId));
-        const file = readShareImage(img.path, roots);
+        // Only from the thread's media folder: a path in Markdown is only
+        // what the agent wrote (docs/protocol.md, "Sharing").
+        const file = readShareImage(img.path, this.deps.home ? paths.media(this.deps.home, img.threadId) : undefined);
         if ('skip' in file) {
           this.deps.log.warn('shared picture not sent', { threadId: img.threadId, path: img.path, why: file.skip });
         } else {
@@ -1934,14 +1933,6 @@ export class ConvexSync {
         up.add(id);
       }
       this.pendingImages.shift();
-    }
-  }
-
-  private createdAtOf(threadId: string): string | undefined {
-    try {
-      return this.deps.runner.get(threadId).createdAt;
-    } catch {
-      return undefined;
     }
   }
 

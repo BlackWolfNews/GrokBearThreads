@@ -956,6 +956,8 @@ test('every CLI gets THREADBEAR_THREAD_ID, THREADBEAR_HOME and THREADBEAR_RUNNER
   assert.equal(env.THREADBEAR_THREAD_ID, thread.id);
   assert.equal(env.THREADBEAR_HOME, h.home);
   assert.equal(env.THREADBEAR_RUNNER_HOME, h.home);
+  // Where a picture goes to be on the thread's shared page (docs/protocol.md, "Sharing").
+  assert.equal(env.THREADBEAR_MEDIA_DIR, path.join(h.home, 'threads', thread.id, 'media'));
   assert.match(env.THREADBEAR_RUNNER_VERSION, /^\d+\.\d+\.\d+\+/);
   // This runner's bin/ first, so a bare `tb` in the thread is its tb.
   assert.equal(env.PATH.split(':')[0], path.resolve(import.meta.dirname, '..', '..', 'bin'));

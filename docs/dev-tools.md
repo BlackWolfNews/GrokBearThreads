@@ -154,7 +154,7 @@ the data dir (`<home>`, normally `~/Library/Application Support/Threadbear`):
   with `origin: "runner"`. At most 3 automatic resumes per thread per
   hour; past that, only the note. Delete `restart.json` once handled.
 - **Environment:** every CLI the runner starts gets `THREADBEAR_THREAD_ID`,
-  `THREADBEAR_HOME` and `THREADBEAR_RUNNER_VERSION`.
+  `THREADBEAR_HOME`, `THREADBEAR_RUNNER_VERSION` and `THREADBEAR_MEDIA_DIR`.
 - **deploy-runner.sh's restart step:** by default it calls
   `runner.restart { when: "idle", resume }`. Inside a thread
   (`THREADBEAR_THREAD_ID` set) the resume defaults to "The runner restarted

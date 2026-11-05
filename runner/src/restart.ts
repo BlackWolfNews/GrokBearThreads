@@ -133,6 +133,9 @@ export function threadEnv(threadId: string, home: string, basePath = process.env
     THREADBEAR_HOME: home,
     THREADBEAR_RUNNER_HOME: home,
     THREADBEAR_RUNNER_VERSION: RUNNER_VERSION,
+    // A picture copied in here can be on the thread's shared page; one
+    // anywhere else can't (docs/protocol.md, "Sharing").
+    THREADBEAR_MEDIA_DIR: paths.media(home, threadId),
     // The old names too, for skills and scripts written before the rename.
     THREADBARE_THREAD_ID: threadId,
     THREADBARE_HOME: home,

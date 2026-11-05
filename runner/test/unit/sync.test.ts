@@ -10,7 +10,7 @@ import type { Project } from '../../src/protocol.ts';
 import type { ScheduleBackend } from '../../src/schedules.ts';
 import { nullLogger, type Logger } from '../../src/log.ts';
 import { AT_MAC_IDLE_MS, isAtMac } from '../../src/presence.ts';
-import { readRunnerJson } from '../../src/config.ts';
+import { paths, readRunnerJson } from '../../src/config.ts';
 
 type Call = { kind: string; fn: string; args: Record<string, unknown> };
 
@@ -1185,11 +1185,8 @@ function pngBytes(w: number, h: number): Buffer {
 
 test('sharing: pictures of a shared thread go to file storage, once each, and go when it stops', async () => {
   const h = makeHarness();
-  // In the thread's folder: a picture anywhere else stays on the Mac.
-  const pic = path.join(h.cfg.defaults.cwd, 'chart.png');
   const png = pngBytes(32, 16);
-  fs.writeFileSync(pic, png);
-  // And one in a temp folder that isn't the thread's, which never goes
+  // One in a temp folder that isn't the thread's, which never goes
   // (Daybreak verify-fix, 5 Nov: another app's screenshot was one line away).
   const other = path.join(tmpDir(), 'Screenshot.png');
   fs.writeFileSync(other, pngBytes(8, 8));
@@ -1200,6 +1197,7 @@ test('sharing: pictures of a shared thread go to file storage, once each, and go
     config: { enabled: true, url: 'https://x.convex.cloud', runnerId: 'r1' },
     key: 'k',
     runner: h.runner,
+    home: h.cfg.home,
     version: '0.1.0+test',
     startedAt: '2026-10-29T00:00:00.000Z',
     clock: h.clock,
@@ -1217,14 +1215,14 @@ test('sharing: pictures of a shared thread go to file storage, once each, and go
     },
   });
   const t = h.runner.create({ text: 'draw it', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
-  // The chart was made after the thread started, by its creation time in
-  // the runner's records. A picture already in the folder never goes
+  // The chart is in the thread's media folder, where a picture goes to be
+  // on its shared page. One in the thread's folder never goes, however new
   // (Daybreak verify-fix, 5 Nov: Markdown naming one published it).
-  const started = Date.parse(h.runner.get(t.id).createdAt);
-  fs.utimesSync(pic, new Date(started + 1000), new Date(started + 1000));
+  const pic = path.join(paths.media(h.cfg.home, t.id), 'chart.png');
+  fs.mkdirSync(path.dirname(pic), { recursive: true });
+  fs.writeFileSync(pic, png);
   const old = path.join(h.cfg.defaults.cwd, 'scan.png');
   fs.writeFileSync(old, pngBytes(9, 9));
-  fs.utimesSync(old, new Date(started - 60_000), new Date(started - 60_000));
   const s = session(h, t.id);
   s.init();
   s.text('m1', `Here it is:\n\n![The chart](${pic})\n\nand a [link](https://example.com). ![Not mine](${other}) ![Was there](${old})`);
@@ -1270,11 +1268,10 @@ test('sharing: pictures of a shared thread go to file storage, once each, and go
 test('sharing: a shared thread seen before it comes across in a handover has its pictures sent once it arrives', async () => {
   const calls: Call[] = [];
   const h = makeHarness();
-  const pic = path.join(h.cfg.defaults.cwd, 'shot.png');
-  fs.writeFileSync(pic, pngBytes(4, 4));
   const t = h.runner.create({ text: 'look', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
-  const started = Date.parse(h.runner.get(t.id).createdAt);
-  fs.utimesSync(pic, new Date(started + 1000), new Date(started + 1000));
+  const pic = path.join(paths.media(h.cfg.home, t.id), 'shot.png');
+  fs.mkdirSync(path.dirname(pic), { recursive: true });
+  fs.writeFileSync(pic, pngBytes(4, 4));
   const s = session(h, t.id);
   s.init();
   s.text('m1', `![shot](${pic})`);
@@ -1296,6 +1293,7 @@ test('sharing: a shared thread seen before it comes across in a handover has its
       },
       events: (id, o) => h.runner.events(id, o),
     },
+    home: h.cfg.home,
     version: '0.1.0+test',
     startedAt: '2026-10-29T00:00:00.000Z',
     clock: h.clock,
