@@ -498,6 +498,10 @@ export type PanelItem = {
   path?: string;
   icon?: string;
   tone?: 'attention' | 'failed' | 'done';
+  // A heading drawn over the row where it differs from the row before's.
+  section?: string;
+  // Short, faint, at the end of the title's line: a date or a count.
+  trailing?: string;
 };
 
 export type BackgroundKind = 'agent' | 'shell' | 'monitor' | 'other';

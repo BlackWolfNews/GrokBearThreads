@@ -239,6 +239,22 @@ final class ListPanelTests: XCTestCase {
         XCTAssertEqual(image.image?.path, "/tmp/s.png")
     }
 
+    func testSectionsDrawAHeadingWhereTheyChangeAndTrailingDecodes() throws {
+        let json = #"""
+        {"items":[
+          {"title":"Streak","section":"Waiting · 1","trailing":"1d"},
+          {"title":"Clouds","section":"Shipped · 2","trailing":"5d"},
+          {"title":"Replay","section":"Shipped · 2"},
+          {"title":"Loose"},
+          {"title":"Back","section":"Shipped · 2"}
+        ]}
+        """#
+        let items = try XCTUnwrap(try JSONDecoder().decode(PanelRender.self, from: Data(json.utf8)).items)
+        XCTAssertEqual(items.map(\.trailing), ["1d", "5d", nil, nil, nil])
+        // A row with no section ends the group, so the next one says it again.
+        XCTAssertEqual(PanelItem.headings(items), ["Waiting · 1", "Shipped · 2", nil, nil, "Shipped · 2"])
+    }
+
     func testRailIcons() {
         XCTAssertEqual(PanelIcon.symbol(for: Panel(id: "convex.dashboard", title: "Convex")), "cylinder.split.1x2")
         XCTAssertEqual(PanelIcon.symbol(for: Panel(id: "xcode.simulator", title: "Simulator", kind: .image)), "iphone")

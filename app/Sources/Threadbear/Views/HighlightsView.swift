@@ -388,6 +388,8 @@ struct PaneRow: View {
     var titleTruncation: Text.TruncationMode = .middle
     /// A path keeps both ends; a sub-agent's report its start.
     var detailTruncation: Text.TruncationMode = .middle
+    /// A list panel's sentence gets two; a path or a sha one.
+    var detailLines = 1
     var action: (() -> Void)?
     @State private var hovering = false
 
@@ -452,8 +454,9 @@ struct PaneRow: View {
                         Text(detail)
                             .font(.system(size: TypeScale.small))
                             .foregroundStyle(SidebarMetrics.faint)
-                            .lineLimit(1)
+                            .lineLimit(detailLines)
                             .truncationMode(detailTruncation)
+                            .fixedSize(horizontal: false, vertical: detailLines > 1)
                     }
                 }
             }

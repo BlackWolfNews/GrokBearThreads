@@ -2697,11 +2697,13 @@ The new hero is shorter, and every page now leads with what the app does.
     site.summary.panels = [{
       id: 'deploys.previews', title: 'Previews', kind: 'list', icon: 'paperplane', patch: 'deploys', note: 'landing-rebuild',
       mockItems: [
-        { title: 'Home', detail: 'Ready 4 minutes ago', url: 'https://site-git-landing-rebuild.vercel.app', icon: 'globe', tone: 'done' },
-        { title: 'Pricing', detail: 'Waiting on the plan prices', url: 'https://site-git-landing-rebuild.vercel.app/pricing', icon: 'globe', tone: 'attention' },
-        { title: 'Docs', detail: 'Build failed: no image at /docs/hero.png', path: path.join(root, 'logs/docs-build.txt'), icon: 'globe', tone: 'failed' },
-        { title: 'Local', detail: 'astro dev on port 4321', url: 'http://localhost:4321/', icon: 'laptopcomputer' },
-        { title: 'Production', detail: 'main, deployed 2 days ago', url: 'https://example.com', icon: 'globe' },
+        // Grouped under headings, with a date at the end of the line and a
+        // sentence long enough to wrap onto its second line.
+        { title: 'Home', detail: 'Ready, with the new hero, the three plan cards and the footer links all pointing at the rebuilt pages', url: 'https://site-git-landing-rebuild.vercel.app', icon: 'globe', tone: 'done', section: 'This branch', trailing: '4m' },
+        { title: 'Pricing', detail: 'Waiting on the plan prices', url: 'https://site-git-landing-rebuild.vercel.app/pricing', icon: 'globe', tone: 'attention', section: 'This branch', trailing: '12m' },
+        { title: 'Docs', detail: 'Build failed: no image at /docs/hero.png', path: path.join(root, 'logs/docs-build.txt'), icon: 'globe', tone: 'failed', section: 'This branch', trailing: '20m' },
+        { title: 'Local', detail: 'astro dev on port 4321', url: 'http://localhost:4321/', icon: 'laptopcomputer', section: 'Elsewhere' },
+        { title: 'Production', detail: 'main, deployed 2 days ago', url: 'https://example.com', icon: 'globe', section: 'Elsewhere', trailing: '2d' },
       ],
     }];
     site.summary.patches = [{ id: 'deploys', source: 'project', file: path.join(root, '.threadbear/patches/deploys.ts') }];

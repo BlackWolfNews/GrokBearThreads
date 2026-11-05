@@ -378,6 +378,9 @@ test('a panel with an items function is a list panel, filled by renderListPanel 
           (await sh("echo from-sh")).trim(),
           { title: "", detail: "dropped: no title" },
           { title: "odd", tone: "loud", extra: 1 },
+          { title: "grouped", section: " Shipped · 2 ", trailing: "5d" },
+          { title: "long", section: "x".repeat(200), trailing: "y".repeat(50) },
+          { title: "blank", section: "  ", trailing: 3 },
         ] },
         { title: "Broken", items: () => { throw new Error("no git here") } },
         { title: "Slow", items: () => new Promise(() => {}) },
@@ -400,7 +403,14 @@ test('a panel with an items function is a list panel, filled by renderListPanel 
     },
   };
   assert.deepEqual(await renderListPanel(list!, set, ctx), {
-    items: [{ title: 'main', detail: app, tone: 'done' }, { title: 'from-sh' }, { title: 'odd' }],
+    items: [
+      { title: 'main', detail: app, tone: 'done' },
+      { title: 'from-sh' },
+      { title: 'odd' },
+      { title: 'grouped', section: 'Shipped · 2', trailing: '5d' },
+      { title: 'long', section: 'x'.repeat(80), trailing: 'y'.repeat(24) },
+      { title: 'blank' },
+    ],
   });
   assert.deepEqual(commands, [{ command: 'echo from-sh', cwd: app }]);
   assert.deepEqual(await renderListPanel(broken!, set, ctx), { note: "Couldn't fill this panel: no git here" });

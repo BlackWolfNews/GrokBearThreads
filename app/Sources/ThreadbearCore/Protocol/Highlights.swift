@@ -213,7 +213,7 @@ public struct PanelItem: Sendable, Hashable, Codable {
     }
 
     public var title: String
-    /// A second line, grey.
+    /// Grey, under the title, up to two lines.
     public var detail: String?
     public var url: String?
     public var path: String?
@@ -221,14 +221,22 @@ public struct PanelItem: Sendable, Hashable, Codable {
     public var icon: String?
     /// Nil is plain, and so is a tone this app doesn't know.
     public var tone: Tone?
+    /// A heading over this row and the next ones with the same section,
+    /// drawn where it changes.
+    public var section: String?
+    /// Short and faint at the end of the title's line: a date or a count.
+    public var trailing: String?
 
-    public init(title: String, detail: String? = nil, url: String? = nil, path: String? = nil, icon: String? = nil, tone: Tone? = nil) {
+    public init(title: String, detail: String? = nil, url: String? = nil, path: String? = nil, icon: String? = nil, tone: Tone? = nil,
+                section: String? = nil, trailing: String? = nil) {
         self.title = title
         self.detail = detail
         self.url = url
         self.path = path
         self.icon = icon
         self.tone = tone
+        self.section = section
+        self.trailing = trailing
     }
 
     public init(from decoder: Decoder) throws {
@@ -239,7 +247,22 @@ public struct PanelItem: Sendable, Hashable, Codable {
         path = (try? c.decodeIfPresent(String.self, forKey: .path)) ?? nil
         icon = (try? c.decodeIfPresent(String.self, forKey: .icon)) ?? nil
         tone = (try? c.decodeIfPresent(Tone.self, forKey: .tone)) ?? nil
+        section = (try? c.decodeIfPresent(String.self, forKey: .section)) ?? nil
+        trailing = (try? c.decodeIfPresent(String.self, forKey: .trailing)) ?? nil
     }
 
-    enum CodingKeys: String, CodingKey { case title, detail, url, path, icon, tone }
+    enum CodingKeys: String, CodingKey { case title, detail, url, path, icon, tone, section, trailing }
+}
+
+extension PanelItem {
+    /// The heading to draw over each row: its section where it differs from
+    /// the row before's, so a patch's groups come out in its own order.
+    public static func headings(_ items: [PanelItem]) -> [String?] {
+        var last: String?
+        return items.map { item in
+            defer { last = item.section }
+            guard let section = item.section, !section.isEmpty, section != last else { return nil }
+            return section
+        }
+    }
 }

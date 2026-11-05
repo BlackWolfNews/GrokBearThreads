@@ -1013,7 +1013,9 @@ private struct ListPanel: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         let reserves = items.contains { ListPanel.icon($0) != nil }
-                        ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                        let headings = PanelItem.headings(items)
+                        ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                            if let heading = headings[index] { SectionHeading(title: heading) }
                             row(item, reservesIcon: reserves)
                         }
                     }
@@ -1046,9 +1048,13 @@ private struct ListPanel: View {
         } else {
             nil
         }
+        // A patch's detail is usually a sentence (what changed, why it
+        // failed), so it gets two lines and keeps its start.
         return PaneRow(icon: ListPanel.icon(item), iconColor: ListPanel.colour(item.tone), title: item.title,
+                       trailing: item.trailing,
                        trailingSymbol: item.tone == .done && item.icon != nil ? "checkmark" : nil,
-                       detail: item.detail, reservesIcon: reservesIcon, action: open)
+                       detail: item.detail, reservesIcon: reservesIcon, detailTruncation: .tail,
+                       detailLines: 2, action: open)
             .iconContextMenu {
                 if let path = item.path {
                     FileMenu(path: path, thread: thread, title: item.title)

@@ -333,11 +333,15 @@ type Panel = {
 // One row of a `list` panel (panels.render).
 type PanelItem = {
   title: string
-  detail?: string       // a second line, grey
+  detail?: string       // grey, under the title, up to two lines
   url?: string          // a click opens it in the browser, or the panel if Mike set "Default"
   path?: string         // a click previews the file in the pane
   icon?: string         // an SF Symbol name
   tone?: "attention" | "failed" | "done" // orange, red or a tick; absent: plain
+  section?: string      // a heading over this row and the ones after it with the same
+                        // section, drawn where it changes ("Waiting · 1"); at most 80 characters
+  trailing?: string     // short and faint at the end of the title's line, like a date
+                        // ("5d"); at most 24 characters
 }
 
 // A grouping above folders that carries goals, state and notes forward
@@ -2273,7 +2277,9 @@ panel: rows drawn natively, with no page to serve.
 `items` gets `{ cwd, threadId, sh }`, where `sh(command)` runs a command
 in `cwd` through a login shell and resolves with what it printed (it
 rejects on a non-zero exit). It returns `PanelItem`s (or a promise of
-them). A panel can have an `icon`, an SF Symbol name for its button on
+them). Give rows a `section` to group them under headings (rows of one
+section next to each other, in the order you want the groups), and a
+`trailing` for a date or count at the end of the line. A panel can have an `icon`, an SF Symbol name for its button on
 the rail. A hook is a command the runner runs by itself, so in a
 project's patch it's one script in the repo and plain words (see
 "Trusting a folder's patches"):

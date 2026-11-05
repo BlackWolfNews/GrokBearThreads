@@ -1018,6 +1018,8 @@ function panelItem(raw: unknown): PanelItem | undefined {
   const item: PanelItem = { title: r.title.trim().slice(0, 300) };
   for (const k of ['detail', 'url', 'path', 'icon'] as const) if (typeof r[k] === 'string' && (r[k] as string).trim()) item[k] = (r[k] as string).trim().slice(0, 2000);
   if (r.tone === 'attention' || r.tone === 'failed' || r.tone === 'done') item.tone = r.tone;
+  if (typeof r.section === 'string' && r.section.trim()) item.section = r.section.trim().slice(0, 80);
+  if (typeof r.trailing === 'string' && r.trailing.trim()) item.trailing = r.trailing.trim().slice(0, 24);
   return item;
 }
 
