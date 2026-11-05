@@ -17,6 +17,11 @@ import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 // used next to no CPU since the last look. The agent checks on it and
 // stops it or carries on; it asks Mike if it can't tell. Once per job.
 //
+// A job that waits on Mike by design is left alone until its own timeout:
+// `browserbear handoff <tab> --wait` sits silent with no CPU until he
+// presses Done (5 Nov: two nudges in a row for one). The shell's command
+// lines show it, so it's told apart from a loop that can never end.
+//
 // Claude only: its jobs write to output files under /tmp/claude-<uid>
 // (a sub-agent's is a link to its transcript), which give the start and
 // last-output times. Codex's background terminals leave nothing to read.
@@ -34,7 +39,30 @@ export type TaskFile = { startedAt: number; lastOutputAt: number };
 // A background shell under a thread's CLI: the job it writes for (from the
 // output file on its stdout), the CPU it and everything under it have used,
 // and what's running there ("zsh", "sleep").
-export type BackgroundShell = { taskId?: string; cpuSeconds: number; commands: string[] };
+// `args` are the full command lines, for telling a wait on Mike apart.
+export type BackgroundShell = { taskId?: string; cpuSeconds: number; commands: string[]; args?: string[] };
+
+// How long past a waiting command's own timeout before it counts as stuck
+// after all: it should have exited by itself by then.
+export const WAIT_GRACE_MS = 5 * 60_000;
+// browserbear's own default for handoff --wait (cli.mjs DEFAULT_WAIT_S).
+const HANDOFF_DEFAULT_WAIT_S = 20 * 60;
+
+// How long a command line says it will wait on the user, in ms, or
+// undefined when it isn't such a command. Only `browserbear handoff` with
+// --wait, --until-url or --until-text for now.
+export function waitsOnUserMs(commandLine: string): number | undefined {
+  const words = commandLine.trim().split(/\s+/);
+  const at = words.findIndex((w, i) => /(^|\/)browserbear(\/cli\.mjs)?$/.test(w) && words[i + 1] === 'handoff');
+  if (at < 0) return undefined;
+  // The process's own line (`node …/browserbear handoff 12 --wait …`), not
+  // the shell's quoted -c line, so plain words are enough.
+  const own = words.slice(at + 2);
+  if (!own.some((w) => w === '--wait' || w === '--until-url' || w === '--until-text')) return undefined;
+  const t = own.indexOf('--timeout');
+  const secs = t >= 0 ? Number(own[t + 1]) : HANDOFF_DEFAULT_WAIT_S;
+  return (Number.isFinite(secs) && secs > 0 ? secs : HANDOFF_DEFAULT_WAIT_S) * 1000;
+}
 
 export interface Probe {
   taskFile(sessionId: string, taskId: string): Promise<TaskFile | undefined>;
@@ -111,7 +139,7 @@ export class StuckJobs {
     for (const [k, at] of Object.entries(saved.nudged)) if (now - Date.parse(at) < NUDGE_MEMORY_MS) nudged[k] = at;
 
     // Jobs that have been going and quiet long enough, before any ps.
-    const quiet = new Map<string, { thread: IdleBackground; task: BackgroundTask; minutes: number }[]>();
+    const quiet = new Map<string, { thread: IdleBackground; task: BackgroundTask; minutes: number; startedAt: number }[]>();
     for (const thread of threads) {
       for (const task of thread.tasks) {
         // Monitors sit quiet by design; other kinds leave no file to judge.
@@ -120,7 +148,7 @@ export class StuckJobs {
         const file = await this.probe.taskFile(thread.sessionId, task.id);
         if (!file || now - file.startedAt < QUIET_MS || now - file.lastOutputAt < QUIET_MS) continue;
         const list = quiet.get(thread.sessionId) ?? [];
-        list.push({ thread, task, minutes: Math.round((now - file.startedAt) / 60_000) });
+        list.push({ thread, task, minutes: Math.round((now - file.startedAt) / 60_000), startedAt: file.startedAt });
         quiet.set(thread.sessionId, list);
       }
     }
@@ -130,7 +158,7 @@ export class StuckJobs {
 
     const stuck = new Map<string, Stuck[]>();
     for (const [sessionId, list] of quiet) {
-      for (const { thread, task, minutes } of list) {
+      for (const { thread, task, minutes, startedAt } of list) {
         const k = key(thread.threadId, task.id);
         let commands: string[] | undefined;
         if (task.kind === 'shell') {
@@ -138,6 +166,9 @@ export class StuckJobs {
           // exited and the CLI will say so, or it isn't ours to judge.
           const shell = shells.get(sessionId)?.find((s) => s.taskId === task.id);
           if (!shell) continue;
+          // Waiting on Mike, and still within the time it said it would.
+          const wait = Math.max(0, ...(shell.args ?? []).map((a) => waitsOnUserMs(a) ?? 0));
+          if (wait && now < startedAt + wait + WAIT_GRACE_MS) continue;
           const before = this.cpu.get(k);
           this.cpu.set(k, shell.cpuSeconds);
           // Two looks are needed to see how much CPU it's using.
@@ -259,6 +290,7 @@ export function realProbe(root = path.join('/tmp', `claude-${process.getuid?.() 
               taskId: name?.endsWith('.output') ? path.basename(name, '.output') : undefined,
               cpuSeconds: tree.reduce((sum, p) => sum + p.cpuSeconds, 0),
               commands: tree.map((p) => commandName(p.command)),
+              args: tree.map((p) => p.command),
             };
           }),
         );

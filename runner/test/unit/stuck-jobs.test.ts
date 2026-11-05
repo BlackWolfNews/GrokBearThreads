@@ -10,6 +10,8 @@ import {
   isCliFor,
   parseLsof,
   parsePs,
+  waitsOnUserMs,
+  WAIT_GRACE_MS,
   type BackgroundShell,
   type Probe,
   type TaskFile,
@@ -170,4 +172,46 @@ test('ps, lsof and CLI matching', () => {
   assert.ok(isCliFor(`claude --session-id ${id}`, id));
   // A background shell reading another task's output names the session too.
   assert.ok(!isCliFor(`/bin/zsh -c source /Users/m/.claude/shell-snapshots/snapshot-zsh-1.sh && eval 'cat /tmp/claude-501/p/${id}/tasks/b.output'`, id));
+});
+
+test('a browserbear handoff --wait is left alone until its own timeout, then counts', async () => {
+  const { h, probe, jobs, thread, s } = setUp();
+  const handoff = { id: 'b2', type: 'local_bash', kind: 'shell' as const, description: 'Wait for Mike to sign in' };
+  s.out({ kind: 'tasks', tasks: [handoff] });
+  s.result('completed');
+  const started = h.clock.now();
+  probe.files.set('b2', { startedAt: started, lastOutputAt: started });
+  const shell = (cpuSeconds: number): BackgroundShell => ({
+    taskId: 'b2',
+    cpuSeconds,
+    commands: ['zsh', 'node'],
+    args: ["/bin/zsh -c source /x/shell-snapshots/snapshot-zsh.sh && eval 'browserbear handoff 12 --wait --timeout 3600'", 'node /Users/m/.local/bin/browserbear handoff 12 --wait --timeout 3600'],
+  });
+  probe.shellsBySession.set(session(h), [shell(0.1)]);
+
+  // Quiet and idle for 55 minutes, well past 30, but it said it'd wait an hour.
+  for (let i = 0; i < 11; i++) {
+    h.clock.advance(5 * MIN);
+    await jobs.sweep();
+  }
+  assert.deepEqual(nudges(h, thread.id), []);
+
+  // Past its timeout and the grace: it should have exited, so it's stuck.
+  h.clock.advance(60 * MIN + WAIT_GRACE_MS - 55 * MIN);
+  await jobs.sweep();
+  probe.shellsBySession.set(session(h), [shell(0.2)]);
+  h.clock.advance(5 * MIN);
+  await jobs.sweep();
+  assert.equal(nudges(h, thread.id).length, 1);
+});
+
+test('which command lines wait on the user, and for how long', () => {
+  assert.equal(waitsOnUserMs('node /Users/m/.local/bin/browserbear handoff 12 --wait --timeout 3600'), 3600_000);
+  assert.equal(waitsOnUserMs('node /x/browserbear/cli.mjs handoff https://a.b --until-url *done*'), 20 * MIN);
+  assert.equal(waitsOnUserMs('browserbear handoff 3 --wait --timeout nope'), 20 * MIN);
+  // Not waiting, or not browserbear: judged as usual.
+  assert.equal(waitsOnUserMs('node /x/browserbear handoff 12'), undefined);
+  assert.equal(waitsOnUserMs('node /x/browserbear snapshot 12 --wait'), undefined);
+  assert.equal(waitsOnUserMs('sleep 3600'), undefined);
+  assert.equal(waitsOnUserMs("until ! pgrep -f snip2.py; do sleep 3; done"), undefined);
 });

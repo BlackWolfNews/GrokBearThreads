@@ -1235,7 +1235,12 @@ everything under it used under 2 seconds of CPU between two looks. The
 shells are found under the thread's CLI (the process whose arguments
 carry `--resume=<session>` or `--session-id=<session>`) and matched to
 their jobs by the output file on their stdout. Monitors are left alone;
-they sit quiet by design. Codex's background terminals leave no files,
+they sit quiet by design. So is a shell running a command that waits on
+Mike, `browserbear handoff … --wait` (or `--until-url`, `--until-text`),
+seen in the full command lines under it: it's left alone until its own
+`--timeout` (20 minutes when not given) plus 5 minutes has passed since
+the job started, and judged as usual after that, as it should have
+exited by itself by then. Codex's background terminals leave no files,
 so Codex threads aren't looked at.
 
 The thread gets one message from the runner (origin `runner`) listing
