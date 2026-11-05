@@ -3026,7 +3026,9 @@ export class Runner {
 
   noticeOverOnMac(threadId: string, text: string, archive: boolean): void {
     const st = this.mustGet(threadId);
-    st.rec.forceUnread = false;
+    // Without archive something in the thread is still to do (a dialog
+    // still up, or the access still missing), so it stays in Needs you.
+    if (archive) st.rec.forceUnread = false;
     this.emit(st, { type: 'system.note', text });
     this.markDirty(st);
     if (archive && !st.rt.turn && !st.rec.archivedAt && this.opening(threadId).text === undefined) this.update({ threadId, archived: true, archivedBy: 'threadbear' });
