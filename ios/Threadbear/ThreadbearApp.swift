@@ -78,7 +78,9 @@ struct ThreadbearApp: App {
                 .alert(model.pairingGate.pending?.title ?? "",
                        isPresented: Binding(get: { model.pairingGate.pending != nil }, set: { if !$0 { model.pairingGate.cancel() } }),
                        presenting: model.pairingGate.pending) { request in
-                    Button("Pair") { Task { await model.acceptPairing() } }
+                    // Takes this request, the one shown, at once: a Task here ran
+                    // after the dismissal had cancelled it.
+                    Button("Pair") { model.acceptPairing(request) }
                     Button("Cancel", role: .cancel) { model.pairingGate.cancel() }
                 } message: { request in
                     Text(request.message)

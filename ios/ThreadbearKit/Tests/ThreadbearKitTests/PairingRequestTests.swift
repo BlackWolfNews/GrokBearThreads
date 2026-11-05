@@ -38,7 +38,7 @@ import Testing
         saved.stores["happy-bear-123.convex.cloud"] = oldStore
         let gate = PairingGate()
         let url = Self.link(host: "evil-fox-9.convex.cloud", key: Self.otherKey)
-        #expect(gate.ask(url, allowLocal: false, current: saved.pairing, keys: saved.keys))
+        #expect(.asking == gate.ask(url, allowLocal: false, current: saved.pairing, keys: saved.keys))
         let request = try! #require(gate.pending)
         #expect(request.title == "Pair with evil-fox-9.convex.cloud?")
         #expect(request.message.contains("from happy-bear-123.convex.cloud to evil-fox-9.convex.cloud"))
@@ -55,7 +55,7 @@ import Testing
     @Test func theFirstPairingIsAskedAbout() throws {
         let gate = PairingGate()
         let saved = Saved()
-        #expect(gate.ask(Self.link(host: "happy-bear-123.convex.cloud", key: Self.macKey), allowLocal: false, current: nil, keys: saved.keys))
+        #expect(.asking == gate.ask(Self.link(host: "happy-bear-123.convex.cloud", key: Self.macKey), allowLocal: false, current: nil, keys: saved.keys))
         let request = try #require(gate.pending)
         #expect(request.message.hasPrefix("This link pairs the phone with the server at happy-bear-123.convex.cloud."))
         #expect(request.replacesHost == nil)
@@ -63,7 +63,7 @@ import Testing
 
     /// The finding's second test: Cancel keeps the old server, token and keys,
     /// and leaves nothing to pair with afterwards.
-    @Test func cancelKeepsTheOldPairingAndKeys() {
+    @Test func cancelKeepsTheOldPairingAndKeys() throws {
         let saved = Saved()
         saved.pairing = Self.old
         let store = MemoryRunnerKeyStore(["mac": Self.macKey])
@@ -71,24 +71,63 @@ import Testing
         let gate = PairingGate()
         // Same server, a new token and a different key for the same Mac.
         let url = Self.link(host: "happy-bear-123.convex.cloud", token: "tb_attacker", key: Self.otherKey)
-        #expect(gate.ask(url, allowLocal: false, current: saved.pairing, keys: saved.keys))
+        #expect(.asking == gate.ask(url, allowLocal: false, current: saved.pairing, keys: saved.keys))
         #expect(gate.pending?.changedKeys == 1)
         #expect(gate.pending?.message.contains("new token for happy-bear-123.convex.cloud") == true)
         #expect(gate.pending?.message.contains("changes the key of 1 Mac") == true)
+        let shown = try #require(gate.pending)
         gate.cancel()
         #expect(gate.pending == nil)
-        #expect(gate.accept() == nil)
+        var paired = false
+        #expect(gate.accept(shown) { _ in paired = true } == nil)
+        #expect(!paired)
         #expect(saved.pairing == Self.old)
         #expect(saved.pairing?.token == "tb_expired")
         #expect(store.key(for: "mac") == Self.macKey)
     }
 
-    @Test func yesHandsBackTheLinkOnce() throws {
+    /// Codex's P1: tapping Pair dismisses the alert, whose binding cancels
+    /// the gate straight after the button's action. The yes is taken in the
+    /// action itself, so it still pairs, with the link that was shown, once.
+    @Test func yesPairsEvenThoughTheAlertCancelsAfterIt() async throws {
         let gate = PairingGate()
         let url = Self.link(host: "happy-bear-123.convex.cloud")
         gate.ask(url, allowLocal: false, current: nil, keys: Saved().keys)
-        #expect(try #require(gate.accept()).link == url)
-        #expect(gate.accept() == nil)
+        let shown = try #require(gate.pending)
+        var paired: [URL] = []
+        let task = gate.accept(shown) { paired.append($0.link) }
+        gate.cancel() // the alert going away
+        await task?.value
+        #expect(paired == [url])
+        #expect(gate.accept(shown) { paired.append($0.link) } == nil)
+        #expect(paired == [url])
+    }
+
+    /// Codex's P2: a second link while the first is on screen is turned
+    /// away, never swapped in under the yes Mike gives the first.
+    @Test func aSecondLinkWhileAskingIsTurnedAway() async throws {
+        let gate = PairingGate()
+        let first = Self.link(host: "happy-bear-123.convex.cloud")
+        gate.ask(first, allowLocal: false, current: nil, keys: Saved().keys)
+        let shown = try #require(gate.pending)
+        #expect(.busy == gate.ask(Self.link(host: "evil-fox-9.convex.cloud", key: Self.otherKey), allowLocal: false, current: nil, keys: Saved().keys))
+        #expect(gate.pending?.id == shown.id)
+        var paired: [URL] = []
+        await gate.accept(shown) { paired.append($0.link) }?.value
+        #expect(paired == [first])
+    }
+
+    /// A yes for a request that isn't the one waiting (the same link opened
+    /// again makes a new request) pairs nothing.
+    @Test func aYesForAnotherRequestPairsNothing() throws {
+        let gate = PairingGate()
+        let url = Self.link(host: "happy-bear-123.convex.cloud")
+        let stale = try #require(PairingRequest(link: url, allowLocal: false, current: nil, keys: Saved().keys))
+        gate.ask(url, allowLocal: false, current: nil, keys: Saved().keys)
+        var paired = false
+        #expect(gate.accept(stale) { _ in paired = true } == nil)
+        #expect(!paired)
+        #expect(gate.pending != nil)
     }
 
     @Test func sameKeysSaySo() throws {
@@ -102,7 +141,7 @@ import Testing
 
     @Test func notAPairingLinkIsntHeld() {
         let gate = PairingGate()
-        #expect(!gate.ask(URL(string: "threadbear://pair?url=https://evil.example.com&token=t")!, allowLocal: false, current: nil, keys: Saved().keys))
+        #expect(.notPairing == gate.ask(URL(string: "threadbear://pair?url=https://evil.example.com&token=t")!, allowLocal: false, current: nil, keys: Saved().keys))
         #expect(gate.pending == nil)
     }
 }

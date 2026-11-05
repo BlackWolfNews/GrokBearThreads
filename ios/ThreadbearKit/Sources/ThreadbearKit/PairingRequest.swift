@@ -10,7 +10,9 @@ import Observation
 /// it unpaired, and a link then replaced the saved server, token and runner
 /// keys without a word (Daybreak finding 5, Nov 2026).
 public struct PairingRequest: Sendable, Equatable, Identifiable {
-    public var id: URL { link }
+    /// Each request is its own, even for the same link twice, so a yes is
+    /// only ever for the one that was shown.
+    public let id = UUID()
     public let link: URL
     public let pairing: Pairing
     /// The server the phone is paired with now, when the link names another one.
@@ -78,23 +80,36 @@ public struct PairingRequest: Sendable, Equatable, Identifiable {
 /// only `accept` hands it back to be paired with.
 @MainActor @Observable
 public final class PairingGate {
+    public enum Asked: Equatable, Sendable {
+        case asking
+        /// Not a pairing link.
+        case notPairing
+        /// Another link is already waiting for an answer. It isn't swapped
+        /// for this one, so a yes is always for the server that was shown.
+        case busy
+    }
+
     public private(set) var pending: PairingRequest?
 
     public init() {}
 
-    /// False for a link that isn't a pairing link, for the caller to say so.
-    /// A second link replaces one still waiting.
     @discardableResult
-    public func ask(_ link: URL, allowLocal: Bool, current: Pairing?, keys: (Pairing) -> any RunnerKeyStore) -> Bool {
-        guard let request = PairingRequest(link: link, allowLocal: allowLocal, current: current, keys: keys) else { return false }
+    public func ask(_ link: URL, allowLocal: Bool, current: Pairing?, keys: (Pairing) -> any RunnerKeyStore) -> Asked {
+        guard let request = PairingRequest(link: link, allowLocal: allowLocal, current: current, keys: keys) else { return .notPairing }
+        guard pending == nil else { return .busy }
         pending = request
-        return true
+        return .asking
     }
 
-    /// Yes: the request to pair with, once.
-    public func accept() -> PairingRequest? {
-        defer { pending = nil }
-        return pending
+    /// Yes to `shown`, the request on screen: taken now, before anything
+    /// else can run (the alert going away cancels the gate straight after
+    /// the button's action), then paired with in `pair`. Nil, and nothing
+    /// paired, when `shown` isn't the one waiting.
+    @discardableResult
+    public func accept(_ shown: PairingRequest, pair: @escaping @MainActor (PairingRequest) async -> Void) -> Task<Void, Never>? {
+        guard let pending, pending.id == shown.id else { return nil }
+        self.pending = nil
+        return Task { await pair(pending) }
     }
 
     public func cancel() { pending = nil }

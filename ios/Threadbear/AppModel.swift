@@ -389,15 +389,18 @@ final class AppModel {
     /// paired or not (an expired token used to let a link straight in).
     func askToPair(_ link: URL) {
         lastError = nil
-        let asked = pairingGate.ask(link, allowLocal: Self.allowLocalPairing, current: pairing ?? PairingStore.load(),
-                                    keys: { Self.runnerKeys(for: $0) })
-        if !asked { lastError = "That link isn't a Threadbear pairing link." }
+        switch pairingGate.ask(link, allowLocal: Self.allowLocalPairing, current: pairing ?? PairingStore.load(),
+                               keys: { Self.runnerKeys(for: $0) }) {
+        case .asking: break
+        case .notPairing: lastError = "That link isn't a Threadbear pairing link."
+        case .busy: lastError = "Answer the pairing question first, then open the link again."
+        }
     }
 
-    /// Mike said yes to the waiting link.
-    func acceptPairing() async {
-        guard let request = pairingGate.accept() else { return }
-        await pair(with: request.link)
+    /// Mike said yes to `shown`. Synchronous, so the request is taken before
+    /// the alert's dismissal cancels the gate.
+    func acceptPairing(_ shown: PairingRequest) {
+        pairingGate.accept(shown) { [weak self] request in await self?.pair(with: request.link) }
     }
 
     /// From a `threadbear://pair` link Mike said yes to (or `-ThreadbearPair`
