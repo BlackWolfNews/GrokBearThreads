@@ -240,10 +240,45 @@ test('which command lines wait on the user, and for how long', () => {
   // Read as browserbear reads its flags: anywhere, the last one winning.
   assert.equal(waitsOnUserMs('node /x/browserbear --timeout 7200 handoff 12 --wait'), 7200_000);
   assert.equal(waitsOnUserMs('node /x/browserbear handoff 12 --wait --timeout 1800 --timeout 7200'), 7200_000);
+  assert.equal(waitsOnUserMs('node /x/browserbear --until-text Payment complete handoff 12 --timeout 7200'), 7200_000);
+  assert.equal(waitsOnUserMs('node --no-warnings /x/browserbear handoff 12 --wait'), 20 * MIN);
+  // Inline node code that only mentions it.
+  assert.equal(waitsOnUserMs("node -e /* /x/browserbear handoff 12 --wait --timeout 86400 */ setInterval(()=>{},1000)"), undefined);
+  assert.equal(waitsOnUserMs('node -e x /x/browserbear handoff 12 --wait'), undefined);
   // Not waiting, not browserbear, or only a shell's text naming it: judged as usual.
   assert.equal(waitsOnUserMs('node /x/browserbear handoff 12'), undefined);
   assert.equal(waitsOnUserMs('node /x/browserbear snapshot 12 --wait'), undefined);
   assert.equal(waitsOnUserMs('sleep 3600'), undefined);
   assert.equal(waitsOnUserMs("/bin/zsh -c eval 'browserbear handoff 12 --wait --timeout 86400'"), undefined);
   assert.equal(waitsOnUserMs('until ! pgrep -f snip2.py; do sleep 3; done'), undefined);
+});
+
+test('a loop that keeps starting handoffs is judged once the first one would have timed out', async () => {
+  const { h, probe, jobs, thread, s } = setUp();
+  s.out({ kind: 'tasks', tasks: [waiter] });
+  s.result('completed');
+  const started = h.clock.now();
+  probe.files.set('b1', { startedAt: started, lastOutputAt: started });
+  let cpu = 0;
+  // Each look sees a freshly started handoff under the loop.
+  const look = async () => {
+    cpu += 0.1;
+    probe.shellsBySession.set(session(h), [
+      { taskId: 'b1', cpuSeconds: cpu, commands: ['zsh', 'node'], processes: [{ command: 'node /x/browserbear handoff 12 --wait --timeout 3600', startedAt: h.clock.now() - MIN }] },
+    ]);
+    await jobs.sweep();
+  };
+  // The deadline is set at the first look that finds it quiet (30 min),
+  // from the handoff seen then: 29 + 60 + 5 = 94 min. Without it, every
+  // new handoff would put it off again, for good.
+  for (let i = 0; i < 18; i++) {
+    h.clock.advance(5 * MIN);
+    await look();
+  }
+  assert.deepEqual(nudges(h, thread.id), []);
+  for (let i = 0; i < 2; i++) {
+    h.clock.advance(5 * MIN);
+    await look();
+  }
+  assert.equal(nudges(h, thread.id).length, 1);
 });

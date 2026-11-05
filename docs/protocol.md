@@ -1242,7 +1242,8 @@ way browserbear reads its flags. A shell whose own text only mentions
 one doesn't count. It's left alone until its own `--timeout` (20 minutes
 when not given) plus 5 minutes has passed since that process started
 (ps's etime), and judged as usual after that, as it should have exited
-by itself by then. Codex's background terminals leave no files,
+by itself by then. The first wait the check sees sets that deadline for
+the job, so a loop that keeps starting new handoffs can't put it off. Codex's background terminals leave no files,
 so Codex threads aren't looked at.
 
 The thread gets one message from the runner (origin `runner`) listing

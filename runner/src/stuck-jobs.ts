@@ -62,7 +62,13 @@ const BROWSERBEAR_VALUE_FLAGS = new Set(['profile', 'group', 'until-url', 'until
 export function waitsOnUserMs(commandLine: string): number | undefined {
   const words = commandLine.trim().split(/\s+/);
   const isScript = (w: string) => /(^|\/)browserbear(\/cli\.mjs)?$/.test(w);
-  const at = isScript(words[0] ?? '') ? 0 : /(^|\/)node$/.test(words[0] ?? '') ? words.findIndex((w, i) => i > 0 && isScript(w)) : -1;
+  let at = isScript(words[0] ?? '') ? 0 : -1;
+  if (at < 0 && /(^|\/)node$/.test(words[0] ?? '')) {
+    // Node's script is its first argument that isn't an option; inline
+    // code (-e, -p) that only mentions browserbear doesn't count.
+    const i = words.findIndex((w, i) => i > 0 && !w.startsWith('-'));
+    if (i > 0 && isScript(words[i]) && !words.slice(1, i).some((w) => /^(-e|-p|--eval|--print)(=|$)/.test(w))) at = i;
+  }
   if (at < 0) return undefined;
   const flags = new Map<string, string | true>();
   const pos: string[] = [];
@@ -76,10 +82,23 @@ export function waitsOnUserMs(commandLine: string): number | undefined {
       else flags.set(key, true);
     } else pos.push(a);
   }
-  if (pos[0] !== 'handoff' || !(flags.get('wait') || flags.get('until-url') || flags.get('until-text'))) return undefined;
+  // ps joins the arguments with spaces, so a flag's value with spaces in it
+  // (--until-text "Payment complete") spills into the positionals: look for
+  // the command among them rather than only first.
+  if (!pos.includes('handoff') || !(flags.get('wait') || flags.get('until-url') || flags.get('until-text'))) return undefined;
   const t = flags.get('timeout');
   const secs = t === undefined ? HANDOFF_DEFAULT_WAIT_S : Number(t);
   return (Number.isFinite(secs) && secs > 0 ? secs : HANDOFF_DEFAULT_WAIT_S) * 1000;
+}
+
+// The latest a shell's waiting processes said they'd wait until, plus the grace.
+function waitDeadline(processes: ShellProcess[]): number | undefined {
+  let out: number | undefined;
+  for (const p of processes) {
+    const wait = waitsOnUserMs(p.command);
+    if (wait !== undefined) out = Math.max(out ?? 0, p.startedAt + wait + WAIT_GRACE_MS);
+  }
+  return out;
 }
 
 export interface Probe {
@@ -113,6 +132,8 @@ export class StuckJobs {
   private sweeping = false;
   // CPU seconds each shell had used at the last look, by thread/task.
   private cpu = new Map<string, number>();
+  // When a job waiting on Mike (waitsOnUserMs) stops being left alone, by thread/task.
+  private waitDeadline = new Map<string, number>();
 
   constructor(deps: Deps) {
     this.deps = deps;
@@ -153,6 +174,7 @@ export class StuckJobs {
     const saved = this.read();
     const live = new Set(threads.flatMap((t) => t.tasks.map((task) => key(t.threadId, task.id))));
     for (const k of this.cpu.keys()) if (!live.has(k)) this.cpu.delete(k);
+    for (const k of this.waitDeadline.keys()) if (!live.has(k)) this.waitDeadline.delete(k);
     const nudged: Record<string, string> = {};
     for (const [k, at] of Object.entries(saved.nudged)) if (now - Date.parse(at) < NUDGE_MEMORY_MS) nudged[k] = at;
 
@@ -185,8 +207,14 @@ export class StuckJobs {
           const shell = shells.get(sessionId)?.find((s) => s.taskId === task.id);
           if (!shell) continue;
           // Waiting on Mike, and still within the time it said it would,
-          // counted from when that process started (a script may sleep first).
-          if ((shell.processes ?? []).some((p) => { const wait = waitsOnUserMs(p.command); return wait !== undefined && now < p.startedAt + wait + WAIT_GRACE_MS; })) continue;
+          // counted from when that process started (a script may sleep
+          // first). The first wait seen sets the job's deadline, so a loop
+          // that keeps starting new handoffs can't put it off for good.
+          const deadline = this.waitDeadline.get(k) ?? waitDeadline(shell.processes ?? []);
+          if (deadline !== undefined) {
+            this.waitDeadline.set(k, deadline);
+            if (now < deadline) continue;
+          }
           const before = this.cpu.get(k);
           this.cpu.set(k, shell.cpuSeconds);
           // Two looks are needed to see how much CPU it's using.
