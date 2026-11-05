@@ -1,9 +1,8 @@
 // Mike's own threads, signed in: the Mac app's window in a browser. The
-// sidebar's Starred, Inbox and Running sections with Hibernating and
-// Archived folded under them; a thread with each finished turn folded to
+// sidebar (sidebar.tsx) beside a thread with each finished turn folded to
 // "Worked for 4m 12s" and its reply, and the agent's card of asks joined to
 // the composer. A shared thread (/s/<slug>) is share.tsx.
-import { Component, Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Component, Fragment, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useMutation, useQuery } from 'convex/react';
 import { ConvexError } from 'convex/values';
 import { api } from '../../convex/_generated/api';
@@ -13,11 +12,12 @@ import { signOut, useToken } from './token';
 import { MessageText, Pictures, picturesByRow, ToolRun, Worked, type PageMessage } from './messages';
 import { CommandState } from './command-state';
 import { previewOf, ShareControl, SharePage } from './share';
+import { busy, Lists, ResizeHandle, type Row, useSidebarWidth } from './sidebar';
+import { Pop } from './menu';
 import { duration, fold, splitTurns, type Item } from './turns';
-import { ago, folderName, plain, sender } from './format';
+import { folderName, sender } from './format';
 import * as Icon from './icons';
 
-type Row = NonNullable<ReturnType<typeof useQuery<typeof api.phone.threads>>>[number];
 type Approval = NonNullable<Row['pendingApproval']>;
 type Ask = NonNullable<Row['asks']>[number];
 
@@ -88,8 +88,10 @@ class Catch extends Component<{ children: ReactNode }, { error: unknown }> {
 
 function Shell({ token, route }: { token: string; route: ReturnType<typeof useRoute> }) {
   const selected = route.page === 'thread' ? route.threadId : undefined;
+  const [width, setWidth] = useSidebarWidth();
+  const shell = useRef<HTMLDivElement>(null);
   return (
-    <div className={`shell ${selected ? 'has-thread' : ''}`}>
+    <div ref={shell} className={`shell ${selected ? 'has-thread' : ''}`} style={{ '--sidebar-width': `${width}px` } as CSSProperties}>
       <aside className="sidebar">
         <header className="bar">
           <a
@@ -113,6 +115,7 @@ function Shell({ token, route }: { token: string; route: ReturnType<typeof useRo
             Sign out
           </button>
         </footer>
+        <ResizeHandle shell={shell} width={width} setWidth={setWidth} />
       </aside>
       <main className="main">{selected ? <ThreadView key={selected} token={token} threadId={selected} /> : <Empty />}</main>
     </div>
@@ -136,122 +139,7 @@ function Runners({ token }: { token: string }) {
   return (
     <span className="runners" title={online.length ? `Online: ${names}` : 'No runner online. Messages wait until the Mac is back.'}>
       <span className={`dot ${online.length ? 'ok' : ''}`} />
-      {online.length ? names : 'Mac offline'}
-    </span>
-  );
-}
-
-// ------------------------------------------------------------ list
-
-const busy = (r: Row) => r.status === 'running' || r.status === 'starting';
-
-// As the Mac's sidebar: Starred, Inbox (what needs Mike first), Running,
-// then Hibernating and Archived folded, loaded only while open.
-function Lists({ token, selected }: { token: string; selected?: string }) {
-  const inbox = useQuery(api.phone.threads, { token, view: 'inbox' });
-  const counts = useQuery(api.phone.counts, { token });
-  const [open, setOpen] = useState<{ hibernating: boolean; den: boolean }>({ hibernating: false, den: false });
-  useTick();
-  if (!inbox) return <div className="lists muted pad">Loading…</div>;
-  const starred = inbox.filter((r) => r.starredAt);
-  const rest = inbox.filter((r) => !r.starredAt);
-  const running = rest.filter((r) => busy(r) && !r.needsYou);
-  const waiting = rest.filter((r) => !running.includes(r));
-  const sorted = [...waiting.filter((r) => r.needsYou), ...waiting.filter((r) => !r.needsYou)];
-  return (
-    <nav className="lists">
-      {starred.length ? (
-        <Section icon={<Icon.Star />} title="Starred">
-          <Rows rows={starred} selected={selected} />
-        </Section>
-      ) : null}
-      <Section icon={<Icon.Inbox />} title="Inbox">
-        {sorted.length ? <Rows rows={sorted} selected={selected} /> : <div className="list note">Nothing waiting.</div>}
-      </Section>
-      {running.length ? (
-        <Section icon={<Icon.Bolt />} title="Running" count={running.length}>
-          <Rows rows={running} selected={selected} />
-        </Section>
-      ) : null}
-      <Folded token={token} view="hibernating" icon={<Icon.Moon />} title="Hibernating" count={counts?.hibernating} open={open.hibernating} toggle={() => setOpen((o) => ({ ...o, hibernating: !o.hibernating }))} selected={selected} />
-      <Folded token={token} view="den" icon={<Icon.Archive />} title="Archived" count={counts?.den} open={open.den} toggle={() => setOpen((o) => ({ ...o, den: !o.den }))} selected={selected} />
-    </nav>
-  );
-}
-
-function Section({ icon, title, count, children }: { icon: ReactNode; title: string; count?: number; children: ReactNode }) {
-  return (
-    <>
-      <div className="section-head">
-        {icon}
-        {title}
-        {count !== undefined ? <span className="count">{count}</span> : null}
-      </div>
-      {children}
-    </>
-  );
-}
-
-function Folded({ token, view, icon, title, count, open, toggle, selected }: { token: string; view: 'hibernating' | 'den'; icon: ReactNode; title: string; count?: number; open: boolean; toggle: () => void; selected?: string }) {
-  const rows = useQuery(api.phone.threads, open ? { token, view } : 'skip');
-  return (
-    <>
-      <button className={`section-head ${open ? 'open' : ''}`} onClick={toggle} aria-expanded={open}>
-        {icon}
-        {title}
-        <span className="count">{count ?? ''}</span>
-        <Icon.Chevron className="chev" />
-      </button>
-      {open ? rows ? rows.length ? <Rows rows={rows} selected={selected} /> : <div className="list note">Nothing here.</div> : <div className="list note">Loading…</div> : null}
-    </>
-  );
-}
-
-function Rows({ rows, selected }: { rows: Row[]; selected?: string }) {
-  return (
-    <ul className="list">
-      {rows.map((r) => (
-        <li key={r.threadId}>
-          <a
-            href={threadPath(r.threadId)}
-            className={`row ${r.threadId === selected ? 'on' : ''} ${r.unread ? 'unread' : ''} ${r.needsYou ? 'needs' : ''}`}
-            onClick={(e) => {
-              if (e.metaKey || e.ctrlKey) return;
-              e.preventDefault();
-              go(threadPath(r.threadId));
-            }}
-          >
-            <span className="row-top">
-              {r.needsYou ? <span className="mark needs" title="Needs you" /> : r.unread ? <span className="mark unread" title="Unread" /> : null}
-              <span className="title">{r.title || 'Untitled'}</span>
-              {r.share?.access === 'link' ? (
-                <span className="shared" title="Shared by link">
-                  <Icon.Link />
-                </span>
-              ) : null}
-              <When row={r} />
-            </span>
-            <span className="sub">{r.working && busy(r) ? r.working : r.projects?.length ? r.projects.map((p) => p.title).join(', ') : r.preview ? plain(r.preview) : folderName(r.cwd)}</span>
-          </a>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-// The time at the right of a row, or the status instead of it, as the Mac.
-function When({ row: r }: { row: Row }) {
-  if (busy(r) && !r.needsYou) {
-    return (
-      <span className="when running" title="Working">
-        <span className="spinner" />
-      </span>
-    );
-  }
-  if (r.status === 'error') return <span className="when failed">Failed</span>;
-  return (
-    <span className={`when ${r.needsYou ? 'waiting' : ''}`} title={r.needsYou ? 'Waiting for you' : undefined}>
-      {ago(r.lastActivityMs)}
+      <span className="names">{online.length ? names : 'Mac offline'}</span>
     </span>
   );
 }
@@ -325,7 +213,6 @@ function ThreadView({ token, threadId }: { token: string; threadId: string }) {
   const lastReply = [...items].reverse().find((i) => i.kind === 'message');
   const meta = !busy(t) && lastReply?.kind === 'message' && lastReply.m.role === 'assistant' ? [lastTurn?.ms && lastTurn.ms >= 1000 ? duration(lastTurn.ms) : null, t.costUsd ? `$${t.costUsd.toFixed(2)}` : null].filter(Boolean).join(' · ') : '';
 
-  const text = (m: PageMessage) => <MessageText text={m.text} pictures={inText} seq={m.seq} rows={messages} threadPath={linkTo} />;
   const renderItem = (item: Item<PageMessage>): ReactNode => {
     if (item.kind === 'worked') {
       return (
@@ -347,7 +234,7 @@ function ThreadView({ token, threadId }: { token: string; threadId: string }) {
     return (
       <div key={m.seq} className={`msg ${m.role}`}>
         {from ? <div className="origin">{from.who}</div> : m.role === 'user' && m.origin && m.origin !== 'user' && m.origin !== 'phone' ? <div className="origin">{originLabel(m.origin)}</div> : null}
-        {from ? <MessageText text={from.body} pictures={inText} seq={m.seq} rows={messages} threadPath={linkTo} /> : text(m)}
+        {from ? <MessageText text={from.body} pictures={inText} seq={m.seq} rows={messages} threadPath={linkTo} /> : <MessageText text={m.text} pictures={inText} seq={m.seq} rows={messages} threadPath={linkTo} pictureChips={m.role === 'user'} />}
         <Pictures items={after.get(m.seq) ?? []} />
       </div>
     );
@@ -410,36 +297,25 @@ function ThreadView({ token, threadId }: { token: string; threadId: string }) {
 }
 
 function MoreMenu({ items }: { items: ({ label: string; icon: ReactNode; run: () => void } | null)[] }) {
-  const ref = useRef<HTMLDetailsElement>(null);
-  useEffect(() => {
-    const close = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) ref.current.open = false;
-    };
-    window.addEventListener('click', close);
-    return () => window.removeEventListener('click', close);
-  }, []);
   return (
-    <details className="pop" ref={ref}>
-      <summary className="icon-btn" title="More" aria-label="More">
-        <Icon.More />
-      </summary>
-      <div className="pop-panel menu">
-        {items.map((i) =>
+    <Pop title="More" icon={<Icon.More />}>
+      {(close) =>
+        items.map((i) =>
           i ? (
             <button
               key={i.label}
               onClick={() => {
                 i.run();
-                if (ref.current) ref.current.open = false;
+                close();
               }}
             >
               {i.icon}
               {i.label}
             </button>
           ) : null,
-        )}
-      </div>
-    </details>
+        )
+      }
+    </Pop>
   );
 }
 
@@ -696,13 +572,4 @@ function ApprovalCard({ token, threadId, approval, onSent }: { token: string; th
 
 function originLabel(origin: string): string {
   return origin === 'schedule' ? 'Scheduled' : origin === 'runner' ? 'From Threadbear' : origin === 'agent' ? 'From another thread' : origin;
-}
-
-// Re-renders every half minute so "5m" stays honest between query updates.
-function useTick() {
-  const [, setNow] = useState(0);
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(t);
-  }, []);
 }

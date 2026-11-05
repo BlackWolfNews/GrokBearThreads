@@ -181,46 +181,79 @@ code, pre { font-family: var(--mono); font-size: 13px; }
 /* ================================================================
    Your own threads, signed in (App.tsx): the Mac's window.
    ================================================================ */
-.shell { display: grid; grid-template-columns: 300px minmax(0, 1fr); height: 100%; }
-.sidebar { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--side); border-right: 1px solid var(--line); }
-.bar { display: flex; align-items: center; gap: 8px; padding: 12px 12px 8px 16px; }
-.brand { display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--text); flex: 1; }
+.shell { display: grid; grid-template-columns: clamp(220px, var(--sidebar-width, 300px), max(220px, calc(100vw - 420px))) minmax(0, 1fr); height: 100%; }
+.sidebar { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--side); border-right: 1px solid var(--line); }
+/* A wider strip than the hairline it sits on, so it's easy to catch. */
+.resize-handle { position: absolute; top: 0; bottom: 0; right: -5px; width: 9px; z-index: 6; cursor: col-resize; touch-action: none; outline: none; }
+.resize-handle::after { content: ''; position: absolute; top: 0; bottom: 0; left: 3px; width: 3px; background: transparent; transition: background 0.12s; }
+.resize-handle:hover::after, .resize-handle:focus-visible::after, html.resizing .resize-handle::after { background: var(--line-strong); }
+html.resizing, html.resizing * { cursor: col-resize !important; user-select: none !important; }
+.bar { display: flex; align-items: center; gap: 8px; padding: 10px 12px 6px 16px; }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; color: var(--text); flex: none; }
 .brand:hover { text-decoration: none; }
-.runners { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--faint); }
+.runners { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex: 1; min-width: 0; font-size: 12px; color: var(--faint); white-space: nowrap; }
+.runners .names { overflow: hidden; text-overflow: ellipsis; }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); flex: none; }
 .dot.ok { background: #34c759; }
-.lists { flex: 1; overflow-y: auto; padding: 4px 8px 12px; }
-.section-head { display: flex; align-items: center; gap: 7px; width: 100%; border: 0; background: none; padding: 7px 8px; border-radius: 7px; color: var(--muted); font-size: 13px; font-weight: 600; text-align: left; }
-button.section-head:hover { background: var(--hover); }
-.section-head svg { width: 14px; height: 14px; flex: none; }
-.section-head .count { margin-left: auto; font-weight: 400; color: var(--faint); font-variant-numeric: tabular-nums; }
-.section-head .chev { transition: transform 0.15s; color: var(--faint); }
-.section-head.open .chev { transform: rotate(90deg); }
-.list { list-style: none; margin: 0 0 6px; padding: 0; }
-.row { display: block; padding: 7px 10px 8px; border-radius: 8px; color: var(--text); }
+.lists-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.search-row { display: flex; align-items: center; gap: 4px; padding: 2px 8px 2px; }
+.search { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 6px 0 8px; border-radius: 8px; background: var(--hover); border: 1px solid transparent; color: var(--faint); }
+.search:focus-within { border-color: var(--line-strong); }
+.search > svg { width: 13px; height: 13px; flex: none; }
+.search input { flex: 1; min-width: 0; border: 0; background: none; outline: none; font: inherit; font-size: 13px; color: var(--text); padding: 0; }
+.search input::placeholder { color: var(--faint); }
+.search .clear { display: grid; place-items: center; width: 18px; height: 18px; flex: none; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--faint); }
+.search .clear:hover { background: var(--hover); color: var(--text); }
+.search .clear svg { width: 10px; height: 10px; }
+.lists { flex: 1; min-height: 0; overflow-y: auto; padding: 0 8px 12px; outline: none; }
+/* Headings as the Mac's: quiet grey with a hairline out to the edge, the
+   number after it, the chevron only while folded or under the pointer. */
+.section-head { display: flex; align-items: center; gap: 2px; margin-top: 8px; }
+.section-head .fold { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; border: 0; background: none; padding: 5px 4px 5px 18px; color: var(--muted); font-size: 12.5px; font-weight: 600; text-align: left; }
+button.fold:hover, button.fold:hover .section-title { color: var(--text); }
+.section-head .fold svg { width: 13px; height: 13px; flex: none; }
+.section-title { flex: none; }
+.rule { flex: 1; min-width: 8px; height: 1px; background: var(--line); margin: 0 3px; }
+.section-head .count { flex: none; font-weight: 400; font-size: 11.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.section-head .fold > svg:last-child { width: 10px; height: 10px; color: var(--faint); opacity: 0; transition: transform 0.15s, opacity 0.12s; }
+.section-head.folded .fold > svg:last-child { opacity: 1; transform: rotate(-90deg); }
+button.fold:hover > svg:last-child, button.fold:focus-visible > svg:last-child { opacity: 1; }
+.section-head .pop { flex: none; }
+.section-head .icon-btn { width: 20px; height: 20px; color: var(--faint); }
+.section-head .icon-btn svg { width: 12px; height: 12px; }
+.lit-btn { color: var(--accent) !important; }
+.list { list-style: none; margin: 0 0 2px; padding: 0; }
+/* The dot sits in a gutter left of the title, as Mail has it, so titles line
+   up whether or not they have one. */
+.row { position: relative; display: block; padding: 5px 10px 6px 18px; border-radius: 8px; color: var(--text); }
 .row:hover { background: var(--hover); text-decoration: none; }
 .row.on { background: var(--fill); }
 .row-top { display: flex; align-items: center; gap: 6px; }
-.row .title { flex: 1; min-width: 0; font-size: 14px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.row .title { flex: 1; min-width: 0; font-size: 13.5px; line-height: 1.35; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .row.unread .title, .row.needs .title { font-weight: 600; }
-.row .when { font-size: 11.5px; color: var(--faint); font-variant-numeric: tabular-nums; flex: none; display: inline-flex; align-items: center; gap: 5px; }
+.row .when { font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; flex: none; display: inline-flex; align-items: center; gap: 5px; }
 .row .when.running { color: var(--accent); }
 .row .when.waiting { color: var(--orange); }
 .row .when.failed { color: var(--red); }
-.row .sub { display: block; font-size: 12.5px; color: var(--muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; margin-top: 1px; }
-.row .mark { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.row .sub { display: block; font-size: 12px; line-height: 1.35; color: var(--muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.row .mark { position: absolute; left: 6px; top: 11px; width: 7px; height: 7px; border-radius: 50%; }
 .row .mark.unread { background: var(--accent); }
 .row .mark.needs { background: var(--orange); }
 .row .shared { width: 12px; height: 12px; color: var(--faint); flex: none; }
-.list .note { padding: 6px 10px; font-size: 13px; color: var(--faint); }
-.foot { padding: 10px 16px; border-top: 1px solid var(--line); font-size: 12px; color: var(--faint); display: flex; gap: 8px; }
+.list.note, .list .note { padding: 3px 10px 5px 18px; font-size: 12.5px; color: var(--faint); }
+.more-row { display: flex; align-items: center; gap: 6px; width: 100%; border: 0; background: none; border-radius: 8px; padding: 5px 10px 5px 18px; font-size: 12.5px; color: var(--muted); text-align: left; }
+.more-row:hover { background: var(--hover); color: var(--text); }
+.more-row svg { width: 13px; height: 13px; }
+.foot { padding: 7px 16px; border-top: 1px solid var(--line); font-size: 12px; color: var(--faint); display: flex; gap: 8px; white-space: nowrap; }
+.foot > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.foot .linkish { flex: none; }
 .foot .linkish { color: var(--muted); font-size: 12px; }
 .main { min-width: 0; min-height: 0; display: flex; }
 .empty { margin: auto; text-align: center; color: var(--faint); }
 .empty img { opacity: 0.55; }
 
 .thread { display: flex; flex-direction: column; flex: 1; min-width: 0; height: 100%; }
-.thread-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px 10px 20px; border-bottom: 1px solid var(--line); min-height: 52px; }
+.thread-head { display: flex; align-items: center; gap: 8px; padding: 6px 12px 6px 20px; border-bottom: 1px solid var(--line); min-height: 44px; }
 .crumbs { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; overflow: hidden; white-space: nowrap; }
 .crumbs .folder { color: var(--muted); font-size: 14px; flex: none; }
 .crumbs .sep { color: var(--faint); }
@@ -246,7 +279,18 @@ button.section-head:hover { background: var(--hover); }
 .menu button:hover svg { color: inherit; }
 .menu button:hover { background: var(--accent); color: #fff; }
 .menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 6px; }
+.menu .menu-choice { width: 100%; }
+.menu-label { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.menu-note { flex: none; font-size: 12px; opacity: 0.6; font-variant-numeric: tabular-nums; }
+.menu-tick { flex: none; width: 13px; height: 13px; }
+.menu-tick svg { display: block; width: 13px; height: 13px; color: inherit !important; }
+.menu-scroll { max-height: min(280px, 40vh); overflow-y: auto; display: flex; flex-direction: column; }
+/* Never wider than the sidebar it opens in, as it hangs to the left. */
+.sidebar .pop-panel { min-width: 0; width: 240px; max-width: calc(clamp(220px, var(--sidebar-width, 300px), max(220px, calc(100vw - 420px))) - 12px); }
+.picture-chip { display: inline-flex; align-items: center; gap: 4px; padding: 0 7px 0 5px; border-radius: 6px; background: var(--hover); border: 1px solid var(--line-strong); font-size: 0.87em; line-height: 1.5; color: var(--muted); white-space: nowrap; vertical-align: 1px; }
+.picture-chip svg { width: 12px; height: 12px; flex: none; }
 .share-btn { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--fill); font-size: 13.5px; cursor: pointer; }
+.share-btn > svg { width: 15px; height: 15px; flex: none; }
 .share-btn:hover { border-color: var(--faint); }
 .share-btn.on { border-color: var(--accent); }
 .share-btn .live { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
@@ -310,6 +354,10 @@ button.section-head:hover { background: var(--hover); }
 /* ---- narrow screens: one column, the list or the thread */
 @media (max-width: 760px) {
   .shell { grid-template-columns: minmax(0, 1fr); }
+  .resize-handle { display: none; }
+  .sidebar .pop-panel { max-width: calc(100vw - 16px); }
+  /* Under 16 px an iPhone zooms the page when the box takes the focus. */
+  .search input { font-size: 16px; }
   .shell.has-thread .sidebar { display: none; }
   .shell:not(.has-thread) .main { display: none; }
   .back { display: inline-grid; margin-left: -8px; }

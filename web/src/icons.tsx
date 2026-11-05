@@ -75,3 +75,65 @@ export const Star = () => (
     <path d="m8 1.8 1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z" />
   </svg>
 );
+export const Search = () => (
+  <svg {...base}>
+    <circle cx="7" cy="7" r="4.5" />
+    <path d="m10.4 10.4 3.8 3.8" />
+  </svg>
+);
+export const Close = () => (
+  <svg {...base}>
+    <path d="m4 4 8 8M12 4l-8 8" />
+  </svg>
+);
+export const Filter = () => (
+  <svg {...base}>
+    <path d="M2 3.5h12M4.5 8h7M7 12.5h2" />
+  </svg>
+);
+export const Sort = () => (
+  <svg {...base}>
+    <path d="M5 13V3M2.5 5.5 5 3l2.5 2.5M11 3v10M8.5 10.5 11 13l2.5-2.5" />
+  </svg>
+);
+export const Down = () => (
+  <svg {...base}>
+    <path d="M8 2.5v11M3.5 9 8 13.5 12.5 9" />
+  </svg>
+);
+export const ArrowUp = () => (
+  <svg {...base}>
+    <path d="M8 13.5v-11M3.5 7 8 2.5 12.5 7" />
+  </svg>
+);
+export const Hand = () => (
+  <svg {...base}>
+    <path d="M5.5 8V3.2a1 1 0 0 1 2 0V7.5V2.3a1 1 0 0 1 2 0v5.2V3.3a1 1 0 0 1 2 0v6.2c0 3-1.8 5-4.3 5-1.8 0-2.800-.8-3.700-2.3L2.600 9.400c-.6-1 .8-1.900 1.500-1L5.5 10" />
+  </svg>
+);
+export const Unread = () => (
+  <svg {...base} fill="currentColor" stroke="none">
+    <circle cx="8" cy="8" r="3.5" />
+  </svg>
+);
+export const Threads = () => (
+  <svg {...base}>
+    <path d="M2.5 4h11M2.5 8h11M2.5 12h11" />
+  </svg>
+);
+export const Folder = () => (
+  <svg {...base}>
+    <path d="M1.8 13V3h4.3l1.500 2h6.600v8z" />
+  </svg>
+);
+export const Check = () => (
+  <svg {...base} strokeWidth={2}>
+    <path d="m3 8.5 3.3 3.3L13 4.7" />
+  </svg>
+);
+export const Photo = () => (
+  <svg {...base}>
+    <path d="M2 3h12v10H2zM2 11l3.5-3.5L8 10l2.5-2.5L14 11" />
+    <circle cx="5.5" cy="5.8" r=".8" />
+  </svg>
+);

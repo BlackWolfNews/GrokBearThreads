@@ -5,6 +5,8 @@ import Markdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { go } from './route';
 import { escapeDestinations, findStep, readLink } from './thread-links';
+import { pictureNumber, remarkPictureChips } from './picture-chips';
+import * as Icon from './icons';
 import { workedTitle, type TurnMessage } from './turns';
 import type { ReactNode } from 'react';
 
@@ -98,25 +100,36 @@ export function MessageText({
   seq,
   rows,
   threadPath,
+  pictureChips,
 }: {
   text: string;
   pictures?: Map<string, string>;
   seq?: number;
   rows?: PageMessage[];
   threadPath?: (id: string) => string;
+  pictureChips?: boolean;
 }) {
   return (
     <div className="md" id={seq === undefined ? undefined : stepId(seq)}>
       <Markdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={pictureChips ? [remarkGfm, remarkPictureChips] : [remarkGfm]}
         // The default keeps links safe (no javascript: and the like). A
         // file:// picture is let through only to be looked up in
         // `pictures`; it's never used as an address itself.
         // work:, thread: and review: are never used as addresses either: the
         // `a` below reads them and makes its own.
-        urlTransform={(url, key) => ((key === 'src' && url.startsWith('file://')) || (key === 'href' && readLink(url)) ? url : defaultUrlTransform(url))}
+        urlTransform={(url, key) => ((key === 'src' && url.startsWith('file://')) || (key === 'href' && (readLink(url) || pictureNumber(url) !== undefined)) ? url : defaultUrlTransform(url))}
         components={{
           a: ({ node: _, href, children, ...p }) => {
+            const picture = href ? pictureNumber(href) : undefined;
+            if (picture !== undefined) {
+              return (
+                <span className="picture-chip" title="Pictures you paste stay on your Mac, so they don't show here">
+                  <Icon.Photo />
+                  Picture {picture}
+                </span>
+              );
+            }
             const link = href ? readLink(href) : undefined;
             if (!link) {
               return (

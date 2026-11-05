@@ -726,7 +726,11 @@ browser in, Settings > Phone & browser > Open signed in opens it in your
 browser (or run `npm run web:sign-in` from your Threadbear folder). Each
 thread has its own link. Share in a thread's ... menu on the Mac has Open on
 the web, to go there now, and Copy web link; the Copy link button on the
-website copies it too. It works anywhere you're signed in. On your Mac,
+website copies it too. It works anywhere you're signed in. Its sidebar works
+like the Mac's: drag its edge to resize it (double-click to reset), click a
+heading to fold it, sort the Inbox from the arrows on its heading, and search
+or filter from the top. The filter is only on the website: it picks threads
+that need you, unread or shared ones, or one project or folder. On your Mac,
 `threadbear://thread/<id>` opens a thread in the app instead (the Open
 thread button on a tab BrowserBear has marked for an agent uses it).
 

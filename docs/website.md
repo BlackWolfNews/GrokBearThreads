@@ -8,9 +8,19 @@ Built 28 Oct 2026 (thread 66935d23).
 
 - `web/`: a small Vite + React app, looking like the Mac app (refreshed
   3 Nov 2026, thread c1d311fd, from design B in
-  `docs/web-refresh-design/`). Signed in, it's the Mac's window: Starred,
-  Inbox and Running in the sidebar with Hibernating and Archived folded
-  under them (loaded only while open, counted by `phone:counts`), and a
+  `docs/web-refresh-design/`). Signed in, it's the Mac's window: a sidebar
+  (`web/src/sidebar.tsx`) you can drag wider or narrower, with Starred,
+  Inbox, Running, Hibernating and Archived under headings that fold and
+  show their number. Which thread goes where is `web/src/sections.ts`, the
+  same rules as the Mac's ThreadSections and the phone's InboxSections, so
+  change them together. Hibernating and Archived start folded and are
+  loaded only while open or while searching or filtering (`phone:counts`
+  has their numbers until then). The Inbox heading sorts (needs you first,
+  newest, oldest); the search looks through every section's titles, last
+  replies and places, with `phone:search` for archived threads past the
+  newest 100; the filter beside it picks needs you, unread, shared, or one
+  project or folder; and the arrow keys walk the rows. Folds, the sort and
+  the width are kept in this browser's localStorage. And a
   thread whose finished turns fold to "Worked for 4m 12s" and the reply
   (`web/src/turns.ts`, a port of the iPhone's `Turns.fold`), with the
   pending approval, the end_turn card of asks or the done card's
