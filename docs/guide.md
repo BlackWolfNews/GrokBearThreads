@@ -172,6 +172,16 @@ open in Chrome through [BrowserBear](https://github.com/mikecann/browserbear)
 (say, a sign-in page it wants you to use), the click brings the agent's tab
 into your Chrome window rather than opening a second one.
 
+An agent can also work in a Chrome of its own, which never touches yours
+(`browserbear open <url> --profile agent`). Its pages show in the thread's
+Browser panel, the globe on the right-hand rail, and you can click and type in
+them there. It stays out of sight, so nothing comes to the front. When the agent
+needs you to sign in or approve something, the panel opens by itself with Your
+turn and a Done button. You sign in to each account once, and it stays signed in.
+A passkey or a password manager's popup is Chrome's own, not part of the page: the
+window button beside the address brings up Chrome's real window for it, and
+pressing it again puts the window away.
+
 To share a file somewhere else, drag it out of the app: a file link in a
 reply, a picture in the transcript, a file in Highlights, or the picture or
 video showing in the side pane. It drops as the file itself, so you can

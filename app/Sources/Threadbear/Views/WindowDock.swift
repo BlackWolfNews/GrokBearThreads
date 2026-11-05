@@ -110,6 +110,7 @@ enum WindowDock {
         }
         switch panel {
         case PaneSection.highlightsId: return "Highlights"
+        case AgentBrowser.panelId: return "Browser"
         case PaneSection.patchesId: return "Patches"
         default:
             // The selected thread's panel by that id, else any thread's, as
@@ -147,6 +148,7 @@ enum WindowDock {
         case setup: return setupSymbol
         case connectors: return connectorsSymbol
         case PaneSection.highlightsId: return "pin"
+        case AgentBrowser.panelId: return "globe"
         case PaneSection.patchesId: return "square.dashed"
         default:
             if pinnedThread(panel) != nil { return "text.alignleft" }
@@ -328,6 +330,7 @@ struct RootView: View {
                 guard let thread = app.paneThread else { return true }
                 switch WindowDock.section(panel) {
                 case .highlights: return app.openProject == nil
+                case .panel(AgentBrowser.panelId): return true
                 case .panel(let id): return thread.panels.contains { $0.id == id }
                 case .patches: return !thread.patches.isEmpty
                 default: return true

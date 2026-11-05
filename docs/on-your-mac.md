@@ -149,4 +149,12 @@ if you have BrowserBear, to ask whether an agent's Chrome tab is already
 on that page (`app/Sources/Threadbear/BrowserBear.swift`). Only the link
 goes there.
 
+With BrowserBear's agent Chrome (`browserbear ... --profile agent`, started only
+when an agent asks for it), the Browser panel reads `agent/tabs.json` in BrowserBear's
+folder and connects to that Chrome's debugging port on 127.0.0.1, for the picture of
+the page and to send your mouse and keys. It never touches your own Chrome or its
+profiles. That Chrome is real Google Chrome with its own profile folder, also in BrowserBear's
+folder, and any program on this Mac could reach its port, so it holds only what you sign it in to
+(`app/Sources/Threadbear/Views/AgentBrowserPanel.swift`).
+
 Nothing else: no analytics, no ads, no tracking.

@@ -34,6 +34,9 @@ struct DockPane: View {
                         }
                     case .patches:
                         PatchesList(thread: thread, project: app.openProject)
+                    case .panel(AgentBrowser.panelId):
+                        // One per thread, with its own tabs and picture.
+                        AgentBrowserPanel(thread: thread).id(thread.id)
                     case .panel(let id):
                         if let panel = thread.panels.first(where: { $0.id == id }) {
                             panelView(panel, in: thread)
@@ -184,6 +187,7 @@ struct PaneHeaderButton: View {
 /// Highlights; `thread` is then the one the page borrows them from.
 struct PanelRail: View {
     @Environment(AppModel.self) private var app
+    @ObservedObject private var agentBrowser = AgentBrowserModel.shared
     let thread: ThreadSummary
     var project: Project? = nil
 
@@ -215,6 +219,16 @@ struct PanelRail: View {
                 // project's page, where every panel is the project's.
                 .overlay(alignment: .bottomTrailing) {
                     if project == nil { PanelOriginBadge(panel: panel, thread: thread, app: app) }
+                }
+            }
+            if project == nil, agentBrowser.available {
+                let tabs = agentBrowser.tabs(for: thread.id)
+                ActivityButton(symbol: "globe", title: "Browser", tip: "This thread's browser", badge: tabs.isEmpty ? nil : tabs.count, dot: tabs.contains { $0.state == "yours" }, active: app.dock.isShowing(AgentBrowser.panelId)) {
+                    app.clickRail(.panel(AgentBrowser.panelId), in: thread)
+                }
+                // The agent handing a page over is the one time it opens by itself.
+                .onChange(of: tabs.reduce(0) { $0 + ($1.handoffs ?? 0) }) { old, new in
+                    if new > old { app.showPane(.panel(AgentBrowser.panelId)) }
                 }
             }
             Spacer(minLength: zoomed(8))
