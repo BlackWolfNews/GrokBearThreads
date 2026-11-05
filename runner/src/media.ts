@@ -1,9 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import type { ImageRef } from './protocol.ts';
+import { convertImageSync } from './images.ts';
 
 export type ImageInfo = { mediaType: string; width?: number; height?: number };
 
@@ -164,7 +164,7 @@ export function saveBase64Image(dir: string, data: string, mediaType: string, hi
 // Copies an image into a folder under a fresh name and returns its ref.
 // Used by media.import (into inbox/) and when a message is sent (into the
 // thread's media/ so the transcript keeps working if inbox/ is cleaned).
-// HEIC (iPhone photos), TIFF and BMP are converted with sips on the way in,
+// HEIC (iPhone photos), TIFF and BMP are converted (images.ts) on the way in,
 // since the app and the models only take the common web formats.
 export function copyImageInto(dir: string, src: string): ImageRef {
   const info = readImageInfo(src);
@@ -186,12 +186,11 @@ function convertImageInto(dir: string, src: string): ImageRef {
   // Photos go to JPEG: a 12 MP iPhone shot as PNG is tens of MB, and it's
   // stored twice (inbox, then the thread's media). TIFF and BMP are more
   // often screenshots or diagrams, so they stay lossless as PNG.
-  const [format, ext] = kind === 'heic' ? ['jpeg', 'jpg'] : ['png', 'png'];
+  const [format, ext] = kind === 'heic' ? (['jpeg', 'jpg'] as const) : (['png', 'png'] as const);
   const file = path.join(dir, `${crypto.randomUUID()}.${ext}`);
   const tmp = `${file}.tmp.${ext}`;
   try {
-    const args = ['-s', 'format', format, ...(format === 'jpeg' ? ['-s', 'formatOptions', '90'] : []), src, '--out', tmp];
-    execFileSync('/usr/bin/sips', args, { stdio: 'ignore', timeout: 30_000 });
+    convertImageSync(src, tmp, { format, ...(format === 'jpeg' ? { quality: 90 } : {}) });
     fs.renameSync(tmp, file);
   } catch {
     throw unsupported;
@@ -224,8 +223,8 @@ function readHead(file: string): Buffer {
 }
 
 // The API rejects images over about 5 MB (base64) or 8000 px. Shrink big
-// ones with sips (built into macOS) before sending. Returns the bytes and
-// media type to send; the original file stays as it was for the transcript.
+// ones (images.ts: sips on macOS, ImageMagick on Linux) before sending.
+// Returns the bytes and media type to send; the original file stays as it was for the transcript.
 export function prepareImageForModel(ref: ImageRef, tmpDir: string): { data: Buffer; mediaType: string } {
   const data = fs.readFileSync(ref.path);
   const tooBig = data.length > 3_700_000 || (ref.width ?? 0) > 7900 || (ref.height ?? 0) > 7900;
@@ -233,9 +232,7 @@ export function prepareImageForModel(ref: ImageRef, tmpDir: string): { data: Buf
   try {
     fs.mkdirSync(tmpDir, { recursive: true });
     const out = path.join(tmpDir, `${crypto.randomUUID()}.jpg`);
-    execFileSync('/usr/bin/sips', ['-s', 'format', 'jpeg', '-s', 'formatOptions', '80', '-Z', '2048', ref.path, '--out', out], {
-      stdio: 'ignore',
-    });
+    convertImageSync(ref.path, out, { format: 'jpeg', quality: 80, maxPx: 2048 });
     const small = fs.readFileSync(out);
     fs.rmSync(out, { force: true });
     return { data: small, mediaType: 'image/jpeg' };
@@ -247,7 +244,7 @@ export function prepareImageForModel(ref: ImageRef, tmpDir: string): { data: Buf
 // Copies an image file a CLI saved or looked at (Codex's generated images,
 // a file it viewed) into a media folder, named like saveBase64Image's so the
 // same image always lands on the same file: a replay or a reconnect never
-// duplicates it. HEIC, TIFF and BMP become PNG through sips, since the app
+// duplicates it. HEIC, TIFF and BMP become PNG (images.ts), since the app
 // and the models only take the common web formats. Null when it isn't a
 // readable image.
 export function copyImageFileInto(dir: string, src: string, hint: string): ImageRef | null {
@@ -268,11 +265,11 @@ export function copyImageFileInto(dir: string, src: string, hint: string): Image
     if (!convertibleKind(buf)) return null;
     const out = path.join(dir, `${safeName(hint)}-${sha}.png`);
     if (!fs.existsSync(out)) {
-      // Converted next to the target first, so a failed sips run never
+      // Converted next to the target first, so a failed conversion never
       // leaves a half-written file under the final name.
       const tmp = `${out}.${process.pid}.tmp.png`;
       try {
-        execFileSync('/usr/bin/sips', ['-s', 'format', 'png', file, '--out', tmp], { stdio: 'ignore', timeout: 30_000 });
+        convertImageSync(file, tmp, { format: 'png' });
         fs.renameSync(tmp, out);
       } finally {
         fs.rmSync(tmp, { force: true });

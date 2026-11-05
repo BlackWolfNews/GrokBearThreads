@@ -13,8 +13,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { execFile } from 'node:child_process';
 import type { ImageRef } from './protocol.ts';
+import { convertImage, svgToPng } from './images.ts';
 
 export type IconCandidate = {
   path: string;
@@ -232,7 +232,7 @@ export async function fileHash(file: string): Promise<string | undefined> {
 }
 
 // Copies a picture into `dir` as `<projectId>-<hash>`: SVG as it is,
-// anything else through sips to a PNG of at most ICON_PX (an .icns or a
+// anything else (images.ts) to a PNG of at most ICON_PX (an .icns or a
 // 1024 px app icon would otherwise be a megabyte for a 16 pt dot). The
 // project's older copies go.
 export async function storeIcon(src: string, dir: string, projectId: string, hash: string): Promise<ImageRef> {
@@ -246,12 +246,12 @@ export async function storeIcon(src: string, dir: string, projectId: string, has
   } else {
     const dest = path.join(dir, `${projectId}-${hash}.png`);
     const size = await imageSize(src, ext);
-    const args = ['-s', 'format', 'png', ...(size?.width && Math.max(size.width, size.height ?? 0) <= ICON_PX ? [] : ['-Z', String(ICON_PX)]), src, '--out', dest];
-    const made = await new Promise<boolean>((resolve) => execFile('/usr/bin/sips', args, { timeout: 20_000 }, (err) => resolve(!err)));
+    const small = Boolean(size?.width) && Math.max(size?.width ?? 0, size?.height ?? 0) <= ICON_PX;
+    const made = await convertImage(src, dest, { format: 'png', ...(small ? {} : { maxPx: ICON_PX }) });
     if (made && fs.existsSync(dest)) {
       ref = { path: dest, mediaType: 'image/png', ...(await imageSize(dest, '.png')) };
     } else {
-      // No sips (or it couldn't read it): the file as it is, which the app
+      // No converter (or it couldn't read it): the file as it is, which the app
       // can still draw.
       const raw = path.join(dir, `${projectId}-${hash}${ext}`);
       await fs.promises.copyFile(src, raw);
@@ -263,7 +263,7 @@ export async function storeIcon(src: string, dir: string, projectId: string, has
 }
 
 // The picture as the phone can show it (sync.ts): a PNG, JPEG or WebP as
-// it is; an SVG drawn to a 256 px PNG by Quick Look, since the phone can't
+// it is; an SVG drawn to a 256 px PNG (images.ts), since the phone can't
 // draw SVG. Throws when the file can't be read or drawn.
 export async function phonePicture(iconPath: string, mediaType: string): Promise<{ bytes: Uint8Array; mediaType: string }> {
   if (mediaType !== 'image/svg+xml') {
@@ -272,11 +272,8 @@ export async function phonePicture(iconPath: string, mediaType: string): Promise
   }
   const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'threadbear-icon-'));
   try {
-    const made = await new Promise<boolean>((resolve) =>
-      execFile('/usr/bin/qlmanage', ['-t', '-s', String(ICON_PX), '-o', dir, iconPath], { timeout: 20_000 }, (err) => resolve(!err)),
-    );
     const out = path.join(dir, path.basename(iconPath) + '.png');
-    if (!made || !fs.existsSync(out)) throw new Error('Quick Look could not draw the SVG');
+    if (!(await svgToPng(iconPath, out, ICON_PX))) throw new Error('Could not draw the SVG (Quick Look, or rsvg-convert on Linux)');
     return { bytes: new Uint8Array(await fs.promises.readFile(out)), mediaType: 'image/png' };
   } finally {
     await fs.promises.rm(dir, { recursive: true, force: true });
