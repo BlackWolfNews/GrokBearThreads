@@ -2267,8 +2267,10 @@ A patch whose code can't all be seen isn't loaded at all, trusted or not,
 and has `error` (not `untrusted`) saying why, as a stored hash can't vouch
 for code it didn't cover: one that loads code by a name worked out as it
 runs (`import(name)`, `` import(`./${x}`) ``, `require('./a' + b)`, any
-`createRequire`), in the patch file or a helper, or that reaches more than
-100 local files. `patches.trust` can't trust it; changing it to plain
+`createRequire`, `node:module`, `node:vm`, `node:worker_threads`, `eval`,
+a `data:` or `#` specifier), in the patch file or a helper, one the runner
+can't parse, or one that reaches more than 100 local files. Loads are read
+from the parsed syntax (oxc), so comments and strings don't count either way. `patches.trust` can't trust it; changing it to plain
 imports can. An agent's Edit or Write to a helper carries on the trusted
 patches that import it, as it does for the patch file; it doesn't trust a
 patch that's still waiting. A trust file from before helpers counted

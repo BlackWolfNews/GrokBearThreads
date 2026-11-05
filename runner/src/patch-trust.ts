@@ -36,12 +36,15 @@
 //
 // The hash is only worth anything if it covers what will run. A patch that
 // loads code by a name worked out when it runs (`import(name)`,
-// `createRequire`), or reaches more files than are followed, can't be
-// checked, so it isn't loaded at all, trusted or not: its `error` says why.
+// `createRequire`), doesn't parse, or reaches more files than are followed,
+// can't be checked, so it isn't loaded at all, trusted or not: its `error`
+// says why (scanModule).
 // Saying yes to it would trust whatever that name points at later.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { parseSync } from 'oxc-parser';
 import { atomicWriteFileSync } from './fsutil.ts';
 
 export type TrustVerdict =
@@ -261,12 +264,15 @@ export function patchHash(file: string): PatchHash {
   const queue: { from: string; text: string }[] = [{ from: root, text: text.toString('utf8') }];
   scan: while (queue.length) {
     const { from, text: src } = queue.shift()!;
-    const load = computedLoad(src);
-    if (load && !incomplete) {
+    const { specifiers, problem } = scanModule(src, from);
+    if (problem && !incomplete) {
       const name = from === root ? path.basename(root) : path.relative(path.dirname(root), from);
-      incomplete = `patch trust can't check what ${name} line ${load.line} loads (\`${load.code}\`). Import local files by a plain path, like './lib/x.ts', and it can.`;
+      incomplete =
+        problem.kind === 'parse'
+          ? `patch trust can't read ${name} (${problem.code}, line ${problem.line}), so it can't check what it loads.`
+          : `patch trust can't check what ${name} line ${problem.line} loads (\`${problem.code}\`). Import local files by a plain path, like './lib/x.ts', and it can.`;
     }
-    for (const spec of localSpecifiers(src)) {
+    for (const spec of specifiers) {
       const target = resolveHelper(path.dirname(from), spec);
       if (seen.has(target)) continue;
       seen.add(target);
@@ -316,35 +322,146 @@ export function patchHash(file: string): PatchHash {
 
 const SCANNED = ['.ts', '.mts', '.cts', '.js', '.mjs', '.cjs', '.tsx', '.jsx'];
 
-// The local specifiers in a module's source: static and dynamic imports,
-// re-exports and require calls whose specifier starts with ./, ../ or /.
-// A regex rather than a parser: a match inside a comment or string only
-// adds a file to the hash, which can't let anything through.
-export function localSpecifiers(src: string): string[] {
-  const out = new Set<string>();
-  const re = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)(['"`])((?:\.{1,2}\/|\/)[^'"`\n]*)\1/g;
-  for (let m; (m = re.exec(src)); ) out.add(m[2]);
-  return [...out];
+// What a module loads, read from its syntax by a real parser: the local
+// specifiers it names with a plain string (static and dynamic imports,
+// re-exports, require, `import x = require`), and the first load the scan
+// can't follow (`problem`). Comments and strings are only words, so
+// `import/*c*/(name)` can't slip past and `// import(x)` doesn't count;
+// two regexes did both (Daybreak re-scan, 5 Nov). Parsed with oxc, as
+// TypeScript 7 has no parser to call from JS and Node's own type
+// stripping is experimental. A file that doesn't parse can't be checked.
+//
+// Covers how a module loads code by name: the module system and what hands
+// it out (`createRequire`, `node:module`, `getBuiltinModule`), workers, vm
+// and eval. Not shell commands or child processes: a patch's commands run
+// anything by design, and the scripts they name are hashed (namedPaths).
+export type ModuleScan = { specifiers: string[]; problem?: { kind: 'computed' | 'parse'; line: number; code: string } };
+
+export function scanModule(src: string, file: string): ModuleScan {
+  const ext = path.extname(file);
+  const sourceType = ext === '.cjs' || ext === '.cts' ? 'commonjs' : ext === '.mjs' || ext === '.mts' ? 'module' : 'unambiguous';
+  let parsed: ReturnType<typeof parseSync>;
+  try {
+    parsed = parseSync(file, src, { sourceType, preserveParens: false });
+  } catch (e) {
+    return { specifiers: [], problem: { kind: 'parse', line: 1, code: e instanceof Error ? e.message : String(e) } };
+  }
+  const lineAt = (at: number) => src.slice(0, at).split('\n').length;
+  if (parsed.errors.length) {
+    const err = parsed.errors[0];
+    return { specifiers: [], problem: { kind: 'parse', line: lineAt(err.labels[0]?.start ?? 0), code: err.message } };
+  }
+  const specifiers = new Set<string>();
+  let problem: { start: number; end: number } | undefined;
+  const refuse = (n: AstNode) => {
+    if (!problem || n.start < problem.start) problem = { start: n.start, end: n.end };
+  };
+  // A specifier written as one plain string: followed when it's a local
+  // file, left alone when it's a package, refused when it hands out more.
+  const named = (spec: AstNode | undefined, at: AstNode) => {
+    const value = spec && plainString(spec);
+    if (value === undefined) return refuse(at);
+    if (/^\.{1,2}(\/|$)|^\//.test(value)) specifiers.add(value);
+    else if (value.startsWith('file:')) {
+      try {
+        specifiers.add(fileURLToPath(value));
+      } catch {
+        refuse(at);
+      }
+    }
+    // A data: module's own imports are in a string, and `#x` maps through
+    // package.json to a local file this doesn't follow.
+    else if (/^(data:|#)/.test(value) || LOADER_MODULES.includes(value)) refuse(at);
+  };
+  // Identifiers and members a load handled already, so they aren't
+  // refused as bare references to `require`.
+  const handled = new Set<AstNode>();
+  const stack: { node: AstNode; parent?: AstNode; key?: string }[] = [{ node: parsed.program as unknown as AstNode }];
+  while (stack.length) {
+    const { node, parent, key } = stack.pop()!;
+    if (TYPE_ONLY.has(node.type)) continue;
+    switch (node.type) {
+      case 'ImportDeclaration':
+      case 'ExportNamedDeclaration':
+      case 'ExportAllDeclaration':
+        if (node.source) named(node.source, node);
+        break;
+      case 'ImportExpression':
+        named(node.source, node);
+        break;
+      case 'TSImportEqualsDeclaration':
+        if (node.moduleReference?.type === 'TSExternalModuleReference') named(node.moduleReference.expression, node);
+        break;
+      case 'CallExpression': {
+        const callee = node.callee;
+        const isRequire = (callee.type === 'Identifier' && callee.name === 'require') || (callee.type === 'MemberExpression' && propertyName(callee) === 'require');
+        const isResolve = callee.type === 'MemberExpression' && callee.object.type === 'MetaProperty' && propertyName(callee) === 'resolve';
+        if (isRequire || isResolve) {
+          handled.add(callee);
+          named(node.arguments[0], node);
+        }
+        break;
+      }
+      case 'Identifier':
+        if (handled.has(node) || !isReference(parent, key)) break;
+        if (LOADER_NAMES.includes(node.name)) refuse(node);
+        break;
+      case 'MemberExpression': {
+        const name = propertyName(node);
+        if (name === undefined) {
+          // `process[k]`: any property, so any loader, by a name worked out later.
+          const o = node.object;
+          if (o.type === 'MetaProperty' || (o.type === 'Identifier' && RISKY_OBJECTS.includes(o.name))) refuse(node);
+        } else if (!handled.has(node) && LOADER_PROPERTIES.includes(name)) refuse(node);
+        break;
+      }
+    }
+    for (const k of Object.keys(node)) {
+      if (TYPE_KEYS.has(k)) continue;
+      const v = node[k];
+      for (const child of Array.isArray(v) ? v : [v]) {
+        if (child && typeof child === 'object' && typeof child.type === 'string') stack.push({ node: child as AstNode, parent: node, key: k });
+      }
+    }
+  }
+  return {
+    specifiers: [...specifiers],
+    ...(problem ? { problem: { kind: 'computed' as const, line: lineAt(problem.start), code: src.slice(problem.start, problem.end).replace(/\s+/g, ' ').slice(0, 80) } } : {}),
+  };
 }
 
-// The first place a module loads code by a name the scan can't read:
-// `import(...)` or `require(...)` of anything but one plain string (a
-// variable, a `${}` template, 'a' + b), and any `createRequire`, whose
-// require can be called by any name. Also a regex: one in a comment or a
-// string counts too, which only keeps a patch out, never lets one in.
-// `x.import(...)` is a method, not a load; `module.require` is one.
-export function computedLoad(src: string): { line: number; code: string } | undefined {
-  const re = /(?<![\w$.])(?:import|require)\s*\(|\bmodule\s*\.\s*require\s*\(|\bcreateRequire\b/g;
-  const plain = /^\s*(?:'[^'\\\n]*'|"[^"\\\n]*"|`[^`\\$]*`)\s*[,)]/;
-  for (let m; (m = re.exec(src)); ) {
-    const isCall = m[0].endsWith('(');
-    if (isCall && plain.test(src.slice(m.index + m[0].length))) continue;
-    const rest = src.slice(m.index).split('\n')[0];
-    const close = rest.indexOf(')');
-    const code = isCall ? (close >= 0 ? rest.slice(0, close + 1) : rest).slice(0, 80) : m[0];
-    return { line: src.slice(0, m.index).split('\n').length, code };
-  }
+// oxc's ESTree nodes, loosely: the scan only reads a few fields.
+type AstNode = { type: string; start: number; end: number; [field: string]: any };
+
+// Names that load code, or hand out something that can, when used as values.
+const LOADER_NAMES = ['require', 'eval', 'Function', 'createRequire', 'getBuiltinModule', 'dlopen'];
+const LOADER_PROPERTIES = ['require', 'createRequire', 'getBuiltinModule', 'dlopen', '_load'];
+// Modules that load code by a name or from a string.
+const LOADER_MODULES = ['module', 'node:module', 'vm', 'node:vm', 'worker_threads', 'node:worker_threads'];
+// Objects a computed `[k]` on could reach a loader through.
+const RISKY_OBJECTS = ['globalThis', 'global', 'process', 'module', 'require', 'self', 'window'];
+// TypeScript types: gone before the code runs, so nothing in them loads.
+const TYPE_KEYS = new Set(['typeAnnotation', 'typeArguments', 'typeParameters', 'returnType', 'superTypeArguments', 'implements']);
+const TYPE_ONLY = new Set(['TSInterfaceDeclaration', 'TSTypeAliasDeclaration', 'TSDeclareFunction']);
+
+function plainString(n: AstNode): string | undefined {
+  if (n.type === 'Literal' && typeof n.value === 'string') return n.value;
+  if (n.type === 'TemplateLiteral' && n.expressions.length === 0) return n.quasis[0]?.value?.cooked ?? undefined;
   return undefined;
+}
+
+// `a.b` and `a['b']` name `b`; `a[k]` names nothing the scan can know.
+function propertyName(n: AstNode): string | undefined {
+  if (!n.computed) return n.property.type === 'Identifier' ? n.property.name : undefined;
+  return plainString(n.property);
+}
+
+// Whether an identifier is a value in code, not a property's name or a label.
+function isReference(parent: AstNode | undefined, key: string | undefined): boolean {
+  if (!parent) return true;
+  if (key === 'property' && parent.type === 'MemberExpression') return !!parent.computed;
+  if (key === 'key') return !!parent.computed;
+  return key !== 'label' && parent.type !== 'MetaProperty';
 }
 
 // Paths a module names that start ./ or ../, anywhere: in a command
