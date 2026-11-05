@@ -813,12 +813,23 @@ final class WebPanelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUI
             return existing
         }
         let config = WKWebViewConfiguration()
-        config.websiteDataStore = .default()
+        if url.isFileURL {
+            // A local page is served through the preview scheme, which hands
+            // it only itself and the assets it names (LocalPreviewSite), in
+            // a store of its own so it shares nothing with dashboards' logins.
+            config.setURLSchemeHandler(previews, forURLScheme: LocalPreviewSchemeHandler.scheme)
+            config.websiteDataStore = .nonPersistent()
+        } else {
+            config.websiteDataStore = .default()
+        }
         let view = makeView(config)
         load(url, in: view)
         keep(view, as: url)
         return view
     }
+
+    /// Serves every local HTML preview (Daybreak finding 6).
+    let previews = LocalPreviewSchemeHandler()
 
     /// Convex's embedded dashboard for one deployment, given its deploy key
     /// by a script that answers the page's own request for it. The store
@@ -928,11 +939,13 @@ final class WebPanelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUI
         load(url, in: view)
     }
 
-    /// A local file (a mockup in the pane's preview) may read the files
-    /// beside it, its styles and pictures, and nothing further up.
+    /// A local file (a mockup in the pane's preview) may read itself and the
+    /// styles, scripts and pictures it names in its folder, nothing else
+    /// beside it: it was loaded with read access to the whole folder, so a
+    /// project's page could read a `.env` next to it (Daybreak finding 6).
     private func load(_ url: URL, in view: WKWebView) {
         if url.isFileURL {
-            view.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+            if let page = previews.address(for: url) { view.load(URLRequest(url: page)) }
         } else {
             view.load(URLRequest(url: url))
         }
