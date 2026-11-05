@@ -1396,6 +1396,15 @@ thread to another login when the one it's on runs out of room.
   `shared-pools.json` in its data folder, so it starts with it while the
   backend can't be reached. `runner.json`'s `pools` is left as it was, and
   is used again only with sync off. `defaults.poolId` stays each runner's.
+- **Shared readings** (backend API 39). A subscription is one limit
+  wherever it's signed in, so each runner also follows the other runners'
+  latest usage readings (`sync:sharedUsage`, from their `accounts` rows)
+  and counts one of the same provider and email as a third source beside
+  Token Stats and its own turns: the newest reading wins, window by
+  window, and `usage.source` is `"shared"` when another runner's was the
+  newest. A shared reading Token Stats called stale is left out, and one
+  that says `blocked`, taken after this runner last read the login,
+  blocks it here too until a window at its limit resets.
 - **New threads.** A `threads.create` without `accountId` picks the pool:
   `poolId` if given, else the pool whose `folders` holds `cwd` (the
   longest match), else `defaults.poolId` (`runner.json`'s, the pool last

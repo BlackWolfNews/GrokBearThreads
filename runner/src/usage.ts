@@ -17,6 +17,11 @@ import type { UsageHistory } from './usage-history.ts';
 // the reading didn't already say so.
 export type UsageReading = { windows: UsageWindow[]; blocked?: boolean; blockedUntil?: number; email?: string; plan?: string };
 
+// Another runner's reading of one of its logins, from the backend's
+// accounts table (sync.ts). A subscription is one limit wherever it's
+// signed in, so the same provider and email here is the same login.
+export type SharedReading = { runnerId: string; provider: Provider; email: string; usage: AccountUsage };
+
 // Token Stats hasn't written limits.json for this long: its numbers are old.
 export const STALE_MS = 15 * 60_000;
 // limits.json is replaced by rename and watched; this catches a missed event.
@@ -154,6 +159,8 @@ export class UsageStore {
   private live = new Map<string, LiveAccount>();
   private known = new Map<string, KnownAccount>();
   private sent = new Map<string, AccountUsage | undefined>(); // last reported, per account
+  // The newest reading other runners have of each login, by provider:email.
+  private shared = new Map<string, { at: number; usage: AccountUsage }>();
   private listeners = new Set<(ids: string[]) => void>();
   private watcher?: fs.FSWatcher;
   private pollTimer?: TimerHandle;
@@ -245,6 +252,22 @@ export class UsageStore {
     this.changed(false, [accountId]);
   }
 
+  // Other runners' readings (setShared from sync.ts, with this runner's own
+  // rows left out). Only the newest per login is kept, and none Token
+  // Stats called stale.
+  setShared(rows: SharedReading[]): void {
+    const next = new Map<string, { at: number; usage: AccountUsage }>();
+    for (const r of rows) {
+      const at = Date.parse(r.usage?.readAt ?? '');
+      if (!r.email || !Number.isFinite(at) || r.usage.stale || !Array.isArray(r.usage.windows)) continue;
+      const key = `${r.provider}:${r.email.toLowerCase()}`;
+      const have = next.get(key);
+      if (!have || at > have.at) next.set(key, { at, usage: r.usage });
+    }
+    this.shared = next;
+    this.changed(false);
+  }
+
   // Email and plan for titles: limits.json first (it comes from the
   // profile endpoint), then the account's own last reading.
   identityFor(account: KnownAccount): { email?: string; plan?: string } {
@@ -269,22 +292,39 @@ export class UsageStore {
     const now = this.clock.now();
     const base = this.baselineFor(account);
     const live = this.live.get(account.id);
-    // Newer wins, window by window.
-    const merged = new Map<string, { w: UsageWindow; at: number; live: boolean }>();
-    for (const w of base?.windows ?? []) merged.set(windowKey(w), { w, at: base!.readAt, live: false });
+    const email = (account.email ?? live?.email ?? base?.email)?.toLowerCase();
+    const shared = email ? this.shared.get(`${account.provider}:${email}`) : undefined;
+    // Newer wins, window by window: Token Stats, this runner's own turns,
+    // then other runners' readings of the same login.
+    type From = 'tokenStats' | 'live' | 'shared';
+    const merged = new Map<string, { w: UsageWindow; at: number; from: From }>();
+    for (const w of base?.windows ?? []) merged.set(windowKey(w), { w, at: base!.readAt, from: 'tokenStats' });
     for (const lw of live?.windows ?? []) {
       const { at, ...w } = lw;
       const have = merged.get(windowKey(w));
-      if (!have || at >= have.at) merged.set(windowKey(w), { w, at, live: true });
+      if (!have || at >= have.at) merged.set(windowKey(w), { w, at, from: 'live' });
     }
-    const blocked = !!live?.blocked && (live.blockedUntil === undefined || now < live.blockedUntil);
+    for (const w of shared?.usage.windows ?? []) {
+      const have = merged.get(windowKey(w));
+      if (!have || shared!.at > have.at) merged.set(windowKey(w), { w, at: shared!.at, from: 'shared' });
+    }
+    // Another machine found it at its limit after this one last read it:
+    // blocked here too, until a window at the limit resets.
+    const sharedBlocked =
+      !!shared?.usage.blocked &&
+      shared.at > (live?.at ?? 0) &&
+      (() => {
+        const ends = shared.usage.windows.filter((w) => w.remainingPercent < 1 && w.resetsAt).map((w) => Date.parse(w.resetsAt!));
+        return ends.length === 0 || ends.some((t) => t > now);
+      })();
+    const blocked = (!!live?.blocked && (live.blockedUntil === undefined || now < live.blockedUntil)) || sharedBlocked;
     if (merged.size === 0 && !blocked) return undefined;
-    // When the account was last read at all, by either source.
-    const latest = Math.max(base?.readAt ?? 0, live?.at ?? 0);
-    let newest = { at: 0, live: false };
+    // When the account was last read at all, by any source.
+    const latest = Math.max(base?.readAt ?? 0, live?.at ?? 0, shared?.at ?? 0);
+    let newest: { at: number; from: From } = { at: 0, from: 'tokenStats' };
     const windows: UsageWindow[] = [];
     for (const m of merged.values()) {
-      if (m.at > newest.at) newest = { at: m.at, live: m.live };
+      if (m.at > newest.at) newest = { at: m.at, from: m.from };
       // A reading taken after this window reset didn't mention it: the
       // login has no such window any more. Anthropic dropped the 5-hour
       // one from Max plans at the end of Oct 2026, and without this its
@@ -295,16 +335,16 @@ export class UsageStore {
       if (reset <= now && latest > m.at && latest > reset) continue;
       windows.push(afterReset(m.w, now));
     }
-    if (live && live.at > newest.at) newest = { at: live.at, live: true };
+    if (live && live.at > newest.at) newest = { at: live.at, from: 'live' };
     windows.sort((a, b) => WINDOW_KINDS.indexOf(a.kind) - WINDOW_KINDS.indexOf(b.kind));
     const usage: AccountUsage = {
       windows,
       readAt: new Date(newest.at).toISOString(),
-      source: newest.live ? 'live' : 'tokenStats',
+      source: newest.from,
     };
     // Token Stats has gone quiet, and no turn of this account's has
     // brought a reading in that time either.
-    if (base && this.baseline && now - this.baseline.generatedAt > STALE_MS && !(live && now - live.at <= STALE_MS)) usage.stale = true;
+    if (base && this.baseline && now - this.baseline.generatedAt > STALE_MS && !(live && now - live.at <= STALE_MS) && !(shared && now - shared.at <= STALE_MS)) usage.stale = true;
     if (blocked) usage.blocked = true;
     if (base?.notice) usage.notice = base.notice;
     return usage;

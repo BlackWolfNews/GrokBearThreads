@@ -885,6 +885,23 @@ async function writePools(ctx: { db: MutationCtx['db'] }, runnerId: string, pool
   }
 }
 
+// Every runner's latest usage reading of each login it knows the email of
+// (API 39): the same subscription signed in on several machines is one
+// limit, so each runner takes the newest reading from any of them.
+export const sharedUsage = query({
+  args: { key: v.string() },
+  returns: v.array(v.object({ runnerId: v.string(), provider: v.string(), email: v.string(), usage: v.any() })),
+  handler: async (ctx, { key }) => {
+    checkRunnerKey(key);
+    const out = [];
+    for (const row of await ctx.db.query('accounts').collect()) {
+      if (!row.email || !row.usage) continue;
+      out.push({ runnerId: row.runnerId, provider: row.provider, email: row.email, usage: row.usage });
+    }
+    return out;
+  },
+});
+
 export const setAccounts = mutation({
   args: { key: v.string(), runnerId: v.string(), accounts: v.array(accountDoc) },
   returns: v.null(),

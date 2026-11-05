@@ -154,4 +154,8 @@
 //    `pools` table, sync:pools, sync:savePools and sync:adoptPools. A runner
 //    follows it only with a backend of 38 or later; before, each keeps its
 //    own runner.json pools.
-export const API_VERSION = 38;
+// 39: sync:sharedUsage, every runner's latest usage reading of each login
+//    with an email, so a login signed in on several machines shows the
+//    newest reading on each (docs/protocol.md, Accounts, "Shared
+//    readings"). A runner subscribes only with a backend of 39 or later.
+export const API_VERSION = 39;

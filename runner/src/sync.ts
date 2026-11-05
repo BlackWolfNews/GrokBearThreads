@@ -13,6 +13,7 @@
 // check.sh sets so no test runner ever writes to the real project.
 import type { PoolBackend } from './shared-pools.ts';
 import type { SharedPool } from './pools.ts';
+import type { SharedReading } from './usage.ts';
 import { isSealed, type Sealed } from './secrets.ts';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -88,12 +89,14 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 38;
+export const BACKEND_API_VERSION = 39;
 // From this one an owned schedule can carry `poolId`, the pool that picks
 // its threads' login. An older backend's validator would turn it down.
 export const SCHEDULE_POOLS_API_VERSION = 36;
 // Pools shared between runners: the pools table (shared-pools.ts).
 export const SHARED_POOLS_API_VERSION = 38;
+// Other runners' usage readings of the same logins (sync:sharedUsage).
+export const SHARED_USAGE_API_VERSION = 39;
 // From this one a thread's row carries its open card of asks and a finished
 // turn's next steps, and a message row can be `summary` (end_turn's
 // bullets), so the phone shows end-of-turn cards. An older backend's
@@ -382,6 +385,8 @@ export type SyncDeps = {
   schedules?: { attach(backend: ScheduleBackend): void | Promise<void>; inBackend(): boolean };
   // Follows the shared pools once the backend has them (API 38).
   pools?: { attach(backend: PoolBackend): void };
+  // Takes the other runners' readings of the same logins (API 39).
+  sharedUsage?: { setShared(rows: SharedReading[]): void };
   // For the sidebar table (thread-index.ts): telling the app about other
   // runners' threads, and the data dir their tokens are copied into.
   publish?: (n: Notification) => void;
@@ -2034,6 +2039,7 @@ export class ConvexSync {
         this.lookForReplyImages();
         if ((this.backendApiVersion ?? 0) >= SCHEDULES_API_VERSION && this.running) void this.deps.schedules?.attach(this.scheduleBackend());
         if ((this.backendApiVersion ?? 0) >= SHARED_POOLS_API_VERSION && this.running) this.deps.pools?.attach(this.poolBackend());
+        if ((this.backendApiVersion ?? 0) >= SHARED_USAGE_API_VERSION && this.running) this.followSharedUsage();
         if ((this.backendApiVersion ?? 0) >= THREAD_INDEX_API_VERSION && this.running) this.index?.start();
       },
       (e) => {
@@ -2100,6 +2106,27 @@ export class ConvexSync {
       },
     };
     return this.schedulesTable;
+  }
+
+  // ------------------------------------------------------------ shared usage
+
+  private unsubSharedUsage?: () => void;
+
+  // Once: every runner's readings, less this runner's own, to the usage
+  // store. Each reading's readAt keeps a copy of a copy from winning over
+  // the reading it came from.
+  private followSharedUsage(): void {
+    if (this.unsubSharedUsage || !this.subscriber || !this.deps.sharedUsage) return;
+    const mine = this.runnerId;
+    this.unsubSharedUsage = this.subscriber.subscribe(
+      'sync:sharedUsage',
+      { key: this.deps.key },
+      (v) => this.deps.sharedUsage?.setShared((Array.isArray(v) ? (v as SharedReading[]) : []).filter((r) => r.runnerId !== mine)),
+      (e) => {
+        this.deps.log.debug('shared usage subscription failed', { error: String(e) });
+        this.unsubSharedUsage = undefined;
+      },
+    );
   }
 
   // ------------------------------------------------------------ pools

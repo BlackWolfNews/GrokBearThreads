@@ -70,7 +70,7 @@ public struct AccountUsage: Sendable, Hashable, Codable {
     public var windows: [UsageWindow]
     /// When the newest reading in it was taken.
     public var readAt: Date?
-    /// "tokenStats" or "live".
+    /// "tokenStats", "live", or "shared" (another runner's reading of the same login was the newest).
     public var source: String
     /// Token Stats has gone quiet and there's no live reading since.
     public var stale: Bool

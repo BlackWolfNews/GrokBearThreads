@@ -333,6 +333,7 @@ async function main(): Promise<void> {
     secretBox: runner.secrets,
     schedules: scheduler,
     pools: sharedPools,
+    sharedUsage: usage,
     publish: (n) => runner.publish(n),
     home: cfg.home,
     version: RUNNER_VERSION,

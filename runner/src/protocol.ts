@@ -47,7 +47,9 @@ export type UsageWindow = {
 export type AccountUsage = {
   windows: UsageWindow[];
   readAt: string; // when the newest reading in it was taken
-  source: 'tokenStats' | 'live';
+  // 'shared': another runner's reading of the same login (by email) was the
+  // newest (docs/protocol.md, Accounts, "Shared readings").
+  source: 'tokenStats' | 'live' | 'shared';
   stale?: boolean; // Token Stats has gone quiet and there's no live reading since
   blocked?: boolean; // the provider says this login is at its limit
   notice?: string; // Token Stats' own note
