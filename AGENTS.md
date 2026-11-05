@@ -39,7 +39,10 @@ static site with its own `package.json`; its comments say how to build it.
   working folder and a temp runner data dir, never the real one.
 - Never kill processes you didn't start; T3 Code runs the same CLIs.
 - Screenshots: capture the app window only (by window id), never the full
-  screen, and delete them when done unless they're for a PR.
+  screen, and delete them when done unless they're for a PR. Pictures of the
+  app for anyone else to see (README, the site, PRs, the App Store) are dark
+  mode unless Mike asks for light: `screenshots.sh --appearance dark`,
+  `sim-shots.sh --dark`, `dev-app.sh start --appearance dark`.
 - UI copy: plain words, no eyebrow or kicker labels, no em dashes.
 - `docs/guide.md` is the user guide, and every thread's agent is pointed at
   it (`guideLine` in `runner/src/threadbear-mcp.ts`). Keep it true when a

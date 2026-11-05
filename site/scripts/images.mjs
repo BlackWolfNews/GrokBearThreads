@@ -5,8 +5,9 @@
 //
 //   node scripts/images.mjs [mac shots dir] [iPhone shots dir]
 //
-// Mac shots: app/Tools/screenshots.sh <dir> --appearance light (the mock runner's demo threads,
-// made-up data; nothing from a real thread). iPhone shots: ios/scripts/sim-shots.sh <dir> (the
+// Mac shots: app/Tools/screenshots.sh <dir> --appearance dark (the mock runner's demo threads,
+// made-up data; nothing from a real thread). Dark, as every screenshot of the app is by default
+// (Mike, 5 Nov 2026). iPhone shots: ios/scripts/sim-shots.sh <dir> (the
 // FakeBackend's sample threads). Defaults are where those scripts were last pointed.
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
@@ -15,7 +16,7 @@ import { fileURLToPath } from "node:url";
 
 const site = join(dirname(fileURLToPath(import.meta.url)), "..");
 const repo = join(site, "..");
-const mac = process.argv[2] ?? "/tmp/tb-shots-light";
+const mac = process.argv[2] ?? "/tmp/tb-shots-dark";
 const phone = process.argv[3] ?? "/tmp/tb-shots";
 const screens = join(site, "public/screens");
 const img = join(site, "public/img");
@@ -40,11 +41,12 @@ function webp(from, to, width, quality = 82, crop) {
 const MAC = {
   "mac-thread": ["1-thread-bottom.png", 2200],
   // The transcript's last lines, "Bear with me" and the patch buttons over the message box.
-  "mac-patches": ["6a-long-reply-streaming.png", 940, "940:630:720:1010"],
+  "mac-patches": ["6a-long-reply-streaming.png", 940, "1060:620:772:990"],
   // The account menu, open over a new thread (just the menu: around it is the sidebar, cut off).
-  "mac-accounts": ["13a-account-picker.png", 700, "700:576:664:94"],
-  // The middle of a finished turn: the plan, what changed and the before and after table.
-  "mac-diffs": ["2-plan-and-diffs.png", 940, "940:985:720:150"],
+  "mac-accounts": ["13a-account-picker.png", 700, "720:620:726:84"],
+  // The end of a finished turn: the before and after table, the tests passing and the
+  // Edited 2 files card with one file's diff open.
+  "mac-diffs": ["8c-changes-card.png", 940, "1000:1170:790:96"],
 };
 for (const [name, [file, width, crop]] of Object.entries(MAC)) webp(join(mac, file), join(screens, `${name}.webp`), width, 82, crop);
 

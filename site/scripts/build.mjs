@@ -53,16 +53,16 @@ const MAC = {
     alt: "The Threadbear Mac app. On the left, the inbox: threads with a project tile each, some marked Needs you, and two running at the bottom. In the middle, a thread about making uploads resume after a crash, with a bar chart, the agent's reply and a card asking to run rm -rf .build DerivedData with Allow, Always allow and Deny. On the right, the thread's highlights: a file it wrote, a link and three files changed.",
   },
   "mac-patches": {
-    size: 'width="940" height="630"',
+    size: 'width="940" height="550"',
     alt: "Part of a Threadbear thread while the agent is still writing, with Bear with me and 8 seconds so far under the reply, and a row of buttons from the project's patches above the message box: Typecheck, Open logs and Deploy to prod.",
   },
   "mac-accounts": {
-    size: 'width="700" height="576"',
+    size: 'width="700" height="602"',
     alt: "The account menu in Threadbear, listing four Claude logins and a Codex one, each with how much of its five hour and weekly limits is left.",
   },
   "mac-diffs": {
-    size: 'width="940" height="985"',
-    alt: "Part of a finished turn in Threadbear: a plan with all three steps ticked off, Edited 2 files, ran a command, a short list of what changed and a before and after table for an upload that gets cut off.",
+    size: 'width="940" height="1100"',
+    alt: "The end of a finished turn in Threadbear: the last rows of a before and after table, a line saying all 14 upload tests pass, and an Edited 2 files card with UploadTask.swift open to its diff.",
   },
 };
 const PHONE = {

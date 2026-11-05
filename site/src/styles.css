@@ -462,7 +462,7 @@ video.slide {
 
 /* A part of the Mac window, cropped at full size so it can be read in a card: a plain white
    panel with a hairline and the usual lift, rather than a window. */
-.mac.crop { filter: none; border-radius: var(--r-xl); box-shadow: 0 0 0 1px var(--line), var(--lift); background: #fff; max-width: 470px; }
+.mac.crop { filter: none; border-radius: var(--r-xl); box-shadow: 0 0 0 1px rgba(0, 0, 0, .35), var(--lift); background: #1e1e1e; max-width: 470px; }
 
 /* The patch file, laid over the top corner of the screenshot it made the buttons in (the top of
    that crop is only the end of the reply). 16 px card, 12 px inset, so the code block inside gets
