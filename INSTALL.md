@@ -115,9 +115,11 @@ runner only, no app. Ubuntu 24.04 on x86_64 is what's been tried, on a
 Hetzner cloud server with 8 GB. Do this as an ordinary user with sudo, not root.
 
 1. **Packages:** `sudo apt-get install -y git build-essential imagemagick
-   librsvg2-bin bubblewrap jq` (ImageMagick and rsvg-convert stand in for
+   librsvg2-bin bubblewrap jq lsof` (ImageMagick and rsvg-convert stand in for
    macOS's sips and Quick Look when pictures are converted; Codex's sandbox
-   wants bubblewrap). Set the account's full name, which agents are told:
+   wants bubblewrap; lsof checks who's on the other end of a handover's
+   socket, and minimal images leave it out). zsh isn't needed: patch
+   commands run in the account's own shell, else bash. Set the account's full name, which agents are told:
    `sudo chfn -f "Their Name" $USER`. And a git identity, as on any machine
    that commits: `git config --global user.name` and `user.email`.
 2. **Node 24 with nvm**, at the path the scripts expect:
