@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { makeHarness, tmpDir } from '../helpers/fakes.ts';
-import { ConvexSync, BACKEND_API_VERSION, HEARTBEAT_MS, PREVIEW_HOLD_MS, PROJECT_ACTIVITY_MS, type ThreadDoc } from '../../src/sync.ts';
+import { ConvexSync, BACKEND_API_VERSION, HEARTBEAT_MS, PREVIEW_HOLD_MS, SETTLE_MS, PROJECT_ACTIVITY_MS, type ThreadDoc } from '../../src/sync.ts';
 import { loadSyncCache, SYNC_CACHE_MAX_AGE_MS } from '../../src/sync-cache.ts';
 import { nullLogger } from '../../src/log.ts';
 
@@ -21,6 +21,7 @@ function setup(opts: { apiVersion?: number; firstSeen?: () => boolean; heads?: {
   const failing: { value?: string } = {};
   const holdRemove: { value?: Promise<void> } = {};
   const holdUpsert: { value?: Promise<void> } = {};
+  const failUpsert = { value: false };
   const icon: { value?: string } = {};
   const rejectIcon = { value: false };
   const apiVersion = { value: opts.apiVersion ?? BACKEND_API_VERSION };
@@ -42,6 +43,7 @@ function setup(opts: { apiVersion?: number; firstSeen?: () => boolean; heads?: {
         if (fn === failing.value) throw new Error('down');
         if (fn === 'sync:removeThreads' && holdRemove.value) await holdRemove.value;
         if (fn === 'sync:upsertThreads' && holdUpsert.value) await holdUpsert.value;
+        if (fn === 'sync:upsertThreads' && failUpsert.value) throw new Error('down');
         if (fn === 'sync:heartbeat') {
           if (rejectIcon.value && (args.runner as { icon?: string }).icon) throw new Error('ArgumentValidationError: icon');
           return { apiVersion: apiVersion.value, ...(firstSeen.value || opts.firstSeen?.() ? { firstSeen: true } : {}) };
@@ -52,7 +54,7 @@ function setup(opts: { apiVersion?: number; firstSeen?: () => boolean; heads?: {
     });
   const named = (fn: string) => calls.filter((c) => c.fn === fn);
   const docs = () => named('sync:upsertThreads').flatMap((c) => c.args.threads as ThreadDoc[]);
-  return { h, make, calls, named, docs, cachePath, firstSeen, failing, holdRemove, holdUpsert, icon, rejectIcon, apiVersion };
+  return { h, make, calls, named, docs, cachePath, firstSeen, failing, holdRemove, holdUpsert, failUpsert, icon, rejectIcon, apiVersion };
 }
 
 const settle = async () => {
@@ -312,6 +314,105 @@ test('a removal waiting behind another write is in the file, and a thread turnin
   await settle();
   assert.deepEqual(s.named('sync:removeThreads'), [], 'the thread that turned up is not deleted');
   await again.stop();
+});
+
+test('a start with a record waits for rows to settle before comparing', async () => {
+  const s = setup();
+  const t = s.h.runner.create({ text: 'one', cwd: s.h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  await firstStart(s);
+  const row = s.h.runner.get(t.id);
+  s.calls.length = 0;
+  const again = s.make();
+  again.start();
+  // As a thread looks before its patch links have loaded, then with them.
+  s.h.runner.publish({ method: 'thread.updated', params: { thread: { ...row, title: 'Not loaded yet' } } });
+  s.h.clock.advance(SETTLE_MS - 1);
+  await settle();
+  s.h.runner.publish({ method: 'thread.updated', params: { thread: row } });
+  s.h.clock.advance(1);
+  await settle();
+  s.h.clock.advance(3000);
+  await settle();
+  assert.deepEqual(s.docs(), [], 'nothing to write once it has');
+  // And a real change after that goes as it always did.
+  s.h.runner.update({ threadId: t.id, title: 'Really changed' });
+  s.h.clock.advance(3000);
+  await settle();
+  assert.equal(s.docs().at(-1)?.title, 'Really changed');
+  await again.stop();
+});
+
+test('a thread changing back while its write is on the way goes again', async () => {
+  const s = setup();
+  const t = s.h.runner.create({ text: 'one', cwd: s.h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  const sync = s.make();
+  sync.start();
+  await settle();
+  await sync.flushNow();
+  s.h.clock.advance(PREVIEW_HOLD_MS + 3000);
+  await settle();
+  await sync.flushNow();
+  const row = s.h.runner.get(t.id);
+  s.calls.length = 0;
+  let release!: () => void;
+  s.holdUpsert.value = new Promise<void>((r) => (release = r));
+  s.h.runner.publish({ method: 'thread.updated', params: { thread: { ...row, title: 'Passing' } } });
+  s.h.clock.advance(3000);
+  await settle();
+  assert.equal(s.named('sync:upsertThreads').length, 1, 'on its way');
+  s.h.runner.publish({ method: 'thread.updated', params: { thread: row } });
+  s.holdUpsert.value = undefined;
+  release();
+  await settle();
+  s.h.clock.advance(3000);
+  await settle();
+  assert.equal(s.docs().at(-1)!.title, row.title, 'the mirror ends on the real title');
+  await sync.stop();
+});
+
+test('a new thread goes up straight away while settling, so its push can fire', async () => {
+  const s = setup();
+  s.h.runner.create({ text: 'one', cwd: s.h.cfg.defaults.cwd, accountId: 'claude-3' });
+  await firstStart(s);
+  s.calls.length = 0;
+  const again = s.make();
+  again.start();
+  await settle();
+  const t = s.h.runner.create({ text: 'new while settling', cwd: s.h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  s.h.clock.advance(2100);
+  await settle();
+  assert.ok(s.docs().some((d) => d.threadId === t.id));
+  await again.stop();
+});
+
+test('a write that fails after the thread went back retries the thread as it is', async () => {
+  const s = setup();
+  const t = s.h.runner.create({ text: 'one', cwd: s.h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  const sync = s.make();
+  sync.start();
+  await settle();
+  await sync.flushNow();
+  s.h.clock.advance(PREVIEW_HOLD_MS + 3000);
+  await settle();
+  await sync.flushNow();
+  const row = s.h.runner.get(t.id);
+  s.calls.length = 0;
+  let release!: () => void;
+  s.holdUpsert.value = new Promise<void>((r) => (release = r));
+  s.failUpsert.value = true;
+  s.h.runner.publish({ method: 'thread.updated', params: { thread: { ...row, title: 'Passing' } } });
+  s.h.clock.advance(3000);
+  await settle();
+  s.h.runner.publish({ method: 'thread.updated', params: { thread: row } });
+  s.holdUpsert.value = undefined;
+  release();
+  await settle();
+  s.failUpsert.value = false;
+  s.calls.length = 0;
+  s.h.clock.advance(6000);
+  await settle();
+  assert.deepEqual(s.docs().filter((d) => d.title === 'Passing'), [], 'what failed is not written later');
+  await sync.stop();
 });
 
 test('a heartbeat lost to the network keeps the version from the file', async () => {

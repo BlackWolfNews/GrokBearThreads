@@ -62,6 +62,10 @@ export const PREVIEW_HOLD_MS = 20_000;
 // How often a project goes up only because its lastActivityAt moved. A turn
 // moves it, and a project's row with long notes is tens of KB to read and write.
 export const PROJECT_ACTIVITY_MS = 10 * 60_000;
+// How long a start with a saved record waits before comparing rows with it. A
+// thread's patch links load a moment after the runner starts, so comparing at
+// once sees every thread with links as changed (464 of Mike's 716, each start).
+export const SETTLE_MS = 20_000;
 // How often what's been sent is saved (sync-cache.ts), and on stopping.
 const CACHE_SAVE_MS = 30_000;
 const BACKOFF_MIN_MS = 5000;
@@ -790,6 +794,12 @@ export class ConvexSync {
   private cacheTimer?: TimerHandle;
   private cacheChanged = false;
   private backendHeard = false;
+  private settling = false;
+  private settleTimer?: TimerHandle;
+  // Rows on their way, by digest: a row marked meanwhile is compared with what
+  // it's about to be, not what it was. Otherwise X, then back to what `sent`
+  // has while X is on its way, looks like nothing to do and leaves X there.
+  private writing = new Map<string, string>();
   private seeded = false;
   private messages: MessageDoc[] = [];
   private woke = new WokeRows();
@@ -901,7 +911,10 @@ export class ConvexSync {
     this.full = true;
     this.seedFromCache();
     this.unsub = this.deps.runner.onNotification((n) => this.onNotification(n));
-    for (const t of this.deps.runner.list(ALL)) this.mark(t);
+    if (this.seeded) {
+      this.settling = true;
+      this.settleTimer = this.deps.clock.setTimeout(() => this.settled(), SETTLE_MS);
+    } else for (const t of this.deps.runner.list(ALL)) this.mark(t);
     this.lists = {
       projects: this.deps.runner.listProjects?.(),
       schedules: this.deps.schedules?.inBackend() ? undefined : this.deps.runner.listSchedules?.(),
@@ -929,6 +942,8 @@ export class ConvexSync {
     this.flushTimer?.cancel();
     this.heartbeatTimer?.cancel();
     this.presenceTimer?.cancel();
+    this.settleTimer?.cancel();
+    this.settling = false;
     this.heldTimer?.cancel();
     this.projectsTimer?.cancel();
     this.cacheTimer?.cancel();
@@ -1092,6 +1107,7 @@ export class ConvexSync {
     this.flushTimer = undefined;
     this.lastFlushAt = -Infinity;
     this.retryAt = undefined;
+    if (this.settling) this.settled();
     this.releaseHeld(true);
     await this.flush();
   }
@@ -1205,22 +1221,26 @@ export class ConvexSync {
   }
 
   // Only a change the phone would see makes a write.
-  private mark(t: ThreadSummary): void {
+  private mark(t: ThreadSummary, now_ = false): void {
+    if (this.removedFromFile.delete(t.id)) {
+      this.removed.delete(t.id);
+      this.removing.delete(t.id);
+    }
+    // settled() looks at every thread, as they are by then. Not a new one: its
+    // row has to go up before it needs Mike, or no push ever fires for it (a
+    // push is needsYou going from false to true on a row that's there).
+    if (this.settling && !now_ && this.sent.has(t.id)) return;
     // A thread that isn't waiting any more lost its approval some other
     // way (the turn ended, the runner restarted); the row mustn't keep it.
     if (t.status === 'idle' || t.status === 'error' || t.status === 'stopped') this.pending.delete(t.id);
     this.noteShared(t);
     const doc = toThreadDoc(t, this.runnerId, this.deps.clock.now(), this.pending.get(t.id), this.earliestSeq(t), this.nextSteps(t));
-    if (this.removedFromFile.delete(t.id)) {
-      this.removed.delete(t.id);
-      this.removing.delete(t.id);
-    }
     const now = this.deps.clock.now();
     // Against the row as this backend took it: `sent` holds that, without
     // the fields an older one doesn't know, which would otherwise make every
     // summary of a thread with one look new.
     const row = forBackend(doc, this.backendApiVersion ?? 0, now);
-    if (this.sent.get(t.id) === digest(JSON.stringify(row))) {
+    if ((this.writing.get(t.id) ?? this.sent.get(t.id)) === digest(JSON.stringify(row))) {
       this.dirty.delete(t.id);
       this.held.delete(t.id);
       return;
@@ -1233,6 +1253,14 @@ export class ConvexSync {
     }
     this.held.delete(t.id);
     this.dirty.set(t.id, doc);
+  }
+
+  private settled(): void {
+    this.settleTimer?.cancel();
+    this.settleTimer = undefined;
+    this.settling = false;
+    for (const t of this.deps.runner.list(ALL)) this.mark(t);
+    this.scheduleFlush();
   }
 
   private recordSent(row: ThreadDoc): void {
@@ -1292,6 +1320,9 @@ export class ConvexSync {
   private forgetSent(): void {
     this.deps.log.warn('this deployment has not seen this runner before: writing everything again', { url: this.deps.config.url });
     this.seeded = false;
+    this.settleTimer?.cancel();
+    this.settleTimer = undefined;
+    this.settling = false;
     // Now, not at the next save: a restart before the full write finishes
     // would find the file valid and firstSeen no longer true, and the
     // deployment would stay empty.
@@ -1357,7 +1388,7 @@ export class ConvexSync {
   // a deleted thread. If this write fails, the next flush tries again.
   private async writeRowNow(threadId: string): Promise<void> {
     try {
-      this.mark(this.deps.runner.get(threadId));
+      this.mark(this.deps.runner.get(threadId), true);
       const doc = this.dirty.get(threadId);
       if (!doc) return;
       const row = forBackend(doc, this.backendApiVersion ?? 0, this.deps.clock.now());
@@ -1522,11 +1553,12 @@ export class ConvexSync {
     this.flushing = true;
     this.lastFlushAt = this.deps.clock.now();
     const docs = [...this.dirty.values()];
-    this.removing = new Set(this.removed);
+    // Not while settling: a thread the file says went may yet come across.
+    this.removing = new Set(this.settling ? [] : this.removed);
     let messages = this.messages.splice(0);
     const lists = [...this.dirtyLists];
     this.dirty.clear();
-    this.removed.clear();
+    if (!this.settling) this.removed.clear();
     this.dirtyLists.clear();
     const key = this.deps.key;
     try {
@@ -1536,8 +1568,12 @@ export class ConvexSync {
       const v = this.backendApiVersion ?? 0;
       for (let i = 0; i < docs.length; i += SYNC_BATCH) {
         const batch = docs.slice(i, i + SYNC_BATCH).map((d) => forBackend(d, v, this.deps.clock.now()));
+        for (const d of batch) this.writing.set(d.threadId, digest(JSON.stringify(d)));
         await this.post('mutation', 'sync:upsertThreads', { key, threads: batch });
-        for (const d of batch) this.recordSent(d);
+        for (const d of batch) {
+          this.recordSent(d);
+          this.writing.delete(d.threadId);
+        }
         this.written += batch.length;
       }
       if (this.removing.size) {
@@ -1600,7 +1636,17 @@ export class ConvexSync {
     } catch (e) {
       // Put back what didn't get written, unless a newer version arrived
       // meanwhile, and try again later; one log line per distinct error.
-      for (const d of docs) if (!this.dirty.has(d.threadId) && this.sent.get(d.threadId) !== digest(JSON.stringify(forBackend(d, this.backendApiVersion ?? 0, this.deps.clock.now())))) this.dirty.set(d.threadId, d);
+      // Not written after all: what's due is the thread as it is now, which may
+      // have moved on from what failed, or back to what the mirror has. A thread
+      // not here any more keeps its row as it was, for the retry.
+      this.writing.clear();
+      for (const d of docs) {
+        try {
+          this.mark(this.deps.runner.get(d.threadId), true);
+        } catch {
+          if (!this.dirty.has(d.threadId) && this.sent.get(d.threadId) !== digest(JSON.stringify(forBackend(d, this.backendApiVersion ?? 0, this.deps.clock.now())))) this.dirty.set(d.threadId, d);
+        }
+      }
       for (const id of this.removing) this.removed.add(id);
       this.removing.clear();
       for (const name of lists) this.dirtyLists.add(name);

@@ -3071,7 +3071,8 @@ the mirror back as state. The Mac app doesn't use it.
   until 20 seconds after that row's last write, and goes with anything else
   that changes first. A `thread.deleted` removes the row and its messages.
   What's been written is remembered between starts as hashes
-  (`sync-sent.json` in the data folder), so a start writes only what changed;
+  (`sync-sent.json` in the data folder), so a start writes only what changed
+  (comparing 20 seconds in, once patch links have loaded);
   every 3 days, with no such file, or when `sync:heartbeat` answers
   `firstSeen`, it writes everything and prunes.
 - **Messages.** Each persisted `user.message` and `assistant.text` goes
