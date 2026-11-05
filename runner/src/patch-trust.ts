@@ -50,7 +50,7 @@ import { fileURLToPath } from 'node:url';
 import { parseSync } from 'oxc-parser';
 import { atomicWriteFileSync } from './fsutil.ts';
 import { claudeCommands, isClaudeSettingsFile } from './claude-trust.ts';
-import { reachOf, reachOfCommand } from './script-trust.ts';
+import { looksRunnable, reachOf, reachOfCommand } from './script-trust.ts';
 
 export type TrustVerdict =
   // `files`: the local files its hash covered, real paths. Absent when the
@@ -376,9 +376,12 @@ export function patchHash(file: string): PatchHash {
     // `./setup.sh` out whenever the patch folder had one of the same name.
     // A command that `cd`s first isn't worked out here; automaticCommand
     // refuses one that runs by itself.
+    // Only code (looksRunnable): a data file the patch names, like the
+    // `./state.json` it writes, would change the hash every run.
     for (const spec of namedPaths(src)) {
       const tries = [path.resolve(path.dirname(from), spec), path.resolve(folder, spec)];
       for (const t of tries) {
+        if (!looksRunnable(t)) continue;
         if (!isFile(t)) {
           unnamed.add(t);
           continue;

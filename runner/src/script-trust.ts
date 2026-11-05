@@ -24,7 +24,9 @@
 //   - JavaScript and TypeScript: imports (scanModule), and any string in
 //     them that's the path of a file in the repo.
 //   - Any file a script names (an argument, `$(cat x)`, a `./` path in its
-//     text) is hashed, and followed if it's a script.
+//     text) is hashed if it's code (looksRunnable), and followed if it's a
+//     script. A data file it only names or reads isn't: trusting the
+//     script trusts what it does with its data.
 //
 // Not followed: programs on PATH and packages, as installed. What one of
 // those loads from the repo by its own rules (a test runner's tests, a
@@ -77,7 +79,35 @@ const RISKY_ENV = new Set([
 const LOADING_FLAG = /(^|\s)(-r|-e|-p|--require|--import|--loader|--experimental-loader|--preload|--eval|--print)(\s|=|$)/;
 const LIFECYCLE = ['preinstall', 'install', 'postinstall', 'prepublish', 'preprepare', 'prepare', 'postprepare', 'prepack', 'postpack', 'prepublishOnly', 'publish', 'postpublish', 'dependencies'];
 const PATH_SENTINEL = '\u0000PATH';
-const PICTURES = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.icns', '.pdf', '.heic', '.ico'];
+
+// Extensions of files that run as code: a shell's, Node's, or a language
+// this can't follow (which fails closed when one runs).
+export const RUNNABLE_EXT = [...SHELL_EXT, ...JS_EXT, '.py', '.rb', '.pl'];
+
+// Whether a file a patch or script only names (a string, an argument) is
+// code, and so goes in the hash: a runnable extension, the executable bit
+// or a `#!` line. Anything else (state.json, notes.txt, a folder) is data:
+// a patch that writes its own state file would otherwise change its hash
+// every run and be asked about again. A file something runs, sources or
+// imports is hashed whatever it looks like (follow's other `how`s). A
+// missing file counts only with a runnable extension.
+export function looksRunnable(file: string): boolean {
+  if (RUNNABLE_EXT.includes(path.extname(file).toLowerCase())) return true;
+  try {
+    const st = fs.statSync(file);
+    if (!st.isFile()) return false;
+    if (st.mode & 0o111) return true;
+    const fd = fs.openSync(file, 'r');
+    try {
+      const head = Buffer.alloc(2);
+      return fs.readSync(fd, head, 0, 2, 0) === 2 && head.toString('latin1') === '#!';
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return false;
+  }
+}
 
 // ---- a shell lexer: enough of POSIX sh, bash and zsh to see what runs ----
 
@@ -477,20 +507,22 @@ class Reach {
   }
 
   // Hashes a file of the repo's and follows it by its kind. `how`: it runs
-  // (its own process), it's sourced into `ctx`'s shell, or it's only named
-  // (an argument, a string), when only a script is followed.
-  follow(file: string, how: 'run' | 'source' | 'named', ctx: Ctx | undefined, line?: number): void {
+  // (its own process), it's sourced into `ctx`'s shell, it's loaded as
+  // code or config (an import, a package.json a package script runs from),
+  // or it's only named (an argument, a string): then it's hashed only if
+  // it's code (looksRunnable), and only a script is followed.
+  follow(file: string, how: 'run' | 'source' | 'load' | 'named', ctx: Ctx | undefined, line?: number): void {
     if (this.problem) return;
     const abs = path.resolve(file);
     if (!this.inRepo(abs)) return;
-    // A picture a script names is only shown, as namedPaths leaves them out.
-    if (how === 'named' && PICTURES.includes(path.extname(abs).toLowerCase())) return;
+    if (how === 'named' && !looksRunnable(abs)) return;
+    const passive = how === 'named' || how === 'load';
     let real: string;
     try {
       real = fs.realpathSync(abs);
     } catch {
       if (this.missing.size < 500) this.missing.add(abs);
-      if (how !== 'named') this.fail(ctx, line, `runs ${this.rel(abs)}, which isn't a file in the repo now, so patch trust can't see what it'll be.`);
+      if (!passive) this.fail(ctx, line, `runs ${this.rel(abs)}, which isn't a file in the repo now, so patch trust can't see what it'll be.`);
       return;
     }
     let st: fs.Stats;
@@ -515,18 +547,18 @@ class Reach {
     } catch {
       return;
     }
-    const kind = kindOf(real, text, how !== 'named');
+    const kind = kindOf(real, text, !passive);
     const label = this.rel(real);
     if (kind === 'binary') {
-      if (how !== 'named') this.fail(ctx, line, `runs ${label}, a program patch trust can't read.`);
+      if (!passive) this.fail(ctx, line, `runs ${label}, a program patch trust can't read.`);
       return;
     }
     if (kind === 'other') {
-      if (how !== 'named') this.fail(ctx, line, `runs ${label}, which isn't a shell script or JavaScript, so patch trust can't follow what it loads.`);
+      if (!passive) this.fail(ctx, line, `runs ${label}, which isn't a shell script or JavaScript, so patch trust can't follow what it loads.`);
       return;
     }
     const startDirs = ctx && !ctx.lost ? new Set(ctx.dirs) : new Set([this.o.folder]);
-    if (how === 'named') startDirs.add(path.dirname(real));
+    if (passive) startDirs.add(path.dirname(real));
     if (kind === 'js') {
       const shebang = /^#!(.*)/.exec(text)?.[1] ?? '';
       if (LOADING_FLAG.test(shebang.replace(/^\S+/, ''))) return this.fail(undefined, undefined, `${label}'s #! line loads other code by a flag (${shebang.trim()}), which patch trust doesn't follow.`);
@@ -543,7 +575,7 @@ class Reach {
     const label = this.rel(file);
     if (scan.problem) return this.fail(undefined, undefined, `${label}: ${scan.problem}`);
     const ctx: Ctx = { label, file, argv0: [file], dirs, vars: new Map(), depth };
-    for (const spec of scan.specifiers) this.follow(this.o.resolveImport(path.dirname(file), spec), 'named', ctx);
+    for (const spec of scan.specifiers) this.follow(this.o.resolveImport(path.dirname(file), spec), 'load', ctx);
     this.namedIn(text, file, ctx);
     // A string naming a file of the repo's (`spawnSync('bash', ['scripts/x.sh'])`).
     for (const s of scan.strings) {
@@ -775,9 +807,17 @@ class Reach {
       const inRepo = targets.filter((t) => this.inRepo(t));
       if (inRepo.length) {
         const found = inRepo.filter(isFile);
-        for (const t of inRepo) if (!isFile(t) && this.missing.size < 500) this.missing.add(t);
+        // A missing one that could turn up as a program: a runnable
+        // extension, or none. Not a data file's name: every string a patch
+        // has is followed as a command, so `'.cache/state.json'` lands here.
+        for (const t of inRepo) if (!isFile(t) && mayRun(t) && this.missing.size < 500) this.missing.add(t);
         if (!found.length) return this.fail(ctx, line, `runs ${name}, which isn't a file in the repo now, so patch trust can't see what it'll be.`);
-        for (const t of found) this.follow(t, 'run', ctx, line);
+        // A file that isn't code can't run as a command (it has no
+        // executable bit): not hashed, and anything that runs by itself
+        // refuses it, as before.
+        const code = found.filter(looksRunnable);
+        if (!code.length) return this.fail(ctx, line, `runs ${name}, which isn't a shell script or JavaScript, so patch trust can't follow what it loads.`);
+        for (const t of code) this.follow(t, 'run', ctx, line);
         return;
       }
       return this.program(path.basename(name), args, ctx, line, extra);
@@ -1085,12 +1125,12 @@ class Reach {
         for (const rc of ['.npmrc', '.yarnrc', '.yarnrc.yml', 'bunfig.toml', '.pnpmfile.cjs', 'pnpm-workspace.yaml']) {
           const f = path.join(d, rc);
           if (!isFile(f)) continue;
-          this.follow(f, 'named', ctx);
+          this.follow(f, 'load', ctx);
           this.rcLoads(f, ctx);
         }
         const f = path.join(d, 'package.json');
         if (isFile(f)) {
-          this.follow(f, 'named', ctx);
+          this.follow(f, 'load', ctx);
           try {
             out.push({ dir: d, pkg: JSON.parse(fs.readFileSync(f, 'utf8')) as Record<string, any> });
           } catch {
@@ -1124,7 +1164,7 @@ class Reach {
     const yarn = [...text.matchAll(/^\s*(?:yarnPath|path):\s*["']?([^"'\s#]+)/gm)].map((m) => m[1]!);
     for (const s of [...quoted, ...yarn]) {
       const p = path.resolve(path.dirname(file), s);
-      if (isFile(p)) this.follow(p, 'named', ctx);
+      if (isFile(p)) this.follow(p, 'load', ctx);
     }
   }
 
@@ -1165,7 +1205,7 @@ class Reach {
       for (const sub of this.localPackages(dir, pkg)) {
         const f = path.join(sub, 'package.json');
         if (!isFile(f) || !this.inRepo(f)) continue;
-        this.follow(f, 'named', ctx);
+        this.follow(f, 'load', ctx);
         try {
           this.runScripts(sub, JSON.parse(fs.readFileSync(f, 'utf8')) as Record<string, any>, LIFECYCLE, ctx);
         } catch {
@@ -1346,6 +1386,12 @@ class Reach {
       return;
     }
   }
+}
+
+// A missing path in a command's place that could turn up as a program.
+function mayRun(p: string): boolean {
+  const ext = path.extname(p).toLowerCase();
+  return !ext || RUNNABLE_EXT.includes(ext);
 }
 
 function isFile(p: string): boolean {

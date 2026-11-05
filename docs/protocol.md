@@ -2416,10 +2416,30 @@ text, from the patch's own folder or the folder holding `.threadbear/`
 (where commands run), each place that has it: the script a worktree
 `setup`, `check`, hook or action `run` calls, so a pull that changes only
 that script asks again. What a named script runs in turn is followed
-and hashed too (below, "What a script runs"); pictures (an `icon`) are
-left out, and a named file that isn't there yet changes the hash when it
-turns up. A patch with no
-local files hashes as its own text alone. Packages (`node:fs`, anything
+and hashed too (below, "What a script runs"), and a named file that
+isn't there yet changes the hash when it turns up. A patch with no
+local files hashes as its own text alone.
+
+**Only code is hashed.** A file the patch, a helper or a script merely
+names (a string, an argument, `$(cat VERSION)`, `< data.txt`) goes in
+the hash only if it looks runnable: an extension of `.sh`, `.bash`,
+`.zsh`, `.ksh`, `.command`, `.js`, `.mjs`, `.cjs`, `.ts`, `.mts`,
+`.cts`, `.tsx`, `.jsx`, `.py`, `.rb` or `.pl`, the executable bit, or a
+`#!` first line; a missing one counts only with one of those
+extensions, or with no extension in a command's place (`./bin/tool`).
+Anything else (`./state.json`, `.cache/state.json` by the repo's
+absolute path, notes, pictures, folders) is data and isn't, so a patch
+that writes its own state file isn't asked about again after every
+run. What something runs, sources or loads is hashed whatever it looks
+like: an import, a file `sh`, `bash`, `node` or `bun` is given
+(`sh ./x.json`), a `source`d file, the `package.json`, `.npmrc` and
+the like a package script runs from, a Makefile. The limit: a hashed
+script's behaviour can still depend on the data files it reads, which
+can change without asking. Trusting a script trusts what it does with
+its data, so a script that runs what a data file says (`sh -c "$(cat
+cmd.txt)"`) still fails closed, as below. A command that runs by itself
+(a `setup` or hook) must still be one hashed script, so naming a data
+file there refuses the patch as before. Packages (`node:fs`, anything
 from `node_modules`) aren't followed: they're the folder's dependencies.
 
 A patch whose code can't all be seen isn't loaded at all, trusted or not,
@@ -2495,10 +2515,11 @@ scripts deep:
 - `make`: the Makefile (and literal `include`s) is hashed and every
   recipe line followed as shell, `$(MAKE)` as `make`.
 - JavaScript and TypeScript: imports, as for patch files, and every
-  plain string that's the path of a file in the repo
-  (`spawnSync('bash', ['scripts/x.sh'])`).
+  plain string that's the path of a file of the repo's that looks
+  runnable (`spawnSync('bash', ['scripts/x.sh'])`).
 - Any other file of the repo's a script names (an argument, `< file`,
-  `$(cat VERSION)`, a `./` path anywhere in its text) is hashed.
+  a `./` path anywhere in its text) is hashed if it looks runnable
+  (above, "Only code is hashed").
 
 What it can't follow, it doesn't guess at: `eval`, `alias`, `bash -c` or
 `trap` with code worked out as it runs, `$(cat "$f")` or `$(< "$f")`, a
@@ -2530,7 +2551,7 @@ past a `./` path: every string in the patch and its helpers (an
 action's `run`, `sh("node scripts/stats.mjs")` in a live function, the
 fixed parts of a template) is followed as a shell command from the
 folder holding `.threadbear/`, as above, and every file of the repo's it
-reaches goes in the hash, so `node scripts/deploy.mjs` asks again when
+runs or loads goes in the hash (a data file it only names doesn't), so `node scripts/deploy.mjs` asks again when
 only `scripts/deploy.mjs` or one of its imports changes (Daybreak
 verify-fix, 5 Nov). A command that can't be followed (`eval`, say)
 still loads; what it names is hashed. A trusted-by-hash patch's command
