@@ -62,7 +62,7 @@ export type LibrarianHost = {
   // Threads hibernating until this one has done something in particular
   // (end_turn's waitFor until), and saying one has.
   waitedOnFor?(threadId: string): { threadId: string; title: string; until: string }[];
-  waitMet?(waiterId: string, targetId: string, why: string): boolean;
+  waitMet?(waiterId: string, targetId: string, why: string, until: string): boolean;
 };
 
 // How long after a turn ends before a look, so a quick follow-up turn
@@ -159,6 +159,8 @@ type Answer = {
 export class Librarian {
   private host: LibrarianHost;
   private projects: Projects;
+  // The conditions each look was shown (prompt), for its met (apply).
+  private shownWaiters = new Map<string, { threadId: string; title: string; until: string }[]>();
   private models?: Pick<Models, 'generate'> & { unavailable?(opts?: { poolOnly?: boolean }): string | undefined; isPrivateFolder?(cwd: string): boolean };
   private clock: Clock;
   private log: Logger;
@@ -400,6 +402,9 @@ export class Librarian {
       const look = this.looks[t.id];
       if (look && look.seq >= t.lastTurnCompletedSeq) continue;
       if (!look || look.early) this.enqueue(t.id, 'first-turn', 'Its first turn ended while the runner was restarting', now);
+      // A turn missed (on a draining runner, say) in a thread another is
+      // waiting on: that look, not a catch-up that may be skipped as quiet.
+      else if (this.host.waitedOnFor?.(t.id).length) this.enqueue(t.id, 'waited-on', 'A thread is waiting on it', now);
       else this.enqueue(t.id, 'catch-up', 'More turns since its last look', Math.max(now, Date.parse(look.at) + CATCH_UP_MS));
       found++;
     }
@@ -602,7 +607,14 @@ export class Librarian {
       lines.push('', 'Hibernating threads waiting for the user to talk about something:');
       for (const w of waiting) lines.push(`- ${w.threadId.slice(0, 8)} "${w.title}": ${w.topic}`);
     }
-    const waiters = this.host.waitedOnFor?.(rec.id) ?? [];
+    // Not a waiter in a private folder: its title and condition aren't
+    // sent, so its wait only ends at its time. Kept for apply, so an
+    // answer counts only for the conditions it was shown.
+    const waiters = (this.host.waitedOnFor?.(rec.id) ?? []).filter((w) => {
+      const cwd = this.host.threadRecords().find((t) => t.id === w.threadId)?.cwd;
+      return cwd !== undefined && !this.models?.isPrivateFolder?.(cwd);
+    });
+    this.shownWaiters.set(rec.id, waiters);
     if (waiters.length) {
       lines.push('', 'Hibernating threads waiting until this thread has done something:');
       for (const w of waiters) lines.push(`- ${w.threadId.slice(0, 8)} "${w.title}": until ${w.until}`);
@@ -801,16 +813,20 @@ export class Librarian {
         bump('updated');
       }
     }
-    // Threads waiting until this one had done something, which it has.
+    // Threads waiting until this one had done something, which it has:
+    // only those the look was shown, by a unique id, with a reason.
+    const shown = this.shownWaiters.get(rec.id) ?? [];
+    this.shownWaiters.delete(rec.id);
     if (a.met && typeof a.met === 'object' && !Array.isArray(a.met)) {
-      const waiters = this.host.waitedOnFor?.(rec.id) ?? [];
-      const woke: string[] = [];
+      const woke: { id: string; title: string }[] = [];
       for (const [id, reason] of Object.entries(a.met as Record<string, unknown>)) {
-        const w = id.length >= 8 ? waiters.find((x) => x.threadId.startsWith(id)) : undefined;
-        if (w && !woke.includes(w.title) && this.host.waitMet?.(w.threadId, rec.id, typeof reason === 'string' ? reason.trim() : '')) woke.push(w.title);
+        if (typeof reason !== 'string' || !reason.trim() || id.length < 8) continue;
+        const hits = shown.filter((x) => x.threadId.startsWith(id));
+        const w = hits.length === 1 ? hits[0] : undefined;
+        if (w && !woke.some((x) => x.id === w.threadId) && this.host.waitMet?.(w.threadId, rec.id, reason.trim(), w.until)) woke.push({ id: w.threadId, title: w.title });
       }
       if (woke.length) {
-        said.push(`Woke ${woke.join(' and ')}`);
+        said.push(`Woke ${woke.map((x) => x.title).join(' and ')}`);
         bump('updated');
       }
     }

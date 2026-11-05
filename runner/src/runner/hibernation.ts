@@ -145,6 +145,9 @@ export const hibernationPart = {
     // One may have finished already (while this turn was ending, or before
     // it with nothing new since): it wakes now with that reply.
     this.reconcileWaits();
+    // One waited on for something may have done it already, and had its
+    // look before this wait was there to be judged: one more look.
+    for (const x of list) if (x.until && this.threads.has(x.threadId)) this.tellActivity({ kind: 'waited-on', threadId: x.threadId });
   },
 
   // A turn finished with nothing needed and nothing left running: kept with
@@ -233,9 +236,10 @@ export const hibernationPart = {
   // The librarian read in a look at `targetId` that what `waiterId` waits
   // for there has happened: that wait is done, with the thread's latest
   // reply, and the waiter wakes once all of its waits are.
-  waitMet(this: Runner, waiterId: string, targetId: string, why: string): boolean {
+  waitMet(this: Runner, waiterId: string, targetId: string, why: string, until: string): boolean {
     const st = this.threads.get(waiterId);
-    const w = st?.rec.waitingOn?.find((x) => x.threadId === targetId && x.until && !x.done);
+    // The same condition the look was shown, not one set since.
+    const w = st?.rec.waitingOn?.find((x) => x.threadId === targetId && x.until === until && !x.done);
     if (!st || !w || st.rt.deleted || this.bucket(st.rec) !== 'snoozed') return false;
     let reply = '';
     try {

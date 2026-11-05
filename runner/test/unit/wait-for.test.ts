@@ -239,11 +239,13 @@ test('waitFor until: an ordinary finish is not enough; the librarian saying it h
   turn(target, { needs: 'nothing' }, 'Restarted; waiting for the numbers.');
   assert.ok(h.runner.get(waiter).snoozedUntil, 'a finish alone does not count');
   turn(target, { needs: 'nothing' }, 'Saved 4.1 MB.');
-  assert.equal(h.runner.waitMet(waiter, target, 'it posted the saving'), true);
+  // An answer for another condition (one set since the look) doesn't count.
+  assert.equal(h.runner.waitMet(waiter, target, 'it posted the saving', 'it reports 8 MB'), false);
+  assert.equal(h.runner.waitMet(waiter, target, 'it posted the saving', 'it reports the I/O saving'), true);
   t = h.runner.get(waiter);
   assert.equal(t.snoozedUntil, undefined);
   const text = h.events(waiter).filter((e) => e.type === 'user.message').at(-1).text as string;
   assert.match(text, /has done what you waited for \(it reports the I\/O saving\): it posted the saving/);
   assert.match(text, /Saved 4\.1 MB\./);
-  assert.equal(h.runner.waitMet(waiter, target, 'again'), false, 'only once');
+  assert.equal(h.runner.waitMet(waiter, target, 'again', 'it reports the I/O saving'), false, 'only once');
 });

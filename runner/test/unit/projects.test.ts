@@ -1061,6 +1061,35 @@ test('a thread another is waiting on gets a look soon after any turn, and its me
   assert.match(librarian.status().recent[0].text, /Woke Write the plan/);
 });
 
+test('a met with no reason, or for a waiter in a private folder, wakes nothing', async () => {
+  let prompt = '';
+  const s = setup({
+    privateFolder: (cwd) => cwd.endsWith('secret'),
+    models: (p) => {
+      if (!p.prompt.includes('Measure the I/O saving')) return reply({ projects: [], new: null, state: {}, why: 'x' });
+      prompt = p.prompt;
+      return reply({ projects: [], new: null, state: {}, met: { [open.slice(0, 8)]: false, [hidden.slice(0, 8)]: 'It posted the saving' }, why: 'x' });
+    },
+  });
+  const { h, misc, create, finish } = s;
+  const secret = path.join(misc, 'secret');
+  fs.mkdirSync(secret, { recursive: true });
+  const open = create('Write the plan').thread.id;
+  const hidden = create('Private plan', secret).thread.id;
+  const target = create('Measure the I/O saving').thread.id;
+  for (const w of [open, hidden]) {
+    h.runner.update({ threadId: w, snoozedUntil: new Date(h.clock.now() + 86_400_000).toISOString() });
+    rec(h, w).waitingOn = [{ threadId: target, title: 'Measure the I/O saving', until: 'it reports the I/O saving' }];
+  }
+  await finish(target);
+  h.clock.advance(SETTLE_MS);
+  await tick(8);
+  assert.ok(prompt, 'the target was looked at');
+  assert.doesNotMatch(prompt, /Private plan/);
+  assert.ok(h.runner.get(open).snoozedUntil, 'false is not a reason');
+  assert.ok(h.runner.get(hidden).snoozedUntil, 'never shown, so never met');
+});
+
 test('a look sees what the thread had attached and messages from the phone', async () => {
   const prompts: string[] = [];
   const s = setup({
