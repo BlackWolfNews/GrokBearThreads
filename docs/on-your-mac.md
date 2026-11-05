@@ -163,8 +163,9 @@ File references are where to look.
 An HTML file opened in the side pane (a mockup or report an agent made,
 a page in a project) talks to nothing. It loads through the app's own
 `threadbear-preview:` scheme, which serves only that page and the
-styles, scripts, pictures, fonts and media its markup names in its
-folder, never a dotfile, a symlink or a file outside it. Its web view
+styles, pictures, fonts and media its markup names in its folder:
+never another page, a script file, SVG, a dotfile, a symlink or a file
+outside it. Its web view
 blocks every other load (a WebKit content rule list, which WebKit keeps
 in its own store under `~/Library/WebKit`), sends any connection it would
 still make to a closed port on this Mac (127.0.0.1:9) so no name is

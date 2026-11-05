@@ -12,7 +12,9 @@ import UniformTypeIdentifiers
 /// (LocalPreviewSchemeHandler) that asks `serve` for every request. A file
 /// is served only when all of these hold:
 /// - its path has no `..`, no empty part and no part starting with a dot;
-/// - it's one of `assetExtensions` (no `.json`, `.txt`, `.env`, keys...);
+/// - it's the page itself, or a passive asset, one of `assetExtensions`:
+///   styles, pictures, fonts, sound and video. Never another page, a script,
+///   SVG (which can carry script), `.json`, `.txt`, `.env`, keys...;
 /// - a page or stylesheet served before names it in markup or CSS (the page
 ///   itself always): `src`, `href`, `srcset`, `poster`, a style's `url()`,
 ///   a stylesheet's `url()` and `@import`. Never a string in a script.
@@ -33,14 +35,20 @@ public final class LocalPreviewSite: @unchecked Sendable {
     private let lock = NSLock()
     private var allowed: Set<String>
 
-    /// What a page can pull in. Pages too, so a mockup's own links work.
+    /// What a page can pull in besides itself: passive files only. A
+    /// sibling page or script named by the page (an iframe, a script src)
+    /// would let it read whatever that names in turn (verify-fix, Nov 2026),
+    /// so a preview of a several-file HTML or JS project shows its main page
+    /// alone. Inline scripts in the page still run.
     public static let assetExtensions: Set<String> = [
-        "html", "htm", "css", "js", "mjs",
-        "png", "jpg", "jpeg", "gif", "webp", "avif", "svg", "ico", "bmp", "heic",
+        "css",
+        "png", "jpg", "jpeg", "gif", "webp", "avif", "ico", "bmp", "heic",
         "woff", "woff2", "ttf", "otf",
         "mp4", "webm", "m4v", "mov", "mp3", "m4a", "wav", "ogg",
     ]
-    /// Files read for links: pages and stylesheets. Not scripts, which can
+    /// What can be the page.
+    public static let pageExtensions: Set<String> = ["html", "htm"]
+    /// Files read for links: the page and stylesheets. Not scripts, which can
     /// build any name they like at run time anyway.
     static let scannedExtensions: Set<String> = ["html", "htm", "css"]
     /// Bigger than any page or picture a preview needs.
@@ -51,7 +59,7 @@ public final class LocalPreviewSite: @unchecked Sendable {
     public init?(file: URL) {
         let file = file.standardizedFileURL
         let page = file.lastPathComponent
-        guard Self.assetExtensions.contains((page as NSString).pathExtension.lowercased()), !page.hasPrefix(".") else { return nil }
+        guard Self.pageExtensions.contains((page as NSString).pathExtension.lowercased()), !page.hasPrefix(".") else { return nil }
         root = file.deletingLastPathComponent().resolvingSymlinksInPath()
         // Held open for the site's life: every read starts here, so the
         // folder being moved or swapped for a link later changes nothing.
@@ -72,7 +80,8 @@ public final class LocalPreviewSite: @unchecked Sendable {
         guard let parts = Self.safeParts(path) else { return nil }
         let relative = parts.joined(separator: "/")
         let ext = (relative as NSString).pathExtension.lowercased()
-        guard Self.assetExtensions.contains(ext), lock.withLock({ allowed.contains(relative) }) else { return nil }
+        // The page itself, or a passive asset something served has named.
+        guard relative == page || Self.assetExtensions.contains(ext) && lock.withLock({ allowed.contains(relative) }) else { return nil }
         guard let data = Self.read(parts, under: rootFD, maxBytes: Self.maxBytes) else { return nil }
         if Self.scannedExtensions.contains(ext), let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) {
             let dir = (relative as NSString).deletingLastPathComponent

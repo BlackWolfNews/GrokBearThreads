@@ -60,8 +60,8 @@ final class LocalPreviewTests: XCTestCase {
         deinit { listener.cancel() }
     }
 
-    /// The verify-fix round: a page that reads a file beside it, by naming it
-    /// in its own markup so the allowlist lets it in, still gets nothing out.
+    /// The verify-fix rounds: a page that names the page beside it, in an
+    /// iframe and a fetch, can't read it, and gets nothing out either way.
     /// Every way out is tried against a server on this Mac, and none reaches it.
     func testAPreviewCanSendNothingOut() async throws {
         let server = try Listener()
@@ -122,11 +122,13 @@ final class LocalPreviewTests: XCTestCase {
             if let got = try? await view.evaluateJavaScript("window.results") as? [String: Any] { results = got; break }
         }
         let r = try XCTUnwrap(results, "the page never finished")
-        // It could read the file it named (that's what the allowlist is for)...
-        XCTAssertEqual(r["secret"] as? String, "<p>the secret</p>")
+        // It couldn't read the page beside it, though its markup names it...
+        XCTAssertFalse((r["secret"] as? String ?? "").contains("the secret"), "\(r["secret"] ?? "")")
+        let framed = try? await view.evaluateJavaScript("document.getElementById('f').contentDocument?.body?.innerText ?? 'none'") as? String
+        XCTAssertFalse((framed ?? "").contains("the secret"))
         XCTAssertEqual(r["fetch"] as? String, "blocked")
         XCTAssertEqual(r["rtc"] as? String, "undefined", "WebRTC goes round the proxy")
-        // ...but after the click, the form and the location change have all had their turn,
+        // ...and after the click, the form and the location change have all had their turn,
         try await Task.sleep(for: .seconds(4))
         // nothing reached the server, and the page is still the preview.
         XCTAssertEqual(server.hits, before, "a request got out of the preview: \(server.requests)")

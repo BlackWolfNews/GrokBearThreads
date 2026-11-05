@@ -76,12 +76,26 @@ final class LocalPreviewSiteTests: XCTestCase {
         XCTAssertEqual(site.serve("/style.css")?.mimeType, "text/css")
         XCTAssertEqual(site.serve("/pic.png")?.mimeType, "image/png")
         XCTAssertNotNil(site.serve("/assets/pic@2x.png"), "from srcset")
-        XCTAssertNotNil(site.serve("/about.html"), "a link to another page")
         XCTAssertNotNil(site.serve("/assets/bg.png"), "named by the stylesheet")
         XCTAssertNotNil(site.serve("/assets/font.woff2"), "named by the stylesheet")
         XCTAssertNotNil(site.serve("/theme.css"), "an @import")
         XCTAssertNotNil(site.serve("/assets/styled.png"), "a style attribute's url()")
-        XCTAssertNotNil(site.serve("/app.js"))
+    }
+
+    /// The last verify-fix round: only the selected page and passive assets
+    /// (styles, pictures, fonts, sound and video) are ever served. Another
+    /// page or a script is refused even when the page names it, as an
+    /// iframe or a script src, and so is SVG, which can carry script.
+    func testOnlyThePageItselfAndPassiveAssets() throws {
+        try write("drawing.svg", "<svg xmlns='http://www.w3.org/2000/svg'><script>1</script></svg>")
+        try write("index.html", "<iframe src=about.html></iframe><iframe src=private.html></iframe><script src=app.js></script><img src=drawing.svg><img src=pic.png>")
+        let site = try site()
+        XCTAssertNil(site.serve("/about.html"))
+        XCTAssertNil(site.serve("/private.html"))
+        XCTAssertNil(site.serve("/app.js"))
+        XCTAssertNil(site.serve("/drawing.svg"))
+        XCTAssertNotNil(site.serve("/pic.png"))
+        XCTAssertNotNil(site.serve("/index.html"), "the page itself, again")
     }
 
     /// The verify-fix round: only markup's src and href (and srcset, poster,
@@ -90,7 +104,6 @@ final class LocalPreviewSiteTests: XCTestCase {
     /// let a page read the page beside it.
     func testScriptsNameNothing() throws {
         let site = try site()
-        XCTAssertNotNil(site.serve("/app.js"))
         XCTAssertNil(site.serve("/private.html"), "fetch() in an inline script")
         XCTAssertNil(site.serve("/assets/inline.png"), "a quoted string in an inline script")
         XCTAssertNil(site.serve("/assets/js.png"), "url() inside a script")
@@ -169,5 +182,7 @@ final class LocalPreviewSiteTests: XCTestCase {
     func testOnlyPagesAndAssetsCanBeTheFile() {
         XCTAssertNil(LocalPreviewSite(file: dir.appendingPathComponent("secret.env")))
         XCTAssertNil(LocalPreviewSite(file: dir.appendingPathComponent(".env")))
+        XCTAssertNil(LocalPreviewSite(file: dir.appendingPathComponent("app.js")), "only a page is a page")
+        XCTAssertNil(LocalPreviewSite(file: dir.appendingPathComponent("pic.png")))
     }
 }
