@@ -753,9 +753,9 @@ The Librarian view lists what it did.
 Your threads also have a website, on your own Convex deployment. To sign a
 browser in, Settings > Phone & browser > Open signed in opens it in your
 browser (or run `npm run web:sign-in` from your Threadbear folder). Each
-thread has its own link. Share in a thread's ... menu on the Mac has Open on
-the web, to go there now, and Copy web link; the Copy link button on the
-website copies it too. It works anywhere you're signed in. Its sidebar works
+thread has its own link. Open on the web in a thread's ... menu on the Mac
+takes you there, and the Copy link button on the website copies it. It works
+anywhere you're signed in. Its sidebar works
 like the Mac's: drag its edge to resize it (double-click to reset), click a
 heading to fold it, sort the Inbox from the arrows on its heading, and search
 or filter from the top. The filter is only on the website: it picks threads

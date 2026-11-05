@@ -221,9 +221,11 @@ struct ThreadMenuButton: View {
                 // So Mike can point an agent at this thread (`tb show <id>`).
                 Button("Copy thread id", systemImage: "number") { app.copyToPasteboard(thread.id) }
                 // Only while there's a website to go to, as with the share
-                // button beside this menu.
+                // button beside this menu. No copy-link or share items here:
+                // the share button sits right beside this menu, and the web
+                // page has its own Copy link and share controls.
                 if let link = app.threadWebLink(thread.id) {
-                    ThreadShareMenu(threadId: thread.id, link: link)
+                    Button("Open on the web", systemImage: "safari") { NSWorkspace.shared.open(link) }
                 }
             }
         } label: {

@@ -39,24 +39,6 @@ struct ShareButton: View {
     }
 }
 
-/// "Share ▸" in the thread's ... menu: the thread on the website
-/// (docs/website.md), for Mike or anyone signed in, and the same popover as
-/// the share button for letting other people read it.
-struct ThreadShareMenu: View {
-    @Environment(AppModel.self) private var app
-    let threadId: String
-    let link: URL
-
-    var body: some View {
-        IconMenu("Share", systemImage: "square.and.arrow.up") {
-            Button("Open on the web", systemImage: "safari") { NSWorkspace.shared.open(link) }
-            Button("Copy web link", systemImage: "link") { app.copyToPasteboard(link.absoluteString) }
-            Divider()
-            Button("Share with others…", systemImage: "person.2") { app.sharePopoverThread = threadId }
-        }
-    }
-}
-
 /// What the share button and popover say, kept apart so tests can read it.
 enum ShareText {
     static func buttonTip(_ thread: ThreadSummary) -> String {

@@ -48,7 +48,7 @@ Built 28 Oct 2026 (thread 66935d23).
   the site, and one route of our own, `/s/`, serves a shared thread's
   page (below). Unknown paths fall back to `index.html`, so `/t/<id>`
   works cold.
-- The Mac app's thread `...` menu has **Copy web link**. It takes the site
+- The Mac app's thread `...` menu has **Open on the web**. It takes the site
   from `runner.status`'s `sync.url` (`.convex.cloud` → `.convex.site`), so
   it only shows while sync is on.
 
