@@ -28,6 +28,7 @@ import type { Account, ApprovalDecision, ApprovalOption, AskAnswer, EffortLevel,
 import type { Notification } from './runner.ts';
 import type { ScheduleBackend, StoredSchedule } from './schedules.ts';
 import { ThreadIndex, type RemoteThreads } from './thread-index.ts';
+import { digest, dropSyncCache, loadSyncCache, saveSyncCache, SYNC_CACHE_MAX_AGE_MS } from './sync-cache.ts';
 import { paths, readRunnerJson, writeRunnerJson } from './config.ts';
 import { unplacedPictures } from './pictures.ts';
 
@@ -49,6 +50,18 @@ const BACKFILL_EVENTS = 5000;
 // How often presence is checked. A push is decided with whatever the backend
 // last heard, so this is how late "away" can be.
 export const PRESENCE_MS = 15_000;
+// A row whose only change is its preview line or unread dot waits this long
+// after the row's last write. On Mike's M5 those were 73% of row changes (110
+// and 42 of 208 in 20 minutes on 5 Nov; unread often flips straight back),
+// and each write re-runs phone:threads for every open phone and browser
+// (about 40 KB). The message itself still arrives at once, and anything that
+// needs Mike changes more than these so goes straight away.
+export const PREVIEW_HOLD_MS = 20_000;
+// How often a project goes up only because its lastActivityAt moved. A turn
+// moves it, and a project's row with long notes is tens of KB to read and write.
+export const PROJECT_ACTIVITY_MS = 10 * 60_000;
+// How often what's been sent is saved (sync-cache.ts), and on stopping.
+const CACHE_SAVE_MS = 30_000;
 const BACKOFF_MIN_MS = 5000;
 const BACKOFF_MAX_MS = 5 * 60_000;
 const POST_TIMEOUT_MS = 15_000;
@@ -69,7 +82,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 36;
+export const BACKEND_API_VERSION = 37;
 // From this one an owned schedule can carry `poolId`, the pool that picks
 // its threads' login. An older backend's validator would turn it down.
 export const SCHEDULE_POOLS_API_VERSION = 36;
@@ -144,6 +157,9 @@ export const INDEX_SINCE_API_VERSION = 29;
 // Only the projects that changed go up (sync:upsertProjects), after the
 // whole list once per start.
 export const PROJECTS_DIFF_API_VERSION = 30;
+// Since this API: sync:upsertAccounts, one account's usage moving rewrites
+// that account rather than all of them; a heartbeat says firstSeen.
+export const ACCOUNTS_DIFF_API_VERSION = 37;
 // From this one a thread's row carries `asked`, what Mike last said to it,
 // for the phone's row. An older backend's validator would turn the row
 // down, so it goes without.
@@ -335,6 +351,9 @@ export type SyncDeps = {
   // Where the sync keeps what it has sent once and for all (the full history
   // backfill), per deployment. Tests leave it out and get a backfill each start.
   statePath?: string;
+  // Where it keeps what the mirror already has between starts (sync-cache.ts).
+  // Tests leave it out and get a full write each start.
+  cachePath?: string;
   runner: Host;
   commands?: CommandHost;
   // The runner's key pair for secrets the phone answers (secrets.ts).
@@ -505,6 +524,12 @@ export function toThreadDoc(t: ThreadSummary, runnerId: string, now: number, pen
   const links = (t.actions ?? []).filter((a) => a.kind === 'url' && a.url && /^https?:\/\//i.test(a.url));
   if (links.length) doc.links = links.map((a) => ({ title: a.title, url: a.url!, ...(a.icon ? { icon: a.icon } : {}) }));
   return doc;
+}
+
+// A row's digest without what's held back (PREVIEW_HOLD_MS).
+function steadyDigest(row: ThreadDoc): string {
+  const { preview: _preview, unread: _unread, ...rest } = row;
+  return digest(JSON.stringify(rest));
 }
 
 export function toPhoneAsk(a: OpenAsk): PhoneAsk {
@@ -742,7 +767,24 @@ export class ConvexSync {
   private unsub?: () => void;
   private dirty = new Map<string, ThreadDoc>();
   private removed = new Set<string>();
-  private sent = new Map<string, string>(); // threadId -> the doc last written, as JSON
+  private sent = new Map<string, string>(); // threadId -> digest of the doc last written
+  // Rows whose only change is the preview or unread, until PREVIEW_HOLD_MS after the
+  // row's last write; lastWrite says when that was and what the rest was.
+  private held = new Map<string, { doc: ThreadDoc; due: number }>();
+  private lastWrite = new Map<string, { at: number; steady: string }>();
+  private heldTimer?: TimerHandle;
+  // The newest message seq written per thread, so a start needn't ask.
+  private heads = new Map<string, number>();
+  private catchUpDue = false;
+  // Removals on their way (flush took them from `removed`), for saving, and
+  // ones from the file, which a thread turning up here after all cancels.
+  private removing = new Set<string>();
+  private removedFromFile = new Set<string>();
+  private fullAt = 0;
+  private cacheTimer?: TimerHandle;
+  private cacheChanged = false;
+  private backendHeard = false;
+  private seeded = false;
   private messages: MessageDoc[] = [];
   private woke = new WokeRows();
   private pending = new Map<string, PendingApproval>(); // threadId -> what it waits on
@@ -750,9 +792,14 @@ export class ConvexSync {
   private nexts = new Map<string, { lastSeq: number; next?: string[] }>(); // threadId -> its done card's next steps, as of lastSeq
   private lists: { projects?: Project[]; schedules?: Schedule[]; accounts?: Account[] } = {};
   private dirtyLists = new Set<ListName>();
-  // Each project as the backend has it, id -> its doc as JSON, once the
-  // whole list has gone up since this start (API 30). Undefined until then.
-  private projectsSent?: Map<string, string>;
+  // Each project as the backend has it, id -> digest of its doc without
+  // lastActivityAt, and that lastActivityAt, once the whole list has gone up
+  // (API 30). Undefined until then.
+  private projectsSent?: Map<string, [string, string]>;
+  private projectActivityAt = -Infinity;
+  private projectsTimer?: TimerHandle;
+  // Each account as the backend has it, id -> digest without usage.readAt.
+  private accountsSent?: Map<string, string>;
   // Project pictures (ICONS_API_VERSION): what the mirror has, projectId ->
   // picture name, read from it once; and whether the list has changed since
   // the pictures were last looked at.
@@ -826,6 +873,15 @@ export class ConvexSync {
         takesStars: () => (this.backendApiVersion ?? 0) >= STARS_API_VERSION,
         takesAsked: () => (this.backendApiVersion ?? 0) >= INDEX_ASKED_API_VERSION,
         takesSince: () => (this.backendApiVersion ?? 0) >= INDEX_SINCE_API_VERSION,
+        seed: () => {
+          const file = deps.cachePath;
+          const url = deps.config.url;
+          // Not after forgetSent: the file says what this deployment doesn't have.
+          if (!file || !url || !this.seeded) return undefined;
+          const at = loadSyncCache(file, { url, runnerId: this.runnerId, now: deps.clock.now() })?.index;
+          return at && deps.clock.now() - at.at < SYNC_CACHE_MAX_AGE_MS ? at : undefined;
+        },
+        onSent: () => this.noteSent(),
         ...(deps.appConnected ? { appConnected: deps.appConnected } : {}),
       });
     }
@@ -834,6 +890,10 @@ export class ConvexSync {
   start(): void {
     if (this.off || this.running) return;
     this.running = true;
+    this.projectsSent = undefined;
+    this.accountsSent = undefined;
+    this.full = true;
+    this.seedFromCache();
     this.unsub = this.deps.runner.onNotification((n) => this.onNotification(n));
     for (const t of this.deps.runner.list(ALL)) this.mark(t);
     this.lists = {
@@ -842,8 +902,6 @@ export class ConvexSync {
       accounts: this.deps.runner.listAccounts?.(),
     };
     for (const name of ['projects', 'schedules', 'accounts'] as const) if (this.lists[name]) this.dirtyLists.add(name);
-    this.projectsSent = undefined;
-    this.full = true;
     this.scheduleFlush();
     this.heartbeat();
     void this.checkPresence();
@@ -865,6 +923,13 @@ export class ConvexSync {
     this.flushTimer?.cancel();
     this.heartbeatTimer?.cancel();
     this.presenceTimer?.cancel();
+    this.heldTimer?.cancel();
+    this.projectsTimer?.cancel();
+    this.cacheTimer?.cancel();
+    this.saveCache();
+    this.heldTimer = undefined;
+    this.projectsTimer = undefined;
+    this.cacheTimer = undefined;
     this.presenceTimer = undefined;
     this.flushTimer = undefined;
     this.heartbeatTimer = undefined;
@@ -875,7 +940,12 @@ export class ConvexSync {
   // Backends from before version.ts answer the heartbeat with null: version 0.
   private sawBackend(r: unknown): void {
     const v = typeof (r as { apiVersion?: unknown } | null)?.apiVersion === 'number' ? (r as { apiVersion: number }).apiVersion : 0;
-    if (v === this.backendApiVersion) return;
+    // This deployment has never heard of this runner, though the file says
+    // it's all up: a wiped or restored deployment. Everything goes again.
+    if ((r as { firstSeen?: unknown } | null)?.firstSeen === true && this.seeded) this.forgetSent();
+    // Once a start has heard, as a version read from the cache hasn't been checked.
+    if (v === this.backendApiVersion && this.backendHeard) return;
+    this.backendHeard = true;
     this.backendApiVersion = v;
     if (v < BACKEND_API_VERSION) {
       this.deps.log.warn('the convex backend is older than this runner', { backend: v, expected: BACKEND_API_VERSION, url: this.deps.config.url });
@@ -910,7 +980,7 @@ export class ConvexSync {
       name: this.name,
       threads: this.written,
       messages: this.messagesWritten,
-      pending: this.dirty.size + this.removed.size + this.messages.length + this.dirtyLists.size,
+      pending: this.dirty.size + this.held.size + this.removed.size + this.messages.length + this.dirtyLists.size,
       commands: { state: this.commandsState, applied: this.applied, failed: this.failed, ...(this.commandError ? { lastError: this.commandError } : {}) },
     };
     if (this.lastSyncAt !== undefined) s.lastSyncAt = new Date(this.lastSyncAt).toISOString();
@@ -1016,6 +1086,7 @@ export class ConvexSync {
     this.flushTimer = undefined;
     this.lastFlushAt = -Infinity;
     this.retryAt = undefined;
+    this.releaseHeld(true);
     await this.flush();
   }
 
@@ -1031,6 +1102,10 @@ export class ConvexSync {
         const id = n.params.threadId;
         this.dirty.delete(id);
         this.sent.delete(id);
+        this.held.delete(id);
+        this.lastWrite.delete(id);
+        this.heads.delete(id);
+        this.noteSent();
         this.pending.delete(id);
         this.earliest.delete(id);
         this.nexts.delete(id);
@@ -1130,14 +1205,144 @@ export class ConvexSync {
     if (t.status === 'idle' || t.status === 'error' || t.status === 'stopped') this.pending.delete(t.id);
     this.noteShared(t);
     const doc = toThreadDoc(t, this.runnerId, this.deps.clock.now(), this.pending.get(t.id), this.earliestSeq(t), this.nextSteps(t));
+    if (this.removedFromFile.delete(t.id)) {
+      this.removed.delete(t.id);
+      this.removing.delete(t.id);
+    }
+    const now = this.deps.clock.now();
     // Against the row as this backend took it: `sent` holds that, without
     // the fields an older one doesn't know, which would otherwise make every
     // summary of a thread with one look new.
-    if (this.sent.get(t.id) === JSON.stringify(forBackend(doc, this.backendApiVersion ?? 0, this.deps.clock.now()))) {
+    const row = forBackend(doc, this.backendApiVersion ?? 0, now);
+    if (this.sent.get(t.id) === digest(JSON.stringify(row))) {
       this.dirty.delete(t.id);
+      this.held.delete(t.id);
       return;
     }
+    const last = this.lastWrite.get(t.id);
+    if (!this.dirty.has(t.id) && last && now - last.at < PREVIEW_HOLD_MS && last.steady === steadyDigest(row)) {
+      this.held.set(t.id, { doc, due: last.at + PREVIEW_HOLD_MS });
+      this.armHeld();
+      return;
+    }
+    this.held.delete(t.id);
     this.dirty.set(t.id, doc);
+  }
+
+  private recordSent(row: ThreadDoc): void {
+    this.sent.set(row.threadId, digest(JSON.stringify(row)));
+    this.lastWrite.set(row.threadId, { at: this.deps.clock.now(), steady: steadyDigest(row) });
+    this.noteSent();
+  }
+
+  private armHeld(): void {
+    if (this.heldTimer || !this.held.size || !this.running) return;
+    const due = Math.min(...[...this.held.values()].map((h) => h.due));
+    this.heldTimer = this.deps.clock.setTimeout(() => {
+      this.heldTimer = undefined;
+      this.releaseHeld();
+      this.scheduleFlush();
+      this.armHeld();
+    }, Math.max(0, due - this.deps.clock.now()));
+  }
+
+  private releaseHeld(all = false): void {
+    const now = this.deps.clock.now();
+    for (const [id, h] of this.held) {
+      if (!all && h.due > now) continue;
+      this.dirty.set(id, h.doc);
+      this.held.delete(id);
+    }
+  }
+
+  // ---- What the mirror already has, between starts (sync-cache.ts).
+
+  private seedFromCache(): void {
+    this.seeded = false;
+    const file = this.deps.cachePath;
+    const url = this.deps.config.url;
+    if (!file || !url) return;
+    const c = loadSyncCache(file, { url, runnerId: this.runnerId, now: this.deps.clock.now() });
+    if (!c) return;
+    this.sent = new Map(Object.entries(c.threads));
+    this.heads = new Map(Object.entries(c.heads));
+    // One that's here after all (handed back) isn't gone.
+    const here = new Set(this.deps.runner.list(ALL).map((t) => t.id));
+    for (const id of c.removed ?? []) {
+      if (here.has(id)) continue;
+      this.removed.add(id);
+      this.removedFromFile.add(id);
+    }
+    if (c.projects) this.projectsSent = new Map(Object.entries(c.projects));
+    if (c.accounts) this.accountsSent = new Map(Object.entries(c.accounts));
+    if (c.apiVersion !== undefined) this.backendApiVersion = c.apiVersion;
+    this.fullAt = c.at;
+    this.full = false;
+    this.catchUpDue = true;
+    this.seeded = true;
+    this.deps.log.info('convex sync: comparing with what was sent last time', { threads: this.sent.size, index: Object.keys(c.index?.rows ?? {}).length });
+  }
+
+  private forgetSent(): void {
+    this.deps.log.warn('this deployment has not seen this runner before: writing everything again', { url: this.deps.config.url });
+    this.seeded = false;
+    // Now, not at the next save: a restart before the full write finishes
+    // would find the file valid and firstSeen no longer true, and the
+    // deployment would stay empty.
+    try {
+      if (this.deps.cachePath) dropSyncCache(this.deps.cachePath);
+    } catch (e) {
+      this.deps.log.warn('could not drop what the mirror had', { error: String(e) });
+    }
+    this.cacheChanged = false;
+    this.sent.clear();
+    this.heads.clear();
+    this.lastWrite.clear();
+    this.projectsSent = undefined;
+    this.accountsSent = undefined;
+    this.full = true;
+    this.catchUpDue = false;
+    for (const t of this.deps.runner.list(ALL)) this.mark(t);
+    for (const name of ['projects', 'accounts'] as const) if (this.lists[name]) this.dirtyLists.add(name);
+    this.index?.forgetSent();
+    this.scheduleFlush();
+  }
+
+  private noteSent(): void {
+    if (!this.deps.cachePath || !this.running) return;
+    this.cacheChanged = true;
+    if (this.cacheTimer) return;
+    this.cacheTimer = this.deps.clock.setTimeout(() => {
+      this.cacheTimer = undefined;
+      this.saveCache();
+    }, CACHE_SAVE_MS);
+  }
+
+  // Only once a full write has finished: before that, what's been sent isn't
+  // all of what the mirror should have.
+  private saveCache(): void {
+    const file = this.deps.cachePath;
+    const url = this.deps.config.url;
+    if (!file || !url || !this.cacheChanged || this.full) return;
+    this.cacheChanged = false;
+    try {
+      const index = this.index?.snapshot();
+      saveSyncCache(file, {
+        v: 1,
+        url,
+        runnerId: this.runnerId,
+        ...(this.backendApiVersion !== undefined ? { apiVersion: this.backendApiVersion } : {}),
+        at: this.fullAt,
+        threads: Object.fromEntries(this.sent),
+        heads: Object.fromEntries(this.heads),
+        ...(this.removed.size || this.removing.size ? { removed: [...new Set([...this.removed, ...this.removing])] } : {}),
+        ...(this.projectsSent ? { projects: Object.fromEntries(this.projectsSent) } : {}),
+        ...(this.accountsSent ? { accounts: Object.fromEntries(this.accountsSent) } : {}),
+        ...(index ? { index } : {}),
+      });
+    } catch (e) {
+      this.deps.log.warn('could not save what the mirror has', { error: String(e) });
+    }
   }
 
   // A thread the phone made has its row written before its command
@@ -1151,7 +1356,7 @@ export class ConvexSync {
       if (!doc) return;
       const row = forBackend(doc, this.backendApiVersion ?? 0, this.deps.clock.now());
       await this.post('mutation', 'sync:upsertThreads', { key: this.deps.key, threads: [row] });
-      this.sent.set(threadId, JSON.stringify(row));
+      this.recordSent(row);
       if (this.dirty.get(threadId) === doc) this.dirty.delete(threadId);
       this.written++;
     } catch (e) {
@@ -1227,24 +1432,76 @@ export class ConvexSync {
   private async sendProjects(list: Project[], v: number): Promise<void> {
     const key = this.deps.key;
     const docs = list.map(toProjectDoc);
+    const entry = (d: (typeof docs)[number]): [string, string] => {
+      const { lastActivityAt, ...rest } = d;
+      return [digest(JSON.stringify(rest)), lastActivityAt ?? ''];
+    };
     if (v < PROJECTS_DIFF_API_VERSION || !this.projectsSent) {
       await this.post('mutation', 'sync:setProjects', { key, runnerId: this.runnerId, projects: docs });
-      this.projectsSent = v >= PROJECTS_DIFF_API_VERSION ? new Map(docs.map((d) => [d.id, JSON.stringify(d)])) : undefined;
+      this.projectsSent = v >= PROJECTS_DIFF_API_VERSION ? new Map(docs.map((d) => [d.id, entry(d)])) : undefined;
+      this.noteSent();
       return;
     }
     const sent = this.projectsSent;
-    const changed = docs.filter((d) => sent.get(d.id) !== JSON.stringify(d));
+    const now = this.deps.clock.now();
+    // A real change goes now; one that's only lastActivityAt moving goes at
+    // most every PROJECT_ACTIVITY_MS, all together.
+    const activityDue = now - this.projectActivityAt >= PROJECT_ACTIVITY_MS;
+    let activityWaits = false;
+    const changed = docs.filter((d) => {
+      const [was, wasAt] = sent.get(d.id) ?? [];
+      const [is, isAt] = entry(d);
+      if (was !== is) return true;
+      if (wasAt === isAt) return false;
+      if (activityDue) return true;
+      activityWaits = true;
+      return false;
+    });
     const ids = new Set(docs.map((d) => d.id));
     const removed = [...sent.keys()].filter((id) => !ids.has(id));
-    if (!changed.length && !removed.length) return;
-    await this.post('mutation', 'sync:upsertProjects', { key, runnerId: this.runnerId, projects: changed, removed });
-    for (const d of changed) sent.set(d.id, JSON.stringify(d));
-    for (const id of removed) sent.delete(id);
+    if (changed.length || removed.length) {
+      await this.post('mutation', 'sync:upsertProjects', { key, runnerId: this.runnerId, projects: changed, removed });
+      for (const d of changed) sent.set(d.id, entry(d));
+      for (const id of removed) sent.delete(id);
+      if (activityDue) this.projectActivityAt = now;
+      this.noteSent();
+    }
+    if (activityWaits && !this.projectsTimer) {
+      this.projectsTimer = this.deps.clock.setTimeout(() => {
+        this.projectsTimer = undefined;
+        this.dirtyLists.add('projects');
+        this.scheduleFlush();
+      }, Math.max(0, this.projectActivityAt + PROJECT_ACTIVITY_MS - now));
+    }
+  }
+
+  // As projects: the whole list when the backend can't take less, or when
+  // this is the first this runner knows of what it has; else what changed.
+  // A reading's time isn't a change: Token Stats reads every few minutes
+  // whether or not a window has moved, and nothing shows it from the mirror.
+  private async sendAccounts(list: Account[], v: number): Promise<void> {
+    const key = this.deps.key;
+    const docs = list.map((a) => toAccountDoc(a, v));
+    const entry = (d: (typeof docs)[number]) => {
+      const u = d.usage as Record<string, unknown> | undefined;
+      if (!u) return digest(JSON.stringify(d));
+      const { readAt: _readAt, ...usage } = u;
+      return digest(JSON.stringify({ ...d, usage }));
+    };
+    const sent = this.accountsSent;
+    const changed = sent ? docs.filter((d) => sent.get(d.id as string) !== entry(d)) : docs;
+    const ids = new Set(docs.map((d) => d.id as string));
+    const removed = sent ? [...sent.keys()].filter((id) => !ids.has(id)) : [];
+    if (sent && !changed.length && !removed.length) return;
+    if (sent && v >= ACCOUNTS_DIFF_API_VERSION) await this.post('mutation', 'sync:upsertAccounts', { key, runnerId: this.runnerId, accounts: changed, removed });
+    else await this.post('mutation', 'sync:setAccounts', { key, runnerId: this.runnerId, accounts: docs });
+    this.accountsSent = new Map(docs.map((d) => [d.id as string, entry(d)]));
+    this.noteSent();
   }
 
   private scheduleFlush(): void {
     if (!this.running || this.flushTimer) return;
-    if (!this.dirty.size && !this.removed.size && !this.messages.length && !this.dirtyLists.size && !this.full && !this.imagesDue.size && !this.imagesDrop.size && !this.pendingImages.length && !this.replyDue.size && !this.pendingReplyImages.length) return;
+    if (!this.dirty.size && !this.removed.size && !this.messages.length && !this.dirtyLists.size && !this.full && !this.catchUpDue && !this.imagesDue.size && !this.imagesDrop.size && !this.pendingImages.length && !this.replyDue.size && !this.pendingReplyImages.length) return;
     const now = this.deps.clock.now();
     let delay = Math.max(0, this.lastFlushAt + SYNC_COALESCE_MS - now);
     if (this.retryAt !== undefined) delay = Math.max(delay, this.retryAt - now);
@@ -1259,7 +1516,7 @@ export class ConvexSync {
     this.flushing = true;
     this.lastFlushAt = this.deps.clock.now();
     const docs = [...this.dirty.values()];
-    const removed = [...this.removed];
+    this.removing = new Set(this.removed);
     let messages = this.messages.splice(0);
     const lists = [...this.dirtyLists];
     this.dirty.clear();
@@ -1274,10 +1531,18 @@ export class ConvexSync {
       for (let i = 0; i < docs.length; i += SYNC_BATCH) {
         const batch = docs.slice(i, i + SYNC_BATCH).map((d) => forBackend(d, v, this.deps.clock.now()));
         await this.post('mutation', 'sync:upsertThreads', { key, threads: batch });
-        for (const d of batch) this.sent.set(d.threadId, JSON.stringify(d));
+        for (const d of batch) this.recordSent(d);
         this.written += batch.length;
       }
-      if (removed.length) await this.post('mutation', 'sync:removeThreads', { key, threadIds: removed });
+      if (this.removing.size) {
+        const removed = [...this.removing];
+        await this.post('mutation', 'sync:removeThreads', { key, threadIds: removed });
+        for (const id of removed) {
+          this.removing.delete(id);
+          this.removedFromFile.delete(id);
+        }
+        this.noteSent();
+      }
       for (const name of lists) {
         const list = this.lists[name];
         if (!list) continue;
@@ -1286,7 +1551,11 @@ export class ConvexSync {
           await this.sendProjects(list as Project[], v);
           continue;
         }
-        const rows = name === 'schedules' ? (list as Schedule[]).map(toScheduleDoc) : (list as Account[]).map((a) => toAccountDoc(a, v));
+        if (name === 'accounts') {
+          await this.sendAccounts(list as Account[], v);
+          continue;
+        }
+        const rows = (list as Schedule[]).map(toScheduleDoc);
         await this.post('mutation', `sync:set${name[0]!.toUpperCase()}${name.slice(1)}`, { key, runnerId: this.runnerId, [name]: rows });
       }
       if (this.picturesDue && (this.backendApiVersion ?? 0) >= ICONS_API_VERSION) await this.sendPictures();
@@ -1295,6 +1564,11 @@ export class ConvexSync {
         await this.post('mutation', 'sync:prune', { key, runnerId: this.runnerId, keep });
         messages.unshift(...(await this.catchUp()));
         this.full = false;
+        this.fullAt = this.deps.clock.now();
+        this.noteSent();
+      } else if (this.catchUpDue) {
+        messages.unshift(...this.catchUpFromHeads());
+        this.catchUpDue = false;
       }
       const { docs: history, threadIds: filling } = this.histories();
       // A new thread's first messages are both live and its history: once each.
@@ -1320,8 +1594,9 @@ export class ConvexSync {
     } catch (e) {
       // Put back what didn't get written, unless a newer version arrived
       // meanwhile, and try again later; one log line per distinct error.
-      for (const d of docs) if (!this.dirty.has(d.threadId) && this.sent.get(d.threadId) !== JSON.stringify(d)) this.dirty.set(d.threadId, d);
-      for (const id of removed) this.removed.add(id);
+      for (const d of docs) if (!this.dirty.has(d.threadId) && this.sent.get(d.threadId) !== digest(JSON.stringify(forBackend(d, this.backendApiVersion ?? 0, this.deps.clock.now())))) this.dirty.set(d.threadId, d);
+      for (const id of this.removing) this.removed.add(id);
+      this.removing.clear();
       for (const name of lists) this.dirtyLists.add(name);
       this.messages.unshift(...messages.filter((m) => !this.messages.some((x) => x.threadId === m.threadId && x.seq === m.seq)));
       this.backoffMs = this.backoffMs ? Math.min(this.backoffMs * 2, BACKOFF_MAX_MS) : BACKOFF_MIN_MS;
@@ -1542,6 +1817,8 @@ export class ConvexSync {
       const batch = messages.slice(i, i + MESSAGE_BATCH);
       await this.post('mutation', 'sync:appendMessages', { key: this.deps.key, messages: batch });
       this.messagesWritten += batch.length;
+      for (const m of batch) if (m.seq > (this.heads.get(m.threadId) ?? 0)) this.heads.set(m.threadId, m.seq);
+      this.noteSent();
     }
   }
 
@@ -1552,9 +1829,21 @@ export class ConvexSync {
     if (!filled.size) return [];
     const heads = (await this.post('query', 'sync:messageHeads', { key: this.deps.key, runnerId: this.runnerId })) as { threadId: string; lastSeq: number }[] | null;
     const have = new Map((heads ?? []).map((h) => [h.threadId, h.lastSeq]));
+    for (const [id, seq] of have) if (seq > (this.heads.get(id) ?? 0)) this.heads.set(id, seq);
     const out: MessageDoc[] = [];
     for (const t of this.deps.runner.list(ALL)) {
       if (filled.has(t.id)) out.push(...this.messagesAfter(t, have.get(t.id) ?? 0));
+    }
+    return out;
+  }
+
+  // The same, from what the last start noted (sync-cache.ts), so a start
+  // doesn't read a row and a message per thread to find it out.
+  private catchUpFromHeads(): MessageDoc[] {
+    const filled = this.filledThreads();
+    const out: MessageDoc[] = [];
+    for (const t of this.deps.runner.list(ALL)) {
+      if (filled.has(t.id)) out.push(...this.messagesAfter(t, this.heads.get(t.id) ?? 0));
     }
     return out;
   }
@@ -1696,6 +1985,12 @@ export class ConvexSync {
       },
       (e) => {
         this.deps.log.debug('convex heartbeat failed', { error: String(e) });
+        // The version from the file may be why: a heartbeat with a field an
+        // older backend's validator refuses can never learn better. Going
+        // back to assuming nothing is what a start without the file does.
+        // Only that: while a network blip lasted, this would leave `turn` and
+        // the like off message rows, and they're never written again.
+        if (!this.backendHeard && /validat/i.test(String(e))) this.backendApiVersion = undefined;
       },
     );
     this.heartbeatTimer = this.deps.clock.setTimeout(() => this.heartbeat(), HEARTBEAT_MS);

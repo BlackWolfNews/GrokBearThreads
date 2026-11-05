@@ -173,18 +173,32 @@ export const thread = query({
   },
 });
 
+// Just the thread's row (API 37), for a client that reads messages with
+// phone:messages. phone:thread re-reads up to THREAD_SCAN messages each time
+// one arrives (about 28 KB), which such a client throws away.
+export const threadRow = query({
+  args: { token: v.string(), threadId: v.string() },
+  returns: row,
+  handler: async (ctx, { token, threadId }) => {
+    await checkPhoneToken(ctx, token);
+    return stripThread(await findThread(ctx, threadId));
+  },
+});
+
 // A page of a thread's messages, newest first in the reading but returned
 // oldest first: the newest `limit` with no beforeSeq (live, so new messages
 // arrive by themselves), or the `limit` before beforeSeq. Tool rows (one line
 // each) only with tools: true. hasMore says whether there are older ones.
 // Since API 2; reads Convex alone, so it works while the Mac is asleep.
 export const messages = query({
-  args: { token: v.string(), threadId: v.string(), beforeSeq: v.optional(v.number()), limit: v.optional(v.number()), tools: v.optional(v.boolean()) },
+  // noImages (API 37): for a client watching phone:images instead, so a new
+  // message doesn't read every picture row again.
+  args: { token: v.string(), threadId: v.string(), beforeSeq: v.optional(v.number()), limit: v.optional(v.number()), tools: v.optional(v.boolean()), noImages: v.optional(v.boolean()) },
   // images: from the page's first row on (share.ts), a shared thread's
   // uploaded pictures (API 8), so Mike's page shows what the shared one
   // does, and any thread's reply and pinned pictures (API 24).
   returns: v.object({ messages: v.array(pageMessage), hasMore: v.boolean(), images: v.optional(v.array(phoneImage)) }),
-  handler: async (ctx, { token, threadId, beforeSeq, limit, tools }) => {
+  handler: async (ctx, { token, threadId, beforeSeq, limit, tools, noImages }) => {
     await checkPhoneToken(ctx, token);
     const want = Math.max(1, Math.min(PAGE_MAX, Math.floor(limit ?? PAGE_DEFAULT)));
     const out: { seq: number; role: 'user' | 'assistant' | 'tool'; text: string; origin?: string; toolKind?: string; summary?: boolean; turn?: string; at: string }[] = [];
@@ -203,8 +217,20 @@ export const messages = query({
     }
     out.reverse();
     const from = hasMore || beforeSeq !== undefined ? out[0]?.seq ?? 0 : 0;
-    const images = tools && out.length ? [...(await imagesFrom(ctx, threadId, from)), ...(await replyImagesFrom(ctx, threadId, from))] : [];
+    const images = tools && !noImages && out.length ? [...(await imagesFrom(ctx, threadId, from)), ...(await replyImagesFrom(ctx, threadId, from))] : [];
     return { messages: out, hasMore, ...(images.length ? { images } : {}) };
+  },
+});
+
+// A thread's pictures from a seq on (API 37), live, on their own: a picture can
+// finish uploading after the row it belongs to has left a client's live tail,
+// and this re-runs only when a picture row changes.
+export const images = query({
+  args: { token: v.string(), threadId: v.string(), from: v.number() },
+  returns: v.array(phoneImage),
+  handler: async (ctx, { token, threadId, from }) => {
+    await checkPhoneToken(ctx, token);
+    return [...(await imagesFrom(ctx, threadId, from)), ...(await replyImagesFrom(ctx, threadId, from))];
   },
 });
 

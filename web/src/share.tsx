@@ -7,6 +7,7 @@
 // can stop sharing it or share it again.
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery } from 'convex/react';
+import { useLiveQuery } from './live';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import { MessageText, Pictures, picturesByRow, ToolRun, Worked, type PageMessage, type Picture } from './messages';
@@ -23,7 +24,7 @@ const SITE = 'https://threadbear.mikecann.app';
 
 export function SharePage({ slug, token }: { slug: string; token: string | null }) {
   const [limit, setLimit] = useState(FIRST_PAGE);
-  const data = useQuery(api.share.view, { slug, limit, ...(token ? { token } : {}) });
+  const data = useLiveQuery(api.share.view, { slug, limit, ...(token ? { token } : {}) });
   // Keeps the last page on screen while a bigger one loads.
   const [shown, setShown] = useState<typeof data>(undefined);
   useEffect(() => {

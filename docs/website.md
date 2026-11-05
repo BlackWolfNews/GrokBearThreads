@@ -30,7 +30,8 @@ Built 28 Oct 2026 (thread 66935d23).
   marks it seen.
 - It's a client of the phone's API (`convex/phone.ts`, docs/convex-backend.md
   section 6) and nothing else, so it sees exactly what the phone sees: the
-  newest 20 text messages per thread, no tool output or images. Everything
+  text messages and one line per tool call, with no tool output, and only
+  the images an agent showed Mike or a shared thread's. Everything
   it does is a `commands` row the runner applies.
 - Hosted by `@convex-dev/static-hosting` on the same Convex deployment.
   Since 3 Nov the app owns HTTP routing (`convex/http.ts`) rather than

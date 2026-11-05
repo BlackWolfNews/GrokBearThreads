@@ -296,6 +296,7 @@ async function main(): Promise<void> {
     config: { ...cfg.sync, runnerId: syncRunnerId, icon: runnerIcon },
     key: readSyncKey(cfg.home),
     statePath: `${cfg.home}/sync-state.json`,
+    cachePath: `${cfg.home}/sync-sent.json`,
     presence: async () => (atMac = isAtMac(rpcServer?.appConnected() ?? false, await hidIdleMs())),
     appConnected: () => rpcServer?.appConnected() ?? false,
     runner: {

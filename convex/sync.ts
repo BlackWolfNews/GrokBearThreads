@@ -269,8 +269,10 @@ export const heartbeat = mutation({
     }),
   },
   // The backend's API version (version.ts), so the runner can tell when it's
-  // talking to an older backend than it was built for.
-  returns: v.object({ apiVersion: v.number() }),
+  // talking to an older backend than it was built for. firstSeen (API 37):
+  // this deployment had no row for this runner, so a runner that thinks it has
+  // written everything (sync-cache.ts) knows to write it again.
+  returns: v.object({ apiVersion: v.number(), firstSeen: v.optional(v.boolean()) }),
   handler: async (ctx, { key, runner }) => {
     checkRunnerKey(key);
     const row = { ...runner, lastSeenAt: Date.now() };
@@ -284,7 +286,7 @@ export const heartbeat = mutation({
     // A runner from before view counts gets its count within a minute of
     // this backend, without waiting for a thread to change.
     if (!(await ctx.db.query('viewCounts').withIndex('by_runnerId', (q) => q.eq('runnerId', runner.runnerId)).unique())) await recountViews(ctx, runner.runnerId);
-    return { apiVersion: API_VERSION };
+    return { apiVersion: API_VERSION, ...(existing ? {} : { firstSeen: true }) };
   },
 });
 
@@ -824,6 +826,29 @@ export const setAccounts = mutation({
   handler: async (ctx, { key, runnerId, accounts }) => {
     checkRunnerKey(key);
     await replaceRows(ctx, 'accounts', runnerId, accounts);
+    return null;
+  },
+});
+
+// API 37: only the accounts that changed, and the ones gone. Usage moves one
+// login at a time, and setAccounts read and rewrote every login's row for it
+// (about 20 KB for Mike's ten). The first send after a start with nothing
+// remembered is still setAccounts, the whole list.
+export const upsertAccounts = mutation({
+  args: { key: v.string(), runnerId: v.string(), accounts: v.array(accountDoc), removed: v.array(v.string()) },
+  returns: v.null(),
+  handler: async (ctx, { key, runnerId, accounts, removed }) => {
+    checkRunnerKey(key);
+    const one = (id: string) => ctx.db.query('accounts').withIndex('by_runner_id', (q) => q.eq('runnerId', runnerId).eq('id', id)).unique();
+    for (const a of accounts) {
+      const existing = await one(a.id);
+      if (existing) await ctx.db.replace(existing._id, { ...a, runnerId });
+      else await ctx.db.insert('accounts', { ...a, runnerId });
+    }
+    for (const id of removed) {
+      const existing = await one(id);
+      if (existing) await ctx.db.delete(existing._id);
+    }
     return null;
   },
 });

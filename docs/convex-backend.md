@@ -384,7 +384,7 @@ dashboard panel.
   pairing needs no Convex CLI.
 - `runner/src/sync.ts`: the mirror, documented in docs/protocol.md
   ("Sync"): on with `sync.url` in `runner.json` and `secrets/convex-key`;
-  threads, messages (newest 20 per thread, backfilled once), the pending
+  threads, messages (all of them, backfilled once), the pending
   approval on a row, projects, schedules and accounts; coalesced writes,
   batches, backoff, prune on start, bye on a stop for good; the phone's
   commands applied through the runner's own methods (`origin: "phone"` on
@@ -507,9 +507,14 @@ Queries:
   is kept since API 2, and with `tools: true` there's one row per tool call
   too (`role: "tool"`, a one-line `text` such as "Run the unit tests" or
   "Edited ~/dev/x.ts", and `toolKind`). It reads Convex alone, so it works
-  while the Mac is asleep; the website uses it, raising `limit` as you scroll
-  back. `phone:thread` stays as API 1 had it (newest 20 text messages plus
+  while the Mac is asleep. The website watches only the newest 30 with it and
+  reads older pages once, with `beforeSeq` (`web/src/transcript.ts`); the
+  iPhone still raises `limit` as you scroll back. `phone:thread` stays as API 1 had it (newest 20 text messages plus
   any paged ones, never tool rows), for phone apps built before.
+- `phone:threadRow({ token, threadId })` (API 37) → the thread's row alone,
+  for a client that reads messages with `phone:messages`.
+- `phone:images({ token, threadId, from })` (API 37) → the thread's pictures
+  from that seq on, for a client passing `noImages: true` to `phone:messages`.
 - `phone:command({ token, commandId })` → `{ state: "pending" | "taken" |
   "done" | "failed", note?, threadId? }`.
 
@@ -735,6 +740,27 @@ Backend changes (these deploy prod when they land on main; Mike said yes to
    the projects that changed and the ones gone, with
    `sync:upsertProjects`. Mostly Mike's own cost: his 70-odd projects with
    long notes were about 460 KB each time a turn moved one.
+
+### The restart cost (5 Nov 2026, API 37)
+
+Once the cuts above were in, Mike's prod ran at about 215 MB a day (dashboard,
+3 and 4 Nov, cumulative totals subtracted), and most of it was runner starts,
+not live reads. The M5 started 12 to 15 times a day following main, and each
+start rewrote all 710 thread rows and sidebar rows, read them all again to
+prune, and read a row and a message per thread for message heads: about 9 MB a
+start, over half of the total. What's sent is now remembered as hashes between
+starts (`runner/src/sync-cache.ts`, `sync-sent.json`), with a full write every
+3 days.
+
+Also since then: a row whose only change is its preview or unread waits 20
+seconds (73% of row changes on the M5, each re-running a 30 to 40 KB
+`phone:threads` for every open client); a project moving only by
+`lastActivityAt` goes every 10 minutes; `sync:upsertAccounts` writes one login
+rather than all of them, and a new reading time alone isn't a change; the
+website watches a 30-row tail, reads older pages once, watches pictures apart
+(`phone:images`) and lets go of its live queries after a minute hidden. The
+iPhone app still raises `limit` and uses `phone:thread`, which costs about
+70 KB for each message that arrives while a thread is open.
 
 Not urgent: messages are kept forever, so storage grows about 10 MB a month
 for a typical user. Dropping the messages of threads archived more than a

@@ -142,4 +142,12 @@
 //    each of its threads starts on, instead of `accountId`. A runner sends
 //    it only to a backend of 36 or later; an older runner ignores it and
 //    starts the thread on its folder's pool.
-export const API_VERSION = 36;
+// 37: less database I/O (docs/convex-backend.md, "Usage and the free plan").
+//    sync:upsertAccounts writes only the logins that changed; sync:heartbeat
+//    can say firstSeen, so a runner that remembers what it has written
+//    between starts writes it again for a deployment that's never met it;
+//    phone:threadRow is a thread's row without its messages, and phone:images
+//    a thread's pictures, with phone:messages' noImages. A runner uses
+//    upsertAccounts only with a backend of 37 or later and ignores firstSeen
+//    from none; an older phone goes on using phone:thread.
+export const API_VERSION = 37;

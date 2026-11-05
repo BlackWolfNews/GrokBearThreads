@@ -6,6 +6,7 @@
 // asked for numbers on them, 5 Nov; the Mac only shows it folded).
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { useQuery } from 'convex/react';
+import { useLiveQuery } from './live';
 import { api } from '../../convex/_generated/api';
 import { go, threadPath } from './route';
 import { ago } from './format';
@@ -35,9 +36,9 @@ const SHOWS: { show: Filter['show']; label: string; icon: ReactNode }[] = [
 ];
 
 export function Lists({ token, selected }: { token: string; selected?: string }) {
-  const inbox = useQuery(api.phone.threads, { token, view: 'inbox' });
-  const counts = useQuery(api.phone.counts, { token });
-  const schedules = useQuery(api.phone.schedules, { token }) as ScheduleRow[] | undefined;
+  const inbox = useLiveQuery(api.phone.threads, { token, view: 'inbox' });
+  const counts = useLiveQuery(api.phone.counts, { token });
+  const schedules = useLiveQuery(api.phone.schedules, { token }) as ScheduleRow[] | undefined;
   const [folded, setFolded] = useState(() => readFolded(localStorage.getItem(FOLDED_KEY)));
   const [order, setOrder] = useState(() => readOrder(localStorage.getItem(ORDER_KEY)));
   const [query, setQuery] = useState('');
@@ -50,11 +51,11 @@ export function Lists({ token, selected }: { token: string; selected?: string })
   // Searching or filtering looks in the put-away threads too, so they're
   // loaded for it. Otherwise only while their heading is open.
   const narrowing = !!q || isFiltering(filter);
-  const snoozed = useQuery(api.phone.threads, narrowing || !folded.has('hibernating') ? { token, view: 'hibernating' } : 'skip');
-  const den = useQuery(api.phone.threads, narrowing || !folded.has('archived') ? { token, view: 'den' } : 'skip');
+  const snoozed = useLiveQuery(api.phone.threads, narrowing || !folded.has('hibernating') ? { token, view: 'hibernating' } : 'skip');
+  const den = useLiveQuery(api.phone.threads, narrowing || !folded.has('archived') ? { token, view: 'den' } : 'skip');
   // The den list stops at the newest 100; this finds the older ones.
   const sought = useDebounced(q, 250);
-  const older = useQuery(api.phone.search, sought ? { token, text: sought } : 'skip');
+  const older = useLiveQuery(api.phone.search, sought ? { token, text: sought } : 'skip');
 
   // Keeps the open thread in view when the arrow keys or a link change it.
   useEffect(() => {

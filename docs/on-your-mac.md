@@ -29,8 +29,9 @@ File references are where to look.
   the account's full name from `getent passwd` rather than `id -F`.
 - **A command:** `~/.local/bin/threadbear`.
 - **Files:** the data folder `~/Library/Application Support/Threadbear`
-  (threads, settings, `secrets/`, runner releases, and the pinned release
-  key `upstream-signers`). In `secrets/`, `asked/` holds the answers you
+  (threads, settings, `secrets/`, runner releases, the pinned release key
+  `upstream-signers`, and `sync-sent.json`, hashes of what's already in your
+  Convex mirror so a restart sends only what changed). In `secrets/`, `asked/` holds the answers you
   type into an agent's secret card, one owner-only file each with a small
   script beside it that prints it for `sudo -A`, removed after 24 hours,
   and `secret-box.key` is the key your phone seals those answers to;

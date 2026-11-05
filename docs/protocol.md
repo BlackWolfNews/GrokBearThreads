@@ -3043,19 +3043,23 @@ the mirror back as state. The Mac app doesn't use it.
   sub-agents, and never a tool result, diff or image. A `thread.updated`
   whose phone view differs from the last one written marks the thread
   dirty; dirty threads are written together, at most once every 2
-  seconds, 50 to a mutation. A `thread.deleted` removes the row and its
-  messages.
+  seconds, 50 to a mutation. A change only to its preview or unread waits
+  until 20 seconds after that row's last write, and goes with anything else
+  that changes first. A `thread.deleted` removes the row and its messages.
+  What's been written is remembered between starts as hashes
+  (`sync-sent.json` in the data folder), so a start writes only what changed;
+  every 3 days, with no such file, or when `sync:heartbeat` answers
+  `firstSeen`, it writes everything and prunes.
 - **Messages.** Each persisted `user.message` and `assistant.text` goes
   up as a `messages` row (`threadId, seq, role, text, origin?, at`), text
-  cut at 8,000 characters with a note; never a delta. The mirror keeps
-  the newest 20 per thread. At start the runner asks what the mirror has
-  (`sync:messageHeads`) and sends only newer ones, the newest 20 per
-  thread at most, so a first start sends them all once and a restart
-  sends what it missed. The row's `earliestSeq` is the seq of the
-  thread's first text message. A `page` command (the phone's
-  `loadEarlier`, with `beforeSeq`) writes up to 50 text messages before
-  that seq as paged rows (`pagedAt`), which don't count towards the 20
-  and go after a day.
+  cut at 8,000 characters with a note; never a delta, with one row per tool
+  call (`role: "tool"`, one line). The mirror keeps every one, and each
+  thread's whole history goes up once per deployment. A start sends what's
+  newer than the last one it wrote (`sync-sent.json`), or asks
+  `sync:messageHeads` on a full write. The row's `earliestSeq` is the seq of
+  the thread's first text message. A `page` command (an old phone's
+  `loadEarlier`, with `beforeSeq`) marks up to 50 text messages before that
+  seq as paged (`pagedAt`), so `phone:thread` shows them for a day.
 - **Approvals.** An `approval.requested` puts `{ approvalId, kind:
   "approval", name, title, options, inputSummary? }` on the thread's row
   (`inputSummary` is one line: the command, the path, or the first string

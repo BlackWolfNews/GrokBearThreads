@@ -15,6 +15,7 @@ import type { Clock, TimerHandle } from './clock.ts';
 import type { Logger } from './log.ts';
 import type { ThreadSummary } from './protocol.ts';
 import type { Notification } from './runner.ts';
+import { digest } from './sync-cache.ts';
 import type { Post, Subscribe } from './sync.ts';
 
 export type IndexRow = {
@@ -90,7 +91,7 @@ export function toIndexRow(t: ThreadSummary, withStartedBy = true, withStars = t
 // The part of a row that decides whether it's written.
 function writeKey(r: IndexRow): string {
   const { preview: _p, lastActivityAt: _l, ...rest } = r;
-  return JSON.stringify(rest);
+  return digest(JSON.stringify(rest));
 }
 
 // Where another runner's token goes on this Mac, copied in once, so the app
@@ -123,9 +124,15 @@ export class ThreadIndex {
     // other runners' threads, so with none there's nothing to watch them
     // for. Left out, they're always watched.
     appConnected?: () => boolean;
+    // What was sent before the runner last stopped (sync-cache.ts): a start
+    // then writes only what changed, and doesn't read every row to prune.
+    seed?: () => { at: number; rows: Record<string, string>; removed?: string[] } | undefined;
+    onSent?: () => void;
   };
   private running = false;
   private sent = new Map<string, string>(); // threadId -> writeKey as sent
+  private fullAt = 0;
+  private removing: string[] = []; // on their way: saved with the rest
   private dirty = new Map<string, IndexRow>();
   private removed = new Set<string>();
   private full = true;
@@ -155,6 +162,14 @@ export class ThreadIndex {
     if (this.running) return;
     this.running = true;
     this.full = true;
+    const seed = this.deps.seed?.();
+    if (seed) {
+      this.sent = new Map(Object.entries(seed.rows));
+      this.fullAt = seed.at;
+      this.full = false;
+      const here = new Set(this.deps.host.list(['inbox', 'snoozed', 'archived']).map((t) => t.id));
+      for (const id of seed.removed ?? []) if (!here.has(id)) this.removed.add(id);
+    }
     for (const t of this.deps.host.list(['inbox', 'snoozed', 'archived'])) this.mark(t);
     this.unlisten = this.deps.host.onNotification((n) => {
       if (n.method === 'thread.updated') this.mark(n.params.thread);
@@ -162,6 +177,7 @@ export class ThreadIndex {
         this.dirty.delete(n.params.threadId);
         this.sent.delete(n.params.threadId);
         this.removed.add(n.params.threadId);
+        this.deps.onSent?.();
       } else return;
       this.schedule();
     });
@@ -293,6 +309,21 @@ export class ThreadIndex {
     this.watchTimer = this.deps.clock.setTimeout(() => this.checkWatch(), WATCH_CHECK_MS);
   }
 
+  /** For sync-cache.ts: undefined until a full write has finished. */
+  snapshot(): { at: number; rows: Record<string, string>; removed?: string[] } | undefined {
+    if (this.full || !this.fullAt) return undefined;
+    return { at: this.fullAt, rows: Object.fromEntries(this.sent), ...(this.removed.size || this.removing.length ? { removed: [...new Set([...this.removed, ...this.removing])] } : {}) };
+  }
+
+  /** The deployment doesn't know this runner: everything goes again. */
+  forgetSent(): void {
+    if (!this.running) return;
+    this.sent.clear();
+    this.full = true;
+    for (const t of this.deps.host.list(['inbox', 'snoozed', 'archived'])) this.mark(t);
+    this.schedule();
+  }
+
   /** The backend got new enough for what rows held back: they go again. */
   refresh(): void {
     if (!this.running) return;
@@ -312,6 +343,7 @@ export class ThreadIndex {
       return;
     }
     this.removed.delete(t.id);
+    this.removing = this.removing.filter((id) => id !== t.id);
     this.dirty.set(t.id, row);
   }
 
@@ -328,7 +360,7 @@ export class ThreadIndex {
     if (!this.dirty.size && !this.removed.size && !this.full) return;
     this.flushing = true;
     const rows = [...this.dirty.values()];
-    const removed = [...this.removed];
+    this.removing = [...this.removed];
     const full = this.full;
     this.dirty.clear();
     this.removed.clear();
@@ -341,16 +373,23 @@ export class ThreadIndex {
           key: this.deps.key,
           runnerId: this.deps.runnerId,
           rows: batch,
-          removed: last ? removed : [],
+          removed: last ? this.removing : [],
           ...(last && keep ? { keep } : {}),
         });
         for (const r of batch) this.sent.set(r.threadId, writeKey(r));
       }
-      this.full = false;
+      if (full) {
+        this.full = false;
+        this.fullAt = this.deps.clock.now();
+      }
+      const wentAny = this.removing.length > 0;
+      this.removing = [];
+      if (rows.length || wentAny || full) this.deps.onSent?.();
     } catch (e) {
       // Put back what didn't go, unless something newer is waiting.
       for (const r of rows) if (!this.dirty.has(r.threadId) && this.sent.get(r.threadId) !== writeKey(r)) this.dirty.set(r.threadId, r);
-      for (const id of removed) this.removed.add(id);
+      for (const id of this.removing) this.removed.add(id);
+      this.removing = [];
       this.deps.log.warn('could not write the thread index; trying again', { error: String(e) });
       this.flushing = false;
       this.schedule(15_000);

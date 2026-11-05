@@ -214,6 +214,30 @@ describe('convex mirror e2e', { skip: LOCAL ? false : 'no local Convex deploymen
   // Step 6 part 2 (docs/protocol.md, "Other runners' threads"): the runner
   // writes its sidebar rows, and hands the app another runner's rows (here a
   // pretend "e2e-other" that only heartbeats and writes its index).
+  test('API 37: one account at a time, firstSeen, and a thread row without its messages', async () => {
+    // Its own each run: the local deployment keeps its rows between runs.
+    const runnerId = 'e2e-accounts-' + crypto.randomBytes(4).toString('hex');
+    const beat = (r: string) => api('mutation', 'sync:heartbeat', { key, runner: { runnerId: r, name: r, version: 'x', startedAt: 'x', draining: false, threadCount: 0 } });
+    assert.deepEqual(await beat(runnerId), { apiVersion: 37, firstSeen: true });
+    assert.deepEqual(await beat(runnerId), { apiVersion: 37 });
+
+    const acct = (id: string, title: string) => ({ id, provider: 'claude', title, usage: { windows: [{ kind: 'week', title: 'Week', remainingPercent: 40 }], readAt: '2026-11-05T00:00:00Z', source: 'x' } });
+    const { token } = await api('mutation', 'sync:issueToken', { key, kind: 'browser', name: 'e2e-37' });
+    const mine = async () => ((await api('query', 'phone:accounts', { token })) as { id: string; title: string; runnerId: string }[]).filter((a) => a.runnerId === runnerId).map((a) => `${a.id}:${a.title}`).sort();
+    await api('mutation', 'sync:setAccounts', { key, runnerId, accounts: [acct('a', 'A'), acct('b', 'B')] });
+    await api('mutation', 'sync:upsertAccounts', { key, runnerId, accounts: [acct('a', 'A2'), acct('c', 'C')], removed: ['b', 'never-there'] });
+    assert.deepEqual(await mine(), ['a:A2', 'c:C']);
+
+    const threadId = 'e2e-row-' + crypto.randomBytes(4).toString('hex');
+    const doc = { threadId, runnerId, title: 'Row', cwd: '/x', accountId: 'a', provider: 'claude', status: 'idle', needsYou: false, unread: false, preview: 'p', createdAt: 'x', lastActivityAt: 'x', lastActivityMs: 1, view: 'inbox' };
+    await api('mutation', 'sync:upsertThreads', { key, threads: [doc] });
+    assert.deepEqual(await api('query', 'phone:threadRow', { token, threadId }), doc);
+    await api('mutation', 'sync:removeThreads', { key, threadIds: [threadId] });
+    await assert.rejects(api('query', 'phone:threadRow', { token, threadId }));
+    // Offline again, or the phone's next new thread could pick this runner.
+    await api('mutation', 'sync:bye', { key, runnerId });
+  });
+
   test('the sidebar table: this runner\'s rows go up, another runner\'s come back as remoteThreads', async () => {
     const runnerId = readRunnerJson(home).sync?.runnerId;
     const { thread } = (await client.call('threads.create', { text: 'index me', cwd: home, accountId: 'claude-main' })) as any;

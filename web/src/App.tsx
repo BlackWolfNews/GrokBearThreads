@@ -4,6 +4,8 @@
 // the composer. A shared thread (/s/<slug>) is share.tsx.
 import { Component, Fragment, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useMutation, useQuery } from 'convex/react';
+import { useLiveQuery } from './live';
+import { useTranscript } from './transcript';
 import { ConvexError } from 'convex/values';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
@@ -132,7 +134,7 @@ function Empty() {
 }
 
 function Runners({ token }: { token: string }) {
-  const runners = useQuery(api.phone.runners, { token });
+  const runners = useLiveQuery(api.phone.runners, { token });
   if (!runners) return null;
   const online = runners.filter((r) => Date.now() - Date.parse(r.lastSeenAt) < 3 * 60_000);
   const names = online.map((r) => r.name).join(', ');
@@ -146,60 +148,46 @@ function Runners({ token }: { token: string }) {
 
 // ------------------------------------------------------------ thread
 
-// How many messages (tool lines included) a thread opens with, and how many
-// more each "Load earlier messages" adds. One live query covers them all, so
-// it reads Convex alone and works while the Mac is asleep.
-const FIRST_PAGE = 80;
-const MORE = 200;
-
 function ThreadView({ token, threadId }: { token: string; threadId: string }) {
-  const data = useQuery(api.phone.thread, { token, threadId });
-  const [limit, setLimit] = useState(FIRST_PAGE);
-  const page = useQuery(api.phone.messages, { token, threadId, limit, tools: true });
+  const t = useLiveQuery(api.phone.threadRow, { token, threadId });
+  const shown = useTranscript(token, threadId);
   // For thread: links, as agents may give only the start of an id.
-  const inbox = useQuery(api.phone.threads, { token, view: 'inbox' });
+  const inbox = useLiveQuery(api.phone.threads, { token, view: 'inbox' });
   const update = useMutation(api.phone.update);
   const [pending, setPending] = useState<Id<'commands'> | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const keepFromBottom = useRef<number | null>(null);
   const seen = useRef(false);
-  // Keeps the last page on screen while a bigger one loads.
-  const [shown, setShown] = useState<typeof page>(undefined);
-  useEffect(() => {
-    if (page) setShown(page);
-  }, [page]);
-
   const lastSeq = shown?.messages.at(-1)?.seq;
   useEffect(() => {
     bottom.current?.scrollIntoView({ block: 'end' });
-  }, [lastSeq, data?.thread.status]);
+  }, [lastSeq, t?.status]);
   // After loading earlier messages, stay where you were rather than jumping.
   useEffect(() => {
     const el = list.current;
     if (!el || keepFromBottom.current === null) return;
     el.scrollTop = el.scrollHeight - keepFromBottom.current;
     keepFromBottom.current = null;
-  }, [shown]);
+  }, [shown?.messages.length]);
 
   // Opening a thread here counts as reading it, like opening it on the Mac.
   useEffect(() => {
-    if (!data || seen.current) return;
+    if (!t || seen.current) return;
     seen.current = true;
-    if (data.thread.unread || data.thread.needsYou) void update({ token, threadId, change: { markSeen: true } });
-  }, [data, token, threadId, update]);
+    if (t.unread || t.needsYou) void update({ token, threadId, change: { markSeen: true } });
+  }, [t, token, threadId, update]);
 
   useEffect(() => {
-    if (data) document.title = `${data.thread.title || 'Untitled'} · Threadbear`;
+    if (t) document.title = `${t.title || 'Untitled'} · Threadbear`;
     return () => {
       document.title = 'Threadbear';
     };
-  }, [data?.thread.title]);
+  }, [t?.title]);
 
   const messages = (shown?.messages ?? []) as PageMessage[];
-  const t = data?.thread;
   const items = useMemo(() => fold(messages, t ? busy(t) : false), [messages, t?.status]);
-  if (!data || !shown || !t) return <div className="pad muted">Loading…</div>;
+  if (!shown || !t) return <div className="pad muted">Loading…</div>;
 
   const pictures = shown.images ?? [];
   const inText = new Map(pictures.filter((p) => p.src).map((p) => [p.src!, p.url]));
@@ -266,14 +254,14 @@ function ThreadView({ token, threadId }: { token: string; threadId: string }) {
         {shown.hasMore ? (
           <button
             className="btn earlier"
-            disabled={page !== shown}
+            disabled={shown.loadingMore}
             onClick={() => {
               const el = list.current;
               keepFromBottom.current = el ? el.scrollHeight - el.scrollTop : null;
-              setLimit((n) => n + MORE);
+              shown.loadMore();
             }}
           >
-            {page !== shown ? 'Loading…' : 'Load earlier messages'}
+            {shown.loadingMore ? 'Loading…' : 'Load earlier messages'}
           </button>
         ) : null}
         {items.map(renderItem)}

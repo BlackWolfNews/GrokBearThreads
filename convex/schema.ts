@@ -213,8 +213,6 @@ export default defineSchema({
     .searchIndex('search_title', { searchField: 'title', filterFields: ['view'] })
     .searchIndex('search_preview', { searchField: 'preview', filterFields: ['view'] }),
 
-  // The last 20 text messages of each thread (step 2), plus pages the
-  // phone asked for, which a cron deletes a day later.
   // Every text message of every thread, and one line per tool call (role
   // "tool", since API 2; docs/setup-and-updates.md step 2). Tool output and
   // diffs stay on the Mac; pictures are in replyImages and shareImages. pagedAt marks rows an old phone asked
@@ -394,7 +392,10 @@ export default defineSchema({
         notice: v.optional(v.string()),
       }),
     ),
-  }).index('by_runnerId', ['runnerId']),
+  })
+    .index('by_runnerId', ['runnerId'])
+    // sync:upsertAccounts (API 37) finds the one account it changes.
+    .index('by_runner_id', ['runnerId', 'id']),
 
   // APNs tokens for push (step 4), one row per phone install.
   devices: defineTable({
