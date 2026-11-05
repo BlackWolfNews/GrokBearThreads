@@ -273,6 +273,11 @@ it's sent; in the thread, clicking one opens the picture in Quick Look.
 Any other file you paste or drop in (a video, a PDF, a folder) goes in as
 its full path where you drop it, for the agent to open where it is.
 Nothing's copied, so a big one is fine.
+
+Paste a thread's id (Copy thread id in its ... menu) and it goes in as a
+chip with that thread's title. The agent gets a `thread:<id>` link it can
+read the thread from, and clicking the chip once it's sent opens that
+thread. An id that isn't one of your threads pastes as plain text.
 Stop (⌘.) ends a turn that's running.
 
 A message shows in the thread as soon as you send it, faded, with a

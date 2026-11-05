@@ -1142,9 +1142,9 @@ enum RowRenderer {
         cardChips(pictureChips(userWords(message), images: message.images))
     }
 
-    /// Notion cards mentioned in his words drawn as chips, rather than the
-    /// raw Markdown link the message holds. A click opens the card like any
-    /// other link, and the card's title is what the hover card and a Quote
+    /// Notion cards and threads mentioned in his words drawn as chips,
+    /// rather than the raw Markdown link the message holds. A click opens
+    /// the card like any other link, or the thread in the app, and the card's title is what the hover card and a Quote
     /// or Explain of it read.
     private static func cardChips(_ text: NSAttributedString) -> NSAttributedString {
         let found = CardMentions.find(in: text.string)
@@ -1153,9 +1153,11 @@ enum RowRenderer {
         for mention in found.reversed() {
             guard let url = URL(string: mention.url) else { continue }
             var attributes = out.attributes(at: mention.range.location, effectiveRange: nil)
-            attributes[.attachment] = CardChip.attachment(title: mention.title, font: attributes[.font] as? NSFont ?? Theme.bodyFont)
+            attributes[.attachment] = CardChip.attachment(title: mention.title, kind: mention.kind, font: attributes[.font] as? NSFont ?? Theme.bodyFont)
+            // A thread: link opens that thread (WorkLinks); it has no page
+            // for the hover card to show.
             attributes[.link] = url
-            attributes[.tbPeek] = LinkPeek(url: url, title: mention.title)
+            if mention.kind == .card { attributes[.tbPeek] = LinkPeek(url: url, title: mention.title) }
             attributes[.tbCardChip] = mention.title
             out.replaceCharacters(in: mention.range, with: NSAttributedString(string: "\u{FFFC}", attributes: attributes))
         }

@@ -11,4 +11,10 @@ struct CardMentionsTests {
         #expect(CardMentions.find(in: "![a picture](https://www.notion.so/t3)").isEmpty)
         #expect(CardMentions.find(in: "[c](https://notion.so.evil.com/t3) [d](http://www.notion.so/t3)").isEmpty)
     }
+
+    @Test func threadLinksAreChipsToo() {
+        let found = CardMentions.find(in: "See [Fix the chip](thread:0cf430ac-f429) and [x](thread:a b)")
+        #expect(found.map(\.title) == ["Fix the chip"])
+        #expect(found.first?.isThread == true)
+    }
 }

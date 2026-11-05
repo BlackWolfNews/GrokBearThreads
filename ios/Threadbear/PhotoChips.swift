@@ -71,9 +71,9 @@ enum PhotoChip {
         return image.withRenderingMode(.alwaysOriginal)
     }
 
-    /// A Notion card's chip: its title, cut off if it's long, as a mention
+    /// A Notion card's or thread's chip: its title, cut off if it's long, as a mention
     /// in a message is the raw link otherwise (`CardMentions`).
-    static func cardImage(title: String, metrics: Metrics, traits: UITraitCollection) -> UIImage {
+    static func cardImage(title: String, thread: Bool = false, metrics: Metrics, traits: UITraitCollection) -> UIImage {
         let dark = traits.userInterfaceStyle == .dark
         let secondary = UIColor.secondaryLabel.resolvedColor(with: traits)
         let style = NSMutableParagraphStyle()
@@ -89,7 +89,7 @@ enum PhotoChip {
             shape.lineWidth = 0.5
             shape.stroke()
             let icon = CGRect(x: metrics.inset, y: (size.height - metrics.icon) / 2, width: metrics.icon, height: metrics.icon)
-            if let symbol = UIImage(systemName: "square.text.square", withConfiguration: UIImage.SymbolConfiguration(pointSize: metrics.icon * 0.78))?
+            if let symbol = UIImage(systemName: thread ? "bubble.left" : "square.text.square", withConfiguration: UIImage.SymbolConfiguration(pointSize: metrics.icon * 0.78))?
                 .withTintColor(secondary, renderingMode: .alwaysOriginal) {
                 symbol.draw(in: CGRect(x: icon.midX - symbol.size.width / 2, y: icon.midY - symbol.size.height / 2,
                                        width: symbol.size.width, height: symbol.size.height))
@@ -116,7 +116,7 @@ enum PhotoChip {
                 var last = 0
                 for mention in CardMentions.find(in: words) {
                     let before = ns.substring(with: NSRange(location: last, length: mention.range.location - last))
-                    let chip = Text(Image(uiImage: cardImage(title: mention.title, metrics: metrics, traits: traits)))
+                    let chip = Text(Image(uiImage: cardImage(title: mention.title, thread: mention.isThread, metrics: metrics, traits: traits)))
                         .baselineOffset(metrics.baselineOffset)
                     out = Text("\(out)\(Text(verbatim: before))\(chip)")
                     last = NSMaxRange(mention.range)

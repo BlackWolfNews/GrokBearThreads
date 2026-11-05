@@ -1,8 +1,9 @@
 import AppKit
 import ThreadbearCore
 
-/// A Notion card mentioned among the words (`CardMentions`): a small rounded
-/// tag with the card's title, in place of the raw link (Mike asked 3 Nov).
+/// A Notion card or another thread mentioned among the words
+/// (`CardMentions`): a small rounded tag with the card's or thread's title,
+/// in place of the raw link (Mike asked 3 Nov, for threads 5 Nov).
 /// It looks like a picture's chip, so a message's chips read as one family.
 enum CardChip {
     /// A long title is cut off rather than taking the whole line.
@@ -23,7 +24,12 @@ enum CardChip {
         return NSSize(width: (metrics.inset + metrics.icon + metrics.gap + words + metrics.trailing).rounded(.up), height: metrics.height)
     }
 
-    static func draw(in rect: NSRect, title: String, metrics: PictureChip.Metrics) {
+    /// A card's icon, or a speech bubble for a thread.
+    private static func symbol(_ kind: CardMentions.Kind) -> (name: String, label: String) {
+        kind == .thread ? ("bubble.left", "Thread") : ("square.text.square", "Notion card")
+    }
+
+    static func draw(in rect: NSRect, title: String, kind: CardMentions.Kind = .card, metrics: PictureChip.Metrics) {
         let shape = NSBezierPath(roundedRect: rect.insetBy(dx: 0.25, dy: 0.25), xRadius: metrics.radius, yRadius: metrics.radius)
         PictureChip.fill.setFill()
         shape.fill()
@@ -32,7 +38,7 @@ enum CardChip {
         shape.stroke()
 
         let icon = NSRect(x: rect.minX + metrics.inset, y: rect.midY - metrics.icon / 2, width: metrics.icon, height: metrics.icon)
-        if let symbol = NSImage(systemSymbolName: "square.text.square", accessibilityDescription: "Notion card")?
+        if let symbol = NSImage(systemSymbolName: symbol(kind).name, accessibilityDescription: symbol(kind).label)?
             .withSymbolConfiguration(.init(pointSize: metrics.icon * 0.78, weight: .regular)) {
             let size = symbol.size
             let tinted = NSImage(size: size, flipped: false) { box in
@@ -54,12 +60,12 @@ enum CardChip {
     }
 
     /// Mike's bubble: the chip as an attachment that draws itself.
-    static func attachment(title: String, font: NSFont) -> NSTextAttachment {
+    static func attachment(title: String, kind: CardMentions.Kind = .card, font: NSFont) -> NSTextAttachment {
         let metrics = PictureChip.Metrics(font: font)
         let size = size(title, metrics: metrics)
         let attachment = NSTextAttachment()
         attachment.image = NSImage(size: size, flipped: false) { rect in
-            draw(in: rect, title: title, metrics: metrics)
+            draw(in: rect, title: title, kind: kind, metrics: metrics)
             return true
         }
         attachment.bounds = NSRect(x: 0, y: metrics.baselineOffset, width: size.width, height: size.height)
@@ -67,15 +73,18 @@ enum CardChip {
     }
 }
 
-/// A card in the composer's words. It carries the link it stands for, so the
-/// draft read off the text is the same plain link the message will hold.
+/// A card or thread in the composer's words. It carries the link it stands
+/// for, so the draft read off the text is the same plain link the message
+/// will hold.
 final class CardAttachment: NSTextAttachment {
     let reference: String
     let title: String
+    let kind: CardMentions.Kind
 
-    init(reference: String, title: String) {
+    init(reference: String, title: String, kind: CardMentions.Kind = .card) {
         self.reference = reference
         self.title = title
+        self.kind = kind
         super.init(data: nil, ofType: nil)
         let cell = CardChipCell()
         attachmentCell = cell
@@ -98,7 +107,7 @@ final class CardChipCell: NSTextAttachmentCell {
     override func wantsToTrackMouse() -> Bool { false }
 
     override func draw(withFrame cellFrame: NSRect, in controlView: NSView?) {
-        CardChip.draw(in: cellFrame, title: card?.title ?? "", metrics: metrics)
+        CardChip.draw(in: cellFrame, title: card?.title ?? "", kind: card?.kind ?? .card, metrics: metrics)
     }
 
     override func draw(withFrame cellFrame: NSRect, in controlView: NSView?, characterIndex charIndex: Int, layoutManager: NSLayoutManager) {

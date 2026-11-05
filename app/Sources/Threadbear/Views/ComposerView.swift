@@ -952,13 +952,14 @@ extension ComposerTextView {
         let out = NSMutableAttributedString()
         var images = draft.images.makeIterator()
         var run = ""
-        // Words, with any Notion card mentioned in them drawn as its chip.
+        // Words, with any Notion card or thread mentioned in them drawn as
+        // its chip.
         func flush() {
             let ns = run as NSString
             var last = 0
             for mention in CardMentions.find(in: run) {
                 out.append(NSAttributedString(string: ns.substring(with: NSRange(location: last, length: mention.range.location - last)), attributes: attributes))
-                out.append(chip(CardAttachment(reference: ns.substring(with: mention.range), title: mention.title)))
+                out.append(chip(CardAttachment(reference: ns.substring(with: mention.range), title: mention.title, kind: mention.kind)))
                 last = NSMaxRange(mention.range)
             }
             out.append(NSAttributedString(string: ns.substring(from: last), attributes: attributes))
@@ -1148,9 +1149,21 @@ extension ComposerTextView {
         return super.preferredPasteboardType(from: availableTypes, restrictedToTypesFrom: allowedTypes)
     }
 
+    /// A paste that's only a known thread's id (or link), as the link that
+    /// draws as its chip. Any other id pastes as words.
+    private static func threadReference(_ pasted: String) -> String? {
+        let threads = MainActor.assumeIsolated { AppModel.shared.threads }
+        guard let id = CardMentions.pastedThreadId(pasted, known: { threads[$0] != nil }) else { return nil }
+        return CardMentions.threadReference(id: id, title: threads[id]?.title ?? "")
+    }
+
     override func readSelection(from pboard: NSPasteboard, type: NSPasteboard.PasteboardType) -> Bool {
-        // A card's link pasted back (or from a message) is a chip again.
-        if type == .string, let words = pboard.string(forType: .string), !CardMentions.find(in: words).isEmpty, let storage = textStorage {
+        // A card's link pasted back (or from a message) is a chip again, and
+        // so is a thread's id from "Copy thread id" (Mike asked 5 Nov): it
+        // goes in as a thread: link with the thread's title.
+        if type == .string, var words = pboard.string(forType: .string), let storage = textStorage,
+           !CardMentions.find(in: words).isEmpty || Self.threadReference(words) != nil {
+            if let reference = Self.threadReference(words) { words = reference }
             let piece = chips(for: Draft(text: InlinePictures.words(words)))
             let replace = rangeForUserTextChange
             guard replace.location != NSNotFound, shouldChangeText(in: replace, replacementString: piece.string) else { return false }

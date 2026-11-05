@@ -355,9 +355,18 @@ enum Automation {
                                    windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
             }
             guard let down = mouse(.leftMouseDown, at(x)) else { return "error no event" }
+            let end = (c["toX"] as? Double) ?? x
+            // A text view's mouseDown waits in its own loop for the button to
+            // come up, so a click on its words (a link, a chip) has the up
+            // queued first, or the main thread sits there for good.
+            if end == x, window.contentView?.superview?.hitTest(at(x)) is NSTextView, let up = mouse(.leftMouseUp, at(x)) {
+                NSApp.postEvent(up, atStart: false)
+                window.sendEvent(down)
+                try? await Task.sleep(for: .milliseconds(350))
+                return "ok"
+            }
             window.sendEvent(down)
             try? await Task.sleep(for: .milliseconds(40))
-            let end = (c["toX"] as? Double) ?? x
             if end != x {
                 for step in 1...8 {
                     if let drag = mouse(.leftMouseDragged, at(x + (end - x) * Double(step) / 8)) { window.sendEvent(drag) }
@@ -404,6 +413,16 @@ enum Automation {
             let range = c["replace"] as? Bool == true ? NSRange(location: 0, length: (composer.string as NSString).length) : composer.selectedRange()
             composer.insertText(c["text"] as? String ?? "", replacementRange: range)
             return "ok"
+        case "paste":
+            // `text` pasted into the composer as ⌘V would, through a private
+            // pasteboard so Mike's clipboard is left alone.
+            guard let composer = findComposer(in: window?.contentView) else { return "error no composer" }
+            window?.makeFirstResponder(composer)
+            let board = NSPasteboard(name: .init("com.mikerosoft.threadbear.automation-paste"))
+            board.clearContents()
+            board.setString(c["text"] as? String ?? "", forType: .string)
+            defer { board.releaseGlobally() }
+            return composer.readSelection(from: board, type: .string) ? "ok" : "error paste refused"
         case "return":
             // `"shift": true` for Shift-Return (a new line, carrying a list on).
             // `"focused": true` presses it where the cursor is, as `type` does.

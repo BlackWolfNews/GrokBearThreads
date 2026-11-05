@@ -122,6 +122,27 @@ final class ProjectTests: XCTestCase {
         XCTAssertEqual(CardMentions.find(in: "no links here").count, 0)
     }
 
+    func testThreadLinksAreMentionsToo() {
+        let ref = CardMentions.threadReference(id: "0cf430ac-f429", title: "Fix [the]\nchip")
+        XCTAssertEqual(ref, "[Fix \\[the\\] chip](thread:0cf430ac-f429)", "one line, brackets escaped")
+        let found = CardMentions.find(in: "See \(ref) and [card](https://notion.so/a)")
+        XCTAssertEqual(found.map(\.kind), [.thread, .card])
+        XCTAssertEqual(found.first?.title, "Fix [the] chip")
+        XCTAssertEqual(found.first?.url, "thread:0cf430ac-f429")
+        XCTAssertEqual(CardMentions.threadReference(id: "a", title: "  "), "[Thread](thread:a)")
+        XCTAssertEqual(CardMentions.find(in: "[x](thread:a b) [y](threads:a) ![z](thread:a)").count, 0)
+    }
+
+    func testAPastedThreadIdOfAKnownThread() {
+        let known: (String) -> Bool = { $0 == "0cf430ac-f429-4ed9" }
+        XCTAssertEqual(CardMentions.pastedThreadId(" 0cf430ac-f429-4ed9\n", known: known), "0cf430ac-f429-4ed9")
+        XCTAssertEqual(CardMentions.pastedThreadId("0CF430AC-F429-4ED9", known: known), "0cf430ac-f429-4ed9")
+        XCTAssertEqual(CardMentions.pastedThreadId("threadbear://thread/0cf430ac-f429-4ed9", known: known), "0cf430ac-f429-4ed9")
+        XCTAssertEqual(CardMentions.pastedThreadId("thread:0cf430ac-f429-4ed9", known: known), "0cf430ac-f429-4ed9")
+        XCTAssertNil(CardMentions.pastedThreadId("11111111-2222", known: known), "an unknown id stays words")
+        XCTAssertNil(CardMentions.pastedThreadId("see 0cf430ac-f429-4ed9", known: known), "only an id on its own")
+    }
+
     func testACardsReferenceIsFoundAsAMention() {
         let card = ProjectTask(id: "a", title: "Fix [the] button (soon)", url: "https://www.notion.so/a", status: "Doing")
         let found = CardMentions.find(in: "See \(card.reference) next")
