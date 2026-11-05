@@ -18,7 +18,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { ConvexClient } from 'convex/browser';
 import { phonePicture } from './project-icons.ts';
-import { imagesInEvent, readReplyImage, readShareImage, replyImagesInEvent, type ReplyImage, type ShareImage } from './share-images.ts';
+import { imagesInEvent, readReplyImage, readShareImage, replyImagesInEvent, shareRoots, type ReplyImage, type ShareImage } from './share-images.ts';
 import { extForMediaType, sniffImage } from './media.ts';
 import { makeFunctionReference } from 'convex/server';
 import type { Clock, TimerHandle } from './clock.ts';
@@ -1388,13 +1388,19 @@ export class ConvexSync {
       this.imagesUp.set(img.threadId, up);
       const id = `${img.seq} ${img.path}`;
       if (!up.has(id) && this.sharedNow.get(img.threadId)) {
-        const file = readShareImage(img.path);
+        // Only real pictures from the thread's own places, typed by their
+        // bytes: the page is public, and a path is only what the agent wrote.
+        const roots = shareRoots(this.cwdOf(img.threadId), this.deps.home ? paths.thread(this.deps.home, img.threadId) : undefined);
+        const file = readShareImage(img.path, roots);
         if ('skip' in file) {
           this.deps.log.warn('shared picture not sent', { threadId: img.threadId, path: img.path, why: file.skip });
         } else {
           const url = (await this.post('mutation', 'sync:iconUploadUrl', { key })) as string;
-          const storageId = await this.upload(url, file.bytes, img.mediaType);
-          const { threadId, seq, path: file_, src, mediaType, width, height } = img;
+          const { mediaType } = file;
+          const storageId = await this.upload(url, file.bytes, mediaType);
+          const { threadId, seq, path: file_, src } = img;
+          const width = file.width ?? img.width;
+          const height = file.height ?? img.height;
           await this.post('mutation', 'sync:addShareImage', { key, threadId, seq, path: file_, ...(src ? { src } : {}), storageId, mediaType, ...(width ? { width } : {}), ...(height ? { height } : {}) });
         }
         up.add(id);

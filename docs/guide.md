@@ -843,7 +843,10 @@ for each thing an agent did. Tool output and images stay on your Mac. A photo
 you send from your phone passes through that deployment on its way to the Mac
 and is deleted once the Mac has it.
 A thread you share can be read by anyone with its link, pictures included,
-and only that thread. The pictures are uploaded only while it's shared.
+and only that thread. The pictures are uploaded only while it's shared,
+and only real pictures from the thread's folder, its own attachments and
+screenshots, or a temp folder; one an agent points at anywhere else stays
+on your Mac and the page shows its caption instead.
 Notifications to your phone go through a small relay Mike runs, because
 Apple only delivers notifications for his app through his key. The text is
 locked with a key only your phone and your deployment have, so the relay

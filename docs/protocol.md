@@ -3108,6 +3108,13 @@ type ThreadShare = {
   When the thread is shared the runner looks through its whole history,
   then sends new ones as they come; each file goes once (`sync:shareImages`
   says what's up), at most 10 MB. Stopping sharing drops them all.
+- As the page is public and a path is only what the agent wrote, a file
+  goes up only if it's really a PNG, JPEG, GIF or WebP by its bytes (the
+  type sent is the one its bytes say, not its name's), isn't itself a
+  symlink, and is, by its real path, under the thread's folder, the
+  thread's own folder in the data dir (where attachments and tool pictures
+  are copied), `os.tmpdir()` or `/tmp`. Anything else stays on the Mac
+  with a line in the runner log and shows on the page as its alt text.
 - The thread's row on the mirror has `share: { access, slug }` (backend
   API 8). An older backend gets the row without it, and gets it once a
   heartbeat says it's new enough.

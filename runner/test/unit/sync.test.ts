@@ -1171,10 +1171,21 @@ test('sharing: the row carries share, "off" included, once the backend takes it'
   assert.deepEqual(docs().filter((d) => d.threadId === a.id).at(-1)!.share, { access: 'off', slug });
 });
 
+// A PNG's header, enough for the sniffing a shared picture gets.
+function pngBytes(w: number, h: number): Buffer {
+  const b = Buffer.alloc(24);
+  b.writeUInt32BE(0x89504e47, 0);
+  b.writeUInt32BE(0x0d0a1a0a, 4);
+  b.writeUInt32BE(w, 16);
+  b.writeUInt32BE(h, 20);
+  return b;
+}
+
 test('sharing: pictures of a shared thread go to file storage, once each, and go when it stops', async () => {
   const dir = tmpDir();
   const pic = path.join(dir, 'chart.png');
-  fs.writeFileSync(pic, Buffer.from('PNGBYTES'));
+  const png = pngBytes(32, 16);
+  fs.writeFileSync(pic, png);
   const calls: Call[] = [];
   const uploads: string[] = [];
   let stored: { seq: number; path: string }[] = [];
@@ -1195,7 +1206,7 @@ test('sharing: pictures of a shared thread go to file storage, once each, and go
       return null;
     },
     upload: async (_url, bytes) => {
-      uploads.push(Buffer.from(bytes).toString());
+      uploads.push(Buffer.from(bytes).toString('hex'));
       return `st_${uploads.length}`;
     },
   });
@@ -1223,7 +1234,8 @@ test('sharing: pictures of a shared thread go to file storage, once each, and go
   assert.equal(added[0]!.src, pic);
   assert.equal(added[0]!.mediaType, 'image/png');
   assert.equal(added[0]!.storageId, 'st_1');
-  assert.deepEqual(uploads, ['PNGBYTES']);
+  assert.deepEqual(uploads, [png.toString('hex')]);
+  assert.deepEqual([added[0]!.width, added[0]!.height], [32, 16]);
 
   // A restart doesn't send it again: the mirror says it has it.
   stored = [{ seq: added[0]!.seq as number, path: pic }];
@@ -1244,7 +1256,7 @@ test('sharing: pictures of a shared thread go to file storage, once each, and go
 test('sharing: a shared thread seen before it comes across in a handover has its pictures sent once it arrives', async () => {
   const dir = tmpDir();
   const pic = path.join(dir, 'shot.png');
-  fs.writeFileSync(pic, Buffer.from('PNGBYTES'));
+  fs.writeFileSync(pic, pngBytes(4, 4));
   const calls: Call[] = [];
   const h = makeHarness();
   const t = h.runner.create({ text: 'look', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;

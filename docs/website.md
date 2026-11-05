@@ -68,7 +68,8 @@ preview. With Mike's token it also answers while the
 thread isn't shared, with `manage`, so his page keeps its controls.
 
 Pictures are in file storage (`shareImages`), uploaded by the runner only
-while the thread is shared and dropped when it stops. A picture written in
+while the thread is shared and dropped when it stops, and only real
+pictures from the thread's own places (docs/protocol.md, "Sharing"). A picture written in
 a message's Markdown (`src`) takes the place of that Markdown image; the
 rest go after the row they came with. Mike's own thread page shows them
 too (`phone:messages` returns them). A Markdown picture that wasn't

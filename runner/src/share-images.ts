@@ -3,6 +3,7 @@
 // them. Only for shared threads: the rest keep their pictures on the Mac.
 import fs from 'node:fs';
 import os from 'node:os';
+import path from 'node:path';
 import type { PersistedEvent } from './protocol.ts';
 import { absolute } from './highlights.ts';
 import { sniffImage, sniffVideo } from './media.ts';
@@ -86,8 +87,8 @@ export function imagesInEvent(e: PersistedEvent, home = os.homedir()): ShareImag
   return [];
 }
 
-// The bytes to upload, or why not.
-export function readShareImage(file: string): { bytes: Uint8Array } | { skip: string } {
+// A file's bytes, at most SHARE_IMAGE_BYTES, or why not.
+function readCapped(file: string): { bytes: Uint8Array } | { skip: string } {
   let size: number;
   try {
     size = fs.statSync(file).size;
@@ -96,6 +97,58 @@ export function readShareImage(file: string): { bytes: Uint8Array } | { skip: st
   }
   if (size > SHARE_IMAGE_BYTES) return { skip: `it's ${Math.round(size / 1024 / 1024)} MB` };
   return { bytes: new Uint8Array(fs.readFileSync(file)) };
+}
+
+// Where a shared thread's pictures may come from: its folder, its own
+// folder in the data dir (media/, where attachments and tool pictures are
+// copied) and the temp folders agents save screenshots in. Anything else
+// is somewhere an agent talked into it could point at to publish a file.
+export function shareRoots(cwd: string | undefined, threadDir: string | undefined): string[] {
+  return [cwd, threadDir, os.tmpdir(), '/tmp'].filter((d): d is string => Boolean(d));
+}
+
+function under(file: string, dir: string): boolean {
+  const rel = path.relative(dir, file);
+  return rel === '' || (rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel));
+}
+
+function realOr(p: string): string {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return p;
+  }
+}
+
+const OUTSIDE = "it isn't in the thread's folder, its media or a temp folder";
+
+// The bytes of a shared thread's picture and what they really are, or why
+// not. It goes to a public page, so: a file under `roots` (by its real
+// path, so a folder link can't lead out), not itself a link, and really a
+// picture whatever its name says. The type comes from the bytes too.
+export function readShareImage(file: string, roots: string[]): { bytes: Uint8Array; mediaType: string; width?: number; height?: number } | { skip: string } {
+  const real = roots.flatMap((r) => [r, realOr(r)]);
+  if (!real.some((r) => under(path.resolve(file), r))) return { skip: OUTSIDE };
+  let st: fs.Stats;
+  try {
+    st = fs.lstatSync(file);
+  } catch {
+    return { skip: 'the file is gone' };
+  }
+  if (st.isSymbolicLink()) return { skip: "it's a link" };
+  if (!st.isFile()) return { skip: "it can't be read" };
+  if (!real.some((r) => under(realOr(file), r))) return { skip: OUTSIDE };
+  let read: ReturnType<typeof readCapped>;
+  try {
+    read = readCapped(file);
+  } catch {
+    return { skip: "it can't be read" };
+  }
+  if ('skip' in read) return read;
+  // Pictures only: the page draws them with <img>.
+  const info = sniffImage(Buffer.from(read.bytes));
+  if (!info) return { skip: "it isn't a picture" };
+  return { bytes: read.bytes, mediaType: info.mediaType, ...(info.width ? { width: info.width } : {}), ...(info.height ? { height: info.height } : {}) };
 }
 
 // What the phone shows of any thread, shared or not (backend API 24,
@@ -126,9 +179,9 @@ export function replyImagesInEvent(e: PersistedEvent, cwd: string | undefined, h
 // write any path with a .png on the end, so the file has to be a picture or
 // a video.
 export function readReplyImage(file: string): { bytes: Uint8Array; mediaType: string; width?: number; height?: number } | { skip: string } {
-  let read: ReturnType<typeof readShareImage>;
+  let read: ReturnType<typeof readCapped>;
   try {
-    read = readShareImage(file);
+    read = readCapped(file);
   } catch {
     return { skip: "it can't be read" };
   }

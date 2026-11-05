@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { imagesInEvent, localImagePath, markdownImages, PIN_TOOL, readReplyImage, replyImagesInEvent } from '../../src/share-images.ts';
+import os from 'node:os';
+import { imagesInEvent, localImagePath, markdownImages, PIN_TOOL, readReplyImage, readShareImage, replyImagesInEvent, shareRoots } from '../../src/share-images.ts';
 import { tmpDir } from '../helpers/fakes.ts';
 
 test('share images: Markdown pictures on this Mac, not on the web', () => {
@@ -133,4 +134,64 @@ test('reply images: a file has to really be a picture', () => {
   assert.deepEqual(readReplyImage(fake), { skip: "it isn't a picture" });
   assert.deepEqual(readReplyImage(path.join(dir, 'gone.png')), { skip: 'the file is gone' });
   assert.deepEqual(readReplyImage(dir + '/'), { skip: "it can't be read" });
+});
+
+// A shared thread's pictures go to a public page, so only real pictures
+// from the places a thread's pictures come from go up (docs/protocol.md,
+// "Sharing").
+function pngHeader(w: number, h: number): Buffer {
+  const b = Buffer.alloc(24);
+  b.writeUInt32BE(0x89504e47, 0);
+  b.writeUInt32BE(0x0d0a1a0a, 4);
+  b.writeUInt32BE(w, 16);
+  b.writeUInt32BE(h, 20);
+  return b;
+}
+
+test('share images: a real picture in the thread folder goes, typed by its bytes', () => {
+  const cwd = tmpDir();
+  // Named .jpg but a PNG: the type comes from the bytes.
+  const file = path.join(cwd, 'shot.jpg');
+  fs.writeFileSync(file, pngHeader(640, 480));
+  const read = readShareImage(file, [cwd]);
+  assert.ok(!('skip' in read), JSON.stringify(read));
+  assert.deepEqual([read.mediaType, read.width, read.height], ['image/png', 640, 480]);
+});
+
+test("share images: a text file named .png, a symlink and a picture outside the thread's folders stay on the Mac", () => {
+  const cwd = tmpDir();
+  const elsewhere = tmpDir();
+  const secret = path.join(elsewhere, 'id_rsa');
+  fs.writeFileSync(secret, '-----BEGIN OPENSSH PRIVATE KEY-----');
+  const link = path.join(cwd, 'link.png');
+  fs.symlinkSync(secret, link);
+  assert.deepEqual(readShareImage(link, [cwd]), { skip: "it's a link" });
+  // A link to a real picture is refused too: the check is on the link.
+  const realPic = path.join(cwd, 'real.png');
+  fs.writeFileSync(realPic, pngHeader(1, 1));
+  const picLink = path.join(cwd, 'pic-link.png');
+  fs.symlinkSync(realPic, picLink);
+  assert.deepEqual(readShareImage(picLink, [cwd]), { skip: "it's a link" });
+  const renamed = path.join(cwd, 'notes.png');
+  fs.writeFileSync(renamed, 'API_KEY=hunter2');
+  assert.deepEqual(readShareImage(renamed, [cwd]), { skip: "it isn't a picture" });
+  const outside = path.join(elsewhere, 'secret.png');
+  fs.writeFileSync(outside, pngHeader(10, 10));
+  assert.deepEqual(readShareImage(outside, [cwd]), { skip: "it isn't in the thread's folder, its media or a temp folder" });
+  // A video can't go on the page, which draws with <img>.
+  const mp4 = path.join(cwd, 'clip.mp4');
+  fs.writeFileSync(mp4, Buffer.concat([Buffer.from([0, 0, 0, 16]), Buffer.from('ftypisom'), Buffer.alloc(4)]));
+  assert.equal('skip' in readShareImage(mp4, [cwd]), true);
+  assert.deepEqual(readShareImage(path.join(cwd, 'gone.png'), [cwd]), { skip: 'the file is gone' });
+});
+
+test("share images: the places are the thread's folder, its data folder and the temp folders", () => {
+  const roots = shareRoots('/Users/ann/dev/app', '/data/threads/t1');
+  assert.ok(roots.includes('/Users/ann/dev/app'));
+  assert.ok(roots.includes('/data/threads/t1'));
+  assert.ok(roots.includes(os.tmpdir()));
+  assert.ok(roots.includes('/tmp'));
+  assert.deepEqual(shareRoots(undefined, undefined), [os.tmpdir(), '/tmp']);
+  // /Users/x/secret.png is in none of them.
+  assert.deepEqual(readShareImage('/Users/x/secret.png', roots), { skip: "it isn't in the thread's folder, its media or a temp folder" });
 });
