@@ -2,7 +2,10 @@
 // (scripts/clips.mjs). That window and anything its app draws over it (menus, pickers), no
 // cursor, at the window's full pixel size.
 //
-//   swift scripts/record-window.swift <window id> <out.mov> <seconds>
+//   swift scripts/record-window.swift <window id> <out.mov> <seconds> [--window-only]
+//
+// --window-only records that window alone, without the app's other windows over it (the review
+// window, which the main window would otherwise cover), but without its menus and pickers too.
 //
 // Stops after <seconds>, or earlier when a file named <out.mov>.stop appears. Needs Screen
 // Recording permission for the shell running it.
@@ -14,7 +17,9 @@ import AppKit
 // ScreenCaptureKit needs a connection to the window server, which NSApplication sets up.
 _ = NSApplication.shared
 
-let args = CommandLine.arguments
+let allArgs = CommandLine.arguments
+let windowOnly = allArgs.contains("--window-only")
+let args = allArgs.filter { $0 != "--window-only" }
 guard args.count == 4, let windowID = UInt32(args[1]), let seconds = Double(args[3]) else {
   FileHandle.standardError.write("usage: record-window.swift <window id> <out.mov> <seconds>\n".data(using: .utf8)!)
   exit(2)
@@ -41,11 +46,14 @@ Task {
           let display = content.displays.first(where: { $0.frame.intersects(window.frame) }) else {
       print("no app or display for window \(windowID)"); exit(1)
     }
-    let filter = SCContentFilter(display: display, including: [app], exceptingWindows: [])
+    let filter = windowOnly ? SCContentFilter(desktopIndependentWindow: window) : SCContentFilter(display: display, including: [app], exceptingWindows: [])
     let config = SCStreamConfiguration()
     let scale = CGFloat(filter.pointPixelScale)
-    config.sourceRect = CGRect(x: window.frame.minX - display.frame.minX, y: window.frame.minY - display.frame.minY,
-                               width: window.frame.width, height: window.frame.height)
+    if !windowOnly {
+      config.sourceRect = CGRect(x: window.frame.minX - display.frame.minX, y: window.frame.minY - display.frame.minY,
+                                 width: window.frame.width, height: window.frame.height)
+    }
+    config.ignoreShadowsSingleWindow = true
     config.width = Int(window.frame.width * scale)
     config.height = Int(window.frame.height * scale)
     config.backgroundColor = .clear

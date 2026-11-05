@@ -556,7 +556,7 @@ is an error. Commands marked "the open thread" act on `id` when it's given
 | `select-text` | `row`, `words`, `action` | selects the first match of `words` in a message row and shows the selection bar (says its window number); `action` (`explain`, `quote` or `copy`) clicks that instead. Explain opens the pane; `dump`'s panels line shows its answers |
 | `menu` | `row`, `click` | a transcript row's context menu, or chooses an item from it |
 | `debug-info`, `copy-thread-id`, `clipboard` | `row`, `id` | what "Copy debug info" and "Copy thread id" (the open thread) copy, copied to the instance's pasteboard as the menu items do; `clipboard` reads it back |
-| `appearance`, `resize` | `mode` (light, dark, system); `w`, `h` | |
+| `appearance`, `resize` | `mode` (light, dark, system); `w`, `h`, `review` (a review's id: resize its window instead) | |
 | `zoom` | `to` (in, out, reset) or `percent` | the window's zoom, as ⌘=, ⌘- and ⌘0 set it; says the percent it's at |
 | `archive`, `unarchive`, `snooze` | `id`, `seconds` (default 3600) | the open thread; says which thread it acted on |
 | `undo-archive`, `open-archived` | | the Archived note's Undo, or a click on the note (opens the thread) |

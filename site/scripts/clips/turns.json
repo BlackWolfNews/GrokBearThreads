@@ -1,68 +1,251 @@
-[
-  {
-    "match": "Advanced tab",
-    "thinking": "Find every place the tab's name shows up, rename it, then run the settings tests.",
-    "tools": [
-      {
-        "title": "rg -n \"Advanced\" app/Sources",
-        "result": "SettingsView.swift:41:  Tab(\"Advanced\")\nSettingsView.swift:88:  // Advanced settings",
-        "ms": 700
-      },
-      {
-        "name": "Read",
-        "kind": "read",
-        "title": "Read SettingsView.swift",
-        "input": {
-          "file_path": "/Users/mike/dev/threadbear/app/Sources/SettingsView.swift"
+{
+  "turns": [
+    {
+      "match": "Advanced tab",
+      "thinking": "Find every place the tab's name shows up, rename it, then run the settings tests.",
+      "tools": [
+        {
+          "title": "rg -n \"Advanced\" app/Sources",
+          "result": "SettingsView.swift:41:  Tab(\"Advanced\")\nSettingsView.swift:88:  // Advanced settings",
+          "ms": 700
         },
-        "ms": 500
-      },
-      {
-        "title": "swift test --filter Settings",
-        "result": "Executed 14 tests, with 0 failures",
-        "ms": 900
-      }
-    ],
-    "reply": "Done. The tab's called **Runner** now, and nothing else in the app still says Advanced. The settings tests pass, all 14 of them.",
-    "chunk": 4,
-    "chunkMs": 28
-  },
-  {
-    "match": "Tail the Convex logs",
-    "thinking": "Pull the last hour of logs and look for errors.",
-    "tools": [
-      {
-        "title": "npx convex logs --history 200",
-        "result": "2 errors in the last hour\nwalks:record  Uncaught Error: walk 7f3a not found",
-        "ms": 900
-      }
-    ],
-    "reply": "Two errors in the last hour, both from **walks:record**: it gets called for a walk that was deleted a moment before. Want me to make it skip a missing walk rather than throw?",
-    "chunk": 4,
-    "chunkMs": 26
-  },
-  {
-    "answer": "green",
-    "firstMs": 400,
-    "thinking": "Green, then: use the system green so it works in dark mode too.",
-    "tools": [
-      {
-        "name": "Read",
-        "kind": "read",
-        "title": "Read Toolbar.swift",
-        "input": {
-          "file_path": "/Users/mike/dev/walkies/Sources/Viewer/Toolbar.swift"
+        {
+          "name": "Read",
+          "kind": "read",
+          "title": "Read SettingsView.swift",
+          "input": {
+            "file_path": "/Users/mike/dev/threadbear/app/Sources/SettingsView.swift"
+          },
+          "ms": 500
         },
-        "ms": 500
+        {
+          "title": "swift test --filter Settings",
+          "result": "Executed 14 tests, with 0 failures",
+          "ms": 900
+        }
+      ],
+      "reply": "Done. The tab's called **Runner** now, and nothing else in the app still says Advanced. The settings tests pass, all 14 of them.",
+      "chunk": 4,
+      "chunkMs": 28
+    },
+    {
+      "match": "Tail the Convex logs",
+      "thinking": "Pull the last hour of logs and look for errors.",
+      "tools": [
+        {
+          "title": "npx convex logs --history 200",
+          "result": "2 errors in the last hour\nwalks:record  Uncaught Error: walk 7f3a not found",
+          "ms": 900
+        }
+      ],
+      "reply": "Two errors in the last hour, both from **walks:record**: it gets called for a walk that was deleted a moment before. Want me to make it skip a missing walk rather than throw?",
+      "chunk": 4,
+      "chunkMs": 26
+    },
+    {
+      "answer": "green",
+      "firstMs": 400,
+      "thinking": "Green, then: use the system green so it works in dark mode too.",
+      "tools": [
+        {
+          "name": "Read",
+          "kind": "read",
+          "title": "Read Toolbar.swift",
+          "input": {
+            "file_path": "/Users/mike/dev/walkies/Sources/Viewer/Toolbar.swift"
+          },
+          "ms": 500
+        },
+        {
+          "title": "xcodebuild -scheme Walkies build",
+          "result": "** BUILD SUCCEEDED **",
+          "ms": 900
+        }
+      ],
+      "reply": "Green it is. The Share button uses the system green now, so it stands out from the grey buttons beside it and still reads well in dark mode.",
+      "chunk": 4,
+      "chunkMs": 28
+    },
+    {
+      "match": "Bring in Mike's release",
+      "thinking": "Fetch the release, see what it touches and whether it meets anything changed in this copy.",
+      "tools": [
+        {
+          "title": "git fetch upstream --tags",
+          "result": "* [new tag] release/2026-11-05",
+          "ms": 700
+        },
+        {
+          "title": "git merge --no-commit release/2026-11-05",
+          "result": "Automatic merge went well; stopped before committing as requested",
+          "ms": 800
+        },
+        {
+          "title": "./check.sh --quick",
+          "result": "All checks passed",
+          "ms": 900
+        }
+      ],
+      "reply": "Your copy has 3 changes of its own, and none of them touch the files the release changes, so it merges cleanly. The checks pass on the merged copy.",
+      "end": {
+        "needs": "you",
+        "asks": [
+          {
+            "action": "Land Mike's release on your main?",
+            "options": [
+              "Land it",
+              "Not yet"
+            ],
+            "suggested": 0
+          }
+        ]
       },
-      {
-        "title": "xcodebuild -scheme Walkies build",
-        "result": "** BUILD SUCCEEDED **",
-        "ms": 900
+      "chunk": 4,
+      "chunkMs": 26
+    },
+    {
+      "match": "map jump",
+      "thinking": "Find where the map sets its camera when the zoom changes.",
+      "tools": [
+        {
+          "title": "rg -n \"setCamera\" Sources/Map",
+          "result": "WalkMapView.swift:88:  map.setCamera(camera, animated: true)",
+          "ms": 700
+        }
+      ],
+      "reply": "It re-centres on your location every time the zoom changes. I've made it keep the centre you left it on.",
+      "chunk": 4,
+      "chunkMs": 26
+    },
+    {
+      "match": "Done|testers|release notes",
+      "thinking": "Agreement's accepted, so retry the upload and send it to the testers group.",
+      "tools": [
+        {
+          "title": "xcrun altool --upload-app -f build/Walkies.ipa",
+          "result": "UPLOAD SUCCEEDED",
+          "ms": 900
+        },
+        {
+          "title": "asc testflight add-group \"Testers\" --build 42",
+          "result": "Build 42 is with 42 testers",
+          "ms": 700
+        }
+      ],
+      "reply": "Build 42 is uploaded and with the testers group, release notes and all.",
+      "chunk": 4,
+      "chunkMs": 26
+    }
+  ],
+  "threads": {
+    "demo_design_review": {
+      "title": "Pick a design for the walk done screen",
+      "preview": "Three directions are ready to compare. Pick one or leave notes.",
+      "ask": "Show me a few directions for the screen you see when a walk ends, so I can pick one.",
+      "review": {
+        "title": "Walk done screen",
+        "note": "Three directions for the screen at the end of a walk.",
+        "reply": "Three directions are ready to compare. Pick one or leave notes, then send your reply when you're ready.",
+        "options": [
+          {
+            "id": "A",
+            "title": "Map first",
+            "note": "The route fills the top half, with the walk's name under it.",
+            "image": {
+              "path": "mockups/map.png",
+              "width": 1600,
+              "height": 1100
+            }
+          },
+          {
+            "id": "B",
+            "title": "Stats first",
+            "note": "Distance up top, then what the walk added: streets, secrets, the streak.",
+            "image": {
+              "path": "mockups/stats.png",
+              "width": 1600,
+              "height": 1100
+            }
+          },
+          {
+            "id": "C",
+            "title": "Secret first",
+            "note": "Only when the walk found a secret: the badge takes the whole screen.",
+            "image": {
+              "path": "mockups/badge.png",
+              "width": 1600,
+              "height": 1100
+            }
+          }
+        ]
       }
-    ],
-    "reply": "Green it is. The Share button uses the system green now, so it stands out from the grey buttons beside it and still reads well in dark mode.",
-    "chunk": 4,
-    "chunkMs": 28
+    },
+    "demo_dark_mode": {
+      "panels": [
+        {
+          "id": "walkies.stats",
+          "title": "Walkies",
+          "kind": "list",
+          "icon": "figure.walk",
+          "patch": "walkies",
+          "note": "production",
+          "mockItems": [
+            {
+              "title": "3 people",
+              "detail": "have installed Walkies",
+              "icon": "person.2"
+            },
+            {
+              "title": "43 walks",
+              "detail": "in 48 suburbs",
+              "icon": "figure.walk"
+            },
+            {
+              "title": "32 secrets",
+              "detail": "found so far",
+              "icon": "sparkles"
+            },
+            {
+              "title": "12 days",
+              "detail": "longest streak",
+              "icon": "flame"
+            }
+          ]
+        }
+      ]
+    },
+    "demo_testflight_beta": {
+      "asks": [
+        {
+          "action": "Accept the new agreement in App Store Connect",
+          "where": "App Store Connect \u203a Business",
+          "why": "Only the account holder can, and the upload's waiting on it.",
+          "options": [
+            "Done",
+            "Can you do it?"
+          ],
+          "suggested": 0
+        },
+        {
+          "action": "Who gets the beta?",
+          "why": "42 people are in the testers group; the team is 4.",
+          "options": [
+            "Just me",
+            "The testers group",
+            "Testers and the team"
+          ],
+          "suggested": 1
+        },
+        {
+          "action": "Send the release notes as they are?",
+          "why": "Written from this week's commits: faster sync, the new Share button and two crash fixes.",
+          "options": [
+            "Send them",
+            "Let me edit first"
+          ],
+          "suggested": 0
+        }
+      ]
+    }
   }
-]
+}

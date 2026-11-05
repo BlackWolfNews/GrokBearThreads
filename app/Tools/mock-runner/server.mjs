@@ -306,6 +306,7 @@ addDemoPools();
 const highlights = new Map();
 addDemoHighlights();
 addDemoSubagents();
+applyScriptedThreads();
 /**
  * The runners a schedule can run on (runners.list, docs/protocol.md,
  * "Schedules", "Runners"): this one first, and an online "bruce", as if
@@ -1380,12 +1381,62 @@ const DEMO_ASKS = [
  *   reply, chunk, chunkMs, end ({ needs, asks } or { needs, next }) }, played at a believable speed
  * instead of the canned answer. For recording the site's clips; nothing else sets it.
  */
-let scriptedCache;
-function scriptedTurns() {
+// var, not let: applyScriptedThreads runs at startup, above this line.
+var scriptedCache;
+function scriptedFile() {
   if (scriptedCache) return scriptedCache;
   const file = process.env.MOCK_SCRIPTED_TURNS;
-  scriptedCache = file ? JSON.parse(fs.readFileSync(file, 'utf8')) : [];
+  const json = file ? JSON.parse(fs.readFileSync(file, 'utf8')) : {};
+  // An array is the turns alone; an object has `turns` and `threads`.
+  scriptedCache = Array.isArray(json) ? { turns: json, threads: {} } : { turns: json.turns ?? [], threads: json.threads ?? {}, dir: path.dirname(file) };
   return scriptedCache;
+}
+function scriptedTurns() {
+  return scriptedFile().turns;
+}
+
+/**
+ * MOCK_SCRIPTED_TURNS's `threads`: { <thread id>: { title, preview, ask (its first message's text),
+ * review ({ title, note, options: [{ id, title, note, image: { path, width, height } }] }, image
+ * paths relative to the file), panels (added to the thread's), asks (its last turn's card) } }, so a
+ * clip shows made-up content
+ * of its own rather than the demo's.
+ */
+function applyScriptedThreads() {
+  const { threads: overrides, dir } = scriptedFile();
+  for (const [id, o] of Object.entries(overrides)) {
+    const t = threads.get(id);
+    if (!t) continue;
+    if (o.title) t.summary.title = o.title;
+    if (o.preview) t.summary.preview = o.preview;
+    if (o.ask) {
+      const first = t.events.find((e) => e.type === 'user.message');
+      if (first) first.text = o.ask;
+      t.summary.asked = o.ask;
+    }
+    if (o.review) {
+      for (const event of t.events) {
+        if (event.type !== 'review.updated') continue;
+        const options = o.review.options.map((option) => ({ reference: false, ...option,
+          image: { mediaType: 'image/png', ...option.image, path: path.resolve(dir, option.image.path) } }));
+        event.review = { ...event.review, title: o.review.title, note: o.review.note, options };
+        t.reviews.set(event.review.id, event.review);
+      }
+      for (const event of t.events) {
+        if (event.type === 'tool.call' && event.name?.endsWith('show_options')) { event.title = `Compare options: ${o.review.title}`; event.input = { title: o.review.title }; }
+        if (event.type === 'assistant.text' && o.review.reply) event.text = o.review.reply;
+      }
+    }
+    if (o.panels) t.summary.panels = [...(t.summary.panels ?? []), ...o.panels];
+    // `asks`: the card of asks its last turn ended with (docs/protocol.md, "Needs you").
+    if (o.asks) {
+      const done = t.events.findLast((e) => e.type === 'turn.completed');
+      if (done) Object.assign(done, { needs: 'you', asks: o.asks });
+      // The summary carries them too, and it's what the app draws the card from.
+      t.summary.asks = o.asks;
+      t.summary.needsYou = true;
+    }
+  }
 }
 
 async function playScripted(threadId, turnId, started, turn, interrupted) {
@@ -2503,7 +2554,7 @@ p{color:#8a8a90;font-size:12px;line-height:1.5;margin-top:18px}
 <nav><div>dashboard</div><div>notes</div><div>scratchpad</div><div>snapshots</div><div class="on">usage</div><div>videos</div></nav>
 <main><h1>usage <span class="tag">dev</span><span class="tag">1 document</span></h1>
 <table><tr><th>_id</th><th>month</th><th>spendUsd</th><th>limitUsd</th></tr><tr><td>j57c…9m2</td><td>"2026-10"</td><td>41.8</td><td>80</td></tr></table>
-<p>The mock runner's stand-in for the Convex dashboard. A real thread in a Convex project gets dashboard.convex.dev for its deployment here.</p></main>`;
+${process.env.MOCK_SCRIPTED_TURNS ? '' : "<p>The mock runner's stand-in for the Convex dashboard. A real thread in a Convex project gets dashboard.convex.dev for its deployment here.</p>"}</main>`;
   const convex = threads.get('demo_dark_mode');
   if (convex) {
     convex.summary.panels = [{

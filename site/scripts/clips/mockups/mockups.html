@@ -1,0 +1,50 @@
+<!doctype html>
+<!-- Three made-up directions for a Walkies "walk done" screen, for the options clip: open it with
+     ?v=map, stats or badge and screenshot it at 1600 x 1100 to make the PNGs beside it, which are
+     committed. Nothing here is real data. -->
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  body { width: 1600px; height: 1100px; display: grid; place-items: center; font-family: -apple-system, "SF Pro Display", sans-serif;
+         background: radial-gradient(circle at 30% 20%, #f4efe6, #e8e0d2); }
+  .phone { width: 470px; height: 960px; border-radius: 64px; background: #111; padding: 14px; box-shadow: 0 40px 80px rgba(60,40,10,.25); }
+  .screen { width: 100%; height: 100%; border-radius: 52px; overflow: hidden; background: #fbfaf7; position: relative; display: flex; flex-direction: column; }
+  .bar { height: 54px; display: flex; justify-content: space-between; align-items: center; padding: 0 34px; font-weight: 600; font-size: 17px; }
+  h1 { font-size: 30px; font-weight: 700; letter-spacing: -.02em; }
+  .muted { color: #8a8378; }
+  .btn { margin: 0 28px 34px; height: 60px; border-radius: 18px; background: #2f7d4f; color: #fff; display: grid; place-items: center; font-weight: 600; font-size: 19px; }
+  .map { position: relative; background: #e3ecd9; overflow: hidden; }
+  .map svg { position: absolute; inset: 0; }
+  .stat { font-size: 64px; font-weight: 700; letter-spacing: -.03em; }
+  .row { display: flex; gap: 14px; padding: 0 28px; }
+  .tile { flex: 1; background: #fff; border-radius: 22px; padding: 18px; box-shadow: 0 1px 0 rgba(0,0,0,.05), 0 6px 18px rgba(60,40,10,.06); }
+  .tile b { font-size: 30px; display: block; }
+  .badge { width: 230px; height: 230px; border-radius: 50%; margin: 0 auto; background: conic-gradient(#f2b441, #e0702c, #f2b441); display: grid; place-items: center; box-shadow: 0 18px 40px rgba(224,112,44,.35); }
+  .badge div { width: 190px; height: 190px; border-radius: 50%; background: #fff6e6; display: grid; place-items: center; font-size: 92px; }
+</style>
+<body>
+<div class="phone"><div class="screen" id="screen"></div></div>
+<script>
+const route = (w, h) => `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}">
+  <path d="M0 ${h*.3} L${w} ${h*.42} M${w*.35} 0 L${w*.28} ${h} M0 ${h*.78} L${w} ${h*.7} M${w*.75} 0 L${w*.82} ${h}" stroke="#fff" stroke-width="14" fill="none"/>
+  <path d="M${w*.2} ${h*.85} C ${w*.25} ${h*.55}, ${w*.5} ${h*.62}, ${w*.55} ${h*.4} S ${w*.8} ${h*.2}, ${w*.7} ${h*.12}" stroke="#2f7d4f" stroke-width="9" fill="none" stroke-linecap="round"/>
+  <circle cx="${w*.2}" cy="${h*.85}" r="12" fill="#2f7d4f"/><circle cx="${w*.7}" cy="${h*.12}" r="14" fill="#e0702c" stroke="#fff" stroke-width="5"/></svg>`;
+const v = new URLSearchParams(location.search).get("v") ?? "map";
+const s = document.getElementById("screen");
+if (v === "map") s.innerHTML = `<div class="bar"><span>9:41</span><span>●●●</span></div>
+  <div class="map" style="height:540px">${route(442, 540)}</div>
+  <div style="padding:26px 28px 0;flex:1"><h1>Morning loop</h1><p class="muted" style="font-size:19px;margin-top:6px">3.4 km · 41 min · along the foreshore</p></div>
+  <div class="btn">Share walk</div>`;
+if (v === "stats") s.innerHTML = `<div class="bar"><span>9:41</span><span>●●●</span></div>
+  <div style="padding:30px 28px 10px"><p class="muted" style="font-size:19px">Walk done</p><div class="stat">3.4 km</div><p class="muted" style="font-size:19px">41 minutes · 4,812 steps</p></div>
+  <div class="row" style="margin-top:22px"><div class="tile"><b>2</b><span class="muted">new streets</span></div><div class="tile"><b>1</b><span class="muted">secret found</span></div></div>
+  <div class="row" style="margin-top:14px"><div class="tile"><b>12</b><span class="muted">day streak</span></div><div class="tile"><b>48</b><span class="muted">suburbs</span></div></div>
+  <div class="map" style="height:210px;margin:22px 28px 0;border-radius:22px">${route(386, 210)}</div><div style="flex:1"></div>
+  <div class="btn">Share walk</div>`;
+if (v === "badge") s.innerHTML = `<div class="bar"><span>9:41</span><span>●●●</span></div>
+  <div style="flex:1;display:flex;flex-direction:column;justify-content:center;text-align:center;padding:0 34px">
+  <div class="badge"><div>🌊</div></div>
+  <h1 style="margin-top:34px">You found a secret!</h1><p class="muted" style="font-size:20px;margin-top:10px;line-height:1.4">The old jetty steps, one of 32 hidden spots around town.</p>
+  <p style="font-size:18px;margin-top:26px">3.4 km · 41 min</p></div>
+  <div class="btn" style="background:#e0702c">Share it</div>`;
+</script>

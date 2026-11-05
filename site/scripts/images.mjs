@@ -7,7 +7,7 @@
 //
 // Mac shots: app/Tools/screenshots.sh <dir> --appearance dark (the mock runner's demo threads,
 // made-up data; nothing from a real thread). Dark, as every screenshot of the app is by default
-// (Mike, 5 Nov 2026). iPhone shots: ios/scripts/sim-shots.sh <dir> (the
+// (Mike, 5 Nov 2026). iPhone shots: ios/scripts/sim-shots.sh <dir> --dark (the
 // FakeBackend's sample threads). Defaults are where those scripts were last pointed.
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";

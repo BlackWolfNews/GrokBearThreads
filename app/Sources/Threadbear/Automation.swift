@@ -852,7 +852,13 @@ enum Automation {
             app.transcript.scrollToBottom()
             return "ok"
         case "resize", "size":
-            guard let window else { return "error no window" }
+            guard var window else { return "error no window" }
+            // {"review": id}: that review's own window instead (the site's clips record it at the
+            // main window's size).
+            if let id = c["review"] as? String {
+                guard let review = app.reviewWindows.values.first(where: { $0.session.review.id == id })?.window else { return "error that review isn't open" }
+                window = review
+            }
             window.setContentSize(NSSize(width: number(c["w"]) ?? 1240, height: number(c["h"]) ?? 820))
             let size = AppDump.contentSize(window)
             return "ok \(Int(size.width))x\(Int(size.height))"

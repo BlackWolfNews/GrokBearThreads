@@ -66,8 +66,8 @@ const MAC = {
   },
 };
 const PHONE = {
-  inbox: "Threadbear on iPhone: the inbox, with Release 1.2 of the garden app marked Needs OK, a question about where settings should live marked Asking, two finished threads and one running.",
-  approval: "A thread on iPhone asking to run git tag v1.2.0 and push it, with Allow, Always and Deny buttons and a reply box at the bottom.",
+  inbox: "Threadbear on iPhone: the inbox, with Release 1.2 of the garden app, a question about where settings should live, a date picker fix and an old clean-up, and Running, Hibernating and Archived folded below.",
+  approval: "A thread on iPhone asking to run git tag v1.2.0 && git push origin v1.2.0, with Allow, Always and Deny buttons and a reply box at the bottom.",
   question: "A thread on iPhone asking where each person's settings should live, in the database or on the phone, with a box for something else and a Send answer button.",
 };
 
@@ -78,24 +78,27 @@ const PHONE = {
  * with its first frame as a poster. Every line here should stay true of the app and its clip.
  */
 const SLIDES = [
-  ["threads", "Claude Code and Codex, side by side",
-    "Every thread in one inbox, on the logins you already pay for. Approvals, pictures and the files it changed show up right in the thread.",
-    "The Threadbear Mac app in dark mode, going from a Claude thread to a Codex thread, then asking a thread to rename a settings tab while its reply streams in."],
-  ["patches", "Ask for a button and get one",
-    "Your agent writes a patch and a few seconds later there's a Deploy button over the message box, or a panel of your own beside the thread.",
-    "A Threadbear thread where the Open logs button above the message box asks the agent to check the Convex logs, then the Patches panel lists the patches the buttons came from."],
-  ["previews", "See what it made without leaving the thread",
-    "Pages, mockups and docs your agent makes open in the side pane, and every file, link and commit it touched is kept in Highlights.",
-    "A Threadbear thread opening the landing page mockups its sub-agents made, the home page then pricing, in the pane beside it."],
-  ["questions", "Answer it with a click",
-    "When an agent needs you, it asks with the choices as buttons, so answering is usually one click.",
-    "A Threadbear thread asking which colour the new Share button should be. Green gets picked and the agent carries on with it."],
-  ["projects", "Threads sorted into projects",
-    "Threads find their way into the project they're about, and each project keeps its goals and notes, so the next thread picks up where the last one left off.",
-    "Threadbear's projects view, with threads grouped under Walkies, Threadbear and Photo sync, narrowed to Walkies by typing in the search."],
-  ["logins", "Every login you've got",
-    "Pick the Claude or Codex login for each thread and see how much of its limits are left, or put them in a pool and let it pick the one with the most room.",
-    "Threadbear's model picker, listing pools of logins with how much room each has left, then the thread moved to Opus 5.5 on a login with 12% left."],
+  ["decisions", "Get to your next decision fast",
+    "When a thread needs you, it says exactly what, with the choices as buttons and just enough context to decide. Pick your answers and it gets going again.",
+    "A Threadbear thread whose last turn ended with three asks: accept an agreement in App Store Connect, who gets the beta and whether to send the release notes. Each is answered with a click, then the thread goes off to work and its reply streams in."],
+  ["options", "Pick from a few options",
+    "When the agent isn't sure how something should look, it shows you a few side by side. Pick one, leave a note, and it carries on.",
+    "Threadbear's options window stepping through three designs for a walking app's walk done screen, map first, stats first and secret first, then showing them side by side with the second picked and a note added."],
+  ["inbox", "Make a decision, move on",
+    "Threads that are working drop out of your inbox into Running, and finished ones archive with a click, so your inbox is only what needs you.",
+    "Three finished threads archived one after another in Threadbear, each flying off into the archive and leaving the inbox shorter."],
+  ["librarian", "No project to pick",
+    "Just start a thread. The librarian files it into the right project and keeps each project's notes up to date, so you never have to.",
+    "A new thread in Threadbear started with no folder or project picked, then the Librarian page: what it's looking at now, what's next and the threads it has filed into projects."],
+  ["phone", "Your threads on your phone",
+    "Everything syncs through your own Convex deployment, so your phone keeps working even when your laptop's asleep.",
+    "Threadbear on an iPhone: a thread about taking the pedals off a kid's bike, scrolling down to the diagram the agent made, then opening it full screen."],
+  ["patches", "Make it yours with patches",
+    "Like Unity's editor, it's meant to be changed. A patch is a little TypeScript file that adds panels and buttons for your project, and your agent can write one for you.",
+    "A Threadbear thread with patch panels beside it: the built-in Convex dashboard, then a project's own stats panel, then one of its buttons run from above the message box."],
+  ["fork", "Your own copy that still gets updates",
+    "You fork the code, so you can change anything. My changes come as a daily release, and a thread brings them into your copy and asks before it lands.",
+    "Threadbear's Updates panel showing a new release from Mike with six changes, then Bring Them In starting a thread that merges it and checks it before asking to land."],
 ];
 
 function showcase() {
