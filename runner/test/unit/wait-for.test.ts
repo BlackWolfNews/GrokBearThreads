@@ -95,3 +95,60 @@ test('waitFor: only with needs "nothing", and an unknown id leaves it in the inb
   assert.equal(h.runner.get(waiter).snoozedUntil, undefined);
   assert.ok(h.events(waiter).some((e) => e.type === 'system.note' && /^Not hibernated: none of the threads/.test(e.text)));
 });
+
+test('waitFor: a thread that finishes while the waiting turn is still ending counts', () => {
+  const { h, waiter, target, session, turn } = setup();
+  h.runner.send(waiter, 'go on');
+  const s = session(waiter);
+  s.out({ kind: 'event', event: { type: 'tool.call', itemId: 'e1', name: END_TURN, kind: 'mcp', title: 'end_turn', input: { needs: 'nothing', waitFor: [target] } } });
+  turn(target, { needs: 'nothing' }, 'Finished first.');
+  s.text('m1', 'Waiting on it.');
+  s.result();
+  const t = h.runner.get(waiter);
+  assert.equal(t.snoozedUntil, undefined, 'woken straight away');
+  assert.match(h.events(waiter).filter((e) => e.type === 'user.message').at(-1).text, /Finished first\./);
+});
+
+test('waitFor: a background job still running means not finished; the turn after it ends counts', () => {
+  const { h, waiter, target, session, turn } = setup();
+  turn(waiter, { needs: 'nothing', waitFor: [target] });
+  h.runner.send(target, 'measure it');
+  const s = session(target);
+  s.out({ kind: 'tasks', tasks: [{ id: 'b1', type: 'local_bash', kind: 'shell', description: 'measure' }] });
+  s.out({ kind: 'event', event: { type: 'tool.call', itemId: 'e1', name: END_TURN, kind: 'mcp', title: 'end_turn', input: { needs: 'nothing' } } });
+  s.text('m1', 'Started the measurement.');
+  s.result();
+  assert.ok(h.runner.get(waiter).snoozedUntil, 'still waiting while the job runs');
+  // The job ends and the CLI opens a turn by itself with the report.
+  s.out({ kind: 'tasks', tasks: [] });
+  s.out({ kind: 'cliTurn' });
+  s.out({ kind: 'event', event: { type: 'tool.call', itemId: 'e2', name: END_TURN, kind: 'mcp', title: 'end_turn', input: { needs: 'nothing' } } });
+  s.text('m2', 'Saved 4.1 MB.');
+  s.result();
+  assert.equal(h.runner.get(waiter).snoozedUntil, undefined);
+  assert.match(h.events(waiter).filter((e) => e.type === 'user.message').at(-1).text, /Saved 4\.1 MB\./);
+});
+
+test('waitFor: the reply handed over is the one it finished with, not a later message', () => {
+  const { h, waiter, target, other, turn } = setup();
+  turn(waiter, { needs: 'nothing', waitFor: [target, other] });
+  turn(target, { needs: 'nothing' }, 'The real report.');
+  turn(target, { needs: 'you', asks: [{ question: 'Next?' }] }, 'Something later.');
+  turn(other, { needs: 'nothing' }, 'Other done.');
+  const text = h.events(waiter).filter((e) => e.type === 'user.message').at(-1).text as string;
+  assert.match(text, /The real report\./);
+  assert.doesNotMatch(text, /Something later/);
+});
+
+test('end_turn: a refused repeat keeps the card the first one set', () => {
+  const { h, waiter, session } = setup();
+  h.runner.send(waiter, 'go on');
+  const s = session(waiter);
+  s.out({ kind: 'event', event: { type: 'tool.call', itemId: 'e1', name: END_TURN, kind: 'mcp', title: 'end_turn', input: { needs: 'you', asks: [{ question: 'Deploy it?' }] } } });
+  s.out({ kind: 'event', event: { type: 'tool.result', itemId: 'e1', ok: true, text: 'Noted: this thread will wait in Needs you.', truncated: false, images: [] } });
+  s.out({ kind: 'event', event: { type: 'tool.call', itemId: 'e2', name: END_TURN, kind: 'mcp', title: 'end_turn', input: { needs: 'nothing', waitFor: [waiter] } } });
+  s.out({ kind: 'event', event: { type: 'tool.result', itemId: 'e2', ok: false, text: "Not ended: waitFor can't name this thread.", truncated: false, images: [] } });
+  s.text('m1', 'Want me to deploy?');
+  s.result();
+  assert.equal(h.runner.get(waiter).needs, 'you');
+});

@@ -674,6 +674,8 @@ export class Runner {
     this.flush();
     for (const st of this.threads.values()) if (st.rec.queue.some(q => q.reviewId) && this.bucket(st.rec) === 'inbox') this.kickQueue(st);
     this.armSnoozeTimer();
+    // A thread waited on may have finished while this runner was down.
+    this.reconcileWaits();
     // Waits for room are in thread.json, so they outlive a restart.
     this.armRoomTimer();
     // So are waits for the network.
@@ -1690,7 +1692,9 @@ export class Runner {
           // under a result saying it hadn't, and its card replaced the one
           // Mike was told about. One that adds archive adds only that.
           if (ev.type === 'tool.result' && ev.itemId === rt.turn.endTurnCall) {
-            if (endTurnRefusedRepeat(ev)) rt.turn.endTurn = rt.turn.endTurnBefore;
+            // Any refusal after one it took, not just ALREADY_ENDED: a bad
+            // snooze or waitFor on a repeat once turned an ask into Done.
+            if (endTurnRefusedRepeat(ev) || (!ev.ok && rt.turn.ended)) rt.turn.endTurn = rt.turn.endTurnBefore;
             else if (endTurnAddedArchive(ev)) rt.turn.endTurn = { ...rt.turn.endTurnBefore, archive: true };
             else if (endTurnAddedSnooze(ev)) rt.turn.endTurn = { ...rt.turn.endTurnBefore, snooze: rt.turn.endTurn?.snooze };
           }
@@ -2003,14 +2007,18 @@ export class Runner {
     const waitFor = away && !archive ? waitForFromTool(turn.endTurn) : undefined;
     this.endTurn(st, ev.seq, outcome === 'failed' ? 'error' : 'idle', outcome, limitHit, netLost);
     // Done, with nothing left running: any thread waiting on this one hears.
-    // Not if it put itself away to wait too, as it hasn't finished.
-    const finished = away && !snooze && !waitFor && !rec.subagents?.some((a) => a.status === 'running');
-    if (finished && !archive) this.waitedOnFinished(rec.id, 'finished');
+    // Not if it put itself away to wait too, as it hasn't finished. An auto
+    // turn counts (the one after a sub-agent or background job ends is
+    // often where the report is), so this reads end_turn itself, not `away`.
+    const finished = outcome === 'completed' && said?.needs === 'nothing' && !rec.queue.length && !archive &&
+      !snoozeFromTool(turn.endTurn) && !waitForFromTool(turn.endTurn) &&
+      !rec.subagents?.some((a) => a.status === 'running') && !rt.tasks.length;
+    if (finished) this.markFinished(st, turn.lastText);
     if (archive && !rt.turn && !rec.archivedAt && !this.stopping) {
       this.emit(st, { type: 'system.note', text: 'Archived, as the agent was asked to once it had finished.' });
       this.update({ threadId: rec.id, archived: true });
     }
-    if (waitFor && !rt.turn && !rec.archivedAt && !this.stopping) this.waitOn(st, waitFor, snooze);
+    if (waitFor && !rt.turn && !rec.archivedAt && !this.stopping) this.waitOn(st, waitFor, snooze, turn.startedAt);
     else if (snooze && !rt.turn && !rec.archivedAt && !this.stopping) this.snoozeAfterTurn(st, snooze);
   }
 
@@ -2461,7 +2469,7 @@ export class Runner {
         stop = true;
       } else delete rec.archivedAt;
     }
-    if (archiving) this.waitedOnFinished(rec.id, 'archived');
+    if (archiving) this.reconcileWaits();
     if (params.starred === true) rec.starredAt ??= this.isoNow();
     else if (params.starred === false) delete rec.starredAt;
     if (accountChanged && rt.turn && rt.session && !stop) {
@@ -2498,7 +2506,7 @@ export class Runner {
     const { rec, rt } = st;
     rt.deleted = true;
     this.threads.delete(threadId);
-    this.waitedOnFinished(threadId, 'deleted');
+    this.waitedOnDeleted(threadId);
     this.dirty.delete(threadId);
     rt.idleTimer?.cancel();
     rt.deltaTimer?.cancel();
