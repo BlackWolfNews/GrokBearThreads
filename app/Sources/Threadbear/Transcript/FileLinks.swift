@@ -97,7 +97,7 @@ final class FileLinkMenu: NSObject {
         let click = FileLinkAction.click
         for action in [FileLinkAction.panel, .app, .finder] {
             let item = NSMenuItem(title: action.title(path: path), symbol: action.symbol, action: #selector(openItem(_:)), target: self)
-            item.image = action.image(path: path)
+            item.setIcon(action.image(path: path))
             item.representedObject = action.rawValue
             menu.addItem(item)
         }
@@ -207,7 +207,7 @@ final class WebLinkMenu: NSObject {
         let menu = NSMenu()
         for action in [WebLinkAction.browser, .panel] {
             let item = NSMenuItem(title: action.title, symbol: action.symbol, action: #selector(openItem(_:)), target: self)
-            item.image = action.image
+            item.setIcon(action.image)
             item.representedObject = action.rawValue
             menu.addItem(item)
         }

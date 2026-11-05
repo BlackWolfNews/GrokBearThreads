@@ -7,8 +7,18 @@ extension NSMenuItem {
     /// Copy and Paste.
     convenience init(title: String, symbol: String, action: Selector?, target: AnyObject? = nil) {
         self.init(title: title, action: action, keyEquivalent: "")
-        image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        setIcon(NSImage(systemSymbolName: symbol, accessibilityDescription: nil))
         self.target = target
+    }
+
+    /// The item's icon, shown. macOS 27 hides menu item images unless the
+    /// item asks for them (`preferredImageVisibility`, NSMenuItem.h), so
+    /// every AppKit menu in the app lost its icons on 27.2 (Mike, 5 Nov:
+    /// the runner menu). Set icons through here, never `image =`
+    /// (MenuIconsTests checks).
+    func setIcon(_ icon: NSImage?) {
+        image = icon
+        if #available(macOS 27, *) { preferredImageVisibility = .visible }
     }
 }
 
@@ -151,7 +161,7 @@ final class ActionMenuItem: NSMenuItem {
         super.init(title: title, action: #selector(run), keyEquivalent: "")
         target = self
         state = checked ? .on : .off
-        image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        setIcon(NSImage(systemSymbolName: symbol, accessibilityDescription: nil))
     }
 
     required init(coder: NSCoder) { fatalError() }

@@ -4,7 +4,7 @@ import XCTest
 /// Every item in a right-click menu has an icon, like the system's own
 /// Copy and Paste beside them (Mike asked for it, 28 Oct). Checked in the
 /// source: AppKit items made with `NSMenuItem(title:symbol:…)` or given an
-/// image straight after, and in SwiftUI's `.contextMenu { }` blocks and the
+/// icon with `setIcon` straight after, and in SwiftUI's `.contextMenu { }` blocks and the
 /// shared menus (`struct …Menu: View`), a `Button("…")` or `Menu("…")`
 /// with a written title needs `systemImage:`.
 ///
@@ -73,9 +73,24 @@ final class MenuIconsTests: XCTestCase {
             let lines = text.components(separatedBy: "\n")
             for (index, line) in lines.enumerated() where line.contains("NSMenuItem(title:") && !line.contains("symbol:") {
                 let next = lines[index...].prefix(4).joined(separator: "\n")
-                if !next.contains(".image = ") { found.append("\(file.lastPathComponent):\(index + 1): \(line.trimmingCharacters(in: .whitespaces))") }
+                if !next.contains(".setIcon(") { found.append("\(file.lastPathComponent):\(index + 1): \(line.trimmingCharacters(in: .whitespaces))") }
             }
         }
         XCTAssertEqual(found, [], "give these menu items an icon: systemImage: (SwiftUI) or NSMenuItem(title:symbol:action:)")
+    }
+
+    /// macOS 27 hides an AppKit menu item's image unless the item asks for
+    /// it, so icons go on through `setIcon`, which does, never `image =`
+    /// (5 Nov: none of the app's AppKit menus showed theirs on 27.2).
+    func testMenuItemIconsAreShown() throws {
+        let direct = try NSRegularExpression(pattern: #"\b(item|menuItem|row|it)\.image\s*="#)
+        var found: [String] = []
+        for file in sources() where file.lastPathComponent != "MenuItems.swift" {
+            let lines = try String(contentsOf: file, encoding: .utf8).components(separatedBy: "\n")
+            for (index, line) in lines.enumerated() where direct.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) != nil {
+                found.append("\(file.lastPathComponent):\(index + 1): \(line.trimmingCharacters(in: .whitespaces))")
+            }
+        }
+        XCTAssertEqual(found, [], "use item.setIcon(...) so macOS 27 shows the icon")
     }
 }
