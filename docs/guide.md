@@ -206,13 +206,14 @@ icons, with thumbnails of pictures and videos, and the list sorts by whichever c
 you click. It works for folders on your other Macs too, though only this
 Mac's files have thumbnails and Quick Look.
 
-An HTML file opens in the side pane as a page, with the styles,
-pictures, fonts and media beside it that its markup names. Scripts
-written inside the page run, but script files, SVGs and other pages
-beside it don't load, so a mockup made of several HTML or JS files shows
-only its main page. It's kept off the internet too, so a font, script
-or picture from the web is left out, and its links don't open; open the
-file in your browser for those.
+An HTML file opens in the side pane as a static page, with the styles,
+pictures, fonts and media beside it that its markup names. Its scripts
+don't run, and script files, SVGs and other pages beside it don't load,
+so a mockup made of several HTML or JS files shows only its main page,
+and one that draws itself with JavaScript shows what its HTML has
+without it. It's kept off the internet too, so a font or picture from
+the web is left out, and its links don't open. Open the file in your
+browser to see it working.
 
 To share a file somewhere else, drag it out of the app: a file link in a
 reply, a picture in the transcript, a file in Highlights, a row in a folder

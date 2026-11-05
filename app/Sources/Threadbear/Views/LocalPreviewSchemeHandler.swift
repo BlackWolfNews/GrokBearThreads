@@ -5,8 +5,8 @@ import WebKit
 /// Serves local HTML previews as `threadbear-preview://<token>/<page>`,
 /// answering only for what LocalPreviewSite allows: the page and the assets
 /// it names in its folder. A `file://` load with read access to the folder
-/// let a page read any file beside it (Daybreak finding 6). JavaScript stays
-/// on, as mockups use it; what a page can read is what's held back.
+/// let a page read any file beside it (Daybreak finding 6). The page's own
+/// scripts are off (WebPanelPool), so what it names can be shown, not read.
 ///
 /// Each load gets a new token, so each is its own origin with a fresh list
 /// of what it may read, and two previews can't read each other's files.
@@ -18,8 +18,8 @@ import WebKit
 /// refuses navigating away, new windows and downloads.
 final class LocalPreviewSchemeHandler: NSObject, WKURLSchemeHandler {
     static let scheme = "threadbear-preview"
-    /// Inline scripts and styles stay, for mockups; everything else is this
-    /// scheme's alone, or data: and blob: made on the page.
+    /// Inline styles stay, for mockups (scripts are off anyway); everything
+    /// else is this scheme's alone, or data: and blob: made on the page.
     static let policy = [
         "default-src \(scheme): 'unsafe-inline' 'unsafe-eval' data: blob:",
         "connect-src \(scheme):",

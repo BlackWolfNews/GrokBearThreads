@@ -39,7 +39,7 @@ public final class LocalPreviewSite: @unchecked Sendable {
     /// sibling page or script named by the page (an iframe, a script src)
     /// would let it read whatever that names in turn (verify-fix, Nov 2026),
     /// so a preview of a several-file HTML or JS project shows its main page
-    /// alone. Inline scripts in the page still run.
+    /// alone. The page's own scripts don't run at all (WebPanelPool).
     public static let assetExtensions: Set<String> = [
         "css",
         "png", "jpg", "jpeg", "gif", "webp", "avif", "ico", "bmp", "heic",

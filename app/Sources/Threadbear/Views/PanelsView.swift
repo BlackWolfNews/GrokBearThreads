@@ -832,6 +832,12 @@ final class WebPanelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUI
                 source: LocalPreviewSchemeHandler.linkGuard, injectionTime: .atDocumentStart, forMainFrameOnly: false))
             config.websiteDataStore = store
             config.preferences.javaScriptCanOpenWindowsAutomatically = false
+            // A local preview is static: the page's own scripts never run.
+            // Whatever its markup names it can show, but no script can read
+            // those bytes back (verify-fix: `<a href="private.png">` let a
+            // page's script fetch the file). Other panels keep JavaScript.
+            // The app's own scripts (the link guard) still run.
+            config.defaultWebpagePreferences.allowsContentJavaScript = false
             // WebRTC goes round proxies and content rules alike. WebKit only
             // offers the switch privately; KVC finds `_setPeerConnectionEnabled:`.
             if config.preferences.responds(to: NSSelectorFromString("_setPeerConnectionEnabled:")) {
