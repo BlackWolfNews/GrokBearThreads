@@ -3295,17 +3295,23 @@ default).
 - **Reading.** `threads.events` and `threads.subscribe` answer from the
   thread's `messages` rows (Sync, Messages) and its `threads` row. The rows'
   seqs are the other runner's, with gaps where events weren't mirrored, and
-  events are made up beside them, so each row's seq `s` becomes four
-  **relay seqs**: `4s` a `turn.started` (the first row of a turn), `4s+1`
+  events are made up beside them, so each row's seq `s` becomes eight
+  **relay seqs**: `8s` a `turn.started` (the first row of a turn), `8s+1`
   the row's own event (`user.message`, `assistant.text`, or a `tool.call`
-  with the line as its title and no input), `4s+2` a tool's `tool.result`
-  once anything follows it or its turn has ended, and `4s+3`
+  with the line as its title and no input), `8s+2` a tool's `tool.result`
+  once anything follows it or its turn has ended, and `8s+7`
   `turn.completed` at the last row of a turn that has ended (the next row
-  is another turn's, or the thread isn't running), with the row's `needs`,
-  `asks` and `next` on the newest. An open approval, question or secret on
-  the row is placed at `4p+1`, `p` being its event's seq (`pendingApproval.seq`,
-  API 43), and its `approval.resolved` at `4p+2` once the row no longer has
-  it (with the decision if it was answered from this Mac). Every page and
+  is another turn's, or the thread's row has said for 4 seconds that it
+  isn't running, since that runner writes its rows a moment before their
+  messages), with the row's `needs`, `asks` and `next` on the newest. An
+  open approval, question or secret on the row is placed at `8p+1`, `p`
+  being its event's seq (`pendingApproval.seq`, API 43; from an older
+  runner, with none, at `8m+3` after the newest row `m` held when it was
+  first seen), and its `approval.resolved` one after it once the row no
+  longer has it (with the decision if it was answered from this Mac). A
+  `threads.subscribe` replays what's past `afterSeq` and, from everything
+  given before, what can come late (results, answers, turn ends) again;
+  the app takes a seq it already has as nothing. Every page and
   event is in relay seqs, and so are `afterSeq` and `beforeSeq`. A page also
   has `relay: { runnerId, runnerName, atStart? }`; `atStart` says there's
   nothing older. Events can arrive with gaps and late (a tool's result
@@ -3317,7 +3323,8 @@ default).
   pictures aren't in the backend until full sync (step 4). A tool's result
   says `The output is kept on <runner>.` and carries `heldBack: { seq }`,
   the row's own seq, for step 4 to fetch the body by (`sync:remoteBody`,
-  planned). `files.read` with a `runnerId` is `-32000`.
+  planned). `files.read` with a `runnerId` is `-32000`, and the app doesn't ask:
+  it says the file is kept on that machine.
 - **Reads.** A thread is watched only while a client is subscribed to it,
   through `relay:remoteTail` (its newest 15 rows) and `relay:remoteThread`
   (its one row); a minute after the last subscriber goes, both stop. Older
@@ -3332,21 +3339,25 @@ default).
   the row is unread), `threads.update` (`title`, `archived` with its `verdict`, `starred`,
   `snoozedUntil`; anything else is `-32000`) and `threads.share` each queue
   one command with `relay:queueCommand`, which sends a thread's command to
-  the runner whose row the thread is, whatever runner it was asked for.
+  the runner whose row the thread is, whatever runner it was asked for, and
+  `sync:takeCommand` fails a thread's command (any one's, the phone's too)
+  whose thread is another runner's by the time it's taken.
   The runner watches it with `relay:commandState` (a get by id) until it's
   taken (sends, interrupts) or done (the rest), at most 20 seconds, and
   answers with the command's `note` as a `-32000` if it failed. A runner the
   list says is offline is `-32000` at once. Commands from here carry `from:
   "mac"`, so the other runner gives the message no `origin`.
 - **New threads there.** `threads.create` with `runnerId` is a `create`
-  command (text, `cwd`, `accountId`, `model`, `effort`; pictures are
-  `-32000`), answered with a summary of the new thread once that runner
-  has made it. `remoteThreads.logins { runnerId }` gives that runner's
+  command (text, `cwd`, `accountId`, `model`, `effort`, `permissionMode`;
+  pictures are `-32000`), answered with a summary of the new thread once
+  that runner has made it, which this runner then answers for until the
+  sidebar list has it. `remoteThreads.logins { runnerId }` gives that runner's
   logins for the pickers, from the backend's `accounts` rows (no pools;
   `defaults.cwd` is the folder of its newest thread).
 - **Answers from another runner.** `files.list` with `runnerId` and `path`
   is a `call` command, `{ method: "files.list", params: { path } }`, which
-  that runner answers in the command's `result` (at most 500 entries). Only
+  that runner answers in the command's `result` (at most 500 entries; JSON
+  text, at most 256 KB, kept only for a `call`). Only
   methods on the allow-list (`convex/relay.ts` `CALLS`, checked again by
   the runner) can be called, and none that answers with file contents or
   tool output.
