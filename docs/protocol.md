@@ -3275,7 +3275,7 @@ type RemoteThread = { runnerId: string, threadId: string, title, cwd,
 
 ## Other runners' threads through the backend
 
-Full Convex step 5 (5 Nov 2026, backend API 43). The Mac app opens and
+Full Convex step 5 (5 Nov 2026, backend API 44). The Mac app opens and
 drives another runner's thread without connecting to that runner: it asks
 its own runner, with the normal methods and the thread's id, and this
 runner answers from the backend and sends what the app does to the other
@@ -3305,7 +3305,7 @@ default).
   isn't running, since that runner writes its rows a moment before their
   messages), with the row's `needs`, `asks` and `next` on the newest. An
   open approval, question or secret on the row is placed at `8p+1`, `p`
-  being its event's seq (`pendingApproval.seq`, API 43; from an older
+  being its event's seq (`pendingApproval.seq`, API 44; from an older
   runner, with none, at `8m+3` after the newest row `m` held when it was
   first seen), and its `approval.resolved` one after it once the row no
   longer has it (with the decision if it was answered from this Mac). A
@@ -3515,8 +3515,8 @@ the mirror back as state. The Mac app doesn't use it.
   The first message sent to it starts a fresh session with a handoff
   note saying the thread began as a quick ask that a fast model answered
   (see `threads.update` for the note). Like `create`, it finishes with
-  the new thread's id. `interrupt` (API 43)
-  stops the thread's turn, and `call` (API 43) runs one allow-listed method
+  the new thread's id. `interrupt` (API 44)
+  stops the thread's turn, and `call` (API 44) runs one allow-listed method
   and finishes with its answer as `result`; both come only from the main
   Mac's runner (Other runners' threads through the backend). A failed command
   gets `state: "failed"` and a readable `note`. A draining runner takes

@@ -1,4 +1,4 @@
-// Other runners' threads read and steered through the backend (API 43,
+// Other runners' threads read and steered through the backend (API 44,
 // docs/protocol.md "Other runners' threads through the backend"): the main
 // Mac's runner reads another runner's thread from its messages and threads
 // rows, and asks that runner to act on it with a `commands` row, as the

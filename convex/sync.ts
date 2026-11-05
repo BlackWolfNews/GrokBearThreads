@@ -1818,7 +1818,7 @@ export const takeCommand = mutation({
 const RESULT_MAX_BYTES = 256 * 1024;
 
 export const finishCommand = mutation({
-  // result (API 43): a `call`'s answer as JSON text, kept only for one
+  // result (API 44): a `call`'s answer as JSON text, kept only for one
   // (relay.ts), at most RESULT_MAX_BYTES. Text, so its size is what's stored.
   args: { key: v.string(), commandId: v.id('commands'), ok: v.boolean(), note: v.optional(v.string()), resultThreadId: v.optional(v.string()), result: v.optional(v.string()) },
   returns: v.null(),

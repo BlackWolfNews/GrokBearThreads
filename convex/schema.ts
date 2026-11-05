@@ -96,7 +96,7 @@ export const threadFields = {
       v.object({
         approvalId: v.string(),
         kind: v.literal('approval'),
-        // The approval.requested event's seq (API 43), so the main Mac's
+        // The approval.requested event's seq (API 44), so the main Mac's
         // runner can place the card in another runner's transcript.
         seq: v.optional(v.number()),
         name: v.string(),
@@ -354,7 +354,7 @@ export default defineSchema({
   commands: defineTable({
     runnerId: v.string(), // or "any"
     threadId: v.optional(v.string()),
-    // interrupt and call (API 43) come only from the main Mac's runner (relay.ts queueCommand).
+    // interrupt and call (API 44) come only from the main Mac's runner (relay.ts queueCommand).
     kind: v.union(v.literal('send'), v.literal('respond'), v.literal('update'), v.literal('create'), v.literal('page'), v.literal('share'), v.literal('quickAsk'), v.literal('interrupt'), v.literal('call')),
     args: v.any(),
     state: v.union(v.literal('pending'), v.literal('taken'), v.literal('done'), v.literal('failed')),
@@ -363,7 +363,7 @@ export default defineSchema({
     takenAt: v.optional(v.number()),
     doneAt: v.optional(v.number()),
     resultThreadId: v.optional(v.string()), // for create, once it lands
-    result: v.optional(v.string()), // a call's answer as JSON text (API 43), from an allow-listed method (relay.ts CALLS)
+    result: v.optional(v.string()), // a call's answer as JSON text (API 44), from an allow-listed method (relay.ts CALLS)
   })
     .index('by_runner_state', ['runnerId', 'state'])
     .index('by_state', ['state'])

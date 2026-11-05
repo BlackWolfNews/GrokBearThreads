@@ -242,7 +242,7 @@ export type SyncStatus = {
 
 // The approval or question a thread is waiting on, as the phone sees it.
 export type PendingApproval =
-  // seq: the event's (API 43), for the main Mac's transcript of this thread.
+  // seq: the event's (API 44), for the main Mac's transcript of this thread.
   | { approvalId: string; kind: 'approval'; seq?: number; name: string; title: string; options: ApprovalOption[]; inputSummary?: string }
   | { approvalId: string; kind: 'question'; seq?: number; questions: Question[] }
   // docs/protocol.md, "Secrets": key is the runner's public key, which the
@@ -373,7 +373,7 @@ export type CommandHost = {
   // Seen up to the last event it has.
   markSeen(threadId: string): unknown;
   create(p: { text: string; images?: ImageRef[]; cwd?: string; accountId?: string; model?: string; effort?: EffortLevel; permissionMode?: 'ask' | 'full'; origin?: 'phone' }): { thread: ThreadSummary };
-  // Stops the thread's turn (a command from the main Mac, API 43).
+  // Stops the thread's turn (a command from the main Mac, API 44).
   interrupt?(threadId: string): unknown;
   share(threadId: string, p: { access: 'off' | 'link'; newLink?: boolean }): unknown;
   quickAsk(p: { question: string; answer: string; sources?: { title: string; url: string }[]; askedAt?: number }): { thread: ThreadSummary };

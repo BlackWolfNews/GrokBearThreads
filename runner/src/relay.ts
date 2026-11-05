@@ -107,7 +107,7 @@ export type RelayEvent = { seq: number; ts: string; threadId: string; turnId?: s
 export type RelaySource = { post: Post; subscribe?: Subscribe; key: string };
 export type RelayDeps = {
   // The backend, with the owner key; undefined while sync is off or the
-  // backend is older than API 43 (sync.ts relaySource).
+  // backend is older than API 44 (sync.ts relaySource).
   source: () => RelaySource | undefined;
   // Other runners and their threads, as the sidebar has them (thread-index.ts).
   remote: () => RemoteThreads;

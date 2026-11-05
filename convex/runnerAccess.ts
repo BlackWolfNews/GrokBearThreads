@@ -197,7 +197,7 @@ export const ACCESS: Record<string, Access> = {
   audit: 'owner',
   auditRemove: 'owner',
   purgeRunner: 'owner',
-  // relay.ts (API 43): other runners' threads read and steered from the main
+  // relay.ts (API 44): other runners' threads read and steered from the main
   // Mac. Reading another runner's messages and queueing work for it is the
   // owner's alone.
   remoteTail: 'owner',

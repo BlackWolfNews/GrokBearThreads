@@ -348,7 +348,7 @@ dashboard panel.
   `setProjects`, `upsertProjects`, `setSchedules`, `setAccounts`, `takeCommand`,
   `finishCommand`), its queries (`threadsOf`, `runnersList`,
   `messageHeads`, `pendingCommands`, which it holds as a live query) and
-  `pruneOld` for `crons.ts`. `convex/relay.ts` (API 43) is the main Mac's
+  `pruneOld` for `crons.ts`. `convex/relay.ts` (API 44) is the main Mac's
   runner reading another runner's thread (`remoteTail`, `remoteMessages`,
   `remoteThread`) and queueing work for it (`queueCommand`, `commandState`,
   `remoteAccounts`), owner key only, so the Mac app opens other Macs'
