@@ -166,7 +166,7 @@ export function relayEvents(threadId: string, rows: RelayRow[], row: RelayThread
     const p = c.pending;
     const body =
       p.kind === 'approval'
-        ? { type: 'approval.requested', approvalId: p.approvalId, name: p.name, title: p.title, input: p.inputSummary ? { summary: p.inputSummary } : {}, options: p.options }
+        ? { type: 'approval.requested', approvalId: p.approvalId, name: p.name, title: p.title, input: p.inputSummary ? { [inputKey(p.name, p.inputSummary)]: p.inputSummary } : {}, options: p.options }
         : p.kind === 'question'
           ? { type: 'question.requested', approvalId: p.approvalId, questions: p.questions }
           : { type: 'secret.requested', approvalId: p.approvalId, label: p.label, reason: p.reason, ...(p.placeholder ? { placeholder: p.placeholder } : {}) };
@@ -573,6 +573,14 @@ export class Relay {
     const recent = this.deps.remote().threads.filter((t) => t.runnerId === runnerId).sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt))[0];
     return { accounts, pools: [], defaults: { cwd: recent?.cwd ?? '', accountId: recent?.accountId ?? accounts[0]?.id ?? '', models: {}, efforts: {} } };
   }
+}
+
+// The row has the input as one line; the card draws it under the key a
+// tool's input would have had, so a command reads as a command.
+function inputKey(name: string, line: string): string {
+  if (name === 'Bash') return 'command';
+  if (/^[~/]/.test(line)) return 'file_path';
+  return /^https?:\/\//.test(line) ? 'url' : 'input';
 }
 
 function num(x: unknown): number | undefined {
