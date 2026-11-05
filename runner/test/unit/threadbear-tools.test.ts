@@ -1266,6 +1266,47 @@ test('one reply: a nudged end_turn with no message to keep still asks for the re
   assert.equal(h.runner.endTurnNudged(second.thread.id), false);
 });
 
+// 5 Nov 2026, thread 1d9689e6: a Slack draft for Mike to approve was
+// written before end_turn, as narration, and the reply after it was "Nothing
+// has been sent yet." Words since the last step fold away with one reply, so
+// the result asks for them again in full; words before a step don't count.
+test('one reply: words written just before end_turn are asked for again in full, as they fold away', async () => {
+  const h = makeHarness();
+  const again = /write it again in full as your reply/;
+  const input = { headline: 'Draft update for Jamie ready to send', asks: [{ question: 'Send the Hetzner update to Jamie in your Slack DM?', options: [{ label: 'Send it' }, { label: "I'll edit and send" }] }] };
+  // The draft as narration, straight before the call.
+  const first = start(h);
+  const one = tools(h, first.thread.id, undefined, () => true);
+  toolCall(first.s, 'b1', 'Bash', { command: 'slack-read D081T2X5SG6' });
+  toolResult(first.s, 'b1');
+  first.s.out({ kind: 'event', event: { type: 'assistant.text', itemId: 'n1', text: 'The Hetzner Linux runner is up and sits in threadbear beside your Mac and Bruce.', narration: true } });
+  toolCall(first.s, 'e1', END_TURN, input);
+  let r = await one.call('end_turn', input);
+  assert.equal(r.error, false, r.text);
+  assert.match(r.text, /Now write your reply/);
+  assert.match(r.text, again);
+  assert.match(r.text, /never see your thinking/);
+  // Plain text counts too, and a done turn hears it as well.
+  const second = start(h);
+  const two = tools(h, second.thread.id, undefined, () => true);
+  second.s.text('m1', 'Three ways to share pools: A, B and C, and here is each.');
+  toolCall(second.s, 'e2', END_TURN, { headline: 'Laid out three designs', needs: 'nothing' });
+  r = await two.call('end_turn', { headline: 'Laid out three designs', needs: 'nothing' });
+  assert.match(r.text, /^Noted: this thread is done/);
+  assert.match(r.text, again);
+  // A status line before a step is just working: nothing to write again.
+  const third = start(h);
+  const three = tools(h, third.thread.id, undefined, () => true);
+  third.s.text('m1', 'Checking the DM with Jamie first.');
+  toolCall(third.s, 'b1', 'Bash', { command: 'slack-read D081T2X5SG6' });
+  toolResult(third.s, 'b1');
+  toolCall(third.s, 'e3', END_TURN, input);
+  r = await three.call('end_turn', input);
+  assert.match(r.text, /Now write your reply/);
+  assert.doesNotMatch(r.text, again);
+  assert.match(r.text, /never see your thinking/, 'what the asks are about always goes in the reply');
+});
+
 // One reply (docs/protocol.md, "One reply"; 1 Nov 2026): end_turn carries
 // the card and a headline, and the message after it is the reply.
 test('one reply: end_turn takes the card, never asks for a message first, and says the reply comes next', async () => {

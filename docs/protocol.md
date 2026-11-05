@@ -1689,7 +1689,14 @@ the thread if a sub-agent stalls, so an ask can't stay hidden for good.
   reply, as it comes next: the accepted result says "Now write your
   reply" (`ONE_REPLY_NEXT`), and the runner, seeing it, keeps the turn's
   text after it, streams it, and writes it with `final: true`; thinking
-  before it is kept too and folds into the work. The app shows the final
+  before it is kept too and folds into the work. Claude's result also says
+  the user never sees its thinking, so what the asks are about (a draft to
+  approve, the options weighed) goes in the reply in full, and when the
+  turn has words since its last step (`turnReply`), that they folded away
+  too and are to be written again in full (`WROTE_FIRST`): on 5 Nov 2026
+  Opus twice wrote a Slack draft or three designs as narration before
+  `end_turn`, then replied "Nothing has been sent yet." under a card
+  asking about them (thread 1d9689e6). The app shows the final
   text as the turn's reply whatever else the turn wrote. An ask's
   `question` is its `action` (no why), and its answers' labels are
   `options`, their `does` notes `optionNotes` in the same order ("" for

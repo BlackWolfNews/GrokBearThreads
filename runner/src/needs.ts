@@ -523,7 +523,7 @@ const ONE_REPLY_REPLY =
   'The reply: lead with the point and keep it as short as it can be while they can act on it without reading your working. ' +
   'A work report is a few bullets of what changed and the result, each linked to where it can be checked: [tests pass](work:npm test) quotes a few words of a step in your working (the command you ran or its description) and opens it there, lit up; [its own thread](thread:<its id from list_threads>) opens another thread; web pages and files link as usual. ' +
   'An explanation, a draft or an answer to their question is prose, at the length it needs. ' +
-  'When you\'re asking something, end the reply with what they need to know to answer it. The question itself, and what each answer would do, are in the card under the reply, so don\'t repeat them. ' +
+  'When you\'re asking something, end the reply with what they need to know to answer it, in full, as they never see your thinking: the draft to approve, the options you weighed. The question itself, and what each answer would do, are in the card under the reply, so don\'t repeat them. ' +
   'Never write a "What I need from you" section, a "Nothing needed from you" line or a list of follow-ups in the reply: asks and next are those. ';
 
 // Only what the fields' own descriptions don't say (threadbear-mcp.ts):
@@ -555,11 +555,27 @@ export function endTurnDescription(provider: 'claude' | 'codex', bulletReplies: 
 // the turn's reply (runner.ts, onOutput).
 export const ONE_REPLY_NEXT = 'Now write your reply';
 
-export function oneReplyAccepted(needsYou: boolean, restart = ''): string {
+export function oneReplyAccepted(needsYou: boolean, restart = '', wroteFirst = false): string {
+  const first = wroteFirst ? WROTE_FIRST : '';
   return needsYou
-    ? `${ENDED} will wait in Needs you.${restart} ${ONE_REPLY_NEXT}: it's the only text the user sees from this turn, with the card of asks under it. Don't repeat the questions or answers, and write nothing after your reply.`
-    : `${ENDED} is done. ${ONE_REPLY_NEXT}: it's the only text the user sees from this turn. Write nothing after it.`;
+    ? `${ENDED} will wait in Needs you.${restart} ${ONE_REPLY_NEXT}: it's the only text the user sees from this turn, with the card of asks under it. ${first}${ASKS_NEED_THE_REPLY} Don't repeat the card's questions or answers, and write nothing after your reply.`
+    : `${ENDED} is done. ${ONE_REPLY_NEXT}: it's the only text the user sees from this turn. ${first}Write nothing after it.`;
 }
+
+// On 5 Nov 2026 (thread 1d9689e6) Opus wrote a Slack draft for Mike to
+// approve, and another time three designs for him to pick from, before
+// end_turn, as narration blocks (which reach the runner only as a
+// one-line summary), then took "Don't repeat the questions or answers" to
+// mean the draft was already in front of him and wrote one line after
+// it: "Nothing has been sent yet." He got a card asking him to approve a
+// message he couldn't see. Everything before end_turn folds into the
+// working with one reply, so when the turn has words since its last step
+// (turnReply), they were meant as the reply and have to be written again.
+// Asking for more text gets more text (16509f4), which is the point here.
+const WROTE_FIRST =
+  'What you wrote just before this call folded into your working with the rest, out of sight, so they haven\'t read it: write it again in full as your reply. ';
+const ASKS_NEED_THE_REPLY =
+  'They never see your thinking either, so whatever the asks are about (a draft for them to approve, the options you weighed) goes in the reply in full.';
 
 // For an end_turn the Stop hook asked for, in a turn that has its message:
 // the nudge said "your message above is the reply", and "Now write your reply"

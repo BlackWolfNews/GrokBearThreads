@@ -835,7 +835,13 @@ export function buildThreadbearTools(
           const reply = await replied();
           if (reply.replied && !reply.narrationOnly) return oneReplyAlreadyWritten(needs === 'you', restart);
         }
-        return oneReplyAccepted(needs === 'you', restart);
+        // Claude's words since its last step were meant as the reply, and
+        // fold away out of sight (needs.ts, WROTE_FIRST). Codex has never
+        // done this, and its commentary before the final answer is a status
+        // line it would only write again. A call that never landed is taken
+        // as having written nothing: its turn can't be read.
+        const before = codex ? undefined : await replied();
+        return oneReplyAccepted(needs === 'you', restart, Boolean(before?.landed && before.replied));
       }),
     );
 
