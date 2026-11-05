@@ -296,6 +296,65 @@ public struct LimitPace: Sendable, Equatable {
         return "Lasts till it resets"
     }
 
+    /// What to do about a window, in one line under its meter. Mike, 5 Nov:
+    /// the graphs are good but he wants something to act on when he looks,
+    /// so each line says what happens at this pace and what that means
+    /// (runs out two days early, or a third of it goes to waste) rather
+    /// than only when it resets.
+    public struct Verdict: Sendable, Equatable {
+        public enum Tone: Sendable, Equatable {
+            /// Used up now.
+            case out
+            /// Runs out before it resets: spend it more slowly, or elsewhere.
+            case short
+            /// A good part of it will go unused: lean on this one.
+            case spare
+            /// Nothing to do.
+            case fine
+        }
+        public var text: String
+        public var tone: Tone
+    }
+
+    /// How much of a weekly window left unused at the reset is worth
+    /// pointing at. Under this it's just about right.
+    public static let spareWorthSaying: Double = 15
+
+    public static func verdict(_ window: UsageWindow, pace: LimitPace?, stale: Bool, now: Date, calendar: Calendar = .current) -> Verdict? {
+        let reset = window.resetsAt.map { AccountUsageText.resetTime($0, now: now, calendar: calendar) }
+        if window.remainingPercent < 1, let reset {
+            return Verdict(text: "Used up, back " + reset, tone: .out)
+        }
+        // Old numbers can't say how fast it's going now.
+        if let pace, !stale {
+            if let runsOutAt = pace.runsOutAt {
+                var text = "Runs out " + AccountUsageText.resetTime(runsOutAt, now: now, calendar: calendar)
+                if let resetsAt = window.resetsAt { text += ", " + gap(resetsAt.timeIntervalSince(runsOutAt)) + " before it resets" }
+                return Verdict(text: text, tone: .short)
+            }
+            // Only the week: a 5-hour window nearly always has room left
+            // over, so saying so would be on every row and mean nothing.
+            if window.kind == "weekly", let left = pace.leftAtReset, let reset {
+                if left >= spareWorthSaying {
+                    return Verdict(text: "About \(AccountUsageText.percent(left)) will go unused, resets " + reset, tone: .spare)
+                }
+                return Verdict(text: "On track, lasts till " + reset, tone: .fine)
+            }
+        }
+        return reset.map { Verdict(text: "Resets " + $0, tone: .fine) }
+    }
+
+    /// "2 days", "1 day", "5 hours", "1 hour", "40 min": roughly how long,
+    /// as nobody plans around "1 day 7 hours".
+    static func gap(_ seconds: TimeInterval) -> String {
+        let hours = seconds / 3600
+        if hours >= 36 { return "\(Int((hours / 24).rounded())) days" }
+        if hours >= 24 { return "1 day" }
+        if hours >= 1.5 { return "\(Int(hours.rounded())) hours" }
+        if hours >= 1 { return "1 hour" }
+        return "\(max(1, Int((seconds / 60).rounded()))) min"
+    }
+
     /// "9% a day", "12% an hour".
     public func rateText(kind: String) -> String {
         let value = rate < 1 ? String(format: "%.1f", rate) : String(Int(rate.rounded()))

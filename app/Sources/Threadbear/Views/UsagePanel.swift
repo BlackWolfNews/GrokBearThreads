@@ -486,8 +486,10 @@ private struct LoginRow: View {
     @ViewBuilder
     private func meters(_ windows: [UsageWindow], colour: Color) -> some View {
         ForEach(windows, id: \.kind) { window in
+            // Each meter takes its share of the row: capped at 320 they
+            // stopped two thirds of the way across a wide panel (Mike, 5 Nov).
             WindowMeter(window: window, samples: stats?.samples(account.id, kind: window.kind) ?? [], colour: colour, stale: account.usage?.stale == true, now: now)
-                .frame(minWidth: zoomed(170), maxWidth: zoomed(320), alignment: .leading)
+                .frame(minWidth: zoomed(170), maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -503,8 +505,9 @@ private struct LoginRow: View {
     }
 }
 
-/// One window: its name and what's left, a bar, and how it's going: when
-/// it resets, or that it runs out first at this pace. The weekly window
+/// One window: its name and what's left, a bar, and what to do about it
+/// (`LimitPace.verdict`): runs out early, will go unused, on track, or
+/// when it resets. The weekly window
 /// has a small chart of the week so far instead of the bar, with where
 /// this pace leads dashed on to the reset.
 private struct WindowMeter: View {
@@ -531,8 +534,8 @@ private struct WindowMeter: View {
             // The weekly chart already shows what's left (its line ends at
             // it), so only the 5-hour window gets a bar.
             if window.kind == "weekly" {
-                WeekChart(window: window, samples: samples, pace: pace, colour: colour, now: now)
-                    .frame(height: zoomed(34))
+                WeekChart(window: window, samples: samples, pace: stale ? nil : pace, colour: colour, now: now)
+                    .frame(height: zoomed(44))
             } else {
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.primary.opacity(0.08))
@@ -542,26 +545,27 @@ private struct WindowMeter: View {
                 }
                 .frame(height: zoomed(4))
             }
-            outlook(pace)
-                .font(.system(size: zoomed(11)))
-                .lineLimit(1)
+            if let verdict = LimitPace.verdict(window, pace: pace, stale: stale, now: now) {
+                Text(verdict.text)
+                    .font(.system(size: zoomed(11), weight: verdict.tone == .short || verdict.tone == .out ? .medium : .regular))
+                    .foregroundStyle(Self.style(verdict.tone))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .tip(tip(pace))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(window.title): " + tip(pace))
     }
 
-    /// Orange when it runs out before it resets; otherwise when it resets.
-    @ViewBuilder
-    private func outlook(_ pace: LimitPace?) -> some View {
-        if window.remainingPercent < 1, let reset = window.resetsAt {
-            Text("Back " + AccountUsageText.resetTime(reset, now: now)).foregroundStyle(.red)
-        } else if let pace, pace.runsOutAt != nil, !stale {
-            Text(pace.outlook(now: now) + " at this pace").foregroundStyle(.orange)
-        } else if let reset = window.resetsAt {
-            Text("Resets " + AccountUsageText.resetTime(reset, now: now)).foregroundStyle(.tertiary)
-        } else {
-            Text(" ")
+    /// Colour only where there's something to do: red used up, orange
+    /// runs out early, green room going spare; on track stays quiet.
+    static func style(_ tone: LimitPace.Verdict.Tone) -> AnyShapeStyle {
+        switch tone {
+        case .out: AnyShapeStyle(Color.red)
+        case .short: AnyShapeStyle(Color.orange)
+        case .spare: AnyShapeStyle(Color.green)
+        case .fine: AnyShapeStyle(.tertiary)
         }
     }
 
@@ -602,7 +606,15 @@ private struct WeekChart: View {
                 [LimitSample(at: now, remainingPercent: window.remainingPercent),
                  pace.runsOutAt.map { LimitSample(at: $0, remainingPercent: 0) } ?? LimitSample(at: reset, remainingPercent: pace.leftAtReset ?? window.remainingPercent)]
             } ?? []
+            let short = pace?.runsOutAt != nil
             Chart {
+                // A faint line at each day of the week, so how far in it is
+                // and when it runs out read without a hover.
+                ForEach(1..<7, id: \.self) { day in
+                    RuleMark(x: .value("Day", start.addingTimeInterval(Double(day) * 86400)))
+                        .foregroundStyle(Color.primary.opacity(0.06))
+                        .lineStyle(StrokeStyle(lineWidth: 1))
+                }
                 ForEach(Array(points.enumerated()), id: \.offset) { _, point in
                     AreaMark(x: .value("Time", point.at), yStart: .value("Floor", 0), yEnd: .value("Left", point.remainingPercent), series: .value("Part", "past"))
                         .foregroundStyle(colour.opacity(0.07))
@@ -614,12 +626,22 @@ private struct WeekChart: View {
                 }
                 ForEach(Array(ahead.enumerated()), id: \.offset) { _, point in
                     LineMark(x: .value("Time", point.at), y: .value("Left", point.remainingPercent), series: .value("Part", "ahead"))
-                        .foregroundStyle(colour.opacity(0.6))
+                        .foregroundStyle(short ? Color.orange.opacity(0.8) : colour.opacity(0.6))
                         .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                }
+                PointMark(x: .value("Time", now), y: .value("Left", window.remainingPercent))
+                    .foregroundStyle(colour)
+                    .symbolSize(zoomed(18))
+                if let out = pace?.runsOutAt {
+                    PointMark(x: .value("Time", out), y: .value("Left", 0))
+                        .foregroundStyle(Color.orange)
+                        .symbolSize(zoomed(18))
                 }
             }
             .chartXScale(domain: start...reset)
-            .chartYScale(domain: 0...100)
+            // A little room top and bottom, so the dots at full and empty
+            // aren't cut in half by the edge.
+            .chartYScale(domain: 0...100, range: .plotDimension(padding: zoomed(3)))
             .chartXAxis(.hidden)
             .chartYAxis(.hidden)
             .chartPlotStyle { $0.background(Color.primary.opacity(0.025)) }

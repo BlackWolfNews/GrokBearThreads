@@ -147,4 +147,58 @@ final class UsageStatsTests: XCTestCase {
         XCTAssertNil(LimitPace.of(fresh, samples: [], now: now), "a minute in is too early to say")
         XCTAssertNil(LimitPace.of(UsageWindow(kind: "weekly", title: "Weekly", remainingPercent: 50), samples: [], now: now), "no reset, no pace")
     }
+
+    // MARK: Verdicts
+
+    func testRunningOutSaysHowLongBeforeTheReset() {
+        // 20% a day with 30% left: out in 1.5 days, 2 days before the reset.
+        let now = at(12)
+        let window = weekly(30, resets: now.addingTimeInterval(3.5 * 86400))
+        let pace = LimitPace.of(window, samples: [], now: now)
+        let verdict = LimitPace.verdict(window, pace: pace, stale: false, now: now, calendar: calendar)!
+        XCTAssertEqual(verdict.tone, .short)
+        XCTAssertEqual(verdict.text, "Runs out Sat 12 am, 2 days before it resets")
+    }
+
+    func testAWeekWithLotsLeftOverSaysItWillGoUnused() {
+        // 10% a day with 80% left and 5 days to go: 30% left at the reset.
+        let now = at(12)
+        let window = weekly(80, resets: now.addingTimeInterval(5 * 86400))
+        let verdict = LimitPace.verdict(window, pace: LimitPace.of(window, samples: [], now: now), stale: false, now: now, calendar: calendar)!
+        XCTAssertEqual(verdict.tone, .spare)
+        XCTAssertEqual(verdict.text, "About 30% will go unused, resets Tue 12 pm")
+    }
+
+    func testAWeekAboutRightIsOnTrack() {
+        // 5 days in with 35% left: 13% a day, about 9% left at the reset.
+        let now = at(12)
+        let window = weekly(35, resets: now.addingTimeInterval(2 * 86400))
+        let verdict = LimitPace.verdict(window, pace: LimitPace.of(window, samples: [], now: now), stale: false, now: now, calendar: calendar)!
+        XCTAssertEqual(verdict.tone, .fine)
+        XCTAssertEqual(verdict.text, "On track, lasts till Sat 12 pm")
+    }
+
+    func testFiveHourWithRoomJustSaysWhenItResets() {
+        let now = at(12)
+        let window = UsageWindow(kind: "five_hour", title: "5-hour", remainingPercent: 90, resetsAt: now.addingTimeInterval(2 * 3600))
+        let verdict = LimitPace.verdict(window, pace: LimitPace.of(window, samples: [], now: now), stale: false, now: now, calendar: calendar)!
+        XCTAssertEqual(verdict, .init(text: "Resets 2 pm", tone: .fine))
+        let used = UsageWindow(kind: "five_hour", title: "5-hour", remainingPercent: 0, resetsAt: now.addingTimeInterval(2 * 3600))
+        XCTAssertEqual(LimitPace.verdict(used, pace: nil, stale: false, now: now, calendar: calendar), .init(text: "Used up, back 2 pm", tone: .out))
+    }
+
+    func testOldNumbersDontGuessAtThePace() {
+        let now = at(12)
+        let window = weekly(30, resets: now.addingTimeInterval(3.5 * 86400))
+        let verdict = LimitPace.verdict(window, pace: LimitPace.of(window, samples: [], now: now), stale: true, now: now, calendar: calendar)!
+        XCTAssertEqual(verdict, .init(text: "Resets Mon 12 am", tone: .fine))
+    }
+
+    func testGapsReadRoughly() {
+        XCTAssertEqual(LimitPace.gap(2.1 * 86400), "2 days")
+        XCTAssertEqual(LimitPace.gap(30 * 3600), "1 day")
+        XCTAssertEqual(LimitPace.gap(5.2 * 3600), "5 hours")
+        XCTAssertEqual(LimitPace.gap(70 * 60), "1 hour")
+        XCTAssertEqual(LimitPace.gap(40 * 60), "40 min")
+    }
 }
