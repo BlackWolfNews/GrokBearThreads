@@ -54,6 +54,20 @@ export function matchesSchedule(s: { title: string; whenText: string; text?: str
   return !q || [s.title, s.whenText, s.text ?? ''].some((x) => x.toLowerCase().includes(q));
 }
 
+const GB = 1024 ** 3;
+
+// "6.9 GB", "212 GB", "1.2 TB": a place after the point only while it matters.
+export function bytesWords(n: number): string {
+  if (n >= 1024 * GB) return `${(n / (1024 * GB)).toFixed(1)} TB`;
+  const gb = n / GB;
+  return `${gb < 100 ? gb.toFixed(1) : Math.round(gb)} GB`;
+}
+
+// Figures this old are from the last time someone looked: the runner reports
+// only while it's being watched, and it isn't, or has gone quiet.
+const STATS_STALE_MS = 60_000;
+export const statsFresh = (s: { at: string }, now: number) => now - Date.parse(s.at) < STATS_STALE_MS;
+
 type UsageWindow = { title: string; remainingPercent: number; resetsAt?: string };
 
 // How much room a login has: its tightest window, or undefined when it has

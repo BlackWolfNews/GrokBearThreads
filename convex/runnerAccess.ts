@@ -171,6 +171,10 @@ export const ACCESS: Record<string, Access> = {
   releaseSchedule: 'own',
   scheduleRan: 'own',
   requestScheduleRun: 'own',
+  // Someone has the website's Runners view open, which says nothing about any
+  // runner; the figures are only ever its own (API 45).
+  runnerWatch: 'shared',
+  setRunnerStats: 'own',
   setAccounts: 'own',
   upsertAccounts: 'own',
   // Usage readings of logins its own runner has, from any Mac.

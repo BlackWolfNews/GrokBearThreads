@@ -195,4 +195,11 @@
 //    interrupt or a call as an unknown command, and its approvals have no
 //    seq, so the main Mac's transcript has no card for them (the
 //    thread still shows it needs you).
-export const API_VERSION = 44;
+// 45: the website's rail (docs/website.md). scheduleWakes and phone:wakes, a
+//    sidebar's small view of the schedules; runnerStats, phone:runnerStats,
+//    phone:watchRunners, sync:runnerWatch and sync:setRunnerStats, a machine's
+//    figures, written only while someone's looking; `pressure` on the
+//    heartbeat; phone:schedule and a `schedule` command, for Pause and Run now.
+//    A runner sends these only to a backend of 45 or later, and a runner from
+//    before fails a schedule command with "unknown command".
+export const API_VERSION = 45;

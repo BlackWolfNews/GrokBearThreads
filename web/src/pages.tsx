@@ -1,20 +1,20 @@
 // The rail's views: each is a list for the sidebar and a page for the main
 // column, like a thread and the threads list. They only subscribe while they're
-// showing. What they say comes from the same queries the phone reads, so
-// Scheduled and Projects are for reading: changing one still happens on the Mac
-// or through an agent.
+// showing. Most of what they say comes from the queries the phone reads, and
+// most of it is for reading: a schedule can be paused or run from here, and any
+// other change to one, or to a project, happens on the Mac or through an agent.
 import { useEffect, useState, type ReactNode } from 'react';
 import { useMutation } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
-import { useLiveQuery } from './live';
+import { useLiveQuery, usePageAway } from './live';
 import { useInbox } from './inbox';
 import { MessageText } from './messages';
 import { CommandState } from './command-state';
 import { go, threadPath, type RailView, viewPath } from './route';
 import { ago, day, folderName } from './format';
 import { readTheme, setTheme, type Theme } from './theme';
-import { isOnline, matchesSchedule, runnersShown, runnerState, scheduleSections, sinceWords, tightest, untilWords } from './view-logic';
+import { bytesWords, statsFresh, isOnline, matchesSchedule, runnersShown, runnerState, scheduleSections, sinceWords, tightest, untilWords } from './view-logic';
 import { busy, type Row } from './sidebar';
 import * as Icon from './icons';
 
@@ -225,17 +225,34 @@ export function ScheduledList({ token, selected }: { token: string; selected?: s
 export function SchedulePage({ token, id }: { token: string; id: string }) {
   const rows = useLiveQuery(api.phone.schedules, { token }) as Schedule[] | undefined;
   const runners = useLiveQuery(api.phone.runners, { token });
+  const command = useMutation(api.phone.schedule);
+  const [pending, setPending] = useState<Id<'commands'> | null>(null);
   const now = useClock();
   if (!rows) return <div className="pad muted">Loading…</div>;
   const s = rows.find((x) => x.id === id);
   if (!s) return <PageGone view="scheduled" what="That schedule has gone." />;
   const runner = runners?.find((r) => r.runnerId === s.runnerId);
+  const act = async (action: 'pause' | 'resume' | 'run') => setPending(await command({ token, scheduleId: s.id, action }));
   const state = s.finishedAt ? `Finished ${day(s.finishedAt)}` : s.paused ? 'Paused' : s.nextRunAt ? `${new Date(s.nextRunAt).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}, ${untilWords(s.nextRunAt, now)}` : '';
   return (
     <div className="page">
-      <PageHead view="scheduled" title={s.title} />
+      <PageHead view="scheduled" title={s.title}>
+        {s.finishedAt ? null : (
+          <>
+            <button className="btn" title={s.paused ? 'Let it run again' : 'Stop it running until you resume it'} onClick={() => void act(s.paused ? 'resume' : 'pause')}>
+              {s.paused ? <Icon.Play /> : <Icon.Pause />}
+              {s.paused ? 'Resume' : 'Pause'}
+            </button>
+            <button className="btn" title="Run it once now, whatever its next time is" onClick={() => void act('run')}>
+              <Icon.Play />
+              Run now
+            </button>
+          </>
+        )}
+      </PageHead>
       <div className="page-body">
         <div className="page-col">
+          {pending ? <CommandState token={token} commandId={pending} onDone={() => setPending(null)} /> : null}
           <dl className="facts">
             <dt>When</dt>
             <dd>{s.whenText}</dd>
@@ -437,9 +454,40 @@ export function ProjectPage({ token, id }: { token: string; id: string }) {
 
 // ------------------------------------------------------------ runners
 
+// Tells the runners someone's looking, so they report their figures. Only while
+// the tab can be seen, as nobody needs them otherwise and each report is a write.
+function useWatchRunners(token: string) {
+  const watch = useMutation(api.phone.watchRunners);
+  const away = usePageAway();
+  useEffect(() => {
+    if (away) return;
+    const ping = () => {
+      if (!document.hidden) void watch({ token });
+    };
+    ping();
+    const t = setInterval(ping, 30_000);
+    return () => clearInterval(t);
+  }, [away, token, watch]);
+}
+
+const percent = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 100) : 0);
+
+function Mini({ label, value, low }: { label: string; value: number; low?: boolean }) {
+  return (
+    <span title={`${label} ${value}%`}>
+      {label}
+      <span className={`mini ${low ? 'low' : ''}`}>
+        <i style={{ width: `${value}%` }} />
+      </span>
+    </span>
+  );
+}
+
 export function RunnersList({ token, selected }: { token: string; selected?: string }) {
   const rows = useLiveQuery(api.phone.runners, { token });
   const inbox = useInbox();
+  const stats = useLiveQuery(api.phone.runnerStats, { token });
+  useWatchRunners(token);
   const now = useClock();
   if (!rows) return <div className="lists muted pad">Loading…</div>;
   const shown = runnersShown(rows, now);
@@ -449,7 +497,17 @@ export function RunnersList({ token, selected }: { token: string; selected?: str
     <ul className="list">
       {items.map((r) => {
         const running = (inbox ?? []).filter((t) => t.runnerId === r.runnerId && busy(t)).length;
-        return <ListRow key={r.runnerId} href={viewPath('runners', r.runnerId)} on={r.runnerId === selected} title={r.name} sub={runnerState(r, now)} right={running ? `${running} running` : undefined} />;
+        const s = stats?.find((x) => x.runnerId === r.runnerId);
+        const sub =
+          s && isOnline(r, now) && statsFresh(s, now) ? (
+            <span className="minis">
+              <Mini label="CPU" value={s.cpuPercent} />
+              <Mini label="Mem" value={percent(s.memUsed, s.memTotal)} low={r.pressure === 'memory'} />
+            </span>
+          ) : (
+            runnerState(r, now)
+          );
+        return <ListRow key={r.runnerId} href={viewPath('runners', r.runnerId)} on={r.runnerId === selected} title={r.name} sub={sub} right={running ? `${running} running` : undefined} />;
       })}
     </ul>
   );
@@ -478,6 +536,7 @@ export function RunnerPage({ token, id }: { token: string; id: string }) {
   const rows = useLiveQuery(api.phone.runners, { token });
   const inbox = useInbox();
   const accounts = useLiveQuery(api.phone.accounts, { token }) as Account[] | undefined;
+  const stats = useLiveQuery(api.phone.runnerStats, { token });
   const now = useClock();
   if (!rows) return <div className="pad muted">Loading…</div>;
   const r = rows.find((x) => x.runnerId === id);
@@ -485,6 +544,8 @@ export function RunnerPage({ token, id }: { token: string; id: string }) {
   const mine = (inbox ?? []).filter((t) => t.runnerId === id);
   const running = mine.filter(busy);
   const logins = (accounts ?? []).filter((a) => a.runnerId === id).map((a) => a.title);
+  const s = stats?.find((x) => x.runnerId === id);
+  const fresh = !!s && isOnline(r, now) && statsFresh(s, now);
   return (
     <div className="page">
       <PageHead view="runners" title={r.name}>
@@ -495,9 +556,34 @@ export function RunnerPage({ token, id }: { token: string; id: string }) {
       </PageHead>
       <div className="page-body">
         <div className="page-col">
+          {s ? (
+            <div className="meters">
+              <Meter label="CPU" sub={`${s.cores} cores${s.load1 !== undefined ? `, load ${s.load1}` : ''}`} value={`${s.cpuPercent}%`} percent={s.cpuPercent} />
+              <Meter label="Memory" sub={r.pressure === 'memory' ? 'Running low' : undefined} value={`${bytesWords(s.memUsed)} of ${bytesWords(s.memTotal)}`} percent={percent(s.memUsed, s.memTotal)} low={r.pressure === 'memory'} />
+              <Meter label="Disk" sub={r.pressure === 'disk' ? 'Running low' : undefined} value={`${bytesWords(s.diskFree)} free of ${bytesWords(s.diskTotal)}`} percent={percent(s.diskTotal - s.diskFree, s.diskTotal)} low={r.pressure === 'disk'} />
+              {fresh ? null : <div className="page-note">From {sinceWords(Date.parse(s.at), now)} ago, when it last reported.</div>}
+            </div>
+          ) : isOnline(r, now) ? (
+            <div className="page-note">Asking it for its figures…</div>
+          ) : null}
           <dl className="facts">
+            {s?.machine ? (
+              <>
+                <dt>Machine</dt>
+                <dd>{[s.machine, s.os].filter(Boolean).join(', ')}</dd>
+              </>
+            ) : null}
             <dt>Version</dt>
             <dd>{r.version}</dd>
+            {r.startedAt && isOnline(r, now) ? (
+              <>
+                <dt>Up for</dt>
+                <dd>
+                  {sinceWords(Date.parse(r.startedAt), now)}
+                  {s ? `, the machine ${sinceWords(now - s.uptimeSec * 1000, now)}` : ''}
+                </dd>
+              </>
+            ) : null}
             <dt>Threads</dt>
             <dd>
               {running.length} running, {mine.length} in the inbox

@@ -3628,6 +3628,14 @@ the mirror back as state. The Mac app doesn't use it.
   or a handover) sets `lastSeenAt` to 0 so the phone shows it offline at
   once; a draining runner just stops, and the new release writes
   everything again under the same `runnerId`.
+- **Runner figures** (API 45). While the website's Runners view is open it calls
+  `phone:watchRunners` every 30 seconds, keeping a time in the future in
+  `runnerWatch`. Each runner subscribes to that (`sync:runnerWatch`), and while
+  it's in the future sends its machine's CPU, memory and disk every 10 seconds
+  to a row of its own (`sync:setRunnerStats`; `runner/src/runner-stats.ts`).
+  With nobody looking nothing's written. The heartbeat carries only `pressure`
+  (`memory` or `disk`, looked for every 5 minutes), which rarely changes, as
+  every phone's runner list re-runs when that row does.
 - **Commands.** The phone's mutations (`convex/phone.ts`) add a row to
   `commands` for a runner (`runnerId`, or `"any"`). The runner holds a
   live query on its pending commands over the Convex client's WebSocket
@@ -4027,6 +4035,8 @@ anyone's); "any runner" is any good key. Anything not sorted is owner only.
 | `claimSchedule` | its own | `runnerId` |
 | `releaseSchedule` | its own | the schedule's runner |
 | `scheduleRan` | its own | the schedule's runner |
+| `runnerWatch` | any runner | a time, nothing about any runner |
+| `setRunnerStats` | its own | the `runnerId` it reports for; `machine` and `os` cut to 128 bytes |
 | `requestScheduleRun` | its own | the schedule's runner, so only the owner asks another runner to run one |
 | `runnersList` | owner only | every runner's id and name, which a Mac posing as another would want; a runner key's scheduler lists only its own runner |
 | `pendingCommands` | its own | `runnerId` only: `"any"` commands wait for the owner key |

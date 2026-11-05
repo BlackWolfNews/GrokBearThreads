@@ -46,6 +46,7 @@ import { SettingsService, modelMethods, settingsMethods } from './settings.ts';
 import { ConvexSync, defaultRunnerName, ensureRunnerId, readSyncKey } from './sync.ts';
 import { SharedPools } from './shared-pools.ts';
 import { readPools } from './pools.ts';
+import { machineSampler } from './runner-stats.ts';
 import { detectMachineIcon } from './machine.ts';
 import { filesMethods } from './files.ts';
 import { devicesMethods } from './devices.ts';
@@ -349,7 +350,12 @@ async function main(): Promise<void> {
     },
     // The phone's commands, through the same methods the app's RPCs use,
     // on whichever runner has the thread.
-    commands: phoneCommands(runner, peers),
+    commands: {
+      ...phoneCommands(runner, peers),
+      // A schedule's own runner gets its command, so the scheduler here is its.
+      schedule: ({ scheduleId, action }) => (action === 'run' ? scheduler.runNow(scheduleId) : scheduler.update({ scheduleId, paused: action === 'pause' })),
+    },
+    sample: machineSampler(cfg.home),
     secretBox: runner.secrets,
     schedules: scheduler,
     pools: sharedPools,

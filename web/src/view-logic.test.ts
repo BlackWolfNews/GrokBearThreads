@@ -1,7 +1,7 @@
 // node --test web/src/view-logic.test.ts
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isOnline, matchesSchedule, runnersShown, runnerState, scheduleSections, sinceWords, tightest, untilWords } from './view-logic.ts';
+import { bytesWords, statsFresh, isOnline, matchesSchedule, runnersShown, runnerState, scheduleSections, sinceWords, tightest, untilWords } from './view-logic.ts';
 
 const NOW = Date.parse('2026-11-05T10:00:00Z');
 const ago = (ms: number) => new Date(NOW - ms).toISOString();
@@ -59,4 +59,16 @@ test('a login\'s room is its tightest window', () => {
   assert.equal(tightest([{ title: '5h', remainingPercent: 80 }, { title: 'week', remainingPercent: 30 }])?.title, 'week');
   assert.equal(tightest([]), undefined);
   assert.equal(tightest(undefined), undefined);
+});
+
+test('sizes read short', () => {
+  const GB = 1024 ** 3;
+  assert.equal(bytesWords(6.94 * GB), '6.9 GB');
+  assert.equal(bytesWords(212.4 * GB), '212 GB');
+  assert.equal(bytesWords(1536 * GB), '1.5 TB');
+});
+
+test('figures are fresh for a minute', () => {
+  assert.ok(statsFresh({ at: ago(30_000) }, NOW));
+  assert.ok(!statsFresh({ at: ago(90_000) }, NOW));
 });

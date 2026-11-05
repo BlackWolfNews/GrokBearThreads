@@ -337,6 +337,7 @@ button.fold:hover > svg:last-child, button.fold:focus-visible > svg:last-child {
 .meter .track { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
 .meter .track i { display: block; height: 100%; border-radius: 3px; background: var(--muted); }
 .meter .track.low i { background: var(--orange); }
+.minis { display: flex; gap: 12px; }
 .mini { display: inline-block; width: 42px; height: 4px; border-radius: 2px; background: var(--line); vertical-align: 2px; overflow: hidden; margin-left: 5px; }
 .mini i { display: block; height: 100%; background: var(--faint); border-radius: 2px; }
 .mini.low i { background: var(--orange); }

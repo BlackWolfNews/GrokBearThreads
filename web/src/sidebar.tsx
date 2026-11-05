@@ -12,7 +12,7 @@ import { api } from '../../convex/_generated/api';
 import { go, threadPath } from './route';
 import { ago } from './format';
 import { MenuChoice, Pop } from './menu';
-import { ARCHIVE_FIRST, ARCHIVE_STEP, archived, archiveShown, build, clampWidth, hibernating, isFiltering, neighbour, NO_FILTER, passes, placeChoices, placesOf, readFolded, readOrder, readWidth, shows, SIDEBAR_DEFAULT, wakesOf, type Filter, type InboxOrder, type ScheduleRow, type SectionKey } from './sections';
+import { ARCHIVE_FIRST, ARCHIVE_STEP, archived, archiveShown, build, clampWidth, hibernating, isFiltering, neighbour, NO_FILTER, passes, placeChoices, placesOf, readFolded, readOrder, readWidth, shows, SIDEBAR_DEFAULT, wakesOf, type Filter, type InboxOrder, type SectionKey } from './sections';
 import * as Icon from './icons';
 
 export type Row = NonNullable<ReturnType<typeof useQuery<typeof api.phone.threads>>>[number];
@@ -39,7 +39,7 @@ const SHOWS: { show: Filter['show']; label: string; icon: ReactNode }[] = [
 export function Lists({ token, selected, isNew }: { token: string; selected?: string; isNew?: boolean }) {
   const inbox = useInbox();
   const counts = useLiveQuery(api.phone.counts, { token });
-  const schedules = useLiveQuery(api.phone.schedules, { token }) as ScheduleRow[] | undefined;
+  const schedules = useLiveQuery(api.phone.wakes, { token });
   const [folded, setFolded] = useState(() => readFolded(localStorage.getItem(FOLDED_KEY)));
   const [order, setOrder] = useState(() => readOrder(localStorage.getItem(ORDER_KEY)));
   const [query, setQuery] = useState('');

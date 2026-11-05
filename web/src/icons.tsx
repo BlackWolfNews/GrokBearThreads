@@ -190,3 +190,13 @@ export const Server = () => (
     <path d="M2.5 2.5h11V7h-11zM2.5 9h11v4.5h-11zM5 4.75h.01M5 11.25h.01" />
   </svg>
 );
+export const Pause = () => (
+  <svg {...base}>
+    <path d="M5.5 3v10M10.5 3v10" />
+  </svg>
+);
+export const Play = () => (
+  <svg {...base}>
+    <path d="M4.5 2.5 13 8l-8.5 5.5z" />
+  </svg>
+);

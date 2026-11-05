@@ -25,10 +25,14 @@ Built 28 Oct 2026 (thread 66935d23).
   Projects, a tile per runner with a dot for online, then Usage and a gear
   (appearance, sign out). Each opens a list in the sidebar and a page beside
   it (`web/src/pages.tsx`, at `/scheduled`, `/projects`, `/runners`, `/usage`,
-  each with `/<id>`), which subscribe only while they're showing. They read,
-  they don't change: a schedule or project is edited on the Mac or through
-  an agent. A project's page lists all its threads, live then archived,
-  newest first, from `phone:projectThreads` (Show more for older ones). On a phone the rail is a tab bar, with Runners and Usage under
+  each with `/<id>`), which subscribe only while they're showing. A schedule
+  has Pause and Run now (`phone:schedule`); anything else, and any change to a
+  project, is on the Mac or through an agent. A project's page lists all its
+  threads, live then archived, newest first, from `phone:projectThreads` (Show
+  more for older ones). A runner's page has its CPU, memory and disk, reported
+  only while that view is open (docs/protocol.md, Sync, "Runner figures"), and
+  its tile an orange dot while it's low on memory or disk. The sidebar and rail
+  read `phone:wakes`, not the schedules. On a phone the rail is a tab bar, with Runners and Usage under
   More. The pencil beside the search starts a thread (`/new`, `phone:create`)
   on the runner's default folder and login. And a
   thread whose finished turns fold to "Worked for 4m 12s" and the reply

@@ -215,6 +215,82 @@ describe('convex mirror e2e', { skip: LOCAL ? false : 'no local Convex deploymen
   // Step 6 part 2 (docs/protocol.md, "Other runners' threads"): the runner
   // writes its sidebar rows, and hands the app another runner's rows (here a
   // pretend "e2e-other" that only heartbeats and writes its index).
+  test('API 45: the sidebar\'s schedule rows, figures only while watched, and schedule commands', async () => {
+    const issued = await run('npx', ['convex', 'run', ...ENV_ARGS, 'tokens:issue', JSON.stringify({ name: 'web-e2e-45', days: 1 })], { cwd: REPO });
+    const token = JSON.parse(issued.stdout.slice(issued.stdout.indexOf('{'))).token as string;
+    const phone = { token };
+    const beat = (runnerId: string, more: Record<string, unknown> = {}) => api('mutation', 'sync:heartbeat', { key, runner: { runnerId, name: runnerId, version: '1', startedAt: new Date().toISOString(), draining: false, threadCount: 0, ...more } });
+    const save = (id: string, more: Record<string, unknown> = {}) =>
+      api('mutation', 'sync:saveSchedule', { key, schedule: { id, runnerId: 'e2e-45', title: id, text: 'a long message', whenText: 'soon', paused: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), runs: 0, nextRunAt: '2030-01-01T00:00:00.000Z', threadId: `thread-${id}`, ...more } });
+    const wakes = async () => ((await api('query', 'phone:wakes', phone)) as { scheduleId: string; nextRunAt?: string }[]).filter((w) => w.scheduleId.startsWith('e2e45'));
+
+    // A schedule from before the table comes in on its runner's first heartbeat.
+    await save('e2e45-old');
+    await beat('e2e-45');
+    assert.deepEqual((await wakes()).map((w) => w.scheduleId), ['e2e45-old']);
+
+    // Pausing drops its row, resuming brings it back, deleting drops it for good.
+    await save('e2e45-old', { paused: true });
+    assert.deepEqual(await wakes(), []);
+    await save('e2e45-old');
+    assert.equal((await wakes()).length, 1);
+    await api('mutation', 'sync:deleteSchedule', { key, scheduleId: 'e2e45-old' });
+    assert.deepEqual(await wakes(), []);
+
+    // A run moves its next time; a claim doesn't touch the row.
+    await save('e2e45-run');
+    const before = (await wakes())[0];
+    assert.equal(await api('mutation', 'sync:claimSchedule', { key, runnerId: 'e2e-45', scheduleId: 'e2e45-run', holder: 'h', kind: 'request', expect: 'never' }), false);
+    await api('mutation', 'sync:scheduleRan', { key, scheduleId: 'e2e45-run', holder: 'h', lastRun: { at: new Date().toISOString(), outcome: 'sent' }, sent: true, expectUpdatedAt: 'not this one' });
+    assert.deepEqual((await wakes())[0], before, 'changed underneath: the time it worked out stands');
+    const row = ((await api('query', 'phone:schedules', phone)) as { id: string; updatedAt: string }[]).find((x) => x.id === 'e2e45-run')!;
+    await api('mutation', 'sync:scheduleRan', { key, scheduleId: 'e2e45-run', holder: 'h', lastRun: { at: new Date().toISOString(), outcome: 'sent' }, sent: true, expectUpdatedAt: row.updatedAt, nextRunAt: '2031-01-01T00:00:00.000Z' });
+    assert.equal((await wakes())[0]!.nextRunAt, '2031-01-01T00:00:00.000Z');
+    await api('mutation', 'sync:scheduleRan', { key, scheduleId: 'e2e45-run', holder: 'h', lastRun: { at: new Date().toISOString(), outcome: 'sent' }, sent: true, expectUpdatedAt: row.updatedAt, finishedAt: new Date().toISOString() });
+    assert.deepEqual(await wakes(), [], 'finished');
+
+    // A schedule command goes to the schedule's own runner.
+    await save('e2e45-cmd');
+    const commandId = await api('mutation', 'phone:schedule', { ...phone, scheduleId: 'e2e45-cmd', action: 'pause' });
+    assert.ok(commandId);
+    await assert.rejects(api('mutation', 'phone:schedule', { ...phone, scheduleId: 'nope', action: 'pause' }));
+    await api('mutation', 'sync:deleteSchedule', { key, scheduleId: 'e2e45-cmd' });
+
+    // Figures: the watch row, a report, and pressure on the runner's row.
+    await api('mutation', 'phone:watchRunners', phone);
+    const watch = await api('query', 'sync:runnerWatch', { key });
+    assert.ok(watch.until > Date.now());
+    await api('mutation', 'sync:setRunnerStats', { key, runnerId: 'e2e-45', stats: { cpuPercent: 12, cores: 8, memUsed: 1, memTotal: 2, diskFree: 3, diskTotal: 4, uptimeSec: 5, machine: 'Apple M5', os: 'macOS 27.2' } });
+    await api('mutation', 'sync:setRunnerStats', { key, runnerId: 'e2e-45', stats: { cpuPercent: 40, cores: 8, memUsed: 1, memTotal: 2, diskFree: 3, diskTotal: 4, uptimeSec: 5 } });
+    const stats = ((await api('query', 'phone:runnerStats', phone)) as { runnerId: string; cpuPercent: number; at: string }[]).filter((x) => x.runnerId === 'e2e-45');
+    assert.equal(stats.length, 1, 'one row per runner');
+    assert.equal(stats[0]!.cpuPercent, 40);
+    await beat('e2e-45', { pressure: 'memory' });
+    const listed = () => api('query', 'phone:runners', phone).then((rows: { runnerId: string; pressure?: string; startedAt?: string }[]) => rows.find((x) => x.runnerId === 'e2e-45')!);
+    assert.equal((await listed()).pressure, 'memory');
+    assert.ok((await listed()).startedAt);
+    await beat('e2e-45');
+    assert.equal((await listed()).pressure, undefined, 'cleared when it recovers');
+
+    // A runner key reports for its own runner only, and sees the watch.
+    const made = await api('mutation', 'sync:addRunnerKey', { key, runnerId: 'e2e-45-keyed', name: 'e2e-45-keyed', ownerRunnerId: 'e2e-45', replace: true });
+    const runnerKey = (made as { key: string }).key;
+    const figures = { cpuPercent: 1, cores: 1, memUsed: 1, memTotal: 2, diskFree: 1, diskTotal: 2, uptimeSec: 1 };
+    await api('mutation', 'sync:setRunnerStats', { key: runnerKey, runnerId: 'e2e-45-keyed', stats: { ...figures, os: 'x'.repeat(500) } });
+    const keyed = ((await api('query', 'phone:runnerStats', phone)) as { runnerId: string; os?: string }[]).find((x) => x.runnerId === 'e2e-45-keyed')!;
+    assert.ok(keyed.os!.length <= 128, 'its labels are cut to fit');
+    await assert.rejects(api('mutation', 'sync:setRunnerStats', { key: runnerKey, runnerId: 'e2e-45', stats: figures }));
+    assert.equal(((await api('query', 'phone:runnerStats', phone)) as { runnerId: string; cpuPercent: number }[]).find((x) => x.runnerId === 'e2e-45')!.cpuPercent, 40, 'another runner\'s row is untouched');
+    assert.ok((await api('query', 'sync:runnerWatch', { key: runnerKey }))?.until);
+
+    // The real runner in this test reports too, while it's watched.
+    await until('this runner\'s own figures', async () => {
+      const mine = ((await api('query', 'phone:runnerStats', phone)) as { runnerId: string; memTotal: number }[]).filter((x) => x.runnerId !== 'e2e-45');
+      return mine.find((x) => x.memTotal > 0);
+    }, 90_000);
+    await run('npx', ['convex', 'run', ...ENV_ARGS, 'tokens:revoke', JSON.stringify({ name: 'web-e2e-45' })], { cwd: REPO });
+  });
+
   test('API 37: one account at a time, firstSeen, and a thread row without its messages', async () => {
     // Its own each run: the local deployment keeps its rows between runs.
     const runnerId = 'e2e-accounts-' + crypto.randomBytes(4).toString('hex');

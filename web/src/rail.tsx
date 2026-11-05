@@ -9,11 +9,11 @@ import { useLiveQuery } from './live';
 import { useInbox } from './inbox';
 import { MenuChoice, Pop } from './menu';
 import { go, type RailView, type Route, viewPath } from './route';
-import { build, wakesOf, type ScheduleRow as WakeRow } from './sections';
+import { build, wakesOf } from './sections';
 import { useTheme } from './pages';
 import { signOut } from './token';
 import { day } from './format';
-import { isOnline, runnersShown, runnerState, scheduleSections } from './view-logic';
+import { isOnline, runnersShown, runnerState } from './view-logic';
 import * as Icon from './icons';
 
 // Where Threads goes back to: the thread last open, so a trip to Scheduled and
@@ -22,13 +22,13 @@ let lastThread: string | undefined;
 
 export function Rail({ token, route }: { token: string; route: Route }) {
   const inbox = useInbox();
-  const schedules = useLiveQuery(api.phone.schedules, { token });
+  // The small rows, not phone:schedules: this is on screen all the time.
+  const wakes = useLiveQuery(api.phone.wakes, { token });
   const runners = useLiveQuery(api.phone.runners, { token });
   const now = Date.now();
   if (route.page === 'thread') lastThread = route.threadId;
-  const rows = (schedules ?? []) as Parameters<typeof scheduleSections>[0];
-  const waiting = build(inbox ?? [], now, wakesOf((schedules ?? []) as WakeRow[]), 'needsYou').inbox.length;
-  const active = scheduleSections(rows).active.length;
+  const waiting = build(inbox ?? [], now, wakesOf(wakes ?? []), 'needsYou').inbox.length;
+  const active = wakes?.length ?? 0;
   const threads = route.page === 'list' || route.page === 'thread' || route.page === 'new';
   const narrow = () => matchMedia('(max-width: 760px)').matches;
 
@@ -72,10 +72,10 @@ export function Rail({ token, route }: { token: string; route: Route }) {
       {runnersShown(runners ?? [], now).map((r) => (
         <a
           key={r.runnerId}
-          className={`tile ${isOnline(r, now) ? 'ok' : ''} ${route.page === 'runners' && route.id === r.runnerId ? 'on' : ''}`}
+          className={`tile ${isOnline(r, now) ? 'ok' : ''} ${isOnline(r, now) && r.pressure ? 'warn' : ''} ${route.page === 'runners' && route.id === r.runnerId ? 'on' : ''}`}
           href={viewPath('runners', r.runnerId)}
-          title={`${r.name}: ${runnerState(r, now)}`}
-          aria-label={`${r.name}: ${runnerState(r, now)}`}
+          title={tileWords(r, now)}
+          aria-label={tileWords(r, now)}
           onClick={(e) => {
             e.preventDefault();
             go(viewPath('runners', r.runnerId));
@@ -89,6 +89,10 @@ export function Rail({ token, route }: { token: string; route: Route }) {
       <GearMenu token={token} />
     </nav>
   );
+}
+
+function tileWords(r: Parameters<typeof runnerState>[0] & { name: string; pressure?: string }, now: number): string {
+  return `${r.name}: ${runnerState(r, now)}${r.pressure && isOnline(r, now) ? `. Low on ${r.pressure}` : ''}`;
 }
 
 function GearMenu({ token }: { token: string }) {

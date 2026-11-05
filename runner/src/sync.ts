@@ -21,6 +21,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { ConvexClient } from 'convex/browser';
 import { phonePicture } from './project-icons.ts';
+import { RunnerStats, type MachineStats } from './runner-stats.ts';
 import { imagesInEvent, readReplyImage, readShareImage, replyImagesInEvent, type ReplyImage, type ShareImage } from './share-images.ts';
 import { extForMediaType, sniffImage } from './media.ts';
 import { makeFunctionReference } from 'convex/server';
@@ -100,7 +101,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 44;
+export const BACKEND_API_VERSION = 45;
 // From this one the main Mac reads and steers other runners' threads through
 // the backend (convex/relay.ts): commands can be `interrupt` or `call`, and a
 // pending approval carries its event's seq (docs/protocol.md, "Other
@@ -203,6 +204,10 @@ export const WOKE_BY_API_VERSION = 33;
 // "Secrets"), answered with phone:secret. An older backend's validator would
 // turn the whole row down, so it goes without the card.
 export const SECRETS_API_VERSION = 35;
+// From this one a runner reports its machine's figures while someone's watching
+// (runner-stats.ts), and its heartbeat carries `pressure`; an older backend's
+// validator would turn the heartbeat down.
+export const RUNNER_STATS_API_VERSION = 45;
 // How far back a start looks for pictures, as new ones go up as they come.
 // Reading a whole log for each thread is too much to do for all of them on
 // every start, and it's the threads in use that Mike opens on the phone.
@@ -377,6 +382,8 @@ export type CommandHost = {
   interrupt?(threadId: string): unknown;
   share(threadId: string, p: { access: 'off' | 'link'; newLink?: boolean }): unknown;
   quickAsk(p: { question: string; answer: string; sources?: { title: string; url: string }[]; askedAt?: number }): { thread: ThreadSummary };
+  // The website's Pause, Resume and Run now (API 45). Absent in small tests.
+  schedule?: (p: { scheduleId: string; action: 'pause' | 'resume' | 'run' }) => unknown;
 };
 
 export type SyncDeps = {
@@ -417,6 +424,8 @@ export type SyncDeps = {
   pools?: { attach(backend: PoolBackend): void };
   // Takes the other runners' readings of the same logins (API 39).
   sharedUsage?: { setShared(rows: SharedReading[]): void };
+  // This machine's figures (runner-stats.ts). Absent in tests, which report none.
+  sample?: () => Promise<MachineStats>;
   // For the sidebar table (thread-index.ts): telling the app about other
   // runners' threads, and the data dir their tokens are copied into.
   publish?: (n: Notification) => void;
@@ -954,6 +963,7 @@ export class ConvexSync {
   private replyUp = new Map<string, Set<string>>();
   private flushTimer?: TimerHandle;
   private heartbeatTimer?: TimerHandle;
+  private stats?: RunnerStats;
   private presenceTimer?: TimerHandle;
   private sentAtMac?: boolean;
   private backendApiVersion?: number;
@@ -1076,6 +1086,7 @@ export class ConvexSync {
     this.presenceTimer = undefined;
     this.flushTimer = undefined;
     this.heartbeatTimer = undefined;
+    this.stats?.stop();
     await this.subscriber?.close();
     if (opts.bye) await this.post('mutation', 'sync:bye', { key: this.deps.key, runnerId: this.runnerId }).catch(() => {});
   }
@@ -2318,6 +2329,7 @@ export class ConvexSync {
       threadCount: this.deps.runner.list(ALL).length,
       ...(this.deps.config.icon && (this.backendApiVersion ?? 0) >= RUNNER_ICON_API_VERSION ? { icon: this.deps.config.icon } : {}),
       ...(this.deps.config.rpcUrl && (this.backendApiVersion ?? 0) >= THREAD_INDEX_API_VERSION ? { rpcUrl: this.deps.config.rpcUrl } : {}),
+      ...(this.stats?.pressure && (this.backendApiVersion ?? 0) >= RUNNER_STATS_API_VERSION ? { pressure: this.stats.pressure } : {}),
     };
     void this.post('mutation', 'sync:heartbeat', { key: this.deps.key, runner }).then(
       (r) => {
@@ -2329,6 +2341,7 @@ export class ConvexSync {
         if ((this.backendApiVersion ?? 0) >= SHARED_POOLS_API_VERSION && this.running) this.deps.pools?.attach(this.poolBackend());
         if ((this.backendApiVersion ?? 0) >= SHARED_USAGE_API_VERSION && this.running) this.followSharedUsage();
         if ((this.backendApiVersion ?? 0) >= THREAD_INDEX_API_VERSION && this.running) this.index?.start();
+        if ((this.backendApiVersion ?? 0) >= RUNNER_STATS_API_VERSION && this.running) this.startStats();
       },
       (e) => {
         // A key that isn't this runner's (runner.json's sync.runnerId isn't
@@ -2399,6 +2412,22 @@ export class ConvexSync {
       ...(subscriber ? { subscribe: (fn: string, args: Record<string, unknown>, onUpdate: (v: unknown) => void, onError: (e: Error) => void) => subscriber.subscribe(fn, args, onUpdate, onError) } : {}),
       key: this.deps.key,
     };
+  }
+
+  private startStats(): void {
+    const { sample, key } = this.deps;
+    const subscriber = this.subscriber;
+    if (!sample || !subscriber) return;
+    this.stats ??= new RunnerStats({
+      sample,
+      key,
+      runnerId: this.runnerId,
+      post: (fn, args) => this.post('mutation', fn, args),
+      subscribe: (fn, args, onUpdate, onError) => subscriber.subscribe(fn, args, onUpdate, onError),
+      clock: this.deps.clock,
+      log: this.deps.log,
+    });
+    this.stats.start();
   }
 
   /** remoteThreads.list: other runners' threads, empty with sync off. */
@@ -2737,6 +2766,13 @@ export class ConvexSync {
           .slice(-PAGE_SIZE)
           .map((m) => ({ ...m, pagedAt: now }));
         await this.appendMessages(page);
+        return undefined;
+      }
+      case 'schedule': {
+        if (!host.schedule) throw new Error('this runner can\'t change schedules');
+        if (typeof a.scheduleId !== 'string' || !a.scheduleId) throw new Error('no schedule');
+        if (a.action !== 'pause' && a.action !== 'resume' && a.action !== 'run') throw new Error('action is "pause", "resume" or "run"');
+        await host.schedule({ scheduleId: a.scheduleId, action: a.action });
         return undefined;
       }
       default:

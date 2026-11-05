@@ -66,12 +66,14 @@ export const me = query({
 
 export const runners = query({
   args: { token: v.string() },
-  returns: v.array(v.object({ runnerId: v.string(), name: v.string(), version: v.string(), lastSeenAt: v.string(), draining: v.boolean() })),
+  // release to pressure since API 45, for the website's runner page. An older
+  // phone ignores them.
+  returns: v.array(v.object({ runnerId: v.string(), name: v.string(), version: v.string(), lastSeenAt: v.string(), draining: v.boolean(), release: v.optional(v.string()), startedAt: v.optional(v.string()), threadCount: v.optional(v.number()), pressure: v.optional(v.string()) })),
   handler: async (ctx, { token }) => {
     await checkPhoneToken(ctx, token);
     const out = [];
     for await (const r of ctx.db.query('runners')) {
-      out.push({ runnerId: r.runnerId, name: r.name, version: r.version, lastSeenAt: new Date(r.lastSeenAt).toISOString(), draining: r.draining });
+      out.push({ runnerId: r.runnerId, name: r.name, version: r.version, lastSeenAt: new Date(r.lastSeenAt).toISOString(), draining: r.draining, ...(r.release ? { release: r.release } : {}), startedAt: r.startedAt, threadCount: r.threadCount, ...(r.pressure ? { pressure: r.pressure } : {}) });
     }
     return out;
   },
@@ -415,6 +417,36 @@ export const schedules = query({
   },
 });
 
+// What a sidebar needs of the schedules, all the time (API 45; schema.ts,
+// scheduleWakes): a row per active one, without the claims and runs that make
+// phone:schedules re-run.
+export const wakes = query({
+  args: { token: v.string() },
+  returns: v.array(v.object({ scheduleId: v.string(), threadId: v.optional(v.string()), nextRunAt: v.optional(v.string()) })),
+  handler: async (ctx, { token }) => {
+    await checkPhoneToken(ctx, token);
+    const out = [];
+    for await (const w of ctx.db.query('scheduleWakes')) out.push({ scheduleId: w.scheduleId, ...(w.threadId ? { threadId: w.threadId } : {}), ...(w.nextRunAt ? { nextRunAt: w.nextRunAt } : {}) });
+    return out;
+  },
+});
+
+// Each runner's machine figures (API 45), last reported while someone was
+// watching: see watchRunners.
+export const runnerStats = query({
+  args: { token: v.string() },
+  returns: v.array(v.object({ runnerId: v.string(), at: v.string(), cpuPercent: v.number(), cores: v.number(), memUsed: v.number(), memTotal: v.number(), diskFree: v.number(), diskTotal: v.number(), load1: v.optional(v.number()), uptimeSec: v.number(), machine: v.optional(v.string()), os: v.optional(v.string()) })),
+  handler: async (ctx, { token }) => {
+    await checkPhoneToken(ctx, token);
+    const out = [];
+    for await (const s of ctx.db.query('runnerStats')) {
+      const { _id, _creationTime, at, ...rest } = s;
+      out.push({ ...rest, at: new Date(at).toISOString() });
+    }
+    return out;
+  },
+});
+
 export const accounts = query({
   args: { token: v.string() },
   returns: v.array(v.any()),
@@ -427,6 +459,35 @@ export const accounts = query({
 });
 
 // ------------------------------------------------------------ mutations
+
+// The Runners view is open (API 45): runners report their figures until this
+// lapses. The website calls it every 30 seconds while it's showing, so a closed
+// tab stops them within WATCH_MS.
+const WATCH_MS = 45_000;
+export const watchRunners = mutation({
+  args: { token: v.string() },
+  returns: v.null(),
+  handler: async (ctx, { token }) => {
+    await checkPhoneToken(ctx, token);
+    const until = Date.now() + WATCH_MS;
+    const row = await ctx.db.query('runnerWatch').first();
+    if (row) await ctx.db.patch(row._id, { until });
+    else await ctx.db.insert('runnerWatch', { until });
+    return null;
+  },
+});
+
+// Pause, resume or run a schedule (API 45), on the runner it belongs to.
+export const schedule = mutation({
+  args: { token: v.string(), scheduleId: v.string(), action: v.union(v.literal('pause'), v.literal('resume'), v.literal('run')) },
+  returns: v.id('commands'),
+  handler: async (ctx, { token, scheduleId, action }) => {
+    await checkPhoneToken(ctx, token);
+    const s = await ctx.db.query('schedules').withIndex('by_scheduleId', (q) => q.eq('id', scheduleId)).unique();
+    if (!s) throw new ConvexError({ kind: 'notFound', message: 'no such schedule' });
+    return queue(ctx, s.runnerId, 'schedule', undefined, { scheduleId, action });
+  },
+});
 
 // answers (API 14): the open card's asks the message answers, as the Mac
 // app passes them to threads.send, so the transcript shows them as answers.
@@ -676,6 +737,6 @@ async function commandImages(ctx: { storage: { getUrl(id: Id<'_storage'>): Promi
   return { images: out };
 }
 
-async function queue(ctx: { db: QueryCtx['db'] & { insert: any } }, runnerId: string, kind: 'send' | 'respond' | 'update' | 'create' | 'page' | 'share' | 'quickAsk', threadId: string | undefined, args: Record<string, unknown>) {
+async function queue(ctx: { db: QueryCtx['db'] & { insert: any } }, runnerId: string, kind: 'send' | 'respond' | 'update' | 'create' | 'page' | 'share' | 'quickAsk' | 'schedule', threadId: string | undefined, args: Record<string, unknown>) {
   return ctx.db.insert('commands', { runnerId, ...(threadId ? { threadId } : {}), kind, args, state: 'pending', createdAt: Date.now() });
 }

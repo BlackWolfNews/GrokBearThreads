@@ -489,6 +489,15 @@ Queries:
 - `phone:runners({ token })` → `[{ runnerId, name, version, lastSeenAt,
   draining }]`. Offline is `lastSeenAt` older than 3 minutes (a runner
   that stopped for good has `lastSeenAt` of 1970).
+  Since API 45 also `release?, startedAt?, threadCount?, pressure?`
+  (`memory` or `disk` while one's running low).
+- `phone:wakes({ token })` (API 45) → `[{ scheduleId, threadId?, nextRunAt? }]`,
+  a small row per active schedule, from `scheduleWakes`: what a sidebar needs
+  all the time. `phone:schedules` costs about 150 KB and re-runs on every claim
+  and run, so it's for a schedules view that's open.
+- `phone:runnerStats({ token })` (API 45) → each runner's machine figures, last
+  reported while someone was watching, and `phone:watchRunners({ token })` says
+  someone is (docs/protocol.md, Sync, "Runner figures").
 - `phone:threads({ token, view: "inbox" | "hibernating" | "den" })` →
   rows, newest `lastActivityAt` first; the den is capped at 100. A row is
   `threadId, runnerId, title, cwd, accountId, provider, model?, status,

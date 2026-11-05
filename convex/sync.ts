@@ -10,6 +10,7 @@ import { threadFields, views } from './schema';
 import { API_VERSION } from './version';
 import { actAs, checkRunnerId, forbidden, hasLiveKey, runnerAuth, sha256 } from './lib';
 import { cutBytes, docBytes, mayClaim, NAME_CHARS, mayFinish, mayTake, mayTouch, mayUseStorage, mayWrite, nameSkeleton, normalName, ownsCard, SCHEDULE_ID, utf8Bytes, type Caller } from './runnerAccess';
+import { dropWake, seedWakes, syncWake } from './wakes';
 import { issueToken as makeToken, listTokens as allTokens, revokeToken as revokeOne, tokenInfo, tokenKind, MAX_DAYS } from './tokens';
 
 // Finished commands and paged messages older than this are pruned.
@@ -736,6 +737,7 @@ export const heartbeat = mutation({
       threadCount: v.number(),
       icon: v.optional(v.string()),
       rpcUrl: v.optional(v.string()),
+      pressure: v.optional(v.union(v.literal('memory'), v.literal('disk'))),
     }),
   },
   // The backend's API version (version.ts), so the runner can tell when it's
@@ -760,8 +762,10 @@ export const heartbeat = mutation({
       .withIndex('by_runnerId', (q) => q.eq('runnerId', runner.runnerId))
       .unique();
     // Presence is setPresence's to change; a heartbeat keeps it.
-    if (existing) await ctx.db.replace(existing._id, { ...row, ...(existing.atMac !== undefined ? { atMac: existing.atMac, atMacAt: existing.atMacAt } : {}) });
-    else await ctx.db.insert('runners', row);
+    if (existing) await ctx.db.replace(existing._id, { ...row, wakesSeeded: true, ...(existing.atMac !== undefined ? { atMac: existing.atMac, atMacAt: existing.atMacAt } : {}) });
+    else await ctx.db.insert('runners', { ...row, wakesSeeded: true });
+    // API 45: once per runner, its schedules from before scheduleWakes.
+    if (!existing?.wakesSeeded) await seedWakes(ctx, runner.runnerId);
     // A runner from before view counts gets its count within a minute of
     // this backend, without waiting for a thread to change.
     if (!(await ctx.db.query('viewCounts').withIndex('by_runnerId', (q) => q.eq('runnerId', runner.runnerId)).unique())) await recountViews(ctx, runner.runnerId);
@@ -796,6 +800,51 @@ async function uniqueName(ctx: MutationCtx, runnerId: string, raw: string): Prom
   }
   return runnerId;
 }
+
+// ------------------------------------------------------------ runner figures (API 45)
+// Until when someone has the website's Runners view open (phone:watchRunners).
+// A runner subscribes, and reports only while this is in the future.
+export const runnerWatch = query({
+  args: { key: v.string() },
+  returns: v.union(v.null(), v.object({ until: v.number() })),
+  handler: async (ctx, { key }) => {
+    await runnerAuth(ctx, key, 'runnerWatch');
+    const row = await ctx.db.query('runnerWatch').first();
+    return row ? { until: row.until } : null;
+  },
+});
+
+export const setRunnerStats = mutation({
+  args: {
+    key: v.string(),
+    runnerId: v.string(),
+    stats: v.object({
+      cpuPercent: v.number(),
+      cores: v.number(),
+      memUsed: v.number(),
+      memTotal: v.number(),
+      diskFree: v.number(),
+      diskTotal: v.number(),
+      load1: v.optional(v.number()),
+      uptimeSec: v.number(),
+      machine: v.optional(v.string()),
+      os: v.optional(v.string()),
+    }),
+  },
+  returns: v.null(),
+  handler: async (ctx, { key, runnerId, stats }) => {
+    // A runner key reports for its own runner only, and its labels are cut to
+    // fit, as its heartbeat's are.
+    const caller = await runnerAuth(ctx, key, 'setRunnerStats');
+    await actAs(ctx, caller, runnerId);
+    const labels = caller.owner ? {} : { ...(stats.machine !== undefined ? { machine: cutBytes(stats.machine, 128) } : {}), ...(stats.os !== undefined ? { os: cutBytes(stats.os, 128) } : {}) };
+    const row = { runnerId, at: Date.now(), ...stats, ...labels };
+    const existing = await ctx.db.query('runnerStats').withIndex('by_runnerId', (q) => q.eq('runnerId', runnerId)).unique();
+    if (existing) await ctx.db.replace(existing._id, row);
+    else await ctx.db.insert('runnerStats', row);
+    return null;
+  },
+});
 
 // A runner stopping for good (not handing over) says so, so the phone
 // shows it offline at once rather than 3 minutes later.
@@ -1284,9 +1333,16 @@ export const setSchedules = mutation({
     const owned = new Set<string>();
     for await (const row of ctx.db.query('schedules')) {
       if (row.owned) owned.add(row.id);
-      else if (row.runnerId === runnerId) await ctx.db.delete(row._id);
+      else if (row.runnerId === runnerId) {
+        await ctx.db.delete(row._id);
+        await dropWake(ctx, row.id);
+      }
     }
-    for (const row of schedules) if (!owned.has(row.id)) await ctx.db.insert('schedules', { ...row, runnerId });
+    for (const row of schedules) {
+      if (owned.has(row.id)) continue;
+      await ctx.db.insert('schedules', { ...row, runnerId });
+      await syncWake(ctx, { ...row, runnerId });
+    }
     return null;
   },
 });
@@ -1378,6 +1434,7 @@ export const saveSchedule = mutation({
     capText(caller, "A schedule's text", schedule.text, CAP.scheduleText);
     capDoc(caller, 'A schedule', schedule, CAP.scheduleDoc);
     if (!row && !caller.owner && (await ownedCount(ctx, schedule.runnerId)) >= CAP.schedules) throw tooMany('schedules', CAP.schedules);
+    await syncWake(ctx, schedule);
     if (!row) {
       await ctx.db.insert('schedules', { ...schedule, owned: true });
       return null;
@@ -1398,6 +1455,7 @@ export const deleteSchedule = mutation({
     const row = visibleTo(caller, await scheduleRow(ctx, scheduleId));
     if (!row) return false;
     await ctx.db.delete(row._id);
+    await dropWake(ctx, scheduleId);
     return true;
   },
 });
@@ -1434,9 +1492,15 @@ export const adoptSchedules = mutation({
     }
     if (held.length) return { held };
     for await (const row of ctx.db.query('schedules').withIndex('by_runnerId', (q) => q.eq('runnerId', runnerId))) {
-      if (!row.owned) await ctx.db.delete(row._id);
+      if (!row.owned) {
+        await ctx.db.delete(row._id);
+        await dropWake(ctx, row.id);
+      }
     }
-    for (const s of fresh) await ctx.db.insert('schedules', { ...s, runnerId, owned: true });
+    for (const s of fresh) {
+      await ctx.db.insert('schedules', { ...s, runnerId, owned: true });
+      await syncWake(ctx, { ...s, runnerId });
+    }
     return { held: [] };
   },
 });
@@ -1518,6 +1582,7 @@ export const scheduleRan = mutation({
     }
     // And the row as it will be, checked whole.
     if (!caller.owner && docBytes({ ...row, ...patch }) > CAP.scheduleDoc) delete patch.lastRun;
+    if (row.updatedAt === expectUpdatedAt) await syncWake(ctx, { ...row, nextRunAt: patch.nextRunAt as string | undefined, finishedAt: patch.finishedAt as string | undefined });
     await ctx.db.patch(row._id, patch);
     return null;
   },

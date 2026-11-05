@@ -159,6 +159,12 @@ export default defineSchema({
     // An SF Symbol for the runner's Mac ("laptopcomputer", "macmini"), so
     // lists can tell runners apart at a glance (API 10).
     icon: v.optional(v.string()),
+    // "memory" or "disk" while one's running low (API 45), for the website's
+    // runner tiles. On this row since it rarely changes; the figures have a
+    // row of their own (runnerStats), read only by the Runners view.
+    pressure: v.optional(v.string()),
+    // Its active schedules have been copied to scheduleWakes (API 45), once.
+    wakesSeeded: v.optional(v.boolean()),
     // How a Mac app reaches this runner to open one of its threads (API 12):
     // wss://<MagicDNS name>:<port>/rpc, only on the tailnet (sync.rpcUrl).
     rpcUrl: v.optional(v.string()),
@@ -355,7 +361,7 @@ export default defineSchema({
     runnerId: v.string(), // or "any"
     threadId: v.optional(v.string()),
     // interrupt and call (API 44) come only from the main Mac's runner (relay.ts queueCommand).
-    kind: v.union(v.literal('send'), v.literal('respond'), v.literal('update'), v.literal('create'), v.literal('page'), v.literal('share'), v.literal('quickAsk'), v.literal('interrupt'), v.literal('call')),
+    kind: v.union(v.literal('send'), v.literal('respond'), v.literal('update'), v.literal('create'), v.literal('page'), v.literal('share'), v.literal('quickAsk'), v.literal('interrupt'), v.literal('call'), v.literal('schedule')),
     args: v.any(),
     state: v.union(v.literal('pending'), v.literal('taken'), v.literal('done'), v.literal('failed')),
     note: v.optional(v.string()),
@@ -547,6 +553,40 @@ export default defineSchema({
     updatedAt: v.string(),
     updatedBy: v.string(),
   }).index('by_poolId', ['id']),
+
+  // What a client needs to know about schedules all the time, one small row
+  // per active one (API 45): the website's sidebar uses them to put threads
+  // waiting on a schedule under Hibernating and to count them. A live read of
+  // `schedules` costs about 150 KB and re-runs on every claim and run, as each
+  // writes the row with its whole message. Kept by the sync:*Schedule
+  // functions, and only written when one of these fields changes.
+  scheduleWakes: defineTable({
+    scheduleId: v.string(),
+    runnerId: v.string(),
+    threadId: v.optional(v.string()),
+    nextRunAt: v.optional(v.string()),
+  }).index('by_scheduleId', ['scheduleId']),
+
+  // A machine's figures for the website's Runners view (API 45,
+  // runner/src/runner-stats.ts), written only while runnerWatch is fresh.
+  runnerStats: defineTable({
+    runnerId: v.string(),
+    at: v.number(),
+    cpuPercent: v.number(),
+    cores: v.number(),
+    memUsed: v.number(),
+    memTotal: v.number(),
+    diskFree: v.number(),
+    diskTotal: v.number(),
+    load1: v.optional(v.number()),
+    uptimeSec: v.number(),
+    machine: v.optional(v.string()),
+    os: v.optional(v.string()),
+  }).index('by_runnerId', ['runnerId']),
+
+  // One row: until when someone has the Runners view open. Runners subscribe,
+  // and report only while it's in the future.
+  runnerWatch: defineTable({ until: v.number() }),
 
   accounts: defineTable({
     runnerId: v.string(),

@@ -389,6 +389,9 @@ function setupFull(opts: { heads?: { threadId: string; lastSeq: number }[]; take
       listAccounts: () => [{ id: 'claude-3', provider: 'claude', title: 'three@example.com', configDir: '/tmp/three', models: [{ id: 'x', title: 'X' }] as never, usage: { windows: [{ kind: 'five_hour', title: '5-hour', remainingPercent: 80.5 }], readAt: '2026-10-27T00:00:00.000Z', source: 'live' } }],
     },
     commands: {
+      schedule: (p) => {
+        applied.push(`schedule ${p.scheduleId} ${p.action}`);
+      },
       send: (id, text, images, o) => {
         applied.push(`send ${id} ${text} ${o.origin}`);
         // A forwarded command fails later, as a rejected promise.
@@ -666,6 +669,24 @@ test('commands: each pending one is taken once, applied through the runner as fr
   assert.equal(h.runner.get(t.id).archivedAt !== undefined, true);
   assert.equal(h.runner.get(t.id).share?.access, 'link');
   assert.deepEqual(sync.status().commands, { state: 'on', applied: 4, failed: 0 });
+});
+
+test('commands: the website pauses, resumes and runs a schedule, and nonsense fails with a note', async () => {
+  const { sync, calls, push, applied } = setupFull();
+  sync.start();
+  await sync.flushNow();
+  push([
+    { commandId: 's1', kind: 'schedule', args: { scheduleId: 'a', action: 'pause' }, createdAt: 1 },
+    { commandId: 's2', kind: 'schedule', args: { scheduleId: 'a', action: 'run' }, createdAt: 2 },
+    { commandId: 's3', kind: 'schedule', args: { scheduleId: 'a', action: 'delete' }, createdAt: 3 },
+    { commandId: 's4', kind: 'schedule', args: { action: 'pause' }, createdAt: 4 },
+  ]);
+  await tick(10);
+  assert.deepEqual(applied, ['schedule a pause', 'schedule a run']);
+  const finished = calls.filter((c) => c.fn === 'sync:finishCommand').map((c) => c.args);
+  assert.deepEqual(finished.map((f) => f.ok), [true, true, false, false]);
+  assert.match(String(finished[2]!.note), /action is/);
+  assert.match(String(finished[3]!.note), /no schedule/);
 });
 
 test('commands: a quickAsk is kept as a thread and finished with its id', async () => {
