@@ -412,7 +412,7 @@ test('Peers: a draining runner\'s threads are marked onOldRunner, its usage read
     home,
     token: 't',
     log: nullLogger,
-    runner: { adopt: () => undefined, publish: (n) => published.push(n) },
+    runner: { adopt: () => undefined, publish: (n) => published.push(n), waitedOnDeleted: () => {} },
     sweep: async () => {},
     connect: async () => client as any,
     alive: () => true,
@@ -467,7 +467,7 @@ test('Peers: once closed (this runner is draining), a thread coming across is no
     close: () => {},
   };
   const adopted: string[] = [];
-  const peers = new Peers({ home: h.home, token: 't', log: nullLogger, runner: { adopt: (id) => (adopted.push(id), undefined), publish: () => {} }, sweep: async () => {}, connect: async () => client as any, alive: () => true });
+  const peers = new Peers({ home: h.home, token: 't', log: nullLogger, runner: { adopt: (id) => (adopted.push(id), undefined), publish: () => {}, waitedOnDeleted: () => {} }, sweep: async () => {}, connect: async () => client as any, alive: () => true });
   await peers.connectAll();
   peers.close();
   notify('drain.handedOver', { threadId: 't-old' });

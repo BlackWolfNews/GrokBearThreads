@@ -1973,15 +1973,21 @@ the thread if a sub-agent stalls, so an ask can't stay hidden for good.
   out, a day. A named thread is done once it has finished a turn (its own
   or one its CLI opened after a job ended) with `needs: "nothing"`,
   nothing queued, no sub-agent or background job running and no `snooze`
-  or `waitFor` of its own, with no new work since; or has been archived
+  or `waitFor` of its own, nor a job that ended mid-turn whose result
+  turn is still to come, with no new work since; or has been archived
   or deleted. The runner keeps each thread's last finish and its reply on
   the thread (`finished` in thread.json) and drops it at any new work (a
-  message, a turn its CLI opens), so no clocks are compared: waiting on an
+  message, a review's answer, going back to an earlier message, any turn
+  starting, including one its CLI opens), so no clocks are compared: waiting on an
   idle thread that has finished wakes at once with that reply, and one set
   going in the waiting turn counts only when it finishes that. The waits
   are checked whenever one could have come true: a finish, an archive, a
   delete (on a draining runner too), a new wait, a thread coming across
-  from a draining runner, and once a starting runner is listening. Once
+  from a draining runner (after its own carry-ons there), and once a
+  starting runner is listening, not before (`holdWaits`: a woken thread's
+  tools aren't ready). A thread named in `waitFor` that's on another
+  runner of this Mac (found in the threads folder) is waited on all the
+  same, and checked when either comes across. Once
   every one is done the thread wakes (a "Woke up … finished." note) and
   gets a `user.message` with `origin: "runner"` naming each with up to
   2,000 characters of the reply it finished with. A message, a wake or

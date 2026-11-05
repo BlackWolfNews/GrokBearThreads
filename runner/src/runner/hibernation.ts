@@ -107,9 +107,18 @@ export const hibernationPart = {
     const skipped: string[] = [];
     for (const id of ids) {
       const hits = [...this.threads.values()].filter((t) => !t.rt.deleted && (t.rec.id === id || t.rec.id.startsWith(id)));
-      const t = hits.length === 1 ? hits[0] : undefined;
-      if (!t || t === st || t.rec.archivedAt) skipped.push(id);
-      else if (!list.some((x) => x.threadId === t.rec.id)) list.push({ threadId: t.rec.id, title: t.rec.title });
+      let found: { id: string; title: string; archived: boolean } | undefined;
+      if (hits.length === 1) found = { id: hits[0].rec.id, title: hits[0].rec.title, archived: Boolean(hits[0].rec.archivedAt) };
+      else if (!hits.length) {
+        // On another runner of this Mac's (one that's draining, or the new
+        // one it moved to while this turn ended): waited on all the same,
+        // and checked when either comes across.
+        const there = this.store.ids().filter((n) => n === id || n.startsWith(id));
+        const rec = there.length === 1 && !this.threads.has(there[0]) ? this.store.load(there[0]) : undefined;
+        if (rec) found = { id: rec.id, title: rec.title, archived: Boolean(rec.archivedAt) };
+      }
+      if (!found || found.id === rec.id || found.archived) skipped.push(id);
+      else if (!list.some((x) => x.threadId === found.id)) list.push({ threadId: found.id, title: found.title });
     }
     if (!list.length) {
       this.emit(st, { type: 'system.note', text: `Not hibernated: none of the threads it was to wait on (${ids.join(', ')}) are here and still going.` });
@@ -172,6 +181,7 @@ export const hibernationPart = {
   // a delete, a new wait, a start and a thread coming across from a
   // draining runner. A thread not here (still on that runner) waits.
   reconcileWaits(this: Runner): void {
+    if (this.holdWaits) return;
     for (const st of this.threads.values()) {
       const waits = st.rec.waitingOn;
       if (!waits || st.rt.deleted || st.rec.archivedAt || this.bucket(st.rec) !== 'snoozed') continue;

@@ -270,6 +270,15 @@ export class ThreadStore {
     return paths.blobs(this.home, id);
   }
 
+  // The ids of every thread folder on disk, this runner's or not.
+  ids(): string[] {
+    try {
+      return fs.readdirSync(paths.threads(this.home)).filter((n) => !n.startsWith('.'));
+    } catch {
+      return [];
+    }
+  }
+
   // Every thread on disk. `broken` lists folders that have an event log but
   // no readable thread.json, so the runner can rebuild them rather than
   // have the thread vanish.

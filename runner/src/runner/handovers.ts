@@ -170,9 +170,6 @@ export const handoversPart = {
     this.tellOneStoppedWork(st);
     this.markDirty(st);
     this.armSnoozeTimer();
-    // It may have finished on the old runner while a thread waiting on it
-    // had already come across.
-    this.reconcileWaits();
     this.armRoomTimer();
     this.armNetTimer(true);
     this.log.info('adopted a thread', { threadId, crashed: Boolean(opts.crashed), queued: rec.queue.length });

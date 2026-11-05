@@ -204,6 +204,8 @@ async function main(): Promise<void> {
       if (!appRestarts.isWatching(threadId)) appRestarts.watch(threadId);
     },
   });
+  // Until it is listening (below): see Runner.holdWaits.
+  runner.holdWaits = true;
   const settings = new SettingsService({ config: cfg, publish: (n) => runner.publish(n), poolIds: () => runner.listPools().pools.map((p) => p.id) });
   // Runners still finishing turns after a handover: connected before the
   // threads load, so the ones they have are left to them. Nothing after the
@@ -221,10 +223,16 @@ async function main(): Promise<void> {
         restarter?.resumeAdopted(threadId);
         // Cut off mid-turn if the old runner crashed with it: carried on.
         if (o?.crashed) runner.carryOnStopped(threadId);
+        // It may have finished on the old runner while a thread waiting on
+        // it had already come across. After its own carry-ons, which are
+        // new work, so a finish they replace doesn't count.
+        runner.reconcileWaits();
         // Told now if the app restarted while it was over there.
         if (t) appRestarts?.adopted(threadId);
         return t;
       },
+      // A thread here may be waiting on one deleted over there.
+      waitedOnDeleted: (threadId) => runner.waitedOnDeleted(threadId),
       publish: (n) => runner.publish(n),
     },
     usage: (accountId, reading) => usage.record(accountId, reading),
@@ -513,6 +521,7 @@ async function main(): Promise<void> {
   runner.carryOnStopped();
   // A thread waited on may have finished while the runner was down. Only
   // now: waking one starts its CLI, whose tools need what's set up above.
+  runner.holdWaits = false;
   runner.reconcileWaits();
 
   let stopping = false;

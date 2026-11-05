@@ -522,6 +522,10 @@ export const NO_WAKE_TIME = UNTIL_RESTART;
 // Parts of the Runner that live in runner/ (see each file's top).
 export interface Runner extends NewThreadsPart, HibernationPart, TitlesPart, HighlightsPart, PatchesPart, EditingPart, ClisPart, ReviewsPart, ApprovalsPart, ProjectsHostPart, StoppedWorkPart, HandoversPart, PoolsPart, NetworkPart, WorktreesPart {}
 export class Runner {
+  // While main.ts is still starting up: waking a thread for its waits
+  // (reconcileWaits) would start a CLI whose tools aren't ready, so they
+  // wait for main.ts's own reconcileWaits once it's listening.
+  holdWaits = false;
   cfg: Config;
   store: ThreadStore;
   adapters: Record<string, AgentAdapter>;
@@ -1419,6 +1423,8 @@ export class Runner {
   // than stuck on a turn that never started.
   startTurn(st: ThreadState, msg: QueuedSend): void {
     const { rec, rt } = st;
+    // New work (a review's answer comes this way without sendTo).
+    delete rec.finished;
     // A review can be replayed after a failed turn.started append. Its
     // stable message ID keeps the original user row rather than duplicating it.
     const hasReviewMessage = msg.reviewId && this.store.log(rec.id).read(1, rec.lastSeq).some(e => e.type === 'user.message' && e.reviewId === msg.reviewId && e.turnId === msg.turnId);
@@ -2019,7 +2025,9 @@ export class Runner {
     // Judged before endTurn, which starts any queued message.
     const finished = outcome === 'completed' && said?.needs === 'nothing' && !rec.queue.length && !archive &&
       !snoozeFromTool(turn.endTurn) && !waitForFromTool(turn.endTurn) &&
-      !rec.subagents?.some((a) => a.status === 'running') && !rt.tasks.length;
+      !rec.subagents?.some((a) => a.status === 'running') && !rt.tasks.length &&
+      // A job that ended mid-turn: the CLI's turn reading its result is next.
+      !rt.taskEndedInTurn && !rt.finished.length;
     this.endTurn(st, ev.seq, outcome === 'failed' ? 'error' : 'idle', outcome, limitHit, netLost);
     if (finished) this.markFinished(st, turn.lastText);
     if (archive && !rt.turn && !rec.archivedAt && !this.stopping) {

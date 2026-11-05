@@ -204,3 +204,27 @@ test("end_turn: a refused repeat keeps the card on Codex's form too", () => {
   s.result();
   assert.equal(h.runner.get(waiter).needs, 'you');
 });
+
+test('waitFor: a pending follow-up after a job ended mid-turn means not finished', () => {
+  const { h, waiter, target, session, turn } = setup();
+  turn(waiter, { needs: 'nothing', waitFor: [target] });
+  h.runner.send(target, 'measure it');
+  const s = session(target);
+  s.out({ kind: 'tasks', tasks: [{ id: 'b1', type: 'local_bash', kind: 'shell', description: 'measure' }] });
+  s.out({ kind: 'tasks', tasks: [] });
+  s.out({ kind: 'event', event: { type: 'tool.call', itemId: 'e1', name: END_TURN, kind: 'mcp', title: 'end_turn', input: { needs: 'nothing' } } });
+  s.text('m1', 'Started it.');
+  s.result();
+  assert.ok(h.runner.get(waiter).snoozedUntil, 'the turn reading the result is still to come');
+});
+
+test('waitFor: held while the runner is starting, then checked', () => {
+  const { h, waiter, target, turn } = setup();
+  turn(waiter, { needs: 'nothing', waitFor: [target] });
+  h.runner.holdWaits = true;
+  turn(target, { needs: 'nothing' }, 'Done while starting.');
+  assert.ok(h.runner.get(waiter).snoozedUntil, 'held');
+  h.runner.holdWaits = false;
+  h.runner.reconcileWaits();
+  assert.equal(h.runner.get(waiter).snoozedUntil, undefined);
+});

@@ -41,6 +41,8 @@ export const editingPart = {
       throw new RpcError(ErrorCode.backgroundRunning, `Still running in the background: ${what}. Going back to an earlier message stops it.`, { background: rt.tasks });
     }
     rt.editing = true;
+    // Going back is new work: the answer it replaces isn't a finish.
+    delete rec.finished;
     try {
       // Messages waiting behind the turn were sent after the edited one,
       // so they go with the rest.
