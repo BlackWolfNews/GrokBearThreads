@@ -892,7 +892,10 @@ Measured after API 48 landed (20 minutes of prod logs, 5 Nov, late at night with
 almost no client open, so not comparable with the samples above): `phone:projects`
 37 KB a run, `sync:schedulesSince` one whole read at 178 KB and then little,
 `sync:sharedUsage` still 12 KB a run and the biggest at 78 runs, and about 184 MB/day
-overall. A full day's rate is still to come.
+overall. A full day's rate is still to come. On 6 Nov `sync:sharedUsage` became a
+query every 5 minutes instead of a subscription (each runner's watch re-ran on
+every other runner's login write): 12 runs an hour per runner, about 14 MB a day
+for four runners whatever they write.
 
 An estimate for one Mac with the app open, 300 threads, 15 turns and half an
 hour of phone use a day: about 6 MB a day, 185 MB a month, under a fifth of the

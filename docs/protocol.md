@@ -1503,8 +1503,10 @@ thread to another login when the one it's on runs out of room.
   backend can't be reached. `runner.json`'s `pools` is left as it was, and
   is used again only with sync off. `defaults.poolId` stays each runner's.
 - **Shared readings** (backend API 39). A subscription is one limit
-  wherever it's signed in, so each runner also follows the other runners'
-  latest usage readings (`sync:sharedUsage`, from their `accounts` rows)
+  wherever it's signed in, so each runner also reads the other runners'
+  latest usage readings every 5 minutes (`sync:sharedUsage`, from their
+  `accounts` rows; a query on a timer, not a subscription, since that re-ran
+  on every other runner's login write)
   and counts one of the same provider and email as a third source beside
   Token Stats and its own turns: the newest reading wins, window by
   window, and `usage.source` is `"shared"` when another runner's was the

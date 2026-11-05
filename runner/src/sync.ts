@@ -47,6 +47,8 @@ const CALL_ENTRIES = 500;
 // thread's preview and working line change many times a second.
 export const SYNC_COALESCE_MS = 2000;
 export const HEARTBEAT_MS = 60_000;
+// How often other runners' usage readings are read (followSharedUsage).
+export const SHARED_USAGE_POLL_MS = 5 * 60_000;
 // Threads per upsert mutation, and messages per append.
 export const SYNC_BATCH = 50;
 export const MESSAGE_BATCH = 100;
@@ -1152,6 +1154,8 @@ export class ConvexSync {
     this.index?.stop();
     this.flushTimer?.cancel();
     this.heartbeatTimer?.cancel();
+    this.sharedUsageTimer?.cancel();
+    this.sharedUsageTimer = undefined;
     this.presenceTimer?.cancel();
     this.settleTimer?.cancel();
     this.settling = false;
@@ -2640,31 +2644,38 @@ export class ConvexSync {
 
   // ------------------------------------------------------------ shared usage
 
-  private unsubSharedUsage?: () => void;
+  private sharedUsageTimer?: TimerHandle;
   private sharedUsageAsked?: string;
 
-  // Once: every runner's readings, less this runner's own, to the usage
-  // store. Each reading's readAt keeps a copy of a copy from winning over
-  // the reading it came from.
+  // Every runner's readings, less this runner's own, to the usage store,
+  // read every SHARED_USAGE_POLL_MS. Each reading's readAt keeps a copy of
+  // a copy from winning over the reading it came from. Polled rather than
+  // subscribed (6 Nov): a subscription re-ran on every login write from
+  // every other runner, 78 runs in 20 minutes with four runners and the
+  // biggest read cost left; a poll costs the same whatever they write. A
+  // reading from another machine is at most a poll old, and a runner always
+  // has its own at once.
   private followSharedUsage(): void {
-    if (!this.subscriber || !this.deps.sharedUsage) return;
-    // A heartbeat calls this each time: once, unless the backend has come to
-    // take the runner's id since.
+    if (!this.deps.sharedUsage) return;
+    // A heartbeat calls this each time: started once, and again only when
+    // the backend has come to take the runner's id since.
     const args = sharedUsageArgs(this.deps.key, this.runnerId, this.backendApiVersion ?? 0);
     const asked = JSON.stringify(args);
-    if (this.unsubSharedUsage && this.sharedUsageAsked === asked) return;
-    this.unsubSharedUsage?.();
+    if (this.sharedUsageTimer && this.sharedUsageAsked === asked) return;
+    this.sharedUsageTimer?.cancel();
     this.sharedUsageAsked = asked;
     const mine = this.runnerId;
-    this.unsubSharedUsage = this.subscriber.subscribe(
-      'sync:sharedUsage',
-      args,
-      (v) => this.deps.sharedUsage?.setShared((Array.isArray(v) ? (v as SharedReading[]) : []).filter((r) => r.runnerId !== mine)),
-      (e) => {
-        this.deps.log.debug('shared usage subscription failed', { error: String(e) });
-        this.unsubSharedUsage = undefined;
-      },
-    );
+    const poll = async (): Promise<void> => {
+      if (!this.running || this.sharedUsageAsked !== asked) return;
+      try {
+        const v = await this.backend('query', 'sync:sharedUsage', args);
+        this.deps.sharedUsage?.setShared((Array.isArray(v) ? (v as SharedReading[]) : []).filter((r) => r.runnerId !== mine));
+      } catch (e) {
+        this.deps.log.debug('shared usage read failed', { error: String(e) });
+      }
+      if (this.running && this.sharedUsageAsked === asked) this.sharedUsageTimer = this.deps.clock.setTimeout(() => void poll(), SHARED_USAGE_POLL_MS);
+    };
+    this.sharedUsageTimer = this.deps.clock.setTimeout(() => void poll(), 0);
   }
 
   // ------------------------------------------------------------ pools

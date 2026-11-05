@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
-import { ConvexSync, forBackend, ASKED_API_VERSION, LINKS_API_VERSION, PROJECTS_DIFF_API_VERSION, STARS_API_VERSION, NETWORK_WAIT_API_VERSION, BACKEND_API_VERSION, MAC_RUNNER_STATS_API_VERSION, TURNS_API_VERSION, ICONS_API_VERSION, RUNNER_ICON_API_VERSION, SCHEDULES_API_VERSION, SHARE_API_VERSION, WOKE_API_VERSION, STARTED_BY_API_VERSION, SECTIONS_API_VERSION, MODELS_API_VERSION, REPLY_IMAGES_API_VERSION, REPLY_IMAGES_LOOKBACK_MS, REPLY_IMAGES_SCANS_PER_FLUSH, toAccountDoc, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, convexUploader, pictureName, type ThreadDoc } from '../../src/sync.ts';
+import { ConvexSync, forBackend, ASKED_API_VERSION, LINKS_API_VERSION, PROJECTS_DIFF_API_VERSION, STARS_API_VERSION, NETWORK_WAIT_API_VERSION, BACKEND_API_VERSION, MAC_RUNNER_STATS_API_VERSION, TURNS_API_VERSION, ICONS_API_VERSION, RUNNER_ICON_API_VERSION, SCHEDULES_API_VERSION, SHARE_API_VERSION, WOKE_API_VERSION, STARTED_BY_API_VERSION, SECTIONS_API_VERSION, MODELS_API_VERSION, REPLY_IMAGES_API_VERSION, REPLY_IMAGES_LOOKBACK_MS, REPLY_IMAGES_SCANS_PER_FLUSH, toAccountDoc, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SHARED_USAGE_POLL_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, convexUploader, pictureName, type ThreadDoc } from '../../src/sync.ts';
 import type { Project } from '../../src/protocol.ts';
 import type { ScheduleBackend } from '../../src/schedules.ts';
 import { nullLogger, type Logger } from '../../src/log.ts';
@@ -2294,4 +2294,38 @@ test('runners.stats marks the figures wanted at most every 20 s, and is empty wh
   assert.deepEqual(await old.sync.runnerStats(), [], 'an older backend has none');
   assert.equal(old.calls.filter((c) => c.fn === 'sync:runnerStatsList').length, 0);
   await old.sync.stop();
+});
+
+// Other runners' usage readings are read on a timer, not watched: watching
+// re-ran on every other runner's login write (78 runs in 20 minutes with
+// four runners, 6 Nov), and a poll costs the same whatever they write.
+test("other runners' usage readings are read now, then every five minutes, without this runner's own, until sync stops", async () => {
+  const got: unknown[][] = [];
+  const reading = (runnerId: string) => ({ runnerId, provider: 'claude', email: 'mike.cann@gmail.com', usage: { windows: [], readAt: '2026-11-06T00:00:00.000Z', source: 'live' } });
+  const { h, sync, calls } = setup({
+    answer: (fn) => (fn === 'sync:heartbeat' ? { apiVersion: BACKEND_API_VERSION } : fn === 'sync:sharedUsage' ? [reading('r1'), reading('bruce')] : null),
+    extra: { sharedUsage: { setShared: (rows) => got.push(rows) } },
+  });
+  const reads = () => calls.filter((c) => c.fn === 'sync:sharedUsage');
+  sync.start();
+  await tick(20);
+  // The first read waits for the heartbeat that says the backend's version,
+  // then goes on a zero timer.
+  h.clock.advance(1);
+  await tick(20);
+  assert.equal(reads().length, 1);
+  assert.equal(reads()[0]!.kind, 'query');
+  assert.equal(reads()[0]!.args.runnerId, 'r1');
+  assert.deepEqual(got.at(-1)!.map((r) => (r as { runnerId: string }).runnerId), ['bruce'], "this runner's own left out");
+  // Heartbeats in between don't start a second timer or read again.
+  h.clock.advance(HEARTBEAT_MS * 2);
+  await tick(20);
+  assert.equal(reads().length, 1);
+  h.clock.advance(SHARED_USAGE_POLL_MS);
+  await tick(20);
+  assert.equal(reads().length, 2);
+  await sync.stop();
+  h.clock.advance(SHARED_USAGE_POLL_MS * 3);
+  await tick(20);
+  assert.equal(reads().length, 2, 'nothing after stop');
 });
