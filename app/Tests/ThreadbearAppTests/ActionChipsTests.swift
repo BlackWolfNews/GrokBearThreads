@@ -52,7 +52,8 @@ final class ActionChipsTests: XCTestCase {
     /// The width it works out for a row is the width the row lays out at,
     /// for every count, so it shows the same chips a ViewThatFits would.
     func testTheRowWidthItWorksOutIsTheRowsWidth() throws {
-        let thread = try thread(7)
+        // 11, so "+N" goes from two digits to one along the way.
+        let thread = try thread(11)
         let app = AppModel()
         func measure(_ view: some View) -> CGFloat {
             NSHostingView(rootView: view.environment(app)).fittingSize.width
@@ -61,7 +62,11 @@ final class ActionChipsTests: XCTestCase {
         for action in thread.actions {
             widths.chips[action.id] = measure(ActionChip(action: action, running: false, run: {}))
         }
-        widths.more = measure(ActionChipsMoreTab(threadId: thread.id, more: [], count: thread.actions.count))
+        XCTAssertEqual(ActionChipsFit.moreCounts(11), [9, 11])
+        XCTAssertEqual(ActionChipsFit.moreCounts(3), [3])
+        for count in ActionChipsFit.moreCounts(thread.actions.count) {
+            widths.more[ActionChipsFit.digits(count)] = measure(ActionChipsMoreTab(threadId: thread.id, more: [], count: count))
+        }
         for shown in 0...thread.actions.count {
             let row = ActionChipsRow(thread: thread, shown: Array(thread.actions.prefix(shown)), more: Array(thread.actions.dropFirst(shown)), waiting: [])
             let real = measure(row)
@@ -72,7 +77,7 @@ final class ActionChipsTests: XCTestCase {
         let room = try XCTUnwrap(ActionChipsFit.width(shown: 3, thread: thread, waiting: nil, widths: widths)) + 1
         XCTAssertEqual(ActionChipsFit.shown(thread: thread, waiting: nil, widths: widths, room: room), 3)
         XCTAssertEqual(ActionChipsFit.shown(thread: thread, waiting: nil, widths: widths, room: 0), 0)
-        XCTAssertEqual(ActionChipsFit.shown(thread: thread, waiting: nil, widths: widths, room: 10_000), 7)
+        XCTAssertEqual(ActionChipsFit.shown(thread: thread, waiting: nil, widths: widths, room: 10_000), 11)
         // Not until every chip has been measured.
         widths.chips["p:a2"] = nil
         XCTAssertNil(ActionChipsFit.shown(thread: thread, waiting: nil, widths: widths, room: 10_000))

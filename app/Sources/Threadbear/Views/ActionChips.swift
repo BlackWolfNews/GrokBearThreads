@@ -43,7 +43,8 @@ struct ActionChips: View {
     }
 
     /// Each piece once, out of sight, for its width: every chip, the trust
-    /// chip's shelf and the "+N" one (at the most it could say).
+    /// chip's shelf and the "+N" one, once for each number of digits N
+    /// could have (its digits are all one width).
     private func measuring(_ actions: [Action], waiting: [PatchInfo]) -> some View {
         HStack(alignment: .top, spacing: 0) {
             ForEach(actions) { action in
@@ -56,9 +57,11 @@ struct ActionChips: View {
                     .fixedSize()
                     .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { widths.waiting = $0 }
             }
-            ActionChipsMoreTab(threadId: thread.id, more: [], count: actions.count)
-                .fixedSize()
-                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { widths.more = $0 }
+            ForEach(ActionChipsFit.moreCounts(actions.count), id: \.self) { count in
+                ActionChipsMoreTab(threadId: thread.id, more: [], count: count)
+                    .fixedSize()
+                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { widths.more[ActionChipsFit.digits(count)] = $0 }
+            }
         }
         .fixedSize()
         .hidden()
@@ -75,8 +78,8 @@ enum ActionChipsFit {
         var chips: [String: CGFloat] = [:]
         /// The trust chip on its shelf.
         var waiting: CGFloat?
-        /// The "+N" shelf.
-        var more: CGFloat?
+        /// The "+N" shelf, by how many digits N has.
+        var more: [Int: CGFloat] = [:]
     }
 
     static var rowSpacing: CGFloat { zoomed(6) }
@@ -109,10 +112,19 @@ enum ActionChipsFit {
             parts.append(tabPadding * 2 + items.reduce(0, +) + tabSpacing * CGFloat(items.count - 1))
         }
         if shown < actions.count {
-            guard let more = widths.more else { return nil }
+            guard let more = widths.more[digits(actions.count - shown)] else { return nil }
             parts.append(more)
         }
         return parts.reduce(0, +) + rowSpacing * CGFloat(max(parts.count - 1, 0))
+    }
+
+    static func digits(_ count: Int) -> Int { String(count).count }
+
+    /// One count for each number of digits "+N" could have with `total`
+    /// actions: 9 and 10 for 10 of them.
+    static func moreCounts(_ total: Int) -> [Int] {
+        guard total > 0 else { return [] }
+        return (1...digits(total)).map { min(Int(pow(10, Double($0))) - 1, total) }
     }
 
     /// The most chips that fit in `room`, or none when not even one does,
@@ -186,8 +198,10 @@ struct ActionChipsMoreTab: View {
                         .disabled(app.isRunning(action: action, in: threadId))
                 }
             } label: {
+                // Even digits, so every count with as many digits is as
+                // wide, which is how ActionChipsFit measures it.
                 Text("+\(count)")
-                    .font(.system(size: TypeScale.chip))
+                    .font(.system(size: TypeScale.chip).monospacedDigit())
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, zoomed(6))
                     .padding(.vertical, zoomed(4))
