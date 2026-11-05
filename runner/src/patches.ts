@@ -375,7 +375,7 @@ async function loadPatchFile(file: string, source: 'home' | 'project', cache: Pa
   // asked about again, whatever's cached for it.
   let files: string[] | undefined;
   let blocked: Record<string, string> | undefined;
-  let verified: { hash: string; root: string; code: Map<string, Buffer> } | undefined;
+  let verified: { hash: string; root: string; code: Map<string, Buffer>; edges: Map<string, Map<string, string>> } | undefined;
   if (source === 'project') {
     let verdict;
     try {
@@ -389,7 +389,7 @@ async function loadPatchFile(file: string, source: 'home' | 'project', cache: Pa
     if (!verdict.trusted) return { info: { id, source, file, untrusted: verdict.reason, hash: verdict.hash, ...(verdict.helpers ? { helpers: verdict.helpers } : {}) }, panels: [], actions: [], hooks: [] };
     files = verdict.files;
     blocked = verdict.blocked;
-    if (verdict.hash && verdict.root && verdict.code) verified = { hash: verdict.hash, root: verdict.root, code: verdict.code };
+    if (verdict.hash && verdict.root && verdict.code && verdict.edges) verified = { hash: verdict.hash, root: verdict.root, code: verdict.code, edges: verdict.edges };
     // Trusted by hash, it's imported from the bytes that hash was made
     // from (verified-imports.ts); one without them can't be.
     else if (files) return { info: { id, source, file, error: "Not run: patch trust didn't keep the code it checked." }, panels: [], actions: [], hooks: [] };
@@ -401,7 +401,7 @@ async function loadPatchFile(file: string, source: 'home' | 'project', cache: Pa
   try {
     // The query makes Node load the file again after an edit: a module URL
     // is loaded once per process.
-    const url = verified ? verifiedUrl(verified.root, verified.hash, verified.code) : `${pathToFileURL(file).href}?mtime=${mtimeMs}`;
+    const url = verified ? verifiedUrl(verified.root, verified.hash, verified.code, verified.edges) : `${pathToFileURL(file).href}?mtime=${mtimeMs}`;
     const mod = (await import(url)) as { default?: unknown };
     loaded = readPatchModule(id, source, file, mod.default);
   } catch (e) {

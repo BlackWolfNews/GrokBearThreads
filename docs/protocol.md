@@ -2468,16 +2468,26 @@ What's imported is what was hashed. The hash is made from one read of
 each file, and a trusted patch and its helpers are imported from those
 bytes (`src/verified-imports.ts`, Node's module hooks), never read from
 the folder again, so a command that rewrites one between the check and
-the import changes nothing that runs; a local import from them that
-resolves to a file the hash didn't cover (a helper's symlink retargeted)
-refuses the patch. A cached hash holds only while every file it was
+the import changes nothing that runs. Imports are told apart by how
+they're written: a local one (`./`, `../`, `/`, `file:`) loads the very
+file the hash followed it to, from the hashed bytes, whatever a symlink
+points at by then (into `node_modules` too), and one the hash didn't
+follow refuses the patch; a bare one (a package, a workspace package
+under `packages/`, `node:fs`) resolves as Node resolves it, unhashed, as
+packages are the folder's dependencies. A cached hash holds only while every file it was
 made from has the same inode, size, mode, mtime and ctime (a write
 can't put ctime back), every path to one still leads to the same real
 file, and nothing that was missing has turned up. A hook or `setup`
 runs its script from the folder, so the patch is hashed afresh just
 before it runs, and it's skipped with a `system.note` if that isn't the
-version that was trusted; what the script reads after it starts is the
-script's to check, as with its data files.
+version that was trusted.
+
+So trust covers the bytes of the patch and the code it names, checked
+right before they run. What a trusted script does as it runs (the files
+it reads, copies or generates, like `cp ./payload.txt ./stage.sh && sh
+./stage.sh`) is trusted with it, and a change another process makes
+while it runs isn't caught: the same as running a shell script you've
+reviewed.
 
 A new thread's worktree `setup` runs only when the worktree's own copy of
 the patch, with the files it names as they are there, is a trusted

@@ -991,6 +991,18 @@ test('a patch is imported from the bytes that were hashed, whatever replaces it 
         fs.symlinkSync(elsewhere, p.helper);
       },
     ],
+    // Into node_modules: a relative import is never taken for a package
+    // because of where it lands (Codex's second review, 5 Nov).
+    [
+      'a helper retargeted into node_modules',
+      (p: { helper: string }) => {
+        const pkg = path.join(path.dirname(path.dirname(path.dirname(p.helper))), 'node_modules', 'evil');
+        fs.mkdirSync(pkg, { recursive: true });
+        fs.writeFileSync(path.join(pkg, 'index.ts'), evilHelper);
+        fs.renameSync(p.helper, p.helper + '.bak');
+        fs.symlinkSync(path.join(pkg, 'index.ts'), p.helper);
+      },
+    ],
   ] as const) {
     const folder = path.join(root, what.replace(/\W/g, '-'));
     const p = writeHelperPatch(folder);
@@ -1000,9 +1012,49 @@ test('a patch is imported from the bytes that were hashed, whatever replaces it 
     assert.equal(fs.existsSync(evilRan), false, `${what}: none of the replacement ran`);
     const titles = set.actions.map((a) => a.title);
     assert.ok(!titles.includes('Evil'), `${what}: ${titles}`);
-    if (what !== 'a helper retargeted') assert.deepEqual(titles, ['Go'], what);
-    else assert.match(set.patches[0].error ?? '', /didn't hash/, what);
+    assert.equal(set.patches[0].error, undefined, what);
+    assert.deepEqual(titles, ['Go'], `${what}: the hashed bytes loaded`);
   }
+});
+
+test('a trusted patch can import a workspace package by a bare name, wherever it lives; a local import the hash never followed refuses it', async () => {
+  const root = tmpDir();
+  const folder = path.join(root, 'mono');
+  fs.mkdirSync(path.join(folder, '.git'), { recursive: true });
+  // An npm workspace: node_modules/@ws/lib is a link to packages/lib.
+  const lib = path.join(folder, 'packages', 'lib');
+  fs.mkdirSync(lib, { recursive: true });
+  fs.writeFileSync(path.join(lib, 'package.json'), JSON.stringify({ name: '@ws/lib', type: 'module', exports: './index.mjs' }));
+  fs.writeFileSync(path.join(lib, 'index.mjs'), "export const title = 'From the workspace';\n");
+  fs.mkdirSync(path.join(folder, 'node_modules', '@ws'), { recursive: true });
+  fs.symlinkSync(lib, path.join(folder, 'node_modules', '@ws', 'lib'));
+  const file = writeRaw(folder, "import { title } from '@ws/lib';\nexport default { actions: [{ title, run: 'true' }] };\n");
+  const trust = new PatchTrust();
+  trust.trustCurrent([file]);
+  const set = await loadPatchSet(folder, root, new Map(), [], [], undefined, trust);
+  assert.equal(set.patches[0].error, undefined);
+  assert.deepEqual(set.actions.map((a) => a.title), ['From the workspace']);
+
+  // A local specifier the hash didn't follow (put in after the check).
+  const other = path.join(root, 'other');
+  fs.mkdirSync(path.join(other, '.git'), { recursive: true });
+  const marks = tmpDir();
+  const ran = path.join(marks, 'ran');
+  fs.mkdirSync(path.join(other, '.threadbear', 'lib'), { recursive: true });
+  fs.writeFileSync(path.join(other, '.threadbear', 'lib', 'x.ts'), `import fs from 'node:fs';\nfs.writeFileSync(${JSON.stringify(ran)}, 'x');\nexport const t = 'X';\n`);
+  const p = writeRaw(other, "export default { actions: [{ title: 'Go', run: 'true' }] };\n");
+  const t2 = new PatchTrust();
+  t2.trustCurrent([p]);
+  const gate: PatchGate = {
+    check: async (f, m) => {
+      const v = await t2.check(f, m);
+      if (v.trusted && v.code && v.root) v.code.set(v.root, Buffer.from("import { t } from '../lib/x.ts';\nexport default { actions: [{ title: t, run: 'true' }] };\n"));
+      return v;
+    },
+  };
+  const refused = await loadPatchSet(other, root, new Map(), [], [], undefined, gate);
+  assert.match(refused.patches[0].error ?? '', /didn't hash/);
+  assert.equal(fs.existsSync(ran), false);
 });
 
 test("runner: a trusted hook whose script changed after the last look isn't run; the patch is checked afresh first", async () => {

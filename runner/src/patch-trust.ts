@@ -61,7 +61,9 @@ export type TrustVerdict =
   // `hash` and `code` (the patch's import graph as the bytes that hash was
   // made from, by real path) when it's trusted by hash: the loader imports
   // those bytes, not the folder's files as they are by then.
-  | { trusted: true; files?: string[]; blocked?: Record<string, string>; hash?: string; root?: string; code?: Map<string, Buffer> }
+  // `edges`: each of those files' local import specifiers to the file the
+  // hash took them to.
+  | { trusted: true; files?: string[]; blocked?: Record<string, string>; hash?: string; root?: string; code?: Map<string, Buffer>; edges?: Map<string, Map<string, string>> }
   | { trusted: false; reason: 'new' | 'changed'; hash: string; helpers?: string[] }
   // Nothing can trust it as it stands (see the top): `problem` says why.
   | { trusted: false; reason: 'unchecked'; problem: string };
@@ -209,7 +211,7 @@ export class PatchTrust implements PatchTrustStore {
     if (known?.includes(hash)) {
       entry.trusted = true;
       this.approveEntry(entry);
-      return { trusted: true, files: deps.map((d) => d.path), hash, root: entry.root, code: entry.code, ...(entry.blocked ? { blocked: entry.blocked } : {}) };
+      return { trusted: true, files: deps.map((d) => d.path), hash, root: entry.root, code: entry.code, edges: entry.edges, ...(entry.blocked ? { blocked: entry.blocked } : {}) };
     }
     const helpers = deps.map((d) => d.path);
     const before = known?.some((h) => !h.startsWith(CLAUDE_PREFIX));
@@ -384,6 +386,9 @@ export type PatchHash = {
   deps: Dep[];
   unnamed: string[];
   code: Map<string, Buffer>;
+  // Each file of `code`'s local import specifiers (as written; a file: URL
+  // as its path) to the real path the hash followed it to.
+  edges: Map<string, Map<string, string>>;
   looked: Reads;
   incomplete?: string;
   blocked?: Record<string, string>;
@@ -410,6 +415,7 @@ export function patchHash(file: string): PatchHash {
   const deps: Dep[] = [];
   // The patch's import graph: what Node loads, served from these bytes.
   const code = new Map<string, Buffer>([[root, text]]);
+  const edges = new Map<string, Map<string, string>>();
   const unnamed = new Set<string>();
   let incomplete: string | undefined;
   const add = (dep: Dep): boolean => {
@@ -438,6 +444,8 @@ export function patchHash(file: string): PatchHash {
     }
     for (const spec of specifiers) {
       const target = resolve(path.dirname(from), spec);
+      if (!edges.has(from)) edges.set(from, new Map());
+      edges.get(from)!.set(spec, target);
       if (seen.has(target)) continue;
       seen.add(target);
       if (!add({ path: target })) break scan;
@@ -521,7 +529,7 @@ export function patchHash(file: string): PatchHash {
   // Kept to tell whether a cached hash still holds; the bytes only for
   // the code that's imported.
   reads.bytes.clear();
-  return { hash, own, root, deps, unnamed: missing, code, looked: reads, ...extra };
+  return { hash, own, root, deps, unnamed: missing, code, edges, looked: reads, ...extra };
 }
 
 // scanModule for a script a patch's command runs: its problem as words.
