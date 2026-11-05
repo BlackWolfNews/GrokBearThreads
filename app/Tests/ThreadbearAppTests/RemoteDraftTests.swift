@@ -10,7 +10,8 @@ import XCTest
 final class RemoteDraftTests: XCTestCase {
     /// A login an earlier test left as the last one used would be this
     /// Mac's pick instead of claude-here (saved defaults outlive a run).
-    private let keys = [AppModel.lastAccountKey, "lastAccountId.byProvider", "lastAccountId.codex.byProvider", AppModel.defaultRunnerKey]
+    private let keys = [AppModel.lastAccountKey, "lastAccountId.byProvider", "lastAccountId.codex.byProvider", AppModel.defaultRunnerKey,
+                        AppModel.directRemoteLinkKey]
 
     override func setUp() {
         super.setUp()
@@ -48,6 +49,10 @@ final class RemoteDraftTests: XCTestCase {
         away.answers["hello"] = { [bruceLogins] _ in bruceLogins }
         away.answers["threads.list"] = { _ in ["threads": []] }
         away.answers["threads.create"] = { params in ["thread": ["id": "th_bruce", "title": "On bruce", "cwd": params["cwd"] ?? "", "accountId": params["accountId"] ?? ""]] }
+        // These are the direct link's tests (bruce's own connection, its
+        // token and host pin); since 5 Nov the default goes through this
+        // Mac's runner and Convex instead, which never touches RemoteClients.
+        app.directRemoteLink = true
         app.useRemoteClientsForTesting(RemoteClients(version: "test", makeTransport: { _, _ in away }, readToken: { _ in "token" }, pins: .memory(["/tmp/not-read": "127.0.0.1"])))
         app.remoteRunners = [bruce]
         return (app, local, away)
@@ -166,6 +171,12 @@ final class RemoteRowActionTests: XCTestCase {
     override func setUp() {
         super.setUp()
         _ = NSApplication.shared
+        UserDefaults.standard.removeObject(forKey: AppModel.directRemoteLinkKey)
+    }
+
+    override func tearDown() {
+        UserDefaults.standard.removeObject(forKey: AppModel.directRemoteLinkKey)
+        super.tearDown()
     }
 
     private let bruce = RemoteRunner(id: "r-bruce", name: "bruce", icon: "macmini", online: true,
@@ -183,6 +194,8 @@ final class RemoteRowActionTests: XCTestCase {
         away.answers["threads.list"] = { _ in ["threads": []] }
         away.answers["threads.update"] = { params in ["thread": ["id": params["threadId"] ?? "", "title": "On bruce", "archivedAt": "2026-10-31T00:00:00Z"]] }
         away.answers["threads.hibernateWhen"] = { params in ["thread": ["id": params["threadId"] ?? "", "title": "On bruce", "snoozedUntil": "2026-11-01T00:00:00Z"]] }
+        // The direct link's own connection, as in RemoteDraftTests.
+        app.directRemoteLink = true
         app.useRemoteClientsForTesting(RemoteClients(version: "test", makeTransport: { _, _ in away }, readToken: { _ in token }, pins: .memory(["/tmp/not-read": "127.0.0.1"])))
         app.remoteRunners = [bruce]
         var thread = ThreadSummary(id: "th_bruce", title: "On bruce", status: .idle)
