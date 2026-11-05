@@ -209,4 +209,10 @@
 //    (convex/redaction.ts), and sync:scrubStoredBatch rewrites stored rows
 //    with today's rules. Nothing a client sends or reads changes shape; the
 //    runner's `tb status` says the backend checks too from this version.
-export const API_VERSION = 47;
+// 48: phone:projects reads projectHeads, a small row per project, and returns
+//    goals, state, notes and folders empty; phone:project has one whole. No
+//    iPhone app has ever read those four. sync:sharedUsage takes the caller's
+//    runnerId and leaves its rows out of what it reads; an older runner sends
+//    none and is told about everyone's, as before. sync:schedules reads only a
+//    runner key's own rows.
+export const API_VERSION = 48;

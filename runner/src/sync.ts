@@ -105,7 +105,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 47;
+export const BACKEND_API_VERSION = 48;
 // From this one the main Mac reads and steers other runners' threads through
 // the backend (convex/relay.ts): commands can be `interrupt` or `call`, and a
 // pending approval carries its event's seq (docs/protocol.md, "Other
@@ -125,6 +125,13 @@ export const SHARED_USAGE_API_VERSION = 39;
 // From this one the backend scrubs secrets again before storing what a runner
 // sends (convex/redaction.ts). A runner scrubs first either way.
 export const SCRUB_API_VERSION = 47;
+// From this one sync:sharedUsage takes this runner's id and doesn't read its
+// rows, so it doesn't re-run for this runner's own writes.
+export const SHARED_USAGE_OTHERS_API_VERSION = 48;
+export function sharedUsageArgs<K>(key: K, runnerId: string | undefined, backend: number): { key: K; runnerId?: string } {
+  // An older backend's validator would turn the extra argument down.
+  return runnerId && backend >= SHARED_USAGE_OTHERS_API_VERSION ? { key, runnerId } : { key };
+}
 // From this one a thread's row carries its open card of asks and a finished
 // turn's next steps, and a message row can be `summary` (end_turn's
 // bullets), so the phone shows end-of-turn cards. An older backend's
@@ -2635,7 +2642,7 @@ export class ConvexSync {
     const mine = this.runnerId;
     this.unsubSharedUsage = this.subscriber.subscribe(
       'sync:sharedUsage',
-      { key: this.deps.key },
+      sharedUsageArgs(this.deps.key, mine, this.backendApiVersion ?? 0),
       (v) => this.deps.sharedUsage?.setShared((Array.isArray(v) ? (v as SharedReading[]) : []).filter((r) => r.runnerId !== mine)),
       (e) => {
         this.deps.log.debug('shared usage subscription failed', { error: String(e) });

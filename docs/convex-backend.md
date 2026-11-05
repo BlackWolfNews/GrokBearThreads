@@ -559,7 +559,10 @@ gives it only the newest 100 of the den.
 
 Also `phone:projects({ token, archived? })`, `phone:schedules({ token })`
 and `phone:accounts({ token })`, the runner's lists as it last sent them
-(docs/protocol.md "Sync" says which fields). Since API 5 a project row
+(docs/protocol.md "Sync" says which fields). Since API 44 `phone:projects`
+reads `projectHeads` and returns `goals`, `state`, `notes` and `folders` empty;
+`phone:project({ token, runnerId, id })` is one project whole, or null, read
+only when its page is open. Since API 5 a project row
 has `icon?: { symbol?, url?, by }`: the Mac's `ProjectIcon` with the
 picture as a URL into file storage (the runner uploads it, docs/protocol.md
 "Sync", "Project pictures") in place of a path on the Mac. The phone draws
@@ -875,6 +878,15 @@ rate (39 KB per re-run), `phone:projects` 165 MB (190 KB), `phone:schedules` 68
 MB (157 KB). Those cost nothing with no client open. Also new that day: `sync:sharedUsage` (API 39) reads every login's row, and one
 reading gets copied to the other runners' rows, so one change is three writes
 and nine re-runs, about 70 MB a day at that rate.
+
+Then, API 44. Measured from the logs on 5 Nov before the change: `sync:schedules`
+168 KB a run, `sync:sharedUsage` 16 KB a run. A runner key's `sync:schedules` now
+reads only its own rows, so Bruce and Hetzner no longer pay for, or re-run on, the
+M5's claims; the M5, as owner, still reads them all. `phone:projects` reads
+`projectHeads` rather than `projects`: 79 projects are 199 KB in `projects`, 143 KB
+of it notes, and the fields a list needs are about 30 KB. Editing notes no longer
+re-runs the list. `sync:sharedUsage` leaves out the caller's rows. A day's real
+rate after this hasn't been measured yet.
 
 An estimate for one Mac with the app open, 300 threads, 15 turns and half an
 hour of phone use a day: about 6 MB a day, 185 MB a month, under a fifth of the

@@ -424,6 +424,26 @@ export default defineSchema({
     // sync:upsertProjects (API 30) finds the one project it changes.
     .index('by_runner_id', ['runnerId', 'id']),
 
+  // One small row per project, what a list shows (API 44, projectHeads.ts):
+  // the phone follows the list all the time, and a read costs the whole
+  // document, so reading `projects` for it cost every project's notes. Goals,
+  // state, notes and folders stay in `projects`, read for one project by
+  // phone:project. Only written when one of these fields changes.
+  projectHeads: defineTable({
+    runnerId: v.string(),
+    id: v.string(),
+    title: v.string(),
+    createdBy: v.string(),
+    archived: v.boolean(),
+    createdAt: v.string(),
+    updatedAt: v.string(),
+    threadCount: v.number(),
+    lastActivityAt: v.optional(v.string()),
+    icon: v.optional(v.object({ symbol: v.optional(v.string()), picture: v.optional(v.string()), by: v.string() })),
+  })
+    .index('by_runnerId', ['runnerId'])
+    .index('by_runner_id', ['runnerId', 'id']),
+
   // How many of a runner's threads are in each of the phone's tucked-away
   // views (API 30), kept by the writes that move a thread between views, so
   // phone:counts reads a row per runner rather than every thread. A runner's
@@ -437,6 +457,8 @@ export default defineSchema({
     // Set once linkProjects has been run over every thread the runner had
     // when projectThreads arrived (API 40); later writes keep links current.
     projectsLinked: v.optional(v.boolean()),
+    // Its projects have been copied to projectHeads (API 44), once.
+    projectHeadsSeeded: v.optional(v.boolean()),
     inbox: v.optional(v.number()),
     overflow: v.optional(v.number()),
     total: v.optional(v.number()),

@@ -3638,6 +3638,12 @@ the mirror back as state. The Mac app doesn't use it.
   also `models?` (each `id, title, effortLevels?, defaultEffort?`) and
   `defaultEffort?`, for the phone's new thread pickers). The same at start,
   and the accounts again once a heartbeat first says the backend is at 20.
+  From backend API 44 each project also has a small row in `projectHeads`
+  (no goals, state, notes or folders), written only when what it holds
+  changes apart from `updatedAt`, which `phone:projects` reads; a runner's
+  projects from before are copied there on its next heartbeat, once.
+  `sync:sharedUsage` takes the caller's `runnerId` and doesn't read that
+  runner's rows, so it doesn't re-run for the runner's own writes.
 - **Project pictures** (backend API 5). A project's picture goes to the
   deployment's file storage so the phone can show it: the runner asks
   `sync:projectIcons` once for what the mirror has, and for each project

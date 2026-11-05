@@ -315,30 +315,51 @@ const projectRow = v.object({
   icon: v.optional(v.object({ symbol: v.optional(v.string()), url: v.optional(v.string()), by: v.string() })),
 });
 
+// A project's picture as a URL, in place of the name the runner gave it.
+async function iconOf(ctx: QueryCtx, p: { runnerId: string; id: string; icon?: { symbol?: string; picture?: string; by: string } }) {
+  if (!p.icon) return {};
+  let url: string | undefined;
+  if (p.icon.picture) {
+    const stored = await ctx.db
+      .query('projectIcons')
+      .withIndex('by_runner_project', (q) => q.eq('runnerId', p.runnerId).eq('projectId', p.id))
+      .unique();
+    url = (stored && (await ctx.storage.getUrl(stored.storageId))) ?? undefined;
+  }
+  return { icon: { ...(p.icon.symbol ? { symbol: p.icon.symbol } : {}), ...(url ? { url } : {}), by: p.icon.by } };
+}
+
+// The list, from projectHeads (API 44): goals, state, notes and folders come
+// back empty, and phone:project has them. The iPhone follows this all the time
+// and has only ever read the id, title, archived and icon, so apps already out
+// there get the saving too; reading `projects` cost about 200 KB a run for
+// Mike's 79, nearly all of it notes.
 export const projects = query({
   args: { token: v.string(), archived: v.optional(v.boolean()) },
   returns: v.array(projectRow),
   handler: async (ctx, { token, archived }) => {
     await checkPhoneToken(ctx, token);
     const out = [];
-    for await (const p of ctx.db.query('projects')) {
+    for await (const p of ctx.db.query('projectHeads')) {
       if (p.archived && !archived) continue;
-      const { icon, ...rest } = strip(p);
-      if (!icon) {
-        out.push(rest);
-        continue;
-      }
-      let url: string | undefined;
-      if (icon.picture) {
-        const stored = await ctx.db
-          .query('projectIcons')
-          .withIndex('by_runner_project', (q) => q.eq('runnerId', p.runnerId).eq('projectId', p.id))
-          .unique();
-        url = (stored && (await ctx.storage.getUrl(stored.storageId))) ?? undefined;
-      }
-      out.push({ ...rest, icon: { ...(icon.symbol ? { symbol: icon.symbol } : {}), ...(url ? { url } : {}), by: icon.by } });
+      const { icon: _icon, ...rest } = strip(p);
+      out.push({ ...rest, folders: [], goals: '', state: '', notes: '', ...(await iconOf(ctx, p)) });
     }
     return out.sort((a, b) => (b.lastActivityAt ?? b.updatedAt).localeCompare(a.lastActivityAt ?? a.updatedAt));
+  },
+});
+
+// One project whole, for its page (API 44). Reads only that project's row, so
+// it re-runs only when that project changes.
+export const project = query({
+  args: { token: v.string(), runnerId: v.string(), id: v.string() },
+  returns: v.union(projectRow, v.null()),
+  handler: async (ctx, { token, runnerId, id }) => {
+    await checkPhoneToken(ctx, token);
+    const p = await ctx.db.query('projects').withIndex('by_runner_id', (q) => q.eq('runnerId', runnerId).eq('id', id)).unique();
+    if (!p) return null;
+    const { icon: _icon, ...rest } = strip(p);
+    return { ...rest, ...(await iconOf(ctx, p)) };
   },
 });
 

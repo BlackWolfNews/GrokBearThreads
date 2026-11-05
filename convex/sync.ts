@@ -10,6 +10,7 @@ import { threadFields, views } from './schema';
 import { API_VERSION } from './version';
 import { actAs, checkRunnerId, forbidden, hasLiveKey, runnerAuth, runnerStatsRows, sha256, watchRunnersFor } from './lib';
 import { scrubDoc, scrubEveryString, SCRUB_RULES_VERSION, HELD_BACK } from './redaction';
+import { dropHead, seedHeads, syncHead, syncHeads } from './projectHeads';
 import { cutBytes, docBytes, mayClaim, NAME_CHARS, mayFinish, mayTake, mayTouch, mayUseStorage, mayWrite, nameSkeleton, normalName, ownsCard, SCHEDULE_ID, utf8Bytes, type Caller } from './runnerAccess';
 import { dropWake, seedWakes, syncWake } from './wakes';
 import { issueToken as makeToken, listTokens as allTokens, revokeToken as revokeOne, tokenInfo, tokenKind, MAX_DAYS } from './tokens';
@@ -808,6 +809,12 @@ export const heartbeat = mutation({
       await ctx.db.patch(counted._id, { projectsLinked: true });
       await ctx.scheduler.runAfter(0, internal.sync.linkProjects, { runnerId: runner.runnerId, cursor: null });
     }
+    // API 44: its projects from before projectHeads, once, so phone:projects
+    // lists them within a minute of this backend.
+    if (counted && !counted.projectHeadsSeeded) {
+      await ctx.db.patch(counted._id, { projectHeadsSeeded: true });
+      await seedHeads(ctx, runner.runnerId);
+    }
     return { apiVersion: API_VERSION, ...(existing ? {} : { firstSeen: true }), ...(caller.owner && process.env.RUNNER_KEY_NEXT ? { ownerKeyRotating: true } : {}) };
   },
 });
@@ -1192,6 +1199,7 @@ export const setProjects = mutation({
     await actAs(ctx, caller, runnerId);
     const projects = fitProjects(caller, given);
     await replaceRows(ctx, 'projects', runnerId, projects);
+    await syncHeads(ctx, runnerId, projects.map((p) => ({ ...p, runnerId })));
     // A picture for a project that's gone, or that has no picture any more,
     // goes with it. One the runner hasn't replaced yet stays, so the phone
     // keeps showing the old picture rather than a letter meanwhile.
@@ -1241,11 +1249,13 @@ export const upsertProjects = mutation({
       const existing = await one(p.id);
       if (existing) await ctx.db.replace(existing._id, { ...p, runnerId });
       else await ctx.db.insert('projects', { ...p, runnerId });
+      await syncHead(ctx, { ...p, runnerId });
       if (!p.icon?.picture) await dropIcon(p.id);
     }
     for (const id of removed) {
       const existing = await one(id);
       if (existing) await ctx.db.delete(existing._id);
+      await dropHead(ctx, runnerId, id);
       await dropIcon(id);
     }
     return null;
@@ -1467,11 +1477,13 @@ export const schedules = query({
   handler: async (ctx, { key }) => {
     const caller = await runnerAuth(ctx, key, 'schedules');
     const out = [];
-    for await (const row of ctx.db.query('schedules')) {
+    // A runner key's runner lists only its own: another's schedule is its
+    // text, folder and permissions, which aren't this runner's to see. By
+    // index, so it's all it reads too: reading the whole table cost about 170
+    // KB a run and re-ran it for every other runner's claim (API 44).
+    const rows = caller.owner ? ctx.db.query('schedules') : ctx.db.query('schedules').withIndex('by_runnerId', (q) => q.eq('runnerId', caller.runnerId));
+    for await (const row of rows) {
       if (!row.owned) continue;
-      // A runner key's runner lists only its own: another's schedule is
-      // its text, folder and permissions, which aren't this runner's to see.
-      if (!caller.owner && row.runnerId !== caller.runnerId) continue;
       const { _id, _creationTime, owned, claim, ...rest } = row;
       out.push(rest);
     }
@@ -1741,9 +1753,9 @@ async function writePools(ctx: { db: MutationCtx['db'] }, runnerId: string, pool
 // (API 39): the same subscription signed in on several machines is one
 // limit, so each runner takes the newest reading from any of them.
 export const sharedUsage = query({
-  args: { key: v.string() },
+  args: { key: v.string(), runnerId: v.optional(v.string()) },
   returns: v.array(v.object({ runnerId: v.string(), provider: v.string(), email: v.string(), usage: v.any() })),
-  handler: async (ctx, { key }) => {
+  handler: async (ctx, { key, runnerId }) => {
     const caller = await runnerAuth(ctx, key, 'sharedUsage');
     // A runner key gets readings only for logins its own runner has (by
     // email and provider): that's all it needs to show the newest reading
@@ -1754,8 +1766,20 @@ export const sharedUsage = query({
       mine = new Set();
       for (const a of await ctx.db.query('accounts').withIndex('by_runnerId', (q) => q.eq('runnerId', caller.runnerId)).take(CAP.accounts + 1)) if (a.email) mine.add(`${a.provider}:${a.email.toLowerCase()}`);
     }
+    // Only other runners' rows (API 44): a runner has no use for its own, and
+    // reading them re-ran this for each of its own writes. Two ranges of the
+    // index, so a write to the caller's rows isn't in what this read. A runner
+    // key's own logins, just above, still are. A runner sending no runnerId
+    // (from before 44) is told about everyone's, and leaves out its own.
+    const me = caller.owner ? runnerId : caller.runnerId;
+    const rows = me
+      ? [
+          ...(await ctx.db.query('accounts').withIndex('by_runnerId', (q) => q.lt('runnerId', me)).collect()),
+          ...(await ctx.db.query('accounts').withIndex('by_runnerId', (q) => q.gt('runnerId', me)).collect()),
+        ]
+      : await ctx.db.query('accounts').collect();
     const out = [];
-    for (const row of await ctx.db.query('accounts').collect()) {
+    for (const row of rows) {
       if (!row.email || !row.usage) continue;
       if (mine && !mine.has(`${row.provider}:${row.email.toLowerCase()}`)) continue;
       out.push({ runnerId: row.runnerId, provider: row.provider, email: row.email, usage: row.usage });
@@ -2477,7 +2501,7 @@ export const purgeRunner = mutation({
       await dropThread(ctx, t.threadId, t);
       return { done: false };
     }
-    for (const table of ['threadIndex', 'pocketCards', 'schedules', 'projects', 'accounts'] as const) {
+    for (const table of ['threadIndex', 'pocketCards', 'schedules', 'projects', 'projectHeads', 'accounts'] as const) {
       if (left <= 0) break;
       for (const r of await ctx.db.query(table).withIndex('by_runnerId', (q: any) => q.eq('runnerId', runnerId)).take(left)) {
         await ctx.db.delete(r._id);
