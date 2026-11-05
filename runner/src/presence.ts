@@ -12,6 +12,8 @@ export const AT_MAC_IDLE_MS = 2 * 60_000;
 // the IORegistry, which takes a second or two on a Mac busy rendering, and
 // a synchronous run froze the whole runner for that long every 15 seconds.
 export function hidIdleMs(): Promise<number | undefined> {
+  // IOKit is a Mac's; a Linux runner has no idle time to read.
+  if (process.platform !== 'darwin') return Promise.resolve(undefined);
   return new Promise((resolve) => {
     execFile('/usr/sbin/ioreg', ['-c', 'IOHIDSystem', '-d', '4', '-r', '-k', 'HIDIdleTime'], { encoding: 'utf8', timeout: 5000 }, (_err, stdout) => {
       const ns = stdout?.match(/"HIDIdleTime" = (\d+)/)?.[1];

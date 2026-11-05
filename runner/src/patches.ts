@@ -52,6 +52,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { execFile, spawn } from 'node:child_process';
+import { loginShell } from './system-tools.ts';
 import type { Action, Hook, ImageRef, Panel, PanelItem, PatchInfo } from './protocol.ts';
 import { LIMITS } from './protocol.ts';
 import { imageRefFor } from './media.ts';
@@ -1100,7 +1101,7 @@ export function runCommand(
   opts: { cwd: string; env: Record<string, string | undefined>; shell?: string[]; timeoutMs?: number },
 ): Promise<CommandOutcome> {
   const started = Date.now();
-  const [bin, ...args] = opts.shell ?? ['/bin/zsh', '-lc'];
+  const [bin, ...args] = opts.shell ?? loginShell();
   return new Promise((resolve) => {
     const chunks: Buffer[] = [];
     let size = 0;

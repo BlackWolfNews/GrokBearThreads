@@ -418,10 +418,13 @@ test("revoke --purge won't touch this Mac's own runner", async () => {
 
 // A Mac's login shell is zsh, which aborts a line at a glob that matches
 // nothing; the check over ssh used to fail on every Mac without a
-// convex-panels folder (5 Nov 2026).
-test('the remote admin check runs under a zsh login shell with nothing to find', () => {
+// convex-panels folder (5 Nov 2026). A Linux runner needn't have zsh
+// (INSTALL.md doesn't install it), so there the zsh test is skipped and
+// the next runs under sh.
+const ZSH = fs.existsSync('/bin/zsh') ? '/bin/zsh' : undefined;
+test('the remote admin check runs under a zsh login shell with nothing to find', { skip: !ZSH && 'no /bin/zsh on this machine' }, () => {
   const home = tmpDir();
-  const r = spawnSync('/bin/zsh', ['-c', remoteCommand(REMOTE_ADMIN_CHECK)], { env: { HOME: home, PATH: '/usr/bin:/bin' }, encoding: 'utf8' });
+  const r = spawnSync(ZSH!, ['-c', remoteCommand(REMOTE_ADMIN_CHECK)], { env: { HOME: home, PATH: '/usr/bin:/bin' }, encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.stdout.trim().split('\n'), ['checked']);
 });
@@ -431,7 +434,7 @@ test('the remote admin check still finds a panel key name, quotes and all', () =
   const d = path.join(home, 'Library/Application Support/Threadbear/secrets/convex-panels');
   fs.mkdirSync(d, { recursive: true });
   fs.writeFileSync(path.join(d, 'x.json'), '{"name":"threadbear-panel-bruce-abc123","adminKey":"secret"}');
-  const r = spawnSync('/bin/zsh', ['-c', remoteCommand(REMOTE_ADMIN_CHECK)], { env: { HOME: home, PATH: '/usr/bin:/bin' }, encoding: 'utf8' });
+  const r = spawnSync(ZSH ?? '/bin/sh', ['-c', remoteCommand(REMOTE_ADMIN_CHECK)], { env: { HOME: home, PATH: '/usr/bin:/bin' }, encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.stdout.trim().split('\n'), ['panel threadbear-panel-bruce-abc123', 'checked']);
 });

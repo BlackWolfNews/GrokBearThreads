@@ -28,6 +28,7 @@ import type { Scheduler } from './schedules.ts';
 import type { CommandHost } from './sync.ts';
 import type { DrainProjectOp, MembershipChange, Projects } from './projects.ts';
 import { processInfo } from './proc.ts';
+import { lsofPath } from './system-tools.ts';
 
 // `auth: 'challenge'`: this runner answers the RPC's auth challenge
 // (docs/protocol.md, "Auth"). A drain file without it is from an older
