@@ -162,8 +162,44 @@ final class FilePreviewPressTests: XCTestCase {
         XCTAssertNotNil(NSImage(pasteboard: board))
     }
 
+    /// A click (let go without moving) on a picture: the image view
+    /// doesn't take presses, so it hands the click back up the chain to
+    /// the preview, which handed it to the image view again, until the
+    /// stack ran out (THREADBEAR-N, 5 Nov). It goes on to the pane once.
+    func testClickingAPictureGoesOnToThePane() throws {
+        let image = NSImage(size: NSSize(width: 20, height: 20), flipped: false) { rect in
+            NSColor.systemPink.setFill(); rect.fill(); return true
+        }
+        let png = try XCTUnwrap(NSBitmapImageRep(data: try XCTUnwrap(image.tiffRepresentation))?.representation(using: .png, properties: [:]))
+        let view = try shown("shot.png", png)
+        let window = try XCTUnwrap(view.window)
+        let pane = PressRecorder(frame: window.contentView!.bounds)
+        window.contentView!.addSubview(pane)
+        view.removeFromSuperview()
+        pane.addSubview(view)
+        addTeardownBlock { while NSApp.nextEvent(matching: .any, until: Date(), inMode: .default, dequeue: true) != nil {} }
+
+        func mouse(_ type: NSEvent.EventType) -> NSEvent {
+            NSEvent.mouseEvent(with: type, location: middle, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                               windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+        }
+        NSApp.postEvent(mouse(.leftMouseDown), atStart: false)
+        let down = try XCTUnwrap(window.nextEvent(matching: [.leftMouseDown], until: Date(), inMode: .eventTracking, dequeue: true))
+        NSApp.postEvent(mouse(.leftMouseUp), atStart: false)
+
+        XCTAssertTrue(view.pressTarget(at: middle) === view)
+        view.mouseDown(with: down)
+        XCTAssertEqual(pane.presses, 1)
+    }
+
     func testOtherFilesHaveNoCopyImage() throws {
         let view = try shown("notes.pdf", Data("%PDF-1.4\n".utf8))
         XCTAssertFalse(view.copyImage(to: NSPasteboard(name: NSPasteboard.Name(UUID().uuidString))))
     }
+}
+
+/// Counts the presses that reach it, standing in for the pane around the preview.
+private final class PressRecorder: NSView {
+    var presses = 0
+    override func mouseDown(with event: NSEvent) { presses += 1 }
 }

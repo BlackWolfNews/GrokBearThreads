@@ -854,7 +854,19 @@ final class FilePreviewView: NSView {
         }
     }
 
+    /// Set while a click is handed to the view under the mouse.
+    private var passingClick = false
+
     override func mouseDown(with event: NSEvent) {
+        // The click handed on below came back: a view that doesn't take
+        // presses (the picture's NSImageView) passes them up its
+        // responders, which is here. Handing it down again looped until
+        // the stack ran out (THREADBEAR-N, 5 Nov), so it goes on up to
+        // the pane, as it did before this view took presses.
+        if passingClick {
+            super.mouseDown(with: event)
+            return
+        }
         // A Control-click is a right-click.
         if event.modifierFlags.contains(.control), let menu = menu(for: event) {
             NSMenu.popUpContextMenu(menu, with: event, for: self)
@@ -868,6 +880,8 @@ final class FilePreviewView: NSView {
         // still waiting in the queue.
         guard let view = content?.view else { return }
         let target = view.hitTest(convert(event.locationInWindow, from: nil)) ?? view
+        passingClick = true
+        defer { passingClick = false }
         target.mouseDown(with: event)
     }
 }
