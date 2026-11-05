@@ -160,6 +160,19 @@ File references are where to look.
 | A Connectors gateway | whoever runs it | Only if one is set in `runner.json` or `~/.claude.json`. Its `/health` every few minutes (and once more at the end of a turn where a call to one of its services failed, to see if it needs signing in), and for a project with a Notion page, a Notion read or two every 5 minutes for its task board (`runner/src/notion-tasks.ts`), signed with the header the `headersHelper` command in that `connectors` entry prints, which it runs for each read |
 | Sentry | Mike's | Nothing from your copy. Only a copy whose `origin` is Mike's own repo reports errors or uploads the app's debug symbols (`runner/src/sentry.ts`, `app/Sources/Threadbear/CrashReporting.swift`, `app/build-app.sh`). The App Store iPhone app sends anonymous crash reports. |
 
+An HTML file opened in the side pane (a mockup or report an agent made,
+a page in a project) talks to nothing. It loads through the app's own
+`threadbear-preview:` scheme, which serves only that page and the
+styles, scripts, pictures, fonts and media its markup names in its
+folder, never a dotfile, a symlink or a file outside it. Its web view
+blocks every other load (a WebKit content rule list, which WebKit keeps
+in its own store under `~/Library/WebKit`), sends any connection it would
+still make to a closed port on this Mac (127.0.0.1:9) so no name is
+looked up, has WebRTC off, and doesn't follow links away from it, submit
+forms, open windows or download
+(`app/Sources/Threadbear/Views/LocalPreviewSchemeHandler.swift`,
+`app/Sources/ThreadbearCore/Support/LocalPreviewSite.swift`).
+
 On the Mac itself, a web link you click in the app first goes to
 BrowserBear's socket (`~/Library/Application Support/BrowserBear/browserbear.sock`),
 if you have BrowserBear, to ask whether an agent's Chrome tab is already

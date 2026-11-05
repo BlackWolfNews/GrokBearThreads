@@ -22,10 +22,14 @@ final class LocalPreviewSiteTests: XCTestCase {
         <img src=../elsewhere/out.png><img src="secret.env"><img src="notes.json"><img src="logo.png"><img src="away.png">
         <img src="https://example.com/x.png"><img src="data:image/png;base64,AAAA">
         <script src="app.js"></script>
+        <script>fetch("private.html"); const p = 'assets/inline.png'; document.body.style.background = "url(assets/js.png)";</script>
+        <div style="background: url('assets/styled.png')"></div>
         """)
-        try write("style.css", "body { background: url('assets/bg.png'); } @font-face { src: url(assets/font.woff2) }")
+        try write("style.css", "@import 'theme.css'; body { background: url('assets/bg.png'); } @font-face { src: url(assets/font.woff2) }")
         try write("app.js", "const img = new Image(); img.src = `assets/late.png`;")
-        for name in ["pic.png", "assets/pic@2x.png", "assets/bg.png", "assets/font.woff2", "assets/late.png", "about.html", "other.png", "notes.json"] {
+        try write("theme.css", "a { color: red }")
+        for name in ["pic.png", "assets/pic@2x.png", "assets/bg.png", "assets/font.woff2", "assets/late.png", "about.html", "other.png", "notes.json",
+                     "private.html", "assets/inline.png", "assets/js.png", "assets/styled.png"] {
             try write(name, "x")
         }
         try write(".env", "SECRET=1")
@@ -75,9 +79,22 @@ final class LocalPreviewSiteTests: XCTestCase {
         XCTAssertNotNil(site.serve("/about.html"), "a link to another page")
         XCTAssertNotNil(site.serve("/assets/bg.png"), "named by the stylesheet")
         XCTAssertNotNil(site.serve("/assets/font.woff2"), "named by the stylesheet")
-        XCTAssertNil(site.serve("/assets/late.png"), "the script isn't read until it's served")
+        XCTAssertNotNil(site.serve("/theme.css"), "an @import")
+        XCTAssertNotNil(site.serve("/assets/styled.png"), "a style attribute's url()")
         XCTAssertNotNil(site.serve("/app.js"))
-        XCTAssertNotNil(site.serve("/assets/late.png"), "named by the script")
+    }
+
+    /// The verify-fix round: only markup's src and href (and srcset, poster,
+    /// style url()) and a stylesheet's url() and @import name a file. A
+    /// string in a script names nothing, so `fetch("private.html")` can't
+    /// let a page read the page beside it.
+    func testScriptsNameNothing() throws {
+        let site = try site()
+        XCTAssertNotNil(site.serve("/app.js"))
+        XCTAssertNil(site.serve("/private.html"), "fetch() in an inline script")
+        XCTAssertNil(site.serve("/assets/inline.png"), "a quoted string in an inline script")
+        XCTAssertNil(site.serve("/assets/js.png"), "url() inside a script")
+        XCTAssertNil(site.serve("/assets/late.png"), "named in a script file")
     }
 
     /// Codex's review: no symlink is followed anywhere on the way, not even

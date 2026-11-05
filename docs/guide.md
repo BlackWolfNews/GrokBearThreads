@@ -206,6 +206,13 @@ icons, with thumbnails of pictures and videos, and the list sorts by whichever c
 you click. It works for folders on your other Macs too, though only this
 Mac's files have thumbnails and Quick Look.
 
+An HTML file opens in the side pane as a page, with its own styles,
+scripts and pictures from beside it. It's kept off the internet, so a
+mockup that pulls in a font, a script or a picture from the web shows
+without it, and its links to websites don't open; open the file in your
+browser for those. It can't read other files in its folder either, only
+the ones its own markup names.
+
 To share a file somewhere else, drag it out of the app: a file link in a
 reply, a picture in the transcript, a file in Highlights, a row in a folder
 in the side pane, or the picture or video showing there. It drops as the file itself, so you can

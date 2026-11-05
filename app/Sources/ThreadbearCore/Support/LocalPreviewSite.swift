@@ -13,7 +13,14 @@ import UniformTypeIdentifiers
 /// is served only when all of these hold:
 /// - its path has no `..`, no empty part and no part starting with a dot;
 /// - it's one of `assetExtensions` (no `.json`, `.txt`, `.env`, keys...);
-/// - a page or stylesheet served before names it (the page itself always);
+/// - a page or stylesheet served before names it in markup or CSS (the page
+///   itself always): `src`, `href`, `srcset`, `poster`, a style's `url()`,
+///   a stylesheet's `url()` and `@import`. Never a string in a script.
+///
+/// The page can still name a file beside it in its markup and read it, so
+/// the preview's web view lets nothing out either (WebPanelPool and
+/// LocalPreviewSchemeHandler: no network, no navigating away, no windows,
+/// no downloads), and what it reads stays on screen.
 /// - it's reached from the folder without following a symlink anywhere on
 ///   the way, and is a regular file with one link, checked on the open file
 ///   it's then read from, so swapping it for a link after the check reads
@@ -33,8 +40,9 @@ public final class LocalPreviewSite: @unchecked Sendable {
         "woff", "woff2", "ttf", "otf",
         "mp4", "webm", "m4v", "mov", "mp3", "m4a", "wav", "ogg",
     ]
-    /// Files read for links: pages, stylesheets and scripts.
-    static let scannedExtensions: Set<String> = ["html", "htm", "css", "js", "mjs"]
+    /// Files read for links: pages and stylesheets. Not scripts, which can
+    /// build any name they like at run time anyway.
+    static let scannedExtensions: Set<String> = ["html", "htm", "css"]
     /// Bigger than any page or picture a preview needs.
     public static let maxBytes = 64 * 1024 * 1024
 
@@ -68,7 +76,7 @@ public final class LocalPreviewSite: @unchecked Sendable {
         guard let data = Self.read(parts, under: rootFD, maxBytes: Self.maxBytes) else { return nil }
         if Self.scannedExtensions.contains(ext), let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) {
             let dir = (relative as NSString).deletingLastPathComponent
-            let found = Self.references(in: text).compactMap { Self.resolve($0, from: dir) }
+            let found = (ext == "css" ? Self.cssReferences(in: text) : Self.htmlReferences(in: text)).compactMap { Self.resolve($0, from: dir) }
             lock.withLock { allowed.formUnion(found) }
         }
         let mime = UTType(filenameExtension: ext)?.preferredMIMEType ?? "application/octet-stream"
@@ -125,34 +133,35 @@ public final class LocalPreviewSite: @unchecked Sendable {
         return parts
     }
 
-    /// Every string in a page, stylesheet or script that could be a path:
-    /// quoted strings, unquoted attribute values, `url(...)`, and each part
-    /// of a `srcset`. Most aren't paths; `resolve` keeps the ones that are.
-    static func references(in text: String) -> [String] {
-        var out: [String] = []
-        let patterns = [
-            #""([^"<>\n]{1,1024})""#,
-            #"'([^'<>\n]{1,1024})'"#,
-            #"`([^`<>\n$]{1,1024})`"#,
-            #"=\s*([^\s"'`<>=]{1,1024})"#,
-            #"url\(\s*([^)"'\s]{1,1024})\s*\)"#,
-        ]
-        let range = NSRange(text.startIndex..., in: text)
-        for pattern in patterns {
-            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
-            for match in regex.matches(in: text, range: range) {
-                guard let r = Range(match.range(at: 1), in: text) else { continue }
-                let value = String(text[r]).trimmingCharacters(in: .whitespaces)
-                out.append(value)
-                // srcset="a.png 1x, b.png 2x"
-                if value.contains(",") || value.contains(" ") {
-                    for piece in value.split(separator: ",") {
-                        if let first = piece.split(separator: " ").first { out.append(String(first)) }
-                    }
-                }
+    /// What a page's markup names: `src`, `href`, `poster` and `data`
+    /// attributes, each part of a `srcset`, and `url()` and `@import` in its
+    /// style attributes and `<style>` blocks. Scripts' contents are taken
+    /// out first, so nothing a script says counts.
+    static func htmlReferences(in text: String) -> [String] {
+        let markup = text.replacingOccurrences(of: #"(<script\b[^>]*>)[\s\S]*?(</script\s*>)"#, with: "$1$2",
+                                               options: [.regularExpression, .caseInsensitive])
+        var out = matches(#"\b(?:src|href|poster|data)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))"#, in: markup)
+        for srcset in matches(#"\bsrcset\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))"#, in: markup) {
+            for piece in srcset.split(separator: ",") {
+                if let first = piece.split(separator: " ").first { out.append(String(first)) }
             }
         }
-        return out
+        return out + cssReferences(in: markup)
+    }
+
+    /// What a stylesheet names: `url()` and `@import`.
+    static func cssReferences(in text: String) -> [String] {
+        matches(#"url\(\s*(?:"([^"]*)"|'([^']*)'|([^)"'\s]*))\s*\)"#, in: text)
+            + matches(#"@import\s+(?:"([^"]*)"|'([^']*)')"#, in: text)
+    }
+
+    /// The first group that matched in each match of `pattern`.
+    private static func matches(_ pattern: String, in text: String) -> [String] {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return [] }
+        return regex.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap { match in
+            (1..<match.numberOfRanges).lazy.compactMap { Range(match.range(at: $0), in: text) }.first
+                .map { String(text[$0]).trimmingCharacters(in: .whitespaces) }
+        }
     }
 
     /// `ref`, named in a file in `dir`, as a path from the folder: nil for
