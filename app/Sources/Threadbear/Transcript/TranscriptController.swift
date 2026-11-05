@@ -211,6 +211,13 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
             let visible = scrollView.window?.occlusionState.contains(.visible) ?? false
             AppLog.write("transcript", "showing \(session.threadId): \(rowCount) rows, \(session.state), width \(Int(width)), clip \(Int(clip.minY))+\(Int(clip.height)) of \(Int(tableView.frame.height)), window \(scrollView.window == nil ? "none" : visible ? "visible" : "hidden")")
         }
+        // Paging older rows in is driven by the scroll position changing,
+        // and a first page shorter than the view can't scroll, so it never
+        // changed. A long last turn's newest 500 events fold into one
+        // "Worked for" row, and the thread looked as if it began halfway
+        // down with no way up (Mike, 5 Nov). Ask here too, after a fresh
+        // load and when an already loaded thread is shown again.
+        loadOlderIfNearTop()
     }
 
     var rowCount: Int { session?.displayCount ?? 0 }

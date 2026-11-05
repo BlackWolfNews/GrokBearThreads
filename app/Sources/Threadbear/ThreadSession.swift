@@ -46,6 +46,18 @@ final class ThreadSession {
     @ObservationIgnored private var flushScheduled = false
     @ObservationIgnored private var lastFlush: CFTimeInterval = 0
     @ObservationIgnored private var loadingOlder = false
+    /// Where to page back from after an older page came back with nothing
+    /// usable: the runner pages by seq range and skips corrupt lines, so a
+    /// whole page of them is empty, though older events may lie beyond it.
+    /// Asking from the first loaded seq again would get the same empty page,
+    /// and since paging starts by itself on a short first page
+    /// (`loadOlderIfNearTop` after a reload), it would ask forever. Only
+    /// counts while the model still starts at `firstSeq`; a new model
+    /// (reopened, trimmed) pages from its own start.
+    @ObservationIgnored private var olderSkip: (firstSeq: Int, before: Int)?
+    /// Older-page fetches that failed in a row, for a few retries: a short
+    /// first page can't scroll, so nothing else would ask again.
+    @ObservationIgnored private var olderFailures = 0
     @ObservationIgnored private var rebuilding = false
     @ObservationIgnored private(set) var subscribed = false
     @ObservationIgnored private var loadTask: Task<Void, Never>?
@@ -80,7 +92,13 @@ final class ThreadSession {
         return index - displayStart
     }
 
-    var hasMoreAbove: Bool { displayStart > 0 || feed.model.hasOlderEvents }
+    var hasMoreAbove: Bool { displayStart > 0 || feed.model.hasOlderEvents && olderBefore > 1 }
+
+    /// The seq the next older page ends before.
+    private var olderBefore: Int {
+        if let olderSkip, olderSkip.firstSeq == feed.model.firstSeq { return olderSkip.before }
+        return feed.model.firstSeq
+    }
 
     // MARK: Loading
 
@@ -227,6 +245,11 @@ final class ThreadSession {
             let reply = try await client.subscribe(threadId: threadId, afterSeq: feed.acceptedSeq)
             subscribed = true
             handle(feed.finishSubscribe(reply.events, inProgress: reply.inProgress))
+            // An older page that failed while the connection was down,
+            // retries used up on a short page that can't scroll: ask again
+            // now it's back.
+            olderFailures = 0
+            view?.loadOlderIfNearTop()
         } catch {
             // The next connection subscribes again from the same seq.
             feed.catchUpFailed()
@@ -516,12 +539,21 @@ final class ThreadSession {
             return
         }
         let threadId = threadId
-        let before = feed.model.firstSeq
+        let before = olderBefore
+        let firstSeq = feed.model.firstSeq
         Task {
             do {
                 let fetchStart = CACurrentMediaTime()
                 let page = try await client.events(threadId: threadId, beforeSeq: before, limit: Self.eventsPage)
                 olderFetchMs.append((CACurrentMediaTime() - fetchStart) * 1000)
+                olderFailures = 0
+                guard page.events.contains(where: { !$0.isTransient && $0.seq < before }) else {
+                    // Step back past the range the page covered and go on.
+                    olderSkip = (firstSeq, max(1, before - Self.eventsPage))
+                    loadingOlder = false
+                    view?.loadOlderIfNearTop()
+                    return
+                }
                 let mergeStart = CACurrentMediaTime()
                 // Merge off the main thread; hold flushes until it's swapped in.
                 rebuilding = true
@@ -558,6 +590,14 @@ final class ThreadSession {
             } catch {
                 rebuilding = false
                 loadingOlder = false
+                // Try again a few times, further apart each time.
+                olderFailures += 1
+                guard olderFailures <= 3 else { return }
+                let delay = Double(olderFailures) * 2
+                Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(delay))
+                    self?.view?.loadOlderIfNearTop()
+                }
             }
         }
     }
