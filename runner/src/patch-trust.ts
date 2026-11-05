@@ -39,7 +39,9 @@
 // `createRequire`), doesn't parse, or reaches more files than are followed,
 // can't be checked, so it isn't loaded at all, trusted or not: its `error`
 // says why (scanModule).
-// Saying yes to it would trust whatever that name points at later.
+// Saying yes to it would trust whatever that name points at later. The
+// same for a command it runs by itself (setup, hooks) that's anything but
+// one hashed script and plain words (automaticCommand).
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -49,7 +51,10 @@ import { atomicWriteFileSync } from './fsutil.ts';
 import { claudeCommands, isClaudeSettingsFile } from './claude-trust.ts';
 
 export type TrustVerdict =
-  | { trusted: true }
+  // `files`: the local files its hash covered, real paths. Absent when the
+  // folder is trusted whatever it holds (home's, Threadbear's own), which
+  // is how the loader knows not to hold its commands to automaticCommand.
+  | { trusted: true; files?: string[] }
   | { trusted: false; reason: 'new' | 'changed'; hash: string; helpers?: string[] }
   // Nothing can trust it as it stands (see the top): `problem` says why.
   | { trusted: false; reason: 'unchecked'; problem: string };
@@ -179,7 +184,7 @@ export class PatchTrust implements PatchTrustStore {
     const known = this.folders.get(key);
     if (known?.includes(hash)) {
       entry.trusted = true;
-      return { trusted: true };
+      return { trusted: true, files: deps.map((d) => d.path) };
     }
     const helpers = deps.map((d) => d.path);
     const before = known?.some((h) => !h.startsWith(CLAUDE_PREFIX));
@@ -341,19 +346,22 @@ export function patchHash(file: string): PatchHash {
     }
     // Named files are hashed as they are, not followed: a script is its own
     // program, run by a shell, and what it runs in turn is past what this
-    // follows. Only from the two places a path is read from; a command that
-    // `cd`s first isn't worked out.
+    // follows. From both places a path is read from, each that's there: the
+    // first alone left the folder's own `./setup.sh` out whenever the patch
+    // folder had one of the same name. A command that `cd`s first isn't
+    // worked out here; automaticCommand refuses one that runs by itself.
     for (const spec of namedPaths(src)) {
       const tries = [path.resolve(path.dirname(from), spec), path.resolve(folder, spec)];
-      const found = tries.find(isFile);
-      if (!found) {
-        for (const t of tries) unnamed.add(t);
-        continue;
+      for (const t of tries) {
+        if (!isFile(t)) {
+          unnamed.add(t);
+          continue;
+        }
+        const target = realpath(t);
+        if (seen.has(target)) continue;
+        seen.add(target);
+        if (!add({ path: target, mtimeMs: mtimeOf(target) })) break scan;
       }
-      const target = realpath(found);
-      if (seen.has(target)) continue;
-      seen.add(target);
-      if (!add({ path: target, mtimeMs: mtimeOf(target) })) break scan;
     }
   }
   const missing = [...unnamed];
@@ -529,6 +537,52 @@ export function namedPaths(src: string): string[] {
     if (p.length > 2 && !PICTURES.includes(path.extname(p).toLowerCase())) out.add(p);
   }
   return [...out];
+}
+
+// A command a patch makes Threadbear run by itself (a worktree's `setup`,
+// a hook), held to what the hash can vouch for: one script, by a `./` or
+// `../` path from the folder holding `.threadbear/`, that's a file inside
+// the repo and among the files the hash covered (`files`), then plain
+// words as arguments. Anything a shell would work out first (`cd x &&`,
+// `VAR=1`, `$(...)`, pipes, `;`, quotes, globs, `sh -c`, `bash x.sh`,
+// `npm run`) could run code the hash never saw, and was the hole: `cd
+// scripts && ./setup.sh` kept its trust while setup.sh changed (Daybreak,
+// 5 Nov). So those fail closed rather than being worked out.
+//
+// `run` is what to hand the shell: the script by its absolute path, every
+// word single-quoted, so the file that runs is the one that was hashed
+// whatever folder the command runs in (a thread in a subfolder, a worktree).
+export type AutomaticCommand = { run: string } | { problem: string };
+
+const PLAIN_WORD = /^[A-Za-z0-9_@%+=:,./-]+$/;
+
+export function automaticCommand(command: string, folder: string, files: string[]): AutomaticCommand {
+  const words = command.trim().split(/[ \t]+/);
+  const fix = 'Put the steps in a script in the repo and name just that, like "./scripts/setup.sh --fast", so trusting the patch covers what runs.';
+  if (!words.every((w) => PLAIN_WORD.test(w))) {
+    return { problem: `\`${command}\` runs by itself, so it can only be a script and plain words: patch trust can't vouch for what a shell works out (cd, &&, pipes, variables, quotes). ${fix}` };
+  }
+  const [script, ...args] = words;
+  if (!/^\.\.?\//.test(script)) {
+    return { problem: `\`${command}\` runs by itself, so it has to start with a script path like "./setup.sh": ${script} is found on PATH or works out what to run itself, which patch trust can't vouch for. ${fix}` };
+  }
+  const target = path.resolve(folder, script);
+  if (!isFile(target)) return { problem: `\`${command}\` runs ${script}, which isn't a file in ${folder}.` };
+  const real = realpath(target);
+  if (!isInside(real, repoTop(realpath(folder)))) return { problem: `\`${command}\` runs ${script}, which is outside the repo, so trusting the patch can't cover it.` };
+  if (!files.includes(real)) {
+    return { problem: `\`${command}\` runs ${script}, which patch trust didn't hash: write the path in the patch as plain text ("${script}"), not worked out in code.` };
+  }
+  const quote = (w: string) => `'${w.replace(/'/g, `'\\''`)}'`;
+  return { run: [real, ...args].map(quote).join(' ') };
+}
+
+// The top of the git checkout (or worktree) `dir` is in, else `dir`.
+function repoTop(dir: string): string {
+  for (let d = dir; ; d = path.dirname(d)) {
+    if (fs.existsSync(path.join(d, '.git'))) return d;
+    if (path.dirname(d) === d) return dir;
+  }
 }
 
 const PICTURES = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.icns', '.pdf', '.heic'];

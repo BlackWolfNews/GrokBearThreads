@@ -56,7 +56,7 @@ import type { Action, Hook, ImageRef, Panel, PanelItem, PatchInfo } from './prot
 import { LIMITS } from './protocol.ts';
 import { imageRefFor } from './media.ts';
 import { FolderCache } from './folder-cache.ts';
-import { TRUST_ALL, worktreeOf, type PatchGate } from './patch-trust.ts';
+import { automaticCommand, TRUST_ALL, worktreeOf, type PatchGate } from './patch-trust.ts';
 
 export const CONVEX_DASHBOARD = 'https://dashboard.convex.dev';
 // `npx convex dev` on an anonymous (no account) deployment serves the
@@ -82,7 +82,9 @@ type LoadedPatch = { info: PatchInfo; panels: Panel[]; actions: Action[]; hooks:
 // built in, so a fresh worktree builds from cold. With `keep`, an archived
 // thread's worktree is set aside, those folders and all, for the next
 // thread rather than removed (worktrees.ts, "spares").
-export type WorktreeConfig = { setup?: string; check?: string; keep?: string[] };
+// `setupRun` is `setup` as it runs, for a patch trusted by its hash
+// (bindAutomatic); absent, `setup` runs as written.
+export type WorktreeConfig = { setup?: string; check?: string; keep?: string[]; setupRun?: string };
 
 // A folder of one of the thread's projects.
 export type ProjectFolder = { folder: string; projectId: string };
@@ -368,6 +370,7 @@ async function loadPatchFile(file: string, source: 'home' | 'project', cache: Pa
   if (mtimeMs === undefined) return { info: { id, source, file, error: `can't read ${file}` }, panels: [], actions: [], hooks: [] };
   // Before the cache: a file imported once and then changed by a pull is
   // asked about again, whatever's cached for it.
+  let files: string[] | undefined;
   if (source === 'project') {
     let verdict;
     try {
@@ -379,9 +382,10 @@ async function loadPatchFile(file: string, source: 'home' | 'project', cache: Pa
     // version of it to say yes to (patch-trust.ts).
     if (!verdict.trusted && verdict.reason === 'unchecked') return { info: { id, source, file, error: `Not run: ${verdict.problem}` }, panels: [], actions: [], hooks: [] };
     if (!verdict.trusted) return { info: { id, source, file, untrusted: verdict.reason, hash: verdict.hash, ...(verdict.helpers ? { helpers: verdict.helpers } : {}) }, panels: [], actions: [], hooks: [] };
+    files = verdict.files;
   }
   const hit = cache.get(file);
-  if (hit && hit.mtimeMs === mtimeMs) return hit.loaded;
+  if (hit && hit.mtimeMs === mtimeMs) return files ? bindAutomatic(hit.loaded, file, files) : hit.loaded;
   let loaded: LoadedPatch;
   try {
     // The query makes Node load the file again after an edit: a module URL
@@ -392,7 +396,31 @@ async function loadPatchFile(file: string, source: 'home' | 'project', cache: Pa
     loaded = { info: { id, source, file, error: firstLine(e) }, panels: [], actions: [], hooks: [] };
   }
   cache.set(file, { mtimeMs, loaded });
-  return loaded;
+  return files ? bindAutomatic(loaded, file, files) : loaded;
+}
+
+// A trusted-by-hash patch's commands that run by themselves (its hooks and
+// worktree setup) as they'll run: each must be one hashed script and plain
+// words (automaticCommand), or the whole patch is refused with why, as a
+// patch whose code can't all be checked is. A copy, as `loaded` is cached.
+// Actions aren't held to it: one runs only when it's pressed.
+function bindAutomatic(loaded: LoadedPatch, file: string, files: string[]): LoadedPatch {
+  if (loaded.info.error) return loaded;
+  const folder = path.dirname(path.dirname(path.dirname(file)));
+  const refuse = (what: string, problem: string): LoadedPatch => ({ info: { ...loaded.info, error: `Not run: its ${what} ${problem}` }, panels: [], actions: [], hooks: [] });
+  const hooks: Hook[] = [];
+  for (const hook of loaded.hooks) {
+    const bound = automaticCommand(hook.command, folder, files);
+    if ('problem' in bound) return refuse(`hook "${hook.title}"`, bound.problem);
+    hooks.push({ ...hook, exec: bound.run });
+  }
+  let worktree = loaded.worktree;
+  if (worktree?.setup) {
+    const bound = automaticCommand(worktree.setup, folder, files);
+    if ('problem' in bound) return refuse('worktree setup', bound.problem);
+    worktree = { ...worktree, setupRun: bound.run };
+  }
+  return { ...loaded, hooks, ...(worktree ? { worktree } : {}) };
 }
 
 // Turns a patch module's default export into actions and panels, with ids
@@ -567,12 +595,25 @@ export async function findWorktreePatch(
   gate: PatchGate = TRUST_ALL,
 ): Promise<WorktreePatch | undefined> {
   for (const file of worktreePatchFiles(cwd, home, dirs)) {
-    const loaded = await loadPatchFile(file, 'project', cache, dirs, gate);
-    if (loaded.worktree && !loaded.info.error) {
-      return { ...loaded.worktree, patch: loaded.info.id, file, folder: path.dirname(path.dirname(path.dirname(file))) };
-    }
+    const found = await readWorktreePatch(file, cache, dirs, gate);
+    if (found && !('error' in found)) return found;
   }
   return undefined;
+}
+
+// One patch file's `worktree`, if it loads and has one; `error` when it
+// doesn't load (untrusted, or refused), for saying why setup didn't run.
+export async function readWorktreePatch(
+  file: string,
+  cache: PatchCache = new Map(),
+  dirs: FolderCache = new FolderCache(),
+  gate: PatchGate = TRUST_ALL,
+): Promise<WorktreePatch | { error: string } | undefined> {
+  const loaded = await loadPatchFile(file, 'project', cache, dirs, gate);
+  if (loaded.info.error) return { error: loaded.info.error };
+  if (loaded.info.untrusted) return { error: "it isn't a version you've trusted." };
+  if (!loaded.worktree) return undefined;
+  return { ...loaded.worktree, patch: loaded.info.id, file, folder: path.dirname(path.dirname(path.dirname(file))) };
 }
 
 // The patch files findWorktreePatch would read, nearest folder first.

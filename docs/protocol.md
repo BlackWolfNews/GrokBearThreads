@@ -262,6 +262,9 @@ type Hook = {
   title: string
   on: "turn.end"        // when it runs: after a turn the agent completed (not one it was interrupted in, or failed)
   command: string       // run in `folder`, as an action's command is
+  exec?: string         // for a patch trusted by its hash: what the runner
+                        // really runs, `command`'s script by absolute path
+                        // (see "Trusting a folder's patches"); show `command`
   edited?: string       // only after a turn that edited a file matching this glob, relative to `folder` ("**/*.ts")
   tell: "failures" | "always" | "never"  // when its result is sent to the agent as a message (see Patches)
   patch: string
@@ -2196,11 +2199,13 @@ panel: rows drawn natively, with no page to serve.
 in `cwd` through a login shell and resolves with what it printed (it
 rejects on a non-zero exit). It returns `PanelItem`s (or a promise of
 them). A panel can have an `icon`, an SF Symbol name for its button on
-the rail. A hook is a command the runner runs by itself:
+the rail. A hook is a command the runner runs by itself, so in a
+project's patch it's one script in the repo and plain words (see
+"Trusting a folder's patches"):
 
 ```ts
   hooks: [
-    { title: "Typecheck", on: "turn.end", run: "npx tsc --noEmit", edited: "**/*.{ts,tsx}" },
+    { title: "Typecheck", on: "turn.end", run: "./scripts/typecheck.sh", edited: "**/*.{ts,tsx}" },
   ],
 ```
 
@@ -2306,9 +2311,9 @@ changes only a helper is asked about too, and `helpers` lists them so the
 app can say what else would run. It also covers any existing file the
 patch or a helper names in a path starting `./` or `../`, anywhere in its
 text, from the patch's own folder or the folder holding `.threadbear/`
-(where commands run): the script a worktree `setup`, `check` or action
-`run` calls, so a pull that changes only that script asks again. Those are
-hashed, not followed; pictures (an `icon`) are left out, and a named file
+(where commands run), each place that has it: the script a worktree
+`setup`, `check`, hook or action `run` calls, so a pull that changes only
+that script asks again. Those are hashed, not followed; pictures (an `icon`) are left out, and a named file
 that isn't there yet changes the hash when it turns up. A patch with no
 local files hashes as its own text alone. Packages (`node:fs`, anything
 from `node_modules`) aren't followed: they're the folder's dependencies.
@@ -2336,6 +2341,34 @@ version, and it's that copy's `setup` that runs: the worktree is main's
 commit, which can differ from the main checkout that was trusted.
 Otherwise the setup is skipped with a `system.note` saying why, and the
 thread starts in the worktree anyway.
+
+**Commands that run by themselves.** A project patch's worktree `setup`
+and its hooks run without anyone pressing anything, so the hash has to
+cover what they run, and it can only see a path written in the patch.
+So each must be one script and plain words: a `./` or `../` path from
+the folder holding `.threadbear/`, to an existing file inside the repo
+(the git toplevel) that the hash covered, then arguments made only of
+letters, digits and `_ @ % + = : , . / -`. Anything a shell would work
+out first (`cd scripts && ./setup.sh`, `FOO=1 ./x`, `sh -c`, `bash x.sh`,
+`npm run x`, `npx tsc`, pipes, `;`, `$(...)`, quotes, globs, a path
+worked out in code) could run a file the hash never saw, so the patch
+isn't loaded at all, trusted or not: its `error` starts `Not run:`,
+names the command and says to put the steps in a script. The runner then
+runs the script by its absolute path (a hook's `exec`), every word
+quoted, so it's the hashed file that runs from whichever folder: a hook
+in a thread in a subfolder runs the patch folder's `./scripts/x.sh`, not
+the subfolder's. Home's patches and Threadbear's own checkout are
+trusted whatever they hold, so their commands run as written.
+
+Trusting a script trusts what it runs. The hash covers the script's
+bytes, not the files it calls, reads or installs (another script,
+`npm ci`, a Makefile), so a script should only run what it's fine to run
+as the repo has it then. An action's `run` isn't held to the rule: it
+runs only when someone presses its chip, which shows the command, and
+the scripts it names are hashed as above. Nor is `check`, which runs
+when `tb land` does (the Land chip, or an agent that could run anything
+anyway). A live function (`items`, `when`, `badge`, `summary`) is the
+patch's own code, hashed with it, and `sh` runs what that code says.
 
 ### Trusting a folder's Claude Code hooks
 
@@ -2523,7 +2556,8 @@ default export says so, beside its actions:
 ```ts
 export default {
   worktree: {
-    setup: "cd runner && npm ci",   // run in the new worktree before the first turn; optional
+    setup: "./scripts/setup.sh",    // run in the new worktree before the first turn; optional
+                                    // (one script and plain words: see "Trusting a folder's patches")
     check: "./check.sh --quick",    // run by `tb land` before main moves; optional
   },
 }

@@ -7,9 +7,9 @@ import type { RunnerPart } from './part.ts';
 import type { Action, EventBody } from '../protocol.ts';
 import type { ThreadRecord } from '../store.ts';
 import { BIN_DIR, threadEnv } from '../restart.ts';
-import { cleanUpWorktree, makeWorktree, realpath, sameSubfolder } from '../worktrees.ts';
+import { cleanUpWorktree, makeWorktree, sameSubfolder } from '../worktrees.ts';
 import { isDirectory } from '../fsutil.ts';
-import { findWorktreePatch, isInside, runCommand, type PatchSet, worktreePatchFiles } from '../patches.ts';
+import { findWorktreePatch, isInside, readWorktreePatch, runCommand, type PatchSet, worktreePatchFiles } from '../patches.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ThreadState } from '../runner.ts';
@@ -62,7 +62,7 @@ export const worktreesPart = {
     this.log.info('made a worktree', { threadId: rec.id, path: made.worktree.path, branch: made.worktree.branch });
     this.emit(st, { type: 'system.note', text: `Working in a worktree of its own at ${made.worktree.path}, on the branch ${made.worktree.branch}. tb land puts it on main.` }, turnId);
     if (!patch.setup) return;
-    const setup = await this.worktreeSetup(made.patchFile, made.cwd, patch.patch);
+    const setup = await this.worktreeSetup(made.patchFile, patch.patch);
     if (rt.deleted) return;
     if ('skip' in setup) {
       this.log.warn("didn't run a worktree's setup", { threadId: rec.id, patch: made.patchFile, reason: setup.skip });
@@ -70,7 +70,7 @@ export const worktreesPart = {
       return;
     }
     if (!setup.command) return;
-    const outcome = await runCommand(setup.command, {
+    const outcome = await runCommand(setup.run ?? setup.command, {
       cwd: made.worktree.path,
       env: { ...process.env, ...threadEnv(rec.id, this.cfg.home) },
       shell: this.actionShell,
@@ -101,7 +101,7 @@ export const worktreesPart = {
   // setup runs by itself. So that copy, with the scripts it names as they
   // are in the worktree, must be a version Mike trusted (Daybreak, 5 Nov).
   // Threadbear's own worktrees count as its checkout, so stay trusted.
-  async worktreeSetup(this: Runner, copy: string, cwd: string, id: string): Promise<{ command?: string } | { skip: string }> {
+  async worktreeSetup(this: Runner, copy: string, id: string): Promise<{ command?: string; run?: string } | { skip: string }> {
     let verdict;
     try {
       verdict = await this.patchTrust.check(copy, fs.statSync(copy).mtimeMs);
@@ -114,12 +114,14 @@ export const worktreesPart = {
     }
     let again;
     try {
-      again = await findWorktreePatch(cwd, this.panelsRoot, this.patchCache, undefined, this.patchTrust);
+      again = await readWorktreePatch(copy, this.patchCache, undefined, this.patchTrust);
     } catch (e) {
       return { skip: `couldn't load its copy of the ${id} patch (${String((e as Error).message ?? e)}).` };
     }
+    // Refused as it loaded: a setup that isn't one hashed script, say.
+    if (again && 'error' in again) return { skip: `its copy of the ${id} patch didn't load. ${again.error}` };
     // Trusted, but asking for no setup there: nothing to run.
-    return { command: again && realpath(again.file) === realpath(copy) ? again.setup : undefined };
+    return { command: again?.setup, run: again?.setupRun };
   },
 
   // A thread whose worktree was removed (it was archived with everything

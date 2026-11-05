@@ -426,6 +426,10 @@ export type Hook = {
   title: string;
   on: HookTrigger;
   command: string;
+  // What the runner hands the shell instead, for a patch trusted by its hash:
+  // `command`'s script by its absolute path, every word quoted (patch-trust.ts,
+  // automaticCommand). Clients show `command`.
+  exec?: string;
   edited?: string; // only after a turn that edited a file matching this glob (relative to the folder)
   tell: HookTell; // when the result goes to the agent as a message
   patch: string;

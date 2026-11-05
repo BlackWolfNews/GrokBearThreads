@@ -830,7 +830,13 @@ trusted it") with a Trust button. Open its file to read it first, and
 any files it imports or runs (a setup script, say), which Patches lists
 under it: a change to one of those asks again too. A patch that loads code
 by a name it works out as it runs (`import(name)`) can't be checked, so it
-never runs and Patches says why: import its files by a plain path instead. A
+never runs and Patches says why: import its files by a plain path instead.
+The same goes for a command a patch runs by itself, a worktree's setup or
+a hook: it has to be one script in the repo with plain words after it,
+like `./scripts/setup.sh --fast`, so trusting the patch covers what runs.
+One like `cd scripts && ./setup.sh` or `npm run setup` never runs, and
+Patches says to put the steps in a script. Trusting a script trusts what
+it runs in turn. A
 thread's worktree counts as its repo, and patches that were already in
 your folders when this arrived are trusted for you.
 

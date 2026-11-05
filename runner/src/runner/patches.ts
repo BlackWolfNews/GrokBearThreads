@@ -388,7 +388,7 @@ export const patchesPart = {
   async runHookList(this: Runner, st: ThreadState, hooks: PatchSet['hooks']): Promise<void> {
     for (const hook of hooks) {
       if (st.rt.deleted || this.stopping) return;
-      const outcome = await runCommand(hook.command, {
+      const outcome = await runCommand(hook.exec ?? hook.command, {
         cwd: hook.folder ?? st.rec.cwd,
         env: { ...process.env, ...threadEnv(st.rec.id, this.cfg.home) },
         shell: this.actionShell,

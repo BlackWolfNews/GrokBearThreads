@@ -14,8 +14,10 @@ Only repos that ask. A patch (docs/protocol.md, "Patches") can say:
 ```ts
 export default {
   worktree: {
-    // Run in the new worktree before the first turn. Optional.
-    setup: "cd runner && npm ci --no-audit --no-fund",
+    // Run in the new worktree before the first turn. Optional. One
+    // script in the repo and plain words, as it runs by itself
+    // (docs/protocol.md, "Trusting a folder's patches").
+    setup: "./scripts/setup.sh",
     // Run by `tb land` before main moves. Optional; a failure stops it.
     check: "./check.sh --quick",
   },
