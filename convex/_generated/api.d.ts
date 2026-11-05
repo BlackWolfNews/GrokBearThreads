@@ -16,6 +16,7 @@ import type * as phone from "../phone.js";
 import type * as push from "../push.js";
 import type * as pushTargets from "../pushTargets.js";
 import type * as pushText from "../pushText.js";
+import type * as redaction from "../redaction.js";
 import type * as relay from "../relay.js";
 import type * as runnerAccess from "../runnerAccess.js";
 import type * as share from "../share.js";
@@ -39,6 +40,7 @@ declare const fullApi: ApiFromModules<{
   push: typeof push;
   pushTargets: typeof pushTargets;
   pushText: typeof pushText;
+  redaction: typeof redaction;
   relay: typeof relay;
   runnerAccess: typeof runnerAccess;
   share: typeof share;

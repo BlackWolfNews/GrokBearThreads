@@ -269,6 +269,14 @@ not the same as hiding it from the agent. A command that prints the file
 would put it in the transcript, so only give a secret to a thread you'd
 trust with it.
 
+If a key does end up in a thread's words, Threadbear takes out what it can
+recognise before the text reaches your phone or the website, which show
+`[REDACTED]` there; the Mac keeps every word. It goes by the shapes keys
+usually have and the values in your `.env` files, so it won't catch
+everything, and it can't read pictures. Treat a key that showed up in a
+thread as leaked and replace it, since the AI provider has seen it too.
+`tb status` says what this runner does.
+
 ## Your first thread
 <!-- slug: first-thread -->
 

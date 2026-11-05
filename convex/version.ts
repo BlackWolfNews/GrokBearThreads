@@ -205,4 +205,8 @@
 // 46: sync:watchRunnersFromMac and sync:runnerStatsList, the Mac app's Runners
 //    panel's figures through the main Mac's runner (runners.stats). Owner key
 //    only.
-export const API_VERSION = 46;
+// 47: the backend scrubs secrets from what a runner sends before storing it
+//    (convex/redaction.ts), and sync:scrubStoredBatch rewrites stored rows
+//    with today's rules. Nothing a client sends or reads changes shape; the
+//    runner's `tb status` says the backend checks too from this version.
+export const API_VERSION = 47;

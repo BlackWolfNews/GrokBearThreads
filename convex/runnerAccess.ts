@@ -202,6 +202,7 @@ export const ACCESS: Record<string, Access> = {
   listRunnerKeys: 'owner',
   revokeRunnerKey: 'owner',
   audit: 'owner',
+  scrubStoredBatch: 'owner',
   auditRemove: 'owner',
   purgeRunner: 'owner',
   // relay.ts (API 44): other runners' threads read and steered from the main

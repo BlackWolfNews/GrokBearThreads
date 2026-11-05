@@ -617,6 +617,57 @@ multi-select question's choices go in one string, comma-joined, which is
 what the Mac app sends); `view` and `lastActivityMs` are on every row; a
 `title` change was added to `update`.
 
+## Secret scrubbing (API 47, 5 Nov 2026)
+
+Threadbear had none until now. Today's mirror was nearly clean only because it
+sends one-line tool rows: on 5 Nov the rules would have changed 2 of prod's 83,924
+message rows and nothing in its other tables. Full sync would be a different
+story (about 220 of Mike's 200,000 events, tool output mostly), so this came
+first. The lessons are Agent Archive's:
+
+- **Patterns alone fail, and on the worst leaks.** `sed`, `cut`, `sort` and
+  truncation mangled keys past each version of its rules (Poddle's APNs key, a
+  whole Google key). So there are three layers on the runner: where it came from
+  (`runner/src/withhold.ts`, for the output of `env list`, `.env`, `.p8` and the
+  like, unused until tool output goes up), values it knows
+  (`runner/src/secret-values.ts`) and shapes (`runner/src/redaction.ts`, copied
+  from Agent Archive with its tests).
+- **Scrub on both ends.** An older runner sends what it sends, so the backend
+  runs the same rules (`convex/redaction.ts`, a byte-identical copy a unit test
+  keeps equal).
+- **One way up.** Agent Archive's tool output over 64 KB took a path the backend
+  didn't scrub, and was never replaced. Here it's one wrapper on `ConvexSync.post`
+  and a generic walk over every field, and the backend's `clean()` in each mutation.
+- **New rules need old rows rewritten, without re-sending everything.** A bump
+  made every Agent Archive daemon recheck about 3,600 files. Here nothing re-sends:
+  bump `SCRUB_RULES_VERSION` and run `node runner/scripts/scrub-stored.mjs`, a dry
+  run unless `--apply`, which prints ids and counts only.
+- **Cleaning up isn't undoing.** That cleanup also had to reach backups and
+  exports, and the keys had been to the AI providers already. So the docs say to
+  rotate, and never that the data is secret-free.
+
+Not scrubbed, on purpose: a command's words while it's on its way (a message from
+the phone or another Mac has to reach the runner as typed). Once a command is over,
+however it ended, its words are dropped from the row rather than scrubbed, so a
+value only the sender knew doesn't stay. One that's never taken stays as typed
+until a runner takes it. A value only the sending runner knows still goes up in the
+message row once the other runner has it, as that runner can't know to take it out.
+Identity fields aren't scrubbed either. A title or preview is cut before it gets here, so the
+rules and known values also take out a key's start at the very end of a text, and
+what's left of a key cut shorter than that is a few characters. A title that holds
+two different secrets can come out the same for two Pocket cards, so the second
+replaces the first, and likewise two pictures on one event whose file names
+hold secrets. That loses a card or a picture and leaks nothing, so it stays.
+
+The on-device check (`runner/src/secret-check.ts`, `runner/src/secret-check/`)
+is an experiment, off by default, that changes nothing. In a fake test on 5 Nov,
+Apple's model caught what the rules can't (9 of 9 values with no known prefix) but
+raised 6 false alarms in 19, and on a sample of Mike's real data it flagged 4.4%
+of tool outputs and 8% of screenshots, so it counts first. If it's ever trusted,
+it may only hold things back, never clear them: tool output is untrusted and can
+tell the model to answer "clean". Linux has no such model, so a Linux runner has
+the rules and the withhold list, and `tb status` says so.
+
 ## The Pocket (API 19)
 
 The phone's deck of cards for when Mike's out (`pocketCards`, the `pocket`

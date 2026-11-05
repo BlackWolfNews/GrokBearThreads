@@ -3722,10 +3722,36 @@ the mirror back as state. The Mac app doesn't use it.
   a newer state for the same thread replaces the one waiting. Rows are
   current state, so a long outage costs one write per changed thread
   when it's back.
+- **Secrets.** Every mutation goes through the runner's scrubber on its way up
+  (`ConvexSync.post`, `src/scrub.ts`), every free-text field at any depth, so a
+  new field is covered without anyone remembering to: known values first
+  (`src/secret-values.ts`), then the shape rules (`src/redaction.ts`). Identity
+  fields aren't touched (`NOT_TEXT` there: ids, `key`, timestamps), the digests
+  that decide what's changed are of the row before scrubbing, so a rule changing
+  writes nothing by itself, and the runner's own copy never changes. A message
+  or tool line is also scrubbed before it's cut short. A string whose check throws
+  goes up as `HELD_BACK`, and `sync.scrub.failed` counts them. While the runner
+  is still reading `.env` files, mutations other than the heartbeat wait, for up
+  to a minute, then fail so the flush tries again; a folder that doesn't answer
+  in 5 seconds is left for the next look and counted in `foldersUnread`. Backend API 47
+  does the shape check again in every mutation that takes a runner's text, and
+  on a command's `note` and a call's `result` (scrubbed as parsed JSON, so it stays
+  JSON). A command's `args` are stored word for word only so they reach the runner
+  intact, and are dropped when it's over, however it ended, keeping only `images`
+  (`relay:queueCommand` skips the runner's scrubbing for the same reason). A
+  question's `answers` may name it as
+  scrubbed (`matchAnswers`). A schedule that lives in the backend comes back
+  scrubbed, so one whose text holds a secret runs with `[REDACTED]`. Pictures
+  aren't scrubbed. `src/withhold.ts` says which tool calls' output must never
+  upload; no tool output goes up today, so nothing calls it on the way up yet.
 - **Status.** `runner.status` has `sync: { state: "off" | "ok" | "error",
   reason?, url?, runnerId?, name?, threads?, messages?, lastSyncAt?,
   lastError?, pending?, retryAt?, commands?: { state: "off" | "on" |
-  "error", applied, failed, lastError? } }` (`reason` says why it's off;
+  "error", applied, failed, lastError? }, scrub?: { rulesVersion, knownValues,
+  foldersUnread?, changed, failed, lastFailure?, backendChecks? } }`, and `secretCheck: { state:
+  "off" | "unsupported" | "unavailable" | "on", reason?, since, checkedText,
+  checkedImages, flaggedText, flaggedImages, errors, rulesAndModel, rulesOnly,
+  lastRunAt?, skippedOnBattery?, file? }` (`reason` says why it's off;
   `threads` and `messages` are rows written since start; `pending`
   changes waiting), and `tb status` prints it as one line.
 - **Convex side.** `convex/` at the repo root (schema, `sync.ts` for the
@@ -4090,6 +4116,7 @@ anyone's); "any runner" is any good key. Anything not sorted is owner only.
 | `listRunnerKeys` | owner only | |
 | `revokeRunnerKey` | owner only | |
 | `audit` | owner only | what the old shared key could have left (`tb runner audit`) |
+| `scrubStoredBatch` | owner only | today's secret rules over stored rows, a page at a time (`runner/scripts/scrub-stored.mjs`) |
 | `auditRemove` | owner only | takes out the exact rows `tb runner audit --drop` picks, each only if it's still the version listed |
 | `purgeRunner` | owner only | `tb runner revoke <runnerId> --purge`: everything a runner with no live key wrote, a batch a call |
 | `remoteTail` | owner only | another runner's messages (`convex/relay.ts`, Other runners' threads through the backend) |
