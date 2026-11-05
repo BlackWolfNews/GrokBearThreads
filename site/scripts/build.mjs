@@ -72,8 +72,8 @@ const PHONE = {
 };
 
 /**
- * The hero's slideshow: a short clip of the app per feature, played one after another, with its
- * title and a line under it and a dot for each (site.js). The clips are the demo app on the mock
+ * The hero's slideshow: a short clip of the app per feature, played one after another, with the
+ * features listed down the left (site.js). The clips are the demo app on the mock
  * runner's made-up threads, in dark mode, recorded by scripts/clips.mjs into public/clips/, each
  * with its first frame as a poster. Every line here should stay true of the app and its clip.
  */
@@ -106,19 +106,16 @@ function showcase() {
   // straight away; site.js loads each next one while the one before plays.
   const clips = SLIDES.map(([name, , , alt], i) =>
     `          <video class="slide${i === 0 ? " on" : ""}" src="/clips/${name}.mp4" poster="/clips/${name}.webp" width="1600" height="1058" muted playsinline preload="${i === 0 ? "auto" : "none"}" aria-label="${escape(alt)}"${i === 0 ? "" : ' aria-hidden="true"'}></video>`);
-  const copy = SLIDES.map(([, title, text], i) =>
-    `          <div class="slide-copy${i === 0 ? " on" : ""}"${i === 0 ? "" : ' aria-hidden="true"'}><h2>${title}</h2><p>${text}</p></div>`);
-  const dots = SLIDES.map(([, title], i) =>
-    `          <button type="button" class="dot${i === 0 ? " on" : ""}" aria-label="${escape(title)}"${i === 0 ? ' aria-current="true"' : ""}><span></span></button>`);
+  // The features down the left (Mike, 5 Nov): every title, the playing one open with its line
+  // and a bar that fills for as long as its clip runs. Clicking one jumps to its clip.
+  const features = SLIDES.map(([, title, text], i) =>
+    `          <li><button type="button" class="pick${i === 0 ? " on" : ""}"${i === 0 ? ' aria-current="true"' : ""}><span class="pick-bar"><span></span></span><span class="pick-title">${title}</span><span class="pick-text">${text}</span></button></li>`);
   return `<div class="showcase" aria-roledescription="carousel" aria-label="What Threadbear does">
+        <ol class="picks">
+${features.join("\n")}
+        </ol>
         <div class="slides">
 ${clips.join("\n")}
-        </div>
-        <div class="slide-copies" aria-live="polite">
-${copy.join("\n")}
-        </div>
-        <div class="dots">
-${dots.join("\n")}
         </div>
       </div>`;
 }

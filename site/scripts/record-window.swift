@@ -16,6 +16,8 @@ import AppKit
 
 // ScreenCaptureKit needs a connection to the window server, which NSApplication sets up.
 _ = NSApplication.shared
+// Unbuffered, so whoever started it sees "recording" when it starts, not when it exits.
+setbuf(stdout, nil)
 
 let allArgs = CommandLine.arguments
 let windowOnly = allArgs.contains("--window-only")

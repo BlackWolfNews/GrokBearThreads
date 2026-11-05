@@ -85,22 +85,21 @@ if (tagline) {
 }
 
 
-// The hero's slideshow: each clip plays through, then the next one comes in. The dots jump
-// about, and the current dot fills for as long as its clip runs. It holds still while the pointer
+// The hero's slideshow: each clip plays through, then the next one comes in. The features down
+// the left jump about, and the playing one's bar fills for as long as its clip runs. It holds still while the pointer
 // or focus is on it, and while it's off screen or the tab's hidden. With reduced motion nothing
-// plays by itself: the dots change which clip's first frame shows.
+// plays by itself: the features change which clip's first frame shows.
 const showcase = document.querySelector(".showcase");
 if (showcase) {
   const clips = [...showcase.querySelectorAll(".slide")];
-  const copies = [...showcase.querySelectorAll(".slide-copy")];
-  const dots = [...showcase.querySelectorAll(".dot")];
+  const features = [...showcase.querySelectorAll(".pick")];
   const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (still) showcase.classList.add("still");
   let current = 0;
   let inView = true;
   let fallback = 0;
   const held = () => still || showcase.classList.contains("paused") || !inView || document.hidden;
-  // The dot fills over the clip's length, which is only known once its metadata has loaded.
+  // The bar fills over the clip's length, which is only known once its metadata has loaded.
   const fillFor = (clip) => showcase.style.setProperty("--slide-ms", `${Math.round((clip.duration || 8) * 1000)}ms`);
   const play = () => {
     const clip = clips[current];
@@ -115,11 +114,11 @@ if (showcase) {
   const show = (index) => {
     clips[current].pause();
     current = (index + clips.length) % clips.length;
-    for (const [i, list] of [clips, copies, dots].entries()) {
+    for (const [i, list] of [clips, features].entries()) {
       list.forEach((el, j) => {
         el.classList.toggle("on", j === current);
         // aria-hidden="" doesn't hide anything, so set "true" or take it off.
-        const [name, on] = i < 2 ? ["aria-hidden", j !== current] : ["aria-current", j === current];
+        const [name, on] = i === 0 ? ["aria-hidden", j !== current] : ["aria-current", j === current];
         if (on) el.setAttribute(name, "true");
         else el.removeAttribute(name);
       });
@@ -134,16 +133,16 @@ if (showcase) {
     restartFill();
     play();
   };
-  // Restarts the current dot's fill: drop the class, force a layout, put it back.
+  // Restarts the playing feature's bar: drop the class, force a layout, put it back.
   const restartFill = () => {
     fillFor(clips[current]);
-    const dot = dots[current];
-    dot.classList.remove("on");
-    void dot.offsetWidth;
-    dot.classList.add("on");
+    const feature = features[current];
+    feature.classList.remove("on");
+    void feature.offsetWidth;
+    feature.classList.add("on");
   };
   clips.forEach((clip, i) => clip.addEventListener("ended", () => i === current && show(current + 1)));
-  dots.forEach((dot, i) => dot.addEventListener("click", () => show(i)));
+  features.forEach((feature, i) => feature.addEventListener("click", () => show(i)));
   const hold = (on) => {
     showcase.classList.toggle("paused", on);
     play();
