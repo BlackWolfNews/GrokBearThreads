@@ -180,15 +180,22 @@ open in Chrome through [BrowserBear](https://github.com/mikecann/browserbear)
 (say, a sign-in page it wants you to use), the click brings the agent's tab
 into your Chrome window rather than opening a second one.
 
-An agent can also work in a Chrome of its own, which never touches yours
-(`browserbear open <url> --profile agent`). Its pages show in the thread's
-Browser panel, the globe on the right-hand rail, and you can click and type in
-them there. It stays out of sight, so nothing comes to the front. When the agent
-needs you to sign in or approve something, the panel opens by itself with Your
-turn and a Done button. You sign in to each account once, and it stays signed in.
-A passkey or a password manager's popup is Chrome's own, not part of the page: the
-window button beside the address brings up Chrome's real window for it, and
-pressing it again puts the window away.
+The Browser panel, the globe on a thread's right-hand rail, can show the pages
+an agent opens through [BrowserBear](https://github.com/mikecann/browserbear) in
+an existing Chrome profile. You can click and type in the same page. The profile's
+name and email appear below the address, and its sign-ins stay in Chrome; nothing
+is imported. The profile menu opens a new page in the profile you choose. BrowserBear
+and its extension must be connected to that profile.
+
+When the agent hands over a page already showing in the panel, it says Your turn
+with a Done button. A passkey, a file picker or a password manager's popup belongs
+to Chrome itself: press the window button beside the address to use Chrome's
+window. Capture and input pause while you use that window; press the button again
+to return to the panel. Closing the panel restores the page's normal size.
+
+An agent can also use a separate Chrome with `--profile agent`. Its pages show in
+the same panel, with its own sign-ins. Existing-profile pages use captured frames,
+so movement is less smooth than the separate Chrome's stream.
 
 A link to a folder opens it in the side pane, where it works like a Finder
 window. Double-click a folder to go in, or a file to see it there, and the

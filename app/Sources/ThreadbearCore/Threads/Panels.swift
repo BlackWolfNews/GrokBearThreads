@@ -45,6 +45,7 @@ public enum PanelChoice {
         switch PaneSection(id: remembered) {
         case .highlights: return .highlights
         case .patches: return hasPatches ? .patches : .highlights
+        case .panel("threadbear.browser"): return .panel("threadbear.browser")
         case .panel(let id): return panels.contains { $0.id == id } ? .panel(id) : .highlights
         }
     }

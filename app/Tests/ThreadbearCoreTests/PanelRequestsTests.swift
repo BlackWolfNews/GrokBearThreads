@@ -31,6 +31,7 @@ final class PanelRequestsTests: XCTestCase {
         XCTAssertEqual(panel("usage"), .usage)
         XCTAssertEqual(panel("updates"), .updates)
         XCTAssertEqual(panel("connectors"), .connectors)
+        XCTAssertEqual(panel("threadbear.browser"), .section(.panel("threadbear.browser")))
         XCTAssertNil(panel("xcode.simulator"), "gone since the agent asked")
         let bare = try thread("")
         XCTAssertNil(PanelRequests.panel(PanelRequest(id: "r", panel: "patches", title: "Patches"), in: bare), "no patches, no Patches")
@@ -44,6 +45,10 @@ final class PanelRequestsTests: XCTestCase {
         XCTAssertEqual(place("left"), .side(.left))
         XCTAssertEqual(place("bottom"), .side(.bottom))
         XCTAssertEqual(place("somewhere new"), .usual)
+    }
+
+    func testBrowserRemainsTheChosenPanelWithoutAProjectPatch() {
+        XCTAssertEqual(PanelChoice.section(panels: [], hasPatches: false, remembered: "threadbear.browser"), .panel("threadbear.browser"))
     }
 
     func testShowsEachRequestOnceAndOnlyWhileMikeIsLooking() throws {

@@ -83,7 +83,7 @@ gone from your fork, not just quiet.
 | Thread worktrees, `tb land` | `runner/src/worktrees.ts`, `worktree-setup.sh`, `borrow-worktree.sh`, `docs/thread-worktrees.md` | Only repos whose patch sets `worktree` get them | Medium; AGENTS.md's workflow assumes them. |
 | Codex | `runner/src/adapters/codex/`, `runner/src/updates/codex.ts` | No Codex login, and `cliUpdates: { codex: "off" }` | Woven in, but keep `'codex'` decodable as a provider. |
 | BrowserBear link hand-off | `app/Sources/Threadbear/BrowserBear.swift`, called from `PaneModel.swift` | Inert unless BrowserBear (Mike's own tool) is running | Self-contained: one file, one call. |
-| The Browser panel | `app/Sources/Threadbear/Views/AgentBrowserPanel.swift`, with a case each in `PanelsView.swift`, `WindowDock.swift` and `Automation.swift` | Doesn't show until BrowserBear's agent Chrome has run (`agent/tabs.json` in its folder) | Self-contained. |
+| The Browser panel | `app/Sources/Threadbear/Views/AgentBrowserPanel.swift`, and `BrowserBearPipe.swift`, with cases in `PanelsView.swift`, `WindowDock.swift`, `PanelRequests.swift` and `Automation.swift` | Inert without BrowserBear; existing profiles use its private socket, separate agent Chrome retains its CDP path | Self-contained. |
 
 ### Core, no switch
 

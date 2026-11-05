@@ -230,6 +230,9 @@ struct PanelRail: View {
                 .onChange(of: tabs.reduce(0) { $0 + ($1.handoffs ?? 0) }) { old, new in
                     if new > old { app.showPane(.panel(AgentBrowser.panelId)) }
                 }
+                .onAppear {
+                    if tabs.contains(where: { $0.state == "yours" }) { app.showPane(.panel(AgentBrowser.panelId)) }
+                }
             }
             Spacer(minLength: zoomed(8))
             if !thread.patches.isEmpty {

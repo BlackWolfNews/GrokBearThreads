@@ -3,21 +3,9 @@ import QuartzCore
 import SwiftUI
 import ThreadbearCore
 
-/// A thread's pages in the agent's own Chrome, drawn in a panel.
-///
-/// It's real Chrome, with a profile folder of its own, so it never touches the
-/// Chrome Mike is using; BrowserBear's agent/agent-host.mjs starts it and parks
-/// each page's window in a corner of the screen. This panel connects to that
-/// Chrome's debugging port, shows the page from `Page.startScreencast` and
-/// sends Mike's mouse and keys back with `Input.*`, so he and the agent are in
-/// the same page and nothing comes to the front. Measured on the M5, 5 Nov
-/// 2026: 60 frames a second, 33 ms from a click to the frame showing it, and
-/// about 2 MB/s.
-///
-/// Why not a real browser view in the window (CEF)? Google's sign-in rejects
-/// it ("This browser or app may not be secure"), and it rejects headless Chrome
-/// too, but takes real Chrome with the debugging port open. See
-/// browser-research/embedding-landscape.md in misc.
+/// A thread's pages in real Chrome. Existing profiles use BrowserBear's
+/// private socket for frames and input, keeping their original sign-ins.
+/// The separate agent Chrome remains available through its debugging port.
 enum AgentBrowser {
     static let panelId = "threadbear.browser"
 
@@ -30,7 +18,17 @@ enum AgentBrowser {
 
 struct AgentTab: Decodable, Identifiable, Equatable {
     var tabId: Int
-    var targetId: String
+    var targetId: String?
+    var bridge: Bool?
+    var profile: String?
+    var profileName: String?
+    var profileEmail: String?
+    var inChrome: Bool?
+    var suspended: Bool?
+    var requiresConsent: Bool?
+    var profileTitle: String {
+        [profileName, profileEmail].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+    }
     var url: String
     var title: String
     var thread: String?
@@ -43,7 +41,24 @@ struct AgentTab: Decodable, Identifiable, Equatable {
     /// Goes up each time the agent hands this tab to Mike.
     var handoffs: Int?
     var popup: Bool?
-    var id: Int { tabId }
+    var openedAt: Double?
+    var id: String { "\(profile ?? "agent-chrome")/\(tabId)" }
+}
+
+struct BrowserProfile: Decodable, Identifiable, Equatable {
+    var id: String
+    var name: String?
+    var email: String?
+    var panelPopups: Bool?
+    var title: String {
+        let title = [name, email].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+        return title.isEmpty ? "Chrome profile \(id.prefix(8))" : title
+    }
+}
+
+private struct BrowserPanelState: Decodable {
+    var profiles: [BrowserProfile]
+    var tabs: [AgentTab]
 }
 
 private struct AgentState: Decodable, Equatable {
@@ -61,7 +76,13 @@ final class AgentBrowserModel: ObservableObject {
 
     @Published private(set) var tabs: [AgentTab] = []
     @Published private(set) var port = 0
-    private var socket = ""
+    @Published private(set) var profiles: [BrowserProfile] = []
+    @Published private(set) var error: String?
+    private var agentTabs: [AgentTab] = []
+    private var profileTabs: [AgentTab] = []
+    private var pipe: BrowserBearPipe?
+    private var polling = false
+    private var requestError: String?
     private var timer: Timer?
     private var last: Data?
 
@@ -95,56 +116,90 @@ final class AgentBrowserModel: ObservableObject {
     }
 
     private func read() {
+        pollProfiles()
         let path = (AgentBrowser.home as NSString).appendingPathComponent("agent/tabs.json")
         guard let data = FileManager.default.contents(atPath: path), data != last else { return }
         last = data
         guard let state = try? JSONDecoder().decode(AgentState.self, from: data) else { return }
-        tabs = state.tabs
+        agentTabs = state.tabs
+        mergeTabs()
         port = state.port
-        socket = state.socket
         chromePid = state.chromePid
     }
 
     func tabs(for threadId: String) -> [AgentTab] { tabs.filter { $0.thread == threadId } }
 
-    var available: Bool { port != 0 }
+    var available: Bool { port != 0 || FileManager.default.fileExists(atPath: BrowserBear.socket) }
 
-    func done(_ tab: AgentTab) { request("markDone", ["tab": tab.tabId]) }
-
-    /// Mike typed an address with no page open yet: a page of this thread's.
-    func open(_ url: String, thread: String) { request("open", ["profile": "agent", "url": url], thread: thread) }
-
-    private func request(_ cmd: String, _ args: [String: Any], thread: String? = nil) {
-        let path = socket
-        guard !path.isEmpty else { return }
-        Task.detached { AgentBrowserModel.send(path: path, cmd: cmd, args: args, thread: thread) }
+    private func mergeTabs() {
+        let joined = Dictionary(agentTabs.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
+        tabs = Array(profileTabs.reduce(into: joined) { $0[$1.id] = $1 }.values).sorted { $0.tabId < $1.tabId }
     }
 
-    /// One `{id, cmd, args}` line to BrowserBear's service. Nobody waits for
-    /// the answer: the next tabs.json shows what happened.
-    nonisolated private static func send(path: String, cmd: String, args: [String: Any], thread: String?) {
-        let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
-        guard fd >= 0 else { return }
-        defer { close(fd) }
-        var addr = sockaddr_un()
-        addr.sun_family = sa_family_t(AF_UNIX)
-        let bytes = Array(path.utf8)
-        guard bytes.count < MemoryLayout.size(ofValue: addr.sun_path) else { return }
-        withUnsafeMutableBytes(of: &addr.sun_path) { $0.copyBytes(from: bytes) }
-        let connected = withUnsafePointer(to: &addr) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+    private func pollProfiles() {
+        guard !polling, FileManager.default.fileExists(atPath: BrowserBear.socket) else { return }
+        if pipe == nil {
+            let connection = BrowserBearPipe()
+            connection.onRequestError = { [weak self] message in
+                DispatchQueue.main.async { self?.polling = false; self?.error = message }
+            }
+            connection.onError = { [weak self, weak connection] message in
+                DispatchQueue.main.async {
+                    guard let self, self.pipe === connection else { return }
+                    self.error = message
+                    self.polling = false
+                    connection?.close()
+                    self.pipe = nil
+                    self.profiles = []
+                    self.profileTabs = []
+                    self.mergeTabs()
+                }
+            }
+            pipe = connection
         }
-        var message: [String: Any] = ["id": 1, "cmd": cmd, "args": args]
-        if let thread { message["thread"] = thread }
-        guard connected == 0, var line = try? JSONSerialization.data(withJSONObject: message) else { return }
-        line.append(0x0A)
-        _ = line.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
-        // Staying until it answers: a closed connection can drop the command.
-        var buffer = [UInt8](repeating: 0, count: 4096)
-        var wait = timeval(tv_sec: 40, tv_usec: 0)
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &wait, socklen_t(MemoryLayout<timeval>.size))
-        _ = Darwin.read(fd, &buffer, buffer.count)
+        polling = true
+        pipe?.request("panelState", reply: { [weak self] result in
+            guard result["_error"] == nil else { return }
+            let data = try? JSONSerialization.data(withJSONObject: result)
+            let state = data.flatMap { try? JSONDecoder().decode(BrowserPanelState.self, from: $0) }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.polling = false
+                guard let state else { self.error = "BrowserBear sent an unreadable list of pages."; return }
+                self.error = self.requestError
+                self.profiles = state.profiles
+                self.profileTabs = state.tabs.filter { $0.bridge == true }
+                self.mergeTabs()
+            }
+        })
     }
+
+    private func action(_ cmd: String, _ args: [String: Any], thread: String? = nil, then: (() -> Void)? = nil) {
+        requestError = nil
+        error = nil
+        pipe?.request(cmd, args, thread: thread, failure: { [weak self] message in
+            DispatchQueue.main.async { self?.requestError = message; self?.error = message }
+        }, reply: { result in
+            guard result["_error"] == nil else { return }
+            DispatchQueue.main.async { then?() }
+        })
+    }
+
+    func done(_ tab: AgentTab) { action("markDone", ["tab": tab.tabId]) }
+
+    func resume(_ tab: AgentTab, thread: String, then: (() -> Void)? = nil) {
+        action("panelResume", ["tab": tab.tabId, "profile": tab.profile ?? "agent-chrome"], thread: thread, then: then)
+    }
+
+    func showInChrome(_ tab: AgentTab, thread: String) {
+        action("panelShowChrome", ["tab": tab.tabId, "profile": tab.profile ?? "agent-chrome"], thread: thread)
+    }
+
+    /// The profile is an exact connected identity, never a partial display name.
+    func open(_ url: String, thread: String, profile: String) {
+        action("open", ["profile": profile, "url": url], thread: thread)
+    }
+
 }
 
 // MARK: - The panel
@@ -152,9 +207,9 @@ final class AgentBrowserModel: ObservableObject {
 struct AgentBrowserPanel: View {
     let thread: ThreadSummary
     @ObservedObject private var model = AgentBrowserModel.shared
-    @State private var chosen: Int?
+    @State private var chosen: String?
     @State private var address = ""
-    @State private var surface = AgentSurfaceHandle()
+    @StateObject private var surface = AgentSurfaceHandle()
     @FocusState private var addressFocused: Bool
 
     private var tabs: [AgentTab] { model.tabs(for: thread.id) }
@@ -162,26 +217,64 @@ struct AgentBrowserPanel: View {
     /// The one picked, else the newest: a sign-in popup comes up by itself,
     /// and goes when it closes.
     private var tab: AgentTab? {
-        tabs.first { $0.tabId == chosen } ?? tabs.max { $0.tabId < $1.tabId }
+        tabs.first { $0.id == chosen } ?? tabs.max { ($0.openedAt ?? Double($0.tabId)) < ($1.openedAt ?? Double($1.tabId)) }
     }
 
     var body: some View {
         VStack(spacing: 0) {
             toolbar
+            profilePicker
+            if let tab, tab.bridge == true, model.profiles.first(where: { $0.id == tab.profile })?.panelPopups != true {
+                Text("New windows open in Chrome.").font(.system(size: TypeScale.label)).foregroundStyle(.secondary).padding(.bottom, zoomed(4))
+            }
             if tabs.count > 1 { tabStrip }
             if let tab, tab.state == "yours" { yourTurn(tab) }
-            if let tab, model.port != 0 {
-                AgentSurface(port: model.port, targetId: tab.targetId, handle: surface)
-                    .id(tab.targetId)
+            if let tab, tab.inChrome == true || tab.suspended == true || tab.requiresConsent == true {
+                VStack(spacing: zoomed(10)) {
+                    PaneNote(text: tab.inChrome == true ? "This page is open in Chrome's window." : "This Chrome tab is not connected to the panel.")
+                    Button(tab.requiresConsent == true ? "Show this tab here" : tab.inChrome == true ? "Return to panel" : "Reconnect") {
+                        surface.error = nil
+                        surface.connected = false
+                        model.resume(tab, thread: thread.id)
+                    }
+                    .tip("Display this tab here using its existing Chrome sign-in")
+                }
+            } else if let tab, tab.bridge == true || model.port != 0 {
+                AgentSurface(port: model.port, tab: tab, thread: thread.id, handle: surface)
+                    .id("\(tab.id)-\(surface.retry)")
+                    .overlay {
+                        if let error = surface.error {
+                            VStack(spacing: zoomed(8)) {
+                                Text(error).font(.system(size: TypeScale.label)).multilineTextAlignment(.center)
+                                Button("Reconnect") {
+                                    surface.error = nil
+                                    surface.connected = false
+                                    if tab.bridge == true { model.resume(tab, thread: thread.id) { surface.retry += 1 } }
+                                    else { surface.retry += 1 }
+                                }
+                                    .tip("Reconnect this page to BrowserBear")
+                            }
+                            .padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: zoomed(8)))
+                            .padding()
+                        } else if !surface.connected {
+                            ProgressView("Connecting to Chrome…").padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: zoomed(8)))
+                        }
+                    }
             } else {
-                PaneNote(text: "No pages open in this thread.")
+                PaneNote(text: model.error ?? (model.profiles.isEmpty ? "Connect BrowserBear in a Chrome profile to use its pages here." : "Choose a Chrome profile to open a page with its existing sign-ins."))
             }
             if let tab, tab.state == "working", let action = tab.action { working(action) }
+            if tab != nil, let error = model.error { Text(error).font(.system(size: TypeScale.label)).foregroundStyle(.secondary).padding(zoomed(6)) }
         }
         .onChange(of: tab?.url) { _, url in
             if !addressFocused { address = url.map(Self.shown) ?? "" }
         }
         .onAppear { address = tab.map { Self.shown($0.url) } ?? "" }
+        .onChange(of: tab?.id) { _, _ in surface.error = nil; surface.connected = false }
+        .onChange(of: tabs.map(\.id)) { old, new in
+            let added = Set(new).subtracting(old)
+            if let newest = tabs.filter({ added.contains($0.id) }).max(by: { ($0.openedAt ?? 0) < ($1.openedAt ?? 0) }) { chosen = newest.id }
+        }
     }
 
     private static func shown(_ url: String) -> String { url == "about:blank" ? "" : url }
@@ -192,6 +285,7 @@ struct AgentBrowserPanel: View {
             PaneHeaderButton(symbol: "chevron.right", help: "Forward") { surface.evaluate("history.forward()") }
             PaneHeaderButton(symbol: "arrow.clockwise", help: "Reload") { surface.send("Page.reload") }
             TextField("Address", text: $address)
+                .disabled(tab == nil || tab?.inChrome == true || tab?.requiresConsent == true)
                 .textFieldStyle(.plain)
                 .font(.system(size: TypeScale.label))
                 .focused($addressFocused)
@@ -200,7 +294,9 @@ struct AgentBrowserPanel: View {
                 .background(SidebarMetrics.hover, in: RoundedRectangle(cornerRadius: zoomed(6)))
                 .onSubmit(go)
             PaneHeaderButton(symbol: "macwindow", help: "Show Chrome's own window, for a passkey or a password manager's popup") {
-                surface.showRealWindow()
+                if let tab, tab.inChrome == true { surface.connected = false; model.resume(tab, thread: thread.id) }
+                else if let tab, tab.suspended == true || tab.requiresConsent == true || surface.error != nil { model.showInChrome(tab, thread: thread.id) }
+                else { surface.showRealWindow() }
             }
         }
         .padding(.horizontal, zoomed(6))
@@ -211,22 +307,48 @@ struct AgentBrowserPanel: View {
         var text = address.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         if !text.contains("://") { text = (text.contains(".") && !text.contains(" ") ? "https://" : "https://www.google.com/search?q=") + text }
-        if tab != nil { surface.send("Page.navigate", ["url": text]) } else { model.open(text, thread: thread.id) }
+        if let tab {
+            if tab.suspended == true || surface.error != nil, let profile = tab.profile { model.open(text, thread: thread.id, profile: profile) }
+            else { surface.send("Page.navigate", ["url": text]) }
+        }
         addressFocused = false
+    }
+
+    private var profilePicker: some View {
+        HStack {
+            IconMenu {
+                ForEach(model.profiles) { profile in
+                    Button("New page in \(profile.title)", systemImage: "person.crop.circle") {
+                        chosen = nil
+                        model.open("about:blank", thread: thread.id, profile: profile.id)
+                    }
+                    .tip("Open a new page in \(profile.title)")
+                }
+            } label: {
+                Label(tab.map { $0.profileTitle.isEmpty ? ($0.bridge == true ? "Chrome profile" : "Separate agent Chrome") : $0.profileTitle } ?? "Choose Chrome profile", systemImage: "person.crop.circle")
+                    .font(.system(size: TypeScale.label)).lineLimit(1)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize(horizontal: false, vertical: true)
+            .tip("Open a page in a Chrome profile using its existing sign-ins")
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, zoomed(10))
+        .padding(.bottom, zoomed(4))
     }
 
     private var tabStrip: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: zoomed(2)) {
                 ForEach(tabs) { item in
-                    Button { chosen = item.tabId } label: {
+                    Button { chosen = item.id } label: {
                         Text(item.title.isEmpty ? item.url : item.title)
                             .font(.system(size: TypeScale.label))
                             .lineLimit(1)
                             .frame(maxWidth: zoomed(160))
                             .padding(.horizontal, zoomed(8))
                             .padding(.vertical, zoomed(3))
-                            .background(item.tabId == tab?.tabId ? SidebarMetrics.hover : .clear, in: RoundedRectangle(cornerRadius: zoomed(5)))
+                            .background(item.id == tab?.id ? SidebarMetrics.hover : .clear, in: RoundedRectangle(cornerRadius: zoomed(5)))
                     }
                     .buttonStyle(.plain)
                     .tip(item.url)
@@ -263,7 +385,10 @@ struct AgentBrowserPanel: View {
 
 /// Lets the toolbar reach whichever view is showing the page.
 @MainActor
-final class AgentSurfaceHandle {
+final class AgentSurfaceHandle: ObservableObject {
+    @Published var error: String?
+    @Published var retry = 0
+    @Published var connected = false
     weak var view: AgentSurfaceView?
     func send(_ method: String, _ params: [String: Any] = [:]) { view?.stream?.send(method, params) }
     func evaluate(_ js: String) { send("Runtime.evaluate", ["expression": js, "userGesture": true]) }
@@ -272,11 +397,20 @@ final class AgentSurfaceHandle {
 
 struct AgentSurface: NSViewRepresentable {
     let port: Int
-    let targetId: String
+    let tab: AgentTab
+    let thread: String
     let handle: AgentSurfaceHandle
 
     func makeNSView(context: Context) -> AgentSurfaceView {
-        let view = AgentSurfaceView(port: port, targetId: targetId)
+        let view = AgentSurfaceView(port: port, tab: tab, thread: thread)
+        view.onError = { [weak handle, weak view] message in
+            guard let handle, handle.view === view else { return }
+            handle.error = message
+        }
+        view.onConnected = { [weak handle, weak view] in
+            guard let handle, handle.view === view else { return }
+            handle.connected = true
+        }
         handle.view = view
         return view
     }
@@ -292,18 +426,41 @@ struct AgentSurface: NSViewRepresentable {
 final class AgentStream: NSObject, URLSessionWebSocketDelegate, @unchecked Sendable {
     private var task: URLSessionWebSocketTask?
     private var session: URLSession?
+    private var pipe: BrowserBearPipe?
+    private var thread = ""
+    private var dialogOpen = false
+    private var frames = 0
+    var receivedFrames: Int { lock.lock(); defer { lock.unlock() }; return frames }
+    var onFirstFrame: (() -> Void)?
     private let lock = NSLock()
     private var nextId = 1
     private var waiting: [Int: ([String: Any]) -> Void] = [:]
+    private var moving = false
+    private var nextMove: [String: Any]?
+    private var ended = false
+    private var isEnded: Bool { lock.lock(); defer { lock.unlock() }; return ended }
     /// The decoded picture, off the main thread.
     var onFrame: ((CGImage) -> Void)?
     /// A page's alert, confirm or prompt: nothing in the page moves until it's answered.
     var onDialog: (([String: Any]) -> Void)?
     /// The agent answered it first, or the page went.
     var onDialogClosed: (() -> Void)?
+    var onError: ((String) -> Void)?
 
-    init(port: Int, targetId: String) {
+    init(port: Int, targetId: String, bridgeTab: Int? = nil, profile: String? = nil, thread: String = "") {
         super.init()
+        self.thread = thread
+        if let bridgeTab {
+            let pipe = BrowserBearPipe()
+            self.pipe = pipe
+            pipe.onEvent = { [weak self] in self?.handleMessage($0) }
+            pipe.onError = { [weak self] in self?.fail($0) }
+            pipe.onRequestError = { [weak self] in self?.fail($0) }
+            var args: [String: Any] = ["tab": bridgeTab]
+            if let profile { args["profile"] = profile }
+            pipe.request("panelAttach", args, thread: thread, failure: { [weak self] in self?.fail($0) })
+            return
+        }
         let queue = OperationQueue()
         queue.maxConcurrentOperationCount = 1
         queue.qualityOfService = .userInteractive
@@ -317,11 +474,61 @@ final class AgentStream: NSObject, URLSessionWebSocketDelegate, @unchecked Senda
     }
 
     func close() {
+        lock.lock()
+        ended = true
+        waiting.removeAll()
+        nextMove = nil
+        lock.unlock()
+        pipe?.close()
         task?.cancel(with: .goingAway, reason: nil)
         session?.invalidateAndCancel()
     }
 
     func send(_ method: String, _ params: [String: Any] = [:], reply: (([String: Any]) -> Void)? = nil) {
+        guard !isEnded else { return }
+        if method == "Input.dispatchMouseEvent", ["mousePressed", "mouseReleased"].contains(params["type"] as? String ?? "") {
+            lock.lock()
+            nextMove = nil
+            lock.unlock()
+        }
+        if method == "Input.dispatchMouseEvent", params["type"] as? String == "mouseMoved", reply == nil {
+            move(params)
+            return
+        }
+        sendRaw(method, params, reply: reply)
+    }
+
+    /// Pointer motion can arrive much faster than frames. Keep the latest
+    /// position rather than replaying old moves after a busy page recovers.
+    private func move(_ params: [String: Any]) {
+        lock.lock()
+        if moving { nextMove = params; lock.unlock(); return }
+        moving = true
+        lock.unlock()
+        sendRaw("Input.dispatchMouseEvent", params) { [weak self] _ in
+            guard let self else { return }
+            self.lock.lock()
+            self.moving = false
+            let next = self.nextMove
+            self.nextMove = nil
+            self.lock.unlock()
+            if let next { self.move(next) }
+        }
+    }
+
+    private func sendRaw(_ method: String, _ params: [String: Any], reply: (([String: Any]) -> Void)? = nil) {
+        guard !isEnded else { return }
+        if let pipe {
+            pipe.request("panelCdp", ["method": method, "params": params], thread: thread, failure: { [weak self] message in
+                guard let self, !self.isEnded, (!self.dialogOpen || method == "Page.handleJavaScriptDialog"), method != "Runtime.evaluate" else { return }
+                // A slow input or navigation may already have landed. Keep the
+                // picture alive so the user can see its result and continue.
+                let timedOut = message.localizedCaseInsensitiveContains("timed out") || message.contains("didn't answer in time")
+                if (method.hasPrefix("Input.") || method == "Page.navigate" || method == "Page.reload"), timedOut { return }
+                self.fail(message)
+            }, reply: reply)
+            return
+        }
         lock.lock()
         let id = nextId
         nextId += 1
@@ -330,6 +537,10 @@ final class AgentStream: NSObject, URLSessionWebSocketDelegate, @unchecked Senda
         guard let data = try? JSONSerialization.data(withJSONObject: ["id": id, "method": method, "params": params]),
               let text = String(data: data, encoding: .utf8) else { return }
         task?.send(.string(text)) { _ in }
+    }
+
+    func showWindow(_ shown: Bool, reply: @escaping () -> Void) {
+        pipe?.request("panelWindow", ["shown": shown], thread: thread, reply: { _ in reply() })
     }
 
     private func receive() {
@@ -343,6 +554,15 @@ final class AgentStream: NSObject, URLSessionWebSocketDelegate, @unchecked Senda
     private func handle(_ text: String) {
         guard let data = text.data(using: .utf8),
               let m = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        handleMessage(m)
+    }
+
+    private func handleMessage(_ m: [String: Any]) {
+        guard !isEnded else { return }
+        if m["method"] as? String == "panelError", let params = m["params"] as? [String: Any] {
+            fail(params["message"] as? String ?? "BrowserBear disconnected this page.")
+            return
+        }
         if let id = m["id"] as? Int {
             lock.lock()
             let reply = waiting.removeValue(forKey: id)
@@ -351,10 +571,12 @@ final class AgentStream: NSObject, URLSessionWebSocketDelegate, @unchecked Senda
             return
         }
         if m["method"] as? String == "Page.javascriptDialogOpening", let params = m["params"] as? [String: Any] {
+            dialogOpen = true
             onDialog?(params)
             return
         }
         if m["method"] as? String == "Page.javascriptDialogClosed" {
+            dialogOpen = false
             onDialogClosed?()
             return
         }
@@ -364,9 +586,24 @@ final class AgentStream: NSObject, URLSessionWebSocketDelegate, @unchecked Senda
               let image = CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
         else { return }
         onFrame?(image)
+        lock.lock()
+        frames += 1
+        let first = frames == 1
+        lock.unlock()
+        if first { onFirstFrame?() }
         // Chrome sends the next one when it's had this answer, so a slow Mac
         // gets fewer frames rather than a growing queue.
         if let sid = params["sessionId"] { send("Page.screencastFrameAck", ["sessionId": sid]) }
+    }
+
+    private func fail(_ message: String) {
+        lock.lock()
+        guard !ended else { lock.unlock(); return }
+        ended = true
+        nextMove = nil
+        lock.unlock()
+        pipe?.close()
+        onError?(message)
     }
 }
 
@@ -376,17 +613,26 @@ final class AgentSurfaceView: NSView {
     private(set) var stream: AgentStream?
     private let port: Int
     private let targetId: String
+    private let bridgeTab: Int?
+    private let profile: String?
+    private let thread: String
+    var onError: ((String) -> Void)?
+    var onConnected: (() -> Void)?
     private var streamed: CGSize = .zero
     private var buttons = 0
     private var lastCursorLook = Date.distantPast
+    private var cursorPending = false
     private var realWindowShown = false
 
-    init(port: Int, targetId: String) {
+    init(port: Int, tab: AgentTab, thread: String) {
         self.port = port
-        self.targetId = targetId
+        self.targetId = tab.targetId ?? ""
+        self.bridgeTab = tab.bridge == true ? tab.tabId : nil
+        self.thread = thread
+        self.profile = tab.profile
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.contentsGravity = .topLeft
+        layer?.contentsGravity = bridgeTab == nil ? .topLeft : .resize
         layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
         layerContentsRedrawPolicy = .never
     }
@@ -404,7 +650,7 @@ final class AgentSurfaceView: NSView {
 
     private func start() {
         guard stream == nil else { return }
-        let stream = AgentStream(port: port, targetId: targetId)
+        let stream = AgentStream(port: port, targetId: targetId, bridgeTab: bridgeTab, profile: profile, thread: thread)
         // Off the main thread, in its own transaction: Core Animation allows
         // it, and the picture keeps moving while the app is busy.
         let target = layer
@@ -421,6 +667,10 @@ final class AgentSurfaceView: NSView {
         stream.onDialogClosed = { [weak self] in
             DispatchQueue.main.async { self?.closeDialog() }
         }
+        stream.onError = { [weak self] message in
+            DispatchQueue.main.async { self?.onError?(message) }
+        }
+        stream.onFirstFrame = { [weak self] in DispatchQueue.main.async { self?.onConnected?() } }
         self.stream = stream
         stream.send("Page.enable")
         stream.send("Emulation.setFocusEmulationEnabled", ["enabled": true])
@@ -429,6 +679,7 @@ final class AgentSurfaceView: NSView {
     }
 
     private func stop() {
+        if dialogSheet != nil { stream?.send("Page.handleJavaScriptDialog", ["accept": false]); closeDialog() }
         stream?.send("Page.stopScreencast")
         stream?.close()
         stream = nil
@@ -452,8 +703,11 @@ final class AgentSurfaceView: NSView {
         streamed = bounds.size
         let scale = window.backingScaleFactor
         layer?.contentsScale = scale
+        // Existing Chrome windows and sites expect at least a phone's width.
+        // Scale that viewport into a narrow panel, including its input points.
+        let ratio = pageScale
         stream.send("Emulation.setDeviceMetricsOverride", [
-            "width": Int(bounds.width), "height": Int(bounds.height), "deviceScaleFactor": scale, "mobile": false,
+            "width": Int(ceil(bounds.width * ratio)), "height": Int(ceil(bounds.height * ratio)), "deviceScaleFactor": scale, "mobile": false,
         ])
         stream.send("Page.startScreencast", [
             "format": "jpeg", "quality": 85, "everyNthFrame": 1,
@@ -469,7 +723,12 @@ final class AgentSurfaceView: NSView {
         addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeAlways, .inVisibleRect, .cursorUpdate], owner: self))
     }
 
-    private func point(_ event: NSEvent) -> CGPoint { convert(event.locationInWindow, from: nil) }
+    private var pageScale: CGFloat { bridgeTab == nil ? 1 : max(1, 360 / max(1, bounds.width)) }
+
+    private func point(_ event: NSEvent) -> CGPoint {
+        let p = convert(event.locationInWindow, from: nil)
+        return CGPoint(x: p.x * pageScale, y: p.y * pageScale)
+    }
 
     private static func modifiers(_ event: NSEvent) -> Int {
         var bits = 0
@@ -488,19 +747,37 @@ final class AgentSurfaceView: NSView {
         ])
     }
 
+    private final class Press {
+        var released: NSEvent?
+        var checked = false
+        var handled = false
+    }
+    private var pendingPress: Press?
+
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
         // A <select> would open Chrome's native menu on the parked window,
         // out of sight and holding up the page, so it opens here instead.
         let p = point(event)
+        let press = Press()
+        pendingPress = press
         selectAt(p) { [weak self] handled in
+            press.checked = true
+            press.handled = handled
             guard let self, !handled else { return }
             self.buttons |= 1
             self.mouse("mousePressed", event, button: "left", clicks: event.clickCount)
+            if let up = press.released {
+                self.buttons &= ~1
+                self.mouse("mouseReleased", up, button: "left", clicks: up.clickCount)
+                if self.pendingPress === press { self.pendingPress = nil }
+            }
         }
     }
 
     override func mouseUp(with event: NSEvent) {
+        if let press = pendingPress, !press.checked { press.released = event; return }
+        pendingPress = nil
         guard buttons & 1 != 0 else { return }
         buttons &= ~1
         mouse("mouseReleased", event, button: "left", clicks: event.clickCount)
@@ -542,18 +819,22 @@ final class AgentSurfaceView: NSView {
     }
 
     override func scrollWheel(with event: NSEvent) {
-        let p = point(event)
+        scrollWheel(event, at: point(event))
+    }
+
+    private func scrollWheel(_ event: NSEvent, at p: CGPoint) {
         // Trackpad deltas are in points already; a wheel's are in lines.
         let scale: CGFloat = event.hasPreciseScrollingDeltas ? 1 : 40
         stream?.send("Input.dispatchMouseEvent", [
             "type": "mouseWheel", "x": p.x, "y": p.y, "button": "none", "modifiers": Self.modifiers(event),
-            "deltaX": -event.scrollingDeltaX * scale, "deltaY": -event.scrollingDeltaY * scale,
+            "deltaX": -event.scrollingDeltaX * scale * pageScale, "deltaY": -event.scrollingDeltaY * scale * pageScale,
         ])
     }
 
     /// The pointer the page wants there, as the picture can't show it.
     private func lookAtCursor(_ p: CGPoint) {
-        guard Date().timeIntervalSince(lastCursorLook) > 0.1 else { return }
+        guard !cursorPending, Date().timeIntervalSince(lastCursorLook) > 0.1 else { return }
+        cursorPending = true
         lastCursorLook = Date()
         stream?.send("Runtime.evaluate", [
             "expression": "(() => { const e = document.elementFromPoint(\(p.x), \(p.y)); return e ? getComputedStyle(e).cursor : '' })()",
@@ -561,7 +842,9 @@ final class AgentSurfaceView: NSView {
         ]) { reply in
             let cursor = (reply["result"] as? [String: Any])?["value"] as? String ?? ""
             DispatchQueue.main.async { [weak self] in
-                guard let self, self.window?.isKeyWindow == true else { return }
+                guard let self else { return }
+                self.cursorPending = false
+                guard self.window?.isKeyWindow == true else { return }
                 switch cursor {
                 case "pointer": NSCursor.pointingHand.set()
                 case "text": NSCursor.iBeam.set()
@@ -617,14 +900,14 @@ final class AgentSurfaceView: NSView {
             if let row = menu.item(at: pick), let target = row.target as? MenuAction { target.fire() }
             return
         }
-        menu.popUp(positioning: nil, at: p, in: self)
+        menu.popUp(positioning: nil, at: CGPoint(x: p.x / pageScale, y: p.y / pageScale), in: self)
     }
 
     // MARK: Automation
 
     func automate(_ c: [String: Any], in window: NSWindow) -> String {
         let x = (c["x"] as? Double) ?? 0, y = (c["y"] as? Double) ?? 0
-        let at = convert(NSPoint(x: x, y: y), to: nil)
+        let at = convert(NSPoint(x: x / pageScale, y: y / pageScale), to: nil)
         let now = ProcessInfo.processInfo.systemUptime
         var flags: NSEvent.ModifierFlags = []
         for m in c["mods"] as? [String] ?? [] {
@@ -645,16 +928,18 @@ final class AgentSurfaceView: NSView {
                       characters: chars, charactersIgnoringModifiers: chars.lowercased(), isARepeat: false, keyCode: code)
         }
         switch c["do"] as? String {
+        case "status":
+            return "ok stream=\(stream != nil) frames=\(stream?.receivedFrames ?? 0) frame=\(bounds.size) bridge=\(bridgeTab != nil)"
         case "click":
             mouse(.leftMouseDown).map(window.sendEvent)
             // The press waits on a look for a <select>, so the release follows it.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { mouse(.leftMouseUp).map(window.sendEvent) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + ((c["releaseDelay"] as? Double) ?? 0.15)) { mouse(.leftMouseUp).map(window.sendEvent) }
         case "right":
             mouse(.rightMouseDown).map(window.sendEvent)
         case "scroll":
             guard let cg = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: Int32(-((c["dy"] as? Double) ?? 0)), wheel2: 0, wheel3: 0),
                   let event = NSEvent(cgEvent: cg) else { return "error no event" }
-            scrollWheel(with: event)
+            scrollWheel(event, at: CGPoint(x: x, y: y))
         case "key":
             let chars = c["chars"] as? String ?? ""
             let code = UInt16(c["code"] as? Int ?? 0)
@@ -789,6 +1074,16 @@ final class AgentSurfaceView: NSView {
     func showRealWindow() {
         realWindowShown.toggle()
         let shown = realWindowShown
+        if bridgeTab != nil {
+            stream?.showWindow(shown) { [weak self] in
+                DispatchQueue.main.async {
+                    guard let self, !shown else { return }
+                    self.streamed = .zero
+                    self.resizePage()
+                }
+            }
+            return
+        }
         let screen = window?.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
         let main = NSScreen.screens.first?.frame.height ?? 0
         stream?.send("Browser.getWindowForTarget") { [weak self] reply in

@@ -11,7 +11,7 @@ struct AgentBrowserTests {
          "state":"yours","action":"over to you","finish":true,"status":"complete","handoffs":2,"openedAt":1,"popup":false}
         """
         let tab = try JSONDecoder().decode(AgentTab.self, from: Data(json.utf8))
-        #expect(tab.id == 1004 && tab.thread == "t1" && tab.state == "yours" && tab.handoffs == 2)
+        #expect(tab.tabId == 1004 && tab.thread == "t1" && tab.state == "yours" && tab.handoffs == 2)
     }
 
     /// Tabs a host wrote before it knew of a field, or that no thread owns.
@@ -27,5 +27,12 @@ struct AgentBrowserTests {
         #expect(KeyNames.lookup(29).0 == "Digit0")
         #expect(KeyNames.code(forCharacter: "a") == 0)
         #expect(KeyNames.code(forCharacter: " ") == 49)
+    }
+
+    @Test func existingChromeTabsKeepTheirProfileAndThreadWithoutADebuggingPort() throws {
+        let json = #"{"tabId":24,"url":"https://github.com/","title":"GitHub","thread":"t1","bridge":true,"profile":"personal-id","profileName":"Personal","profileEmail":"me@example.com"}"#
+        let tab = try JSONDecoder().decode(AgentTab.self, from: Data(json.utf8))
+        #expect(tab.bridge == true && tab.targetId == nil)
+        #expect(tab.profile == "personal-id" && tab.profileTitle == "Personal · me@example.com")
     }
 }

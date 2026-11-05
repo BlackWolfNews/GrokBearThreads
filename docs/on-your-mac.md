@@ -163,12 +163,20 @@ if you have BrowserBear, to ask whether an agent's Chrome tab is already
 on that page (`app/Sources/Threadbear/BrowserBear.swift`). Only the link
 goes there.
 
-With BrowserBear's agent Chrome (`browserbear ... --profile agent`, started only
-when an agent asks for it), the Browser panel reads `agent/tabs.json` in BrowserBear's
-folder and connects to that Chrome's debugging port on 127.0.0.1, for the picture of
-the page and to send your mouse and keys. It never touches your own Chrome or its
-profiles. That Chrome is real Google Chrome with its own profile folder, also in BrowserBear's
-folder, and any program on this Mac could reach its port, so it holds only what you sign it in to
-(`app/Sources/Threadbear/Views/AgentBrowserPanel.swift`).
+The Browser panel also uses that private socket to list connected Chrome profiles
+and the pages agents associate with threads. In an existing profile, frames and
+your mouse and keys go through BrowserBear's extension; the page uses Chrome's
+original sign-ins. Threadbear does not read Chrome's cookie database or copy
+credentials. Frames stay on this Mac, in memory, and are not sent to Convex.
+BrowserBear stores thread/tab/profile/target associations and cached page titles in `panel-tabs.json` in
+its own folder (0600); it verifies the target before reconnecting after a service
+restart. Closing a panel releases its viewport and focus overrides. Chrome's
+native-window button pauses panel capture and input for native dialogs.
+
+The optional separate agent Chrome (`browserbear ... --profile agent`) keeps its
+existing path: the panel reads `agent/tabs.json` in BrowserBear's folder and connects
+to that Chrome's local debugging port. It is real Google Chrome with its own profile
+folder; any program on this Mac could reach that port, so it holds only what you
+sign it in to (`app/Sources/Threadbear/Views/AgentBrowserPanel.swift`).
 
 Nothing else: no analytics, no ads, no tracking.
