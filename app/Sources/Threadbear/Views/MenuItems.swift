@@ -18,7 +18,11 @@ extension NSMenuItem {
     /// (MenuIconsTests checks).
     func setIcon(_ icon: NSImage?) {
         image = icon
+        // Only the macOS 27 SDK has it; Xcode 26 (SDK 26.x, AppKit 2685) still
+        // builds without it, and its menus show icons anyway.
+        #if canImport(AppKit, _version: 2700)
         if #available(macOS 27, *) { preferredImageVisibility = .visible }
+        #endif
     }
 }
 
