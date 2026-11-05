@@ -745,11 +745,21 @@ private struct TabItem: View {
             if content.closable(panel) { MiddleClick { controller.close(panel) } }
         }
         .contextMenu { PanelMenu(panel: panel, tabbed: !single) }
+        // Mike couldn't tell a title could be dragged at all (5 Nov). The
+        // close button's own tip wins over this one while over it.
+        .dockTip(moveTip, options)
         // A tab (one that isn't showing too) is pulled out straight away,
         // with no hold. Its drag starts 5 points in, so a click still
         // selects the tab and reaches its close button: a drag from the
         // press swallowed both (28 Oct).
         .modifier(HoldDrag(panel: panel, fromPress: false, high: true, needsHold: false))
+    }
+
+    /// No hold to mention: a tab moves as soon as it's dragged (HoldDrag).
+    private var moveTip: String {
+        if controller.layout.isFloating(panel) { return "Drag to move, or onto the main window to dock it" }
+        if controller.layout.canFloat(panel) { return "Drag to move, or out of the window to open it on its own" }
+        return "Drag to move"
     }
 }
 
