@@ -279,25 +279,31 @@ export class Relay {
     const wasRunning = w.row ? RUNNING.has(w.row.status) : true;
     w.row = row;
     const running = row ? RUNNING.has(row.status) : true;
-    if (!running && wasRunning && live) {
-      // Ends its turn once its last messages have had a moment to arrive.
-      w.stoppedAt = this.deps.clock.now();
-      w.settleTimer?.cancel();
-      w.settleTimer = this.deps.clock.setTimeout(() => {
-        w.settleTimer = undefined;
-        this.emit(w);
-      }, SETTLE_MS);
-    } else if (running) w.stoppedAt = undefined;
+    // Ends its turn once its last messages have had a moment to arrive.
+    if (!running && wasRunning && live) this.settle(w);
+    else if (running) w.stoppedAt = undefined;
     const open = row?.pendingApproval;
     if (open && !w.cards.has(open.approvalId)) {
       // An older runner doesn't say the card's seq: after the newest row.
+      // Two slots after each row (3 and 5), each with its answer one after.
       const newest = w.rows.size ? Math.max(...w.rows.keys()) : 0;
-      w.cards.set(open.approvalId, { pending: open, slot: open.seq !== undefined ? open.seq * SCALE + 1 : newest * SCALE + 3 });
+      const used = new Set([...w.cards.values()].map((c) => c.slot));
+      const slot = open.seq !== undefined ? open.seq * SCALE + 1 : [3, 5].map((k) => newest * SCALE + k).find((s) => !used.has(s));
+      if (slot !== undefined) w.cards.set(open.approvalId, { pending: open, slot });
     }
     for (const [id, c] of w.cards) {
       if (c.resolved || open?.approvalId === id) continue;
       c.resolved = w.decided.get(id) ?? { decision: c.pending.kind === 'approval' ? 'allow' : 'answered', message: `Answered on ${this.runnerName(w.runnerId)} or the phone.` };
     }
+  }
+
+  private settle(w: Watch): void {
+    w.stoppedAt = this.deps.clock.now();
+    w.settleTimer?.cancel();
+    w.settleTimer = this.deps.clock.setTimeout(() => {
+      w.settleTimer = undefined;
+      this.emit(w);
+    }, SETTLE_MS);
   }
 
   private async load(w: Watch): Promise<void> {
@@ -306,7 +312,10 @@ export class Relay {
     const p = page as Page;
     for (const m of p.messages) w.rows.set(m.seq, m);
     w.olderMore = p.hasMore;
-    this.noteRow(w, row as RelayThreadRow | null);
+    const r = row as RelayThreadRow | null;
+    this.noteRow(w, r);
+    // Stopped only just now: its last messages may still be on their way.
+    if (r && !RUNNING.has(r.status) && r.lastActivityAt && this.deps.clock.now() - Date.parse(r.lastActivityAt) < SETTLE_MS) this.settle(w);
     w.loaded = true;
   }
 
@@ -391,12 +400,14 @@ export class Relay {
   private async fill(w: Watch): Promise<void> {
     try {
       while (w.hole) {
-        const { after, until } = w.hole;
+        const { after } = w.hole;
         const page = (await this.read('relay:remoteMessages', { threadId: w.threadId, afterSeq: after, limit: PAGE })) as Page;
         for (const m of page.messages) w.rows.set(m.seq, m);
         const last = page.messages[page.messages.length - 1]?.seq;
+        // Against the hole as it is now: a tail meanwhile may have made it longer.
+        const until = w.hole?.until ?? 0;
         if (last === undefined || !page.hasMore || last >= until) w.hole = undefined;
-        else w.hole = { after: last, until: w.hole?.until ?? until };
+        else w.hole = { after: last, until };
       }
     } catch (e) {
       this.deps.log.warn('relay could not fill a gap', { threadId: w.threadId, error: String(e) });
@@ -590,7 +601,10 @@ export class Relay {
     const args: Record<string, unknown> = { text: String(p.text ?? '') };
     for (const k of ['cwd', 'accountId', 'model', 'effort']) if (typeof p[k] === 'string') args[k] = p[k];
     // "Ask before edits": left out, that runner would give it full access.
-    if (p.permissionMode === 'ask' || p.permissionMode === 'full') args.permissionMode = p.permissionMode;
+    // A runner from before step 5 ignores it (full access), as it would a
+    // phone's; every runner follows main within minutes, and the sidebar
+    // list doesn't say a runner's release to check against.
+    if (p.permissionMode === 'ask' || p.permissionMode === 'full' || p.permissionMode === 'auto') args.permissionMode = p.permissionMode;
     const done = await this.command(runnerId, undefined, 'create', args, { done: true, ms: CALL_MS });
     if (!done.threadId) throw new RpcError(ErrorCode.other, `${this.runnerName(runnerId)} didn't say which thread it made.`);
     const now = new Date(this.deps.clock.now()).toISOString();

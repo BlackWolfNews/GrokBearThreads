@@ -1804,8 +1804,8 @@ export const takeCommand = mutation({
     // applied by the runner that had it, which may keep a copy.
     if (c.threadId !== undefined && c.runnerId !== 'any') {
       const t = await ctx.db.query('threads').withIndex('by_threadId', (q) => q.eq('threadId', c.threadId!)).unique();
-      if (t && t.runnerId !== c.runnerId) {
-        await ctx.db.patch(commandId, { state: 'failed', doneAt: Date.now(), note: 'That thread is on another runner now.' });
+      if (!t || t.runnerId !== c.runnerId) {
+        await ctx.db.patch(commandId, { state: 'failed', doneAt: Date.now(), note: t ? 'That thread is on another runner now.' : 'That thread has gone.' });
         return false;
       }
     }
@@ -1828,7 +1828,15 @@ export const finishCommand = mutation({
     if (!c) return null;
     if (!mayFinish(caller, c)) throw forbidden("finish that command: it isn't for its runner");
     const keep = ok && c.kind === 'call' && result !== undefined && utf8Bytes(result) <= RESULT_MAX_BYTES;
-    await ctx.db.patch(commandId, { state: ok ? 'done' : 'failed', doneAt: Date.now(), ...(note ? { note } : {}), ...(resultThreadId ? { resultThreadId } : {}), ...(keep ? { result } : {}) });
+    // The thread a create made is the command's runner's (it writes the row
+    // before finishing): never another runner's id, which the main Mac would
+    // then open as this runner's new thread.
+    let made: string | undefined;
+    if (resultThreadId && (c.kind === 'create' || c.kind === 'quickAsk')) {
+      const t = await ctx.db.query('threads').withIndex('by_threadId', (q) => q.eq('threadId', resultThreadId)).unique();
+      if (t && (c.runnerId === 'any' ? caller.owner || t.runnerId === (caller as { runnerId?: string }).runnerId : t.runnerId === c.runnerId)) made = resultThreadId;
+    }
+    await ctx.db.patch(commandId, { state: ok ? 'done' : 'failed', doneAt: Date.now(), ...(note ? { note } : {}), ...(made ? { resultThreadId: made } : {}), ...(keep ? { result } : {}) });
     // A secret's sealed answer (docs/protocol.md, "Secrets") has done its
     // job: only the runner could open it, but it needn't sit here a day.
     if (c.args?.sealed) {

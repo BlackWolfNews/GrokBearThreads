@@ -140,7 +140,7 @@ export function commandArgs(kind: Kind, raw: unknown): Record<string, unknown> {
       if (str(a.text) === undefined || !str(a.text)!.trim()) throw bad('a new thread needs text');
       out = pick(a, ['text', 'cwd', 'accountId', 'model', 'effort']);
       // "Ask before edits" from the composer: left out, the thread gets full access.
-      if (a.permissionMode === 'ask' || a.permissionMode === 'full') out.permissionMode = a.permissionMode;
+      if (a.permissionMode === 'ask' || a.permissionMode === 'full' || a.permissionMode === 'auto') out.permissionMode = a.permissionMode;
       break;
     case 'interrupt':
       out = {};

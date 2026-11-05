@@ -391,7 +391,14 @@ export class RpcServer {
       }
       case 'threads.create': {
         // On another runner (docs/protocol.md, "Other runners' threads through the backend").
-        if (typeof p.runnerId === 'string' && this.opts.relay) return this.opts.relay.create(p.runnerId, p);
+        if (typeof p.runnerId === 'string' && this.opts.relay) {
+          return this.opts.relay.create(p.runnerId, p).then((res) => {
+            // Never one of this runner's own: its requests would come here.
+            const id = (res as { thread?: { id?: unknown } }).thread?.id;
+            if (typeof id === 'string' && r.has(id)) throw new RpcError(ErrorCode.other, "The other runner named one of this Mac's threads as the new one.");
+            return res;
+          });
+        }
         if (p.worktree !== undefined && typeof p.worktree !== 'boolean') throw bad('worktree must be a boolean');
         const res = r.create({
           text: optString(p, 'text') ?? '',
