@@ -11,7 +11,8 @@
    - every font size and line height is a step of Tailwind's default type scale;
    - every margin, padding and gap is one of the skill's spacing tokens (--s-*);
    - every radius is a Tailwind radius, and nested radii are outer minus gap;
-   - flat backgrounds only, the one gradient being the hero heading's text (#000 to #666);
+   - flat backgrounds only, no gradients (the hero heading's grey gradient went on 5 Nov: it
+     read as an inactive state);
    - every transition on one curve (--ease), 500 ms for movement, 300 ms for colour. */
 
 @font-face {
@@ -220,171 +221,183 @@ a.appstore:active { transform: scale(.98); }
 /* Not out yet, so it's visibly not a button (B9: no dead links, or visibly disabled). */
 .appstore.soon { cursor: not-allowed; opacity: .72; }
 
-/* ---------- the home page ---------- */
+/* ---------- the home page ("Watch It Work", 5 Nov) ---------- */
 
-/* A phone, drawn round a screenshot. --w sets its width. Tailwind radii: 24 px outside, 8 px
-   bezel, so the screen is 24 - 8 = 16 px. The bezel is flat (no gradients). */
-.phone {
-  --w: 240px; width: var(--w); flex: none; padding: var(--s-75); border-radius: var(--r-3xl);
-  background: #1f1f1f;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .12), 0 30px 46px -26px rgba(40, 30, 15, .5), 0 10px 22px rgba(40, 30, 15, .12);
-}
-/* The screen's flat well colour shows while the screenshot loads, shaped like the screen. */
-.phone img { display: block; width: 100%; height: auto; border-radius: var(--r-2xl); background: #fff; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
 
-.section-title { font-size: 36px; line-height: 40px; font-weight: 600; letter-spacing: -.025em; text-align: center; margin: var(--s-900) auto var(--s-400); max-width: 680px; }
-.badge-icon {
-  position: relative; display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 48px; border-radius: var(--r-xl);
-  background: #ebe5d8; color: var(--ink-soft); font-size: 24px; margin-bottom: var(--s-200);
-}
 /* Each icon is a little patch sewn on: a running stitch 4 px in, so 12 - 4 = 8 px (B3). */
+.badge-icon {
+  position: relative; display: inline-flex; align-items: center; justify-content: center; flex: none; width: 48px; height: 48px; border-radius: var(--r-xl);
+  background: #ebe5d8; color: var(--ink-soft); font-size: 24px;
+}
 .badge-icon::after {
   content: ""; position: absolute; inset: var(--s-50); border-radius: var(--r-lg);
-  border: 1.5px dashed rgba(255, 255, 255, .95); pointer-events: none;
-  /* A darker edge under the stitch, so it shows on the pale wells too. */
-  box-shadow: 0 0 0 1px rgba(60, 45, 20, .06);
+  border: 1.5px dashed rgba(255, 255, 255, .95); pointer-events: none; box-shadow: 0 0 0 1px rgba(60, 45, 20, .06);
 }
 
-/* hero */
-.hero { max-width: 1200px; margin: 0 auto; padding: var(--s-700) var(--s-300) var(--s-300); }
-.hero-copy { display: flex; flex-direction: column; align-items: center; text-align: center; }
-/* The one gradient: on the heading's text, left to right, light theme (B5). */
-.hero-title, .closing-title {
-  font-size: 48px; line-height: 48px; font-weight: 600; letter-spacing: -.035em; max-width: 680px; width: fit-content;
-  background: linear-gradient(90deg, #000000, #666666); -webkit-background-clip: text; background-clip: text; color: transparent;
-}
-.hero-sub { font-size: 18px; line-height: 28px; color: var(--body); max-width: 680px; margin-top: var(--s-300); }
-.hero-cta { display: flex; flex-direction: column; align-items: center; gap: var(--s-100); margin-top: var(--s-400); }
-.risk { font-size: 14px; line-height: 20px; font-weight: 500; color: var(--ink-soft); }
-.proof { margin-top: var(--s-400); max-width: 680px; text-align: center; font-size: 14px; line-height: 20px; color: var(--ink-soft); }
-.proof .icon { font-size: 20px; color: var(--ink-soft); }
-.proof b { white-space: nowrap; color: var(--ink); font-weight: 600; }
-/* The Mac window, with the iPhone over its bottom right corner. The window keeps its own round
-   corners (the screenshot's transparent), so it only needs a shadow. */
-.hero-media { position: relative; margin: var(--s-700) auto 0; max-width: 1100px; padding: 0 var(--s-700) var(--s-600) 0; }
-.mac { display: block; width: 100%; height: auto; filter: drop-shadow(0 24px 40px rgba(40, 30, 15, .16)) drop-shadow(0 2px 6px rgba(40, 30, 15, .08)); }
-.hero-media .phone { position: absolute; right: 0; bottom: 0; --w: 220px; }
+/* Buttons a size up (the copy buttons), a quiet white one beside them, and a text link one. */
+.btn-lg { padding: var(--s-100) var(--s-300); border-radius: var(--r-xl); gap: var(--s-100); min-height: 56px; }
+.btn-lg .icon { font-size: 20px; }
+.btn-ghost { background: var(--card); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); }
+.btn-ghost:hover { background: var(--well); color: var(--ink); }
+.link-btn { font-size: 16px; line-height: 24px; font-weight: 500; color: var(--ink-soft); text-decoration-color: var(--ink-faint); padding: var(--s-50); }
+.link-btn:hover { color: var(--ink); }
 
-/* The hero's slideshow (scripts/build.mjs's SLIDES, site.js plays it): the features down the left,
-   the clip on the right. Every clip sits in the same grid cell, so the stage is one window tall
-   and they crossfade over each other. Without JavaScript only the first shows, as its poster. */
-.hero-media:has(.showcase) { padding: 0; max-width: 1200px; }
-.showcase { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: var(--s-500); align-items: center; }
-.slides { display: grid; width: 100%; }
+/* The copy button: hidden without JavaScript (the prompt can be selected by hand instead). Once
+   it's copied it goes dark, swaps its copy icon for a tick and says where to paste (site.js). */
+.copy-prompt { display: none; }
+.js .copy-prompt { display: inline-flex; }
+.copy-prompt .icon:nth-of-type(2), .copy-prompt.copied .icon:nth-of-type(1) { display: none; }
+.copy-prompt.copied .icon:nth-of-type(2) { display: block; }
+.copy-prompt.copied, .copy-prompt.copied:hover { background: var(--ink); }
+
+/* The prompt, on the code colours. */
+.prompt-box {
+  margin: 0; padding: var(--s-200) var(--s-300); border-radius: var(--r-xl); text-align: left; background: #1f1c18; color: #efe9de;
+  font: 14px/20px var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; user-select: all;
+}
+.prompt-box code { font-size: inherit; }
+
+/* hero: one line, the copy button, then the player, all inside the first 900 px on a laptop */
+.hero { max-width: 1240px; margin: 0 auto; padding: var(--s-300) var(--s-300) 0; text-align: center; }
+.hero-title { font-size: 60px; line-height: 60px; font-weight: 600; letter-spacing: -.035em; }
+.hero-sub { font-size: 18px; line-height: 28px; color: var(--body); max-width: 700px; margin: var(--s-100) auto 0; }
+.hero-cta { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: var(--s-100) var(--s-300); margin-top: var(--s-300); }
+.risk { margin-top: var(--s-100); font-size: 14px; line-height: 20px; font-weight: 500; color: var(--ink-soft); }
+.peek { max-width: 640px; margin: var(--s-200) auto 0; }
+.peek .prompt-box { box-shadow: var(--lift); }
+
+/* The player: the features down the left, the clip on the right (scripts/build.mjs's SLIDES,
+   site.js plays it). */
+.player { display: grid; grid-template-columns: 292px minmax(0, 1fr); gap: var(--s-400); align-items: center; max-width: 1120px; margin: var(--s-300) auto 0; text-align: left; }
+.feats { list-style: none; display: flex; flex-direction: column; gap: var(--s-50); }
+.feat button {
+  position: relative; overflow: hidden; width: 100%; display: grid; grid-template-columns: 36px minmax(0, 1fr); column-gap: var(--s-100); align-items: center;
+  padding: var(--s-75) var(--s-100); border: 0; border-radius: var(--r-xl); background: transparent; cursor: pointer; text-align: left;
+  font: 500 16px/24px var(--sans); color: var(--ink-soft);
+  transition: background-color 300ms var(--ease), color 300ms var(--ease), box-shadow 300ms var(--ease);
+}
+.feat button:hover { background: rgba(31, 28, 24, .04); color: var(--ink); }
+.feat-icon { grid-row: span 2; align-self: start; width: 36px; height: 36px; border-radius: var(--r-lg); display: grid; place-items: center; background: #ebe5d8; color: var(--ink-soft); font-size: 20px; transition: background-color 300ms var(--ease), color 300ms var(--ease); }
+.feat-title { position: relative; z-index: 1; min-height: 36px; display: flex; align-items: center; }
+.feat-text { grid-column: 2; font-size: 14px; line-height: 20px; font-weight: 400; color: var(--body); max-height: 0; opacity: 0; overflow: hidden; transition: max-height 500ms var(--ease), opacity 300ms var(--ease); }
+/* The bar: a hairline along the foot of the playing feature, filled to how far through its clip
+   it is (--p, set every frame from the clip's own currentTime, so it's the clip's real length
+   and it stops when the clip does). */
+.feat-bar { position: absolute; left: var(--s-100); right: var(--s-100); bottom: var(--s-75); height: 3px; border-radius: var(--r-full); background: var(--line); opacity: 0; overflow: hidden; }
+.feat-bar::after { content: ""; position: absolute; inset: 0; background: var(--ink); transform-origin: left; transform: scaleX(var(--p, 0)); }
+.feat.on button { background: var(--card); box-shadow: var(--lift); color: var(--ink); font-weight: 600; padding-bottom: var(--s-200); }
+/* The honey here means "this one's playing". */
+.feat.on .feat-icon { background: var(--honey-tint); color: var(--honey); }
+.feat.on .feat-text { max-height: 80px; opacity: 1; }
+.feat.on .feat-bar { opacity: 1; }
+
 /* The clips are the window alone, square cornered with black where its round corners were, so
-   the page rounds them again: 12 px in the 1600 px recording is 0.75% of the width (cqw). */
-.slides { container-type: inline-size; }
+   the page rounds them again: 12 px in the 1600 px recording is 0.75% of the width (cqw). They
+   share one grid cell and crossfade. */
+.stage { position: relative; display: grid; container-type: inline-size; }
 video.slide {
-  display: block; width: 100%; height: auto; aspect-ratio: 1600 / 1058; border-radius: .75cqw; background: #1e1e1e;
-  box-shadow: 0 24px 40px rgba(40, 30, 15, .16), 0 2px 6px rgba(40, 30, 15, .08), 0 0 0 1px rgba(0, 0, 0, .35);
+  grid-area: 1 / 1; display: block; width: 100%; height: auto; aspect-ratio: 1600 / 1058; border-radius: .75cqw; background: #1e1e1e;
+  box-shadow: 0 30px 60px -20px rgba(40, 30, 15, .35), 0 2px 6px rgba(40, 30, 15, .08), 0 0 0 1px rgba(0, 0, 0, .35);
+  opacity: 0; transition: opacity 600ms var(--ease);
 }
-.slides > * { grid-area: 1 / 1; }
-.slide { opacity: 0; transform: scale(.985); transition: opacity 700ms var(--ease), transform 900ms var(--ease); }
-.slide.on { opacity: 1; transform: none; }
-/* The list: each title, the playing one darker and open to its line, with a bar down its left
-   edge that fills over its clip. */
-.picks { list-style: none; display: flex; flex-direction: column; gap: var(--s-50); text-align: left; }
-.pick {
-  appearance: none; border: 0; background: none; font: inherit; color: inherit; cursor: pointer; width: 100%; text-align: left;
-  display: grid; grid-template-columns: 2px 1fr; column-gap: var(--s-200); padding: var(--s-75) 0;
+video.slide.on { opacity: 1; }
+.player-ctrls { position: absolute; right: var(--s-100); bottom: var(--s-100); z-index: 2; display: flex; gap: var(--s-75); }
+.player-ctrl {
+  width: 36px; height: 36px; border-radius: var(--r-full); border: 0; display: grid; place-items: center; cursor: pointer; font-size: 16px;
+  background: rgba(20, 18, 16, .62); color: #fff; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  opacity: .55; transition: opacity 300ms var(--ease);
 }
-.pick-bar { grid-row: 1 / span 2; position: relative; overflow: hidden; border-radius: var(--r-full); background: var(--line); }
-.pick-bar span { position: absolute; inset: 0; background: var(--ink); transform: scaleY(0); transform-origin: top; }
-.pick-title { font-size: 16px; line-height: 24px; font-weight: 600; color: var(--ink-faint); transition: color 300ms var(--ease); }
-.pick:hover .pick-title, .pick.on .pick-title { color: var(--ink); }
-.pick-text {
-  font-size: 14px; line-height: 20px; color: var(--body); max-height: 0; opacity: 0; overflow: hidden;
-  transition: max-height 500ms var(--ease), opacity 300ms var(--ease), margin 500ms var(--ease);
+.stage:hover .player-ctrl, .player-ctrl:focus-visible { opacity: 1; }
+.player-ctrl svg { fill: currentColor; }
+.player-toggle .play, .player.paused .player-toggle .pause { display: none; }
+.player.paused .player-toggle .play { display: block; }
+.player-full, .player-caption { display: none; }
+@media (prefers-reduced-motion: reduce) { video.slide, .feat-text { transition: none; } }
+
+/* Sections after the hero. */
+.block { max-width: 1180px; margin: 0 auto; padding: 0 var(--s-300); }
+.section-title { font-size: 36px; line-height: 40px; font-weight: 600; letter-spacing: -.025em; text-align: center; margin: 120px auto var(--s-400); max-width: 680px; }
+.section-lede { font-size: 18px; line-height: 28px; color: var(--body); text-align: center; max-width: 620px; margin: calc(var(--s-300) * -1) auto var(--s-500); }
+
+/* Four tiles, one line each, the rest behind the (i). */
+.tiles { list-style: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s-200); }
+.tiles li { position: relative; background: var(--card); border-radius: var(--r-2xl); box-shadow: var(--lift); padding: var(--s-300); }
+.tiles .badge-icon { width: 44px; height: 44px; font-size: 22px; margin-bottom: var(--s-200); }
+.tiles h3 { font-size: 18px; line-height: 24px; font-weight: 600; letter-spacing: -.01em; padding-right: var(--s-400); }
+.tip-btn {
+  position: absolute; top: var(--s-300); right: var(--s-300); width: 28px; height: 28px; border-radius: var(--r-full); border: 1px solid var(--line); background: var(--page);
+  color: var(--ink-soft); font: 600 14px/1 Georgia, serif; cursor: pointer; transition: background-color 300ms var(--ease), color 300ms var(--ease);
 }
-.pick.on .pick-text { max-height: 120px; opacity: 1; margin-top: var(--s-50); }
-/* An animation rather than a transition, so it can stop where it is while the clip's held. */
-.pick.on .pick-bar span { animation: bar-fill var(--slide-ms, 8000ms) linear forwards; }
-.showcase.held .pick.on .pick-bar span { animation-play-state: paused; }
-.showcase.still .pick.on .pick-bar span { animation: none; transform: scaleY(1); }
-@keyframes bar-fill { to { transform: scaleY(1); } }
-/* On a phone the clip comes first and the list sits under it. */
-@media (max-width: 860px) {
-  .showcase { grid-template-columns: minmax(0, 1fr); gap: var(--s-300); }
-  .picks { order: 2; }
+.tip-btn:hover, .tip-btn[aria-expanded="true"] { background: var(--ink); color: #fff; border-color: var(--ink); }
+.tip {
+  position: absolute; left: var(--s-100); right: var(--s-100); top: calc(100% - var(--s-75)); z-index: 5; padding: var(--s-100) var(--s-200); border-radius: var(--r-xl);
+  background: var(--ink); color: #efe9de; font-size: 14px; line-height: 20px; box-shadow: 0 18px 40px -12px rgba(40, 30, 15, .45);
 }
-@media (prefers-reduced-motion: reduce) {
-  .slide, .pick-text { transition: opacity 1ms; transform: none; }
+.tip code { color: #fff; }
+
+/* Where your stuff lives: three cards joined by a sewn thread. */
+.flow { list-style: none; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s-500); max-width: 980px; margin: 0 auto; }
+.flow li { position: relative; display: grid; grid-template-columns: auto 1fr; column-gap: var(--s-200); align-items: center; padding: var(--s-300) var(--s-200); background: var(--card); border-radius: var(--r-2xl); box-shadow: var(--lift); }
+.flow li + li::before { content: ""; position: absolute; left: calc(var(--s-500) * -1); top: 50%; width: var(--s-500); border-top: 2px dashed #cdbd9f; }
+.flow .badge-icon { grid-row: span 2; }
+.flow b { font-size: 16px; line-height: 24px; font-weight: 600; }
+.flow span:not(.badge-icon) { font-size: 14px; line-height: 20px; color: var(--ink-soft); }
+
+/* The launch video beside the commit count. */
+.proof { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: var(--s-700); align-items: center; margin-top: 120px; }
+.proof h2, .install-section h2 { font-size: 36px; line-height: 40px; font-weight: 600; letter-spacing: -.025em; }
+.proof p { font-size: 18px; line-height: 28px; color: var(--body); margin-top: var(--s-200); }
+.proof p b { color: var(--ink); font-weight: 600; }
+.proof .more { margin-top: var(--s-300); font-size: 16px; font-weight: 500; }
+.video-card { position: relative; display: block; border-radius: var(--r-3xl); overflow: hidden; box-shadow: var(--lift), 0 0 0 1px var(--line); background: #efe9de; aspect-ratio: 16 / 9; }
+.video-card img, .video-card iframe { display: block; width: 100%; height: 100%; object-fit: cover; border: 0; }
+.video-play {
+  position: absolute; left: 50%; top: 50%; translate: -50% -50%; width: 76px; height: 76px; border-radius: var(--r-full); display: grid; place-items: center;
+  background: rgba(31, 28, 24, .82); color: #fff; font-size: 28px; box-shadow: 0 12px 30px rgba(31, 28, 24, .3); transition: scale 500ms var(--ease);
 }
+.video-play svg { fill: currentColor; margin-left: var(--s-50); }
+a.video-card:hover .video-play { scale: 1.06; }
+.video-len { position: absolute; right: var(--s-200); bottom: var(--s-200); padding: var(--s-50) var(--s-100); border-radius: var(--r-lg); background: rgba(31, 28, 24, .82); color: #fff; font-size: 14px; line-height: 20px; font-weight: 600; }
+.video-card.playing .video-play, .video-card.playing .video-len { display: none; }
 
+/* Install: the steps beside the prompt. */
+.install-section { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: var(--s-700); align-items: start; margin-top: 120px; }
+.install-section .intro { font-size: 18px; line-height: 28px; color: var(--body); margin-top: var(--s-200); }
+.needs { list-style: none; display: flex; flex-wrap: wrap; gap: var(--s-75); margin-top: var(--s-300); }
+.needs li { font-size: 14px; line-height: 20px; font-weight: 500; color: var(--ink); padding: var(--s-75) var(--s-100); border-radius: var(--r-full); background: var(--card); box-shadow: inset 0 0 0 1px var(--line); }
+.install-steps { list-style: none; counter-reset: step; margin-top: var(--s-400); display: flex; flex-direction: column; gap: var(--s-300); }
+.install-steps li { counter-increment: step; display: grid; grid-template-columns: 32px 1fr; column-gap: var(--s-200); }
+.install-steps li::before { content: counter(step); grid-row: span 2; width: 32px; height: 32px; border-radius: var(--r-full); display: grid; place-items: center; background: var(--ink); color: #fff; font-size: 14px; font-weight: 600; }
+.install-steps b { font-size: 18px; line-height: 32px; font-weight: 600; }
+.install-steps span { font-size: 16px; line-height: 24px; color: var(--body); }
+/* 24 px card, 12 px in, so the prompt inside gets 24 - 12 = 12 px (B3). */
+.prompt-card { background: var(--card); border-radius: var(--r-3xl); box-shadow: var(--lift); padding: var(--s-100); }
+.prompt-card figcaption { display: flex; align-items: center; gap: var(--s-75); font-size: 14px; line-height: 20px; font-weight: 500; color: var(--ink-soft); padding: var(--s-50) var(--s-75) var(--s-100); }
+.prompt-card figcaption .icon { font-size: 16px; }
+.prompt-card .prompt-box { padding: var(--s-300); line-height: 24px; }
+.prompt-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-100); padding: var(--s-100) var(--s-50) var(--s-50); }
+.send-mac[hidden] { display: none; }
+.phone-row { display: flex; align-items: center; gap: var(--s-200); margin-top: var(--s-300); padding: 0 var(--s-50); }
+.phone-row p { font-size: 16px; line-height: 24px; color: var(--body); }
+.phone-row .appstore { flex: none; }
 
-/* problem to solution */
-.problem, .benefits, .how, .proof-section, .faq, .closing { max-width: 1120px; margin: 0 auto; padding: 0 var(--s-300); }
-.problem-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-300); }
-.problem-card { background: var(--card); border-radius: var(--r-3xl); padding: var(--s-500); box-shadow: var(--lift); border: 1px solid transparent; }
-.problem-card h3 { font-size: 20px; line-height: 28px; font-weight: 600; }
-.problem-card p { font-size: 18px; line-height: 28px; color: var(--body); margin-top: var(--s-75); }
-.problem-card.before { background: var(--well); box-shadow: none; }
-.problem-card.before .badge-icon { background: #e6e1d6; color: var(--ink-soft); }
-.problem-card.before p { color: var(--ink-soft); }
-.problem-card.after { border-color: var(--line); }
-/* The one place the honey shows in this section: Threadbear's own card. */
-.problem-card.after .badge-icon { background: var(--honey-tint); color: var(--honey); }
+/* FAQ, as an accordion. */
+.faq-list { max-width: 760px; margin: 0 auto; border-top: 1px solid var(--line); }
+.faq-item { border-bottom: 1px solid var(--line); }
+.faq-item summary { list-style: none; cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: var(--s-200); padding: var(--s-200) var(--s-50); font-size: 18px; line-height: 28px; font-weight: 600; }
+.faq-item summary::-webkit-details-marker { display: none; }
+/* A chevron drawn from two borders, turning up when it's open. */
+.faq-item summary::after { content: ""; flex: none; width: 12px; height: 12px; border-right: 2px solid var(--ink-soft); border-bottom: 2px solid var(--ink-soft); rotate: 45deg; translate: 0 -3px; transition: rotate 300ms var(--ease), translate 300ms var(--ease); }
+.faq-item[open] summary::after { rotate: -135deg; translate: 0 3px; }
+.faq-item summary:hover { color: var(--honey-d); }
+.faq-item p { font-size: 16px; line-height: 24px; color: var(--body); padding: 0 var(--s-50) var(--s-300); max-width: 680px; }
 
-/* benefits */
-.feature {
-  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: stretch; overflow: hidden;
-  background: var(--card); border-radius: var(--r-3xl); box-shadow: var(--lift);
-}
-.feature + .feature { margin-top: var(--s-300); }
-.feature-copy { padding: var(--s-700); align-self: center; }
-.feature-copy h3 { font-size: 30px; line-height: 36px; font-weight: 600; letter-spacing: -.02em; }
-.feature-copy p { font-size: 18px; line-height: 28px; color: var(--body); margin-top: var(--s-200); max-width: 460px; }
-/* Every picture sits on the same quiet well, so the screenshots do the talking. */
-.feature-media { position: relative; display: flex; justify-content: center; align-items: center; gap: var(--s-200); padding: var(--s-500) var(--s-300); background: var(--well); }
-.feature.flip .feature-copy { order: 2; }
-.feature-media .phone { --w: 236px; }
-.feature { grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); }
-.feature.flip { grid-template-columns: minmax(0, 6fr) minmax(0, 5fr); }
-.feature-media.pair .phone { --w: 206px; }
-.feature-media.pair .phone:last-child { transform: translateY(var(--s-300)); }
-
-/* The tagline reveal (B11). Words start at 30% and go to full, one at a time, as you scroll. */
-.tagline-section { max-width: 1080px; margin: 0 auto; padding: var(--s-900) var(--s-300); }
-.tagline { max-width: 680px; margin: 0 auto; text-align: center; font-size: 60px; line-height: 60px; font-weight: 600; letter-spacing: -.03em; color: var(--ink); text-wrap: balance; }
-.tagline .word { opacity: .3; transition: opacity 500ms var(--ease); }
-.tagline .word.on { opacity: 1; }
-
-/* how it works */
-.steps { list-style: none; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s-300); counter-reset: none; }
-.step { position: relative; background: var(--card); border-radius: var(--r-3xl); box-shadow: var(--lift); padding: var(--s-400); }
-.step-number {
-  position: absolute; top: var(--s-400); right: var(--s-400); width: 32px; height: 32px; border-radius: var(--r-full);
-  display: grid; place-items: center; background: var(--ink); color: #fff; font-size: 14px; line-height: 20px; font-weight: 600;
-}
-.step h3 { font-size: 20px; line-height: 28px; font-weight: 600; }
-.step p { font-size: 16px; line-height: 24px; color: var(--body); margin-top: var(--s-75); }
-/* The README's agent prompt, under the steps, as wide as they are. */
-.agent-install { margin-top: var(--s-400); }
-.agent-install > p { max-width: 680px; font-size: 16px; line-height: 24px; color: var(--body); margin-bottom: var(--s-200); }
-.code.wide { width: 100%; margin: 0; }
-.code.wide pre code { font-size: 14px; line-height: 20px; }
-.code.wide pre { white-space: pre-wrap; overflow-wrap: anywhere; }
-
-/* proof */
-.quote { background: var(--card); border-radius: var(--r-3xl); box-shadow: var(--lift); padding: var(--s-600); }
-.quote blockquote p { font-size: 24px; line-height: 32px; font-weight: 500; letter-spacing: -.01em; color: var(--ink); }
-.quote figcaption { display: flex; align-items: center; gap: var(--s-100); margin-top: var(--s-300); font-size: 14px; line-height: 20px; color: var(--ink-soft); }
-.quote figcaption img { width: 40px; height: 40px; border-radius: var(--r-lg); }
-.quote figcaption b { color: var(--ink); font-weight: 600; }
-
-/* FAQ, as plain questions and answers */
-.faq-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-300); }
-.faq-item { background: var(--card); border-radius: var(--r-2xl); padding: var(--s-400); box-shadow: var(--lift); }
-.faq-item:last-child:nth-child(odd) { grid-column: 1 / -1; }
-.faq-item h3 { font-size: 18px; line-height: 28px; font-weight: 600; }
-.faq-item p { font-size: 16px; line-height: 24px; color: var(--body); margin-top: var(--s-75); }
-
-/* closing: the same promise and button as the top, with the risk reversal */
-.closing { margin-top: var(--s-900); padding-bottom: var(--s-700); text-align: center; display: flex; flex-direction: column; align-items: center; }
-.closing .hero-sub { text-align: center; max-width: 580px; }
-.risk-list { list-style: none; display: flex; flex-wrap: wrap; justify-content: center; gap: var(--s-100) var(--s-300); margin: var(--s-400) 0; max-width: 680px; }
-.risk-list li { display: flex; align-items: center; gap: var(--s-75); font-size: 16px; line-height: 24px; font-weight: 500; color: var(--ink); }
-.risk-list .icon { font-size: 20px; color: var(--ink-soft); }
+/* closing: the waving bear, Mike's line and the copy button again */
+.closing { text-align: center; display: flex; flex-direction: column; align-items: center; margin-top: 120px; padding-bottom: var(--s-800); }
+.bear-wave { display: block; width: 120px; height: auto; margin-bottom: var(--s-300); }
+.closing-title { font-size: 48px; line-height: 48px; font-weight: 600; letter-spacing: -.03em; max-width: 760px; }
+.closing-cta { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--s-200); margin-top: var(--s-400); }
 
 /* Scroll reveals (B7): up 32 px and in, once, on the base curve. Only once site.js has run, so
    nothing is hidden without JavaScript. */
@@ -399,124 +412,52 @@ video.slide {
   .menu li { transform: none; }
 }
 
-/* The closing repeats the hero, bigger, since it has the whole width to itself. */
-.closing-title { font-size: 60px; line-height: 60px; }
-
-@media (max-width: 960px) {
-  .closing-title { font-size: 48px; line-height: 48px; }
-  .steps { grid-template-columns: 1fr; }
+@media (max-width: 1080px) {
+  .player { grid-template-columns: 256px minmax(0, 1fr); gap: var(--s-300); }
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* Phones and narrow windows: the list folds into chips over the clip (all seven still in view,
+   the playing one filling as its clip runs), and its line moves under the clip. */
 @media (max-width: 860px) {
-  main { padding-top: var(--s-800); }
-  .hero { padding-top: var(--s-400); }
-  .proof { align-items: flex-start; }
-  /* The window is small on a phone, so the iPhone sits a little lower and takes less of it. */
-  .hero-media { margin-top: var(--s-500); padding: 0 var(--s-500) var(--s-700) 0; }
-  .hero-media .phone { --w: min(34vw, 180px); padding: var(--s-50); border-radius: var(--r-2xl); }
-  .hero-media .phone img { border-radius: var(--r-xl); }
-  .section-title { font-size: 30px; line-height: 36px; margin: var(--s-700) auto var(--s-300); }
-  .problem-grid, .faq-list { grid-template-columns: 1fr; }
-  .problem-card { padding: var(--s-400) var(--s-300); }
-  .feature, .feature.flip { grid-template-columns: 1fr; }
-  .feature.flip .feature-copy { order: 0; }
-  .feature-copy { padding: var(--s-400) var(--s-300); }
-  .feature-copy h3 { font-size: 24px; line-height: 32px; }
-  .feature-copy p { font-size: 16px; line-height: 24px; }
-  .feature-media { padding: var(--s-400) var(--s-200); }
-  .feature-media .phone { --w: min(56vw, 240px); }
-  .feature-media.pair { gap: var(--s-100); }
-  .feature-media.pair .phone { --w: min(38vw, 200px); }
-  .tagline-section { padding: var(--s-700) var(--s-300); }
-  .tagline { font-size: 36px; line-height: 40px; }
-  .quote { padding: var(--s-400) var(--s-300); }
-  .quote blockquote p { font-size: 20px; line-height: 28px; }
-  .faq-item { padding: var(--s-300); }
-  .closing { margin-top: var(--s-700); }
-}
-@media (max-width: 480px) {
-  /* "you can patch yourself" won't fit on one line at 36 px, so the hand break goes and
-     text-wrap: balance splits it into even lines instead of leaving a word alone. */
-  .hero-title, .closing-title { font-size: 36px; line-height: 40px; text-wrap: balance; }
-  .hero-title br, .closing-title br { display: none; }
-}
-
-
-/* ---------- Threadbear's own pieces ---------- */
-
-/* The big button (the hero's and closing's Copy the install prompt). */
-.btn-lg { padding: var(--s-100) var(--s-300); border-radius: var(--r-xl); gap: var(--s-100); }
-.btn-lg .icon { font-size: 20px; }
-
-/* The install prompt: the prompt itself on the code colours, the copy button under it, and a
-   line saying where to paste it once it's copied (site.js). Without JavaScript the button stays
-   hidden and the prompt can be selected by hand. */
-.install { display: flex; flex-direction: column; align-items: center; gap: var(--s-200); width: 100%; max-width: 640px; }
-.install-prompt {
-  width: 100%; margin: 0; padding: var(--s-200) var(--s-300); border-radius: var(--r-xl); text-align: left;
-  background: #1f1c18; color: #efe9de; box-shadow: var(--lift);
-  font: 13px/20px var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; user-select: all;
-}
-.copy-prompt { display: none; }
-.js .copy-prompt { display: inline-flex; }
-.copy-prompt .icon:nth-of-type(2), .copy-prompt.copied .icon:nth-of-type(1) { display: none; }
-.copy-prompt.copied .icon:nth-of-type(2) { display: block; }
-.install-next { min-height: 24px; font-size: 16px; line-height: 24px; font-weight: 500; color: var(--ink); opacity: 0; transform: translateY(-4px); transition: opacity 300ms var(--ease), transform 500ms var(--ease); }
-.install-next.on { opacity: 1; transform: none; }
-.hero-cta { width: 100%; }
-.closing-cta { flex-direction: column; }
-
-/* A part of the Mac window, cropped at full size so it can be read in a card: a plain white
-   panel with a hairline and the usual lift, rather than a window. */
-.mac.crop { filter: none; border-radius: var(--r-xl); box-shadow: 0 0 0 1px rgba(0, 0, 0, .35), var(--lift); background: #1e1e1e; max-width: 470px; }
-
-/* The patch file, laid over the top corner of the screenshot it made the buttons in (the top of
-   that crop is only the end of the reply). 16 px card, 12 px inset, so the code block inside gets
-   16 - 12 = 4 px. */
-.feature-media.patches { flex-direction: column; align-items: stretch; gap: 0; }
-.feature-media.patches .mac { margin: calc(var(--s-700) * -1) auto 0 0; }
-.code {
-  position: relative; z-index: 1; width: min(100%, 320px); margin: 0 0 0 auto; padding: var(--s-100);
-  background: var(--card); border-radius: var(--r-2xl); box-shadow: 0 18px 40px -12px rgba(40, 30, 15, .3), 0 2px 6px rgba(40, 30, 15, .08);
-}
-.code figcaption { font-size: 12px; line-height: 16px; color: var(--ink-soft); padding: var(--s-50) var(--s-50) var(--s-75); }
-.code pre { margin: 0; padding: var(--s-100); border-radius: var(--r); background: #1f1c18; color: #efe9de; overflow-x: auto; }
-.code pre code { font-size: 12px; line-height: 16px; }
-
-/* The sleeping bear, curled up on the corner of the screenshot beside "hibernate". */
-.bear { display: block; height: auto; pointer-events: none; }
-.bear-sleep { position: absolute; width: 140px; right: var(--s-400); bottom: var(--s-300); filter: drop-shadow(0 8px 12px rgba(40, 30, 15, .18)); }
-
-/* Where your threads live: three plain cards, top to bottom, joined by a short line. */
-.flow { list-style: none; display: flex; flex-direction: column; gap: var(--s-300); width: min(100%, 380px); }
-.flow li {
-  position: relative; display: grid; grid-template-columns: auto 1fr; column-gap: var(--s-200); align-items: center;
-  padding: var(--s-200); background: var(--card); border-radius: var(--r-2xl); box-shadow: var(--lift);
-}
-.flow li + li::before {
-  /* A thread between the cards, sewn rather than drawn: centred on the 48 px icon (16 + 24). */
-  content: ""; position: absolute; left: 39px; top: calc(var(--s-300) * -1); width: 0; height: var(--s-300);
-  border-left: 2px dashed #cdbd9f;
-}
-.flow .badge-icon { grid-row: span 2; margin: 0; }
-.flow b { font-size: 16px; line-height: 24px; font-weight: 600; }
-.flow span:not(.badge-icon) { font-size: 14px; line-height: 20px; color: var(--ink-soft); }
-
-/* Why I made it: the quote beside the bear at his workbench. The picture's paper white is close
-   to the page's, so it sits straight on the page with no card. */
-.why { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s-500); align-items: center; }
-.workbench { display: block; width: 100%; height: auto; border-radius: var(--r-3xl); }
-
-/* The closing: the waving bear over the heading, then both ways to get it side by side. */
-.bear-wave { width: 120px; margin-bottom: var(--s-300); }
-.closing-cta { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: var(--s-200); margin-top: var(--s-400); }
-.closing-cta .btn-lg { height: 56px; }
-
-@media (max-width: 860px) {
-  .why { grid-template-columns: 1fr; gap: var(--s-300); }
-  /* No room to overlap on a phone: the code card would cover the buttons it made. */
-  .code { width: 100%; }
-  .feature-media.patches .mac { margin-top: var(--s-200); }
-  .bear-sleep { width: 80px; right: var(--s-75); bottom: 0; }
+  /* The corner sat on the nav pill; the menu links the code instead. */
+  .corner.github { display: none; }
+  .hero { padding: var(--s-300) var(--s-200) 0; }
+  .hero-title { font-size: 36px; line-height: 40px; }
+  .hero-sub { font-size: 16px; line-height: 24px; }
+  .hero-cta { margin-top: var(--s-300); gap: var(--s-50) var(--s-200); }
+  .risk { margin-top: var(--s-50); }
+  .player { grid-template-columns: 1fr; gap: var(--s-200); margin-top: var(--s-400); }
+  .feats { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: var(--s-75); }
+  .feat button { display: block; padding: var(--s-75) var(--s-200); border-radius: var(--r-full); background: var(--card); box-shadow: inset 0 0 0 1px var(--line); font-size: 14px; line-height: 20px; }
+  .feat-icon, .feat-text { display: none; }
+  .feat-title { min-height: 0; display: inline; }
+  /* The chip itself fills, behind its title. */
+  .feat-bar { inset: 0; height: auto; border-radius: 0; background: transparent; }
+  .feat-bar::after { background: var(--honey-tint); }
+  .feat.on button { padding: var(--s-75) var(--s-200); box-shadow: inset 0 0 0 1px var(--ink-faint); }
+  .player-caption { display: block; margin-top: var(--s-100); text-align: center; font-size: 16px; line-height: 24px; color: var(--body); min-height: 48px; }
+  .player-ctrl { opacity: .85; }
+  .player-full { display: grid; }
+  .block { padding: 0 var(--s-200); }
+  .section-title { font-size: 30px; line-height: 36px; margin-top: var(--s-800); }
+  .section-lede { font-size: 16px; line-height: 24px; margin-bottom: var(--s-400); }
+  .tiles { grid-template-columns: 1fr; gap: var(--s-100); }
+  .tiles li { display: flex; align-items: center; gap: var(--s-200); padding: var(--s-200) var(--s-600) var(--s-200) var(--s-200); }
+  .tiles .badge-icon { margin: 0; width: 40px; height: 40px; font-size: 20px; }
+  .tiles h3 { font-size: 16px; padding: 0; }
+  .tip-btn { top: 50%; translate: 0 -50%; right: var(--s-200); }
+  .flow { grid-template-columns: 1fr; gap: var(--s-300); max-width: 420px; }
+  .flow li + li::before { left: 47px; top: calc(var(--s-300) * -1); width: 0; height: var(--s-300); border-top: 0; border-left: 2px dashed #cdbd9f; }
+  .proof, .install-section { grid-template-columns: 1fr; gap: var(--s-400); margin-top: var(--s-800); }
+  .proof h2, .install-section h2 { font-size: 30px; line-height: 36px; }
+  .proof p, .install-section .intro { font-size: 16px; line-height: 24px; }
+  .prompt-card .prompt-box { padding: var(--s-200); font-size: 12px; line-height: 20px; }
+  .prompt-actions .btn-lg { width: 100%; }
+  .phone-row { flex-direction: column; align-items: flex-start; }
+  .faq-item summary { font-size: 16px; line-height: 24px; padding: var(--s-200) var(--s-25); }
+  .closing { margin-top: var(--s-800); }
+  .closing-title { font-size: 30px; line-height: 36px; }
 }
 
 

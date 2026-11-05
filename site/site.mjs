@@ -17,3 +17,11 @@ export const GITHUB_PUBLIC = true;
  */
 export const APP_STORE_URL = "https://apps.apple.com/app/id6827837354";
 export const APP_STORE_LIVE = true;
+
+/**
+ * The launch video's YouTube id (the part after watch?v=), shown in the home page's "Watch me go
+ * through it". Empty until it's up: the page shows a stand-in card with no link. Once it's set,
+ * the card links to it and plays it in place through youtube-nocookie.com, and headers.mjs lets
+ * that player and YouTube's thumbnail through the CSP.
+ */
+export const LAUNCH_VIDEO_ID = "";

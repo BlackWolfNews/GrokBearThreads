@@ -13,6 +13,7 @@ const ICONS = {
   "github-logo": "GithubLogo", "bell": "Bell", "database": "Database", "moon-stars": "MoonStars",
   "qr-code": "QrCode", "coins": "Coins", "code": "Code", "cursor-click": "CursorClick", "wrench": "Wrench",
   "user-circle": "UserCircle", "git-fork": "GitFork", "desktop": "Desktop", "copy": "Copy", "check": "Check",
+  "columns": "Columns", "books": "Books",
 };
 for (const [file, name] of Object.entries(ICONS)) {
   const src = readFileSync(join(pkg, "dist/defs", `${name}.es.js`), "utf8");

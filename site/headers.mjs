@@ -1,11 +1,14 @@
 // The headers every response gets, shared by the Worker (worker.mjs) and the local server
 // (scripts/serve.mjs), so what you see locally is what prod sends. Copied from Quick Ask's site.
+import { LAUNCH_VIDEO_ID } from "./site.mjs";
 
 /**
  * The page only loads its own files: one script (src/site.js, the menu and the scroll reveals),
  * its stylesheet, the fonts, the images and the hero's clips (media-src: without it,
  * default-src 'none' blocks every <video>). Cloudflare's Web Analytics beacon is allowed in case
  * Cloudflare injects it, like it can on mikecann.app. JSON-LD blocks aren't run as scripts.
+ * Once there's a launch video (LAUNCH_VIDEO_ID in site.mjs), YouTube's thumbnail host and its
+ * no-cookie player are let in too, for the home page's click-to-play card; until then, nothing.
  */
 const CSP = [
   "default-src 'none'",
@@ -13,7 +16,8 @@ const CSP = [
   "connect-src 'self'",
   "font-src 'self'",
   "style-src 'self'",
-  "img-src 'self'",
+  LAUNCH_VIDEO_ID ? "img-src 'self' https://i.ytimg.com" : "img-src 'self'",
+  ...(LAUNCH_VIDEO_ID ? ["frame-src https://www.youtube-nocookie.com"] : []),
   "media-src 'self'",
   "manifest-src 'self'",
   "base-uri 'none'",

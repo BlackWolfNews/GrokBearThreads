@@ -1,216 +1,144 @@
 <!--page {"title": "Threadbear · The agent app you can patch yourself", "description": "Threadbear is a Mac app for running Claude Code and Codex threads on the subscriptions you already have, with an iPhone app, a link for every thread, and the whole source to change however you like.", "path": "/"} -->
-<!-- Every claim here is checked against the repo (AGENTS.md, docs/plan.md, docs/protocol.md,
-     docs/convex-backend.md, docs/website.md, ios/README.md) as of 28 Oct 2026. Anything the page
-     describes that isn't built yet has a "NOT BUILT" comment right beside it; they're Mike's plan
-     for how Threadbear works for other people (his words, 28 Oct 2026). Search for NOT BUILT and
-     change the copy when the app changes.
+<!-- Every claim here is checked against the repo (AGENTS.md, docs/guide.md, docs/protocol.md,
+     docs/convex-backend.md, docs/website.md, ios/README.md). Anything the page describes that
+     isn't built yet has a "NOT BUILT" comment right beside it. Search for NOT BUILT and change
+     the copy when the app changes.
 
-     The layout follows Elaya's landing-page-design skill, like Quick Ask's site: a classic hero
-     plus sections, in the skill's order: hero, problem to solution, benefits, the tagline reveal,
-     how it works, proof, FAQ, then the closing CTA with the risk reversal. Copy is written as
-     Mike (~/.claude/skills/mike-voice). -->
+     The layout is "Watch It Work", the one Mike picked on 5 Nov from four directions
+     (~/dev/me/misc/threadbear-site-review/REVIEW.md): the page is a player first. One line of
+     what it is and the copy button, then the features down the left beside the playing clip, and
+     everything after it short: four one-line tiles with the detail behind an (i), where your
+     stuff lives, the launch video with the commit count, install (the only place the prompt is
+     printed in full), the FAQ as an accordion and a closing copy button. It keeps the skill's
+     order (Elaya's landing-page-design skill): hero, benefits, how it works, proof, FAQ, closing.
+     Copy is written as Mike (~/.claude/skills/mike-voice). -->
     <section class="hero" aria-labelledby="hero-title">
-      <div class="hero-copy">
-        <h1 id="hero-title" class="hero-title">The agent app<br> you can patch yourself</h1>
-        <p class="hero-sub">Threadbear is a Mac app for running Claude Code and Codex threads. You get the whole thing, the source and your own Convex backend, so when something bugs you, you (or more likely your agent) can change it.</p>
-        <!-- Installing is a prompt for your own agent, so the hero gives you that rather than a
-             Fork button (Mike, 5 Nov). The GitHub corner and How it works still link the repo. -->
-        <div class="hero-cta">
-          {{installPrompt}}
-          <p class="risk">Free, for Macs with Apple silicon.</p>
-        </div>
-        <!-- The skill wants one proof signal above the fold. There are no users yet, so this is
-             the repo's own history, counted from git at build time (scripts/build.mjs). "From
-             inside Threadbear": since 27 Oct its threads get their own worktrees and land with
-             `tb land` (AGENTS.md). -->
-        <p class="proof"><span>I started it on {{firstDay}}, and my agents have made <b>{{commits}} commits</b> to it since, lately from inside Threadbear itself.</span></p>
+      <h1 id="hero-title" class="hero-title">The agent app you can patch yourself</h1>
+      <p class="hero-sub">A Mac app for running your Claude Code and Codex threads. You get all of the source, so when something bugs you, you (or more likely your agent) can change it.</p>
+      <!-- Installing is a prompt for your own agent, so the hero gives you that rather than a
+           Fork button (Mike, 5 Nov). The prompt itself is printed once, in #get: "See the prompt"
+           goes there without JavaScript, and with it opens a peek at the same text right here. -->
+      <div class="hero-cta">
+        {{copyButton}}
+        <a class="link-btn" href="#get" data-peek aria-controls="peek" aria-expanded="false">See the prompt</a>
       </div>
-      <!-- A slideshow of clips of the app, one per feature (SLIDES in scripts/build.mjs, the
-           playing in site.js). The iPhone is further down, in its own section. -->
-      <div class="hero-media">
-        {{showcase}}
-      </div>
+      <div class="peek" id="peek" hidden><pre class="prompt-box"><code></code></pre></div>
+      <p class="risk">Free, for Macs with Apple silicon.</p>
+
+      <!-- The player: a clip per feature in the launch video's order, the list down the left
+           (SLIDES in scripts/build.mjs, the playing in site.js). -->
+      <h2 class="visually-hidden" id="features">What it does</h2>
+      {{showcase}}
     </section>
 
-    <section class="problem reveal" aria-labelledby="problem-title">
-      <h2 id="problem-title" class="section-title">I kept wanting to change my agent app</h2>
-      <div class="problem-grid">
-        <div class="problem-card before">
-          <span class="badge-icon">{{icon cursor-click}}</span>
-          <h3>Someone else's app</h3>
-          <p>The agent apps I used were good, but each had a few things I couldn't change. Picking a project for every thread when it's nearly always misc, images that only half worked, and agents dying whenever the app quit or updated.</p>
-        </div>
-        <div class="problem-card after">
-          <span class="badge-icon">{{icon bandaids}}</span>
-          <h3>With Threadbear</h3>
-          <p>New threads just start in your usual folder, and images show up right in the thread. A little runner in the background owns the agents, so quitting the app never stops a turn. And when I want something new, I ask a thread to add it.</p>
-        </div>
-      </div>
-    </section>
-
-    <section class="benefits" id="features" aria-labelledby="benefits-title">
-      <h2 id="benefits-title" class="section-title reveal">What it does</h2>
-
-      <article class="feature reveal">
-        <div class="feature-copy">
-          <span class="badge-icon">{{icon bandaids}}</span>
-          <h3>Ask for a button and get one</h3>
-          <p>Patches are small TypeScript files in your project's <code>.threadbear/patches</code> folder. They add buttons above the message box, panels beside the thread, and commands that run after each turn. Your agent can write one while you watch, and it shows up a few seconds later.</p>
-          <p>A few come built in, like the Convex dashboard for a folder with Convex in it, and a Simulator panel for an Xcode project.</p>
-        </div>
-        <div class="feature-media patches">
-          <figure class="code">
-            <figcaption><code>.threadbear/patches/reseed.ts</code></figcaption>
-            <pre><code>export default {
-  actions: [{
-    title: "Reseed dev DB",
-    run: "npx convex run seed:reset",
-  }],
-}</code></pre>
-          </figure>
-          {{mac mac-patches crop}}
-        </div>
-      </article>
-
-      <article class="feature flip reveal">
-        <div class="feature-copy">
-          <span class="badge-icon">{{icon device-mobile}}</span>
-          <h3>Your threads on your phone</h3>
-          <!-- Built (ios/, convex/push.ts). The phone isn't on the App Store yet; see the badge. -->
-          <p>The iPhone app has your inbox and the latest messages in each thread. You can reply, approve a command or answer a question from the couch, and it sends you a notification when a thread needs you.</p>
-          <!-- Built: docs/website.md, "Copy web link" in the thread's ... menu. -->
-          <p>Every thread has its own link too, so you can open it in a browser or paste it to yourself.</p>
-        </div>
-        <div class="feature-media pair">
-          {{phone approval}}
-          {{phone question}}
-        </div>
-      </article>
-
-      <article class="feature reveal">
-        <div class="feature-copy">
-          <span class="badge-icon">{{icon key}}</span>
-          <h3>Runs on the subscriptions you already pay for</h3>
-          <p>Threadbear drives the official Claude Code and Codex command line tools, logged in as you, so it's your plan doing the work and nothing extra on top. Pick Claude or Codex, the model and how hard it thinks, per thread.</p>
-          <!-- Built, with a catch: more than one login per provider is found through Token Stats'
-               account folders (runner/src/accounts.ts), and the usage on each comes from Token
-               Stats too. Both are Mike's own tools, so this line stays vague until that's
-               something anyone can set up. -->
-          <p>Got more than one account? The menu shows each login and how much it has left.</p>
-        </div>
-        <div class="feature-media">{{mac mac-accounts crop}}</div>
-      </article>
-
-      <article class="feature flip reveal">
-        <div class="feature-copy">
-          <span class="badge-icon">{{icon lightning}}</span>
-          <h3>Quick, even with lots of threads</h3>
-          <p>It's a native Mac app written in SwiftUI and AppKit, so it opens fast and stays light. Threads that have gone quiet hibernate after half an hour, so their CLI isn't sitting there eating memory, and wake up right where they left off when you message them.</p>
-        </div>
-        <div class="feature-media">
-          {{mac mac-diffs crop}}
-          <img class="bear bear-sleep" src="/img/bear-sleep.webp" alt="" width="280" height="230" loading="lazy" decoding="async">
-        </div>
-      </article>
-
-      <article class="feature reveal">
-        <div class="feature-copy">
-          <span class="badge-icon">{{icon database}}</span>
-          <h3>Your own backend, on Convex</h3>
-          <!-- ./threadbear setup makes the deployment (scripts/setup.mjs). What goes up and
-               what stays on the Mac follows docs/convex-backend.md. -->
-          <p>When you install Threadbear it makes a Convex deployment in your own Convex account, and that's what your phone and browser talk to. Thread titles, the latest messages and anything waiting on you go up there. Full transcripts, tool output and images stay on your Mac.</p>
-          <p>None of it runs on a server of mine, so I never see any of it.</p>
-        </div>
-        <div class="feature-media">
-          <ol class="flow" aria-label="Where your threads live">
-            <li>
-              <span class="badge-icon">{{icon desktop}}</span>
-              <b>Your Mac</b>
-              <span>The app and the runner, with every full transcript</span>
-            </li>
-            <li>
-              <span class="badge-icon">{{icon database}}</span>
-              <b>Your Convex deployment</b>
-              <span>Titles, the latest messages and what needs you</span>
-            </li>
-            <li>
-              <span class="badge-icon">{{icon device-mobile}}</span>
-              <b>Your iPhone and browser</b>
-              <span>Read, reply and approve from anywhere</span>
-            </li>
-          </ol>
-        </div>
-      </article>
-    </section>
-
-    <!-- The skill's mandatory tagline reveal (B11): each word goes from muted to full as it
-         crosses a line on the screen (src/site.js). Without JavaScript it's simply all lit. -->
-    <section class="tagline-section" aria-label="Threadbear in one line">
-      <p class="tagline">If something bugs you,<br> ask a thread to fix it.</p>
-    </section>
-
-    <section class="how reveal" id="how" aria-labelledby="how-title">
-      <h2 id="how-title" class="section-title">How it works</h2>
-      <ol class="steps">
-        <li class="step">
-          <span class="step-number" aria-hidden="true">1</span>
-          <span class="badge-icon">{{icon git-fork}}</span>
-          <h3>Fork it and install</h3>
-          <!-- scripts/setup.mjs, as README.md's "Doing it yourself" says. -->
-          <p>Fork the repo, clone it and run <code>./threadbear setup</code>. It builds the Mac app and the runner, and sets up a Convex deployment that's yours.</p>
-        </li>
-        <li class="step">
-          <span class="step-number" aria-hidden="true">2</span>
+    <!-- The things the video says in a line that have no clip: one line each, the detail behind
+         the (i). All built (docs/guide.md: the runner, Copy web link, Schedules' Runs on). -->
+    <section class="block reveal" aria-labelledby="more-title">
+      <h2 class="section-title" id="more-title">A few more things it does</h2>
+      <ul class="tiles">
+        <li>
           <span class="badge-icon">{{icon terminal-window}}</span>
-          <h3>Use your Claude Code or Codex login</h3>
-          <p>If you already use either one in a terminal, that's it. Threadbear starts threads with the logins already on your Mac.</p>
+          <h3>Quit the app and your threads keep going</h3>
+          <button type="button" class="tip-btn" aria-expanded="false" aria-controls="tip-runner" aria-label="More about the runner">i</button>
+          <p class="tip" id="tip-runner" hidden>A separate little process called the runner owns the agents, so closing, quitting or updating the app never stops a turn.</p>
         </li>
-        <li class="step">
-          <span class="step-number" aria-hidden="true">3</span>
-          <span class="badge-icon">{{icon qr-code}}</span>
-          <h3>Pair your iPhone</h3>
-          <!-- The Mac app's Settings > Phone & browser shows the code (DevicesSettings.swift). -->
-          <p>Scan the code in the Mac app's settings with the iPhone app, and your threads show up on your phone.</p>
+        <li>
+          <span class="badge-icon">{{icon link}}</span>
+          <h3>Every thread has its own link</h3>
+          <button type="button" class="tip-btn" aria-expanded="false" aria-controls="tip-link" aria-label="More about thread links">i</button>
+          <p class="tip" id="tip-link" hidden>Copy web link from a thread's menu and open it in any browser you're signed in on, or paste it to yourself for later.</p>
         </li>
+        <li>
+          <span class="badge-icon">{{icon desktop}}</span>
+          <h3>Schedules that run on any of your Macs</h3>
+          <button type="button" class="tip-btn" aria-expanded="false" aria-controls="tip-schedules" aria-label="More about schedules">i</button>
+          <p class="tip" id="tip-schedules" hidden>Send a thread a message at a set time, once or over and over, or start a new thread each time. Pick which Mac it runs on and it runs there, even while this one's asleep.</p>
+        </li>
+        <li>
+          <span class="badge-icon">{{icon key}}</span>
+          <h3>Runs on your own Claude or Codex login</h3>
+          <button type="button" class="tip-btn" aria-expanded="false" aria-controls="tip-login" aria-label="More about logins">i</button>
+          <p class="tip" id="tip-login" hidden>It drives the official <code>claude</code> and <code>codex</code> command line tools, logged in as you, so it's your plan doing the work. It never reads or copies your login tokens.</p>
+        </li>
+      </ul>
+    </section>
+
+    <!-- ./threadbear setup makes the deployment (scripts/setup.mjs). What goes up and what stays
+         on the Mac follows docs/convex-backend.md. -->
+    <section class="block reveal" aria-labelledby="where-title">
+      <h2 class="section-title" id="where-title">Where your stuff lives</h2>
+      <p class="section-lede">Installing it makes a Convex deployment in your own Convex account. None of it runs on a server of mine, so I never see any of it.</p>
+      <ol class="flow" aria-label="Where your threads live">
+        <li><span class="badge-icon">{{icon desktop}}</span><b>Your Mac</b><span>The app and the runner, with every full transcript</span></li>
+        <li><span class="badge-icon">{{icon database}}</span><b>Your Convex deployment</b><span>Titles, the latest messages and what needs you</span></li>
+        <li><span class="badge-icon">{{icon device-mobile}}</span><b>Your iPhone and browser</b><span>Read, reply and approve from anywhere</span></li>
       </ol>
-      <!-- The same prompt as README.md's "The easy way: let your agent do it": keep the two the same. -->
-      <div class="agent-install">
-        <p>Or paste this into Claude Code or Codex and let it do the lot. It checks the code against everything Threadbear installs and talks to before any of it runs, tells you what it thinks, and only sets it up once you're happy.</p>
-        <figure class="code wide">
-          <figcaption>For Claude Code or Codex</figcaption>
-          <pre><code>{{prompt}}</code></pre>
+    </section>
+
+    <!-- Proof: the launch video and the repo's own history. No users or quotes yet, so none get
+         made up. The count and first day come from git at build time (scripts/build.mjs). "From
+         inside Threadbear": since 27 Oct its threads get their own worktrees and land with
+         `tb land` (AGENTS.md). The video is LAUNCH_VIDEO_ID in site.mjs. -->
+    <section class="block proof reveal" aria-labelledby="proof-title">
+      <div>
+        <h2 id="proof-title">Watch me go through it</h2>
+        <p>The launch video walks through all of it in about 25 minutes, so grab yourself a lovely cup of tea first.</p>
+        <p>I started Threadbear on {{firstDay}} and my agents have made <b>{{commits}} commits</b> to it since, lately from inside Threadbear itself.</p>
+        <p class="more"><a href="https://github.com/mikecann/threadbear/commits/main">See the commits on GitHub</a></p>
+      </div>
+      {{launchVideo}}
+    </section>
+
+    <!-- Install: the one place the prompt is printed in full (INSTALL_PROMPT in
+         scripts/build.mjs, the same as README.md's "let your agent do it"). The steps follow what
+         the prompt does, in the video's order: check first, then fork and set up. -->
+    <section class="block install-section reveal" id="get" aria-labelledby="get-title">
+      <div>
+        <h2 id="get-title">Install it with a prompt</h2>
+        <p class="intro">There's nothing to download. You paste this into Claude Code or Codex and your agent sets it all up for you.</p>
+        <ul class="needs" aria-label="What you need">
+          <li>A Mac with Apple silicon</li>
+          <li>Claude Code or Codex</li>
+          <li>A Convex account</li>
+        </ul>
+        <ol class="install-steps">
+          <li><b>Copy the prompt</b><span>It's printed in full here, so you can read exactly what it asks for.</span></li>
+          <li><b>Paste it into Claude Code or Codex</b><span>Your agent forks the repo and checks the code for anything malicious before it runs any of it, then tells you what it thinks.</span></li>
+          <!-- INSTALL.md: builds the app and runner, makes the Convex deployment, starts the app;
+               the tour is the app's own onboarding. -->
+          <li><b>Say yes, and it sets it up</b><span>It builds the app, makes your own Convex deployment and starts Threadbear, with a little tour to get you going.</span></li>
+        </ol>
+      </div>
+      <div>
+        <figure class="prompt-card">
+          <figcaption>{{icon terminal-window}}For Claude Code or Codex</figcaption>
+          <pre class="prompt-box" id="prompt"><code>{{prompt}}</code></pre>
+          <div class="prompt-actions">
+            {{copyButton}}
+            <!-- A copy button on a phone is a dead end (you paste it on your Mac), so phones with
+                 a share sheet also get this, for AirDrop or Messages. site.js shows it. -->
+            <button type="button" class="btn btn-lg btn-ghost send-mac" hidden>{{icon desktop}}<span>Send this page to my Mac</span></button>
+          </div>
         </figure>
+        <!-- The Mac app's Settings > Phone & browser shows the code (DevicesSettings.swift). -->
+        <div class="phone-row">
+          {{appStoreBadge}}
+          <p>Then grab the iPhone app and pair it with the code in the Mac app's settings.</p>
+        </div>
       </div>
     </section>
 
-    <!-- PROOF GAP. The skill wants testimonials or a case study here. Threadbear isn't out, so
-         there are none, and none get made up. This is Mike's own message from 26 Oct 2026, when
-         he asked to build it (Agent Archive thread "Hey, if I wanted to build my own T3 code or
-         conductor..."), lightly trimmed: the cuts are the ellipses, the app's name is swapped for "[the app I was using]" (Mike, 28 Oct: don't name it), plus "MISC"
-         capitalised the usual way. -->
-    <section class="proof-section reveal" aria-labelledby="proof-title">
-      <h2 id="proof-title" class="section-title">Why I made it</h2>
-      <div class="why">
-        <figure class="quote">
-          <blockquote><p>I like some parts of [the app I was using]. I like the ability to snooze things... I don't like the way that it forces me into picking a project each time. I basically almost always pick misc so that seems redundant to me... I want it to be able to do all the things that I want to do and not more.</p></blockquote>
-          <figcaption><img src="/img/icon-192.png" alt="" width="40" height="40"><span><b>Mike Cann</b> made Threadbear</span></figcaption>
-        </figure>
-        <img class="workbench" src="/img/workbench.webp" alt="A worn teddy bear covered in patches sits at a wooden workbench with a laptop open, sewing a new patch onto himself, with scissors, pins and scraps of fabric around him." width="1200" height="676" loading="lazy" decoding="async">
-      </div>
-    </section>
-
-    <section class="faq reveal" id="faq" aria-labelledby="faq-title">
+    <section class="block faq reveal" id="faq" aria-labelledby="faq-title">
       <h2 id="faq-title" class="section-title">Questions people ask</h2>
       {{faq}}
     </section>
 
-    <section class="closing reveal" id="get" aria-labelledby="closing-title">
-      <img class="bear bear-wave" src="/img/bear-wave.webp" alt="" width="280" height="378" loading="lazy" decoding="async">
-      <h2 id="closing-title" class="closing-title">The agent app<br> you can patch yourself</h2>
-      <p class="hero-sub">It's free and you get all of the source. Copy the prompt into Claude Code or Codex to install it, and grab the iPhone app too if you want your threads on your phone.</p>
+    <!-- Closing: Mike's own line from the end of the launch video, lightly tidied. -->
+    <section class="block closing reveal" aria-labelledby="closing-title">
+      <img class="bear-wave" src="/img/bear-wave.webp" alt="" width="280" height="378" loading="lazy" decoding="async">
+      <h2 id="closing-title" class="closing-title">If you're gonna spend all day in one app, you want it exactly how you want it</h2>
+      <p class="risk">Free, for Macs with Apple silicon.</p>
       <div class="closing-cta">
-        {{installPrompt}}
-        {{appStoreBadge}}
+        {{copyButton}}
       </div>
     </section>
