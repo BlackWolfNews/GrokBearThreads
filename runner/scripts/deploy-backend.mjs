@@ -83,6 +83,14 @@ function readKey(home) {
   return { file, key, deployment };
 }
 
+function hasRunnerKey(home) {
+  try {
+    return fs.readFileSync(path.join(home, 'secrets', 'convex-key'), 'utf8').trim().startsWith('tbr_');
+  } catch {
+    return false;
+  }
+}
+
 function syncDeployment(home) {
   const url = readJson(path.join(home, 'runner.json')).sync?.url;
   if (!url) return undefined;
@@ -169,6 +177,13 @@ function main(argv) {
     return 0;
   }
 
+  // Only the main Mac's runner deploys the backend. A Mac with a runner key
+  // of its own (docs/protocol.md, "Runner keys") doesn't, even if an older
+  // setup left a deploy key there (tb runner check says to remove it).
+  if (hasRunnerKey(home)) {
+    say('This Mac has a runner key of its own, so it leaves deploying the backend to the main Mac.');
+    return 0;
+  }
   const { file: keyFile, key, deployment } = readKey(home);
   if (!key) {
     say(`No deploy key in ${keyFile}, so the backend isn't deployed automatically. Make one with:\n  npx convex deployment token create threadbear-runner --prod --save-env "${keyFile}"`);

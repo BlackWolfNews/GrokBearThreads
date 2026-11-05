@@ -38,6 +38,16 @@ export type ConvexKeysOptions = {
 const convexPackage = createRequire(import.meta.url).resolve('convex/package.json');
 const convexBin = path.join(path.dirname(convexPackage), JSON.parse(fs.readFileSync(convexPackage, 'utf8')).bin.convex);
 export const CONVEX_CLI = `${shellQuote(process.execPath)} ${shellQuote(convexBin)}`;
+export const CONVEX_BIN = convexBin;
+
+// secrets/made-deploy-keys: the names of deploy keys this Mac made, one a line.
+export function recordMadeKey(secretsDir: string, name: string): void {
+  try {
+    fs.appendFileSync(path.join(secretsDir, 'made-deploy-keys'), name + '\n', { mode: 0o600 });
+  } catch {
+    // Only a convenience for rotate-owner, which then asks Mike to look.
+  }
+}
 
 export class ConvexKeys {
   // One CLI call per deployment at a time: two panels opening together
@@ -230,6 +240,9 @@ export class ConvexKeys {
       const adminKey = fs.existsSync(scratch) ? parseEnvValue(fs.readFileSync(scratch, 'utf8'), 'CONVEX_DEPLOY_KEY') : undefined;
       if (!out.ok || !adminKey) throw this.failure(out.text, deployment, team);
       fs.writeFileSync(file, JSON.stringify({ name, adminKey }) + '\n', { mode: 0o600 });
+      // Recorded by name, so tb runner rotate-owner knows this key is this
+      // Mac's own when Convex lists it (runner-keys.ts madeDeployKeys).
+      recordMadeKey(path.dirname(this.dir), name);
       fs.chmodSync(file, 0o600);
       return adminKey;
     } finally {

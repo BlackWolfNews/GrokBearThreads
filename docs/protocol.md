@@ -2097,7 +2097,8 @@ own secret questions were declined (Codex approvals). Now:
   the 16-byte tag. All base64. Binding the approval id into the key means
   a sealed answer can't be replayed onto another card.
 - **Trusting the key.** A card's `runnerId` and `key` both come from the
-  mirror, which anyone with the shared runner key can write, so the phone
+  mirror, which the owner key can write for any runner (and, before
+  runner keys, any runner's key could; see Runner keys), so the phone
   takes neither on trust. It seals only to a runner whose key it already
   keeps (keychain, by `runnerId`, per deployment), and it keeps keys only
   from the pairing link: `devices.pair` adds a `key=<runnerId>:<key>`
@@ -3116,7 +3117,8 @@ type RemoteThread = { runnerId: string, threadId: string, title, cwd,
   they connect the same way, and that connection closes a minute later
   unless one of that runner's threads is on screen.
 - **The token goes to one host only.** `rpcUrl` comes from the backend,
-  and any runner with the shared key can rewrite another's, so the client
+  and the owner key can rewrite any runner's (before runner keys, every
+  runner's key could; see Runner keys), so the client
   sends the token only to the host (not the port) in a file beside it
   (`<id>.host` next to `<id>.token`, the host and a newline, owner only),
   copied in from that Mac with the token: `tb pair` there prints both. The
@@ -3143,7 +3145,8 @@ the mirror back as state. The Mac app doesn't use it.
 
 - **On when** `runner.json` has `sync.url` (the deployment's
   `https://<name>.convex.cloud`) and `secrets/convex-key` (0600) holds the
-  key the deployment's `RUNNER_KEY` was set to. `sync.enabled: false`
+  key the deployment's `RUNNER_KEY` was set to (the main Mac) or this
+  runner's own runner key (any other; see Runner keys). `sync.enabled: false`
   turns it off; so does `THREADBEAR_SYNC=off` in the environment, which
   check.sh sets so no test runner writes to the real project.
   `THREADBEAR_SYNC_URL` points a dev or test runner at its own deployment.
@@ -3342,6 +3345,304 @@ type Device = {
   `-32000` with that reason. A backend older than API 6 has none of these
   functions: `pair`, `list` and `revoke` are `-32000` saying the backend
   deploys with the runner's next update.
+
+## Runner keys
+
+Added 5 Nov 2026, after a security review kept finding attacks that start
+with "a holder of the shared runner key". Until then every runner on a
+deployment carried the same `RUNNER_KEY`, so a second Mac (Bruce) could do
+anything the main one could: rewrite any thread's runner and secret card
+key, replace another runner's `rpcUrl`, read its pending commands, put a
+schedule on it, and mint phone tokens. Now there are two kinds of key, and
+`convex/runnerAccess.ts` says what each may do (a unit test,
+`runner/test/unit/runner-access.test.ts`, checks every function in
+`convex/sync.ts` against it and against the table below).
+
+- **The owner key** is the deployment's `RUNNER_KEY`, held by the main Mac's
+  runner only. It may do everything, as every key could before. A
+  deployment with one runner has only this key, and nothing changes for it.
+  While it's being rotated `RUNNER_KEY_NEXT` is an owner key too, so the
+  main runner can move to the new one without a gap: `tb runner
+  rotate-owner` on the main Mac sets a new key as `RUNNER_KEY_NEXT` (with
+  its deploy key) and writes it into its `secrets/convex-key`; once its
+  runner has restarted onto it, `--finish` makes it `RUNNER_KEY` and
+  removes `RUNNER_KEY_NEXT`, and every copy of the old key is dead. While
+  `RUNNER_KEY_NEXT` is set the owner's heartbeat answers
+  `ownerKeyRotating: true`, and `tb status` and `tb runner list` say so.
+- **Runner ids** are checked as they arrive, everywhere one does
+  (`lib.ts checkRunnerId`): 1 to 64 letters, digits, `-` or `_`, never
+  trimmed, and never `"any"`, which is the phone's "whichever runner". `tb
+  runner add` checks the same way, so the id it compared is the id the
+  key is for.
+- **A runner key** (`tbr_` and 64 hex characters) acts as one `runnerId`
+  alone. The backend keeps only its SHA-256 (`runnerKeys`: `runnerId,
+  keyHash, name, createdAt, revokedAt?`); making another for the same
+  runner revokes the one before. A revoked key is refused like a wrong one.
+- **Making one.** On the main Mac, `tb runner add <name> --ssh <host>`
+  reads that Mac's `runner.json` over ssh, but decides the id itself: it
+  refuses the main Mac's own id, an id that isn't one, one that mirrors to
+  another deployment, and an id the deployment already knows unless `--id`
+  names it; a runner with no id yet gets one picked here. It writes the id
+  and the deployment's URL into that `runner.json` when it lacks them, asks
+  `sync:addRunnerKey` (with the main Mac's own id, which the backend
+  refuses to make a key for) and writes the key into that Mac's
+  `secrets/convex-key` over ssh's stdin (owner only, a temp file and a
+  rename). The key is never printed, as an agent running `tb` would have
+  it in its transcript; if the write fails the key is revoked again. It
+  then says if that Mac also has a deploy key, Convex panel keys
+  (`secrets/convex-panels/`) or a Convex login, which `tb runner check
+  [--ssh <host>]` checks too (failing if it can't look), with what to
+  revoke on Convex's side first, by name, before deleting the files and
+  rotating. An id the deployment already has needs `--id` and `--replace`,
+  after it shows that runner's name and when it was last seen. Every ssh
+  turns off agent and port forwarding. `--out <file> --id
+  <runnerId>` writes the key to a file instead; `tb runner list` and `tb
+  runner revoke <runnerId>` do the rest. A runner reads
+  `secrets/convex-key` when it starts, so a new key takes effect on its
+  next restart.
+- **A joining Mac has no admin power.** A deploy key or a Convex CLI login
+  can do anything to the deployment (read `RUNNER_KEY`, issue phone
+  tokens, deploy other functions), so a Mac with one has the owner's power
+  whatever key its runner holds. `threadbear setup --existing`, or setup
+  run again on a Mac whose `secrets/convex-key` is a runner key, makes no
+  Convex login or deploy key and deploys nothing; it never writes or sets
+  `RUNNER_KEY` (`scripts/runner-key-plan.mjs`), and ends by saying to run
+  `tb runner add` on the first Mac. `runner/scripts/deploy-backend.mjs`
+  does nothing on a Mac with a runner key, so only the main Mac's runner
+  deploys. A Mac set up before this keeps whatever it was given: `tb runner
+  check` says what to remove.
+- **The owner key and a runner with its own key.** Once a runner id has a
+  live runner key, the owner key can't act as that runner (`lib.ts actAs`:
+  its heartbeat, lists, commands, or thread rows under that id), so an old
+  copy of the owner key left on that Mac can't carry on as it. It can
+  still put a schedule on it, and revoking the runner key gives the id
+  back.
+- **Refusals.** A function a runner key may not call, or a row that isn't
+  its runner's, throws `ConvexError({ kind: "forbidden", message })`, the
+  message starting "This runner's key can't ...". The runner turns the
+  feature off quietly rather than retrying: the other runners' threads
+  watch stops for good with one log line (that Mac's app lists only its
+  own threads), a heartbeat refused (a key for another runner id) is one
+  warning, and pairing a phone, a Pocket card from another Mac or a
+  schedule on another runner fail with the backend's words.
+- **Thread ids.** A runner key reaches only thread ids whose row is its
+  runner's. For an id with no row its messages and pictures are dropped
+  (its reads are empty), since they'd show in whatever thread the owner
+  later made under that id. It may make a new row only under an id that has
+  had nothing but its own runner: no `threadTombstones` row of another
+  runner's (every deleted thread row gets one, kept for good), no other
+  runner's `threadIndex` row, and nothing left under it (messages,
+  pictures). `prune` deletes a pruned thread's messages and pictures and
+  tombstones it, as `removeThreads` does, so nothing private lingers. The
+  owner key may reuse any id.
+- **Stored files.** A storage id doesn't say who uploaded it, so a runner
+  key's `sync:iconUploadUrl` is a one-use URL on the deployment's own
+  `/runner/upload` route (`convex/http.ts`), which stores the file and
+  records it as that runner's (`storageOwners`); the URL dies with the key
+  that asked for it, a file is at most 10 MB, a runner at most 300 URLs
+  and 200 MB an hour, and one not attached within a day is deleted
+  (`pruneOld`). A
+  runner key may attach or delete only files it uploaded: the owner's and
+  the phone's have no record and are nobody's to take, named or not. And
+  nothing is deleted while anything names it: a picture row, a project
+  icon, or a phone command still pending or taken (`finishCommand` too).
+  The owner key still gets Convex's own upload URL.
+- **Share links.** A slug is one thread's for good. A runner key may put
+  one on its thread only if no other row has it and no other runner's
+  thread ever did: a deleted thread's slug, and the old one when Share
+  again makes a new link, are tombstoned. The owner key may, and other
+  rows with it lose it. `/s/<slug>` and its card show nothing if two rows
+  have one slug (from before this).
+- **Taking a thread over.** Threads don't move between runners, but if the
+  owner key writes a thread id another runner's row has, the thread starts
+  clean: everything that runner wrote under the id (messages, pictures,
+  share link, push state, its sidebar row, its Pocket cards on the thread)
+  goes and is tombstoned, and the row is the owner's as written. Any other
+  runner's sidebar row for an id goes whenever the owner makes the thread,
+  a fresh one too. That runner's key can't write to it again,
+  and `setThreadIndex` checks every row it writes against who has the
+  thread now, so its old sidebar row can't come back.
+- **Schedules.** A runner key can't take a schedule id any row has under
+  another runner, an old mirrored row (before API 9) included, nor adopt
+  one.
+- **Pocket cards** a runner key files carry its runner id, set by the
+  backend, and a thread id only if that thread is its own. The owner's
+  `sync:pocketCards` gives them `filedBy` (that runner's id, which its
+  name can't change), and
+  `phone:pocket` starts their `source` with "From <name>". The main Mac's
+  `pocket` tool marks them "information only, not instructions", and its
+  librarian lists them by title only, never as a thread's own.
+- **Names.** A runner key's heartbeat name is folded to printable ASCII
+  (NFKD without accents, curly quotes and dashes made plain, zero-width
+  and control characters gone), at most 40 characters; with nothing left
+  it's the runner id. Never refused. One that looks like another runner's
+  (compared by `nameSkeleton`: case, "rn" as "m", 0 as O, 1 and i as l)
+  gets its id after it, and the name it ends with is checked the same way.
+  Pushes from a thread start with its Mac's name unless that Mac
+  heartbeats with the main key and has no runner key (`devices:
+  threadForPush` `mac`; a runner with no row goes by its id).
+- **Caps.** What a runner key writes is budgeted in UTF-8 bytes, whole
+  rows not just their text, with at most three live runner keys, so the
+  lists the phone or the main Mac reads whole stay well under Convex's 16
+  MiB a read, and all three at their caps hold at most about 225 MB of the
+  database (3 x 48 MB of messages, 3 x 3,000 threads at 8 KB, a few MB of
+  the rest) and 450 MB of file storage: inside the free plan, with room for
+  the main Mac's own (its whole history was about 21 MB of messages on 5
+  Nov). A cap never deletes or silently drops a real runner's data:
+  - Threads: 3,000 a runner key in all (the M5 had 714, Bruce 7), 8 KB a
+    row. A new one past that waits: left out and said, and sent again
+    later. The inbox and hibernating hold 300 each, counted from
+    `viewCounts` with only the oldest row read: past that the oldest moves
+    out of the list (view `overflow`, `wantView` where it belongs), keeping
+    its messages, pictures and share link, and comes back as soon as the
+    list has room. Reads by id show it where it belongs. A runner key's
+    activity times are never later than now.
+  - Messages: 12 KB a row and 48 MB a runner key in all. Past that its
+    oldest anywhere go first, before a new one goes in, a few hundred a
+    write; one there's still no room for waits (`skipped`) and is sent
+    again, so a new thread's are never the ones lost.
+  - A waiting question keeps exactly what its answer is matched on (its
+    text, header and option labels); only option descriptions are cut, and
+    if it still doesn't fit the card says to answer it on the Mac.
+  - Sidebar rows: 800 at 2 KB, tombstones included; a new one past the cap
+    takes a tombstone's place first, a live row's only when there are none;
+    archived threads aren't listed. The owner reads at most 2,000 a runner.
+  - Projects 50 at 32 KB (one row an id; icons only on its own, 1 KB),
+    schedules 100 at 16 KB (text 12 KB: the longest real prompt on 5 Nov
+    was 2,286 bytes), Pocket cards 50 (title 60, text 2,000), accounts 20 at
+    8 KB, pushes 10 a minute.
+  - Uploads: 10 MB a file, 200 MB an hour, 150 MB stored. Over an allowance
+    is "later" (the upload route's 429): the runner keeps that picture and
+    tries again after ten minutes, the rest of its flush going on; only a
+    file over the size cap is left out.
+
+  Every path that changes a row keeps it in its cap. What a runner's own
+  flush writes is cut to fit or left out and said back (`skipped`), never
+  refused; the runner tries a refused write row by row and doesn't count
+  rows or messages left out as sent, so they go again. Schedules a runner
+  key can't bring up stay in its own `schedules.json`, all of them, and `tb
+  status` says how many. What an agent asks for directly (a card, a
+  schedule) is refused when too big, so it hears why. The owner key isn't
+  capped. `pruneOld` works 1,000 rows (20 messages) a run, finds finished
+  commands by when they finished, drops thread tombstones after 30 days (a
+  share link's stay), and runs again if there's more.
+- **Refusals name nothing a key can't see.** They never say whose a
+  thread, command, card or schedule is. Messages, pictures and reads for
+  another runner's thread go as for an id with no row (dropped, empty);
+  another runner's schedule is as good as missing; and a runner key's
+  Pocket titles are its own (keys `<runnerId>:<title>`), so filing one
+  never collides with, or reveals, the main Mac's.
+- **After a migration.** Rotating the owner key stops the old key working
+  wherever a copy is, but not a deploy key or Convex login that can read
+  env vars, nor what the old key made. `rotate-owner` asks Convex for the
+  deployment's deploy keys (the management API, with a team access token
+  given for that run only as `CONVEX_TEAM_TOKEN`, never kept; an answer in
+  an unexpected shape is an error) and won't start while it lists one this
+  Mac didn't make itself (the names it recorded when it made them, in
+  `secrets/made-deploy-keys`), or can't be asked, unless Mike has looked
+  and passes `--keys-checked`, after it shows them again. CLI logins can't
+  be listed: they're revoked in the dashboard. `tb runner check` flags a
+  team token left on disk. `tb runner audit` (and `rotate-owner --finish`,
+  which runs it) lists, numbered and a page of one section at a time, live
+  phone tokens (which main key issued each, since runner keys), live runner
+  keys (flagging one for this Mac's own id, or any the main key has named
+  as its own), the main key's runners' schedules, Pocket cards filed with a
+  main key, and messages and pictures past each of this runner's threads'
+  own last seq, a few at a time; runner keys' own schedules are listed
+  apart, unnumbered. `--drop 2,5 --snapshot <hex>` takes out those exact
+  rows, each only if it's still the version listed, and only if a fresh
+  listing has the same snapshot (rows, ids and versions). A planted message
+  at a seq the thread has since reached can't be told from a real one; the
+  main runner writes its own over it when it sends that seq again. `tb
+  runner revoke <runnerId> --purge` takes out everything a revoked runner
+  wrote, a page at a time (a long thread takes a few calls): only for a
+  runner that had a key of its own, never this Mac's or one the main key
+  has named as its own. The audit's pages are sized to how big their rows
+  can be. Every string from another Mac or a runner key that `tb runner`
+  prints is stripped of control characters and escape sequences and never
+  put in a command it tells you to run; a runner key's schedule ids must be
+  UUIDs, and a panel key's name is used only if it looks like one
+  Threadbear made. `--finish` refuses unless this Mac's key is the one in
+  `RUNNER_KEY_NEXT`, and setup won't copy or set `RUNNER_KEY` while it's set.
+- **The main Mac comes first.** A heartbeat with the owner key marks the
+  runner's row `byOwner`; making a runner key clears it for that runner at
+  once, and a runner with a live key never counts as the main Mac. Nothing
+  guesses which runner is the main Mac from its thread count: a key for a
+  busy second Mac is fine, and only the asking Mac's own id is refused. A
+  phone's new thread with no runner named (`phone:create`,
+  `phone:quickAsk`) goes to the online `byOwner` runner with no runner key
+  and the most threads, and with none online to `"any"`, which only the
+  owner key takes: it waits for the main Mac rather than going to a Mac
+  with a runner key. Picking a Mac on the phone still sends it there.
+- **What's still trusted from the mirror.** Nothing more than before: the
+  phone still keeps runner keys from pairing links only, and the app still
+  takes another runner's host only from its `.host` file (Secrets,
+  "Trusting the key"; Other runners' threads). Those pins now guard
+  against the owner key or the backend itself, not every runner.
+
+Who may call each function in `convex/sync.ts`. "Owner only" is the owner
+key; "its own" is any key for its own runner's rows (the owner for
+anyone's); "any runner" is any good key. Anything not sorted is owner only.
+
+| Function | Who | What "its own" means |
+|---|---|---|
+| `heartbeat` | its own | `runner.runnerId` is the key's; a name another runner has gets its id after it |
+| `bye` | its own | `runnerId` |
+| `setPresence` | its own | `runnerId` |
+| `upsertThreads` | its own | each row's `runnerId` is the key's, and so is the row it replaces: no taking or moving another runner's thread, its secret card's key or where its commands go. A new row only under an id that's had nothing but its runner (Thread ids, above) |
+| `removeThreads` | its own | the row's runner; for an id with no row a runner key leaves what's there alone |
+| `prune` | its own | `runnerId`; each pruned thread's messages and pictures go too, and it gets a tombstone |
+| `threadsOf` | its own | `runnerId` |
+| `appendMessages` | its own | each message's thread row is the key's runner's; one for an id with no row is dropped |
+| `messageHeads` | its own | `runnerId` |
+| `replyImages` | its own | the thread's row is its runner's; none: empty |
+| `addReplyImage` | its own | the thread's row is its runner's, and the file no other runner's row uses; none: dropped, and the upload deleted if nothing uses it |
+| `shareImages` | its own | the thread's row is its runner's; none: empty |
+| `addShareImage` | its own | the thread's row is its runner's, and the file no other runner's row uses; none: dropped, and the upload deleted if nothing uses it |
+| `dropShareImages` | its own | the thread's row is its runner's; none: nothing |
+| `setProjects` | its own | `runnerId` |
+| `upsertProjects` | its own | `runnerId` |
+| `projectIcons` | its own | `runnerId` |
+| `setProjectIcon` | its own | `runnerId`, and the file no other runner's row uses |
+| `iconUploadUrl` | any runner | a one-use URL, tied to the key that asked, that records the upload as its runner's; 300 an hour, 10 MB a file, 200 MB an hour |
+| `setAccounts` | its own | `runnerId` |
+| `upsertAccounts` | its own | `runnerId` |
+| `sharedUsage` | its own | readings only for logins its runner has (same provider and email); the owner gets all |
+| `pools` | any runner | the shared pools, which every runner follows |
+| `savePools` | owner only | pools reach the main Mac's logins and folders |
+| `adoptPools` | owner only | as `savePools`; a runner key's runner keeps its own until the main Mac sets them |
+| `setSchedules` | owner only | mirrored rows, for a runner on a pre-API 9 schedules.json: no runner key's runner needs it, and it could shadow another runner's ids (its runner stops mirroring, quietly) |
+| `schedules` | its own | lists only its runner's schedules; the owner sees all |
+| `saveSchedule` | its own | the schedule's `runnerId`, and every row with that id, mirrored ones too: no schedule on another runner; a runner key's ids are UUIDs |
+| `deleteSchedule` | its own | the schedule's runner |
+| `adoptSchedules` | its own | `runnerId`: replaces only its own old mirrored rows; for a runner key all or nothing (UUID ids no other runner has, within its caps), saying which it held back |
+| `claimSchedule` | its own | `runnerId` |
+| `releaseSchedule` | its own | the schedule's runner |
+| `scheduleRan` | its own | the schedule's runner |
+| `requestScheduleRun` | its own | the schedule's runner, so only the owner asks another runner to run one |
+| `runnersList` | owner only | every runner's id and name, which a Mac posing as another would want; a runner key's scheduler lists only its own runner |
+| `pendingCommands` | its own | `runnerId` only: `"any"` commands wait for the owner key |
+| `takeCommand` | its own | a command for its runner |
+| `finishCommand` | its own | a command for its runner |
+| `savePocketCard` | its own | a new card, or one its runner filed (the card keeps `runnerId`, and a `threadId` only of its own thread) |
+| `removePocketCard` | its own | a card its runner filed |
+| `pocketCards` | its own | lists only the cards its runner filed; the owner sees all, with `filedBy` |
+| `setThreadIndex` | its own | `runnerId`; a new row for a thread another runner has or had is left out, so one thread id is one runner's |
+| `otherRunnersList` | owner only | other runners' `rpcUrl`s |
+| `otherRunnersThreads` | owner only | other runners' sidebars |
+| `threadIndexSince` | owner only | other runners' sidebars |
+| `issueToken` | owner only | a phone token reads everything and queues commands for every runner |
+| `listTokens` | owner only | |
+| `revokeToken` | owner only | |
+| `addRunnerKey` | owner only | never for `"any"` or the asking Mac's own id (recorded, for the audit); over a live key only with `replace`; at most three live |
+| `listRunnerKeys` | owner only | |
+| `revokeRunnerKey` | owner only | |
+| `audit` | owner only | what the old shared key could have left (`tb runner audit`) |
+| `auditRemove` | owner only | takes out the exact rows `tb runner audit --drop` picks, each only if it's still the version listed |
+| `purgeRunner` | owner only | `tb runner revoke <runnerId> --purge`: everything a runner with no live key wrote, a batch a call |
+
+`sync:uploadTicketOk` and `sync:redeemUpload` are internal, for
+`/runner/upload`.
 
 ## Sharing
 

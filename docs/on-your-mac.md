@@ -16,6 +16,9 @@ File references are where to look.
 - **Convex, in your own account:** a login (`~/.convex/config.json`), a
   project with a production deployment, a deploy key, and one environment
   variable (`RUNNER_KEY`). It deploys `convex/` and the `web/` site there.
+  A second Mac set up with `--existing` gets none of these: its runner's
+  key comes from your first Mac (`tb runner add`), which also writes the
+  deployment's address into its `runner.json`.
   If that login goes missing or expires, the Convex panel's Sign in to
   Convex button runs `convex login` again from the runner, which writes
   the same file; you approve it in your browser on auth.convex.dev.
@@ -37,6 +40,11 @@ File references are where to look.
   type into an agent's secret card, one owner-only file each with a small
   script beside it that prints it for `sudo -A`, removed after 24 hours,
   and `secret-box.key` is the key your phone seals those answers to;
+  `made-deploy-keys` lists, by name, the deploy keys this Mac made (setup's
+  and the Convex panel's), so `tb runner rotate-owner` can tell them from
+  others;
+  `convex-key` is this Mac's key for your Convex backend (the deployment's
+  `RUNNER_KEY` on your first Mac, a runner key of its own on any other);
   `runners/<id>.token` is another Mac's runner token, if you copied one
   in, and `runners/<id>.host` beside it, which you copy in too (`tb pair`
   on that Mac prints both): the only host the app sends that token to.
@@ -141,6 +149,7 @@ File references are where to look.
 |---|---|---|
 | Your Convex deployment | yours | Thread titles and status, all message text (each message cut at 8,000 characters), one line per tool call, projects, schedules, your logins' emails and usage, whether you're at the Mac. Photos you send from the phone, deleted once the Mac has fetched them. Pictures and videos agents put in their replies or pin, at most 10 MB each, for the phone to show. Other images only for threads you share by link. Other tool output and files stay on the Mac. |
 | Convex (the Convex panel) | yours | Only for a thread in a Convex project, when its Convex panel opens: the runner's Convex CLI asks api.convex.dev for the project's deployments and a deploy key, the runner asks the deployment whether a kept key still works (`/api/check_admin_key`), and the panel loads Convex's embedded dashboard (dashboard-embedded.convex.dev) with that key. Sign in to Convex goes to auth.convex.dev. (`runner/src/convex-keys.ts`) |
+| Your other Macs, over ssh | yours | Only when you run `tb runner add <name> --ssh <host>` or `tb runner check --ssh <host>` on your first Mac: it reads that Mac's Threadbear `runner.json`, writes its id and the deployment's address there if it hasn't them, writes its new key into that Mac's `secrets/convex-key`, and looks whether that Mac has a deploy key, Convex panel keys or a Convex login (names only, never a key), through your own ssh setup with agent and port forwarding off (`runner/src/runner-keys.ts`). `tb runner audit` asks this Mac's runner for its threads' last seqs and your deployment for what the main key made. `tb runner rotate-owner` sets env vars on your deployment with your deploy key, and, if you give it a Convex team access token for that run (`CONVEX_TEAM_TOKEN`, never kept), asks api.convex.dev for the deployment's deploy keys (their names and dates) before it rotates. |
 | GitHub | Mike's repo | Release tags fetched every 6 hours; the fork at setup |
 | downloads.claude.ai, registry.npmjs.org | Anthropic, npm | CLI version checks and installs; `npm ci` |
 | Anthropic, OpenAI | yours | Your threads, through the official CLIs on your own logins. After a turn fails because the API couldn't be reached, the runner itself opens (and straight away closes) a connection to api.anthropic.com or chatgpt.com on port 443, at most once a minute, until one opens and the thread carries on. Nothing is sent over it (`runner/src/net-probe.ts`). |

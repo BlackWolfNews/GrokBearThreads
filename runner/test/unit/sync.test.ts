@@ -884,7 +884,7 @@ test('the backend API version from the heartbeat shows in status, and an old bac
 // Project pictures: a runner with a picture for a project sends it to file
 // storage once, when the backend takes pictures (API 5), and never again
 // for the same copy.
-function setupPictures(opts: { backend?: number; has?: { projectId: string; picture: string }[]; project?: Partial<Project> } = {}) {
+function setupPictures(opts: { backend?: number; has?: { projectId: string; picture: string }[]; project?: Partial<Project>; uploadFails?: () => Error | undefined } = {}) {
   const h = makeHarness();
   const dir = tmpDir();
   // A tiny PNG by name only: the bytes don't matter to the sync, which
@@ -916,6 +916,8 @@ function setupPictures(opts: { backend?: number; has?: { projectId: string; pict
     log: nullLogger,
     post,
     upload: async (url, bytes, mediaType) => {
+      const err = opts.uploadFails?.();
+      if (err) throw err;
       uploads.push({ url, bytes: Buffer.from(bytes).toString(), mediaType });
       return `st_${uploads.length}`;
     },
@@ -1526,7 +1528,7 @@ test('a row carries who started it, once the backend takes it', async () => {
 });
 
 // Reply pictures: for any thread, shared or not, once the backend takes them.
-function setupReplyImages(opts: { backend?: number } = {}) {
+function setupReplyImages(opts: { backend?: number; uploadFails?: () => Error | undefined } = {}) {
   const h = makeHarness();
   const dir = tmpDir();
   const png = path.join(dir, 'guide.png');
@@ -1558,6 +1560,8 @@ function setupReplyImages(opts: { backend?: number } = {}) {
         return null;
       },
       upload: async (_url, _bytes, mediaType) => {
+        const err = opts.uploadFails?.();
+        if (err) throw err;
         uploads.push(mediaType);
         return `st_${uploads.length}`;
       },
@@ -1760,4 +1764,140 @@ test('secrets: an older backend gets the row without the card', async () => {
   const last = calls.filter((c) => c.fn === 'sync:upsertThreads').flatMap((c) => c.args.threads as ThreadDoc[]).filter((d) => d.threadId === t.id).at(-1)!;
   assert.equal(last.status, 'waiting');
   assert.equal(last.pendingApproval, undefined);
+});
+
+test("a runner key's refused setSchedules stops the mirroring quietly, and the rest of the write goes on", async () => {
+  // docs/protocol.md, "Runner keys": setSchedules is the main key's only.
+  let setSchedules = 0;
+  const f = setup({
+    fail: () => undefined,
+    answer: (fn) => {
+      if (fn === 'sync:setSchedules') {
+        setSchedules++;
+        throw Object.assign(new Error('Server Error'), { data: { kind: 'forbidden', message: "This runner's key can't call setSchedules" } });
+      }
+      return null;
+    },
+    schedules: { attach: () => {}, inBackend: () => false },
+  });
+  f.sync.start();
+  f.h.runner.publish({ method: 'schedules.updated', params: { schedules: [] } });
+  f.h.clock.advance(SYNC_COALESCE_MS);
+  await tick();
+  f.h.runner.publish({ method: 'schedules.updated', params: { schedules: [] } });
+  f.h.clock.advance(SYNC_COALESCE_MS * 3);
+  await tick();
+  assert.equal(setSchedules, 1, 'asked once, not again');
+  assert.equal(f.sync.status().state, 'ok');
+  await f.sync.stop();
+});
+
+test('a write the backend refuses for good is tried row by row, the bad row left out and said, and the rest go', async () => {
+  // docs/protocol.md, "Runner keys": caps are permanent refusals, not outages.
+  let bad = '';
+  const f = setup({
+    answer: (fn) => {
+      if (fn === 'sync:upsertThreads') return { skipped: [] };
+      return null;
+    },
+  });
+  const realPost = (f.sync as unknown as { post: (k: string, fn: string, a: Record<string, unknown>) => Promise<unknown> }).post;
+  (f.sync as unknown as { post: typeof realPost }).post = async (kind, fn, args) => {
+    if (fn === 'sync:upsertThreads' && (args.threads as { threadId: string }[]).some((t) => t.threadId === bad)) throw Object.assign(new Error('Server Error'), { data: { kind: 'badArgs', message: 'A thread row is over 8192 bytes' } });
+    return realPost(kind, fn, args);
+  };
+  const a = f.h.runner.create({ text: 'one', cwd: f.h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  const b = f.h.runner.create({ text: 'two', cwd: f.h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  bad = a.id;
+  f.sync.start();
+  await f.sync.flushNow();
+  assert.deepEqual(f.docs().map((d) => d.threadId), [b.id]);
+  assert.equal(f.sync.status().state, 'ok', 'not stuck retrying');
+  assert.ok(f.calls.some((c) => c.fn === 'sync:prune'), 'the full write went on to prune');
+  await f.sync.stop();
+});
+
+test("the upload route refusing a picture is a refusal for good, and a row the backend left out isn't remembered as sent", async () => {
+  const { convexUploader, refusedForGood } = await import('../../src/sync.ts');
+  for (const status of [403, 413]) {
+    const up = convexUploader((async () => new Response('{"error":"no"}', { status })) as unknown as typeof fetch);
+    const err = await up('https://x', new Uint8Array(1), 'image/png').catch((e: unknown) => e);
+    assert.equal(refusedForGood(err), true, String(status));
+  }
+  const busy = convexUploader((async () => new Response('', { status: 503 })) as unknown as typeof fetch);
+  assert.equal(refusedForGood(await busy('https://x', new Uint8Array(1), 'image/png').catch((e: unknown) => e)), false);
+  // Left out by the backend: written again next time.
+  let skip = true;
+  const f = setup({ answer: (fn) => (fn === 'sync:upsertThreads' ? { skipped: skip ? [a.id] : [] } : null) });
+  const a = f.h.runner.create({ text: 'one', cwd: f.h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  f.sync.start();
+  await f.sync.flushNow();
+  skip = false;
+  f.h.runner.publish({ method: 'thread.updated', params: { thread: f.h.runner.get(a.id) } } as never);
+  await f.sync.flushNow();
+  assert.equal(f.docs().filter((d) => d.threadId === a.id).length, 2, 'sent again');
+  await f.sync.stop();
+});
+
+test('a picture over the upload allowance waits and goes once the window has passed, without holding up the rest', async () => {
+  const { convexUploader, refusedForGood, retryLater } = await import('../../src/sync.ts');
+  const later = await convexUploader((async () => new Response('{"error":"later"}', { status: 429 })) as unknown as typeof fetch)('https://x', new Uint8Array(1), 'image/png').catch((e: unknown) => e);
+  assert.equal(retryLater(later), true);
+  assert.equal(refusedForGood(later), false);
+  assert.equal(retryLater(Object.assign(new Error('x'), { data: { kind: 'rateLimited' } })), true);
+  let full = true;
+  const { h, fresh, uploads, added, png, thread, settle } = setupReplyImages({ uploadFails: () => (full ? (later as Error) : undefined) });
+  const { t } = thread(`Here: ![Back](${png})`);
+  await tick();
+  const sync = fresh();
+  sync.start();
+  await settle(sync);
+  assert.deepEqual(added(), [], 'not sent yet');
+  assert.notEqual(sync.status().state, 'error', 'and nothing else held up');
+  full = false;
+  h.clock.advance(11 * 60_000);
+  await settle(sync);
+  assert.deepEqual(added().map((a) => a.threadId), [t.id], 'sent once the window passed');
+  assert.deepEqual(uploads, ['image/png']);
+  await sync.stop();
+});
+
+test("messages the backend leaves out aren't counted as sent, so they go again", async () => {
+  let refuse = true;
+  const f = setup({ answer: () => null });
+  const realPost = (f.sync as unknown as { post: (k: string, fn: string, a: Record<string, unknown>) => Promise<unknown> }).post;
+  (f.sync as unknown as { post: typeof realPost }).post = async (kind, fn, args) => {
+    if (fn === 'sync:appendMessages' && refuse) throw Object.assign(new Error('Server Error'), { data: { kind: 'badArgs', message: 'no' } });
+    return realPost(kind, fn, args);
+  };
+  const a = f.h.runner.create({ text: 'hello there', cwd: f.h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  f.sync.start();
+  await f.sync.flushNow();
+  assert.equal(f.calls.filter((c) => c.fn === 'sync:appendMessages').length, 0);
+  refuse = false;
+  await f.sync.stop();
+  // The next start sends it: nothing recorded it as sent.
+  f.sync.start();
+  await f.sync.flushNow();
+  const sent = f.calls.filter((c) => c.fn === 'sync:appendMessages').flatMap((c) => c.args.messages as { threadId: string }[]);
+  assert.ok(sent.some((m) => m.threadId === a.id));
+  await f.sync.stop();
+});
+
+test('a project picture held back by the upload allowance goes by itself once the window passes, on an idle runner', async () => {
+  let full = true;
+  const later = Object.assign(new Error('later'), { data: { kind: 'retryLater', message: 'later' } });
+  const { h, sync, setIcons } = setupPictures({ uploadFails: () => (full ? later : undefined) });
+  sync.start();
+  await tick(20);
+  await sync.flushNow();
+  assert.equal(setIcons().length, 0);
+  full = false;
+  // Nothing else happens: only the pause's own timer brings it round.
+  h.clock.advance(11 * 60_000);
+  await tick(20);
+  h.clock.advance(SYNC_COALESCE_MS * 2);
+  await tick(20);
+  assert.equal(setIcons().length, 1);
+  await sync.stop();
 });

@@ -7,9 +7,10 @@ import { ConvexError, v, type Infer } from 'convex/values';
 import { mutation, query, type QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { threadFields, views } from './schema';
-import { checkPhoneToken } from './lib';
+import { checkPhoneToken, hasLiveKey } from './lib';
 import { API_VERSION } from './version';
 import { imagesFrom, phoneImage, replyImagesFrom } from './share';
+import { runnerName } from './sync';
 
 // A runner not heard from for this long is offline, and a command with no
 // runnerId goes to the main one still online (mainRunner).
@@ -47,6 +48,8 @@ type PhoneThread = Infer<typeof row>;
 function stripThread(doc: Doc<'threads'>): PhoneThread {
   const out: Record<string, unknown> = {};
   for (const [k, value] of Object.entries(doc)) if (PHONE_THREAD_KEYS.has(k) && value !== undefined) out[k] = value;
+  // Out of its list for a runner key's cap (sync.ts upsertThreads): shown where it belongs.
+  if (doc.view === 'overflow') out.view = doc.wantView ?? 'inbox';
   return out as PhoneThread;
 }
 
@@ -326,7 +329,14 @@ export const pocket = query({
   handler: async (ctx, { token }) => {
     await checkPhoneToken(ctx, token);
     const rows = await ctx.db.query('pocketCards').collect();
-    return rows.map(({ _id, _creationTime, key, ...card }) => ({ id: key, ...card }));
+    // A card a runner key filed says which Mac it's from, ahead of its
+    // source, so a card from Bruce can't pass for one from the main Mac.
+    const out = [];
+    for (const { _id, _creationTime, key, runnerId, ...card } of rows) {
+      const from = runnerId ? `From ${await runnerName(ctx, runnerId)}` : undefined;
+      out.push({ id: key, ...card, ...(from ? { source: card.source ? `${from} · ${card.source}` : from } : {}) });
+    }
+    return out;
   },
 });
 
@@ -525,14 +535,20 @@ export const quickAsk = mutation({
   },
 });
 
-// The online runner with the most threads, or "any" (the first one back takes
-// it). Most threads stands in for the Mac Mike really works on, which has his
-// repos and printer. Going by the latest heartbeat instead sent a phone thread
-// to whichever runner had just checked in, so about half landed on Bruce.
+// Where a phone's new thread goes when the phone doesn't say: the online
+// runner heartbeating with the owner key (byOwner, docs/protocol.md "Runner
+// keys") with the most threads, which is the Mac Mike really works on, with
+// his repos and printer. With none online it's "any", which only the owner
+// key takes, so it waits for that Mac rather than going to one with a
+// runner key: Mike's text is for his main Mac unless he picks another.
+// (Going by the latest heartbeat once sent half of them to Bruce; going by
+// most threads alone let a runner key claim a million threads to get them.)
 async function mainRunner(ctx: QueryCtx): Promise<string> {
   let best: { runnerId: string; threadCount: number; lastSeenAt: number } | undefined;
   for await (const r of ctx.db.query('runners')) {
-    if (r.draining || Date.now() - r.lastSeenAt > ONLINE_MS) continue;
+    // A runner with a live key of its own isn't the main Mac, whatever its
+    // last heartbeat said (lib.ts hasLiveKey).
+    if (!r.byOwner || r.draining || Date.now() - r.lastSeenAt > ONLINE_MS || (await hasLiveKey(ctx, r.runnerId))) continue;
     if (!best || r.threadCount > best.threadCount || (r.threadCount === best.threadCount && r.lastSeenAt > best.lastSeenAt)) best = r;
   }
   return best?.runnerId ?? 'any';

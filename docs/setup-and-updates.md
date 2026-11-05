@@ -87,7 +87,9 @@ always-on machine.
 2. Signs you in to Convex (`npx convex login`, once, in the browser), makes a
    `threadbear` project in your account with a production deployment, makes the
    runner's key and sets `RUNNER_KEY`, deploys the functions and the website, and writes
-   `runner.json`. No `.env.local` and no env vars set by hand. With the self-hosted
+   `runner.json`. A second Mac (`--existing`) gets no Convex login, deploy key or
+   `RUNNER_KEY`: the first Mac gives it a runner key of its own with `tb runner add`
+   (docs/protocol.md, "Runner keys"). No `.env.local` and no env vars set by hand. With the self-hosted
    option it starts the local backend instead.
 3. Builds and installs the runner and the Mac app (today's two scripts, folded together).
 4. Opens the Mac app, whose first screen shows a pairing QR code for the phone

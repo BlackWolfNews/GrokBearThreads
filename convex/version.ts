@@ -163,4 +163,17 @@
 //    archived ones included, so the website's project page can list all of
 //    them. The backend links the threads it already has by itself
 //    (sync:linkProjects); nothing changes on the runner.
-export const API_VERSION = 40;
+// 41: runner keys (docs/protocol.md, "Runner keys"). Besides the owner
+//    key (RUNNER_KEY), a key per runner (runnerKeys, sync:addRunnerKey),
+//    which acts as that runnerId alone: its own heartbeat, threads,
+//    messages, schedules, commands and Pocket cards, and none of the
+//    owner-only functions (phone tokens, runner keys, other runners'
+//    threads). The owner key does everything, as before. A runner's
+//    heartbeat with the owner key marks its row byOwner, and a phone's new
+//    thread goes to that runner first. Runner keys come only from a runner
+//    of 41 or later (tb runner add); older runners just use the owner key.
+//    A runner key's iconUploadUrl is a one-use /runner/upload URL that
+//    answers as Convex's own does, so any runner's uploader works with it;
+//    the owner's heartbeat can carry ownerKeyRotating, which older runners
+//    ignore.
+export const API_VERSION = 41;

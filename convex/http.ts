@@ -10,6 +10,7 @@ import { registerStaticRoutes } from '@convex-dev/static-hosting';
 import { components, internal } from './_generated/api';
 import { httpAction } from './_generated/server';
 import type { Id } from './_generated/dataModel';
+import { MAX_RUNNER_UPLOAD_BYTES } from './sync';
 
 const http = httpRouter();
 
@@ -52,6 +53,33 @@ http.route({
     const nonce = typeof b?.nonce === 'string' && /^[0-9a-f]{48}$/.test(b.nonce) ? b.nonce : null;
     const ok = nonce ? await ctx.runMutation(internal.devices.takeRelayCheck, { nonce }) : false;
     return new Response(JSON.stringify({ ok }), { status: ok ? 200 : 404, headers: { 'Content-Type': 'application/json' } });
+  }),
+});
+
+// A runner key's uploads (sync:iconUploadUrl hands out this URL with a
+// one-use ticket): the file is stored here and recorded as that runner's,
+// so its key can attach it, and only it (docs/protocol.md, "Runner keys").
+// Answers { storageId } as Convex's own upload URL does, so the runner's
+// uploader is the same for both.
+
+http.route({
+  path: '/runner/upload',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    const ticket = new URL(request.url).searchParams.get('ticket') ?? '';
+    const refuse = (status: number, error: string) => new Response(JSON.stringify({ error }), { status, headers: { 'Content-Type': 'application/json' } });
+    if (!(await ctx.runQuery(internal.sync.uploadTicketOk, { ticket }))) return refuse(403, 'bad or used upload ticket');
+    const blob = await request.blob();
+    if (blob.size > MAX_RUNNER_UPLOAD_BYTES) return refuse(413, 'too big');
+    const storageId = await ctx.storage.store(blob);
+    // Checked again with the hour's bytes, and the key still live. 429: try
+    // again later (an allowance); 403: this ticket won't do.
+    const redeemed = await ctx.runMutation(internal.sync.redeemUpload, { ticket, storageId, bytes: blob.size });
+    if (redeemed !== true) {
+      await ctx.storage.delete(storageId);
+      return redeemed === 'later' ? refuse(429, 'over the upload allowance for now: try again later') : refuse(403, 'upload refused: a bad or used ticket, or a revoked key');
+    }
+    return new Response(JSON.stringify({ storageId }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }),
 });
 

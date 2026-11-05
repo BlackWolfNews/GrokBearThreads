@@ -766,3 +766,9 @@ test('formatStatus: the line for the runner following main', () => {
   );
   assert.ok(!formatStatus(base, [], now).includes('Following main'), 'an older runner says nothing');
 });
+
+test('tb status says when the main key is still being rotated', () => {
+  const now = Date.parse('2026-10-26T12:00:00.000Z');
+  const text = formatStatus({ version: '1', pid: 1, startedAt: '2026-10-26T11:00:00.000Z', home: '/h', logFile: '/h/l', liveClis: 0, running: [], sync: { state: 'ok', url: 'https://x.convex.cloud', name: 'm5', ownerKeyRotating: true } } as never, [], now);
+  assert.match(text, /RUNNER_KEY_NEXT/);
+});

@@ -618,3 +618,42 @@ test('a schedule made while the file is being moved up is moved up too', async (
   assert.deepEqual(sched.list().map((s) => s.title).sort(), ['early, renamed', 'late']);
   sched.stop();
 });
+
+test('on a runner key the scheduler still moves up and lists runners, without the main key\'s adopt and runner list', async () => {
+  const h = makeHarness();
+  const b = fakeBackend(h.clock, [M5, BRUCE]);
+  const refused = () => Promise.reject(Object.assign(new Error('Server Error'), { data: { kind: 'forbidden', message: "This runner's key can't call adoptSchedules" } }));
+  const backend = { ...b.for('bruce', BRUCE.id), adopt: refused, runners: refused };
+  const home = path.join(h.home, 'bruce');
+  fs.mkdirSync(home, { recursive: true });
+  const local = new Scheduler({ runner: h.runner, home, clock: h.clock, log: nullLogger, zone: () => 'UTC', self: BRUCE, syncOn: false });
+  local.start();
+  await local.create({ text: 'ping', cron: '@hourly', cwd: h.home });
+  local.stop();
+  const s = new Scheduler({ runner: h.runner, home, clock: h.clock, log: nullLogger, zone: () => 'UTC', self: BRUCE, syncOn: true });
+  s.start();
+  await s.attach(backend as never);
+  assert.equal(s.inBackend(), true);
+  assert.equal([...b.rows.values()].filter((r) => r.runnerId === BRUCE.id).length, 1, 'saved one by one instead');
+  assert.deepEqual((await s.runners()).map((r) => r.id), [BRUCE.id]);
+  s.stop();
+});
+
+test("schedules a runner key can't bring up stay on this Mac, running from its own file, and it says so", async () => {
+  const h = makeHarness();
+  const b = fakeBackend(h.clock, [BRUCE]);
+  const home = path.join(h.home, 'bruce2');
+  fs.mkdirSync(home, { recursive: true });
+  const local = new Scheduler({ runner: h.runner, home, clock: h.clock, log: nullLogger, zone: () => 'UTC', self: BRUCE, syncOn: false });
+  local.start();
+  const sc = await local.create({ text: 'a long prompt', cron: '@hourly', cwd: h.home });
+  local.stop();
+  const backend = { ...b.for('bruce', BRUCE.id), adopt: async () => ({ held: [{ id: sc.id, why: "it's over 12000 bytes" }] }) };
+  const s = new Scheduler({ runner: h.runner, home, clock: h.clock, log: nullLogger, zone: () => 'UTC', self: BRUCE, syncOn: true });
+  s.start();
+  await s.attach(backend as never);
+  assert.equal(s.inBackend(), false, 'still its own file');
+  assert.deepEqual(s.heldLocal().map((x) => x.id), [sc.id]);
+  assert.equal(s.list().length, 1, 'nothing lost');
+  s.stop();
+});

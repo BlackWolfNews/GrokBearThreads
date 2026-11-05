@@ -540,7 +540,21 @@ threads made on another Mac show in your sidebar too, with that Mac's
 icon in the row: open one and you're talking to that Mac directly (over
 Tailscale), so it needs that Mac to be on and its key and host copied to
 this one: run `tb pair` on that Mac and it prints the two files to make here
-and how.
+and how. To add a Mac, give it a key of its own from this one: `tb runner
+add <name> --ssh <that Mac>` writes it there, and its runner uses it from
+its next restart. Set that Mac up with `./threadbear setup --existing`, which
+leaves out the Convex login and deploy key (either could do anything to your
+backend) and ends by telling you to run that command; `tb runner check` there
+says if an older setup left them behind.
+That key only reaches its own Mac's threads, schedules and Pocket cards: it
+can't pair a phone or put a schedule on another Mac, and that Mac's app
+doesn't list the other Macs' threads. Only the first Mac's key can. A new
+thread from your phone goes to your first Mac, and waits for it while it's
+asleep, unless you pick another Mac for it. Notifications from another
+Mac's threads start with that Mac's name. After moving a Mac onto its own
+key, `tb runner rotate-owner` on your first Mac changes the main key, and
+`tb runner audit` lists the phone tokens, schedules, cards and messages the
+old one could have made, to take out any you don't recognise.
 Its pictures and files come from that Mac as you open them. To start a
 thread on another Mac, pick it with the machine chip on the composer: the
 folder, account and model are then that Mac's. New threads start on the

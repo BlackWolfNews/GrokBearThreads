@@ -266,3 +266,39 @@ test('with API 29 a re-run reads only the rows that changed, and hears deletions
   assert.equal(heard.at(-1)!.threads.length, 99);
   index.stop();
 });
+
+test('a runner key that may not read the other runners’ threads stops watching for good, and says so once', async () => {
+  const h = makeHarness();
+  const said: string[] = [];
+  let subscriptions = 0;
+  const log = { ...nullLogger, info: (msg: string) => void said.push(msg), warn: (msg: string) => void said.push(msg) };
+  const index = new ThreadIndex({
+    post: async () => null,
+    subscribe: (_fn, _args, _onUpdate, onError) => {
+      subscriptions++;
+      // As the backend refuses it (convex/lib.ts forbidden), through the Convex client.
+      queueMicrotask(() => onError(Object.assign(new Error('Server Error'), { data: { kind: 'forbidden', message: "This runner's key can't call otherRunnersThreads" } })));
+      return () => {};
+    },
+    key: 'k',
+    runnerId: 'r-bruce',
+    home: h.home,
+    host: h.runner,
+    publish: () => {},
+    clock: h.clock,
+    log: log as never,
+    appConnected: () => true,
+  });
+  index.start();
+  await tick();
+  assert.equal(subscriptions, 1);
+  // The periodic check and an app asking again don't try once more.
+  h.clock.advance(5 * 60_000);
+  await tick();
+  index.list();
+  await tick();
+  assert.equal(subscriptions, 1);
+  assert.equal(said.filter((m) => m.startsWith('not watching')).length, 1);
+  assert.equal(said.filter((m) => m.includes('subscription failed')).length, 0);
+  index.stop();
+});

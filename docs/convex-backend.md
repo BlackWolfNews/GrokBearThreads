@@ -161,8 +161,8 @@ what Mike built a native app for.
 registers itself (`runners` table: name, version, last heartbeat) and
 mirrors its own threads, so the phone sees one list across machines
 with a machine label, and a command carries the `runnerId` it's for. A
-thread started from the phone names a runner, or "any" and the first
-online runner takes it. No new Convex work is needed for step 6. The
+thread started from the phone names a runner, or goes to the main Mac
+(docs/protocol.md, "Runner keys"). No new Convex work is needed for step 6. The
 Mac app still has to reach the second runner somehow for transcripts
 and sends: either a second socket over Tailscale, or, later, by reading
 remote runners' summaries from Convex and opening a socket only for the
@@ -341,14 +341,19 @@ the functions without a deployment (`npm run convex:typecheck`). Having a
 dashboard panel.
 
 - `convex/schema.ts`: `runners`, `threads`, `messages`, `commands`,
-  `projects`, `schedules`, `accounts`, `tokens`, `devices`.
+  `projects`, `schedules`, `accounts`, `tokens`, `devices`, `runnerKeys`,
+  `threadTombstones` (docs/protocol.md, "Runner keys").
 - `convex/sync.ts`: the runner's mutations (`upsertThreads`,
   `removeThreads`, `prune`, `heartbeat`, `bye`, `appendMessages`,
   `setProjects`, `upsertProjects`, `setSchedules`, `setAccounts`, `takeCommand`,
   `finishCommand`), its queries (`threadsOf`, `runnersList`,
   `messageHeads`, `pendingCommands`, which it holds as a live query) and
-  `pruneOld` for `crons.ts`. Each takes `key`, which must equal the
-  deployment's `RUNNER_KEY` env var.
+  `pruneOld` for `crons.ts`. Each takes `key`: the deployment's
+  `RUNNER_KEY` (the owner key, the main Mac's), or a runner key from
+  `runnerKeys`, which acts as its own runner alone (`convex/lib.ts`
+  `runnerAuth`, `convex/runnerAccess.ts`; the table of who may call what
+  is docs/protocol.md, "Runner keys"). `tb runner add` on the main Mac
+  makes one for another Mac.
 - `convex/phone.ts`: the phone's API (section 6).
 - `convex/push.ts` (Node action) and `convex/devices.ts`: APNs over
   HTTP/2 with the team's token-based key, copied from Poddle's `apns.ts`.
@@ -409,9 +414,13 @@ quota by deleting its 41 `temp-*`/`tmp-*` projects), all in Sydney
 `npx convex dev` pushes there and `npx convex deploy` ships prod.
 `.env.e2e` names the local one for `runner/test/e2e/sync.e2e.test.ts`,
 which passes `--env-file .env.e2e` to every convex command it runs. Both
-cloud deployments have `RUNNER_KEY` set to the key in the live runner's
+cloud deployments have `RUNNER_KEY` set to the key in the M5's runner's
 `secrets/convex-key`, and the live `runner.json` has `sync.url` pointing
-at prod, so the mirror is on from the runner's next start.
+at prod, so the mirror is on from the runner's next start. Bruce has a
+runner key of its own on prod (`tb runner add bruce --ssh bruce --id
+cb921b2447ea --replace`), not a copy of `RUNNER_KEY`. To rotate `RUNNER_KEY` with no gap, `tb runner
+rotate-owner` on the M5, restart its runner, then `tb runner rotate-owner
+--finish` (docs/protocol.md, "Runner keys").
 
 **Working on it.** `npx convex dev` at the repo root runs the local
 backend and pushes `convex/` as it changes; `npx convex env set RUNNER_KEY
@@ -554,9 +563,10 @@ within a second or two while it's online (state `taken`, then `done` or
   `{ snooze: { until?, untilRestart? } }`, `{ wake: true }`, `{ archive:
   true }`, `{ unarchive: true }`, `{ markSeen: true }`, `{ title }`.
 - `phone:create({ token, text, runnerId?, cwd?, accountId?, model? })`.
-  With no `runnerId`, of the runners seen in the last 3 minutes, the one with
-  the most threads (the Mac Mike works on, not whichever last heartbeat), or
-  `"any"` (the first runner back takes it).
+  With no `runnerId`, of the runners heartbeating with the owner key
+  (`byOwner`) seen in the last 3 minutes, the one with the most threads (the
+  Mac Mike works on), or `"any"`, which only the owner key takes, so it waits
+  for that Mac (docs/protocol.md, "Runner keys").
 - `phone:quickAsk({ token, question, answer, sources?, askedAt, runnerId? })`
   (API 10): a quick ask the phone has already answered out loud, kept as a
   thread. `question` is 1 to 2,000 characters once trimmed, `answer` 1 to

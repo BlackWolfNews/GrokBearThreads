@@ -11,6 +11,7 @@
 // its own file up once, keeps a live copy of the whole table (and a copy on
 // disk for when the backend can't be reached), and sends only its own,
 // each run taken with a claim first so it's sent once.
+import { forbiddenText } from './sync.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -38,13 +39,22 @@ export type RunnerInfo = { id: string; name: string; icon?: string; online: bool
 
 // The backend's schedules table (sync.ts makes one for Convex; tests pass a
 // fake). Every call can fail when the backend can't be reached.
+class HeldLocal extends Error {
+  held: { id: string; why: string }[];
+  constructor(held: { id: string; why: string }[]) {
+    super('schedules held on this Mac');
+    this.held = held;
+  }
+}
+
 export type ScheduleBackend = {
   // The whole table now and whenever it changes. Returns the unsubscribe.
   subscribe(onRows: (rows: StoredSchedule[]) => void, onError: (e: Error) => void): () => void;
   save(s: StoredSchedule): Promise<void>;
   remove(scheduleId: string): Promise<void>;
-  // This runner's schedules.json, moved up once.
-  adopt(rows: StoredSchedule[]): Promise<void>;
+  // This runner's schedules.json, moved up once. `held`: ones a runner key
+  // couldn't bring up (convex/sync.ts adoptSchedules), when nothing moved.
+  adopt(rows: StoredSchedule[]): Promise<void | { held?: { id: string; why: string }[] }>;
   // Takes a run: "due" at that nextRunAt, or the "request" at that
   // runRequestedAt. False when it isn't ours to send (any more).
   claim(scheduleId: string, kind: 'due' | 'request', expect: string): Promise<boolean>;
@@ -132,6 +142,7 @@ export class Scheduler {
   // "local": schedules.json is the schedules. "backend": the backend's
   // table is, and this.items is a copy of it, live once `backend` is set.
   private mode: 'local' | 'backend' = 'local';
+  private held: { id: string; why: string }[] = [];
   private backend?: ScheduleBackend;
   private attaching = false;
   private unsubscribe?: () => void;
@@ -236,10 +247,20 @@ export class Scheduler {
       );
       void this.refreshNames();
     } catch (e) {
-      this.log.warn('could not move schedules to the backend; trying again later', { error: String(e) });
+      if (e instanceof HeldLocal) {
+        // Said when what's held changes, not every heartbeat.
+        const said = JSON.stringify(e.held);
+        if (said !== JSON.stringify(this.held)) this.log.warn("schedules stay on this Mac: this runner's key can't put some in the backend, so none move until they can", { held: e.held.map((h) => ({ id: h.id, why: h.why })) });
+        this.held = e.held;
+      } else this.log.warn('could not move schedules to the backend; trying again later', { error: String(e) });
     } finally {
       this.attaching = false;
     }
+  }
+
+  /** Schedules kept in this runner's own file because the backend couldn't take them (shown in tb status). */
+  heldLocal(): { id: string; why: string }[] {
+    return this.held;
   }
 
   // Moves this runner's schedules.json up. The file keeps working while the
@@ -258,7 +279,7 @@ export class Scheduler {
       if (!first && !fresh.length && !changed.length && !gone.length) break;
       // The first pass always goes, even with none: it clears this runner's
       // mirrored rows.
-      if (first || fresh.length) await backend.adopt(fresh.map((r) => this.stored({ ...r, runnerId: this.self.id })));
+      if (first || fresh.length) await this.adopt(backend, fresh.map((r) => this.stored({ ...r, runnerId: this.self.id })));
       for (const r of changed) await backend.save(this.stored({ ...r, runnerId: this.self.id }));
       for (const id of gone) await backend.remove(id);
       for (const r of [...fresh, ...changed]) sent.set(r.id, JSON.stringify(r));
@@ -267,6 +288,25 @@ export class Scheduler {
     }
     for (const r of this.items.values()) r.runnerId = this.self.id;
     this.log.info('schedules moved to the backend', { count: sent.size });
+  }
+
+  // adoptSchedules is the main key's only (it clears mirrored rows from
+  // before API 9, docs/protocol.md "Runner keys"): a runner key's runner
+  // saves its schedules one by one instead, which is all it needs.
+  // Any held back means nothing moved: the file stays this runner's copy,
+  // its schedules keep running from it, and nothing is lost (HeldLocal).
+  private async adopt(backend: ScheduleBackend, rows: StoredSchedule[]): Promise<void> {
+    let r: Awaited<ReturnType<ScheduleBackend['adopt']>>;
+    try {
+      r = await backend.adopt(rows);
+    } catch (e) {
+      if (!forbiddenText(e)) throw e;
+      for (const row of rows) await backend.save(row);
+      return;
+    }
+    const held = (r && typeof r === 'object' && Array.isArray(r.held) ? r.held : []).filter((h) => typeof h?.id === 'string');
+    if (held.length) throw new HeldLocal(held);
+    this.held = [];
   }
 
   private onRows(rows: StoredSchedule[]): void {
@@ -286,6 +326,7 @@ export class Scheduler {
   // backend has, gone quiet or not, since a schedule can name any of them.
   private async refreshNames(): Promise<void> {
     const list = await this.backend?.runners().catch(() => undefined);
+    // (A runner key may not list runners: then only this one has a name.)
     if (!list) return;
     const before = JSON.stringify([...this.names, ...this.icons]);
     for (const r of list) this.learn(r);
@@ -303,7 +344,15 @@ export class Scheduler {
     const me: RunnerInfo = { id: this.self.id, name: this.self.name, ...(this.self.icon ? { icon: this.self.icon } : {}), online: true, self: true };
     if (!this.backend) return [me];
     const now = this.clock.now();
-    const all = await this.backend.runners();
+    // Only the main key lists every runner (docs/protocol.md, "Runner keys"):
+    // on a runner key, this runner is the only one there is.
+    let all: BackendRunner[];
+    try {
+      all = await this.backend.runners();
+    } catch (e) {
+      if (forbiddenText(e)) return [me];
+      throw e;
+    }
     for (const r of all) this.learn(r);
     const others = all
       .filter((r) => r.id !== this.self.id && r.lastSeenAt !== undefined && now - r.lastSeenAt < FORGET_MS)

@@ -197,7 +197,7 @@ export const notify = internalAction({
   args: { threadId: v.string(), held: v.optional(v.boolean()) },
   returns: vSendResult,
   handler: async (ctx, { threadId, held }): Promise<SendSummary> => {
-    const t: { title: string; status: string; preview: string; pendingApproval?: any; needsYou: boolean; atMac: boolean } | null = await ctx.runQuery(internal.devices.threadForPush, { threadId });
+    const t: { title: string; status: string; preview: string; pendingApproval?: any; needsYou: boolean; atMac: boolean; mac?: string } | null = await ctx.runQuery(internal.devices.threadForPush, { threadId });
     // It may have been seen on the Mac in the meantime.
     if (!t || !t.needsYou) return { sent: 0, failed: 0, skipped: 'noLongerNeedsYou' };
     const alert = { ...pushText(t), threadId };

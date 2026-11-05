@@ -16,7 +16,7 @@ import type { Logger } from './log.ts';
 import type { ThreadSummary } from './protocol.ts';
 import type { Notification } from './runner.ts';
 import { digest } from './sync-cache.ts';
-import type { Post, Subscribe } from './sync.ts';
+import { forbiddenText, type Post, type Subscribe } from './sync.ts';
 
 export type IndexRow = {
   threadId: string;
@@ -141,6 +141,8 @@ export class ThreadIndex {
   private unlisten?: () => void;
   private unsubscribe?: () => void;
   private remote: RemoteThreads = { runners: [], threads: [] };
+  // The backend said this runner's key can't read other runners' threads.
+  private refused = false;
   private watchTimer?: TimerHandle;
   private appGoneAt?: number;
   // Watching only what changed (API 29): the other runners, their rows by
@@ -210,8 +212,8 @@ export class ThreadIndex {
   }
 
   private watch(): void {
-    if (this.unsubscribe || !this.deps.subscribe) return;
-    const failed = (e: Error) => this.deps.log.warn('the other runners’ threads subscription failed', { error: String(e) });
+    if (this.unsubscribe || !this.deps.subscribe || this.refused) return;
+    const failed = (e: Error) => this.watchFailed(e);
     this.watchingSince = this.deps.takesSince?.() ?? false;
     if (this.watchingSince) {
       // A heartbeat re-runs only this small read; the rows are watched
@@ -262,8 +264,23 @@ export class ThreadIndex {
       (v) => {
         if (this.rowsKey === key) this.onRows(v, asked);
       },
-      (e) => this.deps.log.warn('the other runners’ threads subscription failed', { error: String(e) }),
+      (e) => this.watchFailed(e),
     );
+  }
+
+  // Only the owner key reads other runners' threads (docs/protocol.md,
+  // "Runner keys"): with a runner key the watch is off for good, said
+  // once, and this runner's app lists only its own threads. Writing this
+  // runner's own rows carries on.
+  private watchFailed(e: Error): void {
+    const refused = forbiddenText(e);
+    if (!refused) {
+      this.deps.log.warn('the other runners’ threads subscription failed', { error: String(e) });
+      return;
+    }
+    if (!this.refused) this.deps.log.info('not watching the other runners’ threads: this runner has a runner key, and only the main Mac’s key reads them', { error: refused });
+    this.refused = true;
+    this.unwatch();
   }
 
   private onRows(v: unknown, asked: { runnerId: string; since?: number }[]): void {
@@ -295,7 +312,7 @@ export class ThreadIndex {
     const now = this.deps.clock.now();
     if (this.deps.appConnected()) {
       this.appGoneAt = undefined;
-      if (!this.unsubscribe) {
+      if (!this.unsubscribe && !this.refused) {
         this.watch();
         this.deps.log.info('watching the other runners’ threads: an app is connected');
       }

@@ -3,6 +3,8 @@
 import { v } from 'convex/values';
 import { internalMutation, internalQuery } from './_generated/server';
 import { hasLiveToken } from './pushTargets';
+import { runnerName } from './sync';
+import { hasLiveKey } from './lib';
 
 // Only phones whose token is still good (pushTargets.ts): revoking deletes
 // a phone's row (tokens.ts), but an expired token's phone, or an old row
@@ -133,7 +135,9 @@ export const drop = internalMutation({
 
 export const threadForPush = internalQuery({
   args: { threadId: v.string() },
-  returns: v.union(v.null(), v.object({ title: v.string(), status: v.string(), preview: v.string(), needsYou: v.boolean(), atMac: v.boolean(), pendingApproval: v.optional(v.any()) })),
+  // mac: the runner's name, for a thread on a Mac with a runner key of its
+  // own (not byOwner), so its push can't pass for the main Mac's.
+  returns: v.union(v.null(), v.object({ title: v.string(), status: v.string(), preview: v.string(), needsYou: v.boolean(), atMac: v.boolean(), mac: v.optional(v.string()), pendingApproval: v.optional(v.any()) })),
   handler: async (ctx, { threadId }) => {
     const t = await ctx.db
       .query('threads')
@@ -145,7 +149,10 @@ export const threadForPush = internalQuery({
       .withIndex('by_runnerId', (q) => q.eq('runnerId', t.runnerId))
       .unique();
     const atMac = Boolean(runner?.atMac) && Date.now() - (runner?.lastSeenAt ?? 0) < PRESENCE_FRESH_MS;
-    return { title: t.title, status: t.status, preview: t.preview, needsYou: t.needsYou, atMac, ...(t.pendingApproval ? { pendingApproval: t.pendingApproval } : {}) };
+    // Named unless it's the main key's runner and has no key of its own; one
+    // with no row (never heartbeated) goes by its id (runnerName).
+    const mac = runner?.byOwner && !(await hasLiveKey(ctx, t.runnerId)) ? undefined : await runnerName(ctx, t.runnerId);
+    return { title: t.title, status: t.status, preview: t.preview, needsYou: t.needsYou, atMac, ...(mac ? { mac } : {}), ...(t.pendingApproval ? { pendingApproval: t.pendingApproval } : {}) };
   },
 });
 

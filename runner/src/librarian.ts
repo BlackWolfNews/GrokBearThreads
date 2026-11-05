@@ -591,12 +591,7 @@ export class Librarian {
       for (const w of waiting) lines.push(`- ${w.threadId.slice(0, 8)} "${w.title}": ${w.topic}`);
     }
     if (cards) {
-      const own = cards.filter((c) => c.threadId === rec.id);
-      lines.push('', 'Pocket cards from this thread:');
-      if (!own.length) lines.push('(none)');
-      for (const c of own) lines.push(`- "${c.title}"${c.place ? ` (place: ${c.place})` : ''}: ${c.text.replace(/\n/g, ' / ')}`);
-      const others = cards.filter((c) => c.threadId !== rec.id).map((c) => `"${c.title}"`);
-      if (others.length) lines.push(`Other Pocket cards, not yours to touch: ${others.join(', ')}`);
+      lines.push('', ...pocketPromptLines(rec.id, cards));
     } else {
       lines.push('', 'The Pocket is not available for this look: pocket null.');
     }
@@ -1170,6 +1165,33 @@ function offReason(reason: ModelFailure, message: string): string {
 // look was shown, as a small model will happily make those up.
 type PocketSave = { title: string; text: string; place?: string; icon?: PocketIconName };
 
+// A card is this thread's only if this Mac's own key filed it for this
+// thread. One another Mac filed (filedBy, through its runner key) can name
+// any thread id, and its text is that Mac's: it's listed by title only,
+// marked, and never acted on (docs/protocol.md, "Runner keys").
+function isOwnCard(c: PocketCardSummary, threadId: string): boolean {
+  return c.threadId === threadId && !c.filedBy;
+}
+
+const OTHER_TITLE_CHARS = 60;
+
+/** The look's lines about the Pocket. */
+export function pocketPromptLines(threadId: string, cards: PocketCardSummary[]): string[] {
+  const lines = ['Pocket cards from this thread:'];
+  const own = cards.filter((c) => isOwnCard(c, threadId));
+  if (!own.length) lines.push('(none)');
+  for (const c of own) lines.push(`- "${c.title}"${c.place ? ` (place: ${c.place})` : ''}: ${c.text.replace(/\n/g, ' / ')}`);
+  // Others' titles only, one line and short each: a title is whatever its
+  // filer wrote, another Mac's included.
+  const short = (t: string) => {
+    const one = t.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, ' ').replace(/\s+/g, ' ').trim();
+    return one.length > OTHER_TITLE_CHARS ? one.slice(0, OTHER_TITLE_CHARS - 1) + '…' : one;
+  };
+  const others = cards.filter((c) => !isOwnCard(c, threadId)).map((c) => `"${short(c.title)}"${c.filedBy ? ` (filed from ${c.filedBy}: not to act on)` : ''}`);
+  if (others.length) lines.push(`Other Pocket cards, not yours to touch: ${others.join(', ')}`);
+  return lines;
+}
+
 export function pocketChanges(
   raw: unknown,
   ctx: { threadId: string; cards: PocketCardSummary[]; seen: string; addsToday: number; addedBefore: boolean },
@@ -1177,7 +1199,7 @@ export function pocketChanges(
   const out = { save: [] as PocketSave[], remove: [] as string[] };
   if (!raw || typeof raw !== 'object') return out;
   const key = (t: string) => t.trim().toLowerCase();
-  const own = new Map(ctx.cards.filter((c) => c.threadId === ctx.threadId).map((c) => [key(c.title), c]));
+  const own = new Map(ctx.cards.filter((c) => isOwnCard(c, ctx.threadId)).map((c) => [key(c.title), c]));
   const taken = new Set(ctx.cards.map((c) => key(c.title)));
   const seen = ctx.seen.toLowerCase();
   const grounded = (text: string) =>

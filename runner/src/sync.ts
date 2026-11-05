@@ -72,6 +72,8 @@ const CACHE_SAVE_MS = 30_000;
 const BACKOFF_MIN_MS = 5000;
 const BACKOFF_MAX_MS = 5 * 60_000;
 const POST_TIMEOUT_MS = 15_000;
+// How long pictures wait after a runner key's upload allowance said "later".
+const PICTURES_PAUSE_MS = 10 * 60_000;
 const ALL: ('inbox' | 'snoozed' | 'archived')[] = ['inbox', 'snoozed', 'archived'];
 
 export type SyncConfig = {
@@ -89,7 +91,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 40;
+export const BACKEND_API_VERSION = 41;
 // From this one an owned schedule can carry `poolId`, the pool that picks
 // its threads' login. An older backend's validator would turn it down.
 export const SCHEDULE_POOLS_API_VERSION = 36;
@@ -212,6 +214,12 @@ export type SyncStatus = {
   // The backend's API version from the last heartbeat (0 for a backend from
   // before there was one), and the one this runner expects.
   backend?: { apiVersion: number; expected: number };
+  // The backend says RUNNER_KEY_NEXT is still set (the owner key only hears
+  // it): a rotation (tb runner rotate-owner) waiting for --finish.
+  ownerKeyRotating?: boolean;
+  // Schedules a runner key couldn't put in the backend, so all of them stay
+  // in this runner's schedules.json (schedules.ts heldLocal; the log says which).
+  schedulesHeld?: number;
 };
 
 // The approval or question a thread is waiting on, as the phone sees it.
@@ -382,7 +390,7 @@ export type SyncDeps = {
   // The scheduler (schedules.ts), given the backend's schedules table once
   // a heartbeat says it has one; while inBackend(), schedules.updated isn't
   // mirrored. Absent in small tests.
-  schedules?: { attach(backend: ScheduleBackend): void | Promise<void>; inBackend(): boolean };
+  schedules?: { attach(backend: ScheduleBackend): void | Promise<void>; inBackend(): boolean; heldLocal?(): { id: string; why: string }[] };
   // Follows the shared pools once the backend has them (API 38).
   pools?: { attach(backend: PoolBackend): void };
   // Takes the other runners' readings of the same logins (API 39).
@@ -404,10 +412,52 @@ export function convexPoster(url: string, fetchFn: typeof fetch = fetch): Post {
       body: JSON.stringify({ path: fn, args, format: 'json' }),
       signal: AbortSignal.timeout(POST_TIMEOUT_MS),
     });
-    const body = (await res.json().catch(() => undefined)) as { status?: string; value?: unknown; errorMessage?: string } | undefined;
-    if (!res.ok || !body || body.status !== 'success') throw new Error(body?.errorMessage ?? `HTTP ${res.status}`);
+    const body = (await res.json().catch(() => undefined)) as { status?: string; value?: unknown; errorMessage?: string; errorData?: unknown } | undefined;
+    if (!res.ok || !body || body.status !== 'success') {
+      // A ConvexError's data (`{ kind, message }`), as the Convex client
+      // keeps it, so forbiddenText can tell a runner key's refusal.
+      throw Object.assign(new Error(body?.errorMessage ?? `HTTP ${res.status}`), body?.errorData !== undefined ? { data: body.errorData } : {});
+    }
     return body.value;
   };
+}
+
+// A refusal that trying again won't change (convex/sync.ts caps and
+// ownership checks), as opposed to an outage.
+export function refusedForGood(e: unknown): boolean {
+  const kind = (e as { data?: { kind?: unknown } } | null)?.data?.kind;
+  if (kind === 'badArgs' || kind === 'tooMany' || kind === 'forbidden') return true;
+  return /"kind"\s*:\s*"(badArgs|tooMany|forbidden)"/.test(String((e as Error | null)?.message ?? ''));
+}
+
+// A refusal for now (a runner key's upload allowance, or too many upload
+// URLs this hour): the item waits and goes again later.
+export function retryLater(e: unknown): boolean {
+  const kind = (e as { data?: { kind?: unknown } } | null)?.data?.kind;
+  if (kind === 'retryLater' || kind === 'rateLimited') return true;
+  return /"kind"\s*:\s*"(retryLater|rateLimited)"/.test(String((e as Error | null)?.message ?? ''));
+}
+
+// What the backend said when this runner's key isn't allowed something
+// (a runner key reaching past its own runner, docs/protocol.md "Runner
+// keys"), or undefined for any other error. The feature that asked turns
+// itself off and says this once, rather than trying again.
+export function forbiddenText(e: unknown): string | undefined {
+  const data = (e as { data?: unknown } | null)?.data;
+  if (data && typeof data === 'object' && (data as { kind?: unknown }).kind === 'forbidden') {
+    const m = (data as { message?: unknown }).message;
+    return typeof m === 'string' ? m : "This runner's key can't do that.";
+  }
+  // A subscription's error may only have the data as JSON in its message.
+  const text = String((e as Error | null)?.message ?? e ?? '');
+  const json = text.match(/\{[^{}]*"kind"\s*:\s*"forbidden"[^{}]*\}/)?.[0];
+  if (!json) return undefined;
+  try {
+    const m = (JSON.parse(json) as { message?: unknown }).message;
+    return typeof m === 'string' ? m : "This runner's key can't do that.";
+  } catch {
+    return "This runner's key can't do that.";
+  }
 }
 
 // File storage's upload URL takes a plain POST of the bytes and answers
@@ -416,6 +466,12 @@ export function convexUploader(fetchFn: typeof fetch = fetch): Upload {
   return async (url, bytes, mediaType) => {
     const res = await fetchFn(url, { method: 'POST', headers: { 'Content-Type': mediaType }, body: bytes, signal: AbortSignal.timeout(POST_TIMEOUT_MS) });
     const body = (await res.json().catch(() => undefined)) as { storageId?: unknown } | undefined;
+    // The upload route refusing (403: a used or dead ticket, or over the
+    // allowance; 413: too big) won't change on a retry: said as a refusal
+    // for good, so that picture is left out rather than the flush retried.
+    if (res.status === 403 || res.status === 413) throw Object.assign(new Error(`upload refused: HTTP ${res.status}`), { data: { kind: 'tooMany', message: `upload refused: HTTP ${res.status}` } });
+    // 429: over an allowance for now (convex/http.ts): kept, and tried again later.
+    if (res.status === 429) throw Object.assign(new Error('upload over the allowance for now'), { data: { kind: 'retryLater', message: 'upload over the allowance for now' } });
     if (!res.ok || typeof body?.storageId !== 'string') throw new Error(`icon upload failed: HTTP ${res.status}`);
     return body.storageId;
   };
@@ -768,7 +824,9 @@ export function toAccountDoc(a: Account, apiVersion = 0) {
 type ListName = 'projects' | 'schedules' | 'accounts';
 
 export type PocketCardInput = { title: string; text: string; place?: string; icon?: string; threadId?: string; source?: string };
-export type PocketCardSummary = { title: string; text: string; place?: string; icon?: string; threadId?: string; source?: string; updatedAt: string };
+// filedBy: another Mac filed it through its runner key (its name); its text
+// is that Mac's, to read, never to follow.
+export type PocketCardSummary = { title: string; text: string; place?: string; icon?: string; threadId?: string; source?: string; updatedAt: string; filedBy?: string };
 
 export class ConvexSync {
   private deps: SyncDeps;
@@ -866,6 +924,10 @@ export class ConvexSync {
   private commandError?: string;
   private commandsState: 'off' | 'on' | 'error' = 'off';
   private index?: ThreadIndex;
+  private heartbeatRefused?: string;
+  private picturesPausedUntil?: number;
+  private ownerKeyRotating = false;
+  private schedulesRefused = false;
 
   constructor(deps: SyncDeps) {
     this.deps = deps;
@@ -1013,6 +1075,9 @@ export class ConvexSync {
     if (this.lastError) s.lastError = this.lastError;
     if (this.retryAt !== undefined) s.retryAt = new Date(this.retryAt).toISOString();
     if (this.backendApiVersion !== undefined) s.backend = { apiVersion: this.backendApiVersion, expected: BACKEND_API_VERSION };
+    if (this.ownerKeyRotating) s.ownerKeyRotating = true;
+    const held = this.deps.schedules?.heldLocal?.().length ?? 0;
+    if (held) s.schedulesHeld = held;
     return s;
   }
 
@@ -1101,8 +1166,84 @@ export class ConvexSync {
       if (/could not find (public )?function/i.test(message)) {
         throw new Error('The Convex backend is older than this runner. It deploys with the runner\'s next update; try again in a few minutes.');
       }
+      // A runner key asking for something only the main Mac's key can do
+      // (pairing a phone, a schedule on another runner): the backend's own words.
+      const refused = forbiddenText(e);
+      if (refused) throw new Error(refused);
       throw e;
     }
+  }
+
+  // One write of rows. Refused for good (a runner key's caps or a row not its
+  // own: kind badArgs, tooMany or forbidden), it's tried row by row and the
+  // rows still refused are left out with a log line, so one can't stall the
+  // whole mirror; anything else (an outage) throws, for the flush's retry.
+  // Rows the backend left out itself (`skipped`) are said the same way.
+  private async writeRows<T>(fn: string, field: string, rows: T[], idOf: (row: T) => string, extra: Record<string, unknown>): Promise<Set<string>> {
+    const left = new Set<string>();
+    const once = async (some: T[]) => {
+      for (const id of this.noteSkipped(fn, await this.post('mutation', fn, { ...extra, [field]: some }))) left.add(id);
+    };
+    try {
+      await once(rows);
+      return left;
+    } catch (e) {
+      if (!refusedForGood(e)) throw e;
+      if (rows.length === 1) {
+        this.leftOut(fn, idOf(rows[0]!), e);
+        left.add(idOf(rows[0]!));
+        return left;
+      }
+    }
+    for (const row of rows) {
+      try {
+        await once([row]);
+      } catch (e) {
+        if (!refusedForGood(e)) throw e;
+        this.leftOut(fn, idOf(row), e);
+        left.add(idOf(row));
+      }
+    }
+    return left;
+  }
+
+  // One picture's upload and record. Refused for good (the upload route's
+  // 403 or 413, a runner key's hourly or stored allowance, a picture it may
+  // not attach), it's left out with a log line and the rest go on: false.
+  // For now ("later": an allowance), it stays queued and pictures pause
+  // until PICTURES_PAUSE_MS has passed; the rest of the flush goes on.
+  private async picture(fn: string, what: string, send: () => Promise<void>): Promise<'sent' | 'dropped' | 'later'> {
+    try {
+      await send();
+      return 'sent';
+    } catch (e) {
+      if (retryLater(e)) {
+        if (!this.picturesPausedUntil) this.deps.log.info('pictures wait: over this runner key\'s upload allowance for now', { fn, row: what });
+        this.picturesPausedUntil = this.deps.clock.now() + PICTURES_PAUSE_MS;
+        this.deps.clock.setTimeout(() => this.scheduleFlush(), PICTURES_PAUSE_MS + 1_000);
+        return 'later';
+      }
+      if (!refusedForGood(e)) throw e;
+      this.leftOut(fn, what, e);
+      return 'dropped';
+    }
+  }
+
+  private picturesPaused(): boolean {
+    if (this.picturesPausedUntil && this.deps.clock.now() < this.picturesPausedUntil) return true;
+    this.picturesPausedUntil = undefined;
+    return false;
+  }
+
+  private noteSkipped(fn: string, r: unknown): string[] {
+    const skipped = (r as { skipped?: unknown } | null)?.skipped;
+    if (!Array.isArray(skipped) || !skipped.length) return [];
+    this.deps.log.warn('the backend left rows out, over what this runner\'s key may write', { fn, rows: skipped.slice(0, 20), count: skipped.length });
+    return skipped.filter((x): x is string => typeof x === 'string');
+  }
+
+  private leftOut(fn: string, row: string, e: unknown): void {
+    this.deps.log.warn('a row the backend refused for good was left out', { fn, row, error: String((e as { data?: { message?: unknown } })?.data?.message ?? (e as Error)?.message ?? e) });
   }
 
   // Writes whatever is waiting now, however recent the last write; tests
@@ -1154,7 +1295,7 @@ export class ConvexSync {
         break;
       case 'schedules.updated':
         // Ones that live in the backend are written there by the scheduler.
-        if (this.deps.schedules?.inBackend()) break;
+        if (this.deps.schedules?.inBackend() || this.schedulesRefused) break;
         this.lists.schedules = n.params.schedules;
         this.dirtyLists.add('schedules');
         this.scheduleFlush();
@@ -1543,7 +1684,10 @@ export class ConvexSync {
 
   private scheduleFlush(): void {
     if (!this.running || this.flushTimer) return;
-    if (!this.dirty.size && !this.removed.size && !this.messages.length && !this.dirtyLists.size && !this.full && !this.catchUpDue && !this.imagesDue.size && !this.imagesDrop.size && !this.pendingImages.length && !this.replyDue.size && !this.pendingReplyImages.length) return;
+    // Project pictures waiting (picturesDue) count too: one an upload
+    // allowance held back goes once its pause is over, idle or not.
+    const picturesWaiting = this.picturesDue && (this.backendApiVersion ?? 0) >= ICONS_API_VERSION && !this.picturesPaused();
+    if (!picturesWaiting && !this.dirty.size && !this.removed.size && !this.messages.length && !this.dirtyLists.size && !this.full && !this.catchUpDue && !this.imagesDue.size && !this.imagesDrop.size && !this.pendingImages.length && !this.replyDue.size && !this.pendingReplyImages.length) return;
     const now = this.deps.clock.now();
     let delay = Math.max(0, this.lastFlushAt + SYNC_COALESCE_MS - now);
     if (this.retryAt !== undefined) delay = Math.max(delay, this.retryAt - now);
@@ -1574,10 +1718,17 @@ export class ConvexSync {
       for (let i = 0; i < docs.length; i += SYNC_BATCH) {
         const batch = docs.slice(i, i + SYNC_BATCH).map((d) => forBackend(d, v, this.deps.clock.now()));
         for (const d of batch) this.writing.set(d.threadId, digest(JSON.stringify(d)));
-        await this.post('mutation', 'sync:upsertThreads', { key, threads: batch });
+        const left = await this.writeRows('sync:upsertThreads', 'threads', batch, (d) => d.threadId, { key });
+        // A row left out isn't remembered as sent (nor in the cache kept
+        // across starts), so its next change, or the next start, tries it again.
         for (const d of batch) {
-          this.recordSent(d);
           this.writing.delete(d.threadId);
+          if (!left.has(d.threadId)) this.recordSent(d);
+          else {
+            this.sent.delete(d.threadId);
+            this.lastWrite.delete(d.threadId);
+            this.noteSent();
+          }
         }
         this.written += batch.length;
       }
@@ -1603,7 +1754,18 @@ export class ConvexSync {
           continue;
         }
         const rows = (list as Schedule[]).map(toScheduleDoc);
-        await this.post('mutation', `sync:set${name[0]!.toUpperCase()}${name.slice(1)}`, { key, runnerId: this.runnerId, [name]: rows });
+        try {
+          await this.post('mutation', `sync:set${name[0]!.toUpperCase()}${name.slice(1)}`, { key, runnerId: this.runnerId, [name]: rows });
+        } catch (e) {
+          // setSchedules (mirroring a pre-API 9 schedules.json) is the main
+          // key's only: a runner key's runner stops mirroring them, quietly,
+          // rather than retrying the whole write for ever. Its scheduler
+          // puts them in the backend itself once a heartbeat says it can.
+          if (name !== 'schedules' || !forbiddenText(e)) throw e;
+          this.deps.log.info('not mirroring schedules.json: this runner has a runner key, and its scheduler keeps them in the backend', { error: forbiddenText(e) });
+          this.lists.schedules = undefined;
+          this.schedulesRefused = true;
+        }
       }
       if (this.picturesDue && (this.backendApiVersion ?? 0) >= ICONS_API_VERSION) await this.sendPictures();
       if (this.full) {
@@ -1626,8 +1788,8 @@ export class ConvexSync {
         seen.add(k);
         return true;
       });
-      await this.appendMessages(messages);
-      this.markFilled(filling);
+      const notFilled = await this.appendMessages(messages);
+      this.markFilled(filling.filter((id) => !notFilled.has(id)));
       if (v >= SHARE_API_VERSION) await this.sendShareImages();
       if (v >= REPLY_IMAGES_API_VERSION) await this.sendReplyImages();
       this.lastSyncAt = this.deps.clock.now();
@@ -1697,10 +1859,15 @@ export class ConvexSync {
         this.deps.log.warn('project picture not sent', { projectId: p.id, path: image.path, error: String((e as Error)?.message ?? e) });
         continue;
       }
-      const url = (await this.post('mutation', 'sync:iconUploadUrl', { key })) as string;
-      const storageId = await this.upload(url, file.bytes, file.mediaType);
-      await this.post('mutation', 'sync:setProjectIcon', { key, runnerId: this.runnerId, projectId: p.id, picture, storageId, mediaType: file.mediaType });
+      if (this.picturesPaused()) return; // picturesDue stays: they go when the pause is over
+      const sent = await this.picture('sync:setProjectIcon', `project ${p.id}`, async () => {
+        const url = (await this.post('mutation', 'sync:iconUploadUrl', { key })) as string;
+        const storageId = await this.upload(url, file.bytes, file.mediaType);
+        await this.post('mutation', 'sync:setProjectIcon', { key, runnerId: this.runnerId, projectId: p.id, picture, storageId, mediaType: file.mediaType });
+      });
+      if (sent === 'later') return;
       this.pictures.set(p.id, picture);
+      if (sent === 'dropped') continue;
       this.deps.log.info('project picture sent', { projectId: p.id, picture, bytes: file.bytes.byteLength });
     }
     const keep = new Set(projects.map((p) => p.id));
@@ -1751,13 +1918,18 @@ export class ConvexSync {
         if ('skip' in file) {
           this.deps.log.warn('shared picture not sent', { threadId: img.threadId, path: img.path, why: file.skip });
         } else {
-          const url = (await this.post('mutation', 'sync:iconUploadUrl', { key })) as string;
-          const { mediaType } = file;
-          const storageId = await this.upload(url, file.bytes, mediaType);
-          const { threadId, seq, path: file_, src } = img;
-          const width = file.width ?? img.width;
-          const height = file.height ?? img.height;
-          await this.post('mutation', 'sync:addShareImage', { key, threadId, seq, path: file_, ...(src ? { src } : {}), storageId, mediaType, ...(width ? { width } : {}), ...(height ? { height } : {}) });
+          if (this.picturesPaused()) return;
+          const sent = await this.picture('sync:addShareImage', `${img.threadId} ${img.path}`, async () => {
+            const url = (await this.post('mutation', 'sync:iconUploadUrl', { key })) as string;
+            const { mediaType } = file;
+            const storageId = await this.upload(url, file.bytes, mediaType);
+            const { threadId, seq, path: file_, src } = img;
+            const width = file.width ?? img.width;
+            const height = file.height ?? img.height;
+            await this.post('mutation', 'sync:addShareImage', { key, threadId, seq, path: file_, ...(src ? { src } : {}), storageId, mediaType, ...(width ? { width } : {}), ...(height ? { height } : {}) });
+          });
+          // Still queued (this one stays first), for after the pause.
+          if (sent === 'later') return;
         }
         up.add(id);
       }
@@ -1828,10 +2000,14 @@ export class ConvexSync {
         if ('skip' in read) {
           this.deps.log.debug('reply picture not sent', { threadId, path: file, why: read.skip });
         } else {
-          const url = (await this.post('mutation', 'sync:iconUploadUrl', { key })) as string;
-          const storageId = await this.upload(url, read.bytes, read.mediaType);
-          const { mediaType, width, height } = read;
-          await this.post('mutation', 'sync:addReplyImage', { key, threadId, seq, path: file, ...(src ? { src } : {}), ...(pinned ? { pinned } : {}), storageId, mediaType, ...(width ? { width } : {}), ...(height ? { height } : {}) });
+          if (this.picturesPaused()) return;
+          const sent = await this.picture('sync:addReplyImage', `${threadId} ${file}`, async () => {
+            const url = (await this.post('mutation', 'sync:iconUploadUrl', { key })) as string;
+            const storageId = await this.upload(url, read.bytes, read.mediaType);
+            const { mediaType, width, height } = read;
+            await this.post('mutation', 'sync:addReplyImage', { key, threadId, seq, path: file, ...(src ? { src } : {}), ...(pinned ? { pinned } : {}), storageId, mediaType, ...(width ? { width } : {}), ...(height ? { height } : {}) });
+          });
+          if (sent === 'later') return;
         }
         up.add(id);
       }
@@ -1871,7 +2047,9 @@ export class ConvexSync {
     return out;
   }
 
-  private async appendMessages(all: MessageDoc[]): Promise<void> {
+  // The threads with a message left out, so their history isn't counted as up.
+  private async appendMessages(all: MessageDoc[]): Promise<Set<string>> {
+    const notFilled = new Set<string>();
     // A backend from before API 2 can't take tool rows; it's deployed before
     // the runner, so this only matters when that deploy was skipped.
     const v = this.backendApiVersion;
@@ -1882,11 +2060,22 @@ export class ConvexSync {
     if (v === undefined || v < WOKE_BY_API_VERSION) messages = messages.map((m) => (m.wokeBy ? (({ wokeBy, ...rest }) => rest)(m) : m));
     for (let i = 0; i < messages.length; i += MESSAGE_BATCH) {
       const batch = messages.slice(i, i + MESSAGE_BATCH);
-      await this.post('mutation', 'sync:appendMessages', { key: this.deps.key, messages: batch });
-      this.messagesWritten += batch.length;
-      for (const m of batch) if (m.seq > (this.heads.get(m.threadId) ?? 0)) this.heads.set(m.threadId, m.seq);
+      const left = await this.writeRows('sync:appendMessages', 'messages', batch, (m) => `${m.threadId}:${m.seq}`, { key: this.deps.key });
+      this.messagesWritten += batch.length - left.size;
+      // A message left out isn't sent: its thread's head stops before it, so
+      // the next start sends it (and what follows) again.
+      const stop = new Map<string, number>();
+      for (const id of left) {
+        const at = id.lastIndexOf(':');
+        const threadId = id.slice(0, at);
+        const seq = Number(id.slice(at + 1));
+        stop.set(threadId, Math.min(stop.get(threadId) ?? Infinity, seq));
+        notFilled.add(threadId);
+      }
+      for (const m of batch) if (m.seq < (stop.get(m.threadId) ?? Infinity) && m.seq > (this.heads.get(m.threadId) ?? 0)) this.heads.set(m.threadId, m.seq);
       this.noteSent();
     }
+    return notFilled;
   }
 
   // At start, what's newer than the mirror's newest message, for threads
@@ -2046,6 +2235,7 @@ export class ConvexSync {
     void this.post('mutation', 'sync:heartbeat', { key: this.deps.key, runner }).then(
       (r) => {
         this.sawBackend(r);
+        this.ownerKeyRotating = (r as { ownerKeyRotating?: unknown } | null)?.ownerKeyRotating === true;
         this.lookForReplyImages();
         if ((this.backendApiVersion ?? 0) >= SCHEDULES_API_VERSION && this.running) void this.deps.schedules?.attach(this.scheduleBackend());
         if ((this.backendApiVersion ?? 0) >= SHARED_POOLS_API_VERSION && this.running) this.deps.pools?.attach(this.poolBackend());
@@ -2053,7 +2243,13 @@ export class ConvexSync {
         if ((this.backendApiVersion ?? 0) >= THREAD_INDEX_API_VERSION && this.running) this.index?.start();
       },
       (e) => {
-        this.deps.log.debug('convex heartbeat failed', { error: String(e) });
+        // A key that isn't this runner's (runner.json's sync.runnerId isn't
+        // the one `tb runner add` made it for) fails every heartbeat: said
+        // once, loudly, as nothing else here would show it.
+        const refused = forbiddenText(e);
+        if (refused && refused !== this.heartbeatRefused) this.deps.log.warn('convex heartbeat refused: this runner key is for another runner', { error: refused, runnerId: this.runnerId });
+        else if (!refused) this.deps.log.debug('convex heartbeat failed', { error: String(e) });
+        this.heartbeatRefused = refused;
         // The version from the file may be why: a heartbeat with a field an
         // older backend's validator refuses can never learn better. Going
         // back to assuming nothing is what a start without the file does.
@@ -2097,9 +2293,7 @@ export class ConvexSync {
       remove: async (scheduleId) => {
         await call('mutation', 'sync:deleteSchedule', { scheduleId });
       },
-      adopt: async (rows) => {
-        await call('mutation', 'sync:adoptSchedules', { runnerId, schedules: rows.map((r) => toOwnedScheduleDoc(r, this.backendApiVersion ?? 0)) });
-      },
+      adopt: async (rows) => (await call('mutation', 'sync:adoptSchedules', { runnerId, schedules: rows.map((r) => toOwnedScheduleDoc(r, this.backendApiVersion ?? 0)) })) as { held?: { id: string; why: string }[] } | null ?? undefined,
       claim: async (scheduleId, kind, expect) => (await call('mutation', 'sync:claimSchedule', { runnerId, scheduleId, holder, kind, expect })) === true,
       release: async (scheduleId) => {
         await call('mutation', 'sync:releaseSchedule', { scheduleId, holder });
@@ -2159,7 +2353,16 @@ export class ConvexSync {
       save: async (pools) => {
         await this.backend('mutation', 'sync:savePools', { key, runnerId, pools });
       },
-      adopt: async (pools) => (await this.backend('mutation', 'sync:adoptPools', { key, runnerId, pools })) === true,
+      // adoptPools is the main key's (docs/protocol.md, "Runner keys"): on a
+      // runner key it's "not taken", and this runner follows the main Mac's.
+      adopt: async (pools) => {
+        try {
+          return (await this.backend('mutation', 'sync:adoptPools', { key, runnerId, pools })) === true;
+        } catch (e) {
+          if (/runner's key can't/.test(String((e as Error)?.message))) return false;
+          throw e;
+        }
+      },
     };
     return this.poolsTable;
   }

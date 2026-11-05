@@ -38,14 +38,14 @@ export type TokenInfo = { id: string; kind: TokenKind; name: string; createdAt: 
 
 // Makes a token and stores its hash. The plain token is returned to the
 // caller and nowhere else.
-export async function issueToken(ctx: MutationCtx, args: { name: string; days?: number; kind?: TokenKind }): Promise<{ id: string; token: string; expiresAt: string }> {
+export async function issueToken(ctx: MutationCtx, args: { name: string; days?: number; kind?: TokenKind; issuedBy?: string; ownerKeyPrint?: string }): Promise<{ id: string; token: string; expiresAt: string }> {
   const bytes = new Uint8Array(24);
   crypto.getRandomValues(bytes);
   const token = 'tb_' + Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
   const now = Date.now();
   const days = Math.min(MAX_DAYS, Math.max(1, Math.floor(args.days ?? DEFAULT_DAYS)));
   const expiresAt = now + days * 24 * 60 * 60_000;
-  const id = await ctx.db.insert('tokens', { hash: await sha256(token), name: args.name, createdAt: now, expiresAt, ...(args.kind ? { kind: args.kind } : {}) });
+  const id = await ctx.db.insert('tokens', { hash: await sha256(token), name: args.name, createdAt: now, expiresAt, ...(args.kind ? { kind: args.kind } : {}), ...(args.issuedBy ? { issuedBy: args.issuedBy } : {}), ...(args.ownerKeyPrint ? { ownerKeyPrint: args.ownerKeyPrint } : {}) });
   return { id, token, expiresAt: new Date(expiresAt).toISOString() };
 }
 

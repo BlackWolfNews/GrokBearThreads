@@ -157,6 +157,32 @@ export default defineSchema({
     // How a Mac app reaches this runner to open one of its threads (API 12):
     // wss://<MagicDNS name>:<port>/rpc, only on the tailnet (sync.rpcUrl).
     rpcUrl: v.optional(v.string()),
+    // Its last heartbeat came with the owner key (docs/protocol.md, "Runner
+    // keys"), so it's the main Mac: a phone's new thread goes there first.
+    byOwner: v.optional(v.boolean()),
+  }).index('by_runnerId', ['runnerId']),
+
+  // Runner keys (docs/protocol.md, "Runner keys"): each authenticates as its
+  // runnerId alone, where the owner key (RUNNER_KEY) can do everything. Only
+  // the SHA-256 of a key is kept; the plain key goes back once, to the owner
+  // that made it (sync:addRunnerKey). Making another for the same runner
+  // revokes the one before.
+  runnerKeys: defineTable({
+    runnerId: v.string(),
+    keyHash: v.string(),
+    name: v.string(),
+    createdAt: v.number(),
+    revokedAt: v.optional(v.number()),
+  })
+    .index('by_hash', ['keyHash'])
+    .index('by_runnerId', ['runnerId'])
+    .index('by_revokedAt', ['revokedAt']),
+
+  // Runner ids the main key has named as its own (sync:addRunnerKey's
+  // ownerRunnerId), so the audit can flag a runner key made for one.
+  ownerRunnerIds: defineTable({
+    runnerId: v.string(),
+    at: v.number(),
   }).index('by_runnerId', ['runnerId']),
 
   // One small row per thread, just what a sidebar row shows (API 12), so a
@@ -195,16 +221,91 @@ export default defineSchema({
     .index('by_runnerId', ['runnerId'])
     .index('by_runner_thread', ['runnerId', 'threadId'])
     .index('by_runner_updated', ['runnerId', 'updatedMs'])
-    .index('by_deleted_updated', ['deleted', 'updatedMs']),
+    .index('by_deleted_updated', ['deleted', 'updatedMs'])
+    // Whether another runner already lists a thread id (sync.ts claimable).
+    .index('by_threadId', ['threadId'])
+    // A runner key's live rows, for its cap (sync.ts setThreadIndex).
+    .index('by_runner_deleted', ['runnerId', 'deleted']),
+
+  // Every thread row ever deleted (removeThreads, prune), so a runner key
+  // can't later make a row under that id and so read or show what was
+  // left under it (docs/protocol.md, "Runner keys"). One small row per
+  // deleted thread, kept for good; the owner key may reuse any id.
+  // A row with `slug` is a share link that thread had (deleted, or replaced
+  // by Share again with a new link): no runner key may take it up.
+  threadTombstones: defineTable({
+    threadId: v.string(),
+    runnerId: v.string(),
+    at: v.number(),
+    slug: v.optional(v.string()),
+  })
+    .index('by_threadId', ['threadId'])
+    .index('by_slug', ['slug'])
+    // pruneOld: thread tombstones (no slug) go after TOMBSTONE_DAYS.
+    .index('by_slug_at', ['slug', 'at']),
+
+  // Upload URLs handed to a runner key (sync:iconUploadUrl): one use each,
+  // redeemed by convex/http.ts /runner/upload, which records the file in
+  // storageOwners. Counted for the hourly limit; pruneOld drops old ones.
+  uploadTickets: defineTable({
+    ticketHash: v.string(),
+    runnerId: v.string(),
+    // The runnerKeys row that asked: a ticket dies with its key.
+    keyId: v.optional(v.id('runnerKeys')),
+    issuedAt: v.number(),
+    usedAt: v.optional(v.number()),
+    // What was uploaded with it: the hour's allowance counts these, which
+    // stay a day whatever happens to the file.
+    bytes: v.optional(v.number()),
+  })
+    .index('by_hash', ['ticketHash'])
+    .index('by_runner_issued', ['runnerId', 'issuedAt'])
+    .index('by_issued', ['issuedAt']),
+
+  // All a runner key's runner keeps in file storage, against its cap
+  // (sync:redeemUpload), less what's been deleted.
+  // Also its message count (CAP.messages) and its pushes this minute.
+  runnerStorage: defineTable({
+    runnerId: v.string(),
+    bytes: v.number(),
+    messages: v.optional(v.number()),
+    // Its messages' bytes, against its budget (sync.ts appendMessages).
+    messageBytes: v.optional(v.number()),
+    pushMinute: v.optional(v.number()),
+    pushes: v.optional(v.number()),
+  }).index('by_runnerId', ['runnerId']),
+
+  // Which runner key's runner uploaded a stored file: such a key attaches
+  // or deletes only files of its own. Files with no row here (the owner's,
+  // the phone's) are no runner key's. `attachedAt`: first named in a row;
+  // one never attached goes after a day (pruneOld).
+  storageOwners: defineTable({
+    storageId: v.id('_storage'),
+    runnerId: v.string(),
+    at: v.number(),
+    bytes: v.optional(v.number()),
+    attachedAt: v.optional(v.number()),
+  })
+    .index('by_storageId', ['storageId'])
+    // A runner's bytes uploaded in the last hour (sync:redeemUpload's cap).
+    .index('by_runner_at', ['runnerId', 'at'])
+    .index('by_unattached', ['attachedAt', 'at']),
 
   // pushedAt is the mirror's own: when a push last went out for the thread
   // (push.ts), kept across the runner's writes.
   // pushHeldAt: a push to "when I'm away" phones held back because Mike was
   // at the Mac; it goes out if he leaves while the thread still needs him.
-  threads: defineTable({ ...threadFields, view: v.union(...views.map((x) => v.literal(x))), pushedAt: v.optional(v.number()), pushHeldAt: v.optional(v.number()) })
+  // view "overflow": a runner key's thread past its view's cap (sync.ts
+  // upsertThreads): out of the lists the phone reads whole, everything
+  // else kept; wantView is the view it's really in, which reads by id show.
+  threads: defineTable({ ...threadFields, view: v.union(...[...views, 'overflow' as const].map((x) => v.literal(x))), wantView: v.optional(v.union(...views.map((x) => v.literal(x)))), pushedAt: v.optional(v.number()), pushHeldAt: v.optional(v.number()) })
+    // The overflowed thread to bring back first when its list has room (sync.ts refill).
+    .index('by_runner_want', ['runnerId', 'wantView', 'lastActivityMs'])
     .index('by_threadId', ['threadId'])
     .index('by_share_slug', ['share.slug'])
     .index('by_runnerId', ['runnerId'])
+    // How many of a runner key's threads are in a view the phone reads whole (its cap).
+    .index('by_runner_view', ['runnerId', 'view', 'lastActivityMs'])
     // setPresence finds held pushes with this, rather than reading every
     // thread the runner has ever had each time Mike leaves the Mac.
     .index('by_runner_pushHeld', ['runnerId', 'pushHeldAt'])
@@ -229,10 +330,14 @@ export default defineSchema({
     wokeBy: v.optional(v.array(v.object({ kind: v.string(), description: v.string() }))), // what finished and woke this turn, on its first row (since API 33)
     at: v.string(),
     pagedAt: v.optional(v.number()),
+    // The runner key's runner that wrote it, so past its message budget its
+    // oldest anywhere give way (sync.ts appendMessages). Absent: the main key's.
+    runnerId: v.optional(v.string()),
   })
     .index('by_thread_seq', ['threadId', 'seq'])
     .index('by_thread_pagedAt', ['threadId', 'pagedAt'])
-    .index('by_pagedAt', ['pagedAt']),
+    .index('by_pagedAt', ['pagedAt'])
+    .index('by_runnerId', ['runnerId']),
 
   // What the phone asks a runner to do (step 3). The owning runner takes
   // pending ones for its runnerId (or "any"), applies them through the
@@ -250,7 +355,9 @@ export default defineSchema({
     resultThreadId: v.optional(v.string()), // for create, once it lands
   })
     .index('by_runner_state', ['runnerId', 'state'])
-    .index('by_state', ['state']),
+    .index('by_state', ['state'])
+    // pruneOld: finished ones by when they finished.
+    .index('by_state_done', ['state', 'doneAt']),
 
   // Phone tokens: only the hash is kept. Issued from the Mac app through
   // the runner (sync:issueToken) or by hand with
@@ -264,7 +371,15 @@ export default defineSchema({
     createdAt: v.number(),
     expiresAt: v.number(),
     revokedAt: v.optional(v.number()),
-  }).index('by_hash', ['hash']),
+    // Since runner keys: which key issued it ("owner", the only one that
+    // may), and the first 8 hex of that key's SHA-256, so after a rotation
+    // `tb runner audit` can tell tokens the old shared key made.
+    issuedBy: v.optional(v.string()),
+    ownerKeyPrint: v.optional(v.string()),
+  })
+    .index('by_hash', ['hash'])
+    // The audit's live tokens, without reading revoked ones.
+    .index('by_revokedAt', ['revokedAt']),
 
   // The runner's projects, schedules and accounts (docs/protocol.md), one
   // row each, replaced as a whole when the runner's list changes.
@@ -296,6 +411,8 @@ export default defineSchema({
   // views (API 30), kept by the writes that move a thread between views, so
   // phone:counts reads a row per runner rather than every thread. A runner's
   // prune (each start) counts them again from scratch.
+  // Since runner keys also its inbox and overflow threads and all of them,
+  // which a runner key's caps are checked against without reading its rows.
   viewCounts: defineTable({
     runnerId: v.string(),
     hibernating: v.number(),
@@ -303,6 +420,9 @@ export default defineSchema({
     // Set once linkProjects has been run over every thread the runner had
     // when projectThreads arrived (API 40); later writes keep links current.
     projectsLinked: v.optional(v.boolean()),
+    inbox: v.optional(v.number()),
+    overflow: v.optional(v.number()),
+    total: v.optional(v.number()),
   }).index('by_runnerId', ['runnerId']),
 
   // Which threads are in which project (API 40), one row per pair, kept by
@@ -332,7 +452,13 @@ export default defineSchema({
     threadId: v.optional(v.string()),
     source: v.optional(v.string()), // the project or thread it came from, as it was then
     updatedAt: v.string(),
-  }).index('by_key', ['key']),
+    // The runner whose runner key filed it: such a key sees and changes only
+    // its own cards. Absent: filed with the owner key (or before keys).
+    runnerId: v.optional(v.string()),
+  })
+    .index('by_key', ['key'])
+    // How many a runner key has filed (its cap), and a takeover's cleanup.
+    .index('by_runnerId', ['runnerId']),
 
   // A project's picture, in file storage, as the phone shows it: PNG at
   // most 256 px (an SVG is drawn to PNG by the runner, since the phone
@@ -345,7 +471,10 @@ export default defineSchema({
     storageId: v.id('_storage'),
     mediaType: v.string(),
     updatedAt: v.number(),
-  }).index('by_runner_project', ['runnerId', 'projectId']),
+  })
+    .index('by_runner_project', ['runnerId', 'projectId'])
+    // Who else uses a stored file, before one is attached or deleted (sync.ts storageUsers).
+    .index('by_storageId', ['storageId']),
 
   schedules: defineTable({
     runnerId: v.string(),
@@ -460,7 +589,9 @@ export default defineSchema({
     mediaType: v.string(),
     width: v.optional(v.number()),
     height: v.optional(v.number()),
-  }).index('by_thread_seq', ['threadId', 'seq']),
+  })
+    .index('by_thread_seq', ['threadId', 'seq'])
+    .index('by_storageId', ['storageId']),
 
   // Pictures an agent showed Mike, for the phone (API 24), from any thread:
   // ones in its replies (`src`, the address it wrote, which the phone swaps)
@@ -478,7 +609,9 @@ export default defineSchema({
     mediaType: v.string(),
     width: v.optional(v.number()),
     height: v.optional(v.number()),
-  }).index('by_thread_seq', ['threadId', 'seq']),
+  })
+    .index('by_thread_seq', ['threadId', 'seq'])
+    .index('by_storageId', ['storageId']),
 
   // This backend's registration with the push relay (docs/push-relay.md),
   // made the first time a push goes that way. One row.

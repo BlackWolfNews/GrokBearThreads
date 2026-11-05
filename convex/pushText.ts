@@ -4,6 +4,7 @@
 
 export type PushThread = {
   title: string;
+  mac?: string; // a runner key's Mac (devices.ts threadForPush): named in the title
   status: string;
   preview: string;
   pendingApproval?:
@@ -15,7 +16,9 @@ export type PushThread = {
 export const PUSH_BODY_CHARS = 180;
 
 export function pushText(t: PushThread): { title: string; body: string } {
-  const title = t.title || 'Threadbear';
+  // A thread on a Mac with a runner key says which, so a push asking for a
+  // secret or an approval can't pass for one from the main Mac.
+  const title = t.mac ? `${t.mac} · ${t.title || 'Threadbear'}` : t.title || 'Threadbear';
   const p = t.pendingApproval;
   let body: string;
   if (p?.kind === 'question') body = p.questions[0]?.question ?? 'Has a question for you';

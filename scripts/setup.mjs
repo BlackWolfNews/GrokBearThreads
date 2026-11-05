@@ -14,10 +14,14 @@
 //      (docs/setup-and-updates.md section 2.3)
 //   3. the repo's packages
 //   4. a Convex login, then a Convex project of your own with a production
-//      deployment (a new one, the one this clone already uses, or with
-//      --existing the project named by --project, for a second Mac)
+//      deployment (a new one, or the one this clone already uses)
 //   5. its keys: a deploy key the runner uses to deploy the backend when it
-//      updates, and the runner's own key, set as RUNNER_KEY
+//      updates, and the main key, set as RUNNER_KEY
+//   With --existing (a second Mac joining a Threadbear another Mac set up),
+//   and on a Mac that already has a runner key, steps 4, 5 and 7 are
+//   skipped: no Convex login, deploy key or backend deploy here, since each
+//   can do anything to the deployment. Its key comes from the first Mac:
+//   tb runner add <name> --ssh <this Mac> (docs/protocol.md, "Runner keys").
 //   6. runner.json: where the runner mirrors to, and the default folder for
 //      new threads (~/ThreadbearThreads, made here, unless --cwd; Settings changes it)
 //   7. the backend and the website, deployed
@@ -33,6 +37,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
+import { isJoining, runnerKeyPlan } from './runner-key-plan.mjs';
 
 const repo = path.resolve(import.meta.dirname, '..');
 // Where new threads start: a folder of their own, not the home folder, and
@@ -78,6 +83,16 @@ const runnerJsonPath = path.join(home, 'runner.json');
 const deployKeyFile = path.join(secrets, 'convex-deploy.env');
 const runnerKeyFile = path.join(secrets, 'convex-key');
 const npx = path.join(path.dirname(process.execPath), 'npx');
+const localKey = (() => {
+  try {
+    return fs.readFileSync(runnerKeyFile, 'utf8').trim();
+  } catch {
+    return '';
+  }
+})();
+// A Mac joining another's Threadbear, by the flag or by the runner key it
+// already has (setup run again there without the flag).
+const joining = isJoining({ existing: v.existing, local: localKey });
 const npm = path.join(path.dirname(process.execPath), 'npm');
 
 class Fail extends Error {}
@@ -286,8 +301,11 @@ async function keys(urlFromProject) {
     if (dry) todo(`a deploy key in ${deployKeyFile}`);
     else {
       fs.mkdirSync(secrets, { recursive: true, mode: 0o700 });
-      runOrFail('Making a deploy key', npx, ['convex', 'deployment', 'token', 'create', `threadbear-runner-${os.hostname().split('.')[0].toLowerCase()}`, '--prod', '--save-env', deployKeyFile]);
+      const keyName = `threadbear-runner-${os.hostname().split('.')[0].toLowerCase()}`;
+      runOrFail('Making a deploy key', npx, ['convex', 'deployment', 'token', 'create', keyName, '--prod', '--save-env', deployKeyFile]);
       fs.chmodSync(deployKeyFile, 0o600);
+      // By name, so tb runner rotate-owner knows this one is this Mac's own.
+      fs.appendFileSync(path.join(secrets, 'made-deploy-keys'), keyName + '\n', { mode: 0o600 });
       ok(`deploy key saved in ${deployKeyFile}`);
     }
   } else ok('deploy key');
@@ -295,20 +313,27 @@ async function keys(urlFromProject) {
   let url = urlFromProject ?? readJson(runnerJsonPath).sync?.url;
   if (!url && key?.name) url = await findUrl(key.name);
   if (!dry && !url) throw new Fail("Couldn't work out the production deployment's URL. Put it in runner.json as sync.url and run setup again.");
-  // The deployment's RUNNER_KEY is shared by every runner that writes to it
-  // (each Mac that joins with --existing). So one that's already set wins:
-  // it's copied here, never replaced, or the other Macs would be locked out.
-  // Only a deployment without one gets a new key.
+  // The deployment's RUNNER_KEY is the main key, which can do everything:
+  // one that's already set wins, never replaced, or the Macs using it would
+  // be locked out. Only a deployment without one gets a new key. A Mac
+  // joining with --existing gets a runner key of its own instead (since
+  // 5 Nov 2026), so it can't write the first Mac's threads or pair phones.
   if (dry) {
     if (fs.existsSync(runnerKeyFile)) ok('runner key');
     else todo("the runner key: the deployment's own if it has one, else a new one set as RUNNER_KEY");
   }
   if (!dry && key) {
-    const existing = run(npx, ['convex', 'env', 'get', 'RUNNER_KEY'], { env: withKey(key.key) }).stdout.trim();
+    const got = run(npx, ['convex', 'env', 'get', 'RUNNER_KEY'], { env: withKey(key.key) });
+    const existing = (got.stdout ?? '').trim();
     const local = fs.existsSync(runnerKeyFile) ? fs.readFileSync(runnerKeyFile, 'utf8').trim() : '';
-    if (existing) {
-      if (local !== existing) writeSecret(runnerKeyFile, existing);
-      ok(local && local !== existing ? "runner key: using the deployment's (it already had one)" : 'runner key');
+    const nextGet = run(npx, ['convex', 'env', 'get', 'RUNNER_KEY_NEXT'], { env: withKey(key.key) });
+    const plan = runnerKeyPlan({ envGet: got, nextGet, local, joining });
+    if (plan.action === 'fail') throw new Fail(plan.why);
+    if (plan.action === 'joined') ok("runner key: this Mac's own, left as it is");
+    else if (plan.action === 'keep') ok('runner key');
+    else if (plan.action === 'copy') {
+      writeSecret(runnerKeyFile, existing);
+      ok(local ? "runner key: using the deployment's (it already had one)" : 'runner key');
     } else {
       const fresh = local || crypto.randomBytes(32).toString('hex');
       if (!local) writeSecret(runnerKeyFile, fresh);
@@ -407,8 +432,16 @@ function install() {
   runOrFail('Installing the Mac app', 'bash', [path.join(repo, 'app', 'install.sh')], { env });
   // A Mac joining a Threadbear you already use: you know your way round,
   // so the app's first-run tour stays away (Help > Take the Tour still has it).
-  if (v.existing) run('defaults', ['write', 'com.mikerosoft.threadbear', 'tourSeen', '-bool', 'YES']);
+  if (joining) run('defaults', ['write', 'com.mikerosoft.threadbear', 'tourSeen', '-bool', 'YES']);
   ok('runner and app installed');
+}
+
+function joined() {
+  say('9. Join your first Mac');
+  const host = os.hostname().replace(/\.local$/, '');
+  note(`On your first Mac, run: tb runner add ${v.name ?? host} --ssh ${host}`);
+  note("It gives this Mac's runner a key of its own and the deployment's address, over ssh. Then restart the runner here (tb restart) and its threads show on your phone and your first Mac.");
+  note('tb runner check (here) says if a deploy key or Convex login from an earlier setup is still on this Mac, which you should remove.');
 }
 
 function finish(url) {
@@ -428,18 +461,28 @@ try {
   say();
   packages();
   say();
-  convexLogin();
-  const made = await project();
-  say();
-  const url = await keys(made);
+  let url = readJson(runnerJsonPath).sync?.url;
+  if (joining) {
+    say('4. Convex: skipped (this Mac joins a Threadbear another Mac set up)');
+    note('No Convex login and no deploy key here: either can do anything to the deployment. The first Mac deploys the backend, and gives this one its own key.');
+    say();
+    say('5. Keys: skipped (its key comes from the first Mac)');
+  } else {
+    convexLogin();
+    const made = await project();
+    say();
+    url = await keys(made);
+  }
   say();
   await runnerJson(url);
   say();
-  backend();
+  if (joining) say('7. Backend and website: skipped (the first Mac deploys them)');
+  else backend();
   say();
   install();
   say();
-  finish(url);
+  if (joining) joined();
+  else finish(url);
   say(dry ? '\nDry run done.' : '\nThreadbear is set up.');
 } catch (e) {
   if (!(e instanceof Fail)) throw e;

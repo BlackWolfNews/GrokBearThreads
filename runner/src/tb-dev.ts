@@ -462,7 +462,9 @@ function formatSync(y: NonNullable<RunnerStatus['sync']>, now: number): string {
   const pending = y.pending ? `, ${plural(y.pending, 'change', 'changes')} waiting` : '';
   if (y.state === 'error') return `Convex mirror: failing${where}: ${y.lastError ?? 'unknown error'}${y.retryAt ? `, retrying in ${duration(Math.max(0, Date.parse(y.retryAt) - now))}` : ''}${pending}`;
   const behind = y.backend && y.backend.apiVersion < y.backend.expected ? `; its backend is older than this runner (API ${y.backend.apiVersion}, wants ${y.backend.expected}): deploy it with runner/scripts/deploy-backend.mjs` : '';
-  return `Convex mirror: on${where} as ${y.name ?? y.runnerId ?? 'this runner'}${last}${pending}${behind}`;
+  const held = y.schedulesHeld ? `; ${y.schedulesHeld} schedule${y.schedulesHeld === 1 ? '' : 's'} too big (or taken) for this runner's key, so its schedules stay in schedules.json on this Mac (tb logs says which)` : '';
+  const rotating = y.ownerKeyRotating ? '; RUNNER_KEY_NEXT is still set, so two main keys work: finish with tb runner rotate-owner --finish' : '';
+  return `Convex mirror: on${where} as ${y.name ?? y.runnerId ?? 'this runner'}${last}${pending}${behind}${held}${rotating}`;
 }
 
 // The runner following main by itself (src/update.ts), one line.

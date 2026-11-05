@@ -15,6 +15,7 @@ import { TRUST_ALL } from './patch-trust.ts';
 import { land, landTargetFromGit, type LandTarget } from './worktrees.ts';
 import { activityCommand } from './activity.ts';
 import { pairCommand } from './pair.ts';
+import { runnerKeysCommand } from './runner-keys.ts';
 
 const OPTIONS = {
   cwd: { type: 'string' },
@@ -58,6 +59,16 @@ const OPTIONS = {
   reason: { type: 'string' },
   thread: { type: 'string' },
   'max-wait': { type: 'string' },
+  // tb runner
+  ssh: { type: 'string' },
+  id: { type: 'string' },
+  finish: { type: 'boolean' },
+  replace: { type: 'boolean' },
+  // tb runner audit (--remove is tb models' already)
+  drop: { type: 'string', multiple: true },
+  snapshot: { type: 'string' },
+  'keys-checked': { type: 'boolean' },
+  purge: { type: 'boolean' },
   lines: { type: 'string', short: 'n' },
   follow: { type: 'boolean', short: 'f' },
   since: { type: 'string' },
@@ -120,6 +131,21 @@ const HELP = `tb: talk to the Threadbear runner
                                   --dry-run stops before main moves
   tb pair                         what to copy to another Mac (this runner's token file and
                                   host) so its app can open this Mac's threads
+  tb runner add <name> (--ssh <host> | --out <file>) [--id <runnerId>]
+                                  on the main Mac: a backend key for another runner that acts
+                                  as that runner alone, written over ssh into its
+                                  secrets/convex-key (or a file); never printed
+  tb runner list [--json]         tb runner revoke <runnerId> [--purge]  (--purge: and take out all it wrote)
+  tb runner check [--ssh <host>]  whether a Mac with a runner key also has a deploy key or
+                                  Convex login (either can do anything to the deployment)
+  tb runner rotate-owner [--finish]
+                                  on the main Mac: a new RUNNER_KEY with no gap (NEXT, restart, finish);
+                                  not while Convex lists a deploy key made for another Mac
+                                  (CONVEX_TEAM_TOKEN for the run lets it ask; else --keys-checked)
+  tb runner audit [--drop 2,5 --snapshot <hex>]
+                                  what the old shared key could have left (tokens, keys,
+                                  schedules, cards, messages, pictures), numbered; --drop
+                                  takes out those rows, if the listing hasn't changed
   tb retitle [<threadId>...] [--dry-run] [--json]
                                   a model title for every thread still named by its first line,
                                   or for the ones given (never one named by hand)
@@ -165,6 +191,7 @@ const COMMAND_FLAGS: Record<string, string[]> = {
   rpc: [],
   land: ['dry-run'],
   pair: [],
+  runner: ['ssh', 'out', 'id', 'json', 'finish', 'replace', 'drop', 'snapshot', 'keys-checked', 'purge'],
 };
 
 // Read but never listed when a command refuses a flag: an agent that sees
@@ -220,6 +247,22 @@ async function main(argv: string[]): Promise<number> {
   if (cmd === 'land') return landCommand(cfg, Boolean(values['dry-run']));
   // Read from runner.json alone, on the Mac being paired.
   if (cmd === 'pair') return pairCommand(cfg);
+  // Straight to the backend with this Mac's key, so no runner needed either.
+  if (cmd === 'runner') {
+    const flags = { ...(typeof values.ssh === 'string' ? { ssh: values.ssh } : {}), ...(typeof values.out === 'string' ? { out: values.out } : {}), ...(typeof values.id === 'string' ? { id: values.id } : {}), json: Boolean(values.json), finish: Boolean(values.finish), replace: Boolean(values.replace), ...(Array.isArray(values.drop) ? { remove: values.drop as string[] } : {}), ...(typeof values.snapshot === 'string' ? { snapshot: values.snapshot } : {}), keysChecked: Boolean(values['keys-checked']), purge: Boolean(values.purge) };
+    // The audit asks this Mac's runner how far each of its threads goes.
+    const heads = async () => {
+      const client = await RunnerClient.connect(runnerUrl(cfg), readToken(cfg.home));
+      try {
+        await client.call('hello', { client: 'tb', version: '1' });
+        const r = await client.call<{ threads: ThreadSummary[] }>('threads.list', { include: ['inbox', 'snoozed', 'archived'] });
+        return r.threads.map((t) => ({ threadId: t.id, lastSeq: t.lastSeq }));
+      } finally {
+        client.close();
+      }
+    };
+    return runnerKeysCommand(cfg, args, flags, { heads });
+  }
   const url = runnerUrl(cfg);
   let client: RunnerClient;
   try {
