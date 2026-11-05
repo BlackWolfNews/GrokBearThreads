@@ -2473,6 +2473,15 @@ p{color:#8a8a90;font-size:12px;line-height:1.5;margin-top:18px}
       { id: 'tools', source: 'project', file: '/Users/mike/dev/me/misc/.threadbear/patches/tools.ts' },
     ];
   }
+  const hooked = threads.get('demo_build_scripts');
+  if (hooked) {
+    // A repo whose own Claude Code settings run a hook, not trusted yet:
+    // the runner started Claude without them (claude-trust.ts).
+    hooked.summary.patches = [
+      { id: 'claude-settings', source: 'claude', file: '/Users/mike/dev/photo-sync/.claude/settings.json',
+        untrusted: 'new', hash: 'c'.repeat(64), helpers: ['/Users/mike/dev/photo-sync/.claude/hooks/session-start.mjs'] },
+    ];
+  }
   const ios = threads.get('demo_button_colour');
   if (ios) {
     // A patch that came with a pull, not trusted yet: listed, not loaded.

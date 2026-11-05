@@ -29,10 +29,10 @@ struct ActionChips: View {
 
     private func row(_ shown: [Action], more: [Action]) -> some View {
         HStack(alignment: .bottom, spacing: zoomed(6)) {
-            let waiting = thread.patches.filter { $0.untrusted != nil }.count
-            if waiting > 0 {
+            let waiting = thread.patches.filter { $0.untrusted != nil }
+            if !waiting.isEmpty {
                 ActionShelfTab {
-                    WaitingPatchesChip(count: waiting) { app.showPane(.patches) }
+                    WaitingPatchesChip(waiting: waiting) { app.showPane(.patches) }
                 }
             }
             ForEach(Array(ActionShelf.shelves(shown, in: thread).enumerated()), id: \.offset) { _, shelf in
@@ -125,9 +125,19 @@ private struct ShelfBadge: View {
 
 /// Patch files in the thread's folder that haven't run because they
 /// aren't trusted yet. Opens Patches, where each can be read and trusted.
-private struct WaitingPatchesChip: View {
-    let count: Int
+struct WaitingPatchesChip: View {
+    let waiting: [PatchInfo]
     let open: () -> Void
+
+    /// "1 patch to trust", or the folder's Claude Code hooks when they're
+    /// what waits.
+    static func label(_ waiting: [PatchInfo]) -> String {
+        let claude = waiting.contains { $0.source == "claude" }
+        let patches = waiting.count - (claude ? 1 : 0)
+        if patches == 0 { return "Hooks to trust" }
+        if claude { return "\(waiting.count) to trust" }
+        return patches == 1 ? "1 patch to trust" : "\(patches) patches to trust"
+    }
 
     var body: some View {
         Button(action: open) {
@@ -135,7 +145,7 @@ private struct WaitingPatchesChip: View {
                 Image(systemName: "lock.shield")
                     .font(.system(size: zoomed(11), weight: .medium))
                     .foregroundStyle(Color(nsColor: Theme.needsYou))
-                Text(count == 1 ? "1 patch to trust" : "\(count) patches to trust")
+                Text(Self.label(waiting))
                     .foregroundStyle(.primary)
             }
             .font(.system(size: TypeScale.chip))
@@ -144,7 +154,9 @@ private struct WaitingPatchesChip: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .tip("This folder has patch files that haven't run, because you haven't trusted them yet. A patch is code that runs on your Mac. Open Patches to read and trust them.")
+        .tip(waiting.contains { $0.source == "claude" }
+             ? "This folder has Claude Code hooks or patch files that haven't run, because you haven't trusted them yet. Each is code that runs on your Mac. Open Patches to read and trust them."
+             : "This folder has patch files that haven't run, because you haven't trusted them yet. A patch is code that runs on your Mac. Open Patches to read and trust them.")
     }
 }
 

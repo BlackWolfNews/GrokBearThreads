@@ -360,12 +360,14 @@ struct PatchesList: View {
                 // Not loaded until trusted: it's code that would run on
                 // this Mac (docs/guide.md, "Patches").
                 HStack(spacing: zoomed(8)) {
-                    Text(untrusted == "changed" ? "Changed since you trusted it" : "Not run yet")
+                    Text(PatchesList.waitingText(patch, untrusted: untrusted))
                         .font(.system(size: TypeScale.detail))
                         .foregroundStyle(Color(nsColor: Theme.needsYou))
                     Button("Trust") { app.trustPatches([patch], in: thread.id) }
                         .controlSize(.small)
-                        .tip("Load this patch and let its code run on your Mac from now on. Open the file below to read it first.")
+                        .tip(patch.source == "claude"
+                             ? "Let this folder's Claude Code hooks, status line and MCP servers run on your Mac from your next message. Open the files below to read them first."
+                             : "Load this patch and let its code run on your Mac from now on. Open the file below to read it first.")
                 }
             } else if let error = patch.error {
                 Text(error)
@@ -412,14 +414,14 @@ struct PatchesList: View {
                         Button {
                             NSWorkspace.shared.open(URL(fileURLWithPath: helper))
                         } label: {
-                            Text("Imports " + helper.abbreviatingHome)
+                            Text((patch.source == "claude" ? "Also trusts " : "Imports ") + helper.abbreviatingHome)
                                 .font(.system(size: TypeScale.small))
                                 .foregroundStyle(Color(nsColor: Theme.faintText))
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                         }
                         .buttonStyle(.plain)
-                        .tip("Open this file it imports. Trusting the patch runs it too.")
+                        .tip(patch.source == "claude" ? "Open this file. Trusting covers it too." : "Open this file it imports. Trusting the patch runs it too.")
                     }
                 }
             } else if let folder = patch.folder, patch.projectId != nil {
@@ -437,8 +439,18 @@ struct PatchesList: View {
         switch source {
         case "builtin": return "built in"
         case "home": return "~/.threadbear"
+        case "claude": return "Claude Code settings"
         default: return "project"
         }
+    }
+
+    /// The orange line on a waiting row. The folder's Claude Code settings
+    /// say what was held back: the rest of them still apply.
+    static func waitingText(_ patch: PatchInfo, untrusted: String) -> String {
+        if patch.source == "claude" {
+            return untrusted == "changed" ? "Changed since you trusted them, so hooks are skipped" : "Hooks and commands skipped until you trust them"
+        }
+        return untrusted == "changed" ? "Changed since you trusted it" : "Not run yet"
     }
 
     /// "actions Typecheck, Reseed · panel Storybook · hook Typecheck".
