@@ -46,7 +46,10 @@ File references are where to look.
   `convex-key` is this Mac's key for your Convex backend (the deployment's
   `RUNNER_KEY` on your first Mac, a runner key of its own on any other);
   `runners/<id>.token` is another Mac's runner token, if you copied one
-  in, and `runners/<id>.host` beside it, which you copy in too (`tb pair`
+  in (only for Settings > Runners > Connect to other machines directly;
+  by default another Mac's threads come through your Convex backend, read
+  by your first Mac's runner while one is open, and nothing connects to
+  that Mac), and `runners/<id>.host` beside it, which you copy in too (`tb pair`
   on that Mac prints both): the only host the app sends that token to.
   The app only reads these; with no `.host` it sends the token nowhere;
   `~/Library/Caches/Threadbear/update`;

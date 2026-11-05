@@ -348,7 +348,12 @@ dashboard panel.
   `setProjects`, `upsertProjects`, `setSchedules`, `setAccounts`, `takeCommand`,
   `finishCommand`), its queries (`threadsOf`, `runnersList`,
   `messageHeads`, `pendingCommands`, which it holds as a live query) and
-  `pruneOld` for `crons.ts`. Each takes `key`: the deployment's
+  `pruneOld` for `crons.ts`. `convex/relay.ts` (API 43) is the main Mac's
+  runner reading another runner's thread (`remoteTail`, `remoteMessages`,
+  `remoteThread`) and queueing work for it (`queueCommand`, `commandState`,
+  `remoteAccounts`), owner key only, so the Mac app opens other Macs'
+  threads with no link to them (docs/protocol.md, "Other runners' threads
+  through the backend"). Each takes `key`: the deployment's
   `RUNNER_KEY` (the owner key, the main Mac's), or a runner key from
   `runnerKeys`, which acts as its own runner alone (`convex/lib.ts`
   `runnerAuth`, `convex/runnerAccess.ts`; the table of who may call what

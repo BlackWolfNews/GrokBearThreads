@@ -3285,7 +3285,7 @@ commands. Only the owner key can do this (`convex/relay.ts`, all owner
 only in Runner keys), so it's the main Mac's runner that answers; a runner
 on a runner key answers `-32000` for another runner's thread. The direct
 link above stays beside it while this is new: the app uses it only with
-**Settings > General > Open other Macs' threads directly** on (off by
+**Settings > Runners > Connect to other machines directly** on (off by
 default).
 
 - **Which threads.** A `THREAD_METHODS` request whose `threadId` isn't this

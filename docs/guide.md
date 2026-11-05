@@ -556,10 +556,18 @@ thread can run on any of them: pick the Mac under Runs on. It runs there
 even while this one is asleep, in that Mac's folder (leave the folder
 empty for its default). Its threads show on your phone and the website, and
 threads made on another Mac show in your sidebar too, with that Mac's
-icon in the row: open one and you're talking to that Mac directly (over
-Tailscale), so it needs that Mac to be on and its key and host copied to
-this one: run `tb pair` on that Mac and it prints the two files to make here
-and how. To add a Mac, give it a key of its own from this one: `tb runner
+icon in the row. Open one and this Mac reads it from your Convex backend
+and sends what you do there (messages, approvals, Stop, archive) for that
+Mac to pick up, the way your phone does, so there's no network link between
+the two Macs to set up. You see its messages and a line for each tool it
+used; the tool output, diffs and pictures stay on that Mac for now, and a
+tool row says so. Editing a message, its highlights and patches, and
+changing its login or model are done on that Mac. A Mac that's off shows
+its threads but can't take a message until it's back. Settings > Runners >
+Connect to other machines directly opens them over Tailscale instead, with
+everything, as before: that needs that Mac to be on and its key and host
+copied to this one (run `tb pair` on that Mac and it prints the two files
+to make here and how). To add a Mac, give it a key of its own from this one: `tb runner
 add <name> --ssh <that Mac>` writes it there, and its runner uses it from
 its next restart. Set that Mac up with `./threadbear setup --existing`, which
 leaves out the Convex login and deploy key (either could do anything to your
@@ -577,7 +585,7 @@ it names each one with the `tb runner add` that gives it its own, or
 `--lock-out` cuts it off on purpose), and
 `tb runner audit` lists the phone tokens, schedules, cards and messages the
 old one could have made, to take out any you don't recognise.
-Its pictures and files come from that Mac as you open them. To start a
+With the direct link on, its pictures and files come from that Mac as you open them. To start a
 thread on another Mac, pick it with the machine chip on the composer: the
 folder, account and model are then that Mac's. New threads start on the
 starred one: change it under Default in that chip's menu, or in

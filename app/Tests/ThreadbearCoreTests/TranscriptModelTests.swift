@@ -424,6 +424,32 @@ final class ThreadFeedTests: XCTestCase {
         XCTAssertEqual(feed.model.rows.map(\.id), ["u:1", "a:m1", "a:m2"])
     }
 
+    /// Another runner's thread through Convex (relay seqs): gaps are how
+    /// it is, so nothing waits for a catch-up, and a late event (an
+    /// approval's answer after later rows) lands where its seq says.
+    func testSparseFeedTakesGapsAndLateEvents() {
+        var feed = ThreadFeed(model: TranscriptModel(events: [E.user(13, "a")]))
+        feed.sparse = true
+        XCTAssertEqual(feed.receive(E.text(37, "m1", "b")), .scheduleFlush)
+        XCTAssertEqual(feed.receive(E.text(49, "m2", "c")), .scheduleFlush)
+        _ = feed.flush()
+        XCTAssertEqual(feed.model.rows.map(\.id), ["u:13", "a:m1", "a:m2"])
+        XCTAssertEqual(feed.receive(E.text(38, "m3", "late")), .scheduleFlush)
+        XCTAssertEqual(feed.receive(E.text(49, "m2", "c")), .scheduleFlush)
+        _ = feed.flush()
+        XCTAssertEqual(feed.model.rows.map(\.id), ["u:13", "a:m1", "a:m3", "a:m2"])
+        XCTAssertEqual(feed.acceptedSeq, 49)
+        // A subscribe reply with a gap doesn't ask again either.
+        XCTAssertEqual(feed.catchUp([E.text(61, "m4", "d")]), .scheduleFlush)
+    }
+
+    func testKnownStartMeansNothingOlder() {
+        var model = TranscriptModel(events: [E.user(13, "a")])
+        XCTAssertTrue(model.hasOlderEvents)
+        model.knownStart = true
+        XCTAssertFalse(model.hasOlderEvents)
+    }
+
     func testStillGappedAfterCatchUpAsksAgain() {
         var feed = ThreadFeed(model: TranscriptModel(events: [E.user(1, "a")]))
         _ = feed.receive(E.text(10, "m9", "z"))
