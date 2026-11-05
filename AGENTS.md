@@ -44,6 +44,10 @@ static site with its own `package.json`; its comments say how to build it.
   mode unless Mike asks for light: `screenshots.sh --appearance dark`,
   `sim-shots.sh --dark`, `dev-app.sh start --appearance dark`.
 - UI copy: plain words, no eyebrow or kicker labels, no em dashes.
+- A menu that picks one of several things with a default (a machine, a
+  file link's action, the browser) also sets the default from that same
+  menu, and marks the default with a star. Mike asked for it on the
+  runner menu on 5 Nov with "Again... like we have done for other menus".
 - `docs/guide.md` is the user guide, and every thread's agent is pointed at
   it (`guideLine` in `runner/src/threadbear-mcp.ts`). Keep it true when a
   change alters what someone using the app sees or does.
