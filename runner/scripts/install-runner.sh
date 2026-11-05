@@ -331,6 +331,8 @@ EOF
 # SIGKILL to anything left after that.
 unit_quote() {
   # systemd's own quoting: double quotes, with \ and " escaped, and % as %%.
+  # (WorkingDirectory and StandardOutput take a bare path instead, spaces
+  # and all; only the % needs doubling there.)
   printf '"%s"' "$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/%/%%/g')"
 }
 unit() {
@@ -345,7 +347,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 ExecStart=$(unit_quote "$NODE") $(unit_quote "$PROGRAM")
-WorkingDirectory=$(unit_quote "$WORKDIR")
+WorkingDirectory=$(printf '%s' "$WORKDIR" | sed -e 's/%/%%/g')
 Environment=$(unit_quote "PATH=$AGENT_PATH")
 Environment="LANG=C.UTF-8"
 EOF
@@ -359,8 +361,8 @@ Restart=always
 RestartSec=5
 KillMode=mixed
 TimeoutStopSec=30
-StandardOutput=append:$LOG
-StandardError=append:$LOG
+StandardOutput=append:${LOG//%/%%}
+StandardError=append:${LOG//%/%%}
 
 [Install]
 WantedBy=default.target
