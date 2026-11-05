@@ -2313,8 +2313,10 @@ patch or a helper names in a path starting `./` or `../`, anywhere in its
 text, from the patch's own folder or the folder holding `.threadbear/`
 (where commands run), each place that has it: the script a worktree
 `setup`, `check`, hook or action `run` calls, so a pull that changes only
-that script asks again. Those are hashed, not followed; pictures (an `icon`) are left out, and a named file
-that isn't there yet changes the hash when it turns up. A patch with no
+that script asks again. What a named script runs in turn is followed
+and hashed too (below, "What a script runs"); pictures (an `icon`) are
+left out, and a named file that isn't there yet changes the hash when it
+turns up. A patch with no
 local files hashes as its own text alone. Packages (`node:fs`, anything
 from `node_modules`) aren't followed: they're the folder's dependencies.
 
@@ -2355,17 +2357,71 @@ worked out in code) could run a file the hash never saw, so the patch
 isn't loaded at all, trusted or not: its `error` starts `Not run:`,
 names the command and says to put the steps in a script. The runner then
 runs the script by its absolute path (a hook's `exec`), every word
-quoted, so it's the hashed file that runs from whichever folder: a hook
-in a thread in a subfolder runs the patch folder's `./scripts/x.sh`, not
-the subfolder's. Home's patches and Threadbear's own checkout are
-trusted whatever they hold, so their commands run as written.
+quoted, from the folder holding `.threadbear/` (`cd '<folder>' &&
+'<script>' ...`), so it's the hashed file that runs, and the folder its
+own relative paths were followed from: a hook in a thread in a subfolder
+runs the patch folder's `./scripts/x.sh` from the patch folder, not the
+subfolder's. Home's patches and Threadbear's own checkout are trusted
+whatever they hold, so their commands run as written.
 
-Trusting a script trusts what it runs. The hash covers the script's
-bytes, not the files it calls, reads or installs (another script,
-`npm ci`, a Makefile), so a script should only run what it's fine to run
-as the repo has it then. An action's `run` isn't held to the rule: it
-runs only when someone presses its chip, which shows the command, and
-the scripts it names are hashed as above. Nor is `check`, which runs
+**What a script runs.** A trusted `./setup.sh` that runs `./helper.sh`
+must not run a changed helper unasked, so from every script a patch
+names, the runner follows what it can run or read in the repo and hashes
+it with the patch (`runner/src/script-trust.ts`), up to 300 files and 12
+scripts deep:
+
+- Shell scripts (by `#!` or `.sh`/`.bash`/`.zsh`), read with a small
+  shell lexer: a command that's a path (`./helper.sh`,
+  `"$(dirname "$0")/x.sh"`, `${0%/*}/x`, `"$DIR/x"` after
+  `DIR="$(cd "$(dirname "$0")" && pwd)"` or `$(git rev-parse
+  --show-toplevel)`), `source`/`.`, `sh`/`bash`/`zsh` with a file or a
+  literal `-c`, `node`/`bun`/`deno`/`tsx` with a file, what `env`,
+  `exec`, `nice`, `nohup`, `timeout`, `taskpolicy`, `xargs`,
+  `find -exec` and the like run, `trap` with literal code, and the
+  `$(...)`s in words, assignments and unquoted here-docs. A `cd` to a
+  path it can work out is followed, so later relative paths resolve.
+- Package scripts by a literal name: `npm run x`, `npm test`,
+  `yarn x`, `pnpm x`, `bun run x` hash the nearest `package.json` and
+  follow that script (and its `pre`/`post`) as shell from the package's
+  folder; `npm ci`/`install` (any package manager) follows the
+  lifecycle scripts (`preinstall`, `postinstall`, `prepare`...) of the
+  package, its workspaces and its `file:` dependencies; `npx x`/`bunx x`
+  hash `package.json`. `.npmrc`, `.yarnrc(.yml)`, `bunfig.toml`,
+  `.pnpmfile.cjs` and `pnpm-workspace.yaml` beside it are hashed, and
+  code they load followed.
+- `make`: the Makefile (and literal `include`s) is hashed and every
+  recipe line followed as shell, `$(MAKE)` as `make`.
+- JavaScript and TypeScript: imports, as for patch files, and every
+  plain string that's the path of a file in the repo
+  (`spawnSync('bash', ['scripts/x.sh'])`).
+- Any other file of the repo's a script names (an argument, `< file`,
+  `$(cat VERSION)`, a `./` path anywhere in its text) is hashed.
+
+What it can't follow, it doesn't guess at: `eval`, `alias`, `bash -c` or
+`trap` with code worked out as it runs, `$(cat "$f")` or `$(< "$f")`, a
+shell, `node` or `bun` reading its program from a pipe or a here-doc
+(`curl ... | sh`), a command in a variable or a pattern (`$CMD`,
+`"$f"` in a loop, `./s/*.sh`), `source "$1"`, relative paths after a
+`cd` to somewhere worked out as it runs, `npm run "$x"`, `npx "$x"`,
+workspace-wide runs (`-w`, `--filter`, `-r`), `node -e`, `--require`
+of a module worked out as it runs, a file that isn't there yet
+(`./build/out.sh`), another language (`python3 x.py`, a `#!` that isn't a
+shell or Node), an awk program that runs commands, `$(shell ...)` or
+`SHELL` in a Makefile, and setting `PATH` to a folder in the repo,
+`BASH_ENV`, `NODE_OPTIONS` that loads code and the like. A worktree
+`setup` or hook that names such a script fails closed: the patch isn't
+loaded, trusted or not, and its `error` starts `Not run:` with the file,
+line and what it couldn't follow. An action naming one still loads, as
+an action runs only when pressed.
+
+Programs on PATH and packages aren't followed, as installed: what one
+loads from the repo by its own rules (a test runner's tests, a linter's
+config, `npx bddgen`'s config) is the folder's to change, as
+`node_modules` is for patch files. So a script should run only tools
+it's fine to run on the repo as it is then. An action's `run` isn't held
+to the one-script rule: it runs only when someone presses its chip,
+which shows the command, and the scripts it names are hashed and
+followed as above. Nor is `check`, which runs
 when `tb land` does (the Land chip, or an agent that could run anything
 anyway). A live function (`items`, `when`, `badge`, `summary`) is the
 patch's own code, hashed with it, and `sh` runs what that code says.

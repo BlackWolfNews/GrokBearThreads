@@ -838,10 +838,14 @@ The same goes for a command a patch runs by itself, a worktree's setup or
 a hook: it has to be one script in the repo with plain words after it,
 like `./scripts/setup.sh --fast`, so trusting the patch covers what runs.
 One like `cd scripts && ./setup.sh` or `npm run setup` never runs, and
-Patches says to put the steps in a script. Trusting a script trusts what
-it runs in turn. A
-thread's worktree counts as its repo, and patches that were already in
-your folders when this arrived are trusted for you.
+Patches says to put the steps in a script. What that script runs in turn
+(another script, a package.json script by name, a Makefile) is covered
+too, so a change to any of them asks again. A script that runs something
+worked out as it runs (`eval`, `bash -c "$x"`, `curl ... | sh`, a command
+in a variable) can't be covered, so a setup or hook naming it never runs,
+and Patches says which line. A thread's worktree counts as its repo, and
+patches that were already in your folders when this arrived are trusted
+for you.
 
 A repo's own Claude Code settings are asked about the same way. When its
 `.claude/settings.json` or `.claude/settings.local.json` has hooks, a

@@ -334,6 +334,39 @@ test('changing only the setup script needs trusting again before a thread runs i
   assert.ok(fs.existsSync(path.join(p3, '.evil-ran')), 'the version trusted now runs');
 });
 
+// Daybreak verify-fix (5 Nov): the worktree's copy of a trusted patch
+// hashed the same when only a script its setup runs had changed, so the
+// changed helper ran before the first turn. Now the helper is in the hash.
+test("a worktree whose setup script is unchanged but whose helper changed doesn't run the setup; trusting that version does", async () => {
+  const opts = { actionShell: ['/bin/sh', '-c'], actionTimeoutMs: 10_000 };
+  const file = (main: string) => path.join(main, '.threadbear/patches/checks.ts');
+  const r = makeRepo(PATCH(`{ setup: "./setup.sh" }`));
+  // Committed: an unchanged setup.sh that runs a harmful helper. In the main
+  // checkout, not committed: a harmless helper, and that's what was trusted.
+  commit(r.main, { 'setup.sh': '#!/bin/sh\n"$(dirname "$0")/scripts/helper.sh"\n', 'scripts/helper.sh': '#!/bin/sh\ntouch .evil-ran\n' }, 'setup');
+  sh(r.main, 'chmod +x setup.sh scripts/helper.sh && git add -A && git commit -qm modes');
+  fs.writeFileSync(path.join(r.main, 'scripts/helper.sh'), '#!/bin/sh\ntouch .setup-ran\n');
+  const trust = new PatchTrust();
+  trust.trustCurrent([file(r.main)]);
+  const h = makeHarness(undefined, {}, { ...opts, patchTrust: trust });
+  const { thread } = h.runner.create({ text: 'Go', accountId: 'claude-3', cwd: r.main });
+  await until(() => h.adapter.sessions.length === 1, 'the CLI to start');
+  const wtPath = h.store.load(thread.id)!.worktree!.path;
+  assert.equal(fs.existsSync(path.join(wtPath, '.evil-ran')), false, "the worktree's changed helper didn't run");
+  assert.equal(h.events(thread.id).some((e) => e.type === 'action.run'), false);
+  const note = h.events(thread.id).filter((e) => e.type === 'system.note').at(-1);
+  assert.match(note?.text ?? '', /^Didn't run the worktree's setup \(\.\/setup\.sh\): its copy of the checks patch isn't a version you've trusted\./);
+
+  // Committing the helper that was trusted: the worktree's copy matches,
+  // and the setup runs it.
+  sh(r.main, 'git add -A && git commit -qm helper');
+  const h2 = makeHarness(undefined, {}, { ...opts, patchTrust: trust });
+  const made = h2.runner.create({ text: 'Go', accountId: 'claude-3', cwd: r.main });
+  await until(() => h2.adapter.sessions.length === 1, 'the CLI to start');
+  await until(() => h2.events(made.thread.id).some((e) => e.type === 'action.run'), 'the setup to run');
+  assert.ok(fs.existsSync(path.join(h2.store.load(made.thread.id)!.worktree!.path, '.setup-ran')));
+});
+
 test('threads.create takes worktree: false over RPC, and refuses a worktree that isn\'t a boolean', async () => {
   const { main } = makeRepo();
   const h = harness();

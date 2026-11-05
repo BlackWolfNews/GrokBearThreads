@@ -371,6 +371,7 @@ async function loadPatchFile(file: string, source: 'home' | 'project', cache: Pa
   // Before the cache: a file imported once and then changed by a pull is
   // asked about again, whatever's cached for it.
   let files: string[] | undefined;
+  let blocked: Record<string, string> | undefined;
   if (source === 'project') {
     let verdict;
     try {
@@ -383,9 +384,10 @@ async function loadPatchFile(file: string, source: 'home' | 'project', cache: Pa
     if (!verdict.trusted && verdict.reason === 'unchecked') return { info: { id, source, file, error: `Not run: ${verdict.problem}` }, panels: [], actions: [], hooks: [] };
     if (!verdict.trusted) return { info: { id, source, file, untrusted: verdict.reason, hash: verdict.hash, ...(verdict.helpers ? { helpers: verdict.helpers } : {}) }, panels: [], actions: [], hooks: [] };
     files = verdict.files;
+    blocked = verdict.blocked;
   }
   const hit = cache.get(file);
-  if (hit && hit.mtimeMs === mtimeMs) return files ? bindAutomatic(hit.loaded, file, files) : hit.loaded;
+  if (hit && hit.mtimeMs === mtimeMs) return files ? bindAutomatic(hit.loaded, file, files, blocked) : hit.loaded;
   let loaded: LoadedPatch;
   try {
     // The query makes Node load the file again after an edit: a module URL
@@ -396,7 +398,7 @@ async function loadPatchFile(file: string, source: 'home' | 'project', cache: Pa
     loaded = { info: { id, source, file, error: firstLine(e) }, panels: [], actions: [], hooks: [] };
   }
   cache.set(file, { mtimeMs, loaded });
-  return files ? bindAutomatic(loaded, file, files) : loaded;
+  return files ? bindAutomatic(loaded, file, files, blocked) : loaded;
 }
 
 // A trusted-by-hash patch's commands that run by themselves (its hooks and
@@ -404,19 +406,19 @@ async function loadPatchFile(file: string, source: 'home' | 'project', cache: Pa
 // words (automaticCommand), or the whole patch is refused with why, as a
 // patch whose code can't all be checked is. A copy, as `loaded` is cached.
 // Actions aren't held to it: one runs only when it's pressed.
-function bindAutomatic(loaded: LoadedPatch, file: string, files: string[]): LoadedPatch {
+function bindAutomatic(loaded: LoadedPatch, file: string, files: string[], blocked?: Record<string, string>): LoadedPatch {
   if (loaded.info.error) return loaded;
   const folder = path.dirname(path.dirname(path.dirname(file)));
   const refuse = (what: string, problem: string): LoadedPatch => ({ info: { ...loaded.info, error: `Not run: its ${what} ${problem}` }, panels: [], actions: [], hooks: [] });
   const hooks: Hook[] = [];
   for (const hook of loaded.hooks) {
-    const bound = automaticCommand(hook.command, folder, files);
+    const bound = automaticCommand(hook.command, folder, files, blocked);
     if ('problem' in bound) return refuse(`hook "${hook.title}"`, bound.problem);
     hooks.push({ ...hook, exec: bound.run });
   }
   let worktree = loaded.worktree;
   if (worktree?.setup) {
-    const bound = automaticCommand(worktree.setup, folder, files);
+    const bound = automaticCommand(worktree.setup, folder, files, blocked);
     if ('problem' in bound) return refuse('worktree setup', bound.problem);
     worktree = { ...worktree, setupRun: bound.run };
   }

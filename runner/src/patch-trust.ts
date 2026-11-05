@@ -28,7 +28,8 @@
 // theirs in turn (relative or absolute specifiers: `./lib/ask.ts`), so a
 // pull that changes only a helper is asked about too. Files it names in a
 // `./` or `../` path (the script its worktree setup or an action runs) are
-// hashed as well, as they run by themselves too. A patch with no local
+// hashed as well, as they run by themselves too, and so is what those
+// scripts run in turn (script-trust.ts). A patch with no local
 // files hashes as its own text alone, as it did before helpers counted.
 // Packages (`node:fs`, `zod`) aren't followed: they're the folder's
 // dependencies, as `npm install` put them there, and hashing node_modules
@@ -49,12 +50,15 @@ import { fileURLToPath } from 'node:url';
 import { parseSync } from 'oxc-parser';
 import { atomicWriteFileSync } from './fsutil.ts';
 import { claudeCommands, isClaudeSettingsFile } from './claude-trust.ts';
+import { reachOf } from './script-trust.ts';
 
 export type TrustVerdict =
   // `files`: the local files its hash covered, real paths. Absent when the
   // folder is trusted whatever it holds (home's, Threadbear's own), which
   // is how the loader knows not to hold its commands to automaticCommand.
-  | { trusted: true; files?: string[] }
+  // `blocked`: scripts it names that run something patch trust can't
+  // follow, with why; a command that runs by itself can't be one.
+  | { trusted: true; files?: string[]; blocked?: Record<string, string> }
   | { trusted: false; reason: 'new' | 'changed'; hash: string; helpers?: string[] }
   // Nothing can trust it as it stands (see the top): `problem` says why.
   | { trusted: false; reason: 'unchecked'; problem: string };
@@ -184,7 +188,7 @@ export class PatchTrust implements PatchTrustStore {
     const known = this.folders.get(key);
     if (known?.includes(hash)) {
       entry.trusted = true;
-      return { trusted: true, files: deps.map((d) => d.path) };
+      return { trusted: true, files: deps.map((d) => d.path), ...(entry.blocked ? { blocked: entry.blocked } : {}) };
     }
     const helpers = deps.map((d) => d.path);
     const before = known?.some((h) => !h.startsWith(CLAUDE_PREFIX));
@@ -294,7 +298,8 @@ type HashEntry = PatchHash & { mtimeMs: number; trusted?: boolean };
 // `deps` are the local files hashed with it; `unnamed`, paths it names that
 // aren't there (so one turning up changes the hash); `incomplete`, why the
 // hash can't cover everything it loads, when it can't.
-export type PatchHash = { hash: string; deps: Dep[]; unnamed: string[]; incomplete?: string };
+// `blocked`, the named scripts that run something it can't follow, and why.
+export type PatchHash = { hash: string; deps: Dep[]; unnamed: string[]; incomplete?: string; blocked?: Record<string, string> };
 
 // A patch file's hash: its own text's alone when it has no local files,
 // else one over its text and each file's, by path relative to the patch
@@ -319,6 +324,7 @@ export function patchHash(file: string): PatchHash {
     deps.push(dep);
     return true;
   };
+  const named = new Set<string>();
   const queue: { from: string; text: string }[] = [{ from: root, text: text.toString('utf8') }];
   scan: while (queue.length) {
     const { from, text: src } = queue.shift()!;
@@ -344,12 +350,12 @@ export function patchHash(file: string): PatchHash {
         }
       }
     }
-    // Named files are hashed as they are, not followed: a script is its own
-    // program, run by a shell, and what it runs in turn is past what this
-    // follows. From both places a path is read from, each that's there: the
-    // first alone left the folder's own `./setup.sh` out whenever the patch
-    // folder had one of the same name. A command that `cd`s first isn't
-    // worked out here; automaticCommand refuses one that runs by itself.
+    // Named files are hashed, and what a named script runs in turn is
+    // followed below (script-trust.ts). From both places a path is read
+    // from, each that's there: the first alone left the folder's own
+    // `./setup.sh` out whenever the patch folder had one of the same name.
+    // A command that `cd`s first isn't worked out here; automaticCommand
+    // refuses one that runs by itself.
     for (const spec of namedPaths(src)) {
       const tries = [path.resolve(path.dirname(from), spec), path.resolve(folder, spec)];
       for (const t of tries) {
@@ -358,14 +364,33 @@ export function patchHash(file: string): PatchHash {
           continue;
         }
         const target = realpath(t);
+        named.add(target);
         if (seen.has(target)) continue;
         seen.add(target);
         if (!add({ path: target, mtimeMs: mtimeOf(target) })) break scan;
       }
     }
   }
+  // What each named script runs, reads and sources, followed through
+  // shells, package scripts and imports: a trusted `./setup.sh` that runs
+  // `./helper.sh` ran a changed helper unasked (Daybreak verify-fix,
+  // 5 Nov). Its own bound, so a big script doesn't stop the patch loading.
+  const top = repoTop(realpath(folder));
+  let blocked: Record<string, string> | undefined;
+  for (const script of named) {
+    if (!isInside(script, top) || PICTURES.includes(path.extname(script).toLowerCase())) continue;
+    const reach = reachOf(script, { folder: realpath(folder), top, scanJs: scriptScan, resolveImport: resolveHelper, namedPaths });
+    for (const f of reach.files) {
+      if (seen.has(f)) continue;
+      seen.add(f);
+      deps.push({ path: f, mtimeMs: mtimeOf(f) });
+    }
+    for (const m of reach.missing) unnamed.add(m);
+    if (reach.problem) (blocked ??= {})[script] = reach.problem;
+  }
   const missing = [...unnamed];
-  if (!deps.length) return { hash: own, deps, unnamed: missing, ...(incomplete ? { incomplete } : {}) };
+  const extra = { ...(incomplete ? { incomplete } : {}), ...(blocked ? { blocked } : {}) };
+  if (!deps.length) return { hash: own, deps, unnamed: missing, ...extra };
   const dir = path.dirname(root);
   const lines = deps
     .map((d) => {
@@ -378,7 +403,18 @@ export function patchHash(file: string): PatchHash {
       return `${path.relative(dir, d.path)} ${h}`;
     })
     .sort();
-  return { hash: sha256(Buffer.from(['threadbear-patch-2', own, ...lines].join('\n'))), deps, unnamed: missing, ...(incomplete ? { incomplete } : {}) };
+  return { hash: sha256(Buffer.from(['threadbear-patch-2', own, ...lines].join('\n'))), deps, unnamed: missing, ...extra };
+}
+
+// scanModule for a script a patch's command runs: its problem as words.
+function scriptScan(src: string, file: string): { specifiers: string[]; strings: string[]; problem?: string } {
+  const { specifiers, strings, problem } = scanModule(src, file);
+  if (!problem) return { specifiers, strings };
+  return {
+    specifiers,
+    strings,
+    problem: problem.kind === 'parse' ? `can't be read (${problem.code}, line ${problem.line}), so patch trust can't check what it loads.` : `line ${problem.line} loads code by a name worked out as it runs (\`${problem.code}\`), which patch trust can't follow.`,
+  };
 }
 
 const SCANNED = ['.ts', '.mts', '.cts', '.js', '.mjs', '.cjs', '.tsx', '.jsx'];
@@ -396,7 +432,9 @@ const SCANNED = ['.ts', '.mts', '.cts', '.js', '.mjs', '.cjs', '.tsx', '.jsx'];
 // it out (`createRequire`, `node:module`, `getBuiltinModule`), workers, vm
 // and eval. Not shell commands or child processes: a patch's commands run
 // anything by design, and the scripts they name are hashed (namedPaths).
-export type ModuleScan = { specifiers: string[]; problem?: { kind: 'computed' | 'parse'; line: number; code: string } };
+// `strings`: every plain string in it, which a script's checks read for
+// paths of files it may run (script-trust.ts).
+export type ModuleScan = { specifiers: string[]; strings: string[]; problem?: { kind: 'computed' | 'parse'; line: number; code: string } };
 
 export function scanModule(src: string, file: string): ModuleScan {
   const ext = path.extname(file);
@@ -405,14 +443,15 @@ export function scanModule(src: string, file: string): ModuleScan {
   try {
     parsed = parseSync(file, src, { sourceType, preserveParens: false });
   } catch (e) {
-    return { specifiers: [], problem: { kind: 'parse', line: 1, code: e instanceof Error ? e.message : String(e) } };
+    return { specifiers: [], strings: [], problem: { kind: 'parse', line: 1, code: e instanceof Error ? e.message : String(e) } };
   }
   const lineAt = (at: number) => src.slice(0, at).split('\n').length;
   if (parsed.errors.length) {
     const err = parsed.errors[0];
-    return { specifiers: [], problem: { kind: 'parse', line: lineAt(err.labels[0]?.start ?? 0), code: err.message } };
+    return { specifiers: [], strings: [], problem: { kind: 'parse', line: lineAt(err.labels[0]?.start ?? 0), code: err.message } };
   }
   const specifiers = new Set<string>();
+  const strings = new Set<string>();
   let problem: { start: number; end: number } | undefined;
   const refuse = (n: AstNode) => {
     if (!problem || n.start < problem.start) problem = { start: n.start, end: n.end };
@@ -441,6 +480,8 @@ export function scanModule(src: string, file: string): ModuleScan {
   while (stack.length) {
     const { node, parent, key } = stack.pop()!;
     if (TYPE_ONLY.has(node.type)) continue;
+    const text = plainString(node);
+    if (text !== undefined && strings.size < 5000) strings.add(text);
     switch (node.type) {
       case 'ImportDeclaration':
       case 'ExportNamedDeclaration':
@@ -487,6 +528,7 @@ export function scanModule(src: string, file: string): ModuleScan {
   }
   return {
     specifiers: [...specifiers],
+    strings: [...strings],
     ...(problem ? { problem: { kind: 'computed' as const, line: lineAt(problem.start), code: src.slice(problem.start, problem.end).replace(/\s+/g, ' ').slice(0, 80) } } : {}),
   };
 }
@@ -556,7 +598,7 @@ export type AutomaticCommand = { run: string } | { problem: string };
 
 const PLAIN_WORD = /^[A-Za-z0-9_@%+=:,./-]+$/;
 
-export function automaticCommand(command: string, folder: string, files: string[]): AutomaticCommand {
+export function automaticCommand(command: string, folder: string, files: string[], blocked: Record<string, string> = {}): AutomaticCommand {
   const words = command.trim().split(/[ \t]+/);
   const fix = 'Put the steps in a script in the repo and name just that, like "./scripts/setup.sh --fast", so trusting the patch covers what runs.';
   if (!words.every((w) => PLAIN_WORD.test(w))) {
@@ -573,8 +615,17 @@ export function automaticCommand(command: string, folder: string, files: string[
   if (!files.includes(real)) {
     return { problem: `\`${command}\` runs ${script}, which patch trust didn't hash: write the path in the patch as plain text ("${script}"), not worked out in code.` };
   }
+  const why = Object.hasOwn(blocked, real) ? blocked[real] : undefined;
+  if (why) {
+    return {
+      problem: `\`${command}\` runs by itself, but patch trust can't follow everything ${script} runs, so trusting the patch couldn't cover it: ${why} Run other scripts by a plain path ("./scripts/x.sh") and package scripts by a plain name ("npm run build").`,
+    };
+  }
   const quote = (w: string) => `'${w.replace(/'/g, `'\\''`)}'`;
-  return { run: [real, ...args].map(quote).join(' ') };
+  // From the folder holding .threadbear/, which is where the follow
+  // started: a hook in a thread in a subfolder ran from there, so the
+  // script's own relative paths named files nothing had hashed.
+  return { run: `cd ${quote(realpath(folder))} && ${[real, ...args].map(quote).join(' ')}` };
 }
 
 // The top of the git checkout (or worktree) `dir` is in, else `dir`.
