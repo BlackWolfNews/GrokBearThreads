@@ -42,11 +42,31 @@ extension AppModel {
             listed.insert(summary.id)
             madeRemote.remove(summary.id)
             if liveRemote.contains(summary.id), next[summary.id] != nil { continue }
-            next[summary.id] = summary
+            next[summary.id] = withRelayCard(summary)
         }
         let gone = next.values.filter { $0.isRemote && !listed.contains($0.id) && !liveRemote.contains($0.id) && !madeRemote.contains($0.id) }.map(\.id)
         if next != threads { threads = next }
         for id in gone { forget(id) }
+    }
+
+    /// A thread read through Convex has the table's row for a summary,
+    /// and that row has no card (thread-index.ts leaves the asks out, as
+    /// they'd cost a write each). The card still comes, in the relay's
+    /// events, so the transcript draws it, but picking an answer and
+    /// sending it go by the summary's `needs`, `asks` and `asksSeq`
+    /// (Decisions.isOpen), and without them every click on it did nothing
+    /// (Mike, 6 Nov, on a Hetzner thread). So while it's open here they
+    /// come from the card it's showing, in the relay's seqs like the card.
+    func withRelayCard(_ summary: ThreadSummary) -> ThreadSummary {
+        guard summary.isRemote, !directRemoteLink else { return summary }
+        return Decisions.withCard(summary, sessions[summary.id]?.openCard)
+    }
+
+    /// A relayed thread's card came or went (ThreadSession.syncOpenCard).
+    func relayCardChanged(_ threadId: String) {
+        guard viaRelay(threadId), let thread = threads[threadId] else { return }
+        let next = withRelayCard(thread)
+        if next != thread { threads[threadId] = next }
     }
 
     func isRemote(_ threadId: String) -> Bool { threads[threadId]?.isRemote == true }

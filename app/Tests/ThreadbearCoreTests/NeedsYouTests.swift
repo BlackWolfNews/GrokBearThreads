@@ -147,6 +147,29 @@ final class NeedsYouTests: XCTestCase {
         XCTAssertNil(model.openCard)
     }
 
+    /// Another runner's thread read through Convex has the sidebar row for
+    /// its summary, with no asks, so its card drew but every pick on it
+    /// did nothing (Mike, 6 Nov, a Hetzner thread). The card it shows
+    /// fills them in, in its own seq, and takes them away once answered.
+    func testARelayedThreadsCardCanBeAnswered() {
+        let row = ThreadSummary(id: "t1", title: "On Hetzner", status: .idle)
+        XCTAssertFalse(Decisions.isOpen(row), "the row alone can't be answered")
+
+        var model = TranscriptModel(events: [done(9, turn: "t1", needs: "you", asks: [["action": "Start the spike?", "options": ["Start the spike", "Not yet"]]])])
+        let open = Decisions.withCard(row, model.openCard)
+        XCTAssertTrue(Decisions.isOpen(open))
+        XCTAssertEqual(open.asksSeq, 9)
+        XCTAssertEqual(open.asks.map(\.action), ["Start the spike?"])
+        XCTAssertEqual(Decisions.answers(asks: open.asks, picks: [0: 0]).map(\.answer.answer), ["Start the spike"])
+
+        // Answered: nothing left to pick.
+        _ = model.apply([E.event(10, "user.message", ["text": "Start the spike?\nStart the spike", "images": []], turn: "t2")])
+        XCTAssertFalse(Decisions.isOpen(Decisions.withCard(open, model.openCard)))
+        // A done card has nothing to answer either.
+        let finished = TranscriptModel(events: [done(1, turn: "t1", needs: "nothing", next: ["Tidy notes"])])
+        XCTAssertFalse(Decisions.isOpen(Decisions.withCard(row, finished.openCard)))
+    }
+
     /// Sent is answered: the card doesn't wait for the runner to show the
     /// message, which can sit queued for a while. A failed send brings it back.
     func testTheOpenCardGoesOnceHisReplyIsOnItsWay() {

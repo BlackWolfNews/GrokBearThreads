@@ -508,7 +508,9 @@ final class ThreadSession {
 
     private func syncOpenCard() {
         let card = feed.model.openCard
-        if card != openCard { openCard = card }
+        guard card != openCard else { return }
+        openCard = card
+        app?.relayCardChanged(threadId)
     }
 
     // MARK: Older rows
