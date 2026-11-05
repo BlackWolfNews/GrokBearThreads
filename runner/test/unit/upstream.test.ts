@@ -12,7 +12,10 @@ import { PATIENCE_MS } from '../helpers/patience.ts';
 // Commits and tags in the throwaway repos need a name, and must not pick
 // up a signing setup from whoever runs the tests.
 const GIT_ENV = { ...process.env, GIT_AUTHOR_NAME: 'Mike', GIT_AUTHOR_EMAIL: 'mike@example.com', GIT_COMMITTER_NAME: 'Mike', GIT_COMMITTER_EMAIL: 'mike@example.com', GIT_CONFIG_GLOBAL: '/dev/null' };
-Object.assign(process.env, { GIT_CONFIG_GLOBAL: '/dev/null' });
+// The runner's own git (the signed tag) needs a name too: with no global
+// config, git on macOS makes one up from the hostname, but on Linux it
+// refuses ("Committer identity unknown").
+Object.assign(process.env, { GIT_CONFIG_GLOBAL: '/dev/null', GIT_COMMITTER_NAME: 'Mike', GIT_COMMITTER_EMAIL: 'mike@example.com' });
 
 function git(cwd: string, ...args: string[]): string {
   const r = spawnSync('git', ['-C', cwd, '-c', 'commit.gpgsign=false', '-c', 'tag.gpgsign=false', ...args], { encoding: 'utf8', env: GIT_ENV });
