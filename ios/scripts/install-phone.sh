@@ -26,11 +26,22 @@ else
   echo "No API key at $ASC_KEY: signing with whatever Xcode has (sign in to Xcode if this fails)"
   extra+=(-allowProvisioningUpdates)
 fi
+# The derived data lives in /tmp and is shared by every thread, and on
+# 5 Nov it was left with package checkouts and binary frameworks half gone
+# (convex-swift with no Package.swift, Sentry's xcframework with no
+# Info.plist), which fails every build until it's cleared. Packages are
+# cheap to fetch again, so drop them when any look broken.
+if [[ -d "$DD/SourcePackages" ]]; then
+  broken=0
+  for d in "$DD"/SourcePackages/checkouts/*(N/); do [[ -f "$d/Package.swift" ]] || broken=1; done
+  for f in "$DD"/SourcePackages/artifacts/**/*.xcframework(N/); do [[ -f "$f/Info.plist" ]] || broken=1; done
+  (( broken )) && { echo "Package cache in $DD looks damaged; fetching packages again"; rm -rf "$DD/SourcePackages"; }
+fi
 # Release says production for APNs (the App Store build), but this build is
 # development-signed, so its pushes come through the sandbox.
 xcodebuild -project Threadbear.xcodeproj -scheme Threadbear -configuration "$CONFIG" \
   -destination 'generic/platform=iOS' -derivedDataPath "$DD" "${extra[@]}" \
-  THREADBEAR_APS_ENVIRONMENT=development build | grep -E " error:|BUILD (SUCCEEDED|FAILED)"
+  THREADBEAR_APS_ENVIRONMENT=development build | grep -E "(^| )error:|BUILD (SUCCEEDED|FAILED)"
 APP="$DD/Build/Products/$CONFIG-iphoneos/Threadbear.app"
 [[ "${BUILD_ONLY:-0}" == 1 ]] && { echo "Built $APP"; exit 0; }
 xcrun devicectl device install app --device "$DEVICE" "$APP"
