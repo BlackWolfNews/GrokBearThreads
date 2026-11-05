@@ -2,7 +2,7 @@
 // row is "the current state of X" as the owning runner last wrote it; the
 // runner stays the source of truth and this is never read back by it.
 // Only what a phone needs: no transcripts or tool output, and the only images
-// are what an agent showed Mike on purpose (replyImages) or a shared thread's.
+// are what an agent showed Mike on purpose or he pasted (replyImages), or a shared thread's.
 import { defineSchema, defineTable } from 'convex/server';
 import { v } from 'convex/values';
 

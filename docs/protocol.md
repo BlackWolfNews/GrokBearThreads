@@ -1588,7 +1588,10 @@ with the picture's thumbnail, and his bubble draws the markers as chips
 too. The pictures still show over the text, as before. The iPhone
 app's composer does the same with photos pasted, taken or chosen, and
 its bubbles draw any `[Picture N]` as a chip with the photo symbol, as
-the phone gets a message's words but not its pictures. An ask's
+the phone isn't given a message's pictures. The runner sends pictures pasted
+into a message to the backend as they're sent, unless `sync.pastedPictures` is
+false in `runner.json`, each with `src` `picture:N`; the website draws them in
+place of the marker, and a chip where one didn't go up. An ask's
 Something else box on the Mac takes pictures as chips too (Needs you).
 
 The runner hands the agent the words and pictures in that order: each

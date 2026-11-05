@@ -99,7 +99,9 @@ what the agent copies into `THREADBEAR_MEDIA_DIR`), never its working
 folder or a temp folder (docs/protocol.md, "Sharing"). A picture written in
 a message's Markdown (`src`) takes the place of that Markdown image; the
 rest go after the row they came with. Mike's own thread page shows them
-too (`phone:messages` returns them). A Markdown picture that wasn't
+too (`phone:messages` returns them), with what he pasted into his own messages
+(`src` `picture:N`, `web/src/picture-chips.ts`), which goes up for every thread as
+it's sent, never for a shared page. A Markdown picture that wasn't
 uploaded shows as its alt text, not a broken image.
 
 Sharing with specific people (an emailed code, through Resend) was built

@@ -17,6 +17,7 @@ import { CommandState } from './command-state';
 import { previewOf, ShareControl, SharePage } from './share';
 import { busy, Lists, ResizeHandle, type Row, useSidebarWidth } from './sidebar';
 import { Pop } from './menu';
+import { pastedOf } from './picture-chips';
 import { Rail } from './rail';
 import { NewThread, ProjectPage, ProjectsList, RunnerPage, RunnersList, ScheduledList, SchedulePage, UsageList, UsagePage } from './pages';
 import { duration, fold, splitTurns, type Item } from './turns';
@@ -223,8 +224,8 @@ function ThreadView({ token, threadId }: { token: string; threadId: string }) {
     return (
       <div key={m.seq} className={`msg ${m.role}`}>
         {from ? <div className="origin">{from.who}</div> : m.role === 'user' && m.origin && m.origin !== 'user' && m.origin !== 'phone' ? <div className="origin">{originLabel(m.origin)}</div> : null}
-        {from ? <MessageText text={from.body} pictures={inText} seq={m.seq} rows={messages} threadPath={linkTo} /> : <MessageText text={m.text} pictures={inText} seq={m.seq} rows={messages} threadPath={linkTo} pictureChips={m.role === 'user'} />}
-        <Pictures items={after.get(m.seq) ?? []} />
+        {from ? <MessageText text={from.body} pictures={inText} seq={m.seq} rows={messages} threadPath={linkTo} /> : <MessageText text={m.text} pictures={inText} seq={m.seq} rows={messages} threadPath={linkTo} pictureChips={m.role === 'user'} pasted={m.role === 'user' ? pastedOf(pictures, m.seq, m.text).byNumber : undefined} />}
+        <Pictures items={[...(after.get(m.seq) ?? []), ...(m.role === 'user' ? pastedOf(pictures, m.seq, m.text).unplaced : [])]} />
       </div>
     );
   };
@@ -240,7 +241,7 @@ function ThreadView({ token, threadId }: { token: string; threadId: string }) {
           <span className="sep">/</span>
           <h1>{t.title || 'Untitled'}</h1>
         </div>
-        <ShareControl token={token} threadId={threadId} share={t.share} preview={previewOf(t.title, messages, pictures)} />
+        <ShareControl token={token} threadId={threadId} share={t.share} preview={previewOf(t.title, messages, pictures.filter((p) => !p.src?.startsWith('picture:')))} />
         <MoreMenu
           items={[
             { label: 'Copy link', icon: <Icon.Link />, run: () => void navigator.clipboard.writeText(location.origin + location.pathname) },

@@ -1,11 +1,23 @@
 // [Picture N] in Mike's own message stands for a picture he pasted
-// (docs/protocol.md, "Pictures in a message"). The Mac draws it as a chip with
-// the picture behind it; here there's only the chip, as a pasted picture
-// doesn't leave the Mac. Done on the parsed Markdown, so a marker in code
-// stays as typed. Turned into a link the `a` renderer knows by its address.
+// (docs/protocol.md, "Pictures in a message"). The picture goes in its place when
+// the runner sent it up (`src` picture:N), and a chip when it didn't: pasted
+// before that, too big, or kept on the Mac (`sync.pastedPictures`). Done on the
+// parsed Markdown, so a marker in code stays as typed. Turned into a link the
+// `a` renderer knows by its address.
 type Node = { type: string; value?: string; url?: string; children?: Node[] };
 
 const SCHEME = 'picture:';
+
+// One message's pasted pictures: which ones it has, by number, out of everything
+// the page loaded, and those its words don't place, which go under it.
+export function pastedOf<T extends { seq: number; src?: string; url: string }>(pictures: T[], seq: number, text: string): { byNumber: Map<number, string>; unplaced: T[] } {
+  const mine = pictures.filter((p) => p.seq === seq && p.src && pictureNumber(p.src) !== undefined);
+  const placed = new Set([...text.matchAll(/\[Picture ([1-9]\d{0,2})\]/g)].map((m) => Number(m[1])));
+  return {
+    byNumber: new Map(mine.map((p) => [pictureNumber(p.src!)!, p.url])),
+    unplaced: mine.filter((p) => !placed.has(pictureNumber(p.src!)!)),
+  };
+}
 
 export function pictureNumber(url: string): number | undefined {
   const m = url.startsWith(SCHEME) ? url.slice(SCHEME.length) : '';

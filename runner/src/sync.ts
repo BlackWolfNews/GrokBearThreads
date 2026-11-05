@@ -22,7 +22,7 @@ import crypto from 'node:crypto';
 import { ConvexClient } from 'convex/browser';
 import { phonePicture } from './project-icons.ts';
 import { RunnerStats, type MachineStats } from './runner-stats.ts';
-import { imagesInEvent, readReplyImage, readShareImage, replyImagesInEvent, type ReplyImage, type ShareImage } from './share-images.ts';
+import { imagesInEvent, pastedImagesInEvent, readReplyImage, readShareImage, replyImagesInEvent, type ReplyImage, type ShareImage } from './share-images.ts';
 import { extForMediaType, sniffImage } from './media.ts';
 import { makeFunctionReference } from 'convex/server';
 import type { Clock, TimerHandle } from './clock.ts';
@@ -93,6 +93,7 @@ export type SyncConfig = {
   runnerId?: string;
   icon?: string;
   rpcUrl?: string;
+  pastedPictures?: boolean;
 };
 
 // runner.status's `sync` (docs/protocol.md, "Sync").
@@ -1397,7 +1398,7 @@ export class ConvexSync {
     // Only to a backend that takes them: an older one would leave them
     // queued, and a start looks through recent threads once it's new enough.
     if ((this.backendApiVersion ?? 0) >= REPLY_IMAGES_API_VERSION) {
-      const found = replyImagesInEvent(e, this.cwdOf(threadId));
+      const found = [...replyImagesInEvent(e, this.cwdOf(threadId)), ...(this.deps.config.pastedPictures === false ? [] : pastedImagesInEvent(e))];
       if (found.length) {
         this.pendingReplyImages.push(...found.map((i) => ({ ...i, threadId })));
         this.scheduleFlush();

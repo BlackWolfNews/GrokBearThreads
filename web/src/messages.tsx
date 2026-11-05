@@ -101,6 +101,7 @@ export function MessageText({
   rows,
   threadPath,
   pictureChips,
+  pasted,
 }: {
   text: string;
   pictures?: Map<string, string>;
@@ -108,6 +109,8 @@ export function MessageText({
   rows?: PageMessage[];
   threadPath?: (id: string) => string;
   pictureChips?: boolean;
+  // This message's pasted pictures that went up, by number (picture-chips.ts).
+  pasted?: Map<number, string>;
 }) {
   return (
     <div className="md" id={seq === undefined ? undefined : stepId(seq)}>
@@ -123,8 +126,16 @@ export function MessageText({
           a: ({ node: _, href, children, ...p }) => {
             const picture = href ? pictureNumber(href) : undefined;
             if (picture !== undefined) {
+              const url = pasted?.get(picture);
+              if (url) {
+                return (
+                  <a className="pasted" href={url} target="_blank" rel="noreferrer" title={`Picture ${picture}, click to open it`}>
+                    <img src={url} alt={`Picture ${picture}`} loading="lazy" />
+                  </a>
+                );
+              }
               return (
-                <span className="picture-chip" title="Pictures you paste stay on your Mac, so they don't show here">
+                <span className="picture-chip" title="This picture is only on your Mac: it was pasted before pictures went up, is over 10 MB, or pictures are turned off on that runner">
                   <Icon.Photo />
                   Picture {picture}
                 </span>

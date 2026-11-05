@@ -1549,7 +1549,7 @@ test('a row carries who started it, once the backend takes it', async () => {
 });
 
 // Reply pictures: for any thread, shared or not, once the backend takes them.
-function setupReplyImages(opts: { backend?: number; uploadFails?: () => Error | undefined } = {}) {
+function setupReplyImages(opts: { backend?: number; uploadFails?: () => Error | undefined; pastedPictures?: boolean } = {}) {
   const h = makeHarness();
   const dir = tmpDir();
   const png = path.join(dir, 'guide.png');
@@ -1565,7 +1565,7 @@ function setupReplyImages(opts: { backend?: number; uploadFails?: () => Error | 
   // A runner start is a new ConvexSync over the same mirror.
   const fresh = () =>
     new ConvexSync({
-      config: { enabled: true, url: 'https://x.convex.cloud', runnerId: 'r1' },
+      config: { enabled: true, url: 'https://x.convex.cloud', runnerId: 'r1', ...(opts.pastedPictures === false ? { pastedPictures: false } : {}) },
       key: 'k',
       runner: h.runner,
       version: '0.1.0+test',
@@ -1622,6 +1622,38 @@ test('reply pictures: from a thread that is not shared, with their size, new one
   await settle(sync);
   assert.equal(uploads.length, 2);
   assert.notEqual(added()[1]!.seq, added()[0]!.seq);
+  await sync.stop();
+});
+
+test('pasted pictures: go up as they are sent, each named for its marker, never looked back for', async () => {
+  const { h, fresh, uploads, added, png, settle } = setupReplyImages();
+  const before = h.runner.create({ text: 'old', images: [{ path: png, mediaType: 'image/png' }], cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  await tick();
+  const sync = fresh();
+  sync.start();
+  await settle(sync);
+  assert.deepEqual(uploads, [], 'one from before this runner started stays on the Mac');
+  await h.runner.send(before.id, 'this [Picture 1] like [Picture 2]', [{ path: png, mediaType: 'image/png' }, { path: png, mediaType: 'image/png' }]);
+  await tick();
+  await settle(sync);
+  // The runner copies a message's pictures into the thread's own media folder.
+  assert.deepEqual(added().map((a) => [a.threadId, a.src, a.width]), [[before.id, 'picture:1', 400], [before.id, 'picture:2', 400]]);
+  assert.ok(added().every((a) => String(a.path).includes('/media/')));
+  assert.equal(added()[0]!.seq, added()[1]!.seq);
+  await sync.stop();
+});
+
+test('pasted pictures: runner.json can keep them on the Mac', async () => {
+  const { h, fresh, uploads, png, settle } = setupReplyImages({ pastedPictures: false });
+  const t = h.runner.create({ text: 'x', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  await tick();
+  const sync = fresh();
+  sync.start();
+  await settle(sync);
+  await h.runner.send(t.id, 'see [Picture 1]', [{ path: png, mediaType: 'image/png' }]);
+  await tick();
+  await settle(sync);
+  assert.deepEqual(uploads, []);
   await sync.stop();
 });
 

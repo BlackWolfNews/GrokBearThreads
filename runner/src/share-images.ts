@@ -1,6 +1,7 @@
 // The pictures in a shared thread's events (docs/website.md, "Sharing"),
 // which the mirror uploads to file storage so the shared page can show
-// them. Only for shared threads: the rest keep their pictures on the Mac.
+// them. What Mike pasted and what agents showed him go up for his own website
+// and phone too, below; the rest of an unshared thread's stay on the Mac.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -200,6 +201,17 @@ export function replyImagesInEvent(e: PersistedEvent, cwd: string | undefined, h
   if (!raw || (!raw.startsWith('/') && !raw.startsWith('~') && !cwd)) return [];
   const file = absolute(raw, cwd ?? '/', home);
   return replyMediaType(file) ? [{ seq: e.seq, path: file, pinned: true }] : [];
+}
+
+// The pictures Mike pasted into a message, for his own website (`sync.pastedPictures`
+// in runner.json, on by default; docs/on-your-mac.md). `src` is picture:N, for
+// the [Picture N] that stands for it (docs/protocol.md, "Pictures in a message"):
+// the phone only swaps a src it finds in Markdown, so it goes on showing its
+// chip. Only as they're sent, never by looking back through the logs: nobody
+// asked for what they'd already pasted to go up, and backfills are what cost.
+export function pastedImagesInEvent(e: PersistedEvent): ReplyImage[] {
+  if (e.type !== 'user.message') return [];
+  return (e.images ?? []).map((image, i) => ({ seq: e.seq, path: image.path, src: `picture:${i + 1}` }));
 }
 
 // The bytes to upload and what they really are, or why not. An agent can

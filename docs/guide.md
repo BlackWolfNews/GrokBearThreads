@@ -828,7 +828,9 @@ its left edge opens your schedules, projects, runners and each login's usage.
 A schedule can be paused or run from there, and a runner shows how busy its
 machine is, with an orange dot on its tile while it's low on memory or disk.
 Other changes are done on the Mac or by asking an agent. The gear
-has the appearance and Sign out, and the pencil beside the search starts a new
+has the appearance and Sign out. Pictures you paste show there too: they go to
+your Convex deployment as they are, so nothing can scrub a secret from one, and
+`"sync": { "pastedPictures": false }` in `runner.json` keeps them on the Mac. The pencil beside the search starts a new
 thread on a runner's default folder and login. On your Mac,
 `threadbear://thread/<id>` opens a thread in the app instead (the Open
 thread button on a tab BrowserBear has marked for an agent uses it).

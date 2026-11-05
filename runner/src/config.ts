@@ -109,7 +109,7 @@ export type Config = {
   // The Convex mirror (src/sync.ts): the project's URL, whether it's on,
   // the name the phone shows for this runner and its id (made once).
   // THREADBEAR_SYNC=off turns it off for tests and dev runners.
-  sync: { enabled: boolean; url?: string; name?: string; runnerId?: string; icon?: string; rpcUrl?: string };
+  sync: { enabled: boolean; url?: string; name?: string; runnerId?: string; icon?: string; rpcUrl?: string; pastedPictures?: boolean };
   // Mike's Connectors gateway's base URL (connectors.ts), for the app's
   // Connectors panel. Unset means there's none to watch.
   connectorsUrl?: string;
@@ -151,7 +151,9 @@ export type RunnerJson = {
   models?: { pool?: string | null; privateFolders?: string[] };
   // icon: an SF Symbol for this runner in lists (machine.ts works one out).
   // rpcUrl: how a Mac app reaches this runner over the tailnet (step 6 part 2).
-  sync?: { enabled?: boolean; url?: string; name?: string; runnerId?: string; icon?: string; rpcUrl?: string };
+  // pastedPictures: false keeps pictures you paste off your Convex deployment
+  // (docs/on-your-mac.md).
+  sync?: { enabled?: boolean; url?: string; name?: string; runnerId?: string; icon?: string; rpcUrl?: string; pastedPictures?: boolean };
   // The gateway, when it isn't the `connectors` MCP server in
   // ~/.claude.json; url "" or enabled: false turns the panel's polling off.
   connectors?: { url?: string; enabled?: boolean; headersHelper?: string };
@@ -285,6 +287,7 @@ function syncConfig(raw: RunnerJson['sync'], env: NodeJS.ProcessEnv): Config['sy
   if (icon) out.icon = icon;
   const rpcUrl = nonEmpty(raw?.rpcUrl);
   if (rpcUrl) out.rpcUrl = rpcUrl;
+  if (raw?.pastedPictures === false) out.pastedPictures = false;
   return out;
 }
 
