@@ -5,6 +5,7 @@
 // written when one of these fields changes, so editing a project's notes
 // re-runs nobody's list.
 import type { MutationCtx } from './_generated/server';
+import { scrubDoc } from './redaction';
 
 type ProjectFields = {
   runnerId: string;
@@ -73,5 +74,7 @@ export const HEADS_MARK = 'projectHeads';
 export async function seedHeads(ctx: { db: MutationCtx['db'] }): Promise<void> {
   if (await ctx.db.query('backendMarks').withIndex('by_name', (q) => q.eq('name', HEADS_MARK)).first()) return;
   await ctx.db.insert('backendMarks', { name: HEADS_MARK });
-  for await (const p of ctx.db.query('projects')) await syncHead(ctx, p);
+  // Rows from before scrubbing (API 47) can hold what today's rules take out, and
+  // nothing else would clean this copy.
+  for await (const p of ctx.db.query('projects')) await syncHead(ctx, { ...p, title: scrubDoc(p.title) });
 }

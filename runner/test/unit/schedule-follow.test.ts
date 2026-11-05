@@ -9,6 +9,7 @@ function harness() {
   const subs: { args: Record<string, unknown>; update: (v: unknown) => void; fail: (e: Error) => void; closed: boolean }[] = [];
   const seen: Row[][] = [];
   const errors: Error[] = [];
+  const waits: { run: () => void; ms: number; cancelled: boolean }[] = [];
   const stop = followSchedules<Row>(
     (_fn, args, update, fail) => {
       const sub = { args, update, fail, closed: false };
@@ -20,8 +21,15 @@ function harness() {
     'k',
     (rows) => seen.push(rows),
     (e) => errors.push(e),
+    (run, ms) => {
+      const w = { run, ms, cancelled: false };
+      waits.push(w);
+      return () => {
+        w.cancelled = true;
+      };
+    },
   );
-  return { subs, seen, errors, stop, last: () => subs.at(-1)! };
+  return { subs, seen, errors, waits, stop, last: () => subs.at(-1)! };
 }
 
 test('reads the whole table first, then asks only from a little before then', () => {
@@ -63,21 +71,38 @@ test('told to start over: drops what it holds and reads the whole table again', 
   assert.deepEqual(h.seen.at(-1), [{ id: 'z' }]);
 });
 
-test("a burst bigger than an answer doesn't go round and round reading the whole table", () => {
+test("a burst bigger than an answer is waited out, never skipped", () => {
   const h = harness();
   const whole = { rows: [{ id: 'a' }], gone: [], at: 100_000 };
   h.subs[0]!.update(whole);
-  // The burst is in the margin, so asking from before it says start over.
+  // The first "start over" reads the table straight away.
   h.last().update({ rows: [], gone: [], at: 100_100, more: true });
+  assert.equal(h.waits.length, 0);
   h.last().update({ ...whole, at: 100_200 });
-  // Now from past it, and the same rule doesn't stick: a later start from
-  // scratch uses the margin again.
-  assert.equal(h.last().args.since, 100_201);
+  // Follows from before the read, not past it: a row stamped before the read can
+  // commit after it, and asking from past it would never hear of that row.
+  assert.equal(h.last().args.since, 100_200 - SCHEDULE_MARGIN_MS);
+  // Still inside the burst: no reading it all again until that's had time to pass.
   const subs = h.subs.length;
-  h.last().update({ rows: [], gone: [], at: 100_300 });
+  h.last().update({ rows: [], gone: [], at: 100_300, more: true });
   assert.equal(h.subs.length, subs);
-  h.last().update({ rows: [{ id: 'b', updatedMs: 200_000 }], gone: [], at: 200_001 });
-  assert.equal(h.last().args.since, 200_000 - SCHEDULE_MARGIN_MS);
+  assert.equal(h.waits.length, 1);
+  assert.equal(h.waits[0]!.ms, SCHEDULE_MARGIN_MS);
+  h.waits[0]!.run();
+  assert.equal(h.last().args.since, undefined, 'then the whole table');
+  h.last().update({ rows: [{ id: 'a' }, { id: 'b' }], gone: [], at: 105_400 });
+  assert.equal(h.last().args.since, 105_400 - SCHEDULE_MARGIN_MS);
+  assert.deepEqual(h.seen.at(-1), [{ id: 'a' }, { id: 'b' }]);
+});
+
+test('stopping while waiting out a burst cancels the wait', () => {
+  const h = harness();
+  h.subs[0]!.update({ rows: [], gone: [], at: 100_000 });
+  h.last().update({ rows: [], gone: [], at: 100_100, more: true });
+  h.last().update({ rows: [], gone: [], at: 100_200 });
+  h.last().update({ rows: [], gone: [], at: 100_300, more: true });
+  h.stop();
+  assert.equal(h.waits[0]!.cancelled, true);
 });
 
 test('an answer to an ask that was replaced is ignored, and stopping stops', () => {

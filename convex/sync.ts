@@ -2508,7 +2508,10 @@ export const auditRemove = mutation({
         } else {
           await ctx.db.delete(row._id);
           if (r.kind === 'picture') await deleteIfUnused(ctx, row.storageId);
-          if (r.kind === 'schedule') await ctx.db.insert('scheduleGone', { id: row.id, runnerId: row.runnerId, at: Date.now() });
+          if (r.kind === 'schedule') {
+            await ctx.db.insert('scheduleGone', { id: row.id, runnerId: row.runnerId, at: Date.now() });
+            if (!(await scheduleRow(ctx, row.id))) await dropWake(ctx, row.id);
+          }
           n++;
         }
       }
@@ -2561,7 +2564,12 @@ export const purgeRunner = mutation({
       for (const r of await ctx.db.query(table).withIndex('by_runnerId', (q: any) => q.eq('runnerId', runnerId)).take(left)) {
         await ctx.db.delete(r._id);
         // The owner's runner holds a copy of every schedule, this one's too.
-        if (table === 'schedules') await ctx.db.insert('scheduleGone', { id: (r as Doc<'schedules'>).id, runnerId, at: Date.now() });
+        if (table === 'schedules') {
+          await ctx.db.insert('scheduleGone', { id: (r as Doc<'schedules'>).id, runnerId, at: Date.now() });
+          // An old mirror row can share its id with another runner's live schedule,
+          // whose wake this is then, so it stays.
+          if (!(await scheduleRow(ctx, (r as Doc<'schedules'>).id))) await dropWake(ctx, (r as Doc<'schedules'>).id);
+        }
         left--;
       }
     }
@@ -2617,8 +2625,10 @@ export const scrubStoredBatch = mutation({
       // A card's lookup key follows its title, for its runner if it has one.
       if (table === 'pocketCards') next.key = cardKey(row.runnerId ? ({ owner: false, runnerId: row.runnerId } as Caller) : ({ owner: true } as Caller), next.title);
       // So a Mac watching only what changed (threadIndexSince) hears of it.
-      if (table === 'threadIndex') next.updatedMs = Date.now();
+      if (table === 'threadIndex' || table === 'schedules') next.updatedMs = Date.now();
       await ctx.db.replace(_id as any, next as any);
+      // The list's copy of a title, or it keeps showing the old one.
+      if (table === 'projects') await syncHead(ctx, next as any);
     }
     return { scanned: page.page.length, changed, cursor: page.continueCursor, done: page.isDone, rulesVersion: SCRUB_RULES_VERSION };
   },

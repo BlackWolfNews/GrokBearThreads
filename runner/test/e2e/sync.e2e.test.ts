@@ -364,6 +364,19 @@ describe('convex mirror e2e', { skip: LOCAL ? false : 'no local Convex deploymen
     assert.equal(whole.notes, 'long notes');
     assert.deepEqual(await api('query', 'phone:projectSearch', { token, text: word.toUpperCase() }), [{ runnerId, id: pid }]);
     assert.deepEqual(await api('query', 'phone:projectSearch', { token, text: 'no-project-says-this' }), []);
+    // A row from before the rules: rewriting it takes the list's copy of the title too.
+    const old = path.join(home, 'old-project.jsonl');
+    const oldId = pid + '-old';
+    fs.writeFileSync(old, JSON.stringify({ ...doc, id: oldId, runnerId }) + '\n');
+    await run('npx', ['convex', 'import', ...ENV_ARGS, '--append', '--yes', '--table', 'projects', old], { cwd: REPO });
+    fs.writeFileSync(old, JSON.stringify({ runnerId, id: oldId, title: doc.title, createdBy: 'user', archived: false, createdAt: 'x', updatedAt: 'x', threadCount: 0 }) + '\n');
+    await run('npx', ['convex', 'import', ...ENV_ARGS, '--append', '--yes', '--table', 'projectHeads', old], { cwd: REPO });
+    const oldTitle = async () => ((await api('query', 'phone:projects', { token })) as Row[]).find((p) => p.id === oldId)!.title;
+    assert.ok((await oldTitle()).includes(secret));
+    const script: string = '../../scripts/scrub-stored.mjs';
+    const { scrubStored } = await import(script);
+    await scrubStored({ post: (fn: string, args: Record<string, unknown>) => api('mutation', fn, args), key, tables: ['projects'], apply: true, batch: 50 });
+    assert.equal(await oldTitle(), 'Title [REDACTED]', 'the head follows when only `projects` is rewritten');
     await api('mutation', 'sync:setProjects', { key, runnerId, projects: [] });
     assert.ok(!((await api('query', 'phone:projects', { token })) as Row[]).some((p) => p.id === pid), 'its small row goes with it');
     await api('mutation', 'sync:bye', { key, runnerId });

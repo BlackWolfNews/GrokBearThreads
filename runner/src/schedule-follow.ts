@@ -9,14 +9,21 @@ export const SCHEDULE_MARGIN_MS = 5000;
 export type ScheduleAnswer<R> = { rows: (R & { updatedMs?: number })[]; gone: string[]; at: number; more?: boolean };
 type Subscribe = (fn: string, args: Record<string, unknown>, onUpdate: (v: unknown) => void, onError: (e: Error) => void) => () => void;
 
-export function followSchedules<R extends { id: string }>(subscribe: Subscribe, key: unknown, onRows: (rows: R[]) => void, onError: (e: Error) => void): () => void {
+function defaultWait(run: () => void, ms: number): () => void {
+  const t = setTimeout(run, ms);
+  t.unref?.();
+  return () => clearTimeout(t);
+}
+
+export function followSchedules<R extends { id: string }>(subscribe: Subscribe, key: unknown, onRows: (rows: R[]) => void, onError: (e: Error) => void, wait: (run: () => void, ms: number) => () => void = defaultWait): () => void {
   const held = new Map<string, R>();
   let since: number | undefined;
   let asked = 0;
   let unsub: (() => void) | undefined;
   let stopped = false;
-  // The last answer said to read it all again.
-  let startedOver = false;
+  // When an answer last said to read it all again, by the backend's clock.
+  let overAt = -Infinity;
+  let cancelWait: (() => void) | undefined;
 
   const ask = () => {
     unsub?.();
@@ -41,17 +48,25 @@ export function followSchedules<R extends { id: string }>(subscribe: Subscribe, 
     // Away too long, or too much changed: read it all again.
     if (a.more) {
       since = undefined;
-      startedOver = true;
-      ask();
+      // A burst bigger than one answer, still inside the margin, says this again
+      // straight after a whole read. Only wait it out: asking from past the read
+      // instead would miss a row stamped before it that commits after it.
+      const again = a.at - overAt < 2 * SCHEDULE_MARGIN_MS;
+      overAt = a.at;
+      if (again) {
+        unsub?.();
+        unsub = undefined;
+        asked++;
+        cancelWait = wait(() => {
+          cancelWait = undefined;
+          ask();
+        }, SCHEDULE_MARGIN_MS);
+      } else ask();
       return;
     }
     let changed = from === undefined;
     if (from === undefined) held.clear();
-    // After starting over, from just past the read rather than a little before
-    // it: if more rows than one answer holds were written in those few seconds
-    // (a big adopt), asking from before them would only say to start over again.
-    let next = from !== undefined ? from : startedOver ? a.at + 1 : a.at - SCHEDULE_MARGIN_MS;
-    if (from === undefined) startedOver = false;
+    let next = from !== undefined ? from : a.at - SCHEDULE_MARGIN_MS;
     for (const { updatedMs, ...row } of a.rows) {
       const r = row as unknown as R;
       if (JSON.stringify(held.get(r.id)) !== JSON.stringify(r)) changed = true;
@@ -71,6 +86,7 @@ export function followSchedules<R extends { id: string }>(subscribe: Subscribe, 
   ask();
   return () => {
     stopped = true;
+    cancelWait?.();
     unsub?.();
     unsub = undefined;
   };
