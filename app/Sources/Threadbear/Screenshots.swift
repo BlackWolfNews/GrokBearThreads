@@ -340,7 +340,7 @@ enum ScreenshotRunner {
                     await capture(compare, dir.appendingPathComponent("16c-design-review-picked.png"))
                     session.enlarge(1)
                     await capture(compare, dir.appendingPathComponent("16d-design-review-enlarged.png"))
-                    session.actualSize = true
+                    session.zoom(.actual)
                     await capture(compare, dir.appendingPathComponent("16e-design-review-100-percent.png"))
                     controller.close()
                 }

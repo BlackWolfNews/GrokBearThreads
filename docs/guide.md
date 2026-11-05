@@ -160,7 +160,11 @@ before or after, and after the last one they're all side by side. Click an
 option on the right, one of its small pictures, or a dot under the stage, to
 go straight to it, and Open live to try one the agent has running. When
 the agent includes today's version to compare against, hold Space (or click
-its button over the picture) to flick to it and back. Tick as
+its button over the picture) to flick to it and back. To look closer at a
+picture, scroll or pinch over it to zoom in where the pointer is (a long page
+starts small enough to see whole). Then scroll or drag to move around, or use
+the small picture in the corner to jump to a part. Pinching out, ⌘0, Esc or a
+double-click goes back to the whole thing, and ⌘+ and ⌘- zoom too. Tick as
 many as you like, or None if none of them will do, write what you think in
 the box at the bottom, and Send takes it all back to the thread.
 

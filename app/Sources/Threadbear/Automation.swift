@@ -324,7 +324,9 @@ enum Automation {
             // (points from the window's top left), with "toX" drags there,
             // and "scrollX"/"scrollY" is a wheel, in lines. They go straight
             // to the window, so Mike's pointer stays where it is.
-            guard let window, let x = c["x"] as? Double, let y = c["y"] as? Double else { return "error point needs x and y" }
+            // {"review": id}: in that review's own window.
+            let reviewWindow = (c["review"] as? String).flatMap { id in app.reviewWindows.values.first { $0.session.review.id == id }?.window }
+            guard let window = reviewWindow ?? window, let x = c["x"] as? Double, let y = c["y"] as? Double else { return "error point needs x and y" }
             let at = { (px: Double) in NSPoint(x: px, y: window.frame.height - y) }
             if c["scrollX"] != nil || c["scrollY"] != nil {
                 let lines = (Int32(c["scrollY"] as? Double ?? 0), Int32(c["scrollX"] as? Double ?? 0))

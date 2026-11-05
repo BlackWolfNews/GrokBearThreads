@@ -187,6 +187,17 @@ final class ReviewNativeWindow: NSWindow {
             if event.type == .keyUp { session.peeking = false } else if !event.isARepeat, session.canPeek { session.peeking = true }
             return
         }
+        // On a shot, the View menu's zoom keys zoom the shot rather than the
+        // app's text, as they do in Preview.
+        if event.type == .keyDown, event.modifierFlags.intersection([.command, .control, .option]) == .command,
+           let session = reviewSession, session.mode == .single {
+            switch event.charactersIgnoringModifiers {
+            case "=", "+": session.zoom(.closer); return
+            case "-": session.zoom(.further); return
+            case "0": session.zoom(.fit); return
+            default: break
+            }
+        }
         super.sendEvent(event)
     }
 
@@ -202,8 +213,8 @@ final class ReviewNativeWindow: NSWindow {
             case 36: // Return
                 if session.mode == .single { session.showAll() } else { session.browse(0) }
                 return
-            case 53 where session.mode == .single: // Esc
-                session.showAll()
+            case 53 where session.mode == .single: // Esc: out of a zoom, then out to all of them
+                if session.zoomed { session.zoom(.fit) } else { session.showAll() }
                 return
             default: break
             }
@@ -231,8 +242,10 @@ private struct ReviewTitlebarButtons: View {
             Spacer(minLength: 0)
             if session.mode == .single {
                 icon("square.grid.2x2", "See them all (Esc)") { session.showAll() }
-                icon(session.actualSize ? "minus.magnifyingglass" : "plus.magnifyingglass",
-                     session.actualSize ? "Fit the image in its space" : "Show at full size and scroll") { session.actualSize.toggle() }
+                icon(session.zoomed ? "minus.magnifyingglass" : "plus.magnifyingglass",
+                     session.zoomed ? "Fit the image in its space (\u{2318}0)" : "Show at full size. Scroll or pinch to zoom, drag to move around") {
+                    session.zoom(session.zoomed ? .fit : .actual)
+                }
             }
             icon("arrow.up.backward", "Show the thread this came from", back)
             if session.review.isPending {
@@ -367,7 +380,7 @@ struct ReviewWindow: View {
             let room = CGSize(width: max(0, geo.size.width - Self.stageInset * 2), height: max(0, geo.size.height - Self.stageInset * 2))
             Group {
                 if session.mode == .single, let shot = session.shownShot {
-                    enlarged(shot.image, size: room)
+                    enlarged(shot.image)
                 } else {
                     let layout = ReviewGalleryLayout.best(
                         aspects: session.review.options.map { aspect($0.image) }, width: room.width, height: room.height, spacing: Self.cellSpacing,
@@ -481,17 +494,15 @@ struct ReviewWindow: View {
         return Double(width) / Double(height)
     }
 
-    /// One shot on the whole stage. A click goes back to all of them; at
-    /// full size a click is for scrolling, so it does nothing.
-    private func enlarged(_ image: ImageRef, size: CGSize) -> some View {
+    /// One shot, with the whole stage to zoom in. A click goes back to all of
+    /// them; zoomed in, a press is for dragging, so it does nothing.
+    private func enlarged(_ image: ImageRef) -> some View {
         let id = session.focusedOption?.id ?? ""
-        let scrolling = session.actualSize
-        let fit = ReviewGalleryLayout.fit(aspect: aspect(image), width: size.width, height: size.height)
-        return ReviewCanvas(image: image, actualSize: scrolling, onClick: scrolling ? nil : { session.showAll() })
-            .tip(scrolling ? "" : "\(id): click to see them all")
-            .frame(width: scrolling ? size.width : fit.width, height: scrolling ? size.height : fit.height)
+        return ReviewCanvas(image: image, zoomable: true, zoomRequest: session.zoomRequest, peeking: session.peeking,
+                            onZoom: { if session.mode == .single { session.zoomed = $0 } }, onClick: { session.showAll() })
+            .tip(session.zoomed ? "" : "\(id): click to see them all, scroll to zoom")
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .accessibilityLabel("\(session.focusedOption?.label ?? ""). Scroll to inspect the image.")
+            .accessibilityLabel("\(session.focusedOption?.label ?? ""). Scroll to zoom into the image.")
     }
 
     /// An option among them all: its first shot, and how many it has.
@@ -508,7 +519,7 @@ struct ReviewWindow: View {
                 if count > 1 { Text("\(count) shots").font(.system(size: TypeScale.detail)).foregroundStyle(.tertiary) }
             }
             .lineLimit(1).frame(height: Self.captionHeight, alignment: .topLeading)
-            ReviewCanvas(image: option.image, actualSize: false, onClick: { session.enlarge(index) })
+            ReviewCanvas(image: option.image, onClick: { session.enlarge(index) })
                 .tip("\(option.id): click to enlarge")
                 .frame(width: fit.width, height: fit.height)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -734,110 +745,471 @@ private struct ReviewThumb: View {
     }
 }
 
-/// Each canvas has its own native scroll view. Fit keeps the entire image
-/// visible, including the shorter reference image. 100% preserves source
-/// pixels and enables independent panning without stretching either image.
+/// The image on the stage, or in a cell among them all. Only one on the stage
+/// can zoom: a cell's click and scroll belong to the grid.
 private struct ReviewCanvas: NSViewRepresentable {
     let image: ImageRef
-    let actualSize: Bool
+    var zoomable = false
+    var zoomRequest: ReviewZoomRequest?
+    var peeking = false
+    var onZoom: ((Bool) -> Void)?
     let onClick: (() -> Void)?
     func makeNSView(context: Context) -> ReviewImageScroll { ReviewImageScroll() }
     func updateNSView(_ view: ReviewImageScroll, context: Context) {
         view.onClick = onClick
-        view.show(image, actual: actualSize)
+        view.onZoom = onZoom
+        view.show(image, zoomable: zoomable, request: zoomRequest, peeking: peeking)
     }
 }
 
-private final class ReviewImageScroll: NSScrollView {
-    private let picture = NSImageView()
-    private var reference: ImageRef?
-    private var actual = false
-    private var loadedKey = ""
-    private var resetScroll = true
-    private var orientedSize: NSSize?
-    /// Taken here rather than by a SwiftUI gesture on top: SwiftUI doesn't
-    /// hand it a click over an AppKit view (ReviewWindowTests caught it).
-    var onClick: (() -> Void)?
-
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        guard onClick != nil else { return super.hitTest(point) }
-        return frame.contains(point) ? self : nil
+/// Holds the document in the middle of the stage whenever it's smaller than
+/// it. A plain clip view pins it to a corner, and a tall page zoomed in is
+/// narrower than the stage for most of the way.
+private final class ReviewCentringClip: NSClipView {
+    override func constrainBoundsRect(_ proposed: NSRect) -> NSRect {
+        var rect = super.constrainBoundsRect(proposed)
+        guard let document = documentView?.frame.size else { return rect }
+        if rect.width > document.width { rect.origin.x = (document.width - rect.width) / 2 }
+        if rect.height > document.height { rect.origin.y = (document.height - rect.height) / 2 }
+        return rect
     }
 
-    // The first click counts even if the window wasn't in front, like a
-    // SwiftUI button beside it does.
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { onClick != nil }
-
-    override func mouseDown(with event: NSEvent) {
-        guard let onClick else { return super.mouseDown(with: event) }
-        onClick()
+    // A plain scroll(to:) goes wherever it's told, past the image's edges.
+    override func scroll(to newOrigin: NSPoint) {
+        super.scroll(to: constrainBoundsRect(NSRect(origin: newOrigin, size: bounds.size)).origin)
     }
+}
+
+/// Draws the image itself rather than an NSImageView handing it to a layer:
+/// a full-page phone shot is 780 x 20852 pixels, over the 16384 a texture can
+/// be, and only the part on screen gets drawn this way.
+private final class ReviewPicture: NSView {
+    var image: CGImage? { didSet { needsDisplay = true } }
+    var unavailable = false { didSet { needsDisplay = true } }
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.textBackgroundColor.setFill()
+        dirtyRect.fill()
+        if let image, let context = NSGraphicsContext.current?.cgContext {
+            context.saveGState()
+            context.interpolationQuality = .high
+            context.translateBy(x: 0, y: bounds.height)
+            context.scaleBy(x: 1, y: -1)
+            context.draw(image, in: bounds)
+            context.restoreGState()
+        } else if unavailable, let symbol = NSImage(systemSymbolName: "photo.badge.exclamationmark", accessibilityDescription: "Image unavailable") {
+            // The same size on screen at any zoom.
+            let side = 40 / (enclosingScrollView?.magnification ?? 1)
+            let rect = NSRect(x: bounds.midX - side / 2, y: bounds.midY - side / 2, width: side, height: side)
+            symbol.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 0.5, respectFlipped: true, hints: nil)
+        }
+    }
+}
+
+/// The whole image small, with a box for the part on show. Drag or click it
+/// to go there: on a page 20,000 pixels long a scroller says how far down
+/// you are, not what's there.
+final class ReviewMinimap: NSView {
+    private let picture = CALayer()
+    private let viewport = CALayer()
+    /// Where to go, as fractions of the image's width and height.
+    var onMove: ((NSPoint) -> Void)?
+    /// The box, as fractions of the image. Not private for ReviewWindowTests.
+    private(set) var shown = NSRect.zero
+
+    override var isFlipped: Bool { true }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
-        drawsBackground = true
-        backgroundColor = .textBackgroundColor
+        wantsLayer = true
+        layer?.cornerRadius = 4
+        layer?.borderWidth = 1
+        layer?.borderColor = NSColor.white.withAlphaComponent(0.25).cgColor
+        layer?.backgroundColor = NSColor.black.withAlphaComponent(0.55).cgColor
+        layer?.masksToBounds = true
+        picture.contentsGravity = .resize
+        picture.opacity = 0.8
+        layer?.addSublayer(picture)
+        viewport.borderWidth = 1.5
+        viewport.borderColor = NSColor.white.cgColor
+        viewport.backgroundColor = NSColor.white.withAlphaComponent(0.2).cgColor
+        layer?.addSublayer(viewport)
+        setTip("Drag to move around the image")
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    func setPicture(_ image: CGImage?) { picture.contents = image }
+
+    func show(visible: NSRect) {
+        shown = visible
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        picture.frame = bounds
+        // Tall enough to see and grab even when it's a sliver of the page.
+        let height = max(6, visible.height * bounds.height)
+        viewport.frame = NSRect(x: visible.minX * bounds.width,
+                                y: min(visible.minY * bounds.height, bounds.height - height),
+                                width: visible.width * bounds.width, height: height)
+        CATransaction.commit()
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func mouseDown(with event: NSEvent) { move(event) }
+    override func mouseDragged(with event: NSEvent) { move(event) }
+
+    private func move(_ event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        onMove?(NSPoint(x: min(1, max(0, point.x / bounds.width)), y: min(1, max(0, point.y / bounds.height))))
+    }
+}
+
+/// One image in a native scroll view, drawn at its real size and magnified
+/// down to fit. Fit is where it starts. Pinching zooms, as does a mouse wheel,
+/// or a trackpad scroll that starts while the image fits, as there's nothing
+/// to scroll then (Mike, 5 Nov: "scroll in and out"). Zoomed in, a trackpad
+/// scroll moves around, as does dragging or the minimap.
+final class ReviewImageScroll: NSScrollView {
+    private let picture = ReviewPicture()
+    let minimap = ReviewMinimap()
+    private var reference: ImageRef?
+    private var zoomable = false
+    private var peeking = false
+    /// The scale that shows the whole image.
+    private var fitScale: CGFloat = 1
+    private var fitted = true
+    private var reportedZoomed = false
+    private var startAtTop = false
+    /// Where to put the view's centre after a flick, as fractions of the image.
+    private var keepCentre: NSPoint?
+    private var orientedSize: NSSize?
+    private var handledRequest: Int?
+    private var pendingStep: ReviewZoomStep?
+    private var shownPixels = 0
+    private var askedPixels = 0
+    private var minimapPath: String?
+    private var gestureZooms = false
+    /// 1 or -1 for which way this swipe zooms in; 0 until it's moved.
+    private var gestureDirection: CGFloat = 1
+    private var dragFrom: NSPoint?
+    private var dragOrigin = NSPoint.zero
+    var onClick: (() -> Void)?
+    var onZoom: ((Bool) -> Void)?
+
+    // The most zoomed in: 4 pixels on screen to one in the image.
+    private static let furthest: CGFloat = 4
+    private static let keyStep: CGFloat = 1.5
+    private static let wheelStep: CGFloat = 0.2
+    private static let trackpadStep: CGFloat = 0.012
+    // What decoding an image at full size may cost, about 400 MB. A very
+    // big image past this is drawn at less than its full size.
+    private static let mostPixels: CGFloat = 100_000_000
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        // Clear, so the stage shows round an image that's narrower than it.
+        drawsBackground = false
+        let clip = ReviewCentringClip()
+        clip.drawsBackground = false
+        contentView = clip
         hasHorizontalScroller = true
         hasVerticalScroller = true
         autohidesScrollers = true
-        picture.imageScaling = .scaleProportionallyUpOrDown
         documentView = picture
+        minimap.isHidden = true
+        minimap.onMove = { [weak self] point in self?.go(to: point) }
+        addSubview(minimap)
+        contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(self, selector: #selector(viewMoved), name: NSView.boundsDidChangeNotification, object: contentView)
     }
     required init?(coder: NSCoder) { fatalError() }
+    deinit { NotificationCenter.default.removeObserver(self) }
 
     // Takes whatever room SwiftUI gives it, never the image's size.
     override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric) }
 
-    func show(_ image: ImageRef, actual: Bool) {
-        if reference?.path != image.path { picture.image = nil; loadedKey = ""; resetScroll = true; orientedSize = nil }
-        if self.actual != actual { resetScroll = true }
+    func show(_ image: ImageRef, zoomable: Bool, request: ReviewZoomRequest?, peeking: Bool) {
+        if reference?.path != image.path {
+            if reference != nil, peeking != self.peeking {
+                // Flicking to today's version stays on the same part of the
+                // page, or there'd be nothing to compare, and keeps the old
+                // picture up until the new one's decoded rather than a blank.
+                let clip = contentView.bounds
+                let document = picture.frame.size
+                keepCentre = NSPoint(x: clip.midX / max(1, document.width), y: clip.midY / max(1, document.height))
+            } else {
+                // Through layout rather than a flag here, as a scroll landing
+                // before it would work "fitted" out again from the old image.
+                picture.image = nil
+                pendingStep = .fit
+                keepCentre = nil
+            }
+            picture.unavailable = false
+            orientedSize = nil
+            shownPixels = 0
+            askedPixels = 0
+            minimap.setPicture(nil)
+            minimapPath = nil
+        }
         reference = image
-        self.actual = actual
-        picture.imageScaling = actual ? .scaleNone : .scaleProportionallyUpOrDown
+        self.peeking = peeking
+        if self.zoomable != zoomable {
+            self.zoomable = zoomable
+            allowsMagnification = zoomable
+        }
+        if let request, handledRequest != request.serial {
+            handledRequest = request.serial
+            pendingStep = request.step
+        }
         needsLayout = true
+    }
+
+    /// The image's size in points, at which one image pixel is one on screen.
+    private var documentSize: NSSize {
+        let scale = window?.backingScaleFactor ?? 2
+        let source = sourceSize
+        return NSSize(width: max(1, source.width / scale), height: max(1, source.height / scale))
+    }
+
+    private var sourceSize: NSSize {
+        orientedSize ?? NSSize(width: reference?.width ?? 1100, height: reference?.height ?? 760)
     }
 
     override func layout() {
         super.layout()
-        guard let reference, contentSize.width > 0, contentSize.height > 0 else { return }
-        let scale = window?.backingScaleFactor ?? 2
-        let source = orientedSize ?? NSSize(width: reference.width ?? 1100, height: reference.height ?? 760)
-        let size: NSSize
-        if actual {
-            size = NSSize(width: max(contentSize.width, source.width / scale), height: max(contentSize.height, source.height / scale))
-        } else { size = contentSize }
-        picture.frame = NSRect(origin: .zero, size: size)
-        if resetScroll {
-            // NSImageView uses AppKit's bottom-left origin. Start at the
-            // image's top edge when zooming in, rather than its footer.
-            contentView.scroll(to: NSPoint(x: 0, y: max(0, size.height - contentSize.height)))
-            reflectScrolledClipView(contentView)
-            resetScroll = false
+        guard reference != nil, bounds.width > 0, bounds.height > 0 else { return }
+        let document = documentSize
+        if picture.frame.size != document { picture.frame = NSRect(origin: .zero, size: document) }
+        // A hair under, as rounding the other way would bring up scrollers
+        // on an image with nothing to scroll.
+        fitScale = min(bounds.width / document.width, bounds.height / document.height) * 0.9999
+        minMagnification = fitScale
+        maxMagnification = max(fitScale * 2, Self.furthest)
+        // Fitted stays fitted through a window resize; zoomed keeps its scale.
+        let target = fitted ? fitScale : min(maxMagnification, max(minMagnification, magnification))
+        if magnification != target { magnification = target }
+        if let step = pendingStep {
+            pendingStep = nil
+            apply(step)
         }
-        let desired = actual ? max(source.width, source.height) : max(contentSize.width, contentSize.height) * scale
-        let pixels = min(10000, max(128, Int(ceil(desired / 256)) * 256))
-        let key = reference.path + "|\(pixels)"
-        guard loadedKey != key else { return }
-        loadedKey = key
-        ThumbnailLoader.shared.load(path: reference.path, maxPixels: pixels) { [weak self] cg in
-            guard let self, self.loadedKey == key else { return }
-            guard let cg else {
+        if startAtTop {
+            startAtTop = false
+            contentView.scroll(to: NSPoint(x: max(0, (document.width - contentView.bounds.width) / 2), y: 0))
+            reflectScrolledClipView(contentView)
+        }
+        if let centre = keepCentre {
+            keepCentre = nil
+            if !fitted { go(to: centre) }
+        }
+        viewMoved()
+    }
+
+    private func apply(_ step: ReviewZoomStep) {
+        switch step {
+        case .fit:
+            magnification = fitScale
+        case .actual:
+            // One image pixel to one on screen, from the top of the page. An
+            // image smaller than the stage is already past that, so it doubles.
+            magnification = fitScale < 1 ? 1 : fitScale * 2
+            startAtTop = true
+        case .closer: zoom(by: Self.keyStep, around: nil)
+        case .further: zoom(by: 1 / Self.keyStep, around: nil)
+        }
+        fitted = magnification <= fitScale * 1.001
+    }
+
+    /// Zooms keeping the spot under the pointer under it, or the middle of
+    /// the view without one.
+    func zoom(by factor: CGFloat, around windowPoint: NSPoint?) {
+        let before = contentView.bounds
+        let anchor = windowPoint.map { contentView.convert($0, from: nil) } ?? NSPoint(x: before.midX, y: before.midY)
+        let across = (anchor.x - before.minX) / max(1, before.width)
+        let down = (anchor.y - before.minY) / max(1, before.height)
+        magnification = min(maxMagnification, max(minMagnification, magnification * factor))
+        let after = contentView.bounds.size
+        contentView.scroll(to: NSPoint(x: anchor.x - across * after.width, y: anchor.y - down * after.height))
+        reflectScrolledClipView(contentView)
+    }
+
+    /// Puts the view's centre on a spot, given as fractions of the image.
+    private func go(to point: NSPoint) {
+        let document = picture.frame.size
+        let clip = contentView.bounds.size
+        contentView.scroll(to: NSPoint(x: point.x * document.width - clip.width / 2, y: point.y * document.height - clip.height / 2))
+        reflectScrolledClipView(contentView)
+    }
+
+    /// Every zoom and scroll comes through here, pinches included, which
+    /// AppKit runs itself.
+    @objc private func viewMoved() {
+        fitted = magnification <= fitScale * 1.001
+        let cursor: NSCursor? = fitted || !zoomable ? nil : .openHand
+        if documentCursor != cursor { documentCursor = cursor }
+        let zoomed = zoomable && !fitted
+        if zoomed != reportedZoomed {
+            reportedZoomed = zoomed
+            // Later, as this can run in the middle of SwiftUI laying us out.
+            DispatchQueue.main.async { [weak self] in self?.onZoom?(zoomed) }
+        }
+        layoutMinimap()
+        loadSharpEnough()
+    }
+
+    private func layoutMinimap() {
+        let document = picture.frame.size
+        let clip = contentView.bounds
+        let overflows = zoomable && (clip.width < document.width - 1 || clip.height < document.height - 1)
+        minimap.isHidden = !overflows
+        guard overflows, let reference else { return }
+        let room = NSSize(width: 150, height: max(40, bounds.height - 32))
+        let scale = min(room.width / document.width, room.height / document.height)
+        // Scrollers run down the right edge, so it stays clear of them.
+        let size = NSSize(width: max(20, (document.width * scale).rounded()), height: max(20, (document.height * scale).rounded()))
+        let frame = NSRect(x: bounds.width - size.width - 22, y: bounds.height - size.height - 16, width: size.width, height: size.height)
+        if minimap.frame != frame { minimap.frame = frame }
+        let visible = clip.intersection(NSRect(origin: .zero, size: document))
+        minimap.show(visible: NSRect(x: visible.minX / document.width, y: visible.minY / document.height,
+                                     width: visible.width / document.width, height: visible.height / document.height))
+        if minimapPath != reference.path {
+            let path = reference.path
+            minimapPath = path
+            ThumbnailLoader.shared.load(path: path, maxPixels: 1200) { [weak self] image in
+                guard let self, self.minimapPath == path else { return }
+                self.minimap.setPicture(image)
+            }
+        }
+    }
+
+    /// Decodes only as many pixels as are on show, and more as it's zoomed
+    /// in: a 20,000 pixel page is 65 MB decoded and needn't be in a thumbnail.
+    private func loadSharpEnough() {
+        guard let reference else { return }
+        let source = sourceSize
+        let longest = max(source.width, source.height)
+        let area = source.width * source.height
+        let most = longest * min(1, (Self.mostPixels / max(1, area)).squareRoot())
+        let needed = Int(min(most, ceil(longest * min(1, magnification))))
+        guard needed > max(shownPixels, askedPixels) else { return }
+        // Twice what's needed, so a zoom doesn't decode it again at each step.
+        let pixels = Int(min(most, max(128, CGFloat(needed) * 2)))
+        askedPixels = pixels
+        let path = reference.path
+        ThumbnailLoader.shared.load(path: path, maxPixels: pixels) { [weak self] image in
+            guard let self, self.reference?.path == path else { return }
+            guard let image else {
+                guard self.shownPixels == 0 else { return }
                 self.picture.setTip("Couldn’t load this image. The saved file may be missing.")
-                self.picture.image = NSImage(systemSymbolName: "photo.badge.exclamationmark", accessibilityDescription: "Image unavailable")
+                self.picture.image = nil
+                self.picture.unavailable = true
                 return
             }
+            // An earlier, smaller decode can arrive after a bigger one.
+            guard pixels > self.shownPixels else { return }
+            self.shownPixels = pixels
             self.picture.setTip("")
-            // ImageIO applied EXIF orientation while decoding. Preserve its
-            // ratio instead of assigning the file header's unrotated size.
-            let ratio = max(source.width, source.height) / CGFloat(max(cg.width, cg.height))
-            let oriented = NSSize(width: CGFloat(cg.width) * ratio, height: CGFloat(cg.height) * ratio)
-            if self.orientedSize != oriented {
-                self.orientedSize = oriented
-                self.resetScroll = true
-                self.needsLayout = true
+            self.picture.unavailable = false
+            if self.orientedSize == nil {
+                // ImageIO applied EXIF orientation while decoding. Keep its
+                // ratio rather than the file header's unrotated size.
+                let ratio = longest / CGFloat(max(image.width, image.height))
+                let oriented = NSSize(width: CGFloat(image.width) * ratio, height: CGFloat(image.height) * ratio)
+                let rotated = (oriented.width > oriented.height) != (source.width > source.height)
+                self.orientedSize = rotated ? oriented : source
+                if rotated { self.needsLayout = true }
             }
-            let image = NSImage(cgImage: cg, size: NSSize(width: oriented.width / scale, height: oriented.height / scale))
             self.picture.image = image
         }
     }
+
+    // MARK: Pointer
+
+    /// The stage takes every press and scroll itself, bar the scrollers and
+    /// the minimap, so nothing inside has to know about clicks.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let hit = super.hitTest(point) else { return nil }
+        if hit === minimap || hit is NSScroller || hit.superview is NSScroller { return hit }
+        return self
+    }
+
+    // The first click counts even if the window wasn't in front, like a
+    // SwiftUI button beside it does.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        if fitted || !zoomable {
+            onClick?()
+            return
+        }
+        if event.clickCount == 2 {
+            apply(.fit)
+            return
+        }
+        dragFrom = event.locationInWindow
+        dragOrigin = contentView.bounds.origin
+        NSCursor.closedHand.push()
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let dragFrom else { return }
+        let moved = NSPoint(x: event.locationInWindow.x - dragFrom.x, y: event.locationInWindow.y - dragFrom.y)
+        // The image follows the hand. It's flipped and window points aren't.
+        contentView.scroll(to: NSPoint(x: dragOrigin.x - moved.x / magnification, y: dragOrigin.y + moved.y / magnification))
+        reflectScrolledClipView(contentView)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard dragFrom != nil else { return }
+        dragFrom = nil
+        NSCursor.pop()
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        guard zoomable else { return super.scrollWheel(with: event) }
+        // A made-up event has no window, and its location means nothing.
+        let at = event.window == nil ? nil : event.locationInWindow
+        let held = !event.modifierFlags.intersection([.command, .control, .option]).isEmpty
+        if !event.hasPreciseScrollingDeltas {
+            // A mouse wheel has no other way to zoom, and dragging moves
+            // around. Shift is how a wheel scrolls sideways.
+            if event.modifierFlags.contains(.shift) { return super.scrollWheel(with: event) }
+            zoom(by: exp(event.scrollingDeltaY * Self.wheelStep), around: at)
+            return
+        }
+        // Decided once per gesture: a scroll that starts while it fits zooms
+        // to its end, and the coast after it does nothing. Otherwise the same
+        // swipe would turn from zooming into scrolling as soon as it zoomed.
+        if !event.momentumPhase.isEmpty {
+            if !gestureZooms { super.scrollWheel(with: event) }
+            return
+        }
+        if event.phase == .began || event.phase.isEmpty {
+            gestureZooms = held || fitted
+            gestureDirection = held ? 1 : 0
+        }
+        guard gestureZooms else { return super.scrollWheel(with: event) }
+        // From fit, either way of swiping goes in, as out is nowhere: with
+        // natural scrolling the swipe up you'd use to read on would do nothing.
+        if gestureDirection == 0, event.scrollingDeltaY != 0 { gestureDirection = event.scrollingDeltaY > 0 ? 1 : -1 }
+        zoom(by: exp(event.scrollingDeltaY * gestureDirection * Self.trackpadStep), around: at)
+    }
+
+    // A point is two pixels on one display and one on another.
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        needsLayout = true
+    }
+
+    // Two-finger double tap: AppKit's own guesses a column to zoom to.
+    override func smartMagnify(with event: NSEvent) {
+        guard zoomable else { return }
+        if fitted { zoom(by: (fitScale < 1 ? 1 : fitScale * 2) / magnification, around: event.locationInWindow) } else { apply(.fit) }
+    }
+
+    #if DEBUG
+    /// For ReviewWindowTests: the part of the image on show, in its points.
+    var visibleForTests: NSRect { contentView.bounds }
+    var pictureSizeForTests: NSSize { picture.frame.size }
+    var isFittedForTests: Bool { fitted }
+    #endif
 }

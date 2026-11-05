@@ -12,6 +12,15 @@ struct ReviewService {
     var cancel: (Int) async throws -> DesignReview
 }
 
+/// What the title bar's button and the zoom keys ask of the image on the stage.
+enum ReviewZoomStep { case fit, actual, closer, further }
+
+/// The serial makes asking twice two asks, as the same step can follow itself.
+struct ReviewZoomRequest: Equatable {
+    var serial: Int
+    var step: ReviewZoomStep
+}
+
 @MainActor
 @Observable
 final class ReviewSession {
@@ -28,7 +37,10 @@ final class ReviewSession {
     /// all of them to choose from (Mike, 2 Nov); one that's over opens on
     /// all of them, as there's nothing left to step towards.
     var mode: ReviewMode
-    var actualSize = false
+    /// Whether the shot on show is zoomed past fitting its space. The image
+    /// says so, as pinching and scrolling happen there.
+    var zoomed = false
+    private(set) var zoomRequest: ReviewZoomRequest?
     /// The option enlarged in .single, and which of its shots.
     private(set) var focused = 0
     private(set) var shot = 0
@@ -331,10 +343,14 @@ final class ReviewSession {
         peeking = false
     }
 
+    func zoom(_ step: ReviewZoomStep) {
+        zoomRequest = ReviewZoomRequest(serial: (zoomRequest?.serial ?? 0) + 1, step: step)
+    }
+
     /// Zoom only means anything on an enlarged image, so it doesn't outlive one.
     func showAll() {
         mode = .all
-        actualSize = false
+        zoomed = false
         peeking = false
     }
 

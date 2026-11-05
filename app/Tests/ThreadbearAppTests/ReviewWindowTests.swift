@@ -165,7 +165,7 @@ final class ReviewWindowTests: XCTestCase {
         click("C: click to enlarge", in: host, window)
         XCTAssertEqual(session.mode, .single)
         XCTAssertEqual(at(session), ["C", "0"])
-        click("C: click to see them all", in: host, window)
+        click("C: click to see them all, scroll to zoom", in: host, window)
         XCTAssertEqual(session.mode, .all)
     }
 
@@ -180,6 +180,212 @@ final class ReviewWindowTests: XCTestCase {
         XCTAssertNil(anchor("Unpick C", in: host))
         XCTAssertNil(anchor("None of them will do", in: host))
         XCTAssertEqual(noteBoxes(in: host), 0, "the reply is shown as text, not a box that can't be typed in")
+    }
+
+    func testAWheelZoomsAndZoomedInPressesDragNotGoBack() {
+        let (session, host, window) = make(tall())
+        defer { window.close() }
+        let image = stage(in: host)
+        XCTAssertTrue(image.isFittedForTests)
+        XCTAssertEqual(image.pictureSizeForTests.height, 10426, "a point for every two pixels")
+        let fit = image.magnification
+        XCTAssertLessThan(fit, 0.1, "the whole page fits")
+
+        image.scrollWheel(with: wheel(lines: 5))
+        pump()
+        XCTAssertGreaterThan(image.magnification, fit * 2)
+        XCTAssertTrue(session.zoomed, "the title bar's button reads this")
+
+        // A press on the image used to go back to all of them.
+        let at = image.convert(NSPoint(x: image.bounds.midX, y: image.bounds.midY), to: nil)
+        press(.leftMouseDown, at, window)
+        press(.leftMouseUp, at, window)
+        pump()
+        XCTAssertEqual(session.mode, .single)
+
+        image.scrollWheel(with: wheel(lines: -40))
+        pump()
+        XCTAssertEqual(image.magnification, fit, accuracy: 0.0001, "it stops at the whole page")
+        XCTAssertFalse(session.zoomed)
+    }
+
+    func testZoomingKeepsTheSpotUnderThePointerUnderIt() {
+        let (session, host, window) = make(wide())
+        defer { window.close() }
+        let image = stage(in: host)
+        session.zoom(.actual)
+        pump()
+        let pointer = image.convert(NSPoint(x: image.bounds.midX + 150, y: image.bounds.midY - 100), to: nil)
+        let before = image.contentView.convert(pointer, from: nil)
+        image.zoom(by: 1.5, around: pointer)
+        pump()
+        let after = image.contentView.convert(pointer, from: nil)
+        XCTAssertEqual(after.x, before.x, accuracy: 1)
+        XCTAssertEqual(after.y, before.y, accuracy: 1)
+    }
+
+    func testDraggingMovesAroundAndTheImageFollowsTheHand() {
+        let (session, host, window) = make(tall())
+        defer { window.close() }
+        let image = stage(in: host)
+        session.zoom(.actual)
+        pump()
+        XCTAssertEqual(image.magnification, 1, accuracy: 0.0001)
+        XCTAssertEqual(image.visibleForTests.minY, 0, accuracy: 1, "full size starts at the top of the page")
+        XCTAssertLessThan(image.visibleForTests.minX, 0, "narrower than the stage, so it's in the middle")
+
+        let from = image.convert(NSPoint(x: image.bounds.midX, y: image.bounds.midY), to: nil)
+        press(.leftMouseDown, from, window)
+        // Up the screen, in AppKit's points: the page goes up, so further down it.
+        press(.leftMouseDragged, NSPoint(x: from.x, y: from.y + 200), window)
+        press(.leftMouseUp, NSPoint(x: from.x, y: from.y + 200), window)
+        pump()
+        XCTAssertEqual(image.visibleForTests.minY, 200, accuracy: 1)
+    }
+
+    func testATrackpadScrollZoomsFromFitAndScrollsOnceZoomed() {
+        let (session, host, window) = make(tall())
+        defer { window.close() }
+        let image = stage(in: host)
+        let fit = image.magnification
+        image.scrollWheel(with: swipe(.began, 40))
+        image.scrollWheel(with: swipe(.changed, 40))
+        pump()
+        let zoomedIn = image.magnification
+        XCTAssertGreaterThan(zoomedIn, fit, "nothing to scroll while it fits")
+        let top = image.visibleForTests.minY
+        // The same swipe stays a zoom right through, however far it's gone.
+        image.scrollWheel(with: swipe(.changed, 20))
+        XCTAssertGreaterThan(image.magnification, zoomedIn)
+        XCTAssertTrue(session.zoomed)
+
+        let scale = image.magnification
+        image.scrollWheel(with: swipe(.ended, 0))
+        image.scrollWheel(with: swipe(.began, -60))
+        image.scrollWheel(with: swipe(.changed, -60))
+        pump()
+        XCTAssertEqual(image.magnification, scale, accuracy: 0.0001, "the next swipe moves around")
+        XCTAssertNotEqual(image.visibleForTests.minY, top)
+    }
+
+    func testASwipeEitherWayZoomsInFromFit() {
+        let (_, host, window) = make(tall())
+        defer { window.close() }
+        let image = stage(in: host)
+        let fit = image.magnification
+        image.scrollWheel(with: swipe(.began, -40))
+        image.scrollWheel(with: swipe(.changed, -40))
+        XCTAssertGreaterThan(image.magnification, fit, "natural scrolling's swipe up")
+    }
+
+    func testTheMinimapShowsThePartOnShowAndGoesWhereItsPressed() {
+        let (session, host, window) = make(tall())
+        defer { window.close() }
+        let image = stage(in: host)
+        XCTAssertTrue(image.minimap.isHidden, "the whole image is on show")
+        session.zoom(.actual)
+        pump()
+        XCTAssertFalse(image.minimap.isHidden)
+        XCTAssertEqual(image.minimap.shown.minY, 0, accuracy: 0.001)
+        let map = image.minimap
+        let middle = map.convert(NSPoint(x: map.bounds.midX, y: map.bounds.midY), to: nil)
+        press(.leftMouseDown, middle, window)
+        press(.leftMouseUp, middle, window)
+        pump()
+        XCTAssertEqual(image.visibleForTests.midY, image.pictureSizeForTests.height / 2, accuracy: 2, "halfway down the page")
+        XCTAssertEqual(session.mode, .single)
+        session.zoom(.fit)
+        pump()
+        XCTAssertTrue(image.minimap.isHidden)
+    }
+
+    func testMovingToAnotherShotFitsItAndAFlickStaysOnTheSamePart() {
+        let (session, host, window) = make(tall())
+        defer { window.close() }
+        let image = stage(in: host)
+        session.zoom(.actual)
+        pump()
+        image.scrollWheel(with: wheel(lines: 1))
+        let scale = image.magnification
+        image.contentView.scroll(to: NSPoint(x: image.visibleForTests.minX, y: 5000))
+        pump()
+        session.peeking = true
+        pump()
+        XCTAssertEqual(session.shownOption?.id, "Today")
+        XCTAssertEqual(image.magnification, scale, accuracy: 0.0001, "flicking keeps the zoom")
+        XCTAssertEqual(image.visibleForTests.minY, 5000, accuracy: 20, "and the place")
+        session.peeking = false
+        pump()
+        session.browse(1)
+        pump()
+        XCTAssertTrue(image.isFittedForTests, "a new shot starts whole")
+        XCTAssertFalse(session.zoomed)
+    }
+
+    func testTheZoomKeysAndEscOnAShotLeaveTheAppsZoomAlone() {
+        let (session, host, window) = make(tall(), native: true)
+        defer { window.close() }
+        let image = stage(in: host)
+        let fit = image.magnification
+        window.sendEvent(key("=", modifiers: .command, code: 24))
+        pump()
+        XCTAssertGreaterThan(image.magnification, fit)
+        XCTAssertTrue(session.zoomed)
+        window.keyDown(with: key("\u{1B}", modifiers: [], code: 53))
+        pump()
+        XCTAssertEqual(session.mode, .single, "Esc comes out of the zoom first")
+        XCTAssertFalse(session.zoomed)
+        window.keyDown(with: key("\u{1B}", modifiers: [], code: 53))
+        XCTAssertEqual(session.mode, .all)
+    }
+
+    /// A page as long as the phone shots that prompted zooming, with today's
+    /// version of the same size to flick to, and a shot after it to move to.
+    private func tall() -> DesignReview {
+        func image(_ name: String) -> ImageRef { ImageRef(path: "/tmp/\(name).png", mediaType: "image/png", width: 780, height: 20852) }
+        var page = ReviewOption(id: "A", title: "Option A", image: image("A"))
+        page.shots = [ReviewShot(title: "Phone", image: image("A")), ReviewShot(title: "Top", image: image("A2"))]
+        return DesignReview(id: "review", title: "Page", options: [
+            page,
+            ReviewOption(id: "Today", title: "Today", reference: true, image: image("today")),
+        ])
+    }
+
+    /// Too big for the stage both ways, so zooming has room in every direction.
+    private func wide() -> DesignReview {
+        DesignReview(id: "review", title: "Page", options: [
+            ReviewOption(id: "A", title: "Option A", image: ImageRef(path: "/tmp/A.png", mediaType: "image/png", width: 6000, height: 6000)),
+        ])
+    }
+
+    private func stage(in host: NSView) -> ReviewImageScroll {
+        Automation.all(ReviewImageScroll.self, in: host)[0]
+    }
+
+    /// A notched mouse wheel, as lines with no finer deltas.
+    private func wheel(lines: Int32) -> NSEvent {
+        NSEvent(cgEvent: CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: lines, wheel2: 0, wheel3: 0)!)!
+    }
+
+    /// Part of a two-finger swipe on a trackpad.
+    private func swipe(_ phase: RowSwipeEvents.Phase, _ points: Double) -> NSEvent {
+        let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: 0, wheel2: 0, wheel3: 0)!
+        event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+        event.setIntegerValueField(.scrollWheelEventScrollPhase, value: phase.rawValue)
+        event.setDoubleValueField(.scrollWheelEventPointDeltaAxis1, value: points)
+        event.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1, value: points)
+        return NSEvent(cgEvent: event)!
+    }
+
+    private func press(_ type: NSEvent.EventType, _ point: NSPoint, _ window: NSWindow) {
+        window.sendEvent(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                            windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1,
+                                            pressure: type == .leftMouseUp ? 0 : 1)!)
+    }
+
+    private func key(_ characters: String, modifiers: NSEvent.ModifierFlags, code: UInt16) -> NSEvent {
+        NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: 0, windowNumber: 0,
+                         context: nil, characters: characters, charactersIgnoringModifiers: characters, isARepeat: false, keyCode: code)!
     }
 
     private func review() -> DesignReview {

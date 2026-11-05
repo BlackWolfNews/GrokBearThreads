@@ -41,7 +41,10 @@ final class ThumbnailLoader: @unchecked Sendable {
         }
         queue.addOperation { [cache] in
             let image = Self.decode(path: path, maxPixels: maxPixels)
-            if let image {
+            // A long page decoded whole for zooming is bigger than the cache's
+            // whole limit, and NSCache would hang on to it anyway. Its view
+            // holds it for as long as it's on show.
+            if let image, image.bytesPerRow * image.height <= cache.totalCostLimit {
                 cache.setObject(CGImageBox(image), forKey: cacheKey, cost: image.bytesPerRow * image.height)
             }
             DispatchQueue.main.async {
