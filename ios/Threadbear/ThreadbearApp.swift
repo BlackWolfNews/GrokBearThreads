@@ -9,9 +9,6 @@ struct ThreadbearApp: App {
     @State private var quick = QuickAskModel()
     /// A Quick Ask link waiting for a yes: every one is asked about, the first included.
     @State private var confirmQuickAsk: QuickAskLink?
-    /// A pairing link opened while already paired, waiting for a yes: it replaces the
-    /// pairing and the Macs the phone will send secrets to.
-    @State private var confirmPair: URL?
     /// A Quick Ask link that couldn't be used (not https, or missing its token).
     @State private var refusedQuickAsk = false
     @Environment(\.scenePhase) private var scenePhase
@@ -57,12 +54,11 @@ struct ThreadbearApp: App {
                     case .success(let link): confirmQuickAsk = link
                     case .failure(.unusable): refusedQuickAsk = true
                     case .failure(.notQuickAsk):
-                        // Any web page can open a link, so one that would replace a
-                        // working pairing is asked about. Unpaired, the pair screen is
-                        // showing and this is what Mike is doing.
-                        // Anything else still goes to pair(), which says it isn't one.
-                        if model.isPaired, !model.isFake, Pairing.parse(url, allowLocal: true) != nil { confirmPair = url; return }
-                        Task { await model.pair(with: url) }
+                        // Any web page can open a link, so every pairing link is asked
+                        // about, paired or not: an expired token leaves the phone
+                        // unpaired, and that mustn't let a link in unasked.
+                        // Anything else gets "not a pairing link".
+                        model.askToPair(url)
                     }
                 }
                 .alert(confirmQuickAsk.map { "Use Quick Ask on \($0.hostName)?" } ?? "",
@@ -77,16 +73,15 @@ struct ThreadbearApp: App {
                 } message: { link in
                     Text(Self.quickAskMessage(link, current: quick.settings.baseURL))
                 }
-                .alert("Pair the phone again?",
-                       isPresented: Binding(get: { confirmPair != nil }, set: { if !$0 { confirmPair = nil } }),
-                       presenting: confirmPair) { url in
-                    Button("Pair again") {
-                        confirmPair = nil
-                        Task { await model.pair(with: url) }
-                    }
-                    Button("Cancel", role: .cancel) { confirmPair = nil }
-                } message: { _ in
-                    Text("This link pairs the phone with a server and says which Macs it can send secrets to. Only say yes if you just scanned the code on your own Mac.")
+                // Cancel leaves the saved pairing and the kept runner keys as they were:
+                // nothing is saved until the yes, and then only once the token works.
+                .alert(model.pairingGate.pending?.title ?? "",
+                       isPresented: Binding(get: { model.pairingGate.pending != nil }, set: { if !$0 { model.pairingGate.cancel() } }),
+                       presenting: model.pairingGate.pending) { request in
+                    Button("Pair") { Task { await model.acceptPairing() } }
+                    Button("Cancel", role: .cancel) { model.pairingGate.cancel() }
+                } message: { request in
+                    Text(request.message)
                 }
                 .alert("This Quick Ask link can't be used", isPresented: $refusedQuickAsk) {
                     Button("OK", role: .cancel) {}

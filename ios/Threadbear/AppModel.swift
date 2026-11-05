@@ -373,18 +373,42 @@ final class AppModel {
 
     // MARK: Pairing
 
-    /// From a `threadbear://pair` link: checks the token works before
-    /// keeping it.
-    func pair(with link: URL) async {
-        #if DEBUG
-        let allowLocal = true // the simulator against `npx convex dev` on this Mac
-        #else
-        let allowLocal = false
-        #endif
-        guard let pairing = Pairing.parse(link, allowLocal: allowLocal) else {
+    #if DEBUG
+    private static let allowLocalPairing = true // the simulator against `npx convex dev` on this Mac
+    #else
+    private static let allowLocalPairing = false
+    #endif
+
+    /// A pairing link waiting for Mike's yes (ThreadbearApp's alert).
+    let pairingGate = PairingGate()
+    /// A yes is being checked with the server, for the pair screen's spinner.
+    private(set) var isPairing = false
+
+    /// Every pairing link, from the Camera, the pair screen's scanner or the
+    /// clipboard, starts here: it's held for a yes and nothing is saved yet,
+    /// paired or not (an expired token used to let a link straight in).
+    func askToPair(_ link: URL) {
+        lastError = nil
+        let asked = pairingGate.ask(link, allowLocal: Self.allowLocalPairing, current: pairing ?? PairingStore.load(),
+                                    keys: { Self.runnerKeys(for: $0) })
+        if !asked { lastError = "That link isn't a Threadbear pairing link." }
+    }
+
+    /// Mike said yes to the waiting link.
+    func acceptPairing() async {
+        guard let request = pairingGate.accept() else { return }
+        await pair(with: request.link)
+    }
+
+    /// From a `threadbear://pair` link Mike said yes to (or `-ThreadbearPair`
+    /// in a Debug build): checks the token works before keeping it.
+    private func pair(with link: URL) async {
+        guard let pairing = Pairing.parse(link, allowLocal: Self.allowLocalPairing) else {
             lastError = "That link isn't a Threadbear pairing link."
             return
         }
+        isPairing = true
+        defer { isPairing = false }
         let backend = ConvexBackend(deploymentURL: pairing.deploymentURL, token: pairing.token)
         do {
             _ = try await backend.me()

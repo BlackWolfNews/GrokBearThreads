@@ -6,7 +6,9 @@ import ThreadbearKit
 struct PairView: View {
     @Environment(AppModel.self) private var model
     @State private var scanning = false
-    @State private var pairing = false
+    /// The code the scanner read, asked about once its sheet has gone, so
+    /// the alert isn't put up while the sheet is still leaving.
+    @State private var scanned: URL?
 
     var body: some View {
         VStack(spacing: 24) {
@@ -23,7 +25,7 @@ struct PairView: View {
                 model.clearError()
                 scanning = true
             } label: {
-                if pairing {
+                if model.isPairing {
                     ProgressView().frame(maxWidth: .infinity)
                 } else {
                     Label("Scan the code", systemImage: "qrcode.viewfinder").frame(maxWidth: .infinity)
@@ -31,7 +33,7 @@ struct PairView: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            .disabled(pairing)
+            .disabled(model.isPairing)
             if let problem = model.authProblem {
                 Text("The server stopped accepting this phone's token (\(problem)). Pair again to carry on.")
                     .font(.footnote)
@@ -48,7 +50,8 @@ struct PairView: View {
                     model.report(TransportError.server("There's no link on the clipboard."))
                     return
                 }
-                Task { await model.pair(with: url) }
+                // The clipboard is anyone's to fill, so this is asked about too.
+                model.askToPair(url)
             }
             .font(.subheadline)
             // Made-up threads on the phone only, for a look before there's
@@ -58,16 +61,16 @@ struct PairView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(32)
-        .fullScreenCover(isPresented: $scanning) {
+        .fullScreenCover(isPresented: $scanning, onDismiss: {
+            if let url = scanned { model.askToPair(url) }
+            scanned = nil
+        }) {
             // Only a Threadbear pairing link ends the scan; any other code
             // in view is ignored.
             ScanSheet(accept: { $0.hasPrefix("threadbear://pair") }) { code in
                 guard let url = URL(string: code) else { return }
-                pairing = true
-                Task {
-                    await model.pair(with: url)
-                    pairing = false
-                }
+                // The sheet has already dismissed itself.
+                scanned = url
             }
         }
     }

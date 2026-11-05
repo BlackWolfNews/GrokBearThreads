@@ -2204,9 +2204,13 @@ own secret questions were declined (Codex approvals). Now:
   before keys still pairs, but its phone can't answer secrets until it's
   paired with a new code. A second Mac (one whose threads reach the phone
   through the same deployment) is trusted only on a phone that kept its
-  key before, or once that Mac draws the pairing code. A pairing link
-  opened while the phone is already paired is asked about first ("Pair
-  the phone again?"), as any web page can open one. The phone also keeps
+  key before, or once that Mac draws the pairing code. Every pairing
+  link is asked about first, as any web page can open one: from the
+  Camera, the pair screen's scanner or the clipboard, paired or not (an
+  expired token leaves the phone unpaired, and that once let a link in
+  unasked). The question names the server and says whether the Macs it
+  may send secrets to change ("Pair with <host>?"); Cancel keeps the
+  saved pairing and kept keys as they were. The phone also keeps
   the runner it first saw each thread on (keychain, by `threadId`),
   pinned when the thread first shows in a list or on a trusted secret
   card. A card on a thread whose `runnerId` differs from its pin is
