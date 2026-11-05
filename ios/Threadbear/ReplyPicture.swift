@@ -19,9 +19,10 @@ extension EnvironmentValues {
 /// identity that it's already showing this one, without comparing the bytes.
 nonisolated final class LoadedPicture: Sendable {
     enum Motion: Sendable {
-        /// A GIF, or another format with several frames: the file's own bytes,
-        /// which MovingImageView plays.
-        case frames(Data)
+        /// A GIF, or another format with several frames, played by
+        /// MovingImageView from `file`. Not its bytes: a row kept every
+        /// GIF's whole file in memory (Codex review, Daybreak finding 8).
+        case frames
         /// Plays full screen, from `file`.
         case video
     }
@@ -57,20 +58,25 @@ actor PictureLoader {
         return URLSession(configuration: config)
     }()
     /// By url and size, so the column's small copy and the full-screen one
-    /// are kept apart.
-    private let decoded = NSCache<NSString, LoadedPicture>()
+    /// are kept apart. One budget for all of them, least recently used out
+    /// first; rows let go of theirs once off screen, so this is what's held.
+    private let decoded = CostLRU<String, LoadedPicture>(limit: 96 * 1024 * 1024)
+    /// A thread of pictures doesn't fetch them all at once.
+    private let downloads = ConcurrencyLimit(4)
 
     /// The largest side's pixels decoded: a phone's column doesn't need all
     /// of a big PNG in memory. Nil for full screen, which is still held to
     /// PictureLimits.maxFullScreenSide.
     func picture(_ url: URL, maxPixels: Int?) async throws -> LoadedPicture {
-        let key = "\(maxPixels ?? 0) \(url.absoluteString)" as NSString
-        if let picture = decoded.object(forKey: key) { return picture }
+        let key = "\(maxPixels ?? 0) \(url.absoluteString)"
+        if let picture = decoded.value(for: key) { return picture }
         // The address is whatever an agent wrote, so the server is anyone's:
         // read with a byte cap, never the whole response (Daybreak finding 8).
-        let data = try await CappedDownload.data(from: url, session: session)
+        let session = session
+        let data = try await downloads.run { try await CappedDownload.data(from: url, session: session) }
         let picture = try await decode(data, url: url, maxPixels: maxPixels ?? PictureLimits.maxFullScreenSide)
-        decoded.setObject(picture, forKey: key)
+        let cost = picture.image.cgImage.map { $0.bytesPerRow * $0.height } ?? Int(picture.image.size.width * picture.image.size.height * 4)
+        decoded.set(picture, for: key, cost: cost)
         return picture
     }
 
@@ -85,7 +91,9 @@ actor PictureLoader {
         let image = UIImage(cgImage: cg)
         guard CGImageSourceGetCount(source) > 1 else { return LoadedPicture(image: image) }
         let ext = (CGImageSourceGetType(source) as String?).flatMap { UTType($0)?.preferredFilenameExtension } ?? "gif"
-        return LoadedPicture(image: image, motion: .frames(data), file: try? saved(data, url: url, ext: ext))
+        // Played from the file, so the bytes go once this returns.
+        guard let file = try? saved(data, url: url, ext: ext) else { return LoadedPicture(image: image) }
+        return LoadedPicture(image: image, motion: .frames, file: file)
     }
 
     /// The whole file comes down first (the runner never sends one over 10 MB,
@@ -132,9 +140,17 @@ struct ReplyPicture: View {
     @State private var fullScreen = false
     @Environment(\.picturesWaitUntilSeen) private var waitUntilSeen
     @State private var seen = false
+    /// Scrolled out of view: the row lets go of its picture, which stays in
+    /// PictureLoader's budgeted cache, so offscreen rows hold nothing.
+    @State private var offscreen = false
+    /// The loaded picture's size, kept after it's let go so the row doesn't
+    /// change height.
+    @State private var loadedSize: CGSize?
+
+    private var wantsPicture: Bool { (!waitUntilSeen || seen) && !offscreen }
 
     private var size: CGSize? {
-        if let size = loaded?.image.size { return size }
+        if let size = loaded?.image.size ?? loadedSize { return size }
         if let width, let height, width > 0, height > 0 { return CGSize(width: width, height: height) }
         return nil
     }
@@ -151,9 +167,14 @@ struct ReplyPicture: View {
                     .accessibilityHint(loaded?.isVideo == true ? "Plays it full screen" : "Shows it full screen")
             }
         }
-        .onScrollVisibilityChange { if $0 { seen = true } }
-        .task(id: waitUntilSeen && !seen ? nil : url) {
-            guard !waitUntilSeen || seen else { return }
+        .onScrollVisibilityChange { visible in
+            if visible { seen = true }
+            // Not while it's open full screen, which shows this one first.
+            offscreen = !visible && !fullScreen
+            if offscreen { loaded = nil }
+        }
+        .task(id: wantsPicture ? url : nil) {
+            guard wantsPicture else { return }
             await load()
             // `-ThreadbearViewPicture <alt>`: opens that picture full screen,
             // for screenshots, as the simulator can't be tapped from a script.
@@ -190,7 +211,11 @@ struct ReplyPicture: View {
     private func load() async {
         failed = false
         do {
-            loaded = try await PictureLoader.shared.picture(url, maxPixels: Self.maxPixels)
+            let picture = try await PictureLoader.shared.picture(url, maxPixels: Self.maxPixels)
+            // Scrolled away while it came: the cache has it for next time.
+            guard !offscreen else { return }
+            loaded = picture
+            loadedSize = picture.image.size
         } catch is CancellationError {
         } catch let error as URLError where error.code == .cancelled {
         } catch {
@@ -211,14 +236,32 @@ private struct PlayBadge: View {
 }
 
 /// Shows a picture and, if it has frames, plays them for as long as it's on
-/// screen. ImageIO's player keeps each frame's own time and the file's loop
-/// count and decodes a frame at a time, so a long GIF doesn't sit in memory
-/// the way a UIImage of all its frames would. Frames it can't play (a
-/// multi-picture JPEG, an unusual format) leave the first frame showing.
+/// screen, each for its own time and as many loops as the file says. Frames
+/// are decoded one at a time off the main thread, from the file and at the
+/// size the first frame was shown at (AnimationPlan), so neither the file's
+/// bytes nor full-size frames sit in memory. One with too many frames or
+/// pixels, or frames ImageIO can't read, leaves the first frame showing.
 final class MovingImageView: UIImageView {
-    /// Whether this run of the player is still wanted: its block has no other
-    /// way of hearing it should stop.
-    private final class Run { var stopped = false }
+    /// Whether this run of the player is still wanted, read from the
+    /// decoding queue too.
+    nonisolated private final class Run: @unchecked Sendable {
+        private let lock = NSLock()
+        private var _stopped = false
+        var stopped: Bool {
+            get { lock.withLock { _stopped } }
+            set { lock.withLock { _stopped = newValue } }
+        }
+    }
+    /// The source and plan, only touched on `queue`.
+    nonisolated private final class Player: @unchecked Sendable {
+        let source: CGImageSource
+        let plan: AnimationPlan
+        init(source: CGImageSource, plan: AnimationPlan) {
+            self.source = source
+            self.plan = plan
+        }
+    }
+    nonisolated private static let queue = DispatchQueue(label: "com.mikecann.threadbear.moving-pictures", qos: .userInitiated)
     private var run: Run?
     private var picture: LoadedPicture?
 
@@ -237,18 +280,38 @@ final class MovingImageView: UIImageView {
     private func play() {
         run?.stopped = true
         run = nil
-        guard window != nil, case let .frames(data) = picture?.motion else { return }
+        guard window != nil, let picture, case .frames = picture.motion, let file = picture.file,
+              let first = picture.image.cgImage else { return }
+        let maxSide = max(first.width, first.height)
         let run = Run()
         self.run = run
-        // The block comes on the main queue.
-        CGAnimateImageDataWithBlock(data as CFData, nil) { [weak self] _, frame, stop in
+        Self.queue.async { [weak self] in
+            guard let source = CGImageSourceCreateWithURL(file as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
+                  let plan = AnimationPlan(source, maxSide: maxSide) else { return }
+            let player = Player(source: source, plan: plan)
+            Self.queue.asyncAfter(deadline: .now() + plan.delays[0]) { [weak self] in
+                self?.step(player, run, index: 1, loop: 0)
+            }
+        }
+    }
+
+    /// On `queue`: decodes frame `index`, shows it, and comes back for the next.
+    nonisolated private func step(_ player: Player, _ run: Run, index: Int, loop: Int) {
+        guard !run.stopped, let frame = player.plan.frame(player.source, at: index) else { return }
+        DispatchQueue.main.async { [weak self] in
             MainActor.assumeIsolated {
-                guard let self, !run.stopped else {
-                    stop.pointee = true
-                    return
-                }
+                guard let self, !run.stopped else { return }
                 self.image = UIImage(cgImage: frame)
             }
+        }
+        var next = index + 1, loop = loop
+        if next == player.plan.delays.count {
+            next = 0
+            loop += 1
+            if player.plan.loopCount > 0, loop >= player.plan.loopCount { return }
+        }
+        Self.queue.asyncAfter(deadline: .now() + player.plan.delays[index]) { [weak self] in
+            self?.step(player, run, index: next, loop: loop)
         }
     }
 }
