@@ -209,8 +209,30 @@ test('SessionStart after a compaction reminds the agent of a reply it owes, with
   assert.match(r.hookSpecificOutput.additionalContext, /How should I start the Convex OS launcher\?/);
   // Only a compaction: a resume or a fresh start says nothing.
   assert.deepEqual(await state.options.hooks.SessionStart[0].hooks[0]({ hook_event_name: 'SessionStart', source: 'resume' }), {});
+  // A Stop that sends the turn back for its reply doesn't end what's owed.
+  await state.options.hooks.Stop[0].hooks[0]({ hook_event_name: 'Stop', stop_hook_active: false });
+  assert.match((await compacted()).hookSpecificOutput.additionalContext, /Convex OS launcher/);
   // Once the reply is written, nothing is owed.
   await state.frame!({ type: 'assistant', session_id: 's', message: { id: 'b', role: 'assistant', content: [{ type: 'text', text: 'Here is the plan in full.' }] } });
+  assert.deepEqual(await compacted(), {});
+  state.close!();
+});
+
+// From Codex's review: a refused repeat's card never showed, and a new
+// message from the user takes over from the reply owed to the last one.
+test('SessionStart after a compaction: the accepted card only, and nothing once the user has moved on', async () => {
+  const { session, state } = start([], {}, { mcpServersFor: () => ({ threadbear: { type: 'sdk', name: 'threadbear' } }), oneReply: () => true });
+  const compacted = () => state.options.hooks.SessionStart[0].hooks[0]({ hook_event_name: 'SessionStart', source: 'compact' });
+  const call = (id: string, question: string) => state.frame!({ type: 'assistant', session_id: 's', message: { id: `m${id}`, role: 'assistant', content: [{ type: 'tool_use', id, name: END_TURN_FULL_NAME, input: { asks: [{ question }] } }] } });
+  const answer = (id: string, content: string, is_error = false) => state.frame!({ type: 'user', session_id: 's', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content, is_error }] } });
+  await call('e1', 'Approve plan A?');
+  await answer('e1', oneReplyAccepted(true));
+  await call('e2', 'Approve plan B?');
+  await answer('e2', 'Already ended.', true);
+  const r = (await compacted()).hookSpecificOutput.additionalContext;
+  assert.match(r, /plan A/);
+  assert.doesNotMatch(r, /plan B/);
+  session.send({ id: 'turn-2', text: 'Forget A, look at B', images: [] });
   assert.deepEqual(await compacted(), {});
   state.close!();
 });

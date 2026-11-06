@@ -16,7 +16,7 @@ import { placePictures } from '../../pictures.ts';
 import { toolTitle, truncateInput } from '../../tools.ts';
 import { RUNNER_VERSION } from '../../config.ts';
 import { stripModelSuffix } from '../../accounts.ts';
-import { END_TURN_FULL_NAME, END_TURN_NUDGE, endTurnMessageStands, ONE_REPLY_END_TURN_NUDGE, ONE_REPLY_WRITE_NUDGE, owedReplyAfterCompact } from '../../needs.ts';
+import { END_TURN_FULL_NAME, END_TURN_NUDGE, endTurnMessageStands, endTurnWantsReply, ONE_REPLY_END_TURN_NUDGE, ONE_REPLY_WRITE_NUDGE, owedReplyAfterCompact } from '../../needs.ts';
 
 // Variables a parent Claude Code session sets for its own children. If the
 // runner was started from inside one (tests, a terminal in T3), they would
@@ -281,9 +281,15 @@ class ClaudeSession implements AgentSession {
   private messageStands = false;
   private pastEndTurn = false;
   private endTurnCall?: string;
-  // The card's questions, from the call, for a compaction to be reminded of
-  // (onCompact).
-  private endTurnQuestions: string[] = [];
+  // Each end_turn call's card questions, by item id, until its result.
+  private endTurnAsks = new Map<string, string[]>();
+  // A reply owed after an accepted one-reply end_turn, with its card's
+  // questions, for a compaction to be reminded of (onCompact). Its own
+  // state, not pastEndTurn's: a Stop that sends the turn back for its reply
+  // clears that, and a compaction can still come before the reply. A reply,
+  // a new message from the user (the agent goes on to that) or the turn's
+  // result ends it.
+  private owedReply?: string[];
 
   constructor(opts: StartSessionOptions, sink: SessionSink, deps: ClaudeAdapterDeps) {
     this.opts = opts;
@@ -382,8 +388,8 @@ class ClaudeSession implements AgentSession {
   // after a compaction, and what it adds is the first thing the agent reads.
   private onCompact(input: HookInput): { hookSpecificOutput?: { hookEventName: 'SessionStart'; additionalContext: string } } {
     if ((input as { source?: string }).source !== 'compact') return {};
-    if (!this.oneReply || !this.pastEndTurn || this.wroteAfterEnd || this.messageStands) return {};
-    return { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: owedReplyAfterCompact(this.endTurnQuestions) } };
+    if (!this.oneReply || !this.owedReply) return {};
+    return { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: owedReplyAfterCompact(this.owedReply) } };
   }
 
   private forgetEndTurn(): void {
@@ -392,7 +398,6 @@ class ClaudeSession implements AgentSession {
     this.messageStands = false;
     this.pastEndTurn = false;
     this.endTurnCall = undefined;
-    this.endTurnQuestions = [];
   }
 
   private onEndTurn(input: HookInput): Record<string, never> {
@@ -417,7 +422,11 @@ class ClaudeSession implements AgentSession {
         // a message sent during a turn lands before the Stop that turn still
         // has coming, and that sent a turn which had called end_turn back
         // to call it (1 Nov 2026, thread cdfccbc3).
-        if ((msg as { type?: string }).type === 'result') this.forgetEndTurn();
+        if ((msg as { type?: string }).type === 'result') {
+          this.forgetEndTurn();
+          this.owedReply = undefined;
+          this.endTurnAsks.clear();
+        }
         for (const out of this.normalizer.handle(msg as Record<string, unknown>)) {
           this.sink.output(out);
           // Words after end_turn's result, by the events' own order: the
@@ -428,13 +437,19 @@ class ClaudeSession implements AgentSession {
             if (ev.type === 'tool.call' && ev.name === END_TURN_FULL_NAME) {
               this.endTurnCall = ev.itemId;
               const asks = Array.isArray(ev.input.asks) ? (ev.input.asks as { question?: unknown; action?: unknown }[]) : [];
-              this.endTurnQuestions = asks.map((a) => String(a?.question ?? a?.action ?? '')).filter(Boolean);
+              this.endTurnAsks.set(ev.itemId, asks.map((a) => String(a?.question ?? a?.action ?? '')).filter(Boolean));
             }
             else if (ev.type === 'tool.result' && ev.itemId === this.endTurnCall && ev.ok) {
               this.pastEndTurn = true;
               this.messageStands = endTurnMessageStands(ev);
+              // Only an accepted call's own card: a refused repeat's result
+              // isn't ok, and its questions never showed.
+              if (endTurnWantsReply(ev)) this.owedReply = this.endTurnAsks.get(ev.itemId) ?? [];
             }
-            else if (this.pastEndTurn && ev.type === 'assistant.text' && !ev.itemId.includes('/') && ev.text.trim()) this.wroteAfterEnd = true;
+            else if (ev.type === 'assistant.text' && !ev.itemId.includes('/') && ev.text.trim()) {
+              if (this.pastEndTurn) this.wroteAfterEnd = true;
+              this.owedReply = undefined;
+            }
           }
           if (out.kind === 'event' && out.event.type === 'tool.call') this.markToolSeen(out.event.itemId);
         }
@@ -532,6 +547,8 @@ class ClaudeSession implements AgentSession {
 
   send(input: UserInput): void {
     this.normalizer.sent();
+    // A new message takes over from a reply owed to the last one (onCompact).
+    this.owedReply = undefined;
     // Each picture where its [Picture N] marker is in the words, or before
     // them when nothing places it (pictures.ts).
     const content: Record<string, unknown>[] = placePictures(input.text, input.images).map((part) => {
