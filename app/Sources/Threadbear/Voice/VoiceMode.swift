@@ -42,6 +42,8 @@ final class VoiceMode {
     @ObservationIgnored private var working = false
     /// The turn's newest message, said when it ends unless a final reply came.
     @ObservationIgnored private var lastMessage: (String, String, String)?
+    /// The approval card waiting on him, for a spoken yes or no.
+    @ObservationIgnored private var pendingApproval: ApprovalRequest?
     /// Without echo cancellation: ignore the microphone until then.
     @ObservationIgnored private var quietUntil: CFTimeInterval = 0
 
@@ -119,6 +121,7 @@ final class VoiceMode {
         phase = .off
         level = 0
         working = false
+        pendingApproval = nil
         if let threadId { VoiceLog.write("off for \(threadId)") }
         threadId = nil
         VoiceServer.shared.stopSoon()
@@ -159,6 +162,16 @@ final class VoiceMode {
     }
 
     private func send(_ text: String, to threadId: String) {
+        // A yes or a no on its own answers the card that's waiting.
+        if let card = pendingApproval, let decision = SpokenAnswer.decision(text, options: card.options) {
+            pendingApproval = nil
+            AppModel.shared.session(for: threadId).respond(approvalId: card.approvalId, decision: decision, answers: nil, message: nil)
+            VoiceLog.write("answered an approval by voice: \(decision.rawValue)")
+            speakNow(decision == .deny ? "OK, I won't." : "OK, going ahead.")
+            working = true
+            phase = .thinking
+            return
+        }
         AppModel.shared.sendSpoken(threadId: threadId, text: text)
         working = true
         phase = .thinking
@@ -190,12 +203,25 @@ final class VoiceMode {
                 lastMessage = (itemId, text, event.ts)
             }
         case .approvalRequested(let request):
-            say("I need your OK on screen: \(request.title).", id: "approval-\(event.seq)", at: event.ts)
+            pendingApproval = request
+            let ask = request.options.contains(.allowAlways) ? "Say yes, no, or always allow." : "Say yes or no."
+            say("I need your OK: \(request.title). \(ask)", id: "approval-\(event.seq)", at: event.ts)
+        case .approvalResolved(let resolution):
+            if pendingApproval?.approvalId == resolution.approvalId { pendingApproval = nil }
         case .questionRequested:
             say("I've got a question for you on screen.", id: "question-\(event.seq)", at: event.ts)
         default:
             break
         }
+    }
+
+    /// A short line of its own, said straight away (an answer's "OK").
+    private func speakNow(_ line: String) {
+        guard let audio, let base else { return }
+        let defaults = UserDefaults.standard
+        let voice = VoiceCatalog.voice(defaults.string(forKey: VoiceCatalog.voiceKey))
+        let speed = VoiceCatalog.speed(defaults.object(forKey: VoiceCatalog.speedKey) as? Double)
+        audio.speak([line], voice: voice.engineVoice, speed: speed, base: base)
     }
 
     private func say(_ markdown: String, id: String, at ts: String) {
@@ -207,6 +233,15 @@ final class VoiceMode {
         let speed = VoiceCatalog.speed(defaults.object(forKey: VoiceCatalog.speedKey) as? Double)
         audio.speak(SpokenText.sentences(markdown), voice: voice.engineVoice, speed: speed, base: base)
     }
+
+    #if DEBUG
+    /// The automation hook's `voice-stage`: a phase to look at, nothing running.
+    func stage(_ phase: Phase, threadId: String?, level: Float) {
+        self.phase = phase
+        self.threadId = threadId
+        self.level = level
+    }
+    #endif
 
     // MARK: Settings' Try button
 

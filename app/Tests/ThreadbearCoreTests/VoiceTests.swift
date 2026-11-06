@@ -115,3 +115,31 @@ final class UtteranceTrackerTests: XCTestCase {
         XCTAssertNil(t.flush())
     }
 }
+
+final class SpokenAnswerTests: XCTestCase {
+    let all: [ApprovalOption] = [.allow, .allowAlways, .deny]
+
+    func testYes() {
+        for said in ["Yes.", "yeah go ahead", "Go ahead, please.", "Sure", "OK, do it!", "yes thank you", "Um, yes."] {
+            XCTAssertEqual(SpokenAnswer.decision(said, options: all), .allow, said)
+        }
+    }
+
+    func testNo() {
+        for said in ["No.", "Nope", "Don't do that.", "no thanks", "Cancel"] {
+            XCTAssertEqual(SpokenAnswer.decision(said, options: all), .deny, said)
+        }
+    }
+
+    func testAlways() {
+        XCTAssertEqual(SpokenAnswer.decision("Always allow it", options: all), .allowAlways)
+        // No always on this card: not taken as a plain yes either.
+        XCTAssertNil(SpokenAnswer.decision("always allow", options: [.allow, .deny]))
+    }
+
+    func testAnythingMoreIsAMessage() {
+        for said in ["No, use the other folder instead", "yes but only for the tests folder", "what does that command do", "thank you", ""] {
+            XCTAssertNil(SpokenAnswer.decision(said, options: all), said)
+        }
+    }
+}

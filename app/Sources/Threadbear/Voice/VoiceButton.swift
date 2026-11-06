@@ -12,16 +12,6 @@ struct VoiceButton: View {
     var body: some View {
         let on = voice.isOn(for: threadId)
         HStack(spacing: 6) {
-            if on, let caption {
-                Text(caption)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.head)
-                    .frame(maxWidth: 260, alignment: .trailing)
-                    .transition(.opacity)
-                    .tip(caption)
-            }
             Button {
                 voice.toggle(threadId: threadId)
             } label: {
@@ -61,16 +51,6 @@ struct VoiceButton: View {
         }
     }
 
-    private var caption: String? {
-        switch voice.phase {
-        case .starting(let status): status
-        case .listening: "Listening…"
-        case .hearing(let words): words.isEmpty ? "Listening…" : words
-        case .thinking: "Working on it…"
-        case .speaking: "Speaking"
-        case .off, .failed: nil
-        }
-    }
 }
 
 /// Five bars: still when off, gently pulsing while busy, and following the

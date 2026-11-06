@@ -1384,8 +1384,14 @@ person; when you pause for about a second it goes to the thread as your
 message, and the agent's reply is read out. You can keep talking while it
 works (what you say goes into the turn it's on, as typing does), and if
 you talk over it, it stops to listen. It's the same thread with the same
-memory, tools and approvals: when it needs your OK or has a question it
-says so, and you answer on screen. Code and tables aren't read out; it
+memory, tools and approvals. When it needs your OK it asks out loud, and
+you can just say "yes", "go ahead", "no" or "always allow"; anything
+longer ("no, use the other folder") goes to it as your message, as
+typing would. A question card you answer on screen.
+While Voice is on, the bear sits over the message box with what you're
+saying beside it: it perks up while it listens, nods along as you talk,
+looks up with thought dots while it works, and talks along with its
+voice. Code and tables aren't read out; it
 tells you they're on screen. Press the button again, or go to another
 thread, to end Voice.
 
