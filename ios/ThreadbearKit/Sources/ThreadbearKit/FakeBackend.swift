@@ -14,6 +14,9 @@ public final class FakeBackend: Backend, @unchecked Sendable {
     private var scheduleList: [PhoneSchedule]
     private var pocketCards = FakeBackend.samplePocket
     private var commands: [String: CommandStatus] = [:]
+    /// Messages sent while the runner's offline (`runnerOnline: false`),
+    /// by thread, as phone:waiting lists them.
+    private var waitingByThread: [String: [WaitingSend]] = [:]
     private var listeners: [UUID: @Sendable () -> Void] = [:]
     /// How long a fake turn takes. Zero in tests.
     private let turnDelay: Duration
@@ -24,7 +27,9 @@ public final class FakeBackend: Backend, @unchecked Sendable {
 
     /// `runners`: the Mac asleep and two more runners online (`-ThreadbearRunners`),
     /// for the new thread sheet's runner picker. Left out of the usual samples.
-    public init(now: Date = .now, turnDelay: Duration = .seconds(2), runnerOnline: Bool = true, listDelay: Duration = .zero, pictures: Bool = false, long: Bool = false, secret: Bool = false, diagrams: Bool = false, runners: Bool = false) {
+    /// `queued`: with the runner offline, a3 already has two messages
+    /// waiting for it, for the screenshots.
+    public init(now: Date = .now, turnDelay: Duration = .seconds(2), runnerOnline: Bool = true, listDelay: Duration = .zero, pictures: Bool = false, long: Bool = false, secret: Bool = false, diagrams: Bool = false, runners: Bool = false, queued: Bool = false) {
         let sample = Self.sample(now: now)
         threadsById = Dictionary(uniqueKeysWithValues: sample.threads.map { ($0.threadId, $0) })
         messagesById = sample.messages
@@ -60,6 +65,14 @@ public final class FakeBackend: Backend, @unchecked Sendable {
         }
         self.turnDelay = turnDelay
         self.listDelay = listDelay
+        if queued {
+            let at = now.timeIntervalSince1970 * 1000
+            waitingByThread["a3"] = [
+                WaitingSend(commandId: "cmd_q1", state: .pending, text: "Yes, ship it", createdAt: at - 120_000),
+                WaitingSend(commandId: "cmd_q2", state: .pending, text: "And check it on the iPad too while you're there", createdAt: at - 60_000),
+            ]
+            for send in waitingByThread["a3"]! { commands[send.commandId] = CommandStatus(state: .pending) }
+        }
     }
 
     // MARK: A thread asking for a secret
@@ -392,6 +405,22 @@ public final class FakeBackend: Backend, @unchecked Sendable {
         watch { [unowned self] in lock.withLock { commands[commandId] } }
     }
 
+    public func waiting(_ threadId: String) -> AsyncThrowingStream<[WaitingSend], Error> {
+        watch { [unowned self] in lock.withLock { waitingByThread[threadId] ?? [] } }
+    }
+
+    public func cancel(_ commandId: String) async throws -> Bool {
+        var cancelled = false
+        mutate { s in
+            for (threadId, list) in s.waitingByThread where list.contains(where: { $0.commandId == commandId && $0.canCancel }) {
+                s.waitingByThread[threadId] = list.filter { $0.commandId != commandId }
+                s.commands[commandId] = CommandStatus(state: .failed, note: "Cancelled")
+                cancelled = true
+            }
+        }
+        return cancelled
+    }
+
     public func connectionStates() -> AsyncStream<Bool> {
         AsyncStream { $0.yield(true) }
     }
@@ -439,6 +468,17 @@ public final class FakeBackend: Backend, @unchecked Sendable {
     }
 
     public func send(threadId: String, text: String, answers: [AskAnswer], images: [String]) async throws -> String {
+        // The runner's offline: it waits, as it would in Convex.
+        let runnerId = lock.withLock { threadsById[threadId]?.runnerId }
+        if let runnerId, WaitingSends.offlineRunner(runnerId, in: lock.withLock { runnerList }, at: .now) != nil {
+            let id = "cmd_" + UUID().uuidString.prefix(8)
+            mutate { s in
+                s.commands[id] = CommandStatus(state: .pending)
+                s.waitingByThread[threadId, default: []].append(WaitingSend(commandId: id, state: .pending, text: text, photos: images.count,
+                                                                            createdAt: Date.now.timeIntervalSince1970 * 1000))
+            }
+            return id
+        }
         let text = Self.withPictures(text, images)
         mutate { s in
             s.append(threadId, role: .user, text: text, origin: "phone")

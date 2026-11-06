@@ -13,6 +13,15 @@ struct ThreadView: View {
     @State private var draft = ""
     /// The last command sent from here, until the runner has taken it.
     @State private var sent: (id: String, status: CommandStatus?)?
+    /// From API 57: every message from the phone the runner hasn't applied
+    /// yet, from here or another phone, each shown dimmed with a Cancel.
+    @State private var waiting: [WaitingSend] = []
+    /// Cancels on their way, so the button can't be tapped twice.
+    @State private var cancelling: Set<String> = []
+    /// Ones that have left the waiting list, kept faded as "Sending…" until
+    /// their message is in the transcript (30 s at most), as the transcript
+    /// can come a moment later, or until settle() finds they failed.
+    @State private var gone: [WaitingSend] = []
     @State private var hibernateTarget: PhoneThread?
     @State private var markedSeen = false
     /// The oldest seq when "Load earlier" was tapped, until older messages
@@ -72,6 +81,7 @@ struct ThreadView: View {
         .task(id: "\(threadId):\(model.connection)") { await follow() }
         .task(id: "\(threadId):\(limit):\(model.hasMessagePages):\(model.connection)") { await followMessages() }
         .task(id: "\(sent?.id ?? ""):\(model.connection)") { await followCommand() }
+        .task(id: "\(threadId):\(model.canSeeWaiting):\(model.connection)") { await followWaiting() }
     }
 
     private func content(_ detail: ThreadDetail) -> some View {
@@ -123,12 +133,19 @@ struct ThreadView: View {
                         }
                     }
                     ForEach(pins.trailing) { PinnedPicture(image: $0) }
+                    let offline = model.offlineRunner(of: thread)
+                    let shown = WaitingSends.shown(waiting + gone, messages: messages)
+                    ForEach(shown) { send in
+                        // Why they're waiting goes under the last one only, not repeated down the column.
+                        WaitingMessageView(send: send, offlineRunner: offline, says: send.id == shown.last?.id,
+                                           cancelling: cancelling.contains(send.id)) { cancel(send) }
+                    }
                     if let pending = thread.pendingApproval {
                         PendingCard(threadId: thread.threadId, runnerId: thread.runnerId, pending: pending) { sent = ($0, nil) }
                     } else if thread.isBusy || thread.working != nil {
                         WorkingLine(text: thread.working)
                             .id("working:\(thread.status == .running)")
-                    } else if let asks = thread.asks, !asks.isEmpty, sent == nil {
+                    } else if let asks = thread.asks, !asks.isEmpty, sent == nil, waiting.isEmpty {
                         AsksCard(asks: asks, picks: $picks, busy: sent != nil) {
                             Task { _ = await send("", to: thread) }
                         }
@@ -190,7 +207,7 @@ struct ThreadView: View {
                 if quick.voiceThreadId == threadId, !typing {
                     VoiceBar(threadId: threadId, afterSeq: messages.last?.seq ?? 0, working: thread.isBusy) { typing = true }
                 } else {
-                    Composer(text: $draft, placeholder: thread.isBusy ? "Steer the agent" : "Reply", links: thread.links ?? []) { text, photos in
+                    Composer(text: $draft, placeholder: composerPlaceholder(thread), links: thread.links ?? []) { text, photos in
                         await send(text, photos: photos, to: thread)
                     }
                 }
@@ -225,13 +242,92 @@ struct ThreadView: View {
     }
 
     /// "Waiting for the Mac" while a command sits in the queue, so a
-    /// message sent with the lid shut doesn't look lost.
+    /// message sent with the lid shut doesn't look lost. From API 57 the
+    /// waiting messages say that themselves, so this is only for a failure.
     private var sentNote: String? {
         guard let sent else { return nil }
         switch sent.status?.state {
+        // An answer to a card is tracked here too, so a failure always shows.
         case .failed: return "Didn't go through: \(sent.status?.note ?? "the runner refused it")"
         case .done, .taken: return nil
-        default: return model.offlineText != nil ? "Waiting for the Mac to wake up" : "Sending…"
+        default:
+            // Each waiting message says how it's getting on itself.
+            if model.canSeeWaiting { return nil }
+            guard let thread = detail?.thread, let name = model.offlineRunner(of: thread) else { return "Sending…" }
+            return "Waiting for \(name) to come back"
+        }
+    }
+
+    /// Says the runner's offline before anything's typed, so it's no
+    /// surprise that the message waits.
+    private func composerPlaceholder(_ thread: PhoneThread) -> String {
+        if let name = model.offlineRunner(of: thread) { return "\(name) is offline, this will wait" }
+        return thread.isBusy ? "Steer the agent" : "Reply"
+    }
+
+    private func followWaiting() async {
+        guard model.canSeeWaiting, let backend = model.backend else { waiting = []; return }
+        do {
+            for try await list in backend.waiting(threadId) {
+                // Off the list: done, failed, or cancelled from another phone.
+                // One being cancelled here is this phone's own doing.
+                let left = waiting.filter { old in !list.contains { $0.id == old.id } && !cancelling.contains(old.id) }
+                // Kept in place while settle() finds out which, so it doesn't blink out.
+                gone += left.map { var s = $0; s.state = .taken; return s }
+                waiting = list
+                for send in left { Task { await settle(send) } }
+            }
+        } catch {
+            model.report(error)
+        }
+    }
+
+    /// How a send that's left the waiting list ended. Done: it stays faded
+    /// until its message is in the transcript. Failed after the runner took
+    /// it (a photo it couldn't fetch, the thread gone): say why and put the
+    /// words back in the box, rather than letting it vanish.
+    private func settle(_ send: WaitingSend) async {
+        var status: CommandStatus?
+        if let backend = model.backend {
+            do {
+                for try await value in backend.command(send.commandId) { status = value; break }
+            } catch {}
+        }
+        if status?.state == .failed {
+            gone.removeAll { $0.id == send.id }
+            guard status?.note != "Cancelled" else { return }
+            // The last one sent from here already says so under the transcript.
+            if sent?.id != send.commandId {
+                model.report(TransportError.server("Didn't go through: \(status?.note ?? "the runner refused it")"))
+            }
+            if draft.isEmpty { draft = send.text }
+            return
+        }
+        // Done (or unreadable, pruned while the phone was away): until its
+        // message is in the transcript, which takes it out of `shown` first.
+        try? await Task.sleep(for: .seconds(30))
+        gone.removeAll { $0.id == send.id }
+    }
+
+    /// Takes a waiting message back. Its words go back in the box if that's
+    /// empty, so a change of mind is an edit rather than typing it again.
+    private func cancel(_ send: WaitingSend) {
+        guard let backend = model.backend, !cancelling.contains(send.id) else { return }
+        cancelling.insert(send.id)
+        Task {
+            defer { cancelling.remove(send.id) }
+            do {
+                if try await backend.cancel(send.commandId) {
+                    // Gone from the list straight away rather than on the next update.
+                    waiting.removeAll { $0.id == send.id }
+                    if sent?.id == send.commandId { sent = nil }
+                    if draft.isEmpty { draft = send.text }
+                } else {
+                    model.report(TransportError.server("Too late to cancel: it's already gone to the Mac."))
+                }
+            } catch {
+                model.report(error)
+            }
         }
     }
 
@@ -332,7 +428,7 @@ struct ThreadView: View {
     /// A finished turn that needs nothing from Mike: the done card's place.
     private func isDone(_ thread: PhoneThread, messages: [PhoneMessage]) -> Bool {
         thread.status == .idle && !thread.needsYou && thread.archivedAt == nil && thread.working == nil
-            && messages.last?.role == .assistant && sent == nil
+            && messages.last?.role == .assistant && sent == nil && waiting.isEmpty
     }
 
     /// Sends what's typed, with any answers picked on the card of asks
@@ -503,6 +599,47 @@ struct EarlierButton: View {
         .buttonStyle(.borderless)
         .disabled(loading)
     }
+}
+
+/// A message the runner hasn't taken yet: the bubble dimmed, and under it
+/// why it's waiting and a Cancel while it can still be stopped.
+struct WaitingMessageView: View {
+    var send: WaitingSend
+    var offlineRunner: String?
+    /// Whether the line says why it's waiting (the last one), or only has its Cancel.
+    var says = true
+    var cancelling: Bool
+    var cancel: () -> Void
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 4) {
+            MessageView(message: PhoneMessage(seq: -1, role: .user, text: text, at: Date(timeIntervalSince1970: send.createdAt / 1000)))
+                .opacity(0.55)
+            HStack(spacing: 5) {
+                if says || !send.canCancel {
+                    Image(systemName: offlineRunner != nil && send.canCancel ? "clock" : "arrow.up.circle")
+                    Text(WaitingSends.note(send, offlineRunner: offlineRunner))
+                    if send.canCancel { Text("·") }
+                }
+                if send.canCancel {
+                    if cancelling {
+                        ProgressView().controlSize(.mini)
+                    } else {
+                        Button("Cancel", action: cancel)
+                            .buttonStyle(.borderless)
+                            // The one thing on the line to tap.
+                            .foregroundStyle(.tint)
+                            .accessibilityHint("Takes this message back before it's sent")
+                    }
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+
+    private var text: String { WaitingSends.mirrored(send) }
 }
 
 struct MessageView: View {

@@ -111,6 +111,16 @@ final class AppModel {
     var canSendPhotos: Bool { isFake || (apiVersion ?? 0) >= BackendCompatibility.photosAPIVersion }
     /// Whether a secret card can be answered here (backend API 35, phone:secret).
     var canAnswerSecrets: Bool { isFake || (apiVersion ?? 0) >= BackendCompatibility.secretsAPIVersion }
+    /// Whether messages waiting for their runner can be listed and cancelled
+    /// (backend API 57, phone:waiting and phone:cancel).
+    var canSeeWaiting: Bool { isFake || (apiVersion ?? 0) >= BackendCompatibility.waitingSendsAPIVersion }
+
+    /// The thread's own runner by name while it's offline. Not offlineText,
+    /// which only speaks up once every runner is: with Bruce and the cloud
+    /// box always up, a message to the sleeping M5 just said "Sending…".
+    func offlineRunner(of thread: PhoneThread) -> String? {
+        WaitingSends.offlineRunner(thread.runnerId, in: runners, at: now)
+    }
     /// The demo's kept runner keys, in memory so it never writes the keychain,
     /// with the sample Mac's as if it came in a pairing link.
     private let demoRunnerKeys = MemoryRunnerKeyStore(FakeBackend.sampleRunnerKeys)
@@ -255,7 +265,9 @@ final class AppModel {
             // -ThreadbearLong: and a very long thread, "long".
             // -ThreadbearSecret: and a thread waiting on a secret card, "secret".
             // -ThreadbearRunners: the Mac asleep and two more runners, for the runner picker.
-            connect(FakeBackend(listDelay: args.contains("-ThreadbearSlowLoad") ? .seconds(6) : .zero, pictures: args.contains("-ThreadbearPictures"), long: args.contains("-ThreadbearLong"), secret: args.contains("-ThreadbearSecret"), diagrams: args.contains("-ThreadbearDiagrams"), runners: args.contains("-ThreadbearRunners")), pairing: nil)
+            // -ThreadbearOffline: the Mac's been asleep for hours, so messages wait, and a3 has two waiting.
+            let offline = args.contains("-ThreadbearOffline")
+            connect(FakeBackend(runnerOnline: !offline, listDelay: args.contains("-ThreadbearSlowLoad") ? .seconds(6) : .zero, pictures: args.contains("-ThreadbearPictures"), long: args.contains("-ThreadbearLong"), secret: args.contains("-ThreadbearSecret"), diagrams: args.contains("-ThreadbearDiagrams"), runners: args.contains("-ThreadbearRunners"), queued: offline), pairing: nil)
         } else if let saved = PairingStore.load() {
             connect(ConvexBackend(deploymentURL: saved.deploymentURL, token: saved.token), pairing: saved)
         }

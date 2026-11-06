@@ -40,7 +40,7 @@ function cleanResult(result: string): string | undefined {
 // typed only so the runner could get them exactly, and nothing reads them after
 // that. Dropped rather than scrubbed, as a value only the sender knew would get
 // through any scrubbing here. Its photos stay named, for deleteIfUnused to count.
-function finishedArgs(args: Record<string, unknown> | undefined): Record<string, unknown> {
+export function finishedArgs(args: Record<string, unknown> | undefined): Record<string, unknown> {
   return Array.isArray(args?.images) ? { images: args.images } : {};
 }
 
@@ -140,7 +140,7 @@ async function mustMayUseStorage(ctx: MutationCtx, caller: Caller, storageId: Id
 
 // Deletes a file nothing names any more. Call after the row naming it has
 // gone (or was never written).
-async function deleteIfUnused(ctx: MutationCtx, storageId: Id<'_storage'>): Promise<void> {
+export async function deleteIfUnused(ctx: MutationCtx, storageId: Id<'_storage'>): Promise<void> {
   if (await storageRefs(ctx, storageId)) return;
   if (await ctx.db.system.get(storageId)) await ctx.storage.delete(storageId);
   for (const row of await ctx.db.query('storageOwners').withIndex('by_storageId', (q) => q.eq('storageId', storageId)).collect()) {

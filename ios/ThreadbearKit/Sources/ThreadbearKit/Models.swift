@@ -830,6 +830,10 @@ public enum BackendCompatibility {
     /// lists them in it, so the new thread sheet can offer a runner, starting
     /// on the first one online. Older backends get no runner picker.
     public static let runnerOrderAPIVersion = 56
+    /// From 57 phone:waiting lists a thread's messages its runner hasn't
+    /// taken yet, and phone:cancel takes one back. Older backends have
+    /// neither, so the phone only shows a line for the last one it sent.
+    public static let waitingSendsAPIVersion = 57
 
     /// The line to show, or nil when the backend is fine.
     public static func problem(_ identity: PhoneIdentity) -> String? {

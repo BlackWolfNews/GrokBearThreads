@@ -10,7 +10,7 @@ import { threadFields, views } from './schema';
 import { checkPhoneToken, hasLiveKey, runnerStatsRows, watchRunnersFor } from './lib';
 import { API_VERSION } from './version';
 import { imagesFrom, phoneImage, replyImagesFrom } from './share';
-import { eventBodyAnswer, readEventBody, runnerName } from './sync';
+import { deleteIfUnused, eventBodyAnswer, finishedArgs, readEventBody, runnerName } from './sync';
 import { HEADS_MARK } from './projectHeads';
 import { notesOf } from './projectNotes';
 
@@ -19,6 +19,8 @@ import { notesOf } from './projectNotes';
 const ONLINE_MS = 3 * 60_000;
 const DEN_LIMIT = 100;
 const MAX_COMMAND_IMAGES = 6;
+// phone:waiting reads at most this many of a thread's pending sends, and as many taken.
+const WAITING_LIMIT = 50;
 
 const row = v.object({ ...threadFields, view: v.union(...views.map((x) => v.literal(x))) });
 const message = v.object({ seq: v.number(), role: v.union(v.literal('user'), v.literal('assistant')), text: v.string(), origin: v.optional(v.string()), at: v.string() });
@@ -85,7 +87,7 @@ export const runners = query({
   },
 });
 
-// Mike's order for his runners (API 56), from the phone's Settings. The
+// Mike's order for his runners (API 57), from the phone's Settings. The
 // phone sends every runner it lists; ids it doesn't know of yet are kept as
 // sent, and a runner left out goes after the ones in it.
 export const setRunnerOrder = mutation({
@@ -610,6 +612,44 @@ export const send = mutation({
     await checkPhoneToken(ctx, token);
     const t = await findThread(ctx, threadId);
     return queue(ctx, t.runnerId, 'send', threadId, { text, ...(answers?.length ? { answers } : {}), ...(await commandImages(ctx, images)) });
+  },
+});
+
+// A thread's messages from the phone that its runner hasn't applied yet
+// (API 57), oldest first: pending ones can still be cancelled, taken ones
+// are on their way. The phone shows each as a dimmed message with its own
+// Cancel, so several sent while the Mac is asleep don't look lost.
+export const waiting = query({
+  args: { token: v.string(), threadId: v.string() },
+  returns: v.array(v.object({ commandId: v.id('commands'), state: v.union(v.literal('pending'), v.literal('taken')), text: v.string(), photos: v.number(), createdAt: v.number() })),
+  handler: async (ctx, { token, threadId }) => {
+    await checkPhoneToken(ctx, token);
+    const out = [];
+    for (const state of ['pending', 'taken'] as const) {
+      // Bounded: a phone can't usefully show more, and each row can carry a long message.
+      for (const c of await ctx.db.query('commands').withIndex('by_thread_state', (q) => q.eq('threadId', threadId).eq('state', state)).take(WAITING_LIMIT)) {
+        // The main Mac's own sends to another runner's thread (relay.ts) aren't the phone's to list or take back.
+        if (c.kind !== 'send' || c.args?.from === 'mac') continue;
+        out.push({ commandId: c._id, state, text: typeof c.args?.text === 'string' ? c.args.text : '', photos: Array.isArray(c.args?.images) ? c.args.images.length : 0, createdAt: c.createdAt });
+      }
+    }
+    return out.sort((a, b) => a.createdAt - b.createdAt);
+  },
+});
+
+// Takes back a message the runner hasn't taken yet (API 57). false once it
+// has: sync:takeCommand and this both check `pending` in one transaction, so
+// only one of them wins. The photos go too, as nothing will fetch them now.
+export const cancel = mutation({
+  args: { token: v.string(), commandId: v.id('commands') },
+  returns: v.boolean(),
+  handler: async (ctx, { token, commandId }) => {
+    await checkPhoneToken(ctx, token);
+    const c = await ctx.db.get(commandId);
+    if (!c || c.kind !== 'send' || c.args?.from === 'mac' || c.state !== 'pending') return false;
+    await ctx.db.patch(commandId, { state: 'failed', note: 'Cancelled', doneAt: Date.now(), args: finishedArgs(c.args) });
+    for (const image of Array.isArray(c.args?.images) ? c.args.images : []) await deleteIfUnused(ctx, image.storageId);
+    return true;
   },
 });
 

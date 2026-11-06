@@ -45,6 +45,12 @@ public protocol Backend: Sendable {
     /// Nil once the thread's gone from the mirror.
     func thread(_ threadId: String) -> AsyncThrowingStream<ThreadDetail?, Error>
     func command(_ commandId: String) -> AsyncThrowingStream<CommandStatus?, Error>
+    /// The thread's messages from the phone its runner hasn't applied yet,
+    /// oldest first, live (backend API 57).
+    func waiting(_ threadId: String) -> AsyncThrowingStream<[WaitingSend], Error>
+    /// Takes back a waiting message (backend API 57). False once the runner
+    /// has taken it, too late to stop.
+    func cancel(_ commandId: String) async throws -> Bool
     func connectionStates() -> AsyncStream<Bool>
 
     /// `answers` (backend API 14): the open card's asks the message answers.
@@ -86,7 +92,7 @@ public protocol Backend: Sendable {
     func registerDevice(apnsToken: String, environment: String, pushKey: String?) async throws
     /// Backend API 3: when this phone (by its APNs token) is notified.
     func setNotifications(apnsToken: String, notify: NotifyMode) async throws
-    /// Puts the runners in this order (backend API 56): new threads start on
+    /// Puts the runners in this order (backend API 57): new threads start on
     /// the first one online, and runners() lists them so.
     func setRunnerOrder(_ runnerIds: [String]) async throws
 }
@@ -249,6 +255,14 @@ public final class ConvexBackend: Backend, @unchecked Sendable {
 
     public func command(_ commandId: String) -> AsyncThrowingStream<CommandStatus?, Error> {
         live("phone:command", ["commandId": .string(commandId)], as: CommandStatus?.self, missing: .some(nil))
+    }
+
+    public func waiting(_ threadId: String) -> AsyncThrowingStream<[WaitingSend], Error> {
+        live("phone:waiting", ["threadId": .string(threadId)], as: [WaitingSend].self)
+    }
+
+    public func cancel(_ commandId: String) async throws -> Bool {
+        try Self.decode(Bool.self, try await transport.mutation("phone:cancel", args(["commandId": .string(commandId)])))
     }
 
     public func connectionStates() -> AsyncStream<Bool> { transport.connectionStates() }

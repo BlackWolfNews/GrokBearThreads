@@ -390,6 +390,8 @@ export default defineSchema({
   })
     .index('by_runner_state', ['runnerId', 'state'])
     .index('by_state', ['state'])
+    // phone:waiting (API 57): a thread's messages its runner hasn't taken yet.
+    .index('by_thread_state', ['threadId', 'state'])
     // pruneOld: finished ones by when they finished.
     .index('by_state_done', ['state', 'doneAt']),
 

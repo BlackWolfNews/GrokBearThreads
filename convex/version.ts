@@ -253,4 +253,7 @@
 //    or quick ask that names no runner goes to the first one online in it
 //    before falling back to the main Mac as before. An older phone gets the
 //    list in that order and still sends no runner.
-export const API_VERSION = 56;
+// 57: phone:waiting, a thread's sends its runner hasn't applied yet, and
+//    phone:cancel, which takes back one still pending. An older phone
+//    never asks for either.
+export const API_VERSION = 57;

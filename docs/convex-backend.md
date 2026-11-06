@@ -562,6 +562,15 @@ Queries:
   from that seq on, for a client passing `noImages: true` to `phone:messages`.
 - `phone:command({ token, commandId })` → `{ state: "pending" | "taken" |
   "done" | "failed", note?, threadId? }`.
+- `phone:waiting({ token, threadId })` (API 57) → the thread's `send`
+  commands not yet finished, oldest first: `{ commandId, state: "pending" |
+  "taken", text, photos, createdAt }`. The phone shows each as a faded
+  message under the transcript, so several sent while the runner is asleep
+  don't look lost.
+- `phone:cancel({ token, commandId })` (API 57) → `true` if the send was
+  still pending and is now `failed` with note "Cancelled" (its photos
+  deleted), `false` once the runner has taken it. `sync:takeCommand` checks
+  `pending` in its own transaction, so only one of the two wins.
 
 Since API 16, `phone:search({ token, text })` returns up to 30 archived
 thread rows whose title or last reply has those words (Convex full-text
