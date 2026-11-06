@@ -89,8 +89,8 @@ export type UpstreamRelease = {
   // starts a thread for these straight away rather than on its timer.
   important?: { commit: string; why: string }[];
   // Plain-words notes for people, from each release main doesn't have yet,
-  // newest first (the "What's new:" part of Mike's tag messages). Older
-  // tags have none, and then the app shows the subjects instead.
+  // newest first. Each verified tag's commit subjects fill in when its
+  // message has no plain-words notes.
   notes?: { tag: string; lines: string[] }[];
 };
 
@@ -131,7 +131,7 @@ export type UpstreamDeps = {
   // (bring-in.ts decides from it whether to start a thread).
   onChecked?: (status: UpstreamStatus) => void;
   // Mike's runner: writes plain-words notes for a release from its
-  // commits, for the tag message (main.ts asks the small model), as "- "
+  // commits, for the tag message (main.ts asks the configured model), as "- "
   // lines. Nothing, or a failure, leaves them out; the release goes out anyway.
   writeNotes?: (commits: string) => Promise<string | undefined>;
   // Replaced in tests.
@@ -236,7 +236,7 @@ export function parseNotes(message: string): string[] {
   return out.slice(0, MAX_NOTE_LINES);
 }
 
-// For the small model writing a release's notes (main.ts writeNotes). The
+// For the configured model writing a release's notes (main.ts writeNotes). The
 // readers use Threadbear on their own Mac and never see its code.
 export const RELEASE_NOTES_SYSTEM = `You write the release notes for Threadbear, a Mac app for running AI coding agents in threads, with an iPhone app and a website. The reader uses Threadbear on their own Mac and wants to know what they'll notice in this release. You get its commit messages.
 
@@ -249,7 +249,7 @@ export function cleanNotes(text: string | undefined): string[] {
     .split('\n')
     .map((l) => l.trim())
     .filter((l) => /^[-*•] /.test(l))
-    .map((l) => l.replace(/^[-*•] /, '').replace(/\s*—\s*/g, ', ').trim())
+    .map((l) => l.replace(/^[-*•] /, '').replace(/\s*—\s*/g, ', ').trim().slice(0, 200))
     .filter(Boolean)
     .slice(0, MAX_NOTE_LINES);
 }
@@ -267,6 +267,7 @@ export class Upstream {
   private running: Promise<UpstreamStatus> | undefined;
   private stopped = false;
   // verified()'s answers, by signers file, object and name.
+  private noteDraft?: { key: string; lines: string[] };
   private readonly answers = new Map<string, SignedTag | null>();
   private readonly git: (cwd: string, args: string[]) => Promise<string>;
   private readonly deps: UpstreamDeps;
@@ -467,13 +468,17 @@ export class Upstream {
       .slice(0, 9);
     const out: { tag: string; lines: string[] }[] = [];
     const add = (name: string, signed: SignedTag) => {
-      const lines = parseNotes(signed.payload.toString('utf8'));
+      const message = signed.payload.toString('utf8');
+      const notes = parseNotes(message);
+      // A failed model call, or a tag from before notes existed, still
+      // describes that release instead of disappearing behind older notes.
+      const lines = notes.length ? notes : message.split('\n').filter((l) => l.startsWith('- ')).slice(0, 5).map((l) => l.slice(2).trim().slice(0, 200)).filter(Boolean);
       if (lines.length) out.push({ tag: TAG_PREFIX + name, lines });
     };
     add(newest.name, newest);
     for (const [name, ref] of older) {
       const signed = await this.verified(checkout, ref, TAG_PREFIX + name, signers);
-      if (!signed) continue;
+      if (!signed || !(await this.isAncestor(checkout, signed.commit, newest.commit))) continue;
       if (await this.isAncestor(checkout, signed.commit, 'refs/heads/main')) break;
       add(name, signed);
     }
@@ -565,15 +570,22 @@ export class Upstream {
   // Plain-words notes for a release, from its commits' subjects and bodies.
   private async notesFor(checkout: string, range: string): Promise<string[]> {
     if (!this.deps.writeNotes) return [];
+    // The full log keys a draft to the exact input, even if a tag moved.
+    const log = await this.git(checkout, ['log', '--no-merges', '--format=%s%n%b%x1e', range, '--max-count=200']);
+    const key = createHash('sha256').update(log).digest('hex');
+    if (this.noteDraft?.key === key) return this.noteDraft.lines;
+    let lines: string[] = [];
     try {
       // Each commit's body cut short, so a busy day's last commits still fit.
-      const log = await this.git(checkout, ['log', '--no-merges', '--format=%s%n%b%x1e', range, '--max-count=200']);
       const commits = log.split('\x1e').map((c) => c.trim()).filter(Boolean).map((c) => (c.length > 600 ? `${c.slice(0, 600)}…` : c));
-      return cleanNotes(await this.deps.writeNotes(commits.join('\n---\n').slice(0, 60_000)));
+      lines = cleanNotes(await this.deps.writeNotes(commits.join('\n---\n').slice(0, 60_000)));
     } catch (e) {
       this.deps.log.warn('could not write release notes; tagging without them', { error: String(e) });
-      return [];
     }
+    // Signing or pushing can fail. Retry those without paying for the same
+    // notes again; a failed model call is cached as the subject fallback.
+    this.noteDraft = { key, lines };
+    return lines;
   }
 
   // Why GitHub's checks hold this commit back, or undefined when they
@@ -653,8 +665,8 @@ const OBJECT_ID = /^[0-9a-f]{40}$|^[0-9a-f]{64}$/;
 // tagger), a message, and one SSH signature at the end. Any other armor
 // (PGP, X.509, a second block) fails, so there's nothing for git or gpg to
 // pick a different verifier from. Armor counts where git looks for it, at
-// the start of a line; the message's lines all start "- " or "Important:"
-// (publishOnce), so a commit subject that mentions armor can't trip this.
+// the start of a line. publishOnce prefixes notes and commit subjects
+// with "- ", so text mentioning armor cannot introduce a signature block.
 export function splitSignedTag(raw: Buffer, tag: string): SignedTag | undefined {
   // latin1 keeps one char per byte, so offsets are byte offsets.
   const text = raw.toString('latin1');

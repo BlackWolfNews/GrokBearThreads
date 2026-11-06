@@ -146,6 +146,11 @@ final class UpdatesTextTests: XCTestCase {
         XCTAssertEqual(groups.map(\.lines), [["Search finds goals again"], ["Private card for keys"]])
         let one = RunnerUpdates.Upstream.Release(tag: "release/2026-11-06", changes: 3, subjects: ["a"], notes: [.init(tag: "release/2026-11-06", lines: ["b"])])
         XCTAssertNil(UpdatesText.releaseLines(one)[0].heading)
+        let older = RunnerUpdates.Upstream.Release(tag: "release/2026-11-07", changes: 3, subjects: ["new work"], notes: one.notes)
+        XCTAssertEqual(UpdatesText.releaseLines(older)[0].heading, "6 Nov")
+        XCTAssertEqual(UpdatesText.releaseLines(older).last?.lines, ["new work"])
+        let odd = RunnerUpdates.Upstream.Release(tag: "release/2026-13-01", changes: 3, notes: [.init(tag: "release/2026-13-01", lines: ["one"]), .init(tag: "release/2026-11-06", lines: ["two"])])
+        XCTAssertEqual(UpdatesText.releaseLines(odd)[0].heading, "release/2026-13-01")
         let old = RunnerUpdates.Upstream.Release(tag: "release/2026-11-01", changes: 9, subjects: (1...9).map(String.init))
         XCTAssertEqual(UpdatesText.releaseLines(old).first?.lines, ["1", "2", "3", "4", "5"], "older tags: the first subjects")
     }

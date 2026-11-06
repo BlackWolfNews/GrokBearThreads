@@ -220,6 +220,7 @@ test("release notes: Mike's runner writes them into the tag, and a fork reads ea
   const w = world();
   const prompts: string[] = [];
   let reply: string | undefined = '- Threads can be pinned\n- Search is quicker';
+  let failPush = true;
   commit(w.mike, 'b.txt', 'Pinning: a pin button on rows\n\nBecause Mike asked.');
   git(w.mike, 'push', '-q', 'origin', 'main');
   const committed = Number(git(w.mike, 'log', '-1', '--format=%ct')) * 1000;
@@ -227,8 +228,14 @@ test("release notes: Mike's runner writes them into the tag, and a fork reads ea
   const up = upstreamFor(w.mike, w.home, clock, {
     publish: { publish: true, signingKey: w.mikeKey.priv }, runningMainSettled: () => true,
     writeNotes: async (commits: string) => { prompts.push(commits); if (reply === 'throw') throw new Error('no room'); return reply; },
+    git: async (cwd: string, args: string[]) => {
+      if (args[0] === 'push' && args.some((a) => a.startsWith('refs/tags/')) && failPush) { failPush = false; throw new Error('push offline'); }
+      return git(cwd, ...args);
+    },
   });
+  await assert.rejects(up.publishOnce(), /push offline/);
   const first = await up.publishOnce();
+  assert.equal(prompts.length, 1, 'a failed push reuses the draft for the same commits');
   assert.match(prompts[0], /Pinning: a pin button on rows\nBecause Mike asked\./);
   const message = git(w.mike, 'cat-file', 'tag', first!);
   assert.match(message, /What's new:\n- Threads can be pinned\n- Search is quicker\n\nEvery change:\n- Pinning: a pin button on rows/);
@@ -245,10 +252,25 @@ test("release notes: Mike's runner writes them into the tag, and a fork reads ea
   // A fork behind both sees the first's notes (the second has none).
   const s = await upstreamFor(w.theirs, w.home).check();
   assert.equal(s.release?.tag, second);
-  assert.deepEqual(s.release?.notes, [{ tag: first, lines: ['Threads can be pinned', 'Search is quicker'] }]);
+  assert.deepEqual(s.release?.notes, [{ tag: second, lines: ['Tidy the tests'] }, { tag: first, lines: ['Threads can be pinned', 'Search is quicker'] }]);
   // Once main has the first, only what's newer counts.
   git(w.theirs, 'merge', '-q', '--no-edit', git(w.mike, 'rev-parse', `${first}^{commit}`));
-  assert.equal((await upstreamFor(w.theirs, w.home).check()).release?.notes, undefined);
+  assert.deepEqual((await upstreamFor(w.theirs, w.home).check()).release?.notes, [{ tag: second, lines: ['Tidy the tests'] }]);
+});
+
+test('release notes exclude signed tags outside the offered history and unsigned notes', async () => {
+  const w = world();
+  commit(w.mike, 'main.txt', 'Main work');
+  const newest = git(w.mike, 'rev-parse', 'HEAD');
+  git(w.mike, 'checkout', '-q', '-b', 'side', 'HEAD~1');
+  commit(w.mike, 'side.txt', 'Unmerged side work');
+  git(w.mike, '-c', 'gpg.format=ssh', '-c', `user.signingkey=${w.mikeKey.priv}`, 'tag', '-s', '-m', "What's new:\n- Not in the offered release", 'release/2026-11-01');
+  git(w.mike, 'tag', '-a', '-m', "What's new:\n- Unsigned notes", 'release/2026-11-02');
+  git(w.mike, 'checkout', '-q', 'main');
+  git(w.mike, '-c', 'gpg.format=ssh', '-c', `user.signingkey=${w.mikeKey.priv}`, 'tag', '-s', '-m', "What's new:\n- Main work", 'release/2026-11-03', newest);
+  git(w.mike, 'push', '-q', 'origin', 'main', '--tags');
+  const s = await upstreamFor(w.theirs, w.home).check();
+  assert.deepEqual(s.release?.notes, [{ tag: 'release/2026-11-03', lines: ['Main work'] }]);
 });
 
 test('parseNotes and cleanNotes', () => {
@@ -257,6 +279,7 @@ test('parseNotes and cleanNotes', () => {
   assert.deepEqual(cleanNotes('Here you go:\n- One — and more\n* Two\nnot a line'), ['One, and more', 'Two']);
   assert.deepEqual(cleanNotes(' NONE '), []);
   assert.deepEqual(cleanNotes(undefined), []);
+  assert.deepEqual(cleanNotes('- ' + 'x'.repeat(1000)), ['x'.repeat(200)]);
 });
 
 test("ciVerdict: every workflow's latest attempt has to pass", () => {

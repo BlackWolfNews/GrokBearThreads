@@ -101,8 +101,17 @@ public enum UpdatesText {
     /// than one, or (from older tags) the first commit subjects.
     public static func releaseLines(_ r: RunnerUpdates.Upstream.Release) -> [(heading: String?, lines: [String])] {
         guard !r.notes.isEmpty else { return [(nil, Array(r.subjects.prefix(5)))] }
-        if r.notes.count == 1 { return [(nil, r.notes[0].lines)] }
-        return r.notes.map { (String(releaseDate($0.tag).dropFirst("of ".count)), $0.lines) }
+        if r.notes.count == 1, r.notes[0].tag == r.tag { return [(nil, r.notes[0].lines)] }
+        var groups = r.notes.map { note in
+            let date = releaseDate(note.tag)
+            return (heading: Optional(date.hasPrefix("of ") ? String(date.dropFirst(3)) : date), lines: note.lines)
+        }
+        // An older runner may supply notes only for older tags. Keep those
+        // dated, and show the subjects so the newest changes remain visible.
+        if !r.notes.contains(where: { $0.tag == r.tag }), !r.subjects.isEmpty {
+            groups.append((heading: "Every change", lines: Array(r.subjects.prefix(5))))
+        }
+        return groups
     }
 
     /// "release/2026-10-30" as "of 30 Oct".

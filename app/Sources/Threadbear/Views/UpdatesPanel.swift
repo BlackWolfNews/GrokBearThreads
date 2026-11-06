@@ -151,7 +151,7 @@ struct UpdatesPanel: View {
                                         .font(.system(size: zoomed(11), weight: .medium))
                                         .padding(.top, zoomed(2))
                                 }
-                                ForEach(group.lines, id: \.self) { line in
+                                ForEach(Array(group.lines.enumerated()), id: \.offset) { _, line in
                                     Text(line)
                                         .font(.system(size: zoomed(11)))
                                         .foregroundStyle(.secondary)

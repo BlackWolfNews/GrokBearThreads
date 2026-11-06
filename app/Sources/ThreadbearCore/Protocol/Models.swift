@@ -1563,7 +1563,7 @@ public struct RunnerUpdates: Sendable, Hashable, Decodable {
     /// Mike's releases, for a fork (protocol "Mike's releases").
     public struct Upstream: Sendable, Hashable, Decodable {
         public struct Release: Sendable, Hashable, Decodable {
-            /// One release's plain-words notes ("What's new:" in Mike's tag).
+            /// One verified release's notes, or its commit subjects as a fallback.
             public struct Notes: Sendable, Hashable, Decodable {
                 public var tag: String
                 public var lines: [String]
@@ -1581,7 +1581,7 @@ public struct RunnerUpdates: Sendable, Hashable, Decodable {
             public var changes: Int
             public var subjects: [String]
             /// Each release main doesn't have yet that came with notes,
-            /// newest first. Empty from older tags or an older runner.
+            /// newest first. Empty from an older runner.
             public var notes: [Notes]
 
             public init(tag: String, commit: String? = nil, changes: Int, subjects: [String] = [], notes: [Notes] = []) {
