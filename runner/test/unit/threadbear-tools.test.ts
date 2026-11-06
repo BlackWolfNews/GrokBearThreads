@@ -942,6 +942,30 @@ test("Codex's end_turn comes before the final answer: never refused, and the ans
   assert.ok(h.events(thread.id).some((e) => e.type === 'assistant.text' && e.text === 'Looks fine. Nothing needed from you.'));
 });
 
+// Codex's half of the 6 Nov fix: end_turn asked in "Ask before edits".
+test("A Codex thread in ask mode ends its turn and reads without asking, and asks before changing anything", async () => {
+  const h = makeHarness();
+  const { thread } = start(h);
+  const list = buildThreadbearTools(h.runner, thread.id, Date.now, undefined, undefined, undefined, { provider: 'codex', sleep: async () => {} });
+  const asked: string[] = [];
+  const codex = new CodexTools(list as ToolDefinition[], {
+    requestApproval: async (r) => {
+      asked.push(r.name.split('__').at(-1)!);
+      return { decision: 'deny' };
+    },
+    cwd: () => '/tmp',
+    mode: () => 'ask',
+    rules: () => [],
+    addRules: () => {},
+  });
+  const call = (tool: string, args: Record<string, unknown>) => codex.call({ threadId: 'n', turnId: 't', callId: tool, namespace: 'threadbear', tool, arguments: args }, { fromChild: false, signal: new AbortController().signal });
+  assert.ok((await call('end_turn', { needs: 'nothing', summary: ['Checked it.'] })).success);
+  assert.ok((await call('list_threads', {})).success);
+  assert.deepEqual(asked, []);
+  assert.equal((await call('send_message', { id: thread.id, text: 'hi' })).success, false);
+  assert.deepEqual(asked, ['send_message']);
+});
+
 // A Codex thread's tool list is fixed when it starts, so what it was told
 // end_turn takes can be from before One reply changed (1 Nov 2026, thread
 // d8c829e8, refused for leaving out a question its schema never mentioned).

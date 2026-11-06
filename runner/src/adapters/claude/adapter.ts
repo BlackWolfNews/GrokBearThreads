@@ -112,6 +112,8 @@ export type ClaudeAdapterDeps = {
   mcpServersFor?: (threadId: string) => Record<string, McpServerConfig>;
   // Tools that ask Mike even in a thread with full access.
   alwaysAsk?: Set<string>;
+  // Tools that never ask, whatever the mode (NEVER_ASK_TOOLS).
+  neverAsk?: Set<string>;
   // One reply (needs.ts), read when a session starts, as its end_turn is.
   oneReply?: () => boolean;
 };
@@ -378,7 +380,12 @@ class ClaudeSession implements AgentSession {
     if (opts.model) options.model = opts.model;
     const effort = claudeEffort(opts.effort);
     if (effort) options.effort = effort;
-    if (opts.allowRules?.length) options.allowedTools = [...opts.allowRules];
+    // The never-ask tools go in as allow rules too, so the CLI lets them
+    // through before its own checks (Auto's classifier included) rather
+    // than relying on canUseTool being reached. They're not the thread's
+    // rules, so they're never saved with them.
+    const allowed = [...(opts.allowRules ?? []), ...[...(deps.neverAsk ?? [])].filter((n) => !deps.alwaysAsk?.has(n))];
+    if (allowed.length) options.allowedTools = [...new Set(allowed)];
     if (opts.resume) {
       options.resume = opts.sessionId;
       if (opts.resumeAt) options.resumeSessionAt = opts.resumeAt;
@@ -541,6 +548,7 @@ class ClaudeSession implements AgentSession {
       if (ans.answers) return { behavior: 'allow', updatedInput: { ...input, answers: ans.answers }, toolUseID: o.toolUseID };
       return { behavior: 'deny', message: ans.message || 'The user dismissed the question without answering.', toolUseID: o.toolUseID };
     }
+    if (this.deps.neverAsk?.has(name) && !this.deps.alwaysAsk?.has(name)) return { behavior: 'allow', updatedInput: input, toolUseID: o.toolUseID };
     if (this.mode === 'full' && !this.deps.alwaysAsk?.has(name)) return { behavior: 'allow', updatedInput: input, toolUseID: o.toolUseID };
     if (!sub) for (const out of this.normalizer.beforeApproval(o.toolUseID, name, input)) this.sink.output(out);
     const ans = await this.sink.requestApproval({

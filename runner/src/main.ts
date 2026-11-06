@@ -58,7 +58,7 @@ import { detectMachineIcon } from './machine.ts';
 import { filesMethods } from './files.ts';
 import { devicesMethods } from './devices.ts';
 import { flushSentry, reportException, reportLoggedError, reportLoggedWarning, startSentry } from './sentry.ts';
-import { ALWAYS_ASK_TOOLS, SERVER_NAME, buildThreadbearTools, threadbearMcpServer } from './threadbear-mcp.ts';
+import { ALWAYS_ASK_TOOLS, NEVER_ASK_TOOLS, SERVER_NAME, buildThreadbearTools, threadbearMcpServer } from './threadbear-mcp.ts';
 
 // Tells launch.mjs this runner calls its listening() hook (release.ts), so
 // it may stop one that hasn't started listening in time.
@@ -165,6 +165,7 @@ async function main(): Promise<void> {
     mcpServersFor: (threadId) => ({ [SERVER_NAME]: threadbearMcpServer(router(), threadId, scheduleControl(), projectControl(), appRestarts, () => cfg.bulletReplies, pocketControl, () => cfg.oneReply, () => cfg.connectorsUrl, gatewayHealth, () => experimentOn(cfg.home, 'scheduleChecks')) }),
     oneReply: () => cfg.oneReply,
     alwaysAsk: ALWAYS_ASK_TOOLS,
+    neverAsk: NEVER_ASK_TOOLS,
   });
   // One app-server per live Codex thread, each starting what E says is
   // current, with the same threadbear tools as dynamic tools.

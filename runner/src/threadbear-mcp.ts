@@ -65,6 +65,32 @@ export const SERVER_NAME = 'threadbear';
 // Asked about every time, even in a thread with full access: deleting is
 // the one thing here that's hard to take back.
 export const ALWAYS_ASK_TOOLS = new Set([`mcp__${SERVER_NAME}__delete_thread`]);
+// Never asked about, whatever the mode. These read, end the turn, or only
+// put something in front of Mike (a card, a pin, a panel, his phone), so
+// they're no more than a reply is. "Ask before edits" asking for end_turn
+// held every turn on an Allow card with no reply under it yet (6 Nov 2026).
+// The rest change something or act elsewhere (other threads, schedules,
+// projects, this thread's own mode and folder) and still ask outside full
+// access: they're how text a stranger wrote could reach a thread on full
+// access, or give this one full access itself.
+export const NEVER_ASK_TOOLS = new Set(
+  [
+    'end_turn',
+    'list_threads',
+    'read_thread',
+    'list_accounts',
+    'list_schedules',
+    'list_projects',
+    'read_project',
+    'show_options',
+    'ask_secret',
+    'pin',
+    'unpin',
+    'show_panel',
+    'pocket',
+    'wait_for_app_restart',
+  ].map((n) => `mcp__${SERVER_NAME}__${n}`),
+);
 
 type Result = { content: { type: 'text'; text: string }[]; isError?: boolean };
 

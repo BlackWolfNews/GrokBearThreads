@@ -7,6 +7,7 @@ import type { SessionSink, AdapterOutput, ToolApprovalRequest } from '../../src/
 import { ProcessRegistry } from '../../src/proc.ts';
 import { nullLogger } from '../../src/log.ts';
 import { tmpDir } from '../helpers/fakes.ts';
+import { ALWAYS_ASK_TOOLS, NEVER_ASK_TOOLS } from '../../src/threadbear-mcp.ts';
 import { END_TURN_FULL_NAME, END_TURN_NUDGE, ONE_REPLY_END_TURN_NUDGE, ONE_REPLY_WRITE_NUDGE, oneReplyAccepted, oneReplyAlreadyWritten } from '../../src/needs.ts';
 
 test('"Always allow" keeps only allow rules, scoped to the session', () => {
@@ -334,6 +335,27 @@ test("a subagent's approval is asked at once, with no itemId and no diff", async
   assert.deepEqual(res.updatedPermissions, [{ type: 'addRules', rules: [{ toolName: 'Write' }], behavior: 'allow', destination: 'session' }]);
   assert.deepEqual(outputs.find((o) => o.kind === 'allowRules'), { kind: 'allowRules', rules: ['Write'] });
   state.close!();
+});
+
+// In "Ask before edits" end_turn stopped for an Allow card, so every turn
+// waited on Mike with no reply written yet (6 Nov 2026, thread c3e52aa6).
+test('the threadbear tools that only read, end the turn or show Mike something never ask, in any mode; the rest still do', async () => {
+  for (const mode of ['ask', 'auto'] as const) {
+    const { state, approvals } = start(['Read'], { permissionMode: mode }, { neverAsk: NEVER_ASK_TOOLS, alwaysAsk: ALWAYS_ASK_TOOLS });
+    const call = (name: string) => state.options.canUseTool(name, {}, { signal: new AbortController().signal, toolUseID: `toolu_${name}`, agentID: 'a' });
+    for (const name of ['mcp__threadbear__end_turn', 'mcp__threadbear__read_thread', 'mcp__threadbear__pin']) {
+      assert.equal((await call(name)).behavior, 'allow', `${name} in ${mode}`);
+    }
+    assert.equal(approvals.length, 0, `nothing asked in ${mode}`);
+    for (const name of ['mcp__threadbear__send_message', 'mcp__threadbear__update_thread', 'mcp__threadbear__create_thread', 'mcp__threadbear__schedule_message', 'mcp__threadbear__delete_thread']) await call(name);
+    assert.deepEqual(approvals.map((a) => a.name.split('__').at(-1)), ['send_message', 'update_thread', 'create_thread', 'schedule_message', 'delete_thread']);
+    // And as allow rules, so the CLI lets them through before its own checks.
+    assert.ok(state.options.allowedTools.includes('Read'));
+    assert.ok(state.options.allowedTools.includes('mcp__threadbear__end_turn'));
+    assert.ok(!state.options.allowedTools.includes('mcp__threadbear__send_message'));
+    state.close!();
+  }
+  for (const name of ALWAYS_ASK_TOOLS) assert.ok(!NEVER_ASK_TOOLS.has(name));
 });
 
 test('each permission mode maps to the SDK mode that enforces it', () => {
