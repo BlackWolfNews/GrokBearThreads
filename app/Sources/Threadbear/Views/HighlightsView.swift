@@ -578,7 +578,20 @@ struct LinkMenu: View {
             Button("Preview here", systemImage: "sidebar.right") { app.preview(path: url.path, title: title, in: thread) }
             Button("Open", systemImage: "arrow.up.forward.app") { app.openLink(url, title: title, in: thread, external: true) }
         } else {
-            Button(WebLinkAction.browser.title, systemImage: WebLinkAction.browser.symbol) { app.openExternally(url) }
+            let profiles = ChromeProfiles.open()
+            if profiles.isEmpty {
+                Button(WebLinkAction.browser.title, systemImage: WebLinkAction.browser.symbol) { app.openExternally(url) }
+            }
+            // One per open Chrome profile, as in the transcript's WebLinkMenu.
+            ForEach(profiles, id: \.directory) { profile in
+                Button { ChromeProfiles.open(url, in: profile) } label: {
+                    Label {
+                        Text(ChromeProfiles.title(profile))
+                    } icon: {
+                        if let icon = ChromeProfiles.icon(profile) { Image(nsImage: icon) } else { Image(systemName: WebLinkAction.browser.symbol) }
+                    }
+                }
+            }
             if PreviewRules.isWebPage(url) {
                 Button(WebLinkAction.panel.title, systemImage: WebLinkAction.panel.symbol) { app.preview(page: url, title: title, in: thread) }
             }
