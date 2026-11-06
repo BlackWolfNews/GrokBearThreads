@@ -76,6 +76,10 @@ final class ThreadSession {
     /// The open card (TranscriptModel.openCard), observed, so the composer
     /// it's drawn in follows its picks and notes and drops it once it closes.
     private(set) var openCard: TranscriptRow?
+    /// Observed by recovery controls outside the AppKit transcript. The
+    /// rows themselves aren't observed, so a refusal arriving after its
+    /// thread summary must still redraw the offer.
+    private(set) var latestCompletion: TurnCompletion?
 
     init(threadId: String, subagentId: String? = nil, app: AppModel) {
         self.threadId = threadId
@@ -507,6 +511,15 @@ final class ThreadSession {
     }
 
     private func syncOpenCard() {
+        if feed.model.openTurn == nil {
+            let latest = feed.model.rows.reversed().lazy.compactMap { row -> TurnCompletion? in
+                if case .footer(let completion) = row.content { return completion }
+                return nil
+            }.first
+            if latest != latestCompletion { latestCompletion = latest }
+        } else if latestCompletion != nil {
+            latestCompletion = nil
+        }
         let card = feed.model.openCard
         guard card != openCard else { return }
         openCard = card

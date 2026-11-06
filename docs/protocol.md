@@ -912,6 +912,16 @@ them), `-32000` anything else with a readable `message`.
 
 ### Models and effort across providers
 
+The Mac app offers **Continue with Codex Sol** above the composer when the
+latest failed Claude turn has the provider's safeguards refusal error and
+the thread's runner has an unrestricted Codex login with room and
+`gpt-6.1-sol` in its model list. This is a user action: it awaits
+`threads.update` with that login and model, then `threads.send` with a
+request to continue the task. The normal provider handoff carries the
+history. It pins the thread to that login, leaves any draft untouched and
+never switches automatically. It uses the existing RPCs and recognises the
+error text for transcripts from older runners too.
+
 The runner checks `model` and `effort` in `threads.create` and
 `threads.update` against the thread's provider, and corrects them rather than
 answering `-32602`, because an older app always sends a model and can't

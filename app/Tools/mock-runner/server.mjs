@@ -1328,6 +1328,16 @@ async function fakeTurn(threadId, text, images, turnId = 'turn_' + crypto.random
   persist(threadId, { type: 'turn.started', turnId }, turnId);
   setStatus(threadId, 'running');
 
+  // A provider refusal for checking the recovery offer, without sending
+  // anything to a real model. Codex's continuation runs normally.
+  if (t.summary.provider !== 'codex' && /mock refusal/i.test(text)) {
+    const error = "API Error: Opus 5.5's safeguards flagged this message. Claude Code can't respond to this message with Opus 5.5.\n\nTry rephrasing the request in a new session or change your model.\n\nDetails: [reasoning_extraction]";
+    persist(threadId, { type: 'error', message: error }, turnId);
+    persist(threadId, { type: 'turn.completed', turnId, outcome: 'failed', durationMs: 851, error }, turnId);
+    t.interrupt = undefined;
+    setStatus(threadId, 'error');
+    return;
+  }
   // Say "signed out" for a turn refused by the login, as Claude Code's
   // expired OAuth session does: the error row and errorKind auth, which
   // gets the thread its Sign in… line.

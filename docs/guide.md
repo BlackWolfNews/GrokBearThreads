@@ -681,6 +681,13 @@ couldn't be refreshed), the thread's turn fails and a line above its
 messages says so. Sign in… opens Terminal on that login's own sign-in, and
 Send again sends your last message again once you're done.
 
+If Claude stops with a safeguards refusal, a small box above the message
+field offers **Continue with Codex Sol**, when Sol is available on a Codex
+login with room. Clicking it moves this thread to GPT-6.1-Sol and asks it
+to continue, with the conversation carried across. It pins the thread to
+that Codex login. Anything you've typed in the message field stays there.
+The switch happens only when you click.
+
 Titles, the librarian and Wake when… run on a Claude login, so with only
 Codex they don't happen: threads keep the first line of their first message
 as their title.

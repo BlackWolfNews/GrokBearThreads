@@ -221,6 +221,7 @@ final class AppModel {
     /// the page, so backing out of a project finds the same results.
     var projectSearchQuery = ""
     var errorMessage: String?
+    var continuingRefusals: Set<String> = []
     /// Bumped to put the cursor in a composer, by its draft key (a thread's
     /// id, or "new"): with threads open in several panels, only that one's.
     var focusRequests: [String: Int] = [:]

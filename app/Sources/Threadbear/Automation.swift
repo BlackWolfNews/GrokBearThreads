@@ -272,6 +272,11 @@ enum Automation {
             // A beat for the table to lay out and draw.
             try? await Task.sleep(for: .milliseconds(150))
             return "ok \(id) \(session.displayCount) rows"
+        case "refusal":
+            guard let id = app.selection, let thread = app.threads[id] else { return "error no thread selected" }
+            guard let account = app.refusalTarget(for: thread) else { return "ok none" }
+            if c["continue"] as? Bool == true { app.continueRefusal(id) }
+            return "ok \(account.id) \(RefusalRecovery.model)"
         case "signin":
             // The selected thread's Sign in… line (SignInBanner): which
             // login it names, and with sendAgain its Send again button.

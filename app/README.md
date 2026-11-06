@@ -523,6 +523,7 @@ is an error. Commands marked "the open thread" act on `id` when it's given
 |---|---|---|
 | `open` | `id`, `timeout` | selects a thread and waits until its rows are on screen |
 | `signin` | `sendAgain` | the selected thread's Sign in… line, shown when its last turn's login was refused: the login it names (`ok none` without one); `sendAgain` presses Send again |
+| `refusal` | `continue` | the selected thread's Codex Sol recovery offer (`ok none` without one); `continue: true` presses Continue with Codex Sol. A message containing `mock refusal` makes a Claude turn fail with a safeguards refusal on the mock runner |
 | `select` | `id` | selects it without waiting |
 | `subagent` | `thread` (default: the open one), `id`, `timeout` | shows a sub-agent's transcript, as clicking its row under the thread does, and waits until its rows are on screen |
 | `mouse-button` | `button` (`back`, `forward`) | a mouse's side-button click over the window, through the same handler as a real one; says the sidebar view, the thread and whether back and forward can go further |
