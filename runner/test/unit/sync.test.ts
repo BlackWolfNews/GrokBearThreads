@@ -1048,7 +1048,7 @@ function setupPictures(opts: { backend?: number; has?: { projectId: string; pict
 }
 
 test('project pictures: sent to file storage once the backend takes them, once per copy, with the symbol on the project', async () => {
-  const { h, sync, calls, uploads, setIcons, change, iconPath, dir } = setupPictures();
+  const { sync, calls, uploads, setIcons, change, iconPath, dir } = setupPictures();
   sync.start();
   await sync.flushNow();
   await tick();
@@ -1059,24 +1059,20 @@ test('project pictures: sent to file storage once the backend takes them, once p
   assert.deepEqual(setIcons()[0]!.args, { key: 'k', runnerId: 'r1', projectId: 'p1', picture: 'p1-abc123', storageId: 'st_1', mediaType: 'image/png' });
   // The list changing again doesn't send the same picture again.
   change({ title: 'Threadbear app' });
-  h.clock.advance(SYNC_COALESCE_MS);
-  await tick(20);
+  await sync.flushNow();
   assert.equal(uploads.length, 1);
   // A new copy (a new file name) does.
   const next = path.join(dir, 'p1-def456.png');
   fs.writeFileSync(next, Buffer.from('NEWBYTES'));
   change({ icon: { image: { path: next, mediaType: 'image/png' }, by: 'mike', updatedAt: '2026-10-28T00:00:00.000Z' } });
-  h.clock.advance(SYNC_COALESCE_MS);
-  // A loaded machine takes more than a set number of ticks (it stopped a Linux runner following main).
-  for (let i = 0; i < 200 && uploads.length < 2; i++) await tick(5);
+  await sync.flushNow();
   assert.equal(uploads.length, 2);
   assert.equal(uploads[1]!.bytes, 'NEWBYTES');
   assert.equal(setIcons()[1]!.args.picture, 'p1-def456');
   // Back to a symbol only: nothing to upload, and the mirror drops the
   // picture with setProjects (this backend is older than upsertProjects).
   change({ icon: { symbol: 'leaf', by: 'librarian', updatedAt: '2026-10-28T00:00:00.000Z' } });
-  h.clock.advance(SYNC_COALESCE_MS);
-  await tick(20);
+  await sync.flushNow();
   assert.equal(uploads.length, 2);
   assert.deepEqual((calls.filter((c) => c.fn === 'sync:setProjects').at(-1)!.args.projects as { icon?: unknown }[])[0]!.icon, { symbol: 'leaf', by: 'librarian' });
   fs.rmSync(iconPath, { force: true });
@@ -1105,7 +1101,7 @@ test('project pictures: one the mirror already has is not sent again, and an old
 });
 
 test('project pictures: a picture that cannot be read is skipped, not retried until the projects change', async () => {
-  const { sync, uploads, iconPath, h, change, dir } = setupPictures();
+  const { sync, uploads, iconPath, change, dir } = setupPictures();
   fs.rmSync(iconPath, { force: true });
   sync.start();
   await sync.flushNow();
@@ -1116,8 +1112,7 @@ test('project pictures: a picture that cannot be read is skipped, not retried un
   const fixed = path.join(dir, 'p1-fixed.png');
   fs.writeFileSync(fixed, Buffer.from('OK'));
   change({ icon: { image: { path: fixed, mediaType: 'image/png' }, by: 'librarian', updatedAt: '2026-10-28T00:00:00.000Z' } });
-  h.clock.advance(SYNC_COALESCE_MS);
-  for (let i = 0; i < 200 && uploads.length < 1; i++) await tick(5);
+  await sync.flushNow();
   assert.equal(uploads.length, 1);
   await sync.stop();
 });

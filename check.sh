@@ -20,6 +20,10 @@
 #                 that doesn't touch runner/
 #   --all         don't skip the dock and deploy tests (below)
 #
+# When up to 8 of the runner's unit test files fail, those run again on
+# their own, one at a time, and a pass then counts: the step's line lists
+# the tests that needed it (runner_unit_tests, below, says why).
+#
 # The deploy tests (a few minutes) only run when something they cover
 # changed from main: runner/scripts/, launch.mjs, the launcher or the tests
 # themselves. BearDock's tests only run when dock/ changed (the app's own
@@ -153,6 +157,47 @@ step() {
   fi
 }
 
+# The runner's unit tests, as `npm test` runs them (runner/package.json),
+# plus a reporter that writes the files with a failure. Plenty of them
+# start real processes with real timeouts, and on a loaded machine those
+# fail with nothing wrong: six did at once, taking 13 to 145 s, while other
+# threads built the app on the M5 (6 Nov). So when a few files failed, just
+# those run again, one file at a time; passing then counts, but the step
+# says which tests needed it, so one that keeps turning up gets fixed. A
+# test that fails on its own as well still fails the step.
+RERUN_MAX_FILES=8
+runner_unit_tests() {
+  local name="runner unit tests" dir="$ROOT/runner"
+  local log="$LOGS/runner-unit-tests.log" list="$LOGS/runner-unit-tests.failed"
+  local start=$SECONDS
+  local run=(node --test --test-timeout=300000 --test-force-exit --test-reporter=spec)
+  if (cd "$dir" && "${run[@]}" --test-reporter-destination=stdout \
+      --test-reporter=./test/helpers/failed-files-reporter.mjs --test-reporter-destination="$list" \
+      "test/unit/**/*.test.ts") >"$log" 2>&1; then
+    printf 'ok    %-20s %4ss\n' "$name" "$((SECONDS - start))"
+    return
+  fi
+  local files=() f
+  [ -f "$list" ] && while IFS= read -r f; do [ -n "$f" ] && files+=("$f"); done <"$list"
+  if [ "${#files[@]}" -ge 1 ] && [ "${#files[@]}" -le "$RERUN_MAX_FILES" ]; then
+    local relog="$LOGS/runner-unit-tests-again.log"
+    if (cd "$dir" && "${run[@]}" --test-concurrency=1 "${files[@]}") >"$relog" 2>&1; then
+      printf 'ok    %-20s %4ss  (passed on a second run of the files that failed:)\n' "$name" "$((SECONDS - start))"
+      # The tests that failed the first time: the spec reporter's ✖ lines,
+      # once each (its summary at the end repeats them).
+      sed -E $'s/\x1b\\[[0-9;]*[A-Za-z]//g' "$log" | grep -E '^[[:space:]]*✖ ' | grep -v '✖ failing tests:' | sed -E 's/^[[:space:]]*/        /' | sort -u | head -n 12
+      return
+    fi
+    printf 'FAIL  %-20s %4ss  %s (failed again on its own; the whole run: %s)\n' "$name" "$((SECONDS - start))" "$relog" "$log"
+    FAILED="$FAILED$name|$relog
+"
+    return
+  fi
+  printf 'FAIL  %-20s %4ss  %s\n' "$name" "$((SECONDS - start))" "$log"
+  FAILED="$FAILED$name|$log
+"
+}
+
 if [ "$APP_ONLY" = 0 ]; then
   if [ ! -d "$ROOT/runner/node_modules" ]; then
     step "runner packages" "$ROOT/runner" npm ci --no-audit --no-fund
@@ -169,7 +214,7 @@ if [ "$APP_ONLY" = 0 ]; then
   step "convex typecheck" "$ROOT" npm run convex:typecheck
   step "web typecheck" "$ROOT" npm run web:typecheck
   step "web tests" "$ROOT" npm run web:test
-  step "runner unit tests" "$ROOT/runner" npm test
+  runner_unit_tests
   if [ "$QUICK" = 0 ]; then
     if needed '^runner/(scripts/|launch\.mjs$|launcher/|test/deploy/)'; then
       step "runner deploy tests" "$ROOT/runner" bash test/deploy/run.sh
