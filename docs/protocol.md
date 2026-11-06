@@ -4491,9 +4491,10 @@ rather than sent when that runner hasn't taken it (`queued`). A thread id or pre
 fits threads in both is refused like any other. The tools that change a
 thread here (`update_thread`, `move_thread`, `interrupt_thread`,
 `delete_thread`) say it's on that runner rather than that it's missing. A
-runner that hasn't heard the list yet (no app connected since it started)
-starts the watch and waits up to 3 seconds for its first answer (or a
-refusal), never after. With sync off, a runner key, the backend failing, or
+runner that isn't watching the list (no app connected lately) starts the
+watch and waits up to 3 seconds for its answer, rows and all (a refusal or
+an error ends the wait); one that runs out isn't waited for again for a
+minute. With sync off, a runner key, the backend failing, or
 on a draining runner (its sync has stopped), they see this runner's threads
 only.
 

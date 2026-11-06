@@ -159,6 +159,9 @@ async function main(): Promise<void> {
   // reaches them. With nothing heard yet (no app connected since the
   // runner started) the list starts the watch and waits up to 3 seconds
   // for the backend's first answer; after that it never waits.
+  // Once a wait has run out (the backend not answering), the next minute's
+  // calls use what's there rather than each waiting again.
+  let remoteWaitSpentAt = 0;
   const remoteControl = (): RemoteControl | undefined => {
     const relay = relayRef;
     // A draining runner has stopped its sync, so its list would go stale:
@@ -167,8 +170,11 @@ async function main(): Promise<void> {
     return {
       list: async () => {
         let r = sync.remoteThreads();
-        for (let waited = 0; !sync.remoteHeard() && waited < 3000; waited += 200) {
-          await new Promise((res) => setTimeout(res, 200));
+        if (!sync.remoteHeard() && Date.now() - remoteWaitSpentAt > 60_000) {
+          for (let waited = 0; !sync.remoteHeard() && waited < 3000; waited += 200) {
+            await new Promise((res) => setTimeout(res, 200));
+          }
+          if (!sync.remoteHeard()) remoteWaitSpentAt = Date.now();
           r = sync.remoteNow();
         }
         return relay.overlay(r);

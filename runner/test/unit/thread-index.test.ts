@@ -270,6 +270,35 @@ test('with API 29 a re-run reads only the rows that changed, and hears deletions
   index.stop();
 });
 
+test('the list counts as heard (for the agent tools) once the rows come, not just the runners', async () => {
+  const h = makeHarness();
+  let rowsAnswer: ((v: unknown) => void) | undefined;
+  const index = new ThreadIndex({
+    post: async () => null,
+    subscribe: (fn, _args, onUpdate) => {
+      if (fn === 'sync:otherRunnersList') queueMicrotask(() => onUpdate([{ runnerId: 'r-cloud', name: 'Cloud', lastSeenAt: Date.now() }]));
+      else rowsAnswer = onUpdate;
+      return () => undefined;
+    },
+    key: 'k',
+    runnerId: 'r-m5',
+    home: h.home,
+    host: h.runner,
+    publish: () => {},
+    clock: h.clock,
+    log: nullLogger,
+    takesSince: () => true,
+  });
+  index.start();
+  for (let i = 0; i < 5; i++) await tick();
+  assert.equal(index.list().runners.length, 1);
+  assert.equal(index.heard(), false, 'runners without their rows');
+  rowsAnswer!([{ runnerId: 'r-cloud', threadId: 'ba5bb5ec', title: 'Rust port', updatedMs: 1, cwd: '/', accountId: 'a', provider: 'claude', status: 'idle', needsYou: false, unread: false, preview: '', createdAt: 'c', lastActivityAt: 'l' }]);
+  assert.equal(index.heard(), true);
+  assert.equal(index.list().threads[0]!.title, 'Rust port');
+  index.stop();
+});
+
 test('a runner key that may not read the other runners’ threads stops watching for good, and says so once', async () => {
   const h = makeHarness();
   const said: string[] = [];

@@ -143,8 +143,8 @@ export class ThreadIndex {
   private remote: RemoteThreads = { runners: [], threads: [] };
   // The backend said this runner's key can't read other runners' threads.
   private refused = false;
-  // Whether the list has had the backend's answer since starting (or been
-  // refused), so the agent tools wait for it only until then.
+  // Whether the list has had the backend's answer since the watch started
+  // (or been refused), so the agent tools wait for it only until then.
   private answered = false;
   private watchTimer?: TimerHandle;
   private appGoneAt?: number;
@@ -216,7 +216,7 @@ export class ThreadIndex {
 
   /** Whether the list has had an answer (or a refusal) to give, for a caller that can wait a moment for one. */
   heard(): boolean {
-    return this.answered || !this.running;
+    return this.answered || !this.running || !this.deps.subscribe;
   }
 
   /** What was last heard, without starting the watch or looking for token files (relay.ts asks on every request). */
@@ -226,6 +226,8 @@ export class ThreadIndex {
 
   private watch(): void {
     if (this.unsubscribe || !this.deps.subscribe || this.refused) return;
+    // What was heard before may be old by now: the tools wait for this watch's answer.
+    this.answered = false;
     const failed = (e: Error) => this.watchFailed(e);
     this.watchingSince = this.deps.takesSince?.() ?? false;
     if (this.watchingSince) {
@@ -234,7 +236,12 @@ export class ThreadIndex {
       this.unsubscribe = this.deps.subscribe('sync:otherRunnersList', { key: this.deps.key, runnerId: this.deps.runnerId }, (v) => this.onRunners(v), failed);
       return;
     }
-    this.unsubscribe = this.deps.subscribe('sync:otherRunnersThreads', { key: this.deps.key, runnerId: this.deps.runnerId }, (v) => this.onRemote(v), failed);
+    this.unsubscribe = this.deps.subscribe('sync:otherRunnersThreads', { key: this.deps.key, runnerId: this.deps.runnerId }, (v) => {
+      // The whole list in one answer (before API 29). With API 29,
+      // onRunners and onRows say when it's in, as both come through onRemote.
+      this.answered = true;
+      this.onRemote(v);
+    }, failed);
   }
 
   // What was last heard stays, so an app connecting again sees the other
@@ -287,6 +294,8 @@ export class ThreadIndex {
   // once, and this runner's app lists only its own threads. Writing this
   // runner's own rows carries on.
   private watchFailed(e: Error): void {
+    // Nothing more coming to wait for: the tools use what was last heard.
+    this.answered = true;
     const refused = forbiddenText(e);
     if (!refused) {
       this.deps.log.warn('the other runners’ threads subscription failed', { error: String(e) });
@@ -294,7 +303,6 @@ export class ThreadIndex {
     }
     if (!this.refused) this.deps.log.info('not watching the other runners’ threads: this runner has a runner key, and only the main Mac’s key reads them', { error: refused });
     this.refused = true;
-    this.answered = true;
     this.unwatch();
   }
 
@@ -433,7 +441,6 @@ export class ThreadIndex {
   }
 
   private onRemote(v: unknown): void {
-    this.answered = true;
     const value = v as { runners?: RawRunner[]; threads?: RemoteThread[] } | null;
     const now = this.deps.clock.now();
     this.remote = {
