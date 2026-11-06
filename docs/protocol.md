@@ -3959,7 +3959,12 @@ default).
   than leave a hole. `runner.status` has `relay: { watching, held, reads, bytes }`:
   threads watched now, rows held, and since start the reads (and live
   updates) and the JSON bytes they brought back, to measure what it costs.
-- **Acting.** `threads.send` (text and `answers`; pictures are `-32000`;
+- **Acting.** `threads.update` takes `archivedBy: "agent"` with an
+  archive (an agent's `update_thread`): the command carries `by: "agent"`,
+  which `relay:queueCommand` keeps only on an archive, and that runner
+  records the archive as an agent's. From an older backend it's dropped and
+  the archive reads as Mike's, as before.
+- `threads.send` (text and `answers`; pictures are `-32000`;
   the answer has `queued: true` when that runner hasn't taken it in the 20
   seconds),
   `threads.interrupt`, `approvals.respond`, `secrets.answer` (sealed to the
@@ -4881,9 +4886,13 @@ runner, and tool output stays there; like the app's view, it still has
 messages an edit there took out, as `thread.rewound` isn't mirrored);
 `send_message` sends with `threads.send`, and says the message is queued
 rather than sent when that runner hasn't taken it (`queued`). A thread id or prefix is looked for in both, and one that
-fits threads in both is refused like any other. The tools that change a
-thread here (`update_thread`, `move_thread`, `interrupt_thread`,
-`delete_thread`) say it's on that runner rather than that it's missing. A
+fits threads in both is refused like any other. `interrupt_thread` stops
+one with `threads.interrupt`, and `update_thread` snoozes, wakes,
+archives or unarchives one with `threads.update` (an archive with
+`archivedBy: "agent"`, below); its title, model, pool and mode stay with
+that runner, which alone knows whether Mike named it, and snoozing until
+the next release isn't asked of it. `move_thread` and `delete_thread`
+say it's on that runner rather than that it's missing. A
 runner that isn't watching the list (no app connected lately) starts the
 watch and waits up to 3 seconds for its answer, rows and all (a refusal or
 an error ends the wait); one that runs out isn't waited for again for a

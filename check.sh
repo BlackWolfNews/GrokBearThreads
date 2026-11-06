@@ -6,9 +6,10 @@
 #   ./check.sh [--quick | --app] [--all] [--e2e] [--shots DIR] [--local]
 #
 # With a check host set (THREADBEAR_CHECK_HOST, or "checkHost" in the
-# runner's runner.json, an ssh host such as "tinker-desk"), the checks run
-# on that Mac instead (scripts/check-remote.sh), so test suites and the
-# app's test windows stay off this one. If it can't be reached they run
+# runner's runner.json, an ssh host such as "tinker-desk", or a list of
+# them, the first free one that can run it taking each run), the checks run
+# there instead (scripts/check-remote.sh), so test suites and the app's test
+# windows stay off this one. If it can't be reached they run
 # here. --e2e always runs here, as it needs this Mac's claude login.
 #   --local       run here even with a check host set (narrow it down too:
 #                 one test file, or swift test --filter)
@@ -85,7 +86,7 @@ if [ "$LOCAL" = 0 ] && [ "$E2E" = 0 ]; then
   else
     RUNNER_JSON="${THREADBEAR_HOME:-$HOME/Library/Application Support/Threadbear}/runner.json"
     CHECK_HOST="$( [ -x "$NODE" ] && [ -f "$RUNNER_JSON" ] && "$NODE" -e '
-      try { const h = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).checkHost; if (typeof h === "string") console.log(h) } catch {}' "$RUNNER_JSON")"
+      try { const h = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).checkHost; const l = (Array.isArray(h) ? h : [h]).filter((x) => typeof x === "string" && /^[A-Za-z0-9._@-]+$/.test(x)); if (l.length) console.log(l.join(",")) } catch {}' "$RUNNER_JSON")"
   fi
   if [ -n "$CHECK_HOST" ]; then
     "$ROOT/scripts/check-remote.sh" "$CHECK_HOST" ${ARGS[@]+"${ARGS[@]}"}

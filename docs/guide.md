@@ -664,7 +664,8 @@ used; the tool output, diffs and pictures stay on that Mac for now, and a
 tool row says so. Editing a message, its highlights and patches, and
 changing its login or model are done on that Mac. Agents see them the
 same way: `list_threads` lists and searches them (each row says which Mac),
-`read_thread` reads them and `send_message` messages them. A Mac that's off shows
+`read_thread` reads them, `send_message` messages them, and they can stop,
+snooze or archive them. A Mac that's off shows
 its threads but can't take a message until it's back. Its archived
 threads are in your Archived list with the rest, to reopen or unarchive.
 Settings > Runners > Connect to other machines directly opens them over

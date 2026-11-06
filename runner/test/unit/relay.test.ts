@@ -432,3 +432,14 @@ test("a card from an older runner keeps its seqs: the body's diffs make way", ()
   assert.equal(new Set(ev.map((e) => e.seq)).size, ev.length);
   assert.match(String((ev.find((e) => e.seq === 14 * SCALE + 6) as { text?: string }).text), /Also changed: a\.ts/);
 });
+
+test("an agent's archive goes to that runner with by: agent", async () => {
+  const h = harness();
+  h.subscribed.add(T);
+  const done = h.relay.call(T, 'threads.update', { threadId: T, archived: true, archivedBy: 'agent' });
+  await new Promise((r) => setImmediate(r));
+  for (const s of h.subs.get('relay:commandState') ?? []) s.onUpdate({ state: 'done' });
+  await done;
+  const q = h.calls.find((c) => c.fn === 'relay:queueCommand')!;
+  assert.deepEqual(q.args.args, { archive: true, by: 'agent' });
+});

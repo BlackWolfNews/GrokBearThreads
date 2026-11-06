@@ -4,7 +4,13 @@
 # check host is set (THREADBEAR_CHECK_HOST, or "checkHost" in runner.json);
 # you don't run it by hand.
 #
-#   scripts/check-remote.sh <ssh host> [check.sh options]
+#   scripts/check-remote.sh <ssh host>[,<ssh host>...] [check.sh options]
+#
+# With several hosts (Mike's are Tinker Desk and the cloud box), each run
+# goes to the first one that's free and can run it, or waits for the first
+# that can. A Linux host only takes what needs no Mac: a --quick run that
+# doesn't touch ios/ (ThreadbearKit's tests are Swift), with no --shots.
+# Mike asked on 6 Nov, when nine threads' checks queued at once.
 #
 # Mike asked on 6 Nov 2026, after three threads' unit suites, a swift test
 # and three debug apps took his M5 to a load of 75 and a test's window came
@@ -24,7 +30,7 @@
 # Desk a CLI signed in over SSH broke the desktop's login (2 Nov), so
 # check.sh runs those on this Mac.
 #
-# Exit 255: the host couldn't be reached (check.sh then runs here).
+# Exit 255: no host that can run it could be reached (check.sh then runs here).
 set -uo pipefail
 
 BASE_REL=".cache/threadbear-check"
@@ -99,33 +105,25 @@ if [ "${1:-}" = "--on-host" ]; then
 fi
 
 # ---- On this Mac
-HOST="${1:?usage: check-remote.sh <ssh host> [check.sh options]}"
+HOST_LIST="${1:?usage: check-remote.sh <ssh host>[,<ssh host>...] [check.sh options]}"
 shift
+read -ra HOSTS <<<"$(printf '%s' "$HOST_LIST" | tr ',' ' ')"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SSH=(ssh -o BatchMode=yes -o ConnectTimeout=8 -o ServerAliveInterval=30 -o ServerAliveCountMax=4)
 
-if ! "${SSH[@]}" "$HOST" true 2>/dev/null; then
-  echo "Couldn't reach $HOST over ssh." >&2
-  exit 255
-fi
-
 ARGS=()
 SHOTS=""
+QUICK=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --shots)
       case "$2" in /*) SHOTS="$2" ;; *) SHOTS="$PWD/$2" ;; esac
       shift ;;
+    --quick) QUICK=1; ARGS+=("$1") ;;
     *) ARGS+=("$1") ;;
   esac
   shift
 done
-
-id="$(date +%H%M%S)-$$"
-remote_base="$("${SSH[@]}" "$HOST" "mkdir -p ~/$BASE_REL/runs && cd ~/$BASE_REL && pwd")" || exit 255
-# Every rm -rf over there is under this, so never let it be empty.
-case "$remote_base" in */$BASE_REL) ;; *) echo "Unexpected folder on $HOST: '$remote_base'" >&2; exit 255 ;; esac
-remote_run="$remote_base/runs/$id"
 
 # What this checkout changes from main, worked out here where the history
 # is (the copy's git has just one commit), as check.sh skips steps by it
@@ -135,6 +133,38 @@ changed="$(mktemp)"
   base="$(git -C "$ROOT" merge-base HEAD main 2>/dev/null)" && git -C "$ROOT" diff --name-only "$base"
   git -C "$ROOT" ls-files --others --exclude-standard
 } 2>/dev/null | sort -u >"$changed"
+
+# Whether a Linux host can run this: only the runner's, Convex's and the
+# website's checks, so --quick, nothing changed under ios/ (and something
+# changed: with nothing, or check.sh itself, it runs everything), no shots.
+linux_ok=0
+if [ "$QUICK" = 1 ] && [ -z "$SHOTS" ] && [ -s "$changed" ] && ! grep -qE '^ios/|^check\.sh$' "$changed"; then linux_ok=1; fi
+
+# Each host: reachable, its system, and whether its lock is free now.
+# The first free one that can run it wins; otherwise the first that can,
+# which then waits for its lock.
+HOST="" HOST_OS="" remote_base="" first="" first_os="" first_base=""
+probe='mkdir -p ~/'"$BASE_REL"'/runs && cd ~/'"$BASE_REL"' && pwd && uname -s && if [ "$(uname -s)" = Darwin ]; then /usr/bin/lockf -t 0 lock true 2>/dev/null && echo free || echo busy; else flock -n lock true 2>/dev/null && echo free || echo busy; fi'
+for h in "${HOSTS[@]}"; do
+  out="$("${SSH[@]}" "$h" "$probe" 2>/dev/null)" || { echo "Couldn't reach $h over ssh." >&2; continue; }
+  { read -r b; read -r os; read -r state; } <<<"$out"
+  # Every rm -rf over there is under this, so never let it be empty.
+  case "$b" in */$BASE_REL) ;; *) echo "Unexpected folder on $h: '$b'" >&2; continue ;; esac
+  case "$os" in
+    Darwin) ;;
+    Linux) [ "$linux_ok" = 1 ] || continue ;;
+    *) continue ;;
+  esac
+  if [ "$state" = free ]; then HOST="$h" HOST_OS="$os" remote_base="$b"; break; fi
+  [ -n "$first" ] || { first="$h" first_os="$os" first_base="$b"; }
+done
+if [ -z "$HOST" ]; then
+  [ -n "$first" ] || { rm -f "$changed"; echo "None of $HOST_LIST can run this check now." >&2; exit 255; }
+  HOST="$first" HOST_OS="$first_os" remote_base="$first_base"
+fi
+
+id="$(date +%H%M%S)-$$"
+remote_run="$remote_base/runs/$id"
 
 # The files check.sh would see, less what no check reads: the pictures in
 # docs/ and site/ (about 50 MB of the repo). TourTests reads site's JSON.
@@ -163,7 +193,12 @@ inner="/bin/bash $(printf '%q' "$remote_run/scripts/check-remote.sh") --on-host 
 # glass a flat fill.
 [ -z "$SHOTS" ] || inner="\$HOME/.local/bin/desk $(printf '%q' "$inner")"
 lock="$remote_base/lock"
-remote_cmd="/usr/bin/lockf -t 0 $lock true 2>/dev/null || echo 'Waiting for another check on $HOST to finish...'; /usr/bin/lockf -k $lock /bin/bash -c $(printf '%q' "$inner")"
+if [ "$HOST_OS" = Linux ]; then
+  # A server that runs its own runner and threads: the check goes in under them.
+  remote_cmd="flock -n $lock true 2>/dev/null || echo 'Waiting for another check on $HOST to finish...'; flock $lock nice -n 10 /bin/bash -c $(printf '%q' "$inner")"
+else
+  remote_cmd="/usr/bin/lockf -t 0 $lock true 2>/dev/null || echo 'Waiting for another check on $HOST to finish...'; /usr/bin/lockf -k $lock /bin/bash -c $(printf '%q' "$inner")"
+fi
 
 # A failed step's log path is on the host: its logs come back here, and the
 # path in the output is changed to match.

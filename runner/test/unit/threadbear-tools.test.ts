@@ -1443,7 +1443,7 @@ function farRelay(opts: { takes?: boolean } = {}) {
       },
       // That runner takes the command at once, or (takes: false) never answers.
       subscribe: (fn, _args, onUpdate) => {
-        if (fn === 'relay:commandState' && opts.takes !== false) queueMicrotask(() => onUpdate({ state: 'taken' }));
+        if (fn === 'relay:commandState' && opts.takes !== false) queueMicrotask(() => onUpdate({ state: 'done' }));
         return () => undefined;
       },
     }),
@@ -1502,6 +1502,40 @@ test("another runner's threads: listed with their runner, searched, read and mes
   const moved = await call('update_thread', { threadId: 'ba5bb5ec', title: 'x' });
   assert.equal(moved.error, true);
   assert.match(moved.text, /runs on Cloud/);
+});
+
+test("another runner's thread can be archived, snoozed and stopped, and says it was an agent; nothing else changes there", async () => {
+  const h = makeHarness();
+  const { thread: me } = start(h, 'Tidier');
+  const f = farRelay();
+  const call = toolsWith(h, me.id, f.control);
+  const updates = () => f.calls.filter((c) => c.fn === 'relay:queueCommand').map((c) => ({ kind: c.args.kind, args: c.args.args }));
+
+  const archived = await call('update_thread', { threadId: 'ba5bb5ec', archived: true });
+  assert.equal(archived.error, false, archived.text);
+  assert.match(archived.text, /"Rust port for Linux and Windows" on Cloud is archived/);
+  assert.deepEqual(updates().at(-1), { kind: 'update', args: { archive: true, by: 'agent' } });
+
+  const snoozed = await call('update_thread', { threadId: 'ba5bb5ec', snooze: '2h' });
+  assert.equal(snoozed.error, false, snoozed.text);
+  assert.deepEqual(updates().at(-1), { kind: 'update', args: { snooze: { until: '2026-10-26T14:00:00.000Z' } } });
+  await call('update_thread', { threadId: 'ba5bb5ec', snooze: 'off' });
+  assert.deepEqual(updates().at(-1), { kind: 'update', args: { wake: true } });
+
+  const stopped = await call('interrupt_thread', { threadId: 'ba5bb5ec' });
+  assert.equal(stopped.error, false, stopped.text);
+  assert.match(stopped.text, /Asked Cloud to stop "Rust port/);
+  assert.equal(updates().at(-1)!.kind, 'interrupt');
+
+  // A title, model, pool or mode stays with that runner; nothing is queued.
+  const before = updates().length;
+  for (const args of [{ title: 'x' }, { model: 'opus' }, { permissionMode: 'ask' }, { snooze: 'release' }, {}]) {
+    const r = await call('update_thread', { threadId: 'ba5bb5ec', ...args });
+    assert.equal(r.error, true, JSON.stringify(args));
+  }
+  assert.equal(updates().length, before);
+  // Moves and deletes still say where it is.
+  assert.match((await call('move_thread', { threadId: 'ba5bb5ec', folder: '/tmp' })).text, /runs on Cloud/);
 });
 
 test("a message another runner hasn't taken yet is said to be queued, not sent", async () => {

@@ -273,7 +273,7 @@ export function buildThreadbearTools(
   const resolve = async (id: string | undefined): Promise<string> => {
     if (!id) return selfId;
     const hit = await find(id);
-    if (hit.other) throw new Error(`"${hit.other.t.title}" runs on ${hit.other.runner}, so this can't change it from here. read_thread and send_message reach it; do the rest in a thread on ${hit.other.runner}.`);
+    if (hit.other) throw new Error(`"${hit.other.t.title}" runs on ${hit.other.runner}, so this can't change it from here. read_thread, send_message, interrupt_thread and update_thread's snooze and archive reach it; do the rest in a thread on ${hit.other.runner}.`);
     return hit.id;
   };
 
@@ -1489,7 +1489,31 @@ export function buildThreadbearTools(
         archived: z.boolean().optional().describe('true to archive, false to bring back to the inbox.'),
       },
       handle(async ({ threadId, id: alias, title, mikeAsked, model, effort, pool: p, permissionMode, snooze, archived }, extra) => {
-        const id = await resolve(threadId ?? alias);
+        const asked = threadId ?? alias;
+        const hit = asked ? await find(asked) : { id: selfId };
+        const remote = opts.remote?.();
+        if (hit.other && remote) {
+          // Another runner's thread, through the backend (relay.ts): only
+          // what the Mac app's sidebar can do there. A title stays with
+          // that runner, which alone knows whether the user named it.
+          const { t, runner } = hit.other;
+          if ([title, model, effort, p, permissionMode].some((x) => x !== undefined)) throw new Error(`"${t.title}" runs on ${runner}: only snooze and archive change it from here. Do the rest in a thread on ${runner}.`);
+          if (snooze === undefined && archived === undefined) throw new Error('Nothing to change: pass snooze or archived.');
+          const change: Record<string, unknown> = {};
+          if (archived !== undefined) {
+            change.archived = archived;
+            if (archived) change.archivedBy = 'agent';
+          }
+          if (snooze !== undefined) {
+            const word = snooze.trim().toLowerCase();
+            if (word === 'release') throw new Error(`${runner} can't be asked to wake it on its next release from here; use a time, or "restart".`);
+            change.snoozedUntil = word === 'off' ? null : word === 'restart' ? 'restart' : parseWhen(snooze, now());
+          }
+          await remote.call(hit.id, 'threads.update', { threadId: hit.id, ...change });
+          const did = [archived === true ? 'archived' : archived === false ? 'back in the inbox' : '', snooze !== undefined ? (change.snoozedUntil === null ? 'awake' : `snoozed until ${change.snoozedUntil === 'restart' ? 'its runner restarts' : change.snoozedUntil}`) : ''].filter(Boolean).join(' and ');
+          return `"${t.title}" on ${runner} is ${did}.`;
+        }
+        const id = await resolve(asked);
         const stops = (snooze !== undefined && snooze.trim().toLowerCase() !== 'off') || archived === true;
         if (id === selfId && stops) throw new Error("Can't snooze or archive this thread from inside its own turn. Do it once the turn is over by calling end_turn with needs \"nothing\" and archive: true, or snooze: and when to wake (the times this takes, or words like \"when the phone arrives\"), again if you already have.");
         const upd: Parameters<ThreadControl['update']>[0] = { threadId: id };
@@ -1560,7 +1584,16 @@ export function buildThreadbearTools(
       'Stops the turn another thread is running, like pressing Stop in the app.',
       other,
       handle(async ({ threadId, id: alias }) => {
-        const id = await resolveOther(threadId ?? alias);
+        const asked = threadId ?? alias;
+        if (!asked) throw new Error('threadId is required. list_threads shows the ids.');
+        const hit = await find(asked);
+        const remote = opts.remote?.();
+        if (hit.other && remote) {
+          // A Stop for that runner, as the Mac app's (relay.ts).
+          await remote.call(hit.id, 'threads.interrupt', { threadId: hit.id });
+          return `Asked ${hit.other.runner} to stop "${hit.other.t.title}".`;
+        }
+        const id = await resolveOther(asked);
         if (id === selfId) throw new Error("That's this thread. Just end the turn.");
         await control.interrupt(id);
         return `Interrupted ${id.slice(0, 8)} "${(await control.get(id)).title}".`;

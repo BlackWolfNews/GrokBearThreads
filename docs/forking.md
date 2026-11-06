@@ -65,7 +65,9 @@ gone from your fork, not just quiet.
   (what it installs, reads and talks to).
 - Then `./check.sh` (`--app` when you touched `app/`). To run it on
   another Mac over ssh, put `"checkHost": "<ssh host>"` in your
-  runner.json (Mike's is `tinker-desk`); without it, it runs on yours.
+  runner.json, or a list of hosts (Mike's is `["tinker-desk", "cloud"]`;
+  a Linux one only takes `--quick` runs that don't touch `ios/`); without
+  it, it runs on yours.
 
 ### Optional, with a switch
 

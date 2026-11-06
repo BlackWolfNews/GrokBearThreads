@@ -3227,7 +3227,8 @@ export class ConvexSync {
         else if (a.archive) {
           // A verdict still rides along if sent (backend API 42), though no app sends one now.
           const verdict = ARCHIVE_VERDICTS.includes(a.verdict as ArchiveVerdict) ? { verdict: a.verdict as ArchiveVerdict } : {};
-          await host.update({ threadId: id, archived: true, ...verdict });
+          // `by: "agent"`: an agent on the main Mac archived it (relay.ts).
+          await host.update({ threadId: id, archived: true, ...verdict, ...(a.by === 'agent' ? { archivedBy: 'agent' as const } : {}) });
         }
         else if (a.unarchive) await host.update({ threadId: id, archived: false });
         else if (a.markSeen) await host.markSeen(id);

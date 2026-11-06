@@ -275,7 +275,10 @@ test('a release tag signed with OpenPGP or X.509 never counts, whatever gpg says
   git(w.mike, 'push', '-q', 'origin', 'main', '--tags');
   // The victim's gpg would call both good.
   const s = await withVictimGpg({ 'gpg.program': pgp, 'gpg.openpgp.program': pgp, 'gpg.x509.program': x509 }, async () => {
-    assert.equal(spawnSync('git', ['-C', w.mike, 'verify-tag', 'release/2026-12-01'], { env: process.env }).status, 0, 'gpg calls the PGP tag good');
+    // The test's own premise, that this git takes the fake's word. Linux's
+    // git 2.43 (the cloud check host) wants more from it and says no, which
+    // only makes the runner's job easier, so it's held on macOS alone.
+    if (process.platform === 'darwin') assert.equal(spawnSync('git', ['-C', w.mike, 'verify-tag', 'release/2026-12-01'], { env: process.env }).status, 0, 'gpg calls the PGP tag good');
     return upstreamFor(w.theirs, w.home).check();
   });
   assert.equal(s.release?.tag, 'release/2026-10-01');

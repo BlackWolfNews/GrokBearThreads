@@ -151,10 +151,10 @@ export type RunnerJson = {
   sandbox?: unknown;
   pools?: unknown[];
   followMain?: boolean;
-  // An ssh host that ./check.sh sends the repo's checks to, so suites and
-  // the app's test windows stay off this Mac (scripts/check-remote.sh).
-  // Only check.sh reads it; the runner itself doesn't.
-  checkHost?: string;
+  // The ssh host (or hosts, tried in order) that ./check.sh sends the
+  // repo's checks to, so suites and the app's test windows stay off this
+  // Mac (scripts/check-remote.sh). Only check.sh reads it.
+  checkHost?: string | string[];
   bulletReplies?: boolean;
   oneReply?: boolean;
   // bringIn: how often a fork's runner starts a thread to bring in Mike's
