@@ -336,7 +336,7 @@ test('a runner key that may not read the other runners’ threads stops watching
   index.stop();
 });
 
-test("a runner key's archived rows, which a backend before API 53 dropped, go again once", async () => {
+test("a runner key's archived rows, which a backend before API 54 dropped, go again once", async () => {
   const h = makeHarness();
   const live = h.runner.create({ text: 'Still going', accountId: 'claude-3' }).thread;
   const done = h.runner.create({ text: 'All done', accountId: 'claude-3' }).thread;
@@ -370,7 +370,7 @@ test("a runner key's archived rows, which a backend before API 53 dropped, go ag
   const seed = first.index.snapshot()!;
   first.index.stop();
   assert.equal(seed.archived, undefined);
-  // The next start has nothing to send, until the backend says 53: then
+  // The next start has nothing to send, until the backend says 54: then
   // only the archived one goes, heard before the index started.
   const second = make(seed);
   second.index.resendArchived();

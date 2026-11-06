@@ -141,7 +141,7 @@ export class ThreadIndex {
   private unlisten?: () => void;
   private unsubscribe?: () => void;
   private remote: RemoteThreads = { runners: [], threads: [] };
-  // A backend before API 53 dropped a runner key's archived rows while this
+  // A backend before API 54 dropped a runner key's archived rows while this
   // remembered them as sent: they go once more, then this says so (snapshot).
   private archivedSent = false;
   private archivedWanted = false;
@@ -375,7 +375,7 @@ export class ThreadIndex {
   }
 
   /** The backend got new enough for what rows held back: they go again. */
-  /** Once a backend keeps a runner key's archived rows (API 53): those it dropped go again, once. */
+  /** Once a backend keeps a runner key's archived rows (API 54): those it dropped go again, once. */
   resendArchived(): void {
     if (this.archivedSent) return;
     // Heard before the index has started (the heartbeat comes first): at start.

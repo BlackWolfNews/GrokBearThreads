@@ -669,7 +669,7 @@ test("a busy runner key's newest threads and sidebar rows show, and nothing of t
   await s.ctx.db.insert('tokens', { hash: await sha256(token), name: 'phone', expiresAt: Date.now() + 100_000, createdAt: 1 });
   assert.equal((await call(s.ctx, phone.threadRow, { token, threadId: 'I0' })).view, 'inbox');
   // Sidebar: tombstones give way first, then an old archived row, before
-  // any live one; archived threads are listed (API 53).
+  // any live one; archived threads are listed (API 54).
   const rows = Array.from({ length: CAP.indexRows }, (_, i) => (i === 5 ? { ...indexRow(`S${i}`), archivedAt: 'x' } : indexRow(`S${i}`)));
   for (let i = 0; i < rows.length; i += 100) await call(s.ctx, sync.setThreadIndex, { key: BRUCE_KEY, runnerId: BRUCE, rows: rows.slice(i, i + 100), removed: [] });
   await call(s.ctx, sync.setThreadIndex, { key: BRUCE_KEY, runnerId: BRUCE, rows: [], removed: ['S0', 'S1'] });

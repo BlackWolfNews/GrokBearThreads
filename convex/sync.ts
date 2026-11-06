@@ -240,7 +240,7 @@ export const RUNNER_KEY_CAPS = {
   bodyEvictPerWrite: 20,
   pushesPerMinute: 10,
   indexRow: 2_048,
-  indexRows: 800, // every row, tombstones too, archived ones too (API 53)
+  indexRows: 800, // every row, tombstones too, archived ones too (API 54)
   // How many of its oldest rows a write past that looks through for an archived one to give way.
   indexEvictScan: 100,
   cardTitle: 60,
@@ -2485,7 +2485,7 @@ export const setThreadIndex = mutation({
     // A runner key's rows are capped in number (CAP.indexRows), tombstones
     // included, keeping the most recent: a new one past the cap takes the
     // place of its oldest row, an archived one first. Archived threads are
-    // listed too (API 53), so the main Mac's Archived list can reopen them;
+    // listed too (API 54), so the main Mac's Archived list can reopen them;
     // rows too big even when cut are left out.
     let count = caller.owner ? 0 : (await ctx.db.query('threadIndex').withIndex('by_runnerId', (q) => q.eq('runnerId', runnerId)).take(CAP.indexRows + 1)).length;
     for (const given of rows) {

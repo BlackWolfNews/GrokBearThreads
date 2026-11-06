@@ -3744,9 +3744,9 @@ runner itself. Runners never talk to each other.
   Archived threads have rows too, so the app's Archived list has other
   machines' archived threads to open and unarchive. A runner key's rows
   are capped (`CAP.indexRows`), and past the cap its oldest archived row
-  gives way before a live one; a backend before API 53 dropped a runner
+  gives way before a live one; a backend before API 54 dropped a runner
   key's archived rows, and a runner sends those again once on first
-  hearing 53 (its sync cache's `index.archived` says it has).
+  hearing 54 (its sync cache's `index.archived` says it has).
 - **Watching the others.** The runner subscribes to
   `sync:otherRunnersThreads` (every runner but itself, with its threads)
   and gives the result to clients as `remoteThreads.list` and
