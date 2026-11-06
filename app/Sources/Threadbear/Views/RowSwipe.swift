@@ -197,7 +197,7 @@ enum RowSwipeEvents {
     /// system's scrolling runs.
     /// `middle`: over the middle of the window (a page swipe), rather
     /// than the sidebar's rows.
-    static func event(dx: Double, phase: Phase, middle: Bool = false) -> NSEvent? {
+    static func event(dx: Double, dy: Double = 0, phase: Phase, middle: Bool = false, down: Double? = nil) -> NSEvent? {
         guard let cg = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: 0, wheel2: 0, wheel3: 0) else { return nil }
         cg.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
         cg.setIntegerValueField(.scrollWheelEventScrollPhase, value: phase.rawValue)
@@ -205,9 +205,13 @@ enum RowSwipeEvents {
         let delta = probe.isDirectionInvertedFromDevice ? dx : -dx
         cg.setDoubleValueField(.scrollWheelEventPointDeltaAxis2, value: delta)
         cg.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis2, value: delta)
+        // Up and down the way the system scrolls, as across.
+        let vertical = probe.isDirectionInvertedFromDevice ? dy : -dy
+        cg.setDoubleValueField(.scrollWheelEventPointDeltaAxis1, value: vertical)
+        cg.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1, value: vertical)
         if let window = NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain }) {
             let x = middle ? window.frame.midX : window.frame.minX + 100
-            let down = middle ? window.frame.height / 2 : 200
+            let down = down ?? (middle ? window.frame.height / 2 : 200)
             cg.location = CGPoint(x: x, y: (NSScreen.screens.first?.frame.height ?? 0) - window.frame.maxY + down)
         }
         return NSEvent(cgEvent: cg)

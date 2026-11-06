@@ -27,15 +27,15 @@ public struct RowSwipe: Sendable, Equatable {
     private var sumX = 0.0
     private var sumY = 0.0
     private var lastDX: Double = 0
-    /// A swipe right is Back's (NavigationSwipe) while there's somewhere
+    /// A swipe right is Back's (SwipeNavigation in the app) while there's somewhere
     /// to go back to, rather than the row giving a little and stopping.
     private var rightTaken = false
 
     /// Movement before a gesture is called across or up and down.
-    static let decideAfter = 6.0
+    public static let decideAfter = 6.0
     /// Across has to be this much more than up and down to count, so a
     /// slightly diagonal scroll still scrolls.
-    static let across = 1.5
+    public static let across = 1.5
     /// One event moving this far left at the end is a flick: it archives
     /// even short of the line, once the row's at least `flickTravel` along.
     static let flickSpeed = 14.0
