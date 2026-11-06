@@ -45,6 +45,8 @@ test('waits out the timer from the first look, then starts one thread', () => {
   assert.equal(started[0].title, "Bring in Mike's release of 6 Nov");
   assert.match(started[0].text, /docs\/bringing-in-updates\.md/);
   assert.match(started[0].text, /every 5 days/);
+  // The verified commit, not a ref name a later fetch could move (F31).
+  assert.match(started[0].text, /merge its commit c /);
 });
 
 test('nothing waiting starts nothing, however long it has been', () => {
@@ -68,6 +70,7 @@ test('never a second thread while the first is open: a newer release goes to it,
   assert.equal(started.length, 1);
   assert.deepEqual(sent.map((x) => x.threadId), ['t1']);
   assert.match(sent[0].text, /release\/2026-11-11/);
+  assert.match(sent[0].text, /merge its commit c,/);
   // Already told it about this one: nothing more, however long.
   clock.advance(10 * DAY);
   assert.equal(b.consider(release('release/2026-11-11')), 'waiting');

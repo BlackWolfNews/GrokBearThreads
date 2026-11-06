@@ -6,7 +6,7 @@ import path from 'node:path';
 import { tmpDir } from '../helpers/fakes.ts';
 import { FakeClock } from '../../src/clock.ts';
 import { nullLogger } from '../../src/log.ts';
-import { FETCH_INTERVAL_MS, FIRST_LOOK_MS, SETTLE_MS, Upstream, parseImportant, repoKey, signersPath, tagFor } from '../../src/upstream.ts';
+import { FETCH_INTERVAL_MS, FIRST_LOOK_MS, SETTLE_MS, Upstream, parseImportant, repoKey, signersPath, splitSignedTag, tagFor } from '../../src/upstream.ts';
 import { PATIENCE_MS } from '../helpers/patience.ts';
 
 // Commits and tags in the throwaway repos need a name, and must not pick
@@ -67,7 +67,11 @@ function world() {
   return { root, mikeKey, mike, theirs, home };
 }
 
-function upstreamFor(checkout: string, home: string, clock = new FakeClock(), extra = {}) {
+// The clock after every release date the tests use: a release dated after
+// today (and a couple of days' slack) isn't looked at.
+const LATER = Date.parse('2026-12-31T00:00:00Z');
+
+function upstreamFor(checkout: string, home: string, clock = new FakeClock(LATER), extra = {}) {
   return new Upstream({ home, checkout, clock, log: nullLogger, ...extra });
 }
 
@@ -115,7 +119,7 @@ test('a fork sees a newer signed release from Mike, with what main is missing', 
 test('commits Mike marks Important: come with the release, and lead his tag message', async () => {
   const w = world();
   const seen: string[] = [];
-  const up = upstreamFor(w.theirs, w.home, new FakeClock(), { onChecked: (s: { state: string }) => seen.push(s.state) });
+  const up = upstreamFor(w.theirs, w.home, new FakeClock(LATER), { onChecked: (s: { state: string }) => seen.push(s.state) });
   commit(w.mike, 'b.txt', 'Ordinary');
   fs.writeFileSync(path.join(w.mike, 'c.txt'), 'x');
   git(w.mike, 'add', 'c.txt');
@@ -216,6 +220,298 @@ test('publishing needs a signing key', async () => {
   const w = world();
   const up = upstreamFor(w.mike, w.home, new FakeClock(Date.now() + 2 * SETTLE_MS), { publish: { publish: true, signingKey: path.join(w.root, 'missing') }, runningMainSettled: () => true });
   assert.equal(await up.publishOnce(), undefined);
+});
+
+// A stand-in for gpg (or gpgsm) that signs with made-up armor and says any
+// signature is good, as a victim's gpg does for an attacker's key that's in
+// their keyring or that it fetched itself (auto-key-retrieve, WKD).
+function fakeGpg(dir: string, armor: 'PGP SIGNATURE' | 'SIGNED MESSAGE'): string {
+  const file = path.join(dir, `fake-gpg-${armor.replace(' ', '-')}`);
+  fs.writeFileSync(file, `#!/bin/sh
+case "$*" in
+  *--verify*)
+    printf '[GNUPG:] NEWSIG\n[GNUPG:] GOODSIG 0123456789ABCDEF Mallory <m@example.com>\n[GNUPG:] VALIDSIG 0123456789ABCDEF0123456789ABCDEF01234567 2026-12-01 1764547200 0 4 0 22 10 00 0123456789ABCDEF0123456789ABCDEF01234567\n[GNUPG:] TRUST_FULLY 0 pgp\n'
+    exit 0;;
+  *)
+    cat > /dev/null
+    printf -- '-----BEGIN ${armor}-----\n\nAAAAfakefakefake\n-----END ${armor}-----\n'
+    printf '\n[GNUPG:] SIG_CREATED D 22 8 00 1764547200 0123456789ABCDEF0123456789ABCDEF01234567\n' >&2
+    exit 0;;
+esac
+`, { mode: 0o755 });
+  return file;
+}
+
+// The victim's own git config pointing gpg (or gpgsm) at the fake, for as
+// long as \`run\` takes: the runner's git reads it, as it would ~/.gitconfig.
+async function withVictimGpg<T>(entries: Record<string, string>, run: () => Promise<T>): Promise<T> {
+  const keys = Object.keys(entries);
+  const env: Record<string, string> = { GIT_CONFIG_COUNT: String(keys.length) };
+  keys.forEach((k, i) => Object.assign(env, { [`GIT_CONFIG_KEY_${i}`]: k, [`GIT_CONFIG_VALUE_${i}`]: entries[k] }));
+  const before = Object.fromEntries(Object.keys(env).map((k) => [k, process.env[k]]));
+  Object.assign(process.env, env);
+  try {
+    return await run();
+  } finally {
+    for (const [k, v] of Object.entries(before)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+}
+
+// Gautam's scan, 6 Nov 2026, F5: verify-tag with gpg.format=ssh still hands
+// a PGP or X.509 signature to gpg and the whole keyring, so an attacker who
+// controls upstream got a release past the pinned key with their own key.
+test('a release tag signed with OpenPGP or X.509 never counts, whatever gpg says about it', async () => {
+  const w = world();
+  const pgp = fakeGpg(w.root, 'PGP SIGNATURE');
+  const x509 = fakeGpg(w.root, 'SIGNED MESSAGE');
+  commit(w.mike, 'evil.txt', 'Attacker code');
+  git(w.mike, '-c', 'gpg.format=openpgp', '-c', `gpg.program=${pgp}`, '-c', 'user.signingkey=MALLORY', 'tag', '-s', '-m', 'Threadbear 2026-12-01', 'release/2026-12-01');
+  git(w.mike, '-c', 'gpg.format=x509', '-c', `gpg.x509.program=${x509}`, '-c', 'user.signingkey=MALLORY', 'tag', '-s', '-m', 'Threadbear 2026-12-02', 'release/2026-12-02');
+  assert.match(git(w.mike, 'cat-file', 'tag', 'release/2026-12-01'), /-----BEGIN PGP SIGNATURE-----/);
+  assert.match(git(w.mike, 'cat-file', 'tag', 'release/2026-12-02'), /-----BEGIN SIGNED MESSAGE-----/);
+  git(w.mike, 'push', '-q', 'origin', 'main', '--tags');
+  // The victim's gpg would call both good.
+  const s = await withVictimGpg({ 'gpg.program': pgp, 'gpg.openpgp.program': pgp, 'gpg.x509.program': x509 }, async () => {
+    assert.equal(spawnSync('git', ['-C', w.mike, 'verify-tag', 'release/2026-12-01'], { env: process.env }).status, 0, 'gpg calls the PGP tag good');
+    return upstreamFor(w.theirs, w.home).check();
+  });
+  assert.equal(s.release?.tag, 'release/2026-10-01');
+  assert.equal(s.state, 'idle');
+  assert.equal(spawnSync('git', ['-C', w.theirs, 'rev-parse', '-q', '--verify', 'refs/threadbear/upstream/2026-12-01']).status, 1, 'never copied where a bring-in merges from');
+});
+
+test('splitSignedTag: only one SSH signature block, at the end, under the four headers git writes', () => {
+  const w = world();
+  const raw = spawnSync('git', ['-C', w.mike, 'cat-file', 'tag', 'release/2026-10-01']).stdout as Buffer;
+  const text = raw.toString('latin1');
+  const ok = splitSignedTag(raw, 'release/2026-10-01');
+  assert.ok(ok, 'a tag as Mike signs it');
+  assert.equal(ok.commit, git(w.mike, 'rev-parse', 'release/2026-10-01^{commit}'));
+  assert.ok(ok.date);
+  assert.equal(ok.payload.length + Buffer.byteLength(ok.signature, 'latin1'), raw.length, 'payload and signature are the whole object');
+  const sig = text.slice(text.indexOf('-----BEGIN SSH'));
+  const pgp = '-----BEGIN PGP SIGNATURE-----\n\nAAAA\n-----END PGP SIGNATURE-----\n';
+  const bad: [string, string][] = [
+    ['another name', text],
+    ['a PGP block after Mike\'s', text + pgp],
+    ['a PGP block before it', text.replace(sig, pgp + sig)],
+    ['an X.509 block in the message', text.replace(sig, '-----BEGIN SIGNED MESSAGE-----\nAAAA\n-----END SIGNED MESSAGE-----\n' + sig)],
+    ['a second SSH block', text + sig],
+    ['no signature', text.slice(0, text.indexOf('-----BEGIN SSH'))],
+    ['a header added', text.replace('\ntagger ', '\ngpgsig-sha256 x\ntagger ')],
+    ['a tag of a tree', text.replace('type commit', 'type tree')],
+    ['text after the signature', text + 'more\n'],
+  ];
+  for (const [what, t] of bad) assert.equal(splitSignedTag(Buffer.from(t, 'latin1'), what === 'another name' ? 'release/2026-10-02' : 'release/2026-10-01'), undefined, what);
+  // Armor mentioned in a commit subject (publishOnce starts each with "- ")
+  // isn't a block, so it doesn't stop a release.
+  const subject = Buffer.from(text.replace(sig, '- Reject -----BEGIN PGP SIGNATURE----- tags\n' + sig), 'latin1');
+  assert.ok(splitSignedTag(subject, 'release/2026-10-01'));
+});
+
+const kept = (repo: string, name: string) => spawnSync('git', ['-C', repo, 'rev-parse', '-q', '--verify', `refs/threadbear/upstream/${name}^{commit}`], { encoding: 'utf8' }).stdout.trim();
+
+// F31: the fetch force-moved refs/threadbear/upstream/<date>, the ref a
+// bring-in thread merges, to whatever upstream served, before any check.
+test('a release swapped upstream after it verified never moves the ref a bring-in merges', async () => {
+  const w = world();
+  const good = commit(w.mike, 'b.txt', 'Second');
+  signedTag(w.mike, 'release/2026-10-30', w.mikeKey.priv);
+  git(w.mike, 'push', '-q', 'origin', 'main', '--tags');
+  const up = upstreamFor(w.theirs, w.home);
+  assert.equal((await up.check()).release?.commit, good);
+
+  // The attacker force-pushes the same name, unsigned, at their own commit.
+  git(w.mike, 'checkout', '-q', '-b', 'evil');
+  const evil = commit(w.mike, 'evil.txt', 'Attacker code');
+  git(w.mike, 'tag', '-f', '-a', '-m', 'Threadbear 2026-10-30', 'release/2026-10-30', evil);
+  git(w.mike, 'push', '-q', '-f', 'origin', 'refs/tags/release/2026-10-30');
+  const s = await up.check();
+  assert.equal(kept(w.theirs, '2026-10-30'), good, 'the verified ref keeps the commit that verified');
+  assert.equal(s.release?.tag, 'release/2026-10-30');
+  assert.equal(s.release?.commit, good);
+  // What upstream serves now is only in the staging namespace.
+  assert.equal(git(w.theirs, 'rev-parse', 'refs/threadbear/upstream-incoming/2026-10-30^{commit}'), evil);
+});
+
+test('a release name that verified keeps its first tag even if a signed one replaces it upstream', async () => {
+  const w = world();
+  const first = commit(w.mike, 'b.txt', 'Second');
+  signedTag(w.mike, 'release/2026-10-30', w.mikeKey.priv);
+  git(w.mike, 'push', '-q', 'origin', 'main', '--tags');
+  const up = upstreamFor(w.theirs, w.home);
+  await up.check();
+  const other = commit(w.mike, 'c.txt', 'Third');
+  git(w.mike, '-c', 'gpg.format=ssh', '-c', `user.signingkey=${w.mikeKey.priv}`, 'tag', '-f', '-s', '-m', 'again', 'release/2026-10-30', other);
+  git(w.mike, 'push', '-q', '-f', 'origin', 'main', 'refs/tags/release/2026-10-30');
+  const s = await up.check();
+  assert.equal(kept(w.theirs, '2026-10-30'), first);
+  assert.equal(s.release?.commit, first);
+});
+
+// A runner from before this check fetched straight into the verified
+// namespace, so a fork can have an unsigned tag sitting there.
+test('an unsigned ref an older runner left among the releases is taken out, and a signed one takes its name', async () => {
+  const w = world();
+  git(w.mike, 'checkout', '-q', '-b', 'evil');
+  const evil = commit(w.mike, 'evil.txt', 'Attacker code');
+  git(w.mike, 'tag', '-a', '-m', 'unsigned', 'release/2026-11-02', evil);
+  git(w.mike, 'push', '-q', 'origin', 'refs/tags/release/2026-11-02');
+  git(w.mike, 'checkout', '-q', 'main');
+  // What the old fetch did.
+  git(w.theirs, 'fetch', '-q', '--no-tags', 'upstream', '+refs/tags/release/*:refs/threadbear/upstream/*');
+  assert.equal(kept(w.theirs, '2026-11-02'), evil);
+  const leftover = git(w.theirs, 'rev-parse', 'refs/threadbear/upstream/2026-11-02');
+  git(w.mike, 'push', '-q', '-f', 'origin', ':refs/tags/release/2026-11-02');
+  const s = await upstreamFor(w.theirs, w.home).check();
+  assert.equal(s.release?.tag, 'release/2026-10-01');
+  assert.equal(kept(w.theirs, '2026-11-02'), '', 'taken out, so nothing merges it by name');
+
+  // Left over under a name upstream now has a real release for.
+  git(w.theirs, 'update-ref', 'refs/threadbear/upstream/2026-11-03', leftover);
+  const real = commit(w.mike, 'd.txt', 'Real');
+  signedTag(w.mike, 'release/2026-11-03', w.mikeKey.priv);
+  git(w.mike, 'push', '-q', 'origin', 'main', '--tags');
+  const t = await upstreamFor(w.theirs, w.home).check();
+  assert.equal(t.release?.commit, real);
+  assert.equal(kept(w.theirs, '2026-11-03'), real);
+});
+
+test('with no ssh-keygen to ask, the check fails and keeps the releases it verified', async () => {
+  const w = world();
+  const up = upstreamFor(w.theirs, w.home);
+  assert.equal((await up.check()).release?.tag, 'release/2026-10-01');
+  const bin = path.join(w.root, 'bin');
+  fs.mkdirSync(bin);
+  fs.symlinkSync(spawnSync('/usr/bin/which', ['git'], { encoding: 'utf8' }).stdout.trim(), path.join(bin, 'git'));
+  const before = process.env.PATH;
+  process.env.PATH = bin;
+  let s;
+  try {
+    // A runner just started: nothing it remembers.
+    s = await upstreamFor(w.theirs, w.home).check();
+  } finally {
+    process.env.PATH = before;
+  }
+  assert.equal(s.state, 'failed');
+  assert.match(s.reason ?? '', /ssh-keygen/);
+  assert.ok(kept(w.theirs, '2026-10-01'), 'not taken out as unsigned');
+});
+
+// From Codex's review of the fix: what an older runner left among the
+// releases is taken out whatever its name, before anything is copied in.
+test('every unsigned ref an older runner left among the releases goes, even older ones and ones in the way of a name', async () => {
+  const w = world();
+  git(w.mike, 'checkout', '-q', '-b', 'evil');
+  const evil = commit(w.mike, 'evil.txt', 'Attacker code');
+  git(w.mike, 'tag', '-a', '-m', 'unsigned', 'release/2026-10-30', evil);
+  git(w.mike, 'tag', '-a', '-m', 'unsigned', 'release/2026-11-06/poison', evil);
+  git(w.mike, 'push', '-q', 'origin', 'refs/tags/release/2026-10-30', 'refs/tags/release/2026-11-06/poison');
+  git(w.theirs, 'fetch', '-q', '--no-tags', 'upstream', '+refs/tags/release/*:refs/threadbear/upstream/*');
+  git(w.mike, 'push', '-q', 'origin', ':refs/tags/release/2026-11-06/poison');
+  git(w.mike, 'tag', '-d', 'release/2026-11-06/poison');
+  git(w.mike, 'checkout', '-q', 'main');
+  const real = commit(w.mike, 'd.txt', 'Real');
+  signedTag(w.mike, 'release/2026-11-06', w.mikeKey.priv);
+  git(w.mike, 'push', '-q', 'origin', 'main', 'refs/tags/release/2026-11-06');
+  const s = await upstreamFor(w.theirs, w.home).check();
+  assert.equal(s.state, 'available', s.reason ?? '');
+  assert.equal(s.release?.commit, real);
+  assert.equal(kept(w.theirs, '2026-10-30'), '', 'an older unsigned one goes too');
+  assert.equal(kept(w.theirs, '2026-11-06/poison'), '');
+});
+
+// Codex's review: upstream can push any number of tags, and each one made
+// the runner read (and maybe ssh-keygen) it on every check.
+test('a flood of tags upstream costs a check a few reads, once', async () => {
+  const w = world();
+  const tip = git(w.mike, 'rev-parse', 'HEAD');
+  const fake = spawnSync('git', ['-C', w.mike, 'hash-object', '-t', 'tag', '-w', '--stdin'], { input: `object ${tip}\ntype commit\ntag release/2099-01-01\ntagger M <m@e> 1 +0000\n\nx\n-----BEGIN SSH SIGNATURE-----\nAAAA\n-----END SSH SIGNATURE-----\n`, encoding: 'utf8' }).stdout.trim();
+  const lines: string[] = [];
+  for (let i = 0; i < 150; i++) lines.push(`create refs/tags/release/junk-${i} ${tip}`);
+  for (let i = 1; i <= 28; i++) lines.push(`create refs/tags/release/2099-02-${String(i).padStart(2, '0')} ${fake}`);
+  for (let i = 1; i <= 28; i++) lines.push(`create refs/tags/release/2026-09-${String(i).padStart(2, '0')} ${fake}`);
+  // Date-named, pointing straight at a commit: turned down without a read.
+  for (let d = Date.parse('1990-01-01'); d < Date.parse('1991-01-01'); d += 86_400_000) lines.push(`create refs/tags/release/${new Date(d).toISOString().slice(0, 10)} ${tip}`);
+  // Tag objects dated after Mike's newest: read, but only so many a check.
+  for (let i = 7; i <= 31; i++) lines.push(`create refs/tags/release/2026-12-${String(i).padStart(2, '0')} ${fake}`);
+  assert.equal(spawnSync('git', ['-C', w.mike, 'update-ref', '--stdin'], { input: lines.join('\n') + '\n' }).status, 0);
+  const real = commit(w.mike, 'b.txt', 'Real');
+  signedTag(w.mike, 'release/2026-11-06', w.mikeKey.priv);
+  git(w.mike, 'push', '-q', 'origin', 'main', '--tags');
+  let reads = 0;
+  const { gitBytes } = await import('../../src/upstream.ts');
+  const up = upstreamFor(w.theirs, w.home, new FakeClock(LATER), { gitBytes: (cwd: string, args: string[]) => (reads++, gitBytes(cwd, args)) });
+  // 25 fakes dated after it: 20 a check, then the real one.
+  let s = await up.check();
+  assert.equal(reads, 20);
+  assert.equal(s.release, undefined, 'not reached yet, nor the older one');
+  reads = 0;
+  s = await up.check();
+  assert.equal(s.release?.commit, real);
+  assert.ok(reads <= 8, `read ${reads} tags`);
+  reads = 0;
+  await up.check();
+  assert.equal(reads, 0, 'nothing read again');
+});
+
+// Codex's second pass: a read that failed was kept as "not signed", and
+// in the sweep took a good release out.
+test('a read that fails is not taken for an unsigned tag, nor remembered', async () => {
+  const w = world();
+  const { gitBytes } = await import('../../src/upstream.ts');
+  let fail = false;
+  const up = upstreamFor(w.theirs, w.home, new FakeClock(LATER), { gitBytes: (cwd: string, args: string[]) => (fail ? Promise.reject(new Error('spawn git EAGAIN')) : gitBytes(cwd, args)) });
+  const fresh = upstreamFor(w.theirs, w.home, new FakeClock(LATER), { gitBytes: (cwd: string, args: string[]) => (fail ? Promise.reject(new Error('spawn git EAGAIN')) : gitBytes(cwd, args)) });
+  assert.equal((await up.check()).release?.tag, 'release/2026-10-01');
+  fail = true;
+  const s = await fresh.check();
+  assert.equal(s.state, 'failed');
+  assert.ok(kept(w.theirs, '2026-10-01'), 'the sweep left it');
+  fail = false;
+  assert.equal((await fresh.check()).release?.tag, 'release/2026-10-01');
+});
+
+test('an unsigned ref an older runner left goes even while upstream cannot be fetched', async () => {
+  const w = world();
+  git(w.mike, 'checkout', '-q', '-b', 'evil');
+  const evil = commit(w.mike, 'evil.txt', 'Attacker code');
+  git(w.mike, 'tag', '-a', '-m', 'unsigned', 'release/2026-11-06', evil);
+  git(w.mike, 'push', '-q', 'origin', 'refs/tags/release/2026-11-06');
+  git(w.theirs, 'fetch', '-q', '--no-tags', 'upstream', '+refs/tags/release/*:refs/threadbear/upstream/*');
+  git(w.theirs, 'remote', 'set-url', 'upstream', path.join(w.root, 'gone.git'));
+  const s = await upstreamFor(w.theirs, w.home).check();
+  assert.equal(s.state, 'failed');
+  assert.equal(kept(w.theirs, '2026-11-06'), '');
+});
+
+// Codex's third pass: a tag past the read buffer failed every check.
+test('a huge tag is turned down unread, and one an older runner left is taken out', async () => {
+  const w = world();
+  const big = path.join(w.root, 'big.txt');
+  fs.writeFileSync(big, 'x'.repeat(17 * 1024 * 1024));
+  git(w.mike, 'tag', '-a', '-F', big, 'release/2026-11-05');
+  git(w.mike, 'push', '-q', 'origin', 'refs/tags/release/2026-11-05');
+  git(w.theirs, 'fetch', '-q', '--no-tags', 'upstream', '+refs/tags/release/*:refs/threadbear/upstream/*');
+  const real = commit(w.mike, 'd.txt', 'Real');
+  signedTag(w.mike, 'release/2026-11-04', w.mikeKey.priv);
+  git(w.mike, 'push', '-q', 'origin', 'main', 'refs/tags/release/2026-11-04');
+  let reads = 0;
+  const { gitBytes } = await import('../../src/upstream.ts');
+  const s = await upstreamFor(w.theirs, w.home, new FakeClock(LATER), { gitBytes: (cwd: string, args: string[]) => (reads++, gitBytes(cwd, args)) }).check();
+  assert.equal(s.release?.commit, real, s.reason ?? '');
+  assert.equal(kept(w.theirs, '2026-11-05'), '');
+  assert.ok(reads <= 3);
+});
+
+test('tb updates and the bring-in thread name the verified commit to merge', async () => {
+  const { formatUpstream } = await import('../../src/tb-dev.ts');
+  const commitId = 'a'.repeat(40);
+  const text = formatUpstream({ state: 'available', release: { tag: 'release/2026-10-30', commit: commitId, changes: 1, subjects: ['One'] } }, Date.now());
+  assert.match(text, new RegExp(`git merge[^\\n]*${commitId}`));
 });
 
 async function waitFor(ok: () => boolean, ms = PATIENCE_MS): Promise<void> {

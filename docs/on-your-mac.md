@@ -105,7 +105,10 @@ File references are where to look.
   and the screen still locks). While it does, it reads `pmset -g batt`
   every 2 minutes and lets go on battery below 15%.
 - **Mike's releases** (`runner/src/upstream.ts`): every 6 hours it fetches
-  `upstream`'s signed `release/*` tags. It never changes your code by
+  `upstream`'s signed `release/*` tags into `refs/threadbear/upstream-incoming/`
+  in your checkout, checks each with `ssh-keygen -Y verify` against the
+  pinned key (the signature goes in a temp file under `$TMPDIR` for a
+  moment), and copies those that pass to `refs/threadbear/upstream/`. It never changes your code by
   itself. Every 5 days, when there's one your copy doesn't have, it starts
   one thread (on your own Claude or Codex login, like any thread) that
   merges it in a worktree, runs the checks and asks you before it lands

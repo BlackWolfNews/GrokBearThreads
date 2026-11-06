@@ -112,6 +112,13 @@ final class UpdatesTextTests: XCTestCase {
         XCTAssertEqual(UpdatesText.iconTooltip(app: Side(), runner: updates, clis: []), "Updates\n12 new changes from Mike")
         XCTAssertEqual(UpdatesText.upstreamLine(updates.upstream), "Mike's release of 30 Oct has 12 new changes.")
         XCTAssertTrue(UpdatesText.bringInPrompt(updates.upstream!.release!).contains("docs/bringing-in-updates.md"))
+        // The verified commit goes in the prompt, so the thread merges that
+        // and not a ref a later fetch could move (Gautam's scan, F31).
+        let sha = String(repeating: "a", count: 40)
+        let verified = RunnerUpdates.Upstream.Release(tag: "release/2026-10-30", commit: sha, changes: 2)
+        XCTAssertTrue(UpdatesText.bringInPrompt(verified).contains("Merge its commit \(sha)"))
+        XCTAssertTrue(UpdatesText.discussPrompt(verified).contains(sha))
+        XCTAssertFalse(UpdatesText.bringInPrompt(updates.upstream!.release!).contains("Merge its commit"), "not an id")
         let discuss = UpdatesText.discussPrompt(updates.upstream!.release!)
         XCTAssertTrue(discuss.contains("release/2026-10-30 has 12 new changes"))
         XCTAssertTrue(discuss.contains("Don't change anything yet"))

@@ -17,16 +17,20 @@ docs/setup-and-updates.md section 2.3 explains the thinking behind it.
 
 ## 1. See what's coming
 
-- `tb updates` names the newest release (`release/YYYY-MM-DD`) and lists
-  what's in it that main doesn't have. `tb updates check` fetches first.
-  The runner fetched it to `refs/threadbear/upstream/YYYY-MM-DD`, and only
-  lists releases signed with the key setup pinned. Merge that ref, never
-  `upstream/main`: Mike's main can be halfway through something.
-- Mike's changes: `git log --no-merges main..refs/threadbear/upstream/<date>`.
-  His commit messages say why, not just what.
+- `tb updates` names the newest release (`release/YYYY-MM-DD`), its
+  commit id, and what's in it that main doesn't have. `tb updates check`
+  fetches first. The runner only lists releases signed with the key setup
+  pinned, and the commit id is the one the signature was checked for.
+  Merge that commit id (it's in the message that started this thread
+  too), never `upstream/main` (Mike's main can be halfway through
+  something) and never anything under `refs/threadbear/upstream-incoming/`,
+  which is what upstream serves before it's checked. If `tb updates` no
+  longer lists the release, or names a different commit for it, stop and
+  say so rather than merging anything.
+- Mike's changes: `git log --no-merges main..<commit>`. His commit
+  messages say why, not just what.
 - Their changes since they last brought a release in:
-  `git log --no-merges refs/threadbear/upstream/<date>..main`. This is
-  what you must keep.
+  `git log --no-merges <commit>..main`. This is what you must keep.
 
 ## 2. Merge, in this thread's own worktree
 
@@ -34,7 +38,7 @@ Threads in this repo get a worktree of their own (docs/thread-worktrees.md),
 so main doesn't move until you land. Do it there:
 
 ```sh
-git merge --no-ff -m "Bring in Mike's release <date>" refs/threadbear/upstream/<date>
+git merge --no-ff -m "Bring in Mike's release <date>" <commit>
 ```
 
 Always a merge, never a rebase or a cherry-pick: Mike's commits have to

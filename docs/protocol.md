@@ -991,10 +991,29 @@ type RunnerUpdates = {
 A copy of Threadbear that's someone's fork follows Mike's releases
 (`runner/src/upstream.ts`, docs/setup-and-updates.md section 2.3). Every six
 hours, and a couple of minutes after the release is marked good, the runner
-fetches `upstream`'s `release/*` tags into `refs/threadbear/upstream/*` in
-its checkout, and takes the newest that is signed with the key pinned in
-`<home>/upstream-signers` and names itself as the ref it came in as. It
-never changes main: bringing a release in is a thread (docs/bringing-in-updates.md).
+fetches `upstream`'s `release/*` tags into `refs/threadbear/upstream-incoming/*`
+in its checkout, unchecked. Each one that verifies is copied to
+`refs/threadbear/upstream/*`, and the newest there is the release. Verified
+means: the tag object is `object`, `type commit`, `tag <the name it came
+in as>` and `tagger` headers, a message, and exactly one SSH signature
+block at the end, with no other armor at the start of any line; and
+`ssh-keygen -Y verify -n git` finds that signature good, over the bytes
+before it, for a principal in `<home>/upstream-signers`. It never uses
+`git verify-tag`, which would hand a PGP or X.509 signature to gpg. Each
+check first (before the fetch, so a failing upstream can't stop it)
+removes any ref in `refs/threadbear/upstream/*` that doesn't verify (a
+runner from before this check fetched straight into it). A tag object over
+1 MB is never read and doesn't verify. Only tag objects
+whose names are a date (`release/YYYY-MM-DD`, as Mike's runner makes
+them), no later than two days from now and no earlier than the newest
+release already kept, are looked at, newest first, stopping at the first
+that verifies, and at most 20 not read before per check, so a flood of
+tags upstream costs a check almost nothing. Each tag object's answer is
+remembered while the runner runs; a read or an ssh-keygen that fails to
+run fails the check instead, and is tried again next time. A name in `refs/threadbear/upstream/*` keeps the tag it verified
+with: a different tag served later under that name is left out and logged. `release.commit` is the commit
+the verified tag names, and that is what a bring-in merges. It never
+changes main: bringing a release in is a thread (docs/bringing-in-updates.md).
 
 ```ts
 type UpstreamStatus = {

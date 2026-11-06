@@ -537,7 +537,7 @@ export function formatUpstream(u: UpstreamStatus, now: number): string {
       return [
         `Mike's releases: ${r.tag} has ${r.changes} change${r.changes === 1 ? '' : 's'} this copy's main doesn't${checked}`,
         ...r.subjects.map((x) => `  ${x}`),
-      ].join('\n') + more + `\nTo bring it in, follow docs/bringing-in-updates.md (or Bring them in, in the app's Updates panel).`;
+      ].join('\n') + more + `\nIts commit, signed with the pinned key: ${r.commit}. To bring it in, follow docs/bringing-in-updates.md and merge that commit (git merge ${r.commit}), or use Bring them in, in the app's Updates panel.`;
     }
     default:
       return `Mike's releases: up to date${r ? ` with ${r.tag}` : ''}${u.reason ? ` (${u.reason})` : ''}${checked}${published}`;

@@ -1557,11 +1557,15 @@ public struct RunnerUpdates: Sendable, Hashable, Decodable {
     public struct Upstream: Sendable, Hashable, Decodable {
         public struct Release: Sendable, Hashable, Decodable {
             public var tag: String
+            /// The commit the verified tag names: what Bring them in merges,
+            /// rather than a ref name a later fetch could move.
+            public var commit: String?
             public var changes: Int
             public var subjects: [String]
 
-            public init(tag: String, changes: Int, subjects: [String] = []) {
+            public init(tag: String, commit: String? = nil, changes: Int, subjects: [String] = []) {
                 self.tag = tag
+                self.commit = commit
                 self.changes = changes
                 self.subjects = subjects
             }
@@ -1569,11 +1573,12 @@ public struct RunnerUpdates: Sendable, Hashable, Decodable {
             public init(from decoder: Decoder) throws {
                 let c = try decoder.container(keyedBy: CodingKeys.self)
                 tag = ((try? c.decodeIfPresent(String.self, forKey: .tag)) ?? nil) ?? "?"
+                commit = (try? c.decodeIfPresent(String.self, forKey: .commit)) ?? nil
                 changes = ((try? c.decodeIfPresent(Int.self, forKey: .changes)) ?? nil) ?? 0
                 subjects = ((try? c.decodeIfPresent([String].self, forKey: .subjects)) ?? nil) ?? []
             }
 
-            enum CodingKeys: String, CodingKey { case tag, changes, subjects }
+            enum CodingKeys: String, CodingKey { case tag, commit, changes, subjects }
         }
 
         /// off, idle, checking, available or failed.

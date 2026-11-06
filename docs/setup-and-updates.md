@@ -123,7 +123,10 @@ lists the changes since the last tag, which is what the app shows.
 **Signed, because it's code that runs as you.** Setup pins Mike's public key
 (`scripts/release-signers`) into the data folder. The runner ignores any release tag that
 doesn't verify against that pinned copy, so a change to the key in the repo (or a hijacked
-GitHub account) can't push code onto everyone's Mac.
+GitHub account) can't push code onto everyone's Mac. Only an SSH signature by that key
+counts (a PGP or X.509 one never does, whatever gpg would say), a release name keeps the
+tag it first verified with, and the bring-in thread merges the commit id that was checked,
+not a ref name a later fetch could move.
 
 - **Your own changes ship as they do today.** Commit to `main` (or ask a thread to) and
   the runner and the app rebuild themselves.
