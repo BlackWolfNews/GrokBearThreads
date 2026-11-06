@@ -819,7 +819,7 @@ final class AutomationTests: XCTestCase {
                 AppDump.Section(name: "Running", threads: []),
             ], snoozed: 0, archived: 2),
             selection: AppDump.Thread(id: "th1", title: "Fix it", status: "idle", needsYou: false, unread: false, hovered: false),
-            composer: AppDump.Composer(draft: "th1", text: "hello", images: 0, cwd: "/w", account: "claude-3", model: "default (the runner's, claude-haiku-5-5)", ask: true),
+            composer: AppDump.Composer(draft: "th1", text: "hello", images: 0, cwd: "/w", account: "claude-3", model: "default (the runner's, claude-haiku-5-5)", ask: true, mode: .ask),
             transcript: AppDump.Transcript(threadId: "th1", state: "loaded", hasMoreAbove: false, atBottom: true, rows: [
                 AppDump.Row(id: "u:1", kind: "user", height: 64, expanded: nil, inGroup: false, onScreen: false, seq: 1, turn: "t1", text: "Fix it"),
                 AppDump.Row(id: "g:r:r1", kind: "group", height: 32, expanded: true, inGroup: false, onScreen: true, seq: 2, turn: "t1", text: "Ran a command"),
