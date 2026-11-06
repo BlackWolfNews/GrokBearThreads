@@ -285,6 +285,7 @@ test('labReview: a thread busy when it comes across gives the owed review at its
   const file = path.join(h.home, 'threads', id, 'thread.json');
   const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
   assert.ok(saved.labReviewOwed, 'owed on the record');
+  assert.equal(typeof saved.labReviewOwed.seq, 'number', 'with where its events end');
   // A message reached the thread before the new runner looked (as a
   // restart's resume does).
   saved.queue = [{ turnId: 'q1', text: 'Check the new release', images: [], origin: 'runner' }];
@@ -316,7 +317,7 @@ test('labReview: a thread busy when it comes across gives the owed review at its
   assert.ok(codex.sessions.some((x) => x.opts.threadId === reviewId));
 });
 
-test('labReview: a thread hibernated before it came across is finished, and keeps the review for its next finish', async () => {
+test('labReview: a thread hibernated before it came across keeps the review for its next finish, and its wake time', async () => {
   const h = setup();
   const id = start(h);
   await h.runner.beginDrain([id], { onHandedOver: () => {} });
@@ -340,7 +341,7 @@ test('labReview: a thread hibernated before it came across is finished, and keep
   assert.equal(codex.sessions.length, 0);
   const rec = b.threads.get(id)!.rec;
   assert.equal(rec.snoozedUntil, until, 'its own wake time stands');
-  assert.ok(rec.finished, 'finished, so threads waiting on it hear');
+  assert.equal(rec.finished, undefined, "not finished: it hasn't been reviewed");
   assert.ok(rec.labReviewOwed);
 });
 
@@ -375,4 +376,30 @@ test('labReview: a turn that ends while a plain restart refuses new threads owes
   assert.ok(h.runner.threads.get(id)!.rec.labReviewOwed);
   assert.equal(h.runner.threads.get(id)!.rec.finished, undefined);
   assert.ok(!h.events(id).some((e) => e.type === 'system.note' && /^Not reviewed/.test(e.text)));
+});
+
+test('labReview: a thread adopted while the new runner is still starting gets its review once it is listening', async () => {
+  const h = setup();
+  const id = start(h);
+  await h.runner.beginDrain([id], { onHandedOver: () => {} });
+  turn(h, id, { diffs: [codeDiff()] });
+  await tick();
+  const codex = new FakeAdapter('codex', { ...CODEX_FLAGS, archives: true });
+  const b = new Runner({
+    config: testConfig(h.home), store: new ThreadStore(h.home),
+    adapters: { claude: new FakeAdapter(), codex }, accounts: new FakeAccounts(withCodex()),
+    clock: new FakeClock(), log: nullLogger, defer: (fn) => fn(), copyTranscript: () => false,
+    subagentTranscript: () => null, reachable: async () => true, backgroundJobs: false,
+  });
+  // As main.ts has it until it's listening: a CLI's tools aren't ready.
+  b.holdWaits = true;
+  b.start({ skip: new Set([id]) });
+  b.adopt(id);
+  b.startOwedReviews(id);
+  assert.equal(codex.sessions.length, 0, 'not while it starts');
+  assert.ok(b.threads.get(id)!.rec.labReviewOwed);
+  b.holdWaits = false;
+  b.startOwedReviews();
+  assert.equal(b.get(id).waitingOn?.length, 1);
+  assert.equal(codex.sessions.length, 1);
 });

@@ -2124,7 +2124,7 @@ export class Runner {
       this.markDirty(st);
     }
     let review = finished && !rt.turn ? this.startLabReview(st, turn.turnId, turn.lastText) : undefined;
-    if (!review && owed && !rec.labReviewOwed) review = this.startLabReview(st, owed.turnId, owed.reply);
+    if (!review && owed && !rec.labReviewOwed) review = this.startLabReview(st, owed.turnId, owed.reply, owed.seq);
     if (review) this.waitOnReview(st, review);
     // Owed to the next runner (a handover): finished once it's reviewed.
     else if (finished && !rec.labReviewOwed) this.markFinished(st, turn.lastText);

@@ -2261,13 +2261,14 @@ the thread if a sub-agent stalls, so an ask can't stay hidden for good.
   thread is archived (`archivedBy: "threadbear"`). With no login to
   review on, a note says so, once until the next message. A runner that
   is draining (Handovers), restarting or stopping makes no threads, so it records
-  `labReviewOwed: { turnId, reply? }` in thread.json instead, and the
+  `labReviewOwed: { turnId, seq, reply? }` in thread.json instead (`seq`:
+  where that turn's events end, which its diff is read back from), and the
   thread isn't marked finished. The runner that adopts it (after any
-  resume the restart asked for) or next starts (once listening) starts
-  the review then. A thread busy by then (a resume, a queued message)
+  resume the restart asked for, and not before it's listening) or next
+  starts (once listening) starts the review then. A thread busy or
+  hibernating by then (a resume, a queued message, a snooze or `waitFor`)
   keeps it for its next finished turn, which reviews its own change if
-  it made one worth it, else the owed one; a hibernating one is marked
-  finished and keeps it the same way; an archived one drops it.
+  it made one worth it, else the owed one; an archived one drops it.
 - **Waiting on threads.** `end_turn` also takes `waitFor?: string[]`, up
   to 5 thread ids (or unique prefixes) on this runner, with `needs:
   "nothing"`. Once the turn is over it hibernates on the same terms as

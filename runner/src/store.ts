@@ -77,7 +77,8 @@ export type ThreadRecord = {
   labReviews?: number;
   // A review a draining, restarting or stopping runner couldn't start (it
   // makes no threads), for the runner that adopts or loads this one to start.
-  labReviewOwed?: { turnId: string; reply?: string };
+  // `seq`: where that turn's events end, which its diff is read back from.
+  labReviewOwed?: { turnId: string; seq?: number; reply?: string };
   snoozedAt?: string; // when it was last put away, for how long it slept; may be stale once awake
   woke?: { at: string; since?: string }; // woke by itself and not looked at yet (since = snoozedAt)
   archivedAt?: string;

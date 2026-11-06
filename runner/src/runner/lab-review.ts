@@ -46,12 +46,12 @@ export const labReviewPart = {
   // Called once a turn has finished with nothing needed and nothing left
   // running. Starts the review and returns its thread id (the caller then
   // waits on it), or undefined when there's none to do.
-  startLabReview(this: Runner, st: ThreadState, turnId: string, reply: string | undefined): string | undefined {
+  startLabReview(this: Runner, st: ThreadState, turnId: string, reply: string | undefined, upTo?: number): string | undefined {
     const { rec } = st;
     if (rec.reviewOf || rec.archivedAt) return undefined;
     if (!experimentOn(this.cfg.home, 'labReview')) return undefined;
     if ((rec.labReviews ?? 0) >= LAB_REVIEW_ROUNDS) return undefined;
-    const change = this.turnChange(st, turnId);
+    const change = this.turnChange(st, turnId, upTo);
     if (!change || change.codeLines < LAB_REVIEW_MIN_LINES) return undefined;
     // A runner handing over to a new release, restarting or stopping
     // makes no threads (new-threads.ts), and the turn that just ended is
@@ -60,7 +60,9 @@ export const labReviewPart = {
     // starts it (startOwedReview). The caller doesn't mark it finished
     // meanwhile.
     if (this.draining || this.refusing || this.stopping) {
-      rec.labReviewOwed = { turnId, ...(reply ? { reply } : {}) };
+      // Where its events end, so a long turn in between can't push them
+      // out of turnChange's reach.
+      rec.labReviewOwed = { turnId, seq: upTo ?? rec.lastSeq ?? 0, ...(reply ? { reply } : {}) };
       this.markDirty(st);
       this.log.info('lab review owed to the next runner', { threadId: rec.id });
       return undefined;
@@ -121,8 +123,11 @@ export const labReviewPart = {
   // once a runner that has just started is listening (main.ts). After the
   // restart's own resume of that thread, which a review would turn away by
   // putting it to sleep, and never during start(): a CLI's tools need what
-  // main.ts sets up after it.
+  // main.ts sets up after it, so not while it holds waits for that
+  // either: a thread adopted while it's starting gets its review from the
+  // call once it's listening.
   startOwedReviews(this: Runner, threadId?: string): void {
+    if (this.holdWaits) return;
     for (const st of threadId ? [this.threads.get(threadId)] : [...this.threads.values()]) if (st?.rec.labReviewOwed) this.startOwedReview(st);
   },
 
@@ -138,16 +143,14 @@ export const labReviewPart = {
       this.markDirty(st);
       return;
     }
-    // Put to sleep since (by Mike or a schedule, while the handover
-    // waited): a review would wake it early. It counts as finished now,
-    // and its next turn to finish gives the review.
-    if (this.bucket(rec) === 'snoozed') {
-      this.markFinished(st, owed.reply);
-      return;
-    }
+    // Put to sleep since (by Mike, a schedule, or a later turn's own
+    // snooze or waitFor): a review would wake it early, so its next turn
+    // to finish gives it. Not marked finished meanwhile, as it hasn't
+    // been reviewed (and a later turn may be waiting on something).
+    if (this.bucket(rec) === 'snoozed') return;
     delete rec.labReviewOwed;
     this.markDirty(st);
-    const review = this.startLabReview(st, owed.turnId, owed.reply);
+    const review = this.startLabReview(st, owed.turnId, owed.reply, owed.seq);
     if (review) this.waitOnReview(st, review);
     // Owed again if this runner is handing over too.
     else if (!rec.labReviewOwed) this.markFinished(st, owed.reply);
@@ -155,8 +158,9 @@ export const labReviewPart = {
 
   // What the turn changed, from its edit.diff events (the CLI's own edits;
   // a file changed by a shell command isn't seen).
-  turnChange(this: Runner, st: ThreadState, turnId: string): TurnChange | undefined {
-    const last = st.rec.lastSeq ?? 0;
+  // `upTo`: where the turn's events end, for one owed from earlier.
+  turnChange(this: Runner, st: ThreadState, turnId: string, upTo?: number): TurnChange | undefined {
+    const last = upTo ?? st.rec.lastSeq ?? 0;
     let events;
     try {
       events = this.store.log(st.rec.id).read(Math.max(1, last - LOOK_BACK), last);
