@@ -57,6 +57,7 @@ extension AppModel {
             if let v = update.followMain { shown.followMain = v }
             if let v = update.bulletReplies { shown.bulletReplies = v }
             if let v = update.oneReply { shown.oneReply = v }
+            if let v = update.bringIn { shown.bringIn = v }
             if let v = update.pool { shown.models.pool = v }
             if let v = update.privateFolders { shown.models.privateFolders = v }
             runnerSettings = shown

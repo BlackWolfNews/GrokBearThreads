@@ -105,8 +105,15 @@ File references are where to look.
   and the screen still locks). While it does, it reads `pmset -g batt`
   every 2 minutes and lets go on battery below 15%.
 - **Mike's releases** (`runner/src/upstream.ts`): every 6 hours it fetches
-  `upstream`'s signed `release/*` tags. It only tells you about them; it
-  never changes your code.
+  `upstream`'s signed `release/*` tags. It never changes your code by
+  itself. Every 5 days, when there's one your copy doesn't have, it starts
+  one thread (on your own Claude or Codex login, like any thread) that
+  merges it in a worktree, runs the checks and asks you before it lands
+  (`runner/src/bring-in.ts`). A release Mike marks important starts one
+  straight away. Settings › General › Updates from Mike, or
+  `"releases": { "bringIn": 14 }` (or `"important"`, or `"off"`) in
+  `runner.json`, changes it. It keeps what it last did in
+  `runner/bring-in.json` in the data folder.
 - **CLI updates** (`runner/src/updates/`): every hour it checks for new
   Claude Code and Codex versions and installs them. If you don't point it
   at your own Codex, it installs one into the data folder.

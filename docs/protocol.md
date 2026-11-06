@@ -629,6 +629,10 @@ type Settings = {
                         // agent's own message (see "The summary")
   oneReply: boolean     // end_turn first, then the agent's message as the
                         // reply (see "Needs you", One reply); on by default
+  bringIn: number | "important" | "off" // a fork: how often a thread starts
+                        // to bring in Mike's releases, in days (1 to 365;
+                        // 5 by default), only for important ones, or never
+                        // (runner.json releases.bringIn; "Mike's releases")
   models: {
     pool: string | null      // the pool whose Claude logins answer small
                              // jobs; "claude" by default, null: none, so
@@ -888,7 +892,7 @@ the summary and then the reply.
 | `pools.list` | `{}` | `{ pools: Pool[] }` (see Pools) |
 | `pools.save` | `{ pools: Pool[] }` | `{ pools: Pool[] }`. Replaces the whole list in `runner.json` (`builtIn` is dropped; an empty list goes back to the built-in ones). `-32602` for a duplicate id, a blank id or title, an empty `accountIds`, or an account id the runner doesn't know. A blank or non-string `icon` is dropped. Every client gets `pools.updated` |
 | `settings.get` | `{}` | `{ settings: Settings }` |
-| `settings.update` | `{ defaultCwd?, idleMinutes?, maxLiveCLIs?, followMain?, bulletReplies?, oneReply?, models?: { pool?: string \| null, privateFolders? } }` | `{ settings: Settings }`. Saves what's given to `runner.json` and applies it straight away, except `followMain` (next restart). `defaultCwd` must be an existing folder, `idleMinutes` at least 1, `maxLiveCLIs` 1 to 20, `pool` a pool id or `null`; otherwise `-32602` saying which. Every client gets `settings.updated` |
+| `settings.update` | `{ defaultCwd?, idleMinutes?, maxLiveCLIs?, followMain?, bulletReplies?, oneReply?, bringIn?, models?: { pool?: string \| null, privateFolders? } }` | `{ settings: Settings }`. Saves what's given to `runner.json` and applies it straight away, except `followMain` (next restart). `defaultCwd` must be an existing folder, `idleMinutes` at least 1, `maxLiveCLIs` 1 to 20, `pool` a pool id or `null`; otherwise `-32602` saying which. Every client gets `settings.updated` |
 | `devices.list` | `{}` | `{ devices: Device[], site?: string, reason?: string }` (see Devices). `site` is the website's root while sync is on; `reason` says why nothing can pair when it's off |
 | `devices.pair` | `{ kind: "phone" \| "browser", name?: string, days?: number }` | `{ device: Device, pairingLink?: string, signInLink?: string }`. Issues a phone token for a new phone or browser (see Devices) and returns the link that carries it: a `threadbear://pair?url=…&token=…&key=<runnerId>:<key>` link for a phone, for the app to draw as a QR code (the `key` item is this runner's secret-box public key, see Secrets, "Trusting the key"; absent when the runner has none), or the website's sign-in link (`<site>/#token=…`) for a browser, for the app to open. `days` is 1 to 365 (default 90). `-32000` while sync is off, or while the backend is older than this |
 | `devices.revoke` | `{ deviceId }` | `{ devices: Device[] }`. The phone or browser is signed out at its next request. `-32602` for an id that isn't there |
@@ -995,6 +999,9 @@ type UpstreamStatus = {
     date?: string          // the tag's, ISO
     changes: number        // commits in it main doesn't have, merges left out
     subjects: string[]     // their subject lines, newest first, at most 50
+    // Commits in it with an `Important:` trailer (a security or data fix),
+    // and the trailer's text; covered by the tag's signature.
+    important?: { commit: string; why: string }[]
   }
   // Mike's runner (runner.json releases.publish): the last tag it made.
   published?: { tag: string; at: string }
@@ -1004,6 +1011,17 @@ type UpstreamStatus = {
 `upstream.status` returns `{ upstream: UpstreamStatus }`, and
 `upstream.check` fetches first and then returns the same (`tb updates
 [check]`). `runner.status` carries it as `upstream`.
+
+After each check that finds a release main doesn't have, the runner may
+start a thread to bring it in (`runner/src/bring-in.ts`), as Bring Them In
+would: titled "Bring in Mike's release of 6 Nov", in the release's checkout,
+full access, `startedBy` `{ kind: "runner", label: "Threadbear" }`. It does
+so once `releases.bringIn` days have passed since the last one started (or
+since it first looked), straight away for a release with an important commit
+it hasn't acted on, and never with `"off"`. While the last thread it
+started is still there and not archived, it sends that thread a message
+about the newer release instead, on the same timer, so there's never more
+than one. What it last did is in `<home>/runner/bring-in.json`.
 
 Mike's runner makes the tags when runner.json has `"releases": { "publish":
 true, "signingKey": "~/.ssh/<key>" }`: once an hour it looks, and tags

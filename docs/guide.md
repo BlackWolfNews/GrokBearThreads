@@ -1085,6 +1085,14 @@ talks the release through first, what's in it and what it means for your
 own changes, and changes nothing until you say. From a thread, `tb updates`
 says the same, and `tb updates check` looks again now.
 
+You don't have to remember to look. Every 5 days, if Mike has a release
+your copy doesn't have, Threadbear starts that thread for you: it does the
+merge and runs the checks first, so it reaches your inbox with one
+question, whether to land it. There's only ever one; if you leave it open,
+a newer release goes into the same thread. A release Mike marks important
+(a security or data fix) starts one straight away. Change how often, or
+turn it off, in Settings (⌘,) > General > Updates from Mike.
+
 ### The activity log
 
 Turn on Keep an activity log in Settings (⌘,) > General and the app notes

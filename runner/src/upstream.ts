@@ -45,6 +45,11 @@ export type UpstreamRelease = {
   date?: string; // the tag's date, ISO
   changes: number; // commits in it that main doesn't have, merges left out
   subjects: string[]; // their subject lines, newest first, at most 50
+  // Commits in it Mike marked with an `Important:` trailer (a security or
+  // data fix), saying why. They're covered by the tag's signature, as the
+  // signed tag names the commit and so its whole history. bring-in.ts
+  // starts a thread for these straight away rather than on its timer.
+  important?: { commit: string; why: string }[];
 };
 
 // runner.status's `upstream`, and RunnerUpdates' (docs/protocol.md).
@@ -74,6 +79,9 @@ export type UpstreamDeps = {
   // good and up for SETTLE_MS (main.ts). Only asked when publishing.
   runningMainSettled?: () => boolean;
   onChange?: () => void;
+  // After every check that got as far as the releases, with what it found
+  // (bring-in.ts decides from it whether to start a thread).
+  onChecked?: (status: UpstreamStatus) => void;
   // Replaced in tests.
   git?: (cwd: string, args: string[]) => Promise<string>;
 };
@@ -103,6 +111,15 @@ export function repoKey(url: string): string {
     .replace(/\.git\/?$/, '')
     .replace(/\/$/, '')
     .toLowerCase();
+}
+
+// `git log --format=%H%x1f<Important trailers>` as the commits that have one.
+export function parseImportant(out: string): { commit: string; why: string }[] {
+  return out
+    .split('\n')
+    .map((line) => line.split('\x1f'))
+    .filter(([commit, why]) => commit && why?.trim())
+    .map(([commit, why]) => ({ commit: commit.trim(), why: why.trim().slice(0, 200) }));
 }
 
 // release/2026-10-30 for a local date.
@@ -186,7 +203,13 @@ export class Upstream {
       if (!release) return this.set({ state: 'idle', checkedAt, reason: 'no signed releases yet' });
       const state = release.changes > 0 ? 'available' : 'idle';
       if (state === 'available' && this.st.release?.tag !== release.tag) this.deps.log.info('a newer release from upstream', { tag: release.tag, changes: release.changes });
-      return this.set({ state, checkedAt, release });
+      const status = this.set({ state, checkedAt, release });
+      try {
+        this.deps.onChecked?.(status);
+      } catch (e) {
+        this.deps.log.warn('could not act on the release check', { error: String(e) });
+      }
+      return status;
     } catch (e) {
       this.deps.log.warn('could not check upstream for releases', { error: String(e) });
       return this.set({ state: 'failed', checkedAt, reason: String((e as Error).message ?? e).slice(0, 300) });
@@ -212,11 +235,14 @@ export class Upstream {
       }
       const [commit, date] = (await this.git(checkout, ['for-each-ref', '--format=%(*objectname) %(taggerdate:iso-strict)', ref])).split(' ');
       const range = `refs/heads/main..${commit}`;
-      const [count, log] = await Promise.all([
+      const [count, log, trailers] = await Promise.all([
         this.git(checkout, ['rev-list', '--count', '--no-merges', range]),
         this.git(checkout, ['log', '--no-merges', `--max-count=${MAX_SUBJECTS}`, '--format=%s', range]),
+        // One line per commit: its id, then any Important: trailer's text.
+        this.git(checkout, ['log', '--no-merges', '--format=%H%x1f%(trailers:key=Important,valueonly,separator=%x20)', range]),
       ]);
-      return { tag, commit, ...(date ? { date } : {}), changes: Number(count) || 0, subjects: log.split('\n').filter(Boolean) };
+      const important = parseImportant(trailers);
+      return { tag, commit, ...(date ? { date } : {}), changes: Number(count) || 0, subjects: log.split('\n').filter(Boolean), ...(important.length ? { important } : {}) };
     }
     return undefined;
   }
@@ -254,7 +280,11 @@ export class Upstream {
     const last = tags[0];
     if (last && (await this.isAncestor(checkout, tip, last))) return undefined;
     const subjects = (await this.git(checkout, ['log', '--no-merges', '--format=- %s', last ? `${last}..${tip}` : tip, '--max-count=200'])).trim();
-    const message = `Threadbear ${tag.slice(TAG_PREFIX.length)}\n\n${subjects}\n`;
+    // Important commits lead the message, so the release says so wherever
+    // it's read (forks find them from the commits' trailers themselves).
+    const important = parseImportant(await this.git(checkout, ['log', '--no-merges', '--format=%H%x1f%(trailers:key=Important,valueonly,separator=%x20)', last ? `${last}..${tip}` : tip, '--max-count=200']));
+    const lead = important.length ? important.map((i) => `Important: ${i.why}`).join('\n') + '\n\n' : '';
+    const message = `Threadbear ${tag.slice(TAG_PREFIX.length)}\n\n${lead}${subjects}\n`;
     const file = path.join(this.deps.home, 'runner', 'release-tag-message.txt');
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, message);

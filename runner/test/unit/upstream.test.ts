@@ -6,7 +6,7 @@ import path from 'node:path';
 import { tmpDir } from '../helpers/fakes.ts';
 import { FakeClock } from '../../src/clock.ts';
 import { nullLogger } from '../../src/log.ts';
-import { FETCH_INTERVAL_MS, FIRST_LOOK_MS, SETTLE_MS, Upstream, repoKey, signersPath, tagFor } from '../../src/upstream.ts';
+import { FETCH_INTERVAL_MS, FIRST_LOOK_MS, SETTLE_MS, Upstream, parseImportant, repoKey, signersPath, tagFor } from '../../src/upstream.ts';
 import { PATIENCE_MS } from '../helpers/patience.ts';
 
 // Commits and tags in the throwaway repos need a name, and must not pick
@@ -110,6 +110,23 @@ test('a fork sees a newer signed release from Mike, with what main is missing', 
   s = await up.check();
   assert.equal(s.state, 'idle');
   assert.equal(s.release?.changes, 0);
+});
+
+test('commits Mike marks Important: come with the release, and lead his tag message', async () => {
+  const w = world();
+  const seen: string[] = [];
+  const up = upstreamFor(w.theirs, w.home, new FakeClock(), { onChecked: (s: { state: string }) => seen.push(s.state) });
+  commit(w.mike, 'b.txt', 'Ordinary');
+  fs.writeFileSync(path.join(w.mike, 'c.txt'), 'x');
+  git(w.mike, 'add', 'c.txt');
+  git(w.mike, 'commit', '-q', '-m', 'Scrub secrets\n\nWhy it matters.\n\nImportant: keeps API keys out of Convex');
+  const fix = git(w.mike, 'rev-parse', 'HEAD');
+  signedTag(w.mike, 'release/2026-11-06', w.mikeKey.priv);
+  git(w.mike, 'push', '-q', 'origin', 'main', '--tags');
+  const s = await up.check();
+  assert.deepEqual(s.release?.important, [{ commit: fix, why: 'keeps API keys out of Convex' }]);
+  assert.deepEqual(seen, ['available']);
+  assert.deepEqual(parseImportant(`abc\x1f\ndef\x1fa reason\n`), [{ commit: 'def', why: 'a reason' }]);
 });
 
 test('only tags signed with the pinned key, under their own name, count', async () => {

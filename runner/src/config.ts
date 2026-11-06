@@ -149,7 +149,9 @@ export type RunnerJson = {
   followMain?: boolean;
   bulletReplies?: boolean;
   oneReply?: boolean;
-  releases?: { publish?: boolean; signingKey?: string };
+  // bringIn: how often a fork's runner starts a thread to bring in Mike's
+  // releases (bring-in.ts): every so many days, 'important' or 'off'.
+  releases?: { publish?: boolean; signingKey?: string; bringIn?: number | 'important' | 'off' };
   models?: { pool?: string | null; privateFolders?: string[] };
   // icon: an SF Symbol for this runner in lists (machine.ts works one out).
   // rpcUrl: how a Mac app reaches this runner over the tailnet (step 6 part 2).

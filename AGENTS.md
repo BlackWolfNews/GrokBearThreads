@@ -48,6 +48,11 @@ static site with its own `package.json`; its comments say how to build it.
   file link's action, the browser) also sets the default from that same
   menu, and marks the default with a star. Mike asked for it on the
   runner menu on 5 Nov with "Again... like we have done for other menus".
+- A commit that other people's copies should bring in soon (a security or
+  data fix) gets an `Important: <why, in a few plain words>` trailer. Their
+  runners start a thread to bring in the release that has it straight away
+  rather than on their 5-day timer (`runner/src/bring-in.ts`), and the why is
+  what they read. Use it rarely, or it stops meaning anything.
 - `docs/guide.md` is the user guide, and every thread's agent is pointed at
   it (`guideLine` in `runner/src/threadbear-mcp.ts`). Keep it true when a
   change alters what someone using the app sees or does.

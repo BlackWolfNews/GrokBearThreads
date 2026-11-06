@@ -11,6 +11,8 @@ import type { RunnerUpdates } from './runner.ts';
 import { Peers, PrimaryLink, ThreadRouter, drainChildrenName, peersElsewhere, phoneCommands, primaryElsewhere, projectRouter, removeDrainInfo, scheduleRouter, writeDrainInfo, type Elsewhere } from './handover.ts';
 import { RunnerUpdater, releaseTreeAt } from './update.ts';
 import { SETTLE_MS, Upstream } from './upstream.ts';
+import { BringIn } from './bring-in.ts';
+import { bringInSetting } from './settings.ts';
 import { Restarter, restartMethods } from './restart.ts';
 import { AppRestarts } from './app-restarts.ts';
 import { Scheduler, scheduleMethods } from './schedules.ts';
@@ -439,6 +441,31 @@ async function main(): Promise<void> {
   // them (upstream.ts). Starts with the updater, once this release is good.
   const thisRelease = readRelease();
   const bootedAt = Date.now();
+  // A thread every few days to bring Mike's releases in (bring-in.ts).
+  const bringIn = new BringIn({
+    home: cfg.home,
+    clock: realClock,
+    log,
+    setting: () => bringInSetting(cfg.home),
+    start: ({ text, title, why }) => runner.create({
+      text,
+      title,
+      cwd: thisRelease?.checkout,
+      // As Bring Them In does: it merges and runs the checks in its worktree.
+      permissionMode: 'full',
+      startedBy: { kind: 'runner', label: 'Threadbear', why },
+    }).thread.id,
+    open: (threadId) => {
+      try {
+        return !runner.get(threadId).archivedAt;
+      } catch {
+        return false;
+      }
+    },
+    send: (threadId, text) => void runner.send(threadId, text, [], { queue: true }),
+    // The app's Bring Them In and Let's Discuss titles (UpdatesPanel).
+    openByHand: () => runner.list(['inbox', 'snoozed']).find((t) => /^(Bring in|Discuss) Mike's release /.test(t.title))?.id,
+  });
   const upstream = new Upstream({
     home: cfg.home,
     checkout: thisRelease?.checkout,
@@ -454,6 +481,7 @@ async function main(): Promise<void> {
       return releaseTreeAt(thisRelease.checkout, thisRelease.prefix ?? 'runner/', 'refs/heads/main') === thisRelease.tree;
     },
     onChange: () => publishUpdates(),
+    onChecked: (status) => void bringIn.consider(status),
   });
   // runner.updates: sent when what hello's `updates` says changes.
   let lastUpdates = '';
