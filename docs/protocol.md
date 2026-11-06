@@ -2258,16 +2258,19 @@ the thread if a sub-agent stalls, so an ask can't stay hidden for good.
   and the last 8,000 characters of stdout and stderr under the message.
   Anything else (a non-zero exit, a timeout): the run goes ahead with
   "Its check failed (…)" and the output, so a broken check isn't silent.
-  Output (either kind) is kept in `<home>/schedule-checks/<id>.kept.json`,
-  with the command that printed it, until a run carrying it is sent: a
+  Output (either kind) is kept in
+  `<home>/schedule-checks/<id>.<hash of the command>.kept.json` (or in
+  memory, if that can't be written), until a run carrying it is sent: a
   run refused by a restart or handover, a failed send or a skip because
   the last run's thread is still going leaves it, and the next due run
   sends it without running the check again (a check that keeps state
   won't print the same news twice; 6 Nov 2026, a report lost in a
-  handover). Run now doesn't run the check but sends what was kept. What
-  was kept belongs to its command: a run of a changed `check` (or one
-  changed while it ran) doesn't send it, and it's sent if that check is
-  put back. A one-off whose send failed keeps it for a new `at`; it goes
+  handover). Run now doesn't run the check but sends what was kept, and
+  answers `busy` while the check is running (here, or in the release
+  handing over). What was kept belongs to its command: a run of a changed
+  `check` (or one changed while it ran) neither sends nor replaces it,
+  and it's sent if that check is put back. Kept output stays on the
+  runner whose check printed it, as the check's state file does. A one-off whose send failed keeps it for a new `at`; it goes
   with the schedule (deleted, or pruned a week after finishing). A
   stopping runner waits for checks under way before it exits (up to
   their time limit, or 15 s when stopped by a signal, as launch.mjs

@@ -7,7 +7,7 @@ import path from 'node:path';
 import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
 import { Scheduler } from '../../src/schedules.ts';
 import { nullLogger } from '../../src/log.ts';
-import { checkOutcome, runCheck, type CheckResult } from '../../src/schedule-check.ts';
+import { checkOutcome, keptCheckFile, runCheck, type CheckResult } from '../../src/schedule-check.ts';
 import { buildThreadbearTools } from '../../src/threadbear-mcp.ts';
 import { toOwnedScheduleDoc } from '../../src/sync.ts';
 
@@ -242,7 +242,7 @@ test('scheduleChecks: Run now sends what was kept, and a changed check runs afre
   assert.equal(old.find(sc.id).lastRun?.outcome, 'skipped');
 
   // A changed check runs, rather than sending what another command kept.
-  fs.writeFileSync(path.join(h.home, 'schedule-checks', `${sc.id}.kept.json`), JSON.stringify({ check: 'fork-watch', at: 'x', extra: '\n\nnews from the old check' }));
+  fs.writeFileSync(keptCheckFile(h.home, sc.id, 'fork-watch'), JSON.stringify({ check: 'fork-watch', at: 'x', extra: '\n\nnews from the old check' }));
   await old.update({ scheduleId: sc.id, check: 'fork-watch --all' });
   old.stop();
   const last = schedulerOn(h, () => ({ ok: true, output: 'from the new check' }), seen);
@@ -268,7 +268,7 @@ test('scheduleChecks: settled() waits for a check under way, so the runner exits
   assert.equal(done, false, 'still waiting on the check');
   finish({ ok: true, output: 'the news' });
   await settled;
-  const kept = JSON.parse(fs.readFileSync(path.join(h.home, 'schedule-checks', `${sc.id}.kept.json`), 'utf8'));
+  const kept = JSON.parse(fs.readFileSync(keptCheckFile(h.home, sc.id, 'fork-watch'), 'utf8'));
   assert.match(kept.extra, /the news/);
   assert.equal(kept.check, 'fork-watch');
 });
@@ -291,7 +291,7 @@ test('scheduleChecks: while another runner process has the check under way, the 
   assert.equal(still.lastRun, undefined);
   // The old one finishes and keeps what it printed; the next tick sends it.
   fs.rmSync(path.join(dir, `${sc.id}.running.json`));
-  fs.writeFileSync(path.join(dir, `${sc.id}.kept.json`), JSON.stringify({ check: 'fork-watch', at: 'x', extra: '\n\nIts check found this: the news' }));
+  fs.writeFileSync(keptCheckFile(h.home, sc.id, 'fork-watch'), JSON.stringify({ check: 'fork-watch', at: 'x', extra: '\n\nIts check found this: the news' }));
   h.clock.advance(MIN);
   await tick(6);
   assert.equal(seen.length, 0);
@@ -345,7 +345,7 @@ test('scheduleChecks: a schedule deleted mid-check sends nothing and keeps nothi
   finish({ ok: true, output: 'news' });
   await tick(6);
   assert.equal(newThreads(h).length, 0);
-  assert.ok(!fs.existsSync(path.join(h.home, 'schedule-checks', `${sc.id}.kept.json`)));
+  assert.ok(!fs.existsSync(keptCheckFile(h.home, sc.id, 'check-a')));
   sched.stop();
 });
 
@@ -363,6 +363,69 @@ test('scheduleChecks: a one-off whose send fails keeps what its check printed, f
   assert.ok(sched.find(sc.id).finishedAt);
   fs.mkdirSync(dir);
   await sched.update({ scheduleId: sc.id, at: new Date(h.clock.now() + MIN).toISOString() });
+  h.clock.advance(MIN);
+  await tick(6);
+  assert.equal(seen.length, 1);
+  assert.match(sentText(h)[0] ?? '', /the news/);
+  sched.stop();
+});
+
+test('scheduleChecks: a new check printing news leaves the old one\'s kept news alone', async () => {
+  const h = makeHarness();
+  const seen: string[] = [];
+  const outputs: Record<string, () => CheckResult> = { 'check-a': onceCheck('news from a'), 'check-b': onceCheck('news from b') };
+  let current = 'check-a';
+  const sched = schedulerOn(h, () => outputs[current](), seen);
+  const sc = await sched.create({ text: 'Look', title: 'Watch Sentry', cron: '*/5 * * * *', check: 'check-a' });
+  h.runner.refuseNewTurns('The runner is restarting; send again in a moment.');
+  h.clock.advance(5 * MIN);
+  await tick(6);
+  h.runner.refusing = undefined;
+  current = 'check-b';
+  await sched.update({ scheduleId: sc.id, check: 'check-b' });
+  h.clock.advance(5 * MIN);
+  await tick(6);
+  assert.match(sentText(h)[0] ?? '', /news from b/);
+  h.adapter.last.init();
+  h.adapter.last.result('completed');
+  current = 'check-a';
+  await sched.update({ scheduleId: sc.id, check: 'check-a' });
+  h.clock.advance(5 * MIN);
+  await tick(6);
+  assert.deepEqual(seen, ['check-a', 'check-b']);
+  assert.ok(sentText(h).some((m) => /news from a/.test(m)));
+  sched.stop();
+});
+
+test('scheduleChecks: Run now waits while the check is running, here or in the old runner', async () => {
+  const h = makeHarness();
+  let finish!: (r: CheckResult) => void;
+  const sched = schedulerOn(h, () => new Promise<CheckResult>((r) => (finish = r)));
+  const sc = await sched.create({ text: 'Look', title: 'Watch Sentry', at: new Date(h.clock.now() + MIN).toISOString(), check: 'fork-watch' });
+  h.clock.advance(MIN);
+  await tick(6);
+  await assert.rejects(sched.runNow(sc.id), /check is running/);
+  finish({ ok: true, output: 'the news' });
+  await tick(6);
+  assert.match(sentText(h)[0] ?? '', /the news/);
+
+  const other = await sched.create({ text: 'Look', title: 'Watch Sentry', cron: '@daily', check: 'fork-watch' });
+  fs.writeFileSync(path.join(h.home, 'schedule-checks', `${other.id}.running.json`), JSON.stringify({ pid: process.ppid, at: h.clock.now() }));
+  await assert.rejects(sched.runNow(other.id), /check is running/);
+  sched.stop();
+});
+
+test('scheduleChecks: a check whose output can\'t be written down is still not run again by this runner', async () => {
+  const h = makeHarness();
+  const seen: string[] = [];
+  const sched = schedulerOn(h, onceCheck('the news'), seen);
+  const sc = await sched.create({ text: 'Look', title: 'Watch Sentry', cron: '*/5 * * * *', check: 'fork-watch' });
+  // A folder where the kept file would go makes the write fail.
+  fs.mkdirSync(keptCheckFile(h.home, sc.id, 'fork-watch'), { recursive: true });
+  h.runner.refuseNewTurns('The runner is restarting; send again in a moment.');
+  h.clock.advance(5 * MIN);
+  await tick(6);
+  h.runner.refusing = undefined;
   h.clock.advance(MIN);
   await tick(6);
   assert.equal(seen.length, 1);

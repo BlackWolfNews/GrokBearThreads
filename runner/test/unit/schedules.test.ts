@@ -10,6 +10,7 @@ import { ErrorCode, RpcError } from '../../src/protocol.ts';
 import { nullLogger } from '../../src/log.ts';
 import { readRunnerJson } from '../../src/config.ts';
 import { toOwnedScheduleDoc, SCHEDULE_POOLS_API_VERSION } from '../../src/sync.ts';
+import { keptCheckFile } from '../../src/schedule-check.ts';
 
 const MIN = 60_000;
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -601,7 +602,7 @@ test('a backend schedule deleted while its check runs sends nothing', async () =
   finish({ ok: true, output: 'news' });
   for (let i = 0; i < 5; i++) await tick();
   assert.equal(h.runner.list(['inbox', 'snoozed', 'archived']).filter((x) => x.title === 'Fork watch').length, 0);
-  assert.ok(!fs.existsSync(path.join(h.home, 'schedule-checks', `${sc.id}.kept.json`)));
+  assert.ok(!fs.existsSync(keptCheckFile(h.home, sc.id, 'fork-watch')));
   s.stop();
 });
 

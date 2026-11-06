@@ -18,6 +18,7 @@
 // again. A restart landing between the check and the send would otherwise
 // lose it: the next runner's check finds nothing new (6 Nov 2026, schedule
 // 54f11e8a in a handover).
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -33,18 +34,22 @@ export function checkStateFile(home: string, scheduleId: string): string {
   return path.join(home, 'schedule-checks', `${scheduleId}.state`);
 }
 
-export function keptCheckFile(home: string, scheduleId: string): string {
-  return path.join(home, 'schedule-checks', `${scheduleId}.kept.json`);
+// One per command: what a check kept is that command's news, so a changed
+// check neither sends it nor writes over it, and it's sent if that check
+// is put back.
+export function keptCheckFile(home: string, scheduleId: string, check: string): string {
+  const hash = crypto.createHash('sha256').update(check).digest('hex').slice(0, 12);
+  return path.join(home, 'schedule-checks', `${scheduleId}.${hash}.kept.json`);
 }
 
-// What a check printed that hasn't reached a thread yet. `check` is the
-// command that printed it: a changed check doesn't send the old one's news.
+// What a check printed that hasn't reached a thread yet, and the command
+// that printed it.
 export type KeptCheck = { check: string; at: string; extra: string };
 
 export function readKeptCheck(home: string, scheduleId: string, check: string): KeptCheck | undefined {
   let kept: KeptCheck;
   try {
-    kept = JSON.parse(fs.readFileSync(keptCheckFile(home, scheduleId), 'utf8'));
+    kept = JSON.parse(fs.readFileSync(keptCheckFile(home, scheduleId, check), 'utf8'));
   } catch {
     return undefined;
   }
@@ -53,14 +58,26 @@ export function readKeptCheck(home: string, scheduleId: string, check: string): 
 }
 
 export function keepCheck(home: string, scheduleId: string, kept: KeptCheck): void {
-  const file = keptCheckFile(home, scheduleId);
+  const file = keptCheckFile(home, scheduleId, kept.check);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   // It can hold whatever the check printed, so it's the user's only.
   atomicWriteFileSync(file, JSON.stringify(kept), 0o600);
 }
 
-export function dropKeptCheck(home: string, scheduleId: string): void {
-  fs.rmSync(keptCheckFile(home, scheduleId), { force: true });
+// That command's, or with none, all the schedule's (it's gone).
+export function dropKeptCheck(home: string, scheduleId: string, check?: string): void {
+  if (check !== undefined) {
+    fs.rmSync(keptCheckFile(home, scheduleId, check), { force: true });
+    return;
+  }
+  const dir = path.join(home, 'schedule-checks');
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const n of names) if (n.startsWith(`${scheduleId}.`) && n.endsWith('.kept.json')) fs.rmSync(path.join(dir, n), { force: true });
 }
 
 // A check under way in some runner process, so another one (the next
