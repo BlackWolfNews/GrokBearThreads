@@ -190,7 +190,7 @@ export class Scheduler {
   // Every check under way, for settled(): the runner waits for them before
   // it exits, so what they print is kept for the next one.
   private inFlight = new Set<Promise<unknown>>();
-  // Kept outputs this process has sent (id and when kept), in case the file
+  // Kept outputs this process has sent (id, command and when kept), in case the file
   // couldn't be deleted: it isn't sent again.
   private delivered = new Set<string>();
   // What a check printed that couldn't be written down (id, newline, command).
@@ -956,7 +956,7 @@ export class Scheduler {
   private keptFor(rec: ScheduleRecord): Carried | undefined {
     if (!rec.check || !this.checksOn()) return undefined;
     const kept = this.memKept.get(`${rec.id}\n${rec.check}`) ?? readKeptCheck(this.home, rec.id, rec.check);
-    if (!kept || this.delivered.has(`${rec.id} ${kept.at}`)) return undefined;
+    if (!kept || this.delivered.has(`${rec.id}\n${kept.check}\n${kept.at}`)) return undefined;
     return { extra: kept.extra, kept: kept.at, check: kept.check };
   }
 
@@ -989,7 +989,7 @@ export class Scheduler {
       // Only a sent run has carried it. A skip (the last thread still
       // going), a failure or a refused send keeps it for the next run.
       if (outcome === 'sent' && checked && 'extra' in checked && checked.check) {
-        this.delivered.add(`${rec.id} ${checked.kept}`);
+        this.delivered.add(`${rec.id}\n${checked.check}\n${checked.kept}`);
         this.dropKept(rec.id, checked.check);
       }
       this.log.info('schedule ran', { scheduleId: rec.id, outcome, threadId, note });
