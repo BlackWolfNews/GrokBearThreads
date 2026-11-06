@@ -253,7 +253,10 @@ struct AgentBrowserPanel: View {
     var body: some View {
         VStack(spacing: 0) {
             toolbar
-            profilePicker
+            // Only when there's a profile to choose: with BrowserBear agent-only
+            // (Mike's trial) or no profiles connected, an empty "Choose Chrome
+            // profile" menu just looked like a setup step.
+            if !model.profiles.isEmpty { profilePicker }
             if let tab, tab.bridge == true, model.profiles.first(where: { $0.id == tab.profile })?.panelPopups != true {
                 Text("New windows open in Chrome.").font(.system(size: TypeScale.label)).foregroundStyle(.secondary).padding(.bottom, zoomed(4))
             }
@@ -325,6 +328,12 @@ struct AgentBrowserPanel: View {
         model.profiles.first { $0.id == defaultProfile } ?? model.profiles.first
     }
 
+    /// Where an address typed with no page goes: the chosen profile, else the
+    /// agent's own Chrome when none of the user's profiles is offered.
+    private var newPageProfileID: String? {
+        newPageProfile?.id ?? (model.profiles.isEmpty && model.available ? "agent" : nil)
+    }
+
     /// The panel's page can take an address itself; otherwise one typed opens
     /// a new page (no page yet, one that's in Chrome's window, waiting for
     /// Show this tab here, or disconnected).
@@ -339,7 +348,7 @@ struct AgentBrowserPanel: View {
             PaneHeaderButton(symbol: "chevron.right", help: "Forward") { surface.evaluate("history.forward()") }
             PaneHeaderButton(symbol: "arrow.clockwise", help: "Reload") { surface.send("Page.reload") }
             TextField("Address", text: $address)
-                .disabled(!pageTakesAddress && tab?.profile == nil && newPageProfile == nil)
+                .disabled(!pageTakesAddress && tab?.profile == nil && newPageProfileID == nil)
                 .textFieldStyle(.plain)
                 .font(.system(size: TypeScale.label))
                 .focused($addressFocused)
@@ -362,7 +371,7 @@ struct AgentBrowserPanel: View {
         guard !text.isEmpty else { return }
         if !text.contains("://") { text = (text.contains(".") && !text.contains(" ") ? "https://" : "https://www.google.com/search?q=") + text }
         if pageTakesAddress { surface.send("Page.navigate", ["url": text]) }
-        else if let profile = tab?.profile ?? newPageProfile?.id {
+        else if let profile = tab?.profile ?? newPageProfileID {
             chosen = nil
             model.select(nil, in: thread.id)
             model.open(text, thread: thread.id, profile: profile)

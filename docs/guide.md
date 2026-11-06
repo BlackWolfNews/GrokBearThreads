@@ -186,7 +186,9 @@ name and email appear below the address, and its sign-ins stay in Chrome; nothin
 is imported. The profile menu opens a new page in the profile you choose, and makes
 it the default (starred). An address typed with no page showing opens a new page in
 the default profile. BrowserBear
-and its extension must be connected to that profile.
+and its extension must be connected to that profile. With no profile to
+choose (none connected, or `browserbear agent-only on`), the menu is hidden
+and a typed address opens in the agent's own Chrome.
 
 When the agent needs you to do something in a page, handoff opens this thread's
 Browser panel with Your turn and Done, even if it was closed. It opens straight
