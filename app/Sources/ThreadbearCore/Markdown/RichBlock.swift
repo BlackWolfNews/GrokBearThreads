@@ -114,8 +114,13 @@ public enum RichPages {
         """
     }
 
+    /// The biggest a diagram is drawn, in CSS pixels: a side, and an area.
+    public static let diagramMaxSide = 2400
+    public static let diagramMaxArea = 2400 * 1600
+
     /// Run in the diagram page: renders `source` and gives back its size,
-    /// or `{error}` with Pele's message.
+    /// or `{error}` with Pele's message. Its arguments: `source`, `dark`,
+    /// `fontSize`, `maxSide` and `maxArea`.
     public static let drawScript = """
     const out = document.getElementById('out');
     out.className = dark ? 'dark' : 'light';
@@ -126,12 +131,22 @@ public enum RichPages {
       // The box round the SVG and all it draws (a few shapes reach past
       // its viewBox), so the snapshot takes all of it.
       const svg = out.querySelector('svg');
+      // A diagram can ask for any size (spacing in its config): drawn
+      // smaller past a budget, so a hostile one can't make a picture of
+      // gigabytes (cross-lab review, 6 Nov).
+      const w = parseFloat(svg.getAttribute('width')) || 1;
+      const h = parseFloat(svg.getAttribute('height')) || 1;
+      const scale = Math.min(1, maxSide / w, maxSide / h, Math.sqrt(maxArea / (w * h)));
+      if (scale < 1) {
+        svg.setAttribute('width', String(Math.floor(w * scale)));
+        svg.setAttribute('height', String(Math.floor(h * scale)));
+      }
       let right = 0, bottom = 0;
       for (const el of [out, svg, ...svg.querySelectorAll('*')]) {
         const r = el.getBoundingClientRect();
         if (r.width || r.height) { right = Math.max(right, r.right); bottom = Math.max(bottom, r.bottom); }
       }
-      return { width: Math.ceil(right) + 2, height: Math.ceil(bottom) + 2 };
+      return { width: Math.min(Math.ceil(right) + 2, maxSide + 8), height: Math.min(Math.ceil(bottom) + 2, maxSide + 8) };
     } catch (error) {
       out.textContent = '';
       return { error: String(error && error.message || error) };

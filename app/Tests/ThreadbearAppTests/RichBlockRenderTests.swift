@@ -62,14 +62,25 @@ final class RichBlockRenderTests: XCTestCase {
     func testADiagramIsDrawnInBothLooksAndABrokenOneSaysWhy() async throws {
         let renderer = RichRenderer()
         let block = RichBlock(kind: .mermaid, source: "flowchart TD\n  A[Start] --> B{Done?}\n  B -- no --> A")
-        guard case .drawn(let drawn) = await renderer.render(block, zoom: 100) else { return XCTFail("not drawn") }
+        let outcome = await renderer.render(block, zoom: 100)
+        guard case .drawn(let rendered) = outcome else { return XCTFail("not drawn: \(outcome)") }
+        let drawn = rendered.drawn
         XCTAssertGreaterThan(drawn.size.width, 50)
         XCTAssertGreaterThan(drawn.size.height, 100)
-        XCTAssertGreaterThanOrEqual(drawn.dark.width, Int(drawn.size.width))
-        XCTAssertEqual(drawn.dark.width, drawn.light.width)
+        XCTAssertGreaterThanOrEqual(rendered.pictures.dark.width, Int(drawn.size.width))
+        XCTAssertEqual(rendered.pictures.dark.width, rendered.pictures.light.width)
         // Its page for the side pane, with the diagram in both looks.
         let page = try String(contentsOf: RichDiskCache.panePage(block), encoding: .utf8)
         XCTAssertEqual(page.components(separatedBy: "<svg").count - 1, 2)
+
+        // One that asks to be enormous is drawn within the budget.
+        let chains = (0..<12).map { c in (0..<12).map { "C\(c)N\($0)" }.joined(separator: " --> ") }.joined(separator: "\n  ")
+        let huge = RichBlock(kind: .mermaid, source: "%%{init: {\"flowchart\": {\"nodeSpacing\": 2000, \"rankSpacing\": 2000}}}%%\nflowchart LR\n  \(chains)")
+        let big = await renderer.render(huge, zoom: 100)
+        guard case .drawn(let bounded) = big else { return XCTFail("not drawn: \(big)") }
+        XCTAssertLessThanOrEqual(bounded.drawn.size.width, CGFloat(RichPages.diagramMaxSide + 8))
+        XCTAssertLessThanOrEqual(bounded.drawn.size.height, CGFloat(RichPages.diagramMaxSide + 8))
+        XCTAssertLessThanOrEqual(bounded.pictures.dark.width * bounded.pictures.dark.height, 4_200_000)
 
         let broken = RichBlock(kind: .mermaid, source: "flowchart TD\n  A -->")
         guard case .failed(let why) = await renderer.render(broken, zoom: 100) else { return XCTFail("a broken diagram was drawn") }
@@ -102,7 +113,9 @@ final class RichBlockRenderTests: XCTestCase {
         <meta http-equiv="refresh" content="0;url=\(out)/refresh">
         <form action="\(out)/form"><input autofocus></form>
         """)
-        guard case .drawn(let drawn) = await renderer.render(block, zoom: 100) else { return XCTFail("not drawn") }
+        let outcome = await renderer.render(block, zoom: 100)
+        guard case .drawn(let rendered) = outcome else { return XCTFail("not drawn: \(outcome)") }
+        let drawn = rendered.drawn
         // The script would have made it 900 tall.
         XCTAssertLessThan(drawn.size.height, 400)
         try await Task.sleep(for: .seconds(2))

@@ -15,13 +15,43 @@ final class RichBlocks: @unchecked Sendable {
     static let shared = RichBlocks()
     static let changed = Notification.Name("RichBlocks.changed")
 
-    struct Drawn: @unchecked Sendable {
-        let dark: CGImage
-        let light: CGImage
+    /// What a row needs to lay a drawn block out. The pictures themselves
+    /// are kept apart (`pictures`), so cached renders don't hold them.
+    struct Drawn: Sendable {
         /// In points, at the zoom it was drawn for.
         let size: CGSize
         /// A page taller than we draw: the box shows its top and fades out.
         let clipped: Bool
+    }
+
+    /// A block's picture in each look.
+    final class Pictures: @unchecked Sendable {
+        let dark: CGImage
+        let light: CGImage
+        init(dark: CGImage, light: CGImage) { self.dark = dark; self.light = light }
+        var bytes: Int { dark.bytesPerRow * dark.height + light.bytesPerRow * light.height }
+    }
+
+    /// Pictures in memory, by what they take up: past it the oldest go,
+    /// and are read back from disk when drawn again (cross-lab review,
+    /// 6 Nov: a count let many tall pages take gigabytes).
+    static let pictureBytes = 160 * 1024 * 1024
+    private let pictures: NSCache<NSString, Pictures> = {
+        let cache = NSCache<NSString, Pictures>()
+        cache.totalCostLimit = RichBlocks.pictureBytes
+        return cache
+    }()
+
+    func keep(_ pictures: Pictures, for key: String) {
+        self.pictures.setObject(pictures, forKey: key as NSString, cost: pictures.bytes)
+    }
+
+    /// The block's pictures, read from disk if they've left memory.
+    func pictures(_ key: String) -> Pictures? {
+        if let kept = pictures.object(forKey: key as NSString) { return kept }
+        guard let loaded = RichDiskCache.pictures(key) else { return nil }
+        keep(loaded, for: key)
+        return loaded
     }
 
     enum State {
@@ -39,8 +69,8 @@ final class RichBlocks: @unchecked Sendable {
     }
 
     private let inner = Mutex(Inner())
-    /// How many drawn blocks stay in memory (both looks each).
-    static let memoryLimit = 80
+    /// How many blocks' states stay in memory (sizes only, small).
+    static let memoryLimit = 2000
 
     /// Part of a rich row's render key: changes whenever a block is drawn,
     /// fails, or flips between its picture and its source.
@@ -125,9 +155,15 @@ enum RichDiskCache {
         let base = folder.appendingPathComponent(key)
         guard let line = try? String(contentsOf: base.appendingPathExtension("size"), encoding: .utf8) else { return nil }
         let parts = line.split(separator: " ").compactMap { Double($0) }
-        guard parts.count == 3,
-              let dark = image(base.path + "-dark.png"), let light = image(base.path + "-light.png") else { return nil }
-        return RichBlocks.Drawn(dark: dark, light: light, size: CGSize(width: parts[0], height: parts[1]), clipped: parts[2] != 0)
+        guard parts.count == 3, FileManager.default.fileExists(atPath: base.path + "-dark.png"),
+              FileManager.default.fileExists(atPath: base.path + "-light.png") else { return nil }
+        return RichBlocks.Drawn(size: CGSize(width: parts[0], height: parts[1]), clipped: parts[2] != 0)
+    }
+
+    static func pictures(_ key: String) -> RichBlocks.Pictures? {
+        let base = folder.appendingPathComponent(key)
+        guard let dark = image(base.path + "-dark.png"), let light = image(base.path + "-light.png") else { return nil }
+        return RichBlocks.Pictures(dark: dark, light: light)
     }
 
     private static func image(_ path: String) -> CGImage? {
@@ -135,11 +171,11 @@ enum RichDiskCache {
         return CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
     }
 
-    static func save(_ key: String, _ drawn: RichBlocks.Drawn) {
+    static func save(_ key: String, _ drawn: RichBlocks.Drawn, _ pictures: RichBlocks.Pictures) {
         let manager = FileManager.default
         try? manager.createDirectory(at: folder, withIntermediateDirectories: true)
         let base = folder.appendingPathComponent(key)
-        for (image, look) in [(drawn.dark, "dark"), (drawn.light, "light")] {
+        for (image, look) in [(pictures.dark, "dark"), (pictures.light, "light")] {
             guard let data = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else { return }
             try? data.write(to: URL(fileURLWithPath: base.path + "-\(look).png"), options: .atomic)
         }
@@ -185,12 +221,15 @@ final class RichBlockCell: NSTextAttachmentCell {
     }
 
     let block: RichBlock
+    /// Where its pictures are kept (RichBlocks.key, at the zoom it rendered at).
+    let key: String
     let blockState: RichBlocks.State
     let showsSource: Bool
     private let code: NSAttributedString
 
     init(block: RichBlock, state: RichBlocks.State, showsSource: Bool) {
         self.block = block
+        key = RichBlocks.key(block)
         self.blockState = state
         self.showsSource = showsSource
         code = NSAttributedString(string: block.source, attributes: [
@@ -348,9 +387,9 @@ final class RichBlockCell: NSTextAttachmentCell {
         let bodyClip = NSBezierPath(roundedRect: layout.box, xRadius: Self.radius, yRadius: Self.radius)
         bodyClip.addClip()
         NSBezierPath(rect: layout.body).addClip()
-        if showsPicture, case .drawn(let drawn) = blockState {
+        if showsPicture, case .drawn(let drawn) = blockState, let pictures = RichBlocks.shared.pictures(key) {
             let dark = NSAppearance.currentDrawing().bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            let image = dark ? drawn.dark : drawn.light
+            let image = dark ? pictures.dark : pictures.light
             let size = pictureSize(width: layout.box.width)
             let x = block.kind == .html ? layout.body.minX : layout.body.midX - size.width / 2
             let y = layout.body.minY + (block.kind == .html ? 0 : Self.pad)

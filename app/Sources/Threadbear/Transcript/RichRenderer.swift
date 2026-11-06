@@ -31,6 +31,7 @@ final class RichRenderer: NSObject, WKNavigationDelegate, WKUIDelegate {
     /// The tallest a page is drawn; past it the box fades out.
     static let pageMaxHeight: CGFloat = 1600
     static let timeout: Duration = .seconds(15)
+    static let snapshotPoints: CGFloat = 1_000_000
 
     private let world = WKContentWorld.world(name: "threadbear-rich")
     private var diagramView: WKWebView?
@@ -51,19 +52,35 @@ final class RichRenderer: NSObject, WKNavigationDelegate, WKUIDelegate {
         }
     }
 
+    /// A drawing: its size, and its pictures in each look.
+    struct Rendered: @unchecked Sendable {
+        let drawn: RichBlocks.Drawn
+        let pictures: RichBlocks.Pictures
+    }
+
+    enum Outcome {
+        case drawn(Rendered)
+        case failed(String)
+    }
+
     func draw(_ block: RichBlock, zoom: Int, key: String) {
         Task { [weak self] in
             guard let self else { return }
-            let state = await self.render(block, zoom: zoom)
-            if case .drawn(let drawn) = state { RichDiskCache.save(key, drawn) }
-            RichBlocks.shared.finish(key, state)
+            switch await self.render(block, zoom: zoom) {
+            case .drawn(let rendered):
+                RichDiskCache.save(key, rendered.drawn, rendered.pictures)
+                RichBlocks.shared.keep(rendered.pictures, for: key)
+                RichBlocks.shared.finish(key, .drawn(rendered.drawn))
+            case .failed(let why):
+                RichBlocks.shared.finish(key, .failed(why))
+            }
         }
     }
 
     /// Draws one block, after any before it (the views are shared).
-    func render(_ block: RichBlock, zoom: Int) async -> RichBlocks.State {
+    func render(_ block: RichBlock, zoom: Int) async -> Outcome {
         let previous = tail
-        let job = Task { [weak self] () -> RichBlocks.State in
+        let job = Task { [weak self] () -> Outcome in
             await previous?.value
             guard let self else { return .failed("the app is closing") }
             do {
@@ -98,17 +115,49 @@ final class RichRenderer: NSObject, WKNavigationDelegate, WKUIDelegate {
         }
     }
 
+    /// Gives up on a drawing after `timeout` without waiting for it: a
+    /// hung WebKit call never returns, so the views are dropped (new ones
+    /// are made for the next block) and the queue moves on (cross-lab
+    /// review, 6 Nov: a group's timeout still waited on the stuck child).
     private func withTimeout<T: Sendable>(_ work: @escaping @MainActor () async throws -> T) async throws -> T {
-        try await withThrowingTaskGroup(of: T.self) { group in
-            group.addTask { try await work() }
-            group.addTask {
-                try await Task.sleep(for: Self.timeout)
-                throw Failure.timedOut
+        let once = RenderOnce()
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<T, Error>) in
+            let worker = Task { @MainActor in
+                do {
+                    let value = try await work()
+                    guard !once.done else { return }
+                    once.done = true
+                    continuation.resume(returning: value)
+                } catch {
+                    guard !once.done else { return }
+                    once.done = true
+                    continuation.resume(throwing: error)
+                }
             }
-            let first = try await group.next()!
-            group.cancelAll()
-            return first
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: Self.timeout)
+                guard !once.done else { return }
+                once.done = true
+                worker.cancel()
+                self?.reset()
+                continuation.resume(throwing: Failure.timedOut)
+            }
         }
+    }
+
+    /// Drops both views and fails anything waiting on them.
+    private func reset() {
+        for (_, waiting) in loads { waiting.resume(throwing: Failure.timedOut) }
+        loads = [:]
+        for view in [diagramView, pageView].compactMap({ $0 }) {
+            view.stopLoading()
+            view.navigationDelegate = nil
+            view.uiDelegate = nil
+        }
+        diagramView = nil
+        pageView = nil
+        // A page given up on mid-way never reached its own forget.
+        previews.forgetAll()
     }
 
     // MARK: Diagrams
@@ -143,7 +192,7 @@ final class RichRenderer: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     private struct DiagramPicture { var image: CGImage; var size: CGSize; var svg: String }
 
-    private func drawDiagram(_ block: RichBlock, zoom: Int) async throws -> RichBlocks.Drawn {
+    private func drawDiagram(_ block: RichBlock, zoom: Int) async throws -> Rendered {
         let view = try await makeDiagramView()
         var looks: [Bool: DiagramPicture] = [:]
         for dark in [true, false] {
@@ -151,7 +200,8 @@ final class RichRenderer: NSObject, WKNavigationDelegate, WKUIDelegate {
             // was cut at the view's edge before the snapshot was sized.
             view.frame = NSRect(x: 0, y: 0, width: 3000, height: 3000)
             let result = try await view.callAsyncJavaScript(
-                RichPages.drawScript + "\n", arguments: ["source": block.source, "dark": dark, "fontSize": 14.0 * Double(zoom) / 100],
+                RichPages.drawScript + "\n", arguments: ["source": block.source, "dark": dark, "fontSize": 14.0 * Double(zoom) / 100,
+                                                     "maxSide": RichPages.diagramMaxSide, "maxArea": RichPages.diagramMaxArea],
                 in: nil, contentWorld: world)
             guard let answer = result as? [String: Any] else { throw Failure.unavailable("the diagram library gave nothing back") }
             if let error = answer["error"] as? String { throw Failure.unavailable(error) }
@@ -165,7 +215,7 @@ final class RichRenderer: NSObject, WKNavigationDelegate, WKUIDelegate {
         guard let dark = looks[true], let light = looks[false] else { throw Failure.unavailable("the diagram came out empty") }
         let page = RichPages.diagramPanePage(darkSVG: dark.svg, lightSVG: light.svg, title: "Diagram")
         try? writePanePage(page, for: block)
-        return RichBlocks.Drawn(dark: dark.image, light: light.image, size: dark.size, clipped: false)
+        return Rendered(drawn: RichBlocks.Drawn(size: dark.size, clipped: false), pictures: RichBlocks.Pictures(dark: dark.image, light: light.image))
     }
 
     // MARK: Pages
@@ -182,10 +232,12 @@ final class RichRenderer: NSObject, WKNavigationDelegate, WKUIDelegate {
         return view
     }
 
-    private func drawPage(_ block: RichBlock, zoom: Int) async throws -> RichBlocks.Drawn {
+    private func drawPage(_ block: RichBlock, zoom: Int) async throws -> Rendered {
         let file = try writePanePage(RichPages.htmlPage(block.source), for: block)
         let view = try await makePageView()
         guard let address = previews.address(for: file) else { throw Failure.unavailable("the page couldn't be opened") }
+        // Its site holds the folder open; done with, it's let go.
+        defer { previews.forget(file) }
         let width = Self.pageWidth
         view.pageZoom = CGFloat(zoom) / 100
         var looks: [Bool: (CGImage, CGSize, Bool)] = [:]
@@ -207,7 +259,7 @@ final class RichRenderer: NSObject, WKNavigationDelegate, WKUIDelegate {
         view.loadHTMLString("", baseURL: nil)
         guard let dark = looks[true], let light = looks[false] else { throw Failure.unavailable("the page came out empty") }
         let size = CGSize(width: dark.1.width, height: max(dark.1.height, light.1.height))
-        return RichBlocks.Drawn(dark: dark.0, light: light.0, size: size, clipped: dark.2 || light.2)
+        return Rendered(drawn: RichBlocks.Drawn(size: size, clipped: dark.2 || light.2), pictures: RichBlocks.Pictures(dark: dark.0, light: light.0))
     }
 
     /// The block's page, in a folder of its own (so the preview scheme,
@@ -233,6 +285,8 @@ final class RichRenderer: NSObject, WKNavigationDelegate, WKUIDelegate {
     }
 
     private func load(_ view: WKWebView, _ start: (WKWebView) -> Void) async throws {
+        // A drawing given up on doesn't start another load on its way out.
+        try Task.checkCancellation()
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             loads[ObjectIdentifier(view)]?.resume(throwing: CancellationError())
             loads[ObjectIdentifier(view)] = continuation
@@ -244,14 +298,27 @@ final class RichRenderer: NSObject, WKNavigationDelegate, WKUIDelegate {
         view.frame = NSRect(origin: .zero, size: size)
         let config = WKSnapshotConfiguration()
         config.rect = CGRect(origin: .zero, size: size)
+        // At most about a million points (four million pixels on Retina):
+        // more than the box ever shows, and the pane draws the SVG itself.
+        let scale = min(1, (Self.snapshotPoints / max(size.width * size.height, 1)).squareRoot())
+        config.snapshotWidth = NSNumber(value: Double(floor(size.width * scale)))
         config.afterScreenUpdates = true
         let image = try await view.takeSnapshot(configuration: config)
+        try Task.checkCancellation()
         guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { throw Failure.unavailable("the picture came out empty") }
         return cgImage
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         loads.removeValue(forKey: ObjectIdentifier(webView))?.resume()
+    }
+
+    /// The page's process died (a page too big, say): fail what waits on
+    /// it and start afresh next time.
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        loads.removeValue(forKey: ObjectIdentifier(webView))?.resume(throwing: Failure.unavailable("its web view stopped"))
+        if webView === diagramView { diagramView = nil }
+        if webView === pageView { pageView = nil }
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -282,3 +349,6 @@ final class RichRenderer: NSObject, WKNavigationDelegate, WKUIDelegate {
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                  for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? { nil }
 }
+
+/// Whichever of a drawing and its timeout finishes first (RichRenderer.withTimeout).
+private final class RenderOnce: @unchecked Sendable { var done = false }

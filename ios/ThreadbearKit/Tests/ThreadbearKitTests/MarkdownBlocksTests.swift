@@ -43,6 +43,14 @@ import Testing
         #expect(MarkdownBlock.parse("```\nmermaid\n```") == [.code("mermaid")])
     }
 
+    @Test func aFenceStillStreamingInOrTooBigStaysCode() {
+        // The reply so far, its fence not closed yet: drawn once it is.
+        #expect(MarkdownBlock.parse("```mermaid\nflowchart TD\n  A -->") == [.code("flowchart TD\n  A -->")])
+        let big = String(repeating: "a", count: MarkdownBlock.maxRichSource + 1)
+        #expect(MarkdownBlock.parse("```html\n\(big)\n```") == [.code(big)])
+        #expect(MarkdownBlock.parse("```mermaid\n\n```") == [.code("")])
+    }
+
     @Test func aRichBlockInAListKeepsItsSource() {
         #expect(MarkdownBlock.parse("- Steps:\n\n  ```mermaid\n  flowchart LR\n    A --> B\n  ```") == [
             .listItem(text: "Steps:", marker: "•", depth: 0, task: nil),

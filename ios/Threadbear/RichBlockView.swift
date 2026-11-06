@@ -36,6 +36,8 @@ struct RichBlockView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             } else if seen {
                 RichWebView(kind: kind, source: source, fullScreen: false, height: $height)
+                    // A new view for a new kind: scripts are set when it's made.
+                    .id(kind)
                     .frame(height: min(height, Self.maxInlineHeight))
                     .overlay(alignment: .bottom) {
                         if height > Self.maxInlineHeight {
@@ -104,6 +106,7 @@ private struct RichBlockSheet: View {
                     }
                 } else {
                     RichWebView(kind: kind, source: source, fullScreen: true, height: $height)
+                        .id(kind)
                 }
             }
             .navigationTitle(kind == .mermaid ? "Diagram" : "Page")
@@ -146,24 +149,32 @@ struct RichWebView: UIViewRepresentable {
         view.scrollView.bounces = fullScreen
         view.navigationDelegate = context.coordinator
         view.uiDelegate = context.coordinator
-        context.coordinator.kind = kind
-        let page = kind == .mermaid ? RichWebSandbox.diagramPage(fullScreen: fullScreen) : RichWebSandbox.htmlPage(source, fullScreen: fullScreen)
-        context.coordinator.source = source
+        let coordinator = context.coordinator
+        coordinator.kind = kind
+        coordinator.source = source
+        coordinator.fullScreen = fullScreen
         // Nothing loads until the rule list keeping it off the network is on.
         RichWebSandbox.withRules { rules in
             guard let rules else {
-                context.coordinator.loading = true
+                coordinator.loading = true
                 view.loadHTMLString("<p style=\"font:14px -apple-system;color:gray\">This couldn't be shown safely.</p>", baseURL: nil)
                 return
             }
             view.configuration.userContentController.add(rules)
-            context.coordinator.loading = true
-            view.loadHTMLString(page, baseURL: nil)
+            coordinator.ready = true
+            coordinator.load(view)
         }
         return view
     }
 
-    func updateUIView(_ view: WKWebView, context: Context) {}
+    /// The same block with new source (a message edited): drawn again, once
+    /// the rule list is on (until then the first load takes the new source).
+    func updateUIView(_ view: WKWebView, context: Context) {
+        let coordinator = context.coordinator
+        guard coordinator.source != source else { return }
+        coordinator.source = source
+        if coordinator.ready { coordinator.load(view) }
+    }
 
     static func dismantleUIView(_ view: WKWebView, coordinator: Coordinator) {
         view.stopLoading()
@@ -177,6 +188,15 @@ struct RichWebView: UIViewRepresentable {
         var source = ""
         /// The one navigation allowed: the page loadHTMLString starts.
         var loading = false
+        var fullScreen = false
+        /// The rule list is on the view, so it may load.
+        var ready = false
+
+        func load(_ view: WKWebView) {
+            let page = kind == .mermaid ? RichWebSandbox.diagramPage(fullScreen: fullScreen) : RichWebSandbox.htmlPage(source, fullScreen: fullScreen)
+            loading = true
+            view.loadHTMLString(page, baseURL: nil)
+        }
 
         init(height: Binding<CGFloat>) { _height = height }
 
@@ -249,6 +269,13 @@ struct RichWebView: UIViewRepresentable {
         config.allowsInlineMediaPlayback = false
         config.mediaTypesRequiringUserActionForPlayback = .all
         config.dataDetectorTypes = []
+        // In every frame, first: a tap on any link (HTML or SVG, in a shadow
+        // root too) is cancelled in the page, before WebKit starts the
+        // navigation, which is when it would open a connection. Loopback
+        // skips the proxy, so the policy below would be too late for a
+        // link to a server on this phone (cross-lab review, 6 Nov). User
+        // scripts run with the page's scripts off.
+        config.userContentController.addUserScript(WKUserScript(source: linkGuard, injectionTime: .atDocumentStart, forMainFrameOnly: false))
         // A page's own scripts never run. A diagram's page runs only Pele and
         // the draw function, which the app put there.
         config.defaultWebpagePreferences.allowsContentJavaScript = scripts
@@ -263,6 +290,23 @@ struct RichWebView: UIViewRepresentable {
         }
         return config
     }
+
+    static let linkGuard = """
+    (() => {
+      addEventListener('click', (e) => {
+        for (const node of e.composedPath()) {
+          const name = (node && node.localName || '').toLowerCase();
+          if (name === 'a' || name === 'area') { e.preventDefault(); return; }
+        }
+        // A link inside a closed shadow root isn't in the path: the click
+        // is retargeted to its host. An element that can host one has no
+        // default action of its own, so cancelling it costs nothing.
+        const at = e.target && e.target.localName || '';
+        if (at.includes('-') || ['article','aside','blockquote','body','div','footer','h1','h2','h3','h4','h5','h6','header','main','nav','p','section','span'].includes(at)) e.preventDefault();
+      }, true);
+      addEventListener('submit', (e) => e.preventDefault(), true);
+    })();
+    """
 
     /// Pele, read once from the app, for every diagram after.
     static let peleSource: String? = {

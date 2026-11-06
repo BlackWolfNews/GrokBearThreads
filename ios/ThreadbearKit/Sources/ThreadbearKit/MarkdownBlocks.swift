@@ -27,6 +27,9 @@ public indirect enum MarkdownBlock: Sendable, Hashable {
 
     public enum Alignment: Sendable, Hashable { case leading, center, trailing }
 
+    /// Past this a fence stays code (Pele refuses more itself).
+    public static let maxRichSource = 50_000
+
     public enum RichKind: String, Sendable, Hashable {
         case mermaid, html
 
@@ -94,8 +97,13 @@ private struct Parser {
             if let fence = Self.fence(line) {
                 flush()
                 let info = String(line.dropFirst(fence.count)).trimmingCharacters(in: .whitespaces)
-                let body = code(fence: fence, indent: indent)
-                if let kind = MarkdownBlock.RichKind(info: info) {
+                let (body, closed) = code(fence: fence, indent: indent)
+                // Drawn only once its fence is closed (a reply still
+                // streaming in stays code) and not too big to draw, as on
+                // the Mac (RichBlock.from).
+                if closed, body.count <= MarkdownBlock.maxRichSource,
+                   !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                   let kind = MarkdownBlock.RichKind(info: info) {
                     blocks.append(.rich(kind: kind, source: body))
                 } else {
                     blocks.append(.code(body))
@@ -217,21 +225,23 @@ private struct Parser {
         return listIndents.count - 1
     }
 
-    mutating func code(fence: String, indent: Int) -> String {
+    /// The fenced block's lines, and whether its closing fence came.
+    mutating func code(fence: String, indent: Int) -> (String, Bool) {
         i += 1
         var body: [String] = []
+        var closed = false
         while i < lines.count {
             let raw = lines[i]
             i += 1
             let line = raw.trimmingCharacters(in: .whitespaces)
-            if line.hasPrefix(fence), line.allSatisfy({ $0 == fence.first }) { break }
+            if line.hasPrefix(fence), line.allSatisfy({ $0 == fence.first }) { closed = true; break }
             // Code fenced inside a list item is indented with it; take that off.
             var drop = min(indent, Self.indent(of: raw))
             var trimmed = Substring(raw)
             while drop > 0, trimmed.first == " " || trimmed.first == "\t" { trimmed.removeFirst(); drop -= 1 }
             body.append(String(trimmed))
         }
-        return body.joined(separator: "\n")
+        return (body.joined(separator: "\n"), closed)
     }
 
     mutating func quoteLines() -> [String] {

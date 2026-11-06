@@ -51,6 +51,12 @@ final class LocalPreviewSchemeHandler: NSObject, WKURLSchemeHandler {
           if (target !== own) e.preventDefault();
           return;
         }
+        // No link found, but one inside a closed shadow root can't be seen
+        // from here: the click is retargeted to its host. A click on an
+        // element that can host one has no default action of its own, so
+        // cancelling it costs nothing (cross-lab review, 6 Nov).
+        const at = e.target && e.target.localName || '';
+        if (at.includes('-') || ['article','aside','blockquote','body','div','footer','h1','h2','h3','h4','h5','h6','header','main','nav','p','section','span'].includes(at)) e.preventDefault();
       }, true);
     })();
     """
@@ -133,6 +139,24 @@ final class LocalPreviewSchemeHandler: NSObject, WKURLSchemeHandler {
 
     /// The one view each scripts-on site answers.
     private var owners: [String: ObjectIdentifier] = [:]
+
+    /// Stops serving `file` (its static view's site), and lets the site
+    /// close the folder it holds open: the transcript's html boxes are
+    /// drawn once each, and kept they added up to one open folder per
+    /// block (cross-lab review, 6 Nov).
+    func forget(_ file: URL) {
+        if let token = tokens.removeValue(forKey: file.standardizedFileURL.path + "
+") {
+            sites[token] = nil
+            owners[token] = nil
+        }
+    }
+
+    func forgetAll() {
+        tokens = [:]
+        sites = [:]
+        owners = [:]
+    }
 
     /// For tests: answers a request the way WebKit would see it answered.
     func respond(to url: URL) -> (response: HTTPURLResponse, data: Data) {
