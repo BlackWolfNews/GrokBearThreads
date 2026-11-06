@@ -70,6 +70,11 @@ final class PlanCardTests: XCTestCase {
         XCTAssertEqual(model.pendingApprovalIds, [])
     }
 
+    func testThePlanFileIsntAChange() {
+        XCTAssertTrue(TranscriptModel.isPlanFile("/Users/mike/.claude/plans/plan-add-csv-tender-puffin.md"))
+        XCTAssertFalse(TranscriptModel.isPlanFile("/Users/mike/dev/app/plans/next.md"))
+    }
+
     func testAHeadingBecomesTheTitle() {
         XCTAssertEqual(PlanCardText.split("# Plan: add CSV\n\n## Steps\n1. A").title, "Plan: add CSV")
         XCTAssertEqual(PlanCardText.split("# Plan: add CSV\n\n## Steps\n1. A").body, "## Steps\n1. A")

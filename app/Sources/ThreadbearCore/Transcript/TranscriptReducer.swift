@@ -1550,6 +1550,13 @@ public struct TranscriptModel: Sendable {
 
     /// The files a turn changed, from its Edit and Write calls that didn't
     /// fail, each with its edits' line counts added up.
+    /// Claude's plan mode writes its plan to ~/.claude/plans/<name>.md. That's
+    /// the CLI's own note, shown as the plan card; "Edited 1 file" for it,
+    /// in a turn that changed nothing of the project's, read as a change.
+    static func isPlanFile(_ path: String) -> Bool {
+        path.contains("/.claude/plans/") && path.hasSuffix(".md")
+    }
+
     private func changedFiles(turn: String) -> ChangedFiles? {
         changedFiles(turns: [turn])
     }
@@ -1565,7 +1572,7 @@ public struct TranscriptModel: Sendable {
         for id in ids {
             guard let i = itemIndex[id], case .tool(let tool) = items[i].content, !tool.failed else { continue }
             // Every file a tool changed: a Codex patch can touch several.
-            for diff in tool.effectiveDiffs where !diff.hunks.isEmpty {
+            for diff in tool.effectiveDiffs where !diff.hunks.isEmpty && !Self.isPlanFile(diff.path) {
                 let path = diff.path.isEmpty ? tool.title : diff.path
                 let stats = DiffBuilder.stats(diff)
                 if var file = files[path] {
