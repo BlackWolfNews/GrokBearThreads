@@ -87,4 +87,21 @@ final class SlashCommandsTests: XCTestCase {
         XCTAssertEqual(SlashPalette.height(window: 400), 300, "never below the least")
         XCTAssertEqual(SlashPalette.height(window: 1600), 560, "nor above the most")
     }
+
+    func testDraggedSizesStayInBounds() {
+        typealias L = SlashPalette.Layout
+        XCTAssertEqual(L.height(100, window: 900), 220, "never too short to use")
+        XCTAssertEqual(L.height(2000, window: 900), 765, "never past 85% of the window")
+        XCTAssertEqual(L.height(500, window: 900), 500)
+        XCTAssertEqual(L.width(300, window: 1400), 480)
+        XCTAssertEqual(L.width(5000, window: 1400), 1320)
+        // A dragged column leaves the others room: 900 wide, the rest needing 500.
+        XCTAssertEqual(L.column(600, least: 110, others: 500, total: 900), 400)
+        XCTAssertEqual(L.column(50, least: 110, others: 500, total: 900), 110)
+        // A list Mike dragged wide isn't held to half of what's left.
+        XCTAssertEqual(SlashPalette.columnWidths(total: 900, categories: 160, list: 450, chosen: true).list, 450)
+        XCTAssertEqual(SlashPalette.columnWidths(total: 900, categories: 160, list: 450).list, 370)
+        let saved = try! JSONDecoder().decode(L.self, from: JSONEncoder().encode(L(height: 500, list: 300)))
+        XCTAssertEqual(saved, L(height: 500, list: 300))
+    }
 }

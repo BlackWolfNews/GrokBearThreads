@@ -428,6 +428,10 @@ button that shows the file beside the thread.
 Up and Down move, Return runs it, Tab puts it in the box so you can type
 its details after it, and Esc closes the palette. Clicking a category
 shows only those; double-clicking a command runs it.
+Drag the palette's top edge or sides to make it bigger or smaller, and
+the lines between its columns to size them. It keeps the sizes for next
+time; double-click an edge or a line to put that one back to its own
+size.
 
 A command waits for a running turn to finish rather than going into it.
 Commands that only make sense in a CLI's terminal (`/resume`, `/rewind`,

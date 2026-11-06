@@ -38,6 +38,10 @@ struct SlashPaletteView: View {
     /// SlashPalette.height for the window: about half of it. A fixed 300
     /// left a big window's palette showing eight rows (Mike, 6 Nov).
     var height: CGFloat = zoomed(300)
+    /// The sizes Mike dragged it to (AppModel.slashPaletteLayout), and the
+    /// window's, which bounds them.
+    @Binding var layout: SlashPalette.Layout
+    var window: CGSize = CGSize(width: 1200, height: 800)
 
     var body: some View {
         let all = commands ?? []
@@ -47,20 +51,53 @@ struct SlashPaletteView: View {
         // the rest (SlashPalette.columnWidths). Measured over every command,
         // not just the matches, so the columns hold still while typing.
         GeometryReader { geo in
+            let total = geo.size.width
             let widths = SlashPalette.columnWidths(
-                total: geo.size.width,
-                categories: Self.categoriesWidth(all, query: query, recent: recent, provider: provider),
-                list: Self.listWidth(all)
+                total: total,
+                categories: layout.categories ?? Self.categoriesWidth(all, query: query, recent: recent, provider: provider),
+                list: layout.list ?? Self.listWidth(all),
+                chosen: layout.list != nil
             )
             HStack(spacing: 0) {
                 categories(all)
                     .frame(width: widths.categories)
-                Divider()
+                // The dividers drag to size the column on their left.
+                ResizeHandle(edge: .column, tip: "Drag to size the categories; double-click for their own width",
+                             start: { widths.categories },
+                             drag: { base, moved in layout.categories = SlashPalette.Layout.column(base + moved.width, least: 110, others: widths.list + 200, total: total) },
+                             reset: { layout.categories = nil })
                 list(matches, picked: picked)
                     .frame(width: widths.list)
-                Divider()
+                ResizeHandle(edge: .column, tip: "Drag to size the list; double-click for its own width",
+                             start: { widths.list },
+                             drag: { base, moved in layout.list = SlashPalette.Layout.column(base + moved.width, least: 120, others: widths.categories + 200, total: total) },
+                             reset: { layout.list = nil })
                 detail(picked)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+            // Its edges drag to size the whole palette. It's centred over
+            // the box and sits on it, so a side grows both sides at once and
+            // the top grows upwards.
+            .overlay(alignment: .top) {
+                ResizeHandle(edge: .top, tip: "Drag to make it taller or shorter; double-click for half the window",
+                             start: { height },
+                             drag: { base, moved in layout.height = SlashPalette.Layout.height(base - moved.height, window: window.height) },
+                             reset: { layout.height = nil })
+                    .frame(height: zoomed(6))
+            }
+            .overlay(alignment: .leading) {
+                ResizeHandle(edge: .leading, tip: "Drag to make it wider or narrower; double-click for the box's width",
+                             start: { total },
+                             drag: { base, moved in layout.width = SlashPalette.Layout.width(base - 2 * moved.width, window: window.width) },
+                             reset: { layout.width = nil })
+                    .frame(width: zoomed(6))
+            }
+            .overlay(alignment: .trailing) {
+                ResizeHandle(edge: .trailing, tip: "Drag to make it wider or narrower; double-click for the box's width",
+                             start: { total },
+                             drag: { base, moved in layout.width = SlashPalette.Layout.width(base + 2 * moved.width, window: window.width) },
+                             reset: { layout.width = nil })
+                    .frame(width: zoomed(6))
             }
         }
         .frame(maxWidth: .infinity)
@@ -313,5 +350,47 @@ extension AppModel {
                 AppLog.write("rpc", "threads.commands failed: \(error.localizedDescription)")
             }
         }
+    }
+}
+
+/// An edge or divider of the palette that drags to resize it, with the
+/// resize pointer, and a double-click back to the size worked out for it.
+/// The drag is measured in the window, not the view, as the view moves and
+/// grows under the pointer while it goes.
+struct ResizeHandle: View {
+    enum Edge { case top, leading, trailing, column }
+    let edge: Edge
+    let tip: String
+    /// The size when the drag starts.
+    let start: () -> Double
+    /// The size at the start, and how far the pointer has moved since.
+    let drag: (Double, CGSize) -> Void
+    let reset: () -> Void
+    @State private var base: Double?
+
+    var body: some View {
+        Group {
+            if edge == .column {
+                // A hairline to see, with a wider strip to grab.
+                Rectangle().fill(Color(nsColor: .separatorColor)).frame(width: 1)
+                    .padding(.horizontal, zoomed(3))
+                    .contentShape(Rectangle())
+                    .pointerStyle(.columnResize)
+            } else {
+                Color.clear.contentShape(Rectangle())
+                    .pointerStyle(.frameResize(position: edge == .top ? .top : edge == .leading ? .leading : .trailing))
+            }
+        }
+        .gesture(
+            DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                .onChanged { value in
+                    let from = base ?? start()
+                    base = from
+                    drag(from, value.translation)
+                }
+                .onEnded { _ in base = nil }
+        )
+        .onTapGesture(count: 2) { reset() }
+        .tip(tip)
     }
 }

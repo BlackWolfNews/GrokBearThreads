@@ -539,6 +539,11 @@ final class AppModel {
     /// (SlashPalette.swift), for the composer's palette.
     var slashCommands: [String: [SlashCommand]] = [:]
     @ObservationIgnored var slashFetches: [String: Task<Void, Never>] = [:]
+    /// The sizes Mike dragged the palette and its columns to, kept for
+    /// next time.
+    var slashPaletteLayout: SlashPalette.Layout = (UserDefaults.standard.data(forKey: "slashPaletteLayout")).flatMap { try? JSONDecoder().decode(SlashPalette.Layout.self, from: $0) } ?? SlashPalette.Layout() {
+        didSet { UserDefaults.standard.set(try? JSONEncoder().encode(slashPaletteLayout), forKey: "slashPaletteLayout") }
+    }
     /// The commands picked from the palette lately, newest first.
     var recentSlashCommands: [String] = UserDefaults.standard.stringArray(forKey: "recentSlashCommands") ?? [] {
         didSet { UserDefaults.standard.set(recentSlashCommands, forKey: "recentSlashCommands") }

@@ -24,6 +24,8 @@ struct ComposerView: View {
     @State private var importing = 0
     @State private var handle = ComposerHandle()
     @State private var palette = PaletteState()
+    /// The pane's width (paletteWindow), from the frame round the box.
+    @State private var paneWidth: CGFloat = 0
 
     static var cornerRadius: CGFloat { zoomed(20) }
     static var padding: CGFloat { zoomed(14) }
@@ -145,8 +147,13 @@ struct ComposerView: View {
                         palette.closedAt = draft.wrappedValue.text
                         app.preview(path: path, in: thread)
                     } : nil,
-                    height: height
+                    height: height,
+                    layout: Binding(get: { app.slashPaletteLayout }, set: { app.slashPaletteLayout = $0 }),
+                    window: paletteWindow
                 )
+                // A width Mike dragged it to, centred over the box; else the
+                // box's own.
+                .frame(width: app.slashPaletteLayout.width.map { CGFloat(SlashPalette.Layout.width($0, window: paletteWindow.width)) })
                 // Its height is fixed, so lifting it by that sits it just above.
                 .offset(y: -(height + zoomed(8)))
                 .onAppear { app.loadSlashCommands(thread.id) }
@@ -161,6 +168,10 @@ struct ComposerView: View {
         // centred, with the same side insets once the window is narrower.
         .frame(maxWidth: Theme.maxContentWidth)
         .padding(.horizontal, Theme.sideInset)
+        // As wide as the pane, the box still centred in it, so its width
+        // can be read for the palette.
+        .frame(maxWidth: .infinity)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { paneWidth = $0 }
         // At 12 the card looked wedged against the window's rounded bottom
         // corners; Codex and T3 leave about 24.
         .padding(.bottom, zoomed(20))
@@ -194,9 +205,21 @@ struct ComposerView: View {
 
     /// About half the window: read when the palette draws, which it does
     /// with each key, so a resized window is caught on the next one.
+    /// One he dragged it to, kept to what this window has room for.
     private var paletteHeight: CGFloat {
-        let window = handle.textView?.window?.contentLayoutRect.height ?? NSApp.keyWindow?.contentLayoutRect.height ?? 600
+        let window = paletteWindow.height
+        if let chosen = app.slashPaletteLayout.height { return SlashPalette.Layout.height(chosen, window: window) }
         return SlashPalette.height(window: window, least: zoomed(300), most: zoomed(560))
+    }
+
+    /// The window's height, and the width of the pane the box is in: a
+    /// palette dragged wider than the pane is cut off at its edges, so the
+    /// pane's width (less a margin) is the most it can be.
+    private var paletteWindow: CGSize {
+        let size = handle.textView?.window?.contentLayoutRect.size ?? NSApp.keyWindow?.contentLayoutRect.size ?? CGSize(width: 1200, height: 800)
+        // Layout.width keeps 40 clear each side of what it's given.
+        let pane = paneWidth > 0 ? paneWidth : size.width
+        return CGSize(width: pane + 80 - zoomed(16), height: size.height)
     }
 
     /// What /model and /effort would change, as the thread has it now.

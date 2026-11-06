@@ -326,13 +326,16 @@ enum Automation {
         case "point":
             // Real events at a spot in the window, for SwiftUI controls with
             // nothing to find them by: {"cmd":"point","x":956,"y":265} clicks
-            // (points from the window's top left), with "toX" drags there,
+            // (points from the window's top left), with "toX" and "toY" drags there,
             // and "scrollX"/"scrollY" is a wheel, in lines. They go straight
             // to the window, so Mike's pointer stays where it is.
             // {"review": id}: in that review's own window.
             let reviewWindow = (c["review"] as? String).flatMap { id in app.reviewWindows.values.first { $0.session.review.id == id }?.window }
             guard let window = reviewWindow ?? window, let x = c["x"] as? Double, let y = c["y"] as? Double else { return "error point needs x and y" }
             let at = { (px: Double) in NSPoint(x: px, y: window.frame.height - y) }
+            // Anywhere on the way from the start to (toX, toY), `t` from 0 to 1.
+            let endY = (c["toY"] as? Double) ?? y
+            let along = { (t: Double, endX: Double) in NSPoint(x: x + (endX - x) * t, y: window.frame.height - (y + (endY - y) * t)) }
             if c["scrollX"] != nil || c["scrollY"] != nil {
                 let lines = (Int32(c["scrollY"] as? Double ?? 0), Int32(c["scrollX"] as? Double ?? 0))
                 guard let cg = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 2, wheel1: lines.0, wheel2: lines.1, wheel3: 0) else { return "error no event" }
@@ -364,7 +367,7 @@ enum Automation {
             // A text view's mouseDown waits in its own loop for the button to
             // come up, so a click on its words (a link, a chip) has the up
             // queued first, or the main thread sits there for good.
-            if end == x, window.contentView?.superview?.hitTest(at(x)) is NSTextView, let up = mouse(.leftMouseUp, at(x)) {
+            if end == x, endY == y, window.contentView?.superview?.hitTest(at(x)) is NSTextView, let up = mouse(.leftMouseUp, at(x)) {
                 NSApp.postEvent(up, atStart: false)
                 window.sendEvent(down)
                 try? await Task.sleep(for: .milliseconds(350))
@@ -372,13 +375,13 @@ enum Automation {
             }
             window.sendEvent(down)
             try? await Task.sleep(for: .milliseconds(40))
-            if end != x {
+            if end != x || endY != y {
                 for step in 1...8 {
-                    if let drag = mouse(.leftMouseDragged, at(x + (end - x) * Double(step) / 8)) { window.sendEvent(drag) }
+                    if let drag = mouse(.leftMouseDragged, along(Double(step) / 8, end)) { window.sendEvent(drag) }
                     try? await Task.sleep(for: .milliseconds(16))
                 }
             }
-            if let up = mouse(.leftMouseUp, at(end)) { window.sendEvent(up) }
+            if let up = mouse(.leftMouseUp, along(1, end)) { window.sendEvent(up) }
             try? await Task.sleep(for: .milliseconds(350))
             return "ok"
         case "mouse-button":
