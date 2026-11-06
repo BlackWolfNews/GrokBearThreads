@@ -218,14 +218,14 @@ you click. It works for folders on your other Macs too, though only this
 Mac's files have thumbnails and Quick Look.
 
 An HTML file opens in the side pane as a static page, with the styles,
-pictures, fonts and media beside it that its markup names. Its scripts
-don't run, and script files, SVGs and other pages beside it don't load,
-so a mockup made of several HTML or JS files shows only its main page,
-and one that draws itself with JavaScript shows what its HTML has
-without it. It's kept off the internet too, so a font or picture from
-the web is left out, and its links don't open. A page with scripts gets
-a line over it saying they're off, with Open in Browser to see it
-working.
+pictures, fonts and media beside it that its markup names. Script files,
+SVGs and other pages beside it don't load, so a mockup made of several
+HTML or JS files shows only its main page. It's kept off the internet
+too, so a font or picture from the web is left out, and its links don't
+open. A page with scripts of its own opens with them off and a bar over
+it: Run them turns them on for that page, still kept off the internet,
+until the file changes, when it asks again. Open the file in your
+browser to see it with everything.
 
 To share a file somewhere else, drag it out of the app: a file link in a
 reply, a picture in the transcript, a file in Highlights, a row in a folder

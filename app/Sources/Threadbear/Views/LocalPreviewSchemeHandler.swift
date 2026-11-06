@@ -6,7 +6,10 @@ import WebKit
 /// answering only for what LocalPreviewSite allows: the page and the assets
 /// it names in its folder. A `file://` load with read access to the folder
 /// let a page read any file beside it (Daybreak finding 6). The page's own
-/// scripts are off (WebPanelPool), so what it names can be shown, not read.
+/// scripts are off (WebPanelPool), so what it names can be shown, not read,
+/// until Mike chooses Run them for those exact bytes (PreviewScriptConsent).
+/// Then its scripts can read what it names, and everything below is what
+/// keeps that on the screen.
 ///
 /// Each load gets a new token, so each is its own origin with a fresh list
 /// of what it may read, and two previews can't read each other's files.
@@ -64,19 +67,28 @@ final class LocalPreviewSchemeHandler: NSObject, WKURLSchemeHandler {
     }
 
     /// The address to load `file` at, or nil for a file that can't be a page.
-    func address(for file: URL) -> URL? {
-        guard let site = LocalPreviewSite(file: file) else { return nil }
-        let key = file.standardizedFileURL.path
-        if let old = tokens[key] { sites[old] = nil }
+    /// With `pageDigest`, for a view running the page's scripts: the page is
+    /// served only while its bytes match, and only to `owner`, so a script
+    /// can't reach a site through another view's token.
+    func address(for file: URL, pageDigest: String? = nil, owner: WKWebView? = nil) -> URL? {
+        guard let site = LocalPreviewSite(file: file, pageDigest: pageDigest) else { return nil }
+        // The static view and a scripts-on one of the same file are kept
+        // apart, so loading one doesn't take the other's token away.
+        let key = file.standardizedFileURL.path + "\n" + (pageDigest ?? "")
+        if let old = tokens[key] { sites[old] = nil; owners[old] = nil }
         let token = UUID().uuidString.lowercased()
         tokens[key] = token
         sites[token] = site
+        if let owner { owners[token] = ObjectIdentifier(owner) }
         var c = URLComponents()
         c.scheme = Self.scheme
         c.host = token
         c.path = "/" + site.page
         return c.url
     }
+
+    /// The one view each scripts-on site answers.
+    private var owners: [String: ObjectIdentifier] = [:]
 
     /// For tests: answers a request the way WebKit would see it answered.
     func respond(to url: URL) -> (response: HTTPURLResponse, data: Data) {
@@ -95,6 +107,10 @@ final class LocalPreviewSchemeHandler: NSObject, WKURLSchemeHandler {
     func webView(_ webView: WKWebView, start task: WKURLSchemeTask) {
         guard let url = task.request.url else {
             task.didFailWithError(URLError(.badURL))
+            return
+        }
+        if let token = url.host, let owner = owners[token], owner != ObjectIdentifier(webView) {
+            task.didFailWithError(URLError(.noPermissionsToReadFile))
             return
         }
         let (response, data) = respond(to: url)

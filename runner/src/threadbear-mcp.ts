@@ -569,7 +569,7 @@ export function buildThreadbearTools(
         const pinned = `Pinned (${id})${input.show ? ', and shown in the side pane' : ''}.`;
         // Older runners (a handover) don't say; then nothing's added.
         return scriptsOff
-          ? `${pinned} The side pane shows local pages with their scripts off, so anything this page draws with JavaScript will be blank there. If it needs them, copy the page and only the files it uses into a new empty folder, serve that on 127.0.0.1 and pin the URL. Never serve the folder it's in: its scripts could then read anything there, like a .env.`
+          ? `${pinned} This page has scripts. The side pane opens it with them off, and the user has to choose Run them there before anything it draws with JavaScript shows (and again whenever the file changes), so mention that.`
           : pinned;
       }),
     ),

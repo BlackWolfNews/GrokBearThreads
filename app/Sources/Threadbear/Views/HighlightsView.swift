@@ -658,43 +658,51 @@ struct PreviewBody: View {
     }
 }
 
-/// A local HTML file in the pane. Its scripts never run here (WebPanelPool,
+/// A local HTML file in the pane. Its scripts are off (WebPanelPool,
 /// Daybreak finding 6), so a page that draws itself would show as empty
-/// boxes with nothing to say why: one with scripts gets a line over it
-/// saying so, and a button opening it in the browser, where they run, as a
-/// double-click in the Finder would (6 Nov 2026).
+/// boxes with nothing to say why. One with scripts gets a bar over it
+/// asking: Run them reloads it in a view of its own with JavaScript on and
+/// every other guard kept, for those exact bytes only, remembered until the
+/// file changes (PreviewScriptConsent). Mike asked for it on 6 Nov 2026.
 struct LocalPagePreview: View {
-    @Environment(AppModel.self) private var app
     let url: URL
     let opened: Int
-    @State private var scripted: Bool?
+    @State private var scan: (scripts: Bool, digest: String)?
+    @State private var allowed = false
+
+    static let explanation = "Pages open here with their scripts off, as a script could read the files the page names. Run them turns them on for this version of the page, still with no network and nothing read but what it names. If the file changes, you'll be asked again."
 
     var body: some View {
         VStack(spacing: 0) {
-            if scripted == true {
-                HStack(spacing: zoomed(8)) {
-                    Text("Scripts don't run here, so parts may be blank.")
+            if let scan, scan.scripts, !allowed {
+                HStack(spacing: zoomed(6)) {
+                    Text("This page has scripts")
                         .font(.system(size: TypeScale.small))
                         .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    InfoTip(Self.explanation)
                     Spacer(minLength: 0)
-                    Button("Open in Browser") { app.openExternally(url) }
-                        .controlSize(.small)
-                        .tip("Open the page in your browser, where its scripts run")
+                    Button("Run them") {
+                        PreviewScriptConsent().allow(path: url.path, digest: scan.digest)
+                        allowed = true
+                    }
+                    .controlSize(.small)
+                    .tip("Reload this page with its scripts on")
                 }
                 .padding(.horizontal, zoomed(10))
                 .padding(.vertical, zoomed(6))
                 Divider()
             }
-            WebPanel(url: url)
+            WebPanel(url: url, scriptsFor: allowed ? scan?.digest : nil)
         }
         .task(id: "\(url) \(opened)") {
             let path = url.path
             let found = await Task.detached(priority: .utility) {
-                LocalPreviewSite.fileHasScripts(atPath: path)
+                LocalPreviewSite.scan(atPath: path)
             }.value
             // A scan for the page before can finish after this one's.
-            if !Task.isCancelled { scripted = found }
+            if Task.isCancelled { return }
+            scan = found
+            allowed = found.map { $0.scripts && PreviewScriptConsent().allows(path: path, digest: $0.digest) } ?? false
         }
     }
 }

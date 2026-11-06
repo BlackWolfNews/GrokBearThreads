@@ -209,7 +209,9 @@ outside it. Its web view
 blocks every other load (a WebKit content rule list, which WebKit keeps
 in its own store under `~/Library/WebKit`), sends any connection it would
 still make to a closed port on this Mac (127.0.0.1:9) so no name is
-looked up, runs none of the page's scripts, has WebRTC off, and doesn't
+looked up, runs none of the page's scripts (unless you choose Run them
+over that page, which turns them on for that version of the file only,
+remembered by its SHA-256 in the app's settings), has WebRTC off, and doesn't
 follow links away from it, submit
 forms, open windows or download
 (`app/Sources/Threadbear/Views/LocalPreviewSchemeHandler.swift`,

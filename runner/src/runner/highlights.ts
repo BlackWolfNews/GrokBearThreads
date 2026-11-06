@@ -135,9 +135,9 @@ export const highlightsPart = {
 
 export type HighlightsPart = RunnerPart<typeof highlightsPart>;
 
-// A local page the Mac app previews runs none of its own scripts (Daybreak
-// finding 6), so a page that draws itself shows as empty boxes there. `pin`
-// tells the agent (6 Nov 2026). The app's note over the page uses the same
+// A local page the Mac app previews runs none of its own scripts until Mike
+// chooses Run them over it (Daybreak finding 6), so a page that draws itself
+// shows as empty boxes at first. `pin` tells the agent (6 Nov 2026). The app's note over the page uses the same
 // test (LocalPreviewSite.hasScripts): a `<script`, an `on...=` handler or a
 // `javascript:` link. Opened without blocking and checked on the open file,
 // so a FIFO swapped in after pin's stat can't hang the runner (Codex review).

@@ -506,6 +506,8 @@ struct PaneNote: View {
 /// view's container, so leaving and coming back finds the page as it was.
 struct WebPanel: NSViewRepresentable {
     let url: URL
+    /// A local page's digest Mike let run its scripts (LocalPagePreview).
+    var scriptsFor: String?
     @Environment(\.isDockGhost) private var isGhost
 
     func makeNSView(context: Context) -> WebPanelContainer { WebPanelContainer() }
@@ -513,7 +515,7 @@ struct WebPanel: NSViewRepresentable {
     func updateNSView(_ container: WebPanelContainer, context: Context) {
         // The dock's drag ghost would take the page out of its panel.
         if isGhost { return }
-        container.show(WebPanelPool.shared.webView(for: url))
+        container.show(WebPanelPool.shared.webView(for: url, scriptsFor: scriptsFor))
     }
 }
 
@@ -809,10 +811,14 @@ final class WebPanelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUI
         URL(string: "https://dashboard.convex.dev/d/\(selectedConvex(configured))")
     }
 
-    func webView(for url: URL) -> WKWebView {
-        if let existing = views[url] {
-            order.removeAll { $0 == url }
-            order.append(url)
+    /// `scriptsFor`: a local page's digest Mike has let run its scripts
+    /// (PreviewScriptConsent). That view is its own, kept apart from the
+    /// static one, with JavaScript on and every other guard the same.
+    func webView(for url: URL, scriptsFor digest: String? = nil) -> WKWebView {
+        let slot = digest.map { Self.scriptsSlot(url, $0) } ?? url
+        if let existing = views[slot] {
+            order.removeAll { $0 == slot }
+            order.append(slot)
             return existing
         }
         let config = WKWebViewConfiguration()
@@ -838,8 +844,11 @@ final class WebPanelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUI
             // Whatever its markup names it can show, but no script can read
             // those bytes back (verify-fix: `<a href="private.png">` let a
             // page's script fetch the file). Other panels keep JavaScript.
-            // The app's own scripts (the link guard) still run.
-            config.defaultWebpagePreferences.allowsContentJavaScript = false
+            // The app's own scripts (the link guard) still run. Once Mike
+            // lets this page's bytes run (Run them), its own view has them
+            // on: a script can then read what the page names, and the
+            // guards here and in LocalPreviewSchemeHandler keep it in the pane.
+            config.defaultWebpagePreferences.allowsContentJavaScript = digest != nil
             // WebRTC goes round proxies and content rules alike. WebKit only
             // offers the switch privately; KVC finds `_setPeerConnectionEnabled:`.
             if config.preferences.responds(to: NSSelectorFromString("_setPeerConnectionEnabled:")) {
@@ -849,7 +858,7 @@ final class WebPanelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUI
             config.websiteDataStore = .default()
         }
         let view = makeView(config)
-        keep(view, as: url)
+        keep(view, as: slot)
         if url.isFileURL {
             // No load until the rule list blocking the network is on it.
             withPreviewRules { [weak self, weak view] rules in
@@ -860,7 +869,7 @@ final class WebPanelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUI
                     return
                 }
                 view.configuration.userContentController.add(rules)
-                self.load(url, in: view)
+                self.load(url, in: view, scriptsFor: digest)
             }
         } else {
             load(url, in: view)
@@ -944,6 +953,17 @@ final class WebPanelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUI
         """
     }
 
+    /// The pool's key for a page's scripts-on view, one per digest: not a
+    /// page anyone loads, and not the static view's key, so reloading that
+    /// (reloadIfLoaded) never reaches this one.
+    private static func scriptsSlot(_ url: URL, _ digest: String) -> URL {
+        var c = URLComponents()
+        c.scheme = "threadbear-scripts"
+        c.host = digest
+        c.path = url.standardizedFileURL.path
+        return c.url!
+    }
+
     /// The pool's key for a deployment's view: not a page anyone loads.
     private static func convexSlot(_ deployment: String) -> URL {
         URL(string: "threadbear-convex:\(deployment)")!
@@ -1023,9 +1043,9 @@ final class WebPanelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUI
     /// styles, scripts and pictures it names in its folder, nothing else
     /// beside it: it was loaded with read access to the whole folder, so a
     /// project's page could read a `.env` next to it (Daybreak finding 6).
-    private func load(_ url: URL, in view: WKWebView) {
+    private func load(_ url: URL, in view: WKWebView, scriptsFor digest: String? = nil) {
         if url.isFileURL {
-            if let page = previews.address(for: url) { view.load(URLRequest(url: page)) }
+            if let page = previews.address(for: url, pageDigest: digest, owner: digest == nil ? nil : view) { view.load(URLRequest(url: page)) }
         } else {
             view.load(URLRequest(url: url))
         }

@@ -197,13 +197,41 @@ final class LocalPreviewSiteTests: XCTestCase {
         XCTAssertTrue(LocalPreviewSite.hasScripts(Data("<a href=\"javascript:go()\">go</a>".utf8)))
     }
 
-    func testFileHasScriptsNeverBlocksOnAFifo() throws {
+    func testScanNeverBlocksOnAFifo() throws {
         let page = dir.appendingPathComponent("drawn.html")
         try Data("<script>draw()</script>".utf8).write(to: page)
-        XCTAssertTrue(LocalPreviewSite.fileHasScripts(atPath: page.path))
+        let scan = try XCTUnwrap(LocalPreviewSite.scan(atPath: page.path))
+        XCTAssertTrue(scan.scripts)
+        XCTAssertEqual(scan.digest, LocalPreviewSite.digest(Data("<script>draw()</script>".utf8)))
         let fifo = dir.appendingPathComponent("pipe.html").path
         XCTAssertEqual(mkfifo(fifo, 0o600), 0)
-        XCTAssertFalse(LocalPreviewSite.fileHasScripts(atPath: fifo), "returns at once, with no writer")
-        XCTAssertFalse(LocalPreviewSite.fileHasScripts(atPath: dir.appendingPathComponent("gone.html").path))
+        XCTAssertNil(LocalPreviewSite.scan(atPath: fifo), "returns at once, with no writer")
+        XCTAssertNil(LocalPreviewSite.scan(atPath: dir.appendingPathComponent("gone.html").path))
+    }
+
+    /// A view running the page's scripts is served the page only while its
+    /// bytes are the ones Mike allowed: rewritten after Run them, nothing.
+    func testAPageWithADigestIsServedOnlyWhileItMatches() throws {
+        let page = dir.appendingPathComponent("drawn.html")
+        try Data("<script>draw()</script>".utf8).write(to: page)
+        let digest = LocalPreviewSite.digest(Data("<script>draw()</script>".utf8))
+        let site = try XCTUnwrap(LocalPreviewSite(file: page, pageDigest: digest))
+        XCTAssertNotNil(site.serve("drawn.html"))
+        try Data("<script>steal()</script>".utf8).write(to: page)
+        XCTAssertNil(site.serve("drawn.html"), "rewritten: not what was allowed")
+        XCTAssertNil(LocalPreviewSite(file: page, pageDigest: digest)?.serve("drawn.html"))
+        XCTAssertNotNil(LocalPreviewSite(file: page)?.serve("drawn.html"), "the static view still shows it")
+    }
+
+    func testConsentIsForThoseBytesOfThatFile() {
+        let defaults = UserDefaults(suiteName: "LocalPreviewSiteTests.\(UUID().uuidString)")!
+        let consent = PreviewScriptConsent(defaults: defaults)
+        XCTAssertFalse(consent.allows(path: "/a/page.html", digest: "1"))
+        consent.allow(path: "/a/page.html", digest: "1")
+        XCTAssertTrue(consent.allows(path: "/a/page.html", digest: "1"))
+        XCTAssertFalse(consent.allows(path: "/a/page.html", digest: "2"), "changed")
+        XCTAssertFalse(consent.allows(path: "/b/page.html", digest: "1"), "another file with the same bytes")
+        consent.allow(path: "/a/page.html", digest: "2")
+        XCTAssertFalse(consent.allows(path: "/a/page.html", digest: "1"), "one version per file")
     }
 }

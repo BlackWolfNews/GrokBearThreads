@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import UniformTypeIdentifiers
 
@@ -56,7 +57,12 @@ public final class LocalPreviewSite: @unchecked Sendable {
 
     /// The folder is the file's own (its symlinks followed); the page itself
     /// is held to the same rules as everything else when it's served.
-    public init?(file: URL) {
+    /// `pageDigest`: the page's bytes Mike allowed to run scripts (SHA-256,
+    /// hex). Its view runs JavaScript, so the page is served only while its
+    /// bytes still match: an agent rewriting it after the click, or the
+    /// page reloading itself after a rewrite, gets nothing (6 Nov 2026).
+    public init?(file: URL, pageDigest: String? = nil) {
+        self.pageDigest = pageDigest
         let file = file.standardizedFileURL
         let page = file.lastPathComponent
         guard Self.pageExtensions.contains((page as NSString).pathExtension.lowercased()), !page.hasPrefix(".") else { return nil }
@@ -70,6 +76,7 @@ public final class LocalPreviewSite: @unchecked Sendable {
     }
 
     private let rootFD: Int32
+    public let pageDigest: String?
 
     deinit { close(rootFD) }
 
@@ -83,6 +90,7 @@ public final class LocalPreviewSite: @unchecked Sendable {
         // The page itself, or a passive asset something served has named.
         guard relative == page || Self.assetExtensions.contains(ext) && lock.withLock({ allowed.contains(relative) }) else { return nil }
         guard let data = Self.read(parts, under: rootFD, maxBytes: Self.maxBytes) else { return nil }
+        if relative == page, let pageDigest, Self.digest(data) != pageDigest { return nil }
         if Self.scannedExtensions.contains(ext), let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) {
             let dir = (relative as NSString).deletingLastPathComponent
             let found = (ext == "css" ? Self.cssReferences(in: text) : Self.htmlReferences(in: text)).compactMap { Self.resolve($0, from: dir) }
@@ -198,13 +206,14 @@ public final class LocalPreviewSite: @unchecked Sendable {
         return stack.joined(separator: "/")
     }
 
-    /// Whether a page has scripts of its own, which the preview never runs:
-    /// the pane says so (with a way to open it in the browser) rather than
-    /// showing a page that draws itself as blank boxes (6 Nov 2026). The
-    /// runner's `pin` tool tells the agent the same (runner/src/runner/highlights.ts).
-    /// A `<script`, an `on...=` handler in a tag or a `javascript:` link anywhere
-    /// counts, even in a comment: saying so wrongly costs a line, missing
-    /// one looks broken. The runner's test is the same pattern.
+    /// Whether a page has scripts of its own, which the preview runs only
+    /// once Mike says so for those exact bytes (PreviewScriptConsent): the
+    /// pane asks rather than showing a page that draws itself as blank
+    /// boxes (6 Nov 2026). The runner's `pin` tool tells the agent the same
+    /// (runner/src/runner/highlights.ts). A `<script`, an `on...=` handler
+    /// in a tag or a `javascript:` link anywhere counts, even in a comment:
+    /// asking wrongly costs a bar, missing one looks broken. The runner's
+    /// test is the same pattern.
     public static func hasScripts(_ html: Data) -> Bool {
         String(decoding: html.prefix(scriptScanBytes), as: UTF8.self)
             .range(of: scriptPattern, options: [.regularExpression, .caseInsensitive]) != nil
@@ -212,19 +221,25 @@ public final class LocalPreviewSite: @unchecked Sendable {
 
     static let scriptPattern = #"<script|<[^>]*\son[a-z]+\s*=|javascript:"#
 
-    /// `hasScripts` for a file: false for anything but a regular file.
-    /// Opened without blocking and checked on the open file, so a FIFO
-    /// named `.html` (or one swapped in) can't hang the caller (Codex review).
-    public static func fileHasScripts(atPath path: String) -> Bool {
-        let fd = open(path, O_RDONLY | O_NONBLOCK)
-        guard fd >= 0 else { return false }
-        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
-        var info = stat()
-        guard fstat(fd, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG,
-              let data = try? handle.read(upToCount: scriptScanBytes) else { return false }
-        return hasScripts(data)
-    }
-
     /// How much of a page `hasScripts` reads.
     public static let scriptScanBytes = 4 * 1024 * 1024
+
+    /// SHA-256 of a page's bytes, hex: what a consent to run scripts is for.
+    public static func digest(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// A page file read for the pane's bar: whether it has scripts, and the
+    /// digest of what was read. Nil for anything but a regular file up to
+    /// `maxBytes`. Opened without blocking and checked on the open file, so
+    /// a FIFO named `.html` (or one swapped in) can't hang the caller.
+    public static func scan(atPath path: String) -> (scripts: Bool, digest: String)? {
+        let fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC)
+        guard fd >= 0 else { return nil }
+        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        var info = stat()
+        guard fstat(fd, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG, info.st_size <= maxBytes,
+              let data = try? handle.readToEnd() ?? Data(), data.count <= maxBytes else { return nil }
+        return (hasScripts(data), digest(data))
+    }
 }
