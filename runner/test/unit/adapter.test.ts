@@ -7,7 +7,7 @@ import type { SessionSink, AdapterOutput, ToolApprovalRequest } from '../../src/
 import { ProcessRegistry } from '../../src/proc.ts';
 import { nullLogger } from '../../src/log.ts';
 import { tmpDir } from '../helpers/fakes.ts';
-import { END_TURN_FULL_NAME, END_TURN_NUDGE, ONE_REPLY_END_TURN_NUDGE, ONE_REPLY_WRITE_NUDGE, oneReplyAlreadyWritten } from '../../src/needs.ts';
+import { END_TURN_FULL_NAME, END_TURN_NUDGE, ONE_REPLY_END_TURN_NUDGE, ONE_REPLY_WRITE_NUDGE, oneReplyAccepted, oneReplyAlreadyWritten } from '../../src/needs.ts';
 
 test('"Always allow" keeps only allow rules, scoped to the session', () => {
   const { updates, rules } = alwaysAllow('Bash', [
@@ -189,6 +189,29 @@ test('Stop hook: says when it sent a turn back for end_turn, so end_turn knows n
   await state.options.hooks.PostToolUse[0].hooks[0]({ hook_event_name: 'PostToolUse', tool_name: END_TURN_FULL_NAME });
   assert.equal((await stop({ hook_event_name: 'Stop', stop_hook_active: false })).reason, ONE_REPLY_WRITE_NUDGE);
   assert.equal(nudges(), 1);
+  state.close!();
+});
+
+// Thread 1b770c6a (5 Nov 2026): the context was compacted straight after an
+// accepted end_turn, and the summary didn't say a reply was owed, so the agent
+// went back to work and the card's launcher plan was never written.
+test('SessionStart after a compaction reminds the agent of a reply it owes, with the card', async () => {
+  const { state } = start([], {}, { mcpServersFor: () => ({ threadbear: { type: 'sdk', name: 'threadbear' } }), oneReply: () => true });
+  const compacted = () => state.options.hooks.SessionStart[0].hooks[0]({ hook_event_name: 'SessionStart', source: 'compact' });
+  // Nothing owed yet.
+  assert.deepEqual(await compacted(), {});
+  await state.frame!({ type: 'assistant', session_id: 's', message: { id: 'a', role: 'assistant', content: [{ type: 'tool_use', id: 'e1', name: END_TURN_FULL_NAME, input: { needs: 'you', asks: [{ question: 'How should I start the Convex OS launcher?' }] } }] } });
+  await state.options.hooks.PostToolUse[0].hooks[0]({ hook_event_name: 'PostToolUse', tool_name: END_TURN_FULL_NAME });
+  await state.frame!({ type: 'user', session_id: 's', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'e1', content: oneReplyAccepted(true) }] } });
+  const r = await compacted();
+  assert.equal(r.hookSpecificOutput.hookEventName, 'SessionStart');
+  assert.match(r.hookSpecificOutput.additionalContext, /not yet written your reply/);
+  assert.match(r.hookSpecificOutput.additionalContext, /How should I start the Convex OS launcher\?/);
+  // Only a compaction: a resume or a fresh start says nothing.
+  assert.deepEqual(await state.options.hooks.SessionStart[0].hooks[0]({ hook_event_name: 'SessionStart', source: 'resume' }), {});
+  // Once the reply is written, nothing is owed.
+  await state.frame!({ type: 'assistant', session_id: 's', message: { id: 'b', role: 'assistant', content: [{ type: 'text', text: 'Here is the plan in full.' }] } });
+  assert.deepEqual(await compacted(), {});
   state.close!();
 });
 

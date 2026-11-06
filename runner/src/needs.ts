@@ -649,6 +649,19 @@ export const ONE_REPLY_WRITE_NUDGE =
   'Write your reply now, as ordinary text: the user sees only what you write after end_turn, with the card under it. ' +
   "Don't repeat the questions or answers on the card.";
 
+// What a compaction between an accepted one-reply end_turn and its reply
+// adds after the summary (adapter.ts, onCompact), with the card's
+// questions, as the summary may not have them.
+export function owedReplyAfterCompact(questions: string[]): string {
+  const card = questions.length ? ` The card under it asks: ${questions.map((q) => `"${q}"`).join(', ')}.` : '';
+  return (
+    'Before this conversation was compacted you called end_turn, it was accepted, and you had not yet written your reply.' +
+    card +
+    " Write the reply now, as ordinary text, before any tool call: it's the only text the user sees from that turn. " +
+    'Nothing you wrote before end_turn reached them, so whatever the card is about (a plan, a draft, the options) goes in it in full. Then stop.'
+  );
+}
+
 // A reply that ends in a "What I need from you" section, or a "Nothing
 // needed from you" line, comes apart into the reply above it and what the
 // section says (needsFromText). With one reply, Sonnet wrote the section

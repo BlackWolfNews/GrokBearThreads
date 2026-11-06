@@ -16,7 +16,7 @@ import { placePictures } from '../../pictures.ts';
 import { toolTitle, truncateInput } from '../../tools.ts';
 import { RUNNER_VERSION } from '../../config.ts';
 import { stripModelSuffix } from '../../accounts.ts';
-import { END_TURN_FULL_NAME, END_TURN_NUDGE, endTurnMessageStands, ONE_REPLY_END_TURN_NUDGE, ONE_REPLY_WRITE_NUDGE } from '../../needs.ts';
+import { END_TURN_FULL_NAME, END_TURN_NUDGE, endTurnMessageStands, ONE_REPLY_END_TURN_NUDGE, ONE_REPLY_WRITE_NUDGE, owedReplyAfterCompact } from '../../needs.ts';
 
 // Variables a parent Claude Code session sets for its own children. If the
 // runner was started from inside one (tests, a terminal in T3), they would
@@ -281,6 +281,9 @@ class ClaudeSession implements AgentSession {
   private messageStands = false;
   private pastEndTurn = false;
   private endTurnCall?: string;
+  // The card's questions, from the call, for a compaction to be reminded of
+  // (onCompact).
+  private endTurnQuestions: string[] = [];
 
   constructor(opts: StartSessionOptions, sink: SessionSink, deps: ClaudeAdapterDeps) {
     this.opts = opts;
@@ -325,6 +328,7 @@ class ClaudeSession implements AgentSession {
       hooks: {
         Stop: [{ hooks: [(input) => this.onStop(input)] }],
         PostToolUse: [{ matcher: END_TURN_FULL_NAME, hooks: [async (input) => this.onEndTurn(input)] }],
+        SessionStart: [{ hooks: [async (input) => this.onCompact(input)] }],
       },
       abortController: this.abort,
       spawnClaudeCodeProcess: groupSpawner(deps.registry, deps.log, (line) => this.stderr(line), opts.threadId),
@@ -368,12 +372,27 @@ class ClaudeSession implements AgentSession {
     return { decision: 'block', reason: this.oneReply ? ONE_REPLY_END_TURN_NUDGE : END_TURN_NUDGE };
   }
 
+  // A compaction between an accepted end_turn and its reply. On 5 Nov 2026
+  // (thread 1b770c6a) the context filled up just as one-reply end_turn
+  // answered "Now write your reply"; the summary that replaced the
+  // conversation didn't say a reply was owed, so the agent went back to
+  // work and never wrote the launcher plan its card asked about. Nor did
+  // the Stop hook ask, as status lines written while working counted as
+  // words after end_turn. SessionStart runs with source "compact" right
+  // after a compaction, and what it adds is the first thing the agent reads.
+  private onCompact(input: HookInput): { hookSpecificOutput?: { hookEventName: 'SessionStart'; additionalContext: string } } {
+    if ((input as { source?: string }).source !== 'compact') return {};
+    if (!this.oneReply || !this.pastEndTurn || this.wroteAfterEnd || this.messageStands) return {};
+    return { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: owedReplyAfterCompact(this.endTurnQuestions) } };
+  }
+
   private forgetEndTurn(): void {
     this.endTurnTaken = false;
     this.wroteAfterEnd = false;
     this.messageStands = false;
     this.pastEndTurn = false;
     this.endTurnCall = undefined;
+    this.endTurnQuestions = [];
   }
 
   private onEndTurn(input: HookInput): Record<string, never> {
@@ -406,7 +425,11 @@ class ClaudeSession implements AgentSession {
           // ahead of the call comes through.
           if (out.kind === 'event') {
             const ev = out.event;
-            if (ev.type === 'tool.call' && ev.name === END_TURN_FULL_NAME) this.endTurnCall = ev.itemId;
+            if (ev.type === 'tool.call' && ev.name === END_TURN_FULL_NAME) {
+              this.endTurnCall = ev.itemId;
+              const asks = Array.isArray(ev.input.asks) ? (ev.input.asks as { question?: unknown; action?: unknown }[]) : [];
+              this.endTurnQuestions = asks.map((a) => String(a?.question ?? a?.action ?? '')).filter(Boolean);
+            }
             else if (ev.type === 'tool.result' && ev.itemId === this.endTurnCall && ev.ok) {
               this.pastEndTurn = true;
               this.messageStands = endTurnMessageStands(ev);

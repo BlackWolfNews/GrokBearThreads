@@ -1827,7 +1827,13 @@ the thread if a sub-agent stalls, so an ask can't stay hidden for good.
   too and are to be written again in full (`WROTE_FIRST`): on 5 Nov 2026
   Opus twice wrote a Slack draft or three designs as narration before
   `end_turn`, then replied "Nothing has been sent yet." under a card
-  asking about them (thread 1d9689e6). The app shows the final
+  asking about them (thread 1d9689e6). A compaction between an accepted
+  `end_turn` and its reply loses the reply too, as the summary doesn't say
+  one is owed (thread 1b770c6a, 5 Nov 2026: the agent went back to work
+  and the launcher plan its card asked about was never written), so the
+  adapter's `SessionStart` hook, run with source `compact`, adds a reminder
+  with the card's questions when no words have followed `end_turn` yet
+  (`owedReplyAfterCompact`). The app shows the final
   text as the turn's reply whatever else the turn wrote. An ask's
   `question` is its `action` (no why), and its answers' labels are
   `options`, their `does` notes `optionNotes` in the same order ("" for
