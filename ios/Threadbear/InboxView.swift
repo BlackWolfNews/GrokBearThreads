@@ -338,6 +338,7 @@ struct InboxView: View {
             if thread.unread || thread.needsYou {
                 Button { Task { await perform(thread, .markSeen) } } label: { Label("Mark as read", systemImage: "envelope.open") }
             }
+            Button { UIPasteboard.general.string = thread.threadId } label: { Label("Copy Thread ID", systemImage: "number") }
         }
     }
 

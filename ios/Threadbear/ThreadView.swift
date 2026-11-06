@@ -351,6 +351,11 @@ struct ThreadView: View {
                     }
                 }
                 Section {
+                    // To point another thread at this one: pasted into a
+                    // message here or on the Mac, it goes in as a link to it.
+                    Button { UIPasteboard.general.string = thread.threadId } label: { Label("Copy Thread ID", systemImage: "number") }
+                }
+                Section {
                     Label(thread.cwd, systemImage: "folder")
                     Label([thread.accountId, thread.model].compactMap { $0 }.joined(separator: " · "), systemImage: "person.crop.circle")
                     if let cost = thread.costUsd, cost > 0 {

@@ -41,7 +41,7 @@ struct NewThreadView: View {
                 Section {
                     PastableTextField(text: $text, placeholder: "What should it do?", lines: 4...12,
                                       onPasteImages: model.canSendPhotos ? { words.addPasted($0, model: model) } : nil,
-                                      photos: $photos, cursor: cursor)
+                                      photos: $photos, cursor: cursor, threadReference: { model.threadReference(pasted: $0) })
                     HStack {
                         if model.canSendPhotos {
                             PhotoMenu(words: words) {

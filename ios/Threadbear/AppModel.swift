@@ -304,6 +304,16 @@ final class AppModel {
         InboxSections.build(inbox.filter { !archiving.contains($0.threadId) }, now: now, wakes: wakes)
     }
 
+    /// A pasted thread id as the `[title](thread:<id>)` link it goes in as,
+    /// for a thread this phone has a row for (inbox, hibernating, archived),
+    /// or nil to paste the words. Same as the Mac's composer.
+    func threadReference(pasted: String) -> String? {
+        let known = inbox + hibernating + den
+        func title(_ id: String) -> String? { known.first { $0.threadId == id }?.title }
+        guard let id = CardMentions.pastedThreadId(pasted, known: { title($0) != nil }) else { return nil }
+        return CardMentions.threadReference(id: id, title: title(id) ?? "")
+    }
+
     /// Archives a thread, gone from the inbox at once. `leavingThread` is for
     /// its own page, which is popping back to the inbox: the row waits for
     /// the page to clear, then slides off where he can see it go (Mike, 31

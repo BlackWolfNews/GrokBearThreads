@@ -23,6 +23,10 @@ struct PastableTextField: UIViewRepresentable {
     /// Kept up to date with the cursor, and where it goes after the words
     /// change from outside (photos put in).
     var cursor: TextCursor? = nil
+    /// A pasted thread id (Copy thread ID, here or on the Mac) as the
+    /// `[title](thread:<id>)` link it should go in as, or nil to paste the
+    /// words as they are.
+    var threadReference: ((String) -> String?)? = nil
 
     func makeUIView(context: Context) -> PastingTextView {
         let view = PastingTextView()
@@ -56,6 +60,7 @@ struct PastableTextField: UIViewRepresentable {
         view.placeholderLabel.text = placeholder
         view.placeholderLabel.isHidden = !text.isEmpty
         view.onPasteImages = onPasteImages
+        view.threadReference = threadReference
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView view: PastingTextView, context: Context) -> CGSize? {
@@ -109,6 +114,7 @@ struct PastableTextField: UIViewRepresentable {
 
 final class PastingTextView: UITextView {
     var onPasteImages: (([UIImage]) -> Void)?
+    var threadReference: ((String) -> String?)?
     let placeholderLabel = UILabel()
     /// The photos the chips stand for, to draw them again in the other
     /// appearance.
@@ -217,6 +223,12 @@ final class PastingTextView: UITextView {
     }
 
     override func paste(_ sender: Any?) {
+        // A thread's id goes in as a link to it, which the agent can read the
+        // thread from and the bubble draws as a chip, as the Mac does.
+        // insertText goes through the delegate like typing does.
+        if !pastesImages, let words = UIPasteboard.general.string, let reference = threadReference?(words) {
+            return insertText(reference)
+        }
         guard pastesImages, let onPasteImages else { return super.paste(sender) }
         let images = UIPasteboard.general.images ?? []
         if images.isEmpty { return super.paste(sender) }

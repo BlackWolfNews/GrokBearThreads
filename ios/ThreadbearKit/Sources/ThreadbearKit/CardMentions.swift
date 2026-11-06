@@ -28,4 +28,29 @@ public enum CardMentions {
             return Mention(range: match.range, title: title, url: ns.substring(with: match.range(at: 2)))
         }
     }
+
+    /// How a pasted thread id goes into a message: a link the agent can read
+    /// the id from and the bubble draws as a chip with the thread's title.
+    /// The same as the Mac's.
+    public static func threadReference(id: String, title: String) -> String {
+        let words = title.split(whereSeparator: \.isNewline).joined(separator: " ").trimmingCharacters(in: .whitespaces)
+        let name = (words.isEmpty ? "Thread" : words)
+            .replacingOccurrences(of: "[", with: "\\[").replacingOccurrences(of: "]", with: "\\]")
+        return "[\(name)](thread:\(id))"
+    }
+
+    /// The thread a paste names on its own: a bare id ("Copy thread ID" on
+    /// either app), `thread:<id>` or `threadbear://thread/<id>`. Only ids of
+    /// known threads count, so any other UUID pasted stays words. The same
+    /// as the Mac's.
+    public static func pastedThreadId(_ pasted: String, known: (String) -> Bool) -> String? {
+        var text = pasted.trimmingCharacters(in: .whitespacesAndNewlines)
+        for prefix in ["threadbear://thread/", "thread:"] where text.lowercased().hasPrefix(prefix) {
+            text = String(text.dropFirst(prefix.count))
+        }
+        guard !text.isEmpty, text.count <= 64,
+              text.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") }) else { return nil }
+        if known(text) { return text }
+        return known(text.lowercased()) ? text.lowercased() : nil
+    }
 }

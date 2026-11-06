@@ -42,7 +42,7 @@ struct Composer: View {
                 }
                 PastableTextField(text: $text, placeholder: placeholder, lines: 1...6,
                                   onPasteImages: model.canSendPhotos ? { words.addPasted($0, model: model) } : nil,
-                                  photos: $photos, cursor: cursor)
+                                  photos: $photos, cursor: cursor, threadReference: { model.threadReference(pasted: $0) })
                     .padding(.horizontal, 14)
                     .padding(.vertical, 9)
                     .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
