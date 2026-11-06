@@ -101,7 +101,8 @@ File references are where to look.
   `/bin/sh` before each run, as you, for at most a minute. Each keeps a
   state file in `schedule-checks/` in Threadbear's data folder, and
   beside it what the check last printed (`<id>.kept.json`, readable
-  only by you) until a run carrying it has been sent.
+  only by you) until a run carrying it has been sent, and, while a check
+  runs, which runner process is running it (`<id>.running.json`).
 - **Keeping the Mac awake** (`runner/src/keep-awake.ts`, experiment
   `keepAwake`, off by default): while a thread is working and for 3
   minutes after, the runner runs macOS's `/usr/bin/caffeinate -i -w

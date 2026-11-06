@@ -2260,13 +2260,19 @@ the thread if a sub-agent stalls, so an ask can't stay hidden for good.
   "Its check failed (…)" and the output, so a broken check isn't silent.
   Output (either kind) is kept in `<home>/schedule-checks/<id>.kept.json`,
   with the command that printed it, until a run carrying it is sent: a
-  run refused by a restart or handover, a runner stopped mid-check, a
-  failed send or a skip because the last run's thread is still going
-  leaves it, and the next due run sends it without running the check
-  again (a check that keeps state won't print the same news twice; 6
-  Nov 2026, a report lost in a handover). A changed `check` doesn't use
-  the old one's; Run now neither runs the check nor uses it up; deleting
-  the schedule drops it. A backend run is claimed before its check, and recorded after. With
+  run refused by a restart or handover, a repeating schedule's failed
+  send or a skip because the last run's thread is still going leaves it,
+  and the next due run sends it without running the check again (a
+  check that keeps state won't print the same news twice; 6 Nov 2026, a
+  report lost in a handover). A stopping runner waits for checks under
+  way (up to their time limit) before it exits, and while one runs its
+  process is named in `<id>.running.json`, so a next release that finds
+  a live one leaves the run due rather than running the check again. A
+  runner killed outright mid-check can still lose what it printed. A
+  check changed or taken off while it runs has its output dropped;
+  changing the `check` drops what was kept, as does finishing a one-off
+  (even on a failed send) or deleting the schedule. Run now neither runs
+  the check nor uses up what was kept. A backend run is claimed before its check, and recorded after. With
   the experiment off a `check` is kept but not run. Owned rows carry
   `check` from API 51; the agent tools take a `check` only while the
   experiment is on.

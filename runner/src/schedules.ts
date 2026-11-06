@@ -12,7 +12,7 @@
 // disk for when the backend can't be reached), and sends only its own,
 // each run taken with a claim first so it's sent once.
 import { experimentOn } from './experiments.ts';
-import { checkOutcome, dropKeptCheck, keepCheck, MAX_CHECK_CHARS, readKeptCheck, runCheck, type CheckResult } from './schedule-check.ts';
+import { CHECK_TIMEOUT_MS, checkOutcome, checkRunningElsewhere, clearCheckRunning, dropKeptCheck, keepCheck, markCheckRunning, MAX_CHECK_CHARS, readKeptCheck, runCheck, type CheckResult } from './schedule-check.ts';
 import { forbiddenText } from './sync.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -183,6 +183,12 @@ export class Scheduler {
   private check: (p: { command: string; cwd: string; home: string; scheduleId: string }) => Promise<CheckResult>;
   // Local mode's runs waiting on their check, so a tick doesn't start another.
   private checking = new Set<string>();
+  // Every check under way, for settled(): the runner waits for them before
+  // it exits, so what they print is kept for the next one.
+  private inFlight = new Set<Promise<unknown>>();
+  // Kept outputs this process has sent (id and when kept), in case the file
+  // couldn't be deleted: it isn't sent again.
+  private delivered = new Set<string>();
 
   constructor(deps: {
     runner: ScheduleRunner;
@@ -241,6 +247,17 @@ export class Scheduler {
     });
     this.log.info('schedules loaded', { count: this.items.size, mode: this.mode });
     this.tick();
+  }
+
+  /** Resolves once the checks under way have finished (and kept what they printed), or after a check's time limit. */
+  async settled(): Promise<void> {
+    if (!this.inFlight.size) return;
+    let timer: TimerHandle | undefined;
+    const limit = new Promise<void>((r) => {
+      timer = this.clock.setTimeout(r, CHECK_TIMEOUT_MS + 5000);
+    });
+    await Promise.race([Promise.allSettled([...this.inFlight]), limit]);
+    timer?.cancel();
   }
 
   stop(): void {
@@ -583,8 +600,12 @@ export class Scheduler {
       replan = true;
     }
     if (p.check !== undefined) {
+      const was = rec.check;
       if (p.check === null || !p.check.trim()) delete rec.check;
       else rec.check = checkedCheck(p.check);
+      // The old check's news isn't the new one's, and shouldn't come back
+      // if the old check is put back later.
+      if (rec.check !== was) this.dropKept(rec.id);
     }
     if (!rec.threadId) {
       if (p.cwd !== undefined) rec.cwd = away ? p.cwd.trim() || undefined : this.checkedFolder(p.cwd);
@@ -698,6 +719,9 @@ export class Scheduler {
             this.dropKept(rec.id);
             return;
           }
+          // Its check is running in another runner process, or was changed
+          // while it ran: left due for the next tick.
+          if (checked === 'later') return;
           const res = this.send(rec, false, checked);
           if (res.outcome === 'retry') return;
           if (rec.at) this.finish(rec);
@@ -758,6 +782,10 @@ export class Scheduler {
         if (!claimed || this.stopped) continue;
         const checked = await this.checked(rec);
         if (this.stopped) continue;
+        if (checked === 'later') {
+          await backend.release(rec.id).catch(() => {});
+          continue;
+        }
         const res = this.send(rec, false, checked);
         if (res.outcome === 'retry') {
           await backend.release(rec.id).catch(() => {});
@@ -811,7 +839,9 @@ export class Scheduler {
 
   // Its check, when it has one and checks are on (schedule-check.ts):
   // undefined to run as usual.
-  private async checked(rec: ScheduleRecord): Promise<{ skip: string } | { extra: string } | undefined> {
+  // 'later': not now, leave it due (its check is running in another runner
+  // process, or the check was changed while it ran).
+  private async checked(rec: ScheduleRecord): Promise<{ skip: string } | { extra: string; kept?: string } | 'later' | undefined> {
     if (!rec.check || !this.checksOn()) return undefined;
     let cwd = rec.cwd ? path.resolve(expandHome(rec.cwd)) : this.home;
     if (rec.threadId) {
@@ -825,18 +855,46 @@ export class Scheduler {
     // refused the send, or the runner stopped mid-check): send that rather
     // than asking again, as a check that keeps state won't print it twice.
     const command = rec.check;
-    const kept = readKeptCheck(this.home, rec.id, command);
-    if (kept) return { extra: kept.extra };
-    const r = await this.check({ command, cwd, home: this.home, scheduleId: rec.id }).catch((e: unknown) => ({ ok: false as const, output: '', why: String(e) }));
-    const out = checkOutcome(r);
-    if ('extra' in out) {
-      try {
-        keepCheck(this.home, rec.id, { check: command, at: this.iso(), extra: out.extra });
-      } catch (e) {
-        this.log.warn("could not keep a schedule check's output", { scheduleId: rec.id, error: String(e) });
-      }
+    const id = rec.id;
+    const kept = readKeptCheck(this.home, id, command);
+    if (kept && !this.delivered.has(`${id} ${kept.at}`)) return { extra: kept.extra, kept: kept.at };
+    if (checkRunningElsewhere(this.home, id, this.clock.now())) return 'later';
+    try {
+      markCheckRunning(this.home, id, this.clock.now());
+    } catch {
+      // It still runs; another process just can't see it is.
     }
-    return out;
+    const run = this.check({ command, cwd, home: this.home, scheduleId: id })
+      .catch((e: unknown) => ({ ok: false as const, output: '', why: String(e) }))
+      .then((r) => {
+        const out = checkOutcome(r);
+        // Changed or taken off while it ran: this isn't that check's news.
+        const now = this.items.get(id);
+        if (now && now.check !== command) return 'later' as const;
+        if ('extra' in out) {
+          const at = this.iso();
+          try {
+            keepCheck(this.home, id, { check: command, at, extra: out.extra });
+          } catch (e) {
+            this.log.warn("could not keep a schedule check's output", { scheduleId: id, error: String(e) });
+          }
+          return { extra: out.extra, kept: at };
+        }
+        return out;
+      })
+      .finally(() => {
+        try {
+          clearCheckRunning(this.home, id);
+        } catch {
+          // Its time limit makes it stale anyway.
+        }
+      });
+    this.inFlight.add(run);
+    try {
+      return await run;
+    } finally {
+      this.inFlight.delete(run);
+    }
   }
 
   // A run carrying a check's output was sent, so it needn't be kept.
@@ -848,7 +906,7 @@ export class Scheduler {
     }
   }
 
-  private send(rec: ScheduleRecord, manual: boolean, checked?: { skip: string } | { extra: string }): { outcome: 'sent' | 'skipped' | 'failed' | 'retry'; threadId?: string; turnId?: string; note?: string } {
+  private send(rec: ScheduleRecord, manual: boolean, checked?: { skip: string } | { extra: string; kept?: string }): { outcome: 'sent' | 'skipped' | 'failed' | 'retry'; threadId?: string; turnId?: string; note?: string } {
     const at = this.iso();
     const text = `[Scheduled: "${rec.title}", ${this.whenText(rec)}]\n\n${rec.text}${checked && 'extra' in checked ? checked.extra : ''}`;
     const record = (outcome: 'sent' | 'skipped' | 'failed', threadId?: string, note?: string) => {
@@ -856,7 +914,10 @@ export class Scheduler {
       if (outcome === 'sent') rec.runs += 1;
       // Only a sent run has carried it. A skip (the last thread still
       // going), a failure or a refused send keeps it for the next run.
-      if (outcome === 'sent' && checked && 'extra' in checked) this.dropKept(rec.id);
+      if (outcome === 'sent' && checked && 'extra' in checked) {
+        if (checked.kept) this.delivered.add(`${rec.id} ${checked.kept}`);
+        this.dropKept(rec.id);
+      }
       this.log.info('schedule ran', { scheduleId: rec.id, outcome, threadId, note });
     };
     if (checked && 'skip' in checked) {
@@ -934,6 +995,9 @@ export class Scheduler {
   private finish(rec: ScheduleRecord): void {
     rec.finishedAt = this.iso();
     delete rec.nextRunAt;
+    // A one-off has no next run to carry what its check printed (a failed
+    // send says so in lastRun).
+    this.dropKept(rec.id);
   }
 
   private prune(now: number): boolean {

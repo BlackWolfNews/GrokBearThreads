@@ -717,6 +717,9 @@ async function main(): Promise<void> {
     peers.close();
     primaryLink?.close();
     scheduler.stop();
+    // A check under way keeps what it prints for the next runner, but only
+    // if this one is still here when it ends.
+    const checksDone = scheduler.settled();
     librarian.stop();
     stuckJobs.stop();
     frozenClis.stop();
@@ -740,6 +743,7 @@ async function main(): Promise<void> {
         registry.removeFile();
         removeDrainInfo(cfg.home, process.pid);
       }
+      await checksDone;
     } finally {
       log.info('runner stopped');
       process.exit(0);

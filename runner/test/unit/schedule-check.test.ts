@@ -200,8 +200,9 @@ test('scheduleChecks: what a check printed survives the runner stopping mid-chec
   await tick(6);
   assert.equal(seen.length, 1, 'the check started');
   old.stop();
+  const settled = old.settled();
   finish({ ok: true, output: 'fork: someone/threadbear 3 new commits' });
-  await tick(6);
+  await settled;
   assert.equal(newThreads(h).length, 0);
 
   const next = schedulerOn(h, () => ({ ok: true, output: '' }), seen);
@@ -260,4 +261,104 @@ test('scheduleChecks: kept output is for that check only, and Run now leaves it'
   assert.ok(sentText(h).some((m) => /from the new check/.test(m)));
   assert.ok(!sentText(h).some((m) => /news from the old check/.test(m)));
   last.stop();
+});
+
+test('scheduleChecks: settled() waits for a check under way, so the runner exits only once its output is kept', async () => {
+  const h = makeHarness();
+  let finish!: (r: CheckResult) => void;
+  const old = schedulerOn(h, () => new Promise<CheckResult>((r) => (finish = r)));
+  const sc = await old.create({ text: 'Look', title: 'Watch Sentry', cron: '*/5 * * * *', check: 'fork-watch' });
+  h.clock.advance(5 * MIN);
+  await tick(6);
+  old.stop();
+  let done = false;
+  const settled = old.settled().then(() => (done = true));
+  await tick(6);
+  assert.equal(done, false, 'still waiting on the check');
+  finish({ ok: true, output: 'the news' });
+  await settled;
+  const kept = JSON.parse(fs.readFileSync(path.join(h.home, 'schedule-checks', `${sc.id}.kept.json`), 'utf8'));
+  assert.match(kept.extra, /the news/);
+  assert.equal(kept.check, 'fork-watch');
+});
+
+test('scheduleChecks: while another runner process has the check under way, the run waits rather than running it again', async () => {
+  const h = makeHarness();
+  const seen: string[] = [];
+  const sched = schedulerOn(h, () => ({ ok: true, output: '' }), seen);
+  const sc = await sched.create({ text: 'Look', title: 'Watch Sentry', at: new Date(h.clock.now() + MIN).toISOString(), check: 'fork-watch' });
+  // The old release, still running it (the test runner's parent stands in
+  // for a live process).
+  const dir = path.join(h.home, 'schedule-checks');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${sc.id}.running.json`), JSON.stringify({ pid: process.ppid, at: h.clock.now() }));
+  h.clock.advance(MIN);
+  await tick(6);
+  assert.equal(seen.length, 0, 'not run here');
+  const still = sched.find(sc.id);
+  assert.equal(still.finishedAt, undefined, 'the one-off is still due');
+  assert.equal(still.lastRun, undefined);
+  // The old one finishes and keeps what it printed; the next tick sends it.
+  fs.rmSync(path.join(dir, `${sc.id}.running.json`));
+  fs.writeFileSync(path.join(dir, `${sc.id}.kept.json`), JSON.stringify({ check: 'fork-watch', at: 'x', extra: '\n\nIts check found this: the news' }));
+  h.clock.advance(MIN);
+  await tick(6);
+  assert.equal(seen.length, 0);
+  assert.match(sentText(h)[0] ?? '', /the news/);
+  // A marker left by a process that's gone doesn't hold anything up.
+  fs.writeFileSync(path.join(dir, `${sc.id}.running.json`), JSON.stringify({ pid: 999_999_999, at: h.clock.now() }));
+  const next = await sched.create({ text: 'Look', title: 'Watch Sentry', at: new Date(h.clock.now() + MIN).toISOString(), check: 'fork-watch' });
+  fs.renameSync(path.join(dir, `${sc.id}.running.json`), path.join(dir, `${next.id}.running.json`));
+  h.clock.advance(MIN);
+  await tick(6);
+  assert.equal(seen.length, 1);
+  sched.stop();
+});
+
+test('scheduleChecks: a check changed while it runs, or changed and put back, never sends the old news', async () => {
+  const h = makeHarness();
+  const seen: string[] = [];
+  let finish!: (r: CheckResult) => void;
+  let slow = true;
+  const sched = schedulerOn(h, () => (slow ? new Promise<CheckResult>((r) => (finish = r)) : { ok: true, output: '' }), seen);
+  const sc = await sched.create({ text: 'Look', title: 'Watch Sentry', cron: '*/5 * * * *', check: 'check-a' });
+  h.clock.advance(5 * MIN);
+  await tick(6);
+  await sched.update({ scheduleId: sc.id, check: 'check-b' });
+  slow = false;
+  finish({ ok: true, output: 'news from a' });
+  await tick(6);
+  assert.equal(newThreads(h).length, 0, "a's news isn't sent");
+  assert.ok(!fs.existsSync(path.join(h.home, 'schedule-checks', `${sc.id}.kept.json`)));
+
+  // Kept from a refused send, then the check changed and put back.
+  await sched.update({ scheduleId: sc.id, check: 'check-a' });
+  h.runner.refuseNewTurns('The runner is restarting; send again in a moment.');
+  const once = onceCheck('stale news');
+  const s2 = schedulerOn(h, once, seen);
+  sched.stop();
+  h.clock.advance(5 * MIN);
+  await tick(6);
+  assert.ok(fs.existsSync(path.join(h.home, 'schedule-checks', `${sc.id}.kept.json`)));
+  await s2.update({ scheduleId: sc.id, check: 'check-b' });
+  await s2.update({ scheduleId: sc.id, check: 'check-a' });
+  h.runner.refusing = undefined;
+  h.clock.advance(5 * MIN);
+  await tick(6);
+  assert.ok(!sentText(h).some((m) => /stale news/.test(m)));
+  s2.stop();
+});
+
+test('scheduleChecks: a one-off whose send fails drops what it kept, as it has no next run', async () => {
+  const h = makeHarness();
+  const dir = path.join(h.home, 'gone-soon');
+  fs.mkdirSync(dir);
+  const sched = schedulerOn(h, () => ({ ok: true, output: 'the news' }));
+  const sc = await sched.create({ text: 'Look', title: 'Watch Sentry', at: new Date(h.clock.now() + MIN).toISOString(), cwd: dir, check: 'fork-watch' });
+  fs.rmSync(dir, { recursive: true });
+  h.clock.advance(MIN);
+  await tick(6);
+  assert.equal(sched.find(sc.id).lastRun?.outcome, 'failed');
+  assert.ok(!fs.existsSync(path.join(h.home, 'schedule-checks', `${sc.id}.kept.json`)));
+  sched.stop();
 });

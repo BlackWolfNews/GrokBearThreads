@@ -893,8 +893,8 @@ Threadbear, and its switch goes.
   minutes only uses a login when there's something to look at. What it
   prints is added to the message. If the check itself fails, the run goes
   ahead with the error, so you hear about it. What a check prints is
-  kept until a run carrying it has been sent, so a restart in between
-  doesn't lose it. Ask a thread to "only run
+  kept until a run carrying it has been sent, so a runner restart in
+  between doesn't lose it. Ask a thread to "only run
   when there's something new" and it writes the check. Run now skips it.
 - **Keep the Mac awake** (`keepAwake`, since 6 Nov 2026). While any
   thread is working, and for three minutes after, your Mac won't go to

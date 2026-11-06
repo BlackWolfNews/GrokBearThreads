@@ -63,6 +63,40 @@ export function dropKeptCheck(home: string, scheduleId: string): void {
   fs.rmSync(keptCheckFile(home, scheduleId), { force: true });
 }
 
+// A check under way in some runner process, so another one (the next
+// release, in a handover) waits for it rather than running it again: the
+// first will keep what it prints. A marker whose process has gone, or that
+// is older than any check can run, doesn't count.
+export function runningCheckFile(home: string, scheduleId: string): string {
+  return path.join(home, 'schedule-checks', `${scheduleId}.running.json`);
+}
+
+export function markCheckRunning(home: string, scheduleId: string, at: number): void {
+  atomicWriteFileSync(runningCheckFile(home, scheduleId), JSON.stringify({ pid: process.pid, at }));
+}
+
+export function clearCheckRunning(home: string, scheduleId: string): void {
+  fs.rmSync(runningCheckFile(home, scheduleId), { force: true });
+}
+
+export function checkRunningElsewhere(home: string, scheduleId: string, now: number): boolean {
+  let m: { pid?: unknown; at?: unknown };
+  try {
+    m = JSON.parse(fs.readFileSync(runningCheckFile(home, scheduleId), 'utf8'));
+  } catch {
+    return false;
+  }
+  if (typeof m?.pid !== 'number' || typeof m.at !== 'number' || m.pid === process.pid) return false;
+  if (now - m.at > CHECK_TIMEOUT_MS * 2) return false;
+  try {
+    process.kill(m.pid, 0);
+    return true;
+  } catch (e) {
+    // EPERM: it's there, just not ours to signal.
+    return (e as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
 export function runCheck(p: { command: string; cwd: string; home: string; scheduleId: string; timeoutMs?: number }): Promise<CheckResult> {
   const state = checkStateFile(p.home, p.scheduleId);
   try {
