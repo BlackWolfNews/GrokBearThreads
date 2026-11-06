@@ -86,7 +86,7 @@ if [ "$LOCAL" = 0 ] && [ "$E2E" = 0 ]; then
   else
     RUNNER_JSON="${THREADBEAR_HOME:-$HOME/Library/Application Support/Threadbear}/runner.json"
     CHECK_HOST="$( [ -x "$NODE" ] && [ -f "$RUNNER_JSON" ] && "$NODE" -e '
-      try { const h = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).checkHost; const l = (Array.isArray(h) ? h : [h]).filter((x) => typeof x === "string" && /^[A-Za-z0-9._@-]+$/.test(x)); if (l.length) console.log(l.join(",")) } catch {}' "$RUNNER_JSON")"
+      try { const h = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).checkHost; const l = (Array.isArray(h) ? h : [h]).filter((x) => typeof x === "string" && /^[A-Za-z0-9][A-Za-z0-9._@-]*$/.test(x)); if (l.length) console.log(l.join(",")) } catch {}' "$RUNNER_JSON")"
   fi
   if [ -n "$CHECK_HOST" ]; then
     "$ROOT/scripts/check-remote.sh" "$CHECK_HOST" ${ARGS[@]+"${ARGS[@]}"}

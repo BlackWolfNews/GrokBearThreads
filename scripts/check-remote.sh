@@ -114,12 +114,14 @@ SSH=(ssh -o BatchMode=yes -o ConnectTimeout=8 -o ServerAliveInterval=30 -o Serve
 ARGS=()
 SHOTS=""
 QUICK=0
+ALL=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --shots)
       case "$2" in /*) SHOTS="$2" ;; *) SHOTS="$PWD/$2" ;; esac
       shift ;;
     --quick) QUICK=1; ARGS+=("$1") ;;
+    --all) ALL=1; ARGS+=("$1") ;;
     *) ARGS+=("$1") ;;
   esac
   shift
@@ -136,75 +138,107 @@ changed="$(mktemp)"
 
 # Whether a Linux host can run this: only the runner's, Convex's and the
 # website's checks, so --quick, nothing changed under ios/ (and something
-# changed: with nothing, or check.sh itself, it runs everything), no shots.
+# changed: with nothing, check.sh itself or --all, it runs everything), no
+# shots.
 linux_ok=0
-if [ "$QUICK" = 1 ] && [ -z "$SHOTS" ] && [ -s "$changed" ] && ! grep -qE '^ios/|^check\.sh$' "$changed"; then linux_ok=1; fi
+if [ "$QUICK" = 1 ] && [ "$ALL" = 0 ] && [ -z "$SHOTS" ] && [ -s "$changed" ] && ! grep -qE '^ios/|^check\.sh$' "$changed"; then linux_ok=1; fi
 
 # Each host: reachable, its system, and whether its lock is free now.
 # The first free one that can run it wins; otherwise the first that can,
-# which then waits for its lock.
-HOST="" HOST_OS="" remote_base="" first="" first_os="" first_base=""
+# which then waits for its lock. Two checks can both see a host free, so
+# a run there takes the lock without waiting (exit 75 if it can't), and the
+# one that lost chooses again; after three goes it waits in line.
 probe='mkdir -p ~/'"$BASE_REL"'/runs && cd ~/'"$BASE_REL"' && pwd && uname -s && if [ "$(uname -s)" = Darwin ]; then /usr/bin/lockf -t 0 lock true 2>/dev/null && echo free || echo busy; else flock -n lock true 2>/dev/null && echo free || echo busy; fi'
-for h in "${HOSTS[@]}"; do
-  out="$("${SSH[@]}" "$h" "$probe" 2>/dev/null)" || { echo "Couldn't reach $h over ssh." >&2; continue; }
-  { read -r b; read -r os; read -r state; } <<<"$out"
-  # Every rm -rf over there is under this, so never let it be empty.
-  case "$b" in */$BASE_REL) ;; *) echo "Unexpected folder on $h: '$b'" >&2; continue ;; esac
-  case "$os" in
-    Darwin) ;;
-    Linux) [ "$linux_ok" = 1 ] || continue ;;
-    *) continue ;;
-  esac
-  if [ "$state" = free ]; then HOST="$h" HOST_OS="$os" remote_base="$b"; break; fi
-  [ -n "$first" ] || { first="$h" first_os="$os" first_base="$b"; }
-done
-if [ -z "$HOST" ]; then
-  [ -n "$first" ] || { rm -f "$changed"; echo "None of $HOST_LIST can run this check now." >&2; exit 255; }
+choose() {
+  HOST="" HOST_OS="" remote_base="" FREE=0
+  local first="" first_os="" first_base="" h out b os state
+  for h in "${HOSTS[@]}"; do
+    # An ssh host, never something ssh would take for an option.
+    case "$h" in -*|"") continue ;; esac
+    out="$("${SSH[@]}" "$h" "$probe" 2>/dev/null)" || { echo "Couldn't reach $h over ssh." >&2; continue; }
+    { read -r b; read -r os; read -r state; } <<<"$out"
+    # Every rm -rf over there is under this, so never let it be empty.
+    case "$b" in */$BASE_REL) ;; *) echo "Unexpected folder on $h: '$b'" >&2; continue ;; esac
+    case "$os" in
+      Darwin) ;;
+      Linux) [ "$linux_ok" = 1 ] || continue ;;
+      *) continue ;;
+    esac
+    if [ "$state" = free ]; then HOST="$h" HOST_OS="$os" remote_base="$b" FREE=1; return 0; fi
+    [ -n "$first" ] || { first="$h" first_os="$os" first_base="$b"; }
+  done
+  [ -n "$first" ] || return 1
   HOST="$first" HOST_OS="$first_os" remote_base="$first_base"
-fi
-
-id="$(date +%H%M%S)-$$"
-remote_run="$remote_base/runs/$id"
+}
 
 # The files check.sh would see, less what no check reads: the pictures in
 # docs/ and site/ (about 50 MB of the repo). TourTests reads site's JSON.
 files="$(mktemp)"
 (cd "$ROOT" && git ls-files -co --exclude-standard -z) | tr '\0' '\n' \
   | grep -vE '^(docs|site)/.*\.(png|gif|jpe?g|mp4|mov|webp)$' | tr '\n' '\0' >"$files"
-start=$SECONDS
-if ! rsync -a --from0 --files-from="$files" -e "${SSH[*]}" "$ROOT/" "$HOST:$remote_run/" \
-  || ! rsync -a -e "${SSH[*]}" "$changed" "$HOST:$remote_run/.check-changed"; then
-  rm -f "$files" "$changed"
-  "${SSH[@]}" "$HOST" "rm -rf '$remote_run'"
-  echo "Couldn't copy this checkout to $HOST." >&2
-  exit 255
-fi
+BASE_ARGS=(${ARGS[@]+"${ARGS[@]}"})
+tries=0
+while :; do
+  if ! choose; then
+    rm -f "$files" "$changed"
+    echo "None of $HOST_LIST can run this check now." >&2
+    exit 255
+  fi
+  id="$(date +%H%M%S)-$$-$tries"
+  remote_run="$remote_base/runs/$id"
+  start=$SECONDS
+  if ! rsync -a --from0 --files-from="$files" -e "${SSH[*]}" "$ROOT/" "$HOST:$remote_run/" \
+    || ! rsync -a -e "${SSH[*]}" "$changed" "$HOST:$remote_run/.check-changed"; then
+    rm -f "$files" "$changed"
+    "${SSH[@]}" "$HOST" "rm -rf '$remote_run'"
+    echo "Couldn't copy this checkout to $HOST." >&2
+    exit 255
+  fi
+  echo "Checking on $HOST (copied in $((SECONDS - start))s; THREADBEAR_CHECK_HOST= ./check.sh --local runs here)"
+
+  ARGS=(${BASE_ARGS[@]+"${BASE_ARGS[@]}"})
+  remote_shots=""
+  [ -z "$SHOTS" ] || { remote_shots="$remote_base/shots-$id"; ARGS+=(--shots "$remote_shots"); }
+
+  quoted=""
+  for a in ${ARGS[@]+"${ARGS[@]}"}; do quoted+=" $(printf '%q' "$a")"; done
+  inner="/bin/bash $(printf '%q' "$remote_run/scripts/check-remote.sh") --on-host $id$quoted"
+  # The design screenshots go through Desk Runner, which has Screen Recording
+  # there; over plain ssh they'd be drawn in-process, with the sidebar's
+  # glass a flat fill.
+  [ -z "$SHOTS" ] || inner="\$HOME/.local/bin/desk $(printf '%q' "$inner")"
+  lock="$remote_base/lock"
+  # A free host is taken without waiting (75 if another check got there
+  # first); otherwise this waits for its turn.
+  now=0
+  [ "$FREE" = 1 ] && [ "$tries" -lt 3 ] && now=1
+  if [ "$HOST_OS" = Linux ]; then
+    # A server that runs its own runner and threads: the check goes in under them.
+    run="nice -n 10 /bin/bash -c $(printf '%q' "$inner")"
+    if [ "$now" = 1 ]; then remote_cmd="flock -n -E 75 $lock $run"
+    else remote_cmd="flock -n $lock true 2>/dev/null || echo 'Waiting for another check on $HOST to finish...'; flock $lock $run"; fi
+  else
+    run="/bin/bash -c $(printf '%q' "$inner")"
+    if [ "$now" = 1 ]; then remote_cmd="/usr/bin/lockf -t 0 -k $lock $run"
+    else remote_cmd="/usr/bin/lockf -t 0 $lock true 2>/dev/null || echo 'Waiting for another check on $HOST to finish...'; /usr/bin/lockf -k $lock $run"; fi
+  fi
+
+  # A failed step's log path is on the host: its logs come back here, and the
+  # path in the output is changed to match.
+  local_logs="$(mktemp -d "${TMPDIR:-/tmp}/threadbear-check-remote.XXXXXX")"
+  "${SSH[@]}" "$HOST" "$remote_cmd" 2>&1 | sed -u "s#$remote_base/tmp-$id/threadbear-check\.[A-Za-z0-9]*#$local_logs#g"
+  code=${PIPESTATUS[0]}
+  if [ "$now" = 1 ] && [ "$code" = 75 ]; then
+    # Never started: its copy goes, and another host is chosen.
+    "${SSH[@]}" "$HOST" "rm -rf '$remote_run'" 2>/dev/null
+    rmdir "$local_logs" 2>/dev/null
+    echo "Another check took $HOST first; choosing again."
+    tries=$((tries + 1))
+    continue
+  fi
+  break
+done
 rm -f "$files" "$changed"
-echo "Checking on $HOST (copied in $((SECONDS - start))s; THREADBEAR_CHECK_HOST= ./check.sh --local runs here)"
-
-remote_shots=""
-[ -z "$SHOTS" ] || { remote_shots="$remote_base/shots-$id"; ARGS+=(--shots "$remote_shots"); }
-
-quoted=""
-for a in ${ARGS[@]+"${ARGS[@]}"}; do quoted+=" $(printf '%q' "$a")"; done
-inner="/bin/bash $(printf '%q' "$remote_run/scripts/check-remote.sh") --on-host $id$quoted"
-# The design screenshots go through Desk Runner, which has Screen Recording
-# there; over plain ssh they'd be drawn in-process, with the sidebar's
-# glass a flat fill.
-[ -z "$SHOTS" ] || inner="\$HOME/.local/bin/desk $(printf '%q' "$inner")"
-lock="$remote_base/lock"
-if [ "$HOST_OS" = Linux ]; then
-  # A server that runs its own runner and threads: the check goes in under them.
-  remote_cmd="flock -n $lock true 2>/dev/null || echo 'Waiting for another check on $HOST to finish...'; flock $lock nice -n 10 /bin/bash -c $(printf '%q' "$inner")"
-else
-  remote_cmd="/usr/bin/lockf -t 0 $lock true 2>/dev/null || echo 'Waiting for another check on $HOST to finish...'; /usr/bin/lockf -k $lock /bin/bash -c $(printf '%q' "$inner")"
-fi
-
-# A failed step's log path is on the host: its logs come back here, and the
-# path in the output is changed to match.
-local_logs="$(mktemp -d "${TMPDIR:-/tmp}/threadbear-check-remote.XXXXXX")"
-"${SSH[@]}" "$HOST" "$remote_cmd" 2>&1 | sed -u "s#$remote_base/tmp-$id/threadbear-check\.[A-Za-z0-9]*#$local_logs#g"
-code=${PIPESTATUS[0]}
 if [ "$code" = 255 ]; then
   # Not "unreachable": that would make check.sh run it all again here.
   echo "Lost the connection to $HOST during the check." >&2
