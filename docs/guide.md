@@ -1052,10 +1052,15 @@ some of it, that's part of its thread like anything else it reads.
 <!-- slug: privacy -->
 
 Your threads are mirrored to a Convex deployment in your own Convex account,
-which setup made: the thread list, the text of each message, and one line
-for each thing an agent did. Tool output and images stay on your Mac. A photo
-you send from your phone passes through that deployment on its way to the Mac
-and is deleted once the Mac has it.
+which setup made: the thread list, the text of each message, one line for
+each thing an agent did, and your logins' emails and usage. Anything that
+looks like a secret is scrubbed out of the text on the way up, which helps
+but isn't a guarantee. Tool output stays on your Mac. Pictures you paste into
+a message go up as they are, so your website can show them, and nothing can
+scrub a secret out of a picture: `"sync": { "pastedPictures": false }` in
+`runner.json` keeps them on your Mac. A photo you send from your phone passes
+through that deployment on its way to the Mac and is deleted once the Mac has
+it.
 A thread you share can be read by anyone with its link, pictures included,
 and only that thread. The pictures are uploaded only while it's shared,
 and only real pictures from its own media folder: your attachments, the

@@ -191,7 +191,9 @@ The original plan for this step follows.
 - New installs: on, and setup says in plain words what goes up, what can't be
   scrubbed, and where the switch is.
 - Existing installs: asked once, never switched silently.
-- Update `docs/on-your-mac.md`, the README and the guide in the same landing.
+- Update `docs/on-your-mac.md`, the README, the guide and the landing page's
+  "What goes up to Convex?" and "Where your stuff lives" (`site/`) in the same
+  landing.
 
 ### Later, on their own
 
