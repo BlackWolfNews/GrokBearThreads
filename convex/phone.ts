@@ -69,17 +69,55 @@ export const me = query({
 export const runners = query({
   args: { token: v.string() },
   // release to pressure since API 45, for the website's runner page. An older
-  // phone ignores them.
-  returns: v.array(v.object({ runnerId: v.string(), name: v.string(), version: v.string(), lastSeenAt: v.string(), draining: v.boolean(), release: v.optional(v.string()), startedAt: v.optional(v.string()), threadCount: v.optional(v.number()), pressure: v.optional(v.string()) })),
+  // phone ignores them. In Mike's order since API 56 (orderedRunners), with
+  // `placed` on the ones he's put in it and `main` on the main Mac: only
+  // those are ever a new thread's automatic choice.
+  returns: v.array(v.object({ runnerId: v.string(), name: v.string(), version: v.string(), lastSeenAt: v.string(), draining: v.boolean(), release: v.optional(v.string()), startedAt: v.optional(v.string()), threadCount: v.optional(v.number()), pressure: v.optional(v.string()), placed: v.optional(v.boolean()), main: v.optional(v.boolean()) })),
   handler: async (ctx, { token }) => {
     await checkPhoneToken(ctx, token);
-    const out = [];
-    for await (const r of ctx.db.query('runners')) {
-      out.push({ runnerId: r.runnerId, name: r.name, version: r.version, lastSeenAt: new Date(r.lastSeenAt).toISOString(), draining: r.draining, ...(r.release ? { release: r.release } : {}), startedAt: r.startedAt, threadCount: r.threadCount, ...(r.pressure ? { pressure: r.pressure } : {}) });
-    }
-    return out;
+    const saved = (await ctx.db.query('runnerOrder').first())?.runnerIds ?? [];
+    const runners = await orderedRunners(ctx);
+    // `main`: the owner-key Mac a new thread waits for when none of the
+    // placed ones is online, so the phone never falls back to just "the
+    // first listed", which with no main Mac known is a runner key's.
+    const main = await mainOwnerRunner(ctx, runners, false);
+    return runners.map((r) => ({ runnerId: r.runnerId, name: r.name, version: r.version, lastSeenAt: new Date(r.lastSeenAt).toISOString(), draining: r.draining, ...(r.release ? { release: r.release } : {}), startedAt: r.startedAt, threadCount: r.threadCount, ...(r.pressure ? { pressure: r.pressure } : {}), ...(saved.includes(r.runnerId) ? { placed: true } : {}), ...(r.runnerId === main ? { main: true } : {}) }));
   },
 });
+
+// Mike's order for his runners (API 56), from the phone's Settings. The
+// phone sends every runner it lists; ids it doesn't know of yet are kept as
+// sent, and a runner left out goes after the ones in it.
+export const setRunnerOrder = mutation({
+  args: { token: v.string(), runnerIds: v.array(v.string()) },
+  returns: v.null(),
+  handler: async (ctx, { token, runnerIds }) => {
+    await checkPhoneToken(ctx, token);
+    if (runnerIds.length > 50 || runnerIds.some((id) => !id || id.length > 100)) throw new ConvexError({ kind: 'invalid', message: 'runnerIds must be at most 50 ids of 1 to 100 characters' });
+    const ids = [...new Set(runnerIds)];
+    const row = await ctx.db.query('runnerOrder').first();
+    if (row) await ctx.db.patch(row._id, { runnerIds: ids });
+    else await ctx.db.insert('runnerOrder', { runnerIds: ids });
+    return null;
+  },
+});
+
+// Every runner, in Mike's order: the ones he's placed as he placed them, then
+// the rest with the main Mac first (isMain) and the others as they first
+// heartbeated. Never by anything a runner says of itself, like its thread
+// count, so a runner key can't push itself up the list.
+async function orderedRunners(ctx: QueryCtx): Promise<Doc<'runners'>[]> {
+  const all: Doc<'runners'>[] = [];
+  for await (const r of ctx.db.query('runners')) all.push(r);
+  const saved = (await ctx.db.query('runnerOrder').first())?.runnerIds ?? [];
+  const main = await mainOwnerRunner(ctx, all, false);
+  const rank = (r: Doc<'runners'>) => {
+    const i = saved.indexOf(r.runnerId);
+    return i >= 0 ? i : saved.length + (r.runnerId === main ? 0 : 1);
+  };
+  // Array sort is stable, so ties keep the table's creation order.
+  return all.sort((a, b) => rank(a) - rank(b));
+}
 
 // Newest activity first. The den is capped at DEN_LIMIT.
 export const threads = query({
@@ -654,8 +692,9 @@ export const share = mutation({
   },
 });
 
-// A new thread. With no runnerId, the main runner still online takes it
-// (or the first one back, as "any").
+// A new thread. With no runnerId, the first runner online in Mike's order
+// takes it, else the main runner still online (or the first one back, as
+// "any"): mainRunner.
 export const create = mutation({
   args: { token: v.string(), text: v.string(), runnerId: v.optional(v.string()), cwd: v.optional(v.string()), accountId: v.optional(v.string()), model: v.optional(v.string()), effort: v.optional(v.string()), images: v.optional(v.array(v.id('_storage'))) },
   returns: v.id('commands'),
@@ -717,23 +756,40 @@ export const quickAsk = mutation({
   },
 });
 
-// Where a phone's new thread goes when the phone doesn't say: the online
-// runner heartbeating with the owner key (byOwner, docs/protocol.md "Runner
-// keys") with the most threads, which is the Mac Mike really works on, with
-// his repos and printer. With none online it's "any", which only the owner
-// key takes, so it waits for that Mac rather than going to one with a
-// runner key: Mike's text is for his main Mac unless he picks another.
+// Where a phone's new thread goes when the phone doesn't say: the first
+// runner online in the order Mike set on the phone (API 56; a phone from
+// before it never says). With no order, or none of its runners online, the
+// online runner heartbeating with the owner key (byOwner, docs/protocol.md
+// "Runner keys") with the most threads, which is the Mac Mike really works
+// on, with his repos and printer. With none online it's "any", which only
+// the owner key takes, so it waits for that Mac rather than going to one
+// with a runner key: Mike's text is for his main Mac unless he picks
+// another, by name or by putting it in his order.
 // (Going by the latest heartbeat once sent half of them to Bruce; going by
 // most threads alone let a runner key claim a million threads to get them.)
 async function mainRunner(ctx: QueryCtx): Promise<string> {
-  let best: { runnerId: string; threadCount: number; lastSeenAt: number } | undefined;
-  for await (const r of ctx.db.query('runners')) {
-    // A runner with a live key of its own isn't the main Mac, whatever its
-    // last heartbeat said (lib.ts hasLiveKey).
-    if (!r.byOwner || r.draining || Date.now() - r.lastSeenAt > ONLINE_MS || (await hasLiveKey(ctx, r.runnerId))) continue;
+  const all: Doc<'runners'>[] = [];
+  for await (const r of ctx.db.query('runners')) all.push(r);
+  const online = (r: Doc<'runners'>) => !r.draining && Date.now() - r.lastSeenAt <= ONLINE_MS;
+  for (const id of (await ctx.db.query('runnerOrder').first())?.runnerIds ?? []) {
+    const r = all.find((x) => x.runnerId === id);
+    if (r && online(r)) return r.runnerId;
+  }
+  return (await mainOwnerRunner(ctx, all, true)) ?? 'any';
+}
+
+// The main Mac among these runners: heartbeating with the owner key, with
+// no live key of its own (lib.ts hasLiveKey: whatever its last heartbeat
+// said, a runner with a key isn't the main Mac), the most threads first.
+// Only online ones when `onlineOnly`, as a new thread needs; the phone's
+// list (orderedRunners) puts it first asleep too.
+async function mainOwnerRunner(ctx: QueryCtx, runners: Doc<'runners'>[], onlineOnly: boolean): Promise<string | undefined> {
+  let best: Doc<'runners'> | undefined;
+  for (const r of runners) {
+    if (!r.byOwner || (onlineOnly && (r.draining || Date.now() - r.lastSeenAt > ONLINE_MS)) || (await hasLiveKey(ctx, r.runnerId))) continue;
     if (!best || r.threadCount > best.threadCount || (r.threadCount === best.threadCount && r.lastSeenAt > best.lastSeenAt)) best = r;
   }
-  return best?.runnerId ?? 'any';
+  return best?.runnerId;
 }
 
 // Older messages: the owning runner writes up to 50 text messages before

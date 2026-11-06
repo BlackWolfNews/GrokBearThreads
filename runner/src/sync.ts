@@ -115,7 +115,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 55;
+export const BACKEND_API_VERSION = 56;
 // From this one a runner key's archived threads stay in the sidebar table, so
 // those an older backend dropped go again, once (thread-index.ts resendArchived).
 export const ARCHIVED_INDEX_API_VERSION = 54;

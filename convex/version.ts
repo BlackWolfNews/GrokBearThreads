@@ -248,4 +248,9 @@
 //    archived rows an older backend dropped once, on first hearing 54.
 // 55: an owned schedule can carry `checkTimeoutSecs`, how long its check may
 //    take (60 s without). An older runner sends none.
-export const API_VERSION = 55;
+// 56: runners have an order Mike sets on the phone (runnerOrder,
+//    phone:setRunnerOrder). phone:runners lists them in it, and a new thread
+//    or quick ask that names no runner goes to the first one online in it
+//    before falling back to the main Mac as before. An older phone gets the
+//    list in that order and still sends no runner.
+export const API_VERSION = 56;

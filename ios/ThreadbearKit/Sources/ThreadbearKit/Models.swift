@@ -728,13 +728,22 @@ public struct PhoneRunner: Codable, Sendable, Hashable, Identifiable {
     public var version: String?
     @FlexibleDate public var lastSeenAt: Date
     public var draining: Bool?
+    /// In the order Mike set (backend API 56), so it can be a new thread's
+    /// automatic choice. A runner he hasn't placed (with no order, every one
+    /// but the main Mac) is only ever picked by hand.
+    public var placed: Bool?
+    /// The main Mac (backend API 56): heartbeating with the owner key. A new
+    /// thread waits for it when none of the placed runners is online.
+    public var main: Bool?
 
-    public init(runnerId: String, name: String, version: String? = nil, lastSeenAt: Date, draining: Bool? = nil) {
+    public init(runnerId: String, name: String, version: String? = nil, lastSeenAt: Date, draining: Bool? = nil, placed: Bool? = nil, main: Bool? = nil) {
         self.runnerId = runnerId
         self.name = name
         self.version = version
         self._lastSeenAt = FlexibleDate(wrappedValue: lastSeenAt)
         self.draining = draining
+        self.placed = placed
+        self.main = main
     }
 
     /// The runner writes a heartbeat every 60 s; three missed is offline.
@@ -817,6 +826,10 @@ public enum BackendCompatibility {
     /// From 43 phone:threadsSince: the inbox's changes rather than the whole
     /// list for every row written.
     public static let threadChangesAPIVersion = 43
+    /// From 56 runners have an order (phone:setRunnerOrder) and phone:runners
+    /// lists them in it, so the new thread sheet can offer a runner, starting
+    /// on the first one online. Older backends get no runner picker.
+    public static let runnerOrderAPIVersion = 56
 
     /// The line to show, or nil when the backend is fine.
     public static func problem(_ identity: PhoneIdentity) -> String? {

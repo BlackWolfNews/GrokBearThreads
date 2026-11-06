@@ -2,8 +2,10 @@ import SwiftUI
 import ThreadbearKit
 
 /// A new thread from the phone. It starts in the runner's default folder
-/// (Mike didn't want a folder picker on the phone, 31 Oct); the model and
-/// effort can be picked, and the runner picks a login with room for them.
+/// (Mike didn't want a folder picker on the phone, 31 Oct); the runner, model
+/// and effort can be picked, and the runner picks a login with room for them.
+/// The runner starts on the first one online in Mike's order (Settings), so
+/// the Mac asleep doesn't leave the phone nowhere to start one (6 Nov).
 struct NewThreadView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -14,6 +16,8 @@ struct NewThreadView: View {
         _text = State(initialValue: text)
         self.onCreated = onCreated
     }
+    /// Nil until the runners are in, then the first online in Mike's order.
+    @State private var runnerId: String?
     @State private var modelId: String?
     @State private var effort: String?
     @State private var commandId: String?
@@ -71,28 +75,40 @@ struct NewThreadView: View {
                     }
                     if model.canSendPhotos, !photos.isEmpty || adding > 0 { PhotoStrip(words: words) }
                 }
-                if !models.isEmpty {
+                if model.canChooseRunner || !models.isEmpty {
                     Section {
-                        Picker("Model", selection: $modelId) {
-                            Text("Default").tag(String?.none)
-                            ForEach(models) { Text($0.title).tag(Optional($0.id)) }
+                        if model.canChooseRunner {
+                            Picker("Runner", selection: $runnerId) {
+                                // Only with no runner placed and no main Mac known: the backend picks.
+                                if runnerId == nil { Text("Automatic").tag(String?.none) }
+                                ForEach(model.runners) { runner in
+                                    Text(runner.isOnline(at: model.now) ? runner.name : "\(runner.name), offline").tag(Optional(runner.runnerId))
+                                }
+                            }
                         }
-                        Picker("Effort", selection: $effort) {
-                            Text("Default").tag(String?.none)
-                            ForEach(NewThreadChoices.efforts(for: chosenModel), id: \.self) { Text(NewThreadChoices.effortTitle($0)).tag(Optional($0)) }
-                        }
+                        if !models.isEmpty { modelPickers }
                     }
                     .onChange(of: modelId) {
                         // Codex's Ultra on a Claude model, say: back to the model's own.
                         if !NewThreadChoices.keeps(effort: effort, model: chosenModel) { effort = nil }
                     }
+                    .onChange(of: runnerId) {
+                        // A model this runner has no login for: back to its default.
+                        if let modelId, !models.contains(where: { $0.id == modelId }) { self.modelId = nil }
+                        // No pickers on it (its logins aren't in yet): its own effort too.
+                        if models.isEmpty { effort = nil }
+                    }
                 }
-                if let offline = model.offlineText {
+                if let offline = offlineText {
                     Section { Label("\(offline). It'll start when it's back.", systemImage: "moon.zzz").font(.footnote) }
                 }
             }
             .navigationTitle("New thread")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear(perform: pickRunner)
+            .onChange(of: model.runners) { pickRunner() }
+            // The backend's API version can come after the sheet's up.
+            .onChange(of: model.canChooseRunner) { pickRunner() }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
@@ -123,7 +139,40 @@ struct NewThreadView: View {
         }
     }
 
-    private var models: [PhoneModelChoice] { model.newThreadModels }
+    @ViewBuilder private var modelPickers: some View {
+        Picker("Model", selection: $modelId) {
+            Text("Default").tag(String?.none)
+            ForEach(models) { Text($0.title).tag(Optional($0.id)) }
+        }
+        Picker("Effort", selection: $effort) {
+            Text("Default").tag(String?.none)
+            ForEach(NewThreadChoices.efforts(for: chosenModel), id: \.self) { Text(NewThreadChoices.effortTitle($0)).tag(Optional($0)) }
+        }
+    }
+
+    private var models: [PhoneModelChoice] { model.newThreadModels(on: model.canChooseRunner ? runnerId : nil) }
+    private var chosenRunner: PhoneRunner? { model.runners.first { $0.runnerId == runnerId } }
+
+    /// With a runner picked, whether that one's asleep; otherwise whether they all are.
+    private var offlineText: String? {
+        guard model.canChooseRunner, let runner = chosenRunner else { return model.offlineText }
+        guard !runner.isOnline(at: model.now) else { return nil }
+        return "\(runner.name) offline since \(RelativeTime.clock(runner.lastSeenAt, now: model.now))"
+    }
+
+    /// The first runner online in Mike's order, once the runners are in.
+    /// Kept once picked, unless it's gone from the list.
+    private func pickRunner() {
+        // Down to one runner (one revoked meanwhile, say): back to the
+        // backend's choice, and to a model that one has.
+        guard model.canChooseRunner else {
+            runnerId = nil
+            return
+        }
+        if let runnerId, model.runners.contains(where: { $0.runnerId == runnerId }) { return }
+        // Gone from the list: picked afresh, or the backend's choice.
+        runnerId = NewThreadChoices.runner(model.runners, now: model.now)?.runnerId
+    }
     private var chosenModel: PhoneModelChoice? { models.first { $0.id == modelId } }
 
     /// Adds to what's typed, after a space. The first time, asks which engine.
@@ -157,7 +206,10 @@ struct NewThreadView: View {
                 let images = try await model.upload(photos)
                 // Cancelled while the photos were going up: no thread after all.
                 try Task.checkCancellation()
-                commandId = try await backend.create(text: message, runnerId: nil, cwd: nil, images: images,
+                // Picked now if the sheet never got to (the runners or the
+                // API version came in as Start was tapped).
+                if model.canChooseRunner, runnerId == nil { pickRunner() }
+                commandId = try await backend.create(text: message, runnerId: model.canChooseRunner ? runnerId : nil, cwd: nil, images: images,
                                                      settings: NewThreadSettings(model: modelId, effort: effort))
                 model.sent(photos)
             } catch is CancellationError {
@@ -172,7 +224,7 @@ struct NewThreadView: View {
     /// inbox when it starts.
     private func waitForThread() async {
         guard let commandId, let backend = model.backend else { return }
-        if model.offlineText != nil { dismiss(); return }
+        if offlineText != nil { dismiss(); return }
         do {
             for try await status in backend.command(commandId) {
                 if let threadId = status?.threadId {

@@ -494,6 +494,14 @@ Queries:
   that stopped for good has `lastSeenAt` of 1970).
   Since API 45 also `release?, startedAt?, threadCount?, pressure?`
   (`memory` or `disk` while one's running low).
+  Since API 56 in Mike's order (`phone:setRunnerOrder`): the runners he's
+  placed as he placed them, then the rest, the main Mac first and the others
+  in the order they first heartbeated (never by thread count, which a
+  runner says of itself), with `placed: true` on the ones in the saved order
+  and `main: true` on the main Mac (owner key, no runner key of its own).
+  The phone's automatic pick is the first placed one online, else the main
+  Mac, else none (it sends no `runnerId`), so a runner key's Mac is only
+  picked for Mike once he's placed it.
 - `phone:wakes({ token })` (API 45) → `[{ scheduleId, threadId?, nextRunAt? }]`,
   a small row per active schedule, from `scheduleWakes`: what a sidebar needs
   all the time. `phone:schedules` costs about 150 KB and re-runs on every claim
@@ -593,8 +601,14 @@ within a second or two while it's online (state `taken`, then `done` or
 - `phone:update({ token, threadId, change })` where `change` is one of
   `{ snooze: { until?, untilRestart? } }`, `{ wake: true }`, `{ archive:
   true }`, `{ unarchive: true }`, `{ markSeen: true }`, `{ title }`.
+- `phone:setRunnerOrder({ token, runnerIds })` (API 56): Mike's order for
+  his runners, from the phone's Settings, at most 50 ids, kept in the one
+  `runnerOrder` row. The phone's new thread sheet offers a runner, starting
+  on the first one online in it.
 - `phone:create({ token, text, runnerId?, cwd?, accountId?, model? })`.
-  With no `runnerId`, of the runners heartbeating with the owner key
+  With no `runnerId`, the first runner online and not draining in Mike's
+  order (API 56); with no order, or none of it online, of the runners
+  heartbeating with the owner key
   (`byOwner`) seen in the last 3 minutes, the one with the most threads (the
   Mac Mike works on), or `"any"`, which only the owner key takes, so it waits
   for that Mac (docs/protocol.md, "Runner keys").

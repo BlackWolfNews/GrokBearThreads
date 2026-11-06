@@ -26,6 +26,9 @@ final class AppModel {
     /// `-ThreadbearPocket`: start with the Pocket open, for screenshots and
     /// for checking it on the phone, where nothing can tap the button.
     var opensPocketAtLaunch = false
+    var opensSettingsAtLaunch = false
+    /// `-ThreadbearRunnerOrder`: Settings' runner order screen, for screenshots.
+    let opensRunnerOrderAtLaunch = ProcessInfo.processInfo.arguments.contains("-ThreadbearRunnerOrder")
     private(set) var inbox: [PhoneThread] = []
     /// Rows sliding off the inbox on their way out (`archive`).
     private(set) var slidingOff: Set<String> = []
@@ -136,8 +139,53 @@ final class AppModel {
 
     /// The models a new thread can start on; empty hides the pickers, as an
     /// older backend would turn an effort down.
-    var newThreadModels: [PhoneModelChoice] {
-        isFake || (apiVersion ?? 0) >= BackendCompatibility.modelsAPIVersion ? NewThreadChoices.models(accounts) : []
+    /// The models a new thread on this runner can start on (nil: any runner's).
+    func newThreadModels(on runnerId: String?) -> [PhoneModelChoice] {
+        isFake || (apiVersion ?? 0) >= BackendCompatibility.modelsAPIVersion ? NewThreadChoices.models(accounts, runnerId: runnerId) : []
+    }
+
+    /// Whether there's a runner to choose (backend API 56, which lists them
+    /// in Mike's order and keeps one he sets).
+    var canChooseRunner: Bool {
+        runners.count > 1 && (isFake || (apiVersion ?? 0) >= BackendCompatibility.runnerOrderAPIVersion)
+    }
+
+    /// The order last dragged to, until the backend's list comes back in it:
+    /// a heartbeat's update in between would otherwise snap the list back,
+    /// and the next drag would move the wrong row.
+    private var pendingRunnerOrder: [String]?
+
+    /// Puts the runners in this order, here at once and then on the backend,
+    /// whose list then comes back the same.
+    func setRunnerOrder(_ order: [PhoneRunner]) {
+        let ids = order.map(\.runnerId)
+        pendingRunnerOrder = ids
+        runners = order.map { var r = $0; r.placed = true; return r }
+        guard let backend else { return }
+        Task {
+            do { try await backend.setRunnerOrder(ids) } catch {
+                if self.pendingRunnerOrder == ids { self.pendingRunnerOrder = nil }
+                self.lastError = "Couldn't save the runner order: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// The backend's runners, kept in a dragged order it hasn't caught up with.
+    private func receiveRunners(_ list: [PhoneRunner]) {
+        guard let pending = pendingRunnerOrder else { runners = list; return }
+        // Caught up once its own runners come back in that order; one that's
+        // first heartbeated meanwhile is only added at the end.
+        if list.map(\.runnerId).filter(pending.contains) == pending.filter(list.map(\.runnerId).contains) {
+            pendingRunnerOrder = nil
+            runners = list
+            return
+        }
+        let rank = { (r: PhoneRunner) in pending.firstIndex(of: r.runnerId) ?? pending.count }
+        runners = list.enumerated().sorted { (rank($0.element), $0.offset) < (rank($1.element), $1.offset) }.map {
+            var r = $0.element
+            if pending.contains(r.runnerId) { r.placed = true }
+            return r
+        }
     }
 
     /// Starts a photo on its way to file storage, if it isn't already. Done
@@ -198,13 +246,16 @@ final class AppModel {
     init() {
         let args = ProcessInfo.processInfo.arguments
         opensPocketAtLaunch = args.contains("-ThreadbearPocket")
+        // `-ThreadbearSettings`: start on Settings, for screenshots.
+        opensSettingsAtLaunch = args.contains("-ThreadbearSettings")
         if args.contains("-ThreadbearFake") {
             // -ThreadbearSlowLoad: the lists answer after a few seconds, to see the loading rows.
             // -ThreadbearPictures: and a thread with pictures, "pics".
             // -ThreadbearDiagrams: and one with a mermaid diagram and an html block.
             // -ThreadbearLong: and a very long thread, "long".
             // -ThreadbearSecret: and a thread waiting on a secret card, "secret".
-            connect(FakeBackend(listDelay: args.contains("-ThreadbearSlowLoad") ? .seconds(6) : .zero, pictures: args.contains("-ThreadbearPictures"), long: args.contains("-ThreadbearLong"), secret: args.contains("-ThreadbearSecret"), diagrams: args.contains("-ThreadbearDiagrams")), pairing: nil)
+            // -ThreadbearRunners: the Mac asleep and two more runners, for the runner picker.
+            connect(FakeBackend(listDelay: args.contains("-ThreadbearSlowLoad") ? .seconds(6) : .zero, pictures: args.contains("-ThreadbearPictures"), long: args.contains("-ThreadbearLong"), secret: args.contains("-ThreadbearSecret"), diagrams: args.contains("-ThreadbearDiagrams"), runners: args.contains("-ThreadbearRunners")), pairing: nil)
         } else if let saved = PairingStore.load() {
             connect(ConvexBackend(deploymentURL: saved.deploymentURL, token: saved.token), pairing: saved)
         }
@@ -525,7 +576,7 @@ final class AppModel {
         isFake = backend is FakeBackend
         authProblem = nil
         if !isFake { pocket = PocketStore.standard.load() }
-        tasks.append(follow(backend.runners()) { $0.runners = $1 })
+        tasks.append(follow(backend.runners()) { $0.receiveRunners($1) })
         tasks.append(follow(backend.projects()) { model, list in
             // Two runners could use the same id; the first one wins.
             model.projects = Dictionary(list.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })

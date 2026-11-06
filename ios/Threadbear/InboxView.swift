@@ -32,6 +32,8 @@ struct InboxView: View {
     @State private var query = ""
     @State private var olderArchived: [PhoneThread] = []
     @State private var pocketOpen = false
+    /// Settings pushed at launch (`-ThreadbearSettings`, for screenshots).
+    @State private var settingsOpen = false
     @State private var afterPocket: PocketView.Next?
     /// The thread a new thread sheet just made, to open once the sheet has gone.
     @State private var afterCompose: String?
@@ -100,6 +102,9 @@ struct InboxView: View {
                 if !Task.isCancelled { olderArchived = found }
             }
             .navigationDestination(for: String.self) { ThreadView(threadId: $0) }
+            .navigationDestination(isPresented: $settingsOpen) {
+                if model.opensRunnerOrderAtLaunch { RunnerOrderView() } else { SettingsView() }
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Menu {
@@ -156,6 +161,10 @@ struct InboxView: View {
                 if model.opensPocketAtLaunch {
                     model.opensPocketAtLaunch = false
                     pocketOpen = true
+                }
+                if model.opensSettingsAtLaunch || model.opensRunnerOrderAtLaunch {
+                    model.opensSettingsAtLaunch = false
+                    settingsOpen = true
                 }
             }
             .sheet(isPresented: $composing, onDismiss: {

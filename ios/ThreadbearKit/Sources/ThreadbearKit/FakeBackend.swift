@@ -22,7 +22,9 @@ public final class FakeBackend: Backend, @unchecked Sendable {
     private let listDelay: Duration
     private var imagesById: [String: [MessageImage]] = [:]
 
-    public init(now: Date = .now, turnDelay: Duration = .seconds(2), runnerOnline: Bool = true, listDelay: Duration = .zero, pictures: Bool = false, long: Bool = false, secret: Bool = false, diagrams: Bool = false) {
+    /// `runners`: the Mac asleep and two more runners online (`-ThreadbearRunners`),
+    /// for the new thread sheet's runner picker. Left out of the usual samples.
+    public init(now: Date = .now, turnDelay: Duration = .seconds(2), runnerOnline: Bool = true, listDelay: Duration = .zero, pictures: Bool = false, long: Bool = false, secret: Bool = false, diagrams: Bool = false, runners: Bool = false) {
         let sample = Self.sample(now: now)
         threadsById = Dictionary(uniqueKeysWithValues: sample.threads.map { ($0.threadId, $0) })
         messagesById = sample.messages
@@ -51,7 +53,11 @@ public final class FakeBackend: Backend, @unchecked Sendable {
         }
         scheduleList = sample.schedules
         runnerList = [PhoneRunner(runnerId: "mac", name: "MacBook Pro", version: "0.1.0",
-                                  lastSeenAt: runnerOnline ? now : now.addingTimeInterval(-3 * 3600))]
+                                  lastSeenAt: runnerOnline && !runners ? now : now.addingTimeInterval(-3 * 3600), placed: runners ? true : nil, main: true)]
+        if runners {
+            runnerList += [PhoneRunner(runnerId: "mini", name: "Mac mini", version: "0.1.0", lastSeenAt: now, placed: true),
+                           PhoneRunner(runnerId: "cloud", name: "Cloud", version: "0.1.0", lastSeenAt: now, placed: true)]
+        }
         self.turnDelay = turnDelay
         self.listDelay = listDelay
     }
@@ -546,6 +552,14 @@ public final class FakeBackend: Backend, @unchecked Sendable {
     }
 
     public func setNotifications(apnsToken: String, notify: NotifyMode) async throws {}
+
+    public func setRunnerOrder(_ runnerIds: [String]) async throws {
+        mutate { s in
+            let rank = { (r: PhoneRunner) in runnerIds.firstIndex(of: r.runnerId) ?? runnerIds.count }
+            s.runnerList = s.runnerList.enumerated().sorted { (rank($0.element), $0.offset) < (rank($1.element), $1.offset) }.map(\.element)
+            for i in s.runnerList.indices { s.runnerList[i].placed = runnerIds.contains(s.runnerList[i].runnerId) ? true : nil }
+        }
+    }
 
     public func loadEarlier(threadId: String, beforeSeq: Int) async throws -> String {
         let delay = turnDelay

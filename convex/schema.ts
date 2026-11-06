@@ -735,6 +735,12 @@ export default defineSchema({
   // and report only while it's in the future.
   runnerWatch: defineTable({ until: v.number() }),
 
+  // One row: the order Mike put his runners in on the phone (API 56). A new
+  // thread from the phone starts on the first of them that's online, and so
+  // does one that names no runner (phone.ts mainRunner). Only a phone token
+  // sets it, so a runner key can never move itself up.
+  runnerOrder: defineTable({ runnerIds: v.array(v.string()) }),
+
   accounts: defineTable({
     runnerId: v.string(),
     id: v.string(),

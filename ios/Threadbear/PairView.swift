@@ -91,9 +91,22 @@ struct SettingsView: View {
                         LabeledContent("Token expires", value: expires.formatted(date: .abbreviated, time: .omitted))
                     }
                 }
-                ForEach(model.runners) { runner in
-                    LabeledContent(runner.name, value: runner.isOnline(at: model.now) ? "Online" :
-                                    "Last seen \(RelativeTime.clock(runner.lastSeenAt, now: model.now))")
+                if !model.canChooseRunner {
+                    ForEach(model.runners) { runner in
+                        LabeledContent(runner.name, value: runnerStatus(runner))
+                    }
+                }
+            }
+            if model.canChooseRunner {
+                Section {
+                    ForEach(model.runners) { runner in
+                        LabeledContent(runner.name, value: runnerStatus(runner))
+                    }
+                    NavigationLink("Change the order") { RunnerOrderView() }
+                } header: {
+                    Text("Runners")
+                } footer: {
+                    Text("New threads start on the first one that's online.")
                 }
             }
             if model.canChooseNotifications {
@@ -128,5 +141,36 @@ struct SettingsView: View {
         .confirmationDialog("Unpair this phone?", isPresented: $confirmUnpair, titleVisibility: .visible) {
             Button("Unpair", role: .destructive) { model.unpair() }
         }
+    }
+
+    private func runnerStatus(_ runner: PhoneRunner) -> String {
+        runner.isOnline(at: model.now) ? "Online" : "Last seen \(RelativeTime.clock(runner.lastSeenAt, now: model.now))"
+    }
+}
+
+/// The runners in Mike's order, to drag about: new threads start on the
+/// first one online (phone:setRunnerOrder). Its own screen because a Form's
+/// rows only show drag handles with the whole list in edit mode.
+struct RunnerOrderView: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(model.runners) { runner in
+                    LabeledContent(runner.name, value: runner.isOnline(at: model.now) ? "Online" : "Offline")
+                }
+                .onMove { from, to in
+                    var order = model.runners
+                    order.move(fromOffsets: from, toOffset: to)
+                    model.setRunnerOrder(order)
+                }
+            } footer: {
+                Text("New threads start on the first one that's online. Drag to change the order.")
+            }
+        }
+        .environment(\.editMode, .constant(.active))
+        .navigationTitle("Runner order")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }

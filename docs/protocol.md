@@ -4681,7 +4681,12 @@ schedule on it, and mint phone tokens. Now there are two kinds of key, and
   `phone:quickAsk`) goes to the online `byOwner` runner with no runner key
   and the most threads, and with none online to `"any"`, which only the
   owner key takes: it waits for the main Mac rather than going to a Mac
-  with a runner key. Picking a Mac on the phone still sends it there.
+  with a runner key. Picking a Mac on the phone still sends it there, and
+  so does Mike putting it in his runner order (`phone:setRunnerOrder`, API
+  56, a phone token only): then the first one online in that order takes
+  it. The order is only ever Mike's; nothing a runner reports moves it,
+  and the phone's runner picker only starts on a runner he's placed in it
+  (or else the main Mac, or else none, leaving it to the backend).
 - **What's still trusted from the mirror.** Nothing more than before: the
   phone still keeps runner keys from pairing links only, and the app still
   takes another runner's host only from its `.host` file (Secrets,
