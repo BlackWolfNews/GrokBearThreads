@@ -14,7 +14,9 @@ import { ClaudeNormalizer, fileContext } from './normalize.ts';
 import { groupSpawner, type ProcessRegistry } from '../../proc.ts';
 import { prepareImageForModel } from '../../media.ts';
 import { placePictures } from '../../pictures.ts';
-import { toolTitle, truncateInput } from '../../tools.ts';
+import { EDIT_TOOLS, toolTitle, truncateInput } from '../../tools.ts';
+import { RUNS_AS_CODE, RUNS_AS_CODE_REASON, runsAsCodeByName } from '../../code-writes.ts';
+import path from 'node:path';
 import { RUNNER_VERSION } from '../../config.ts';
 import { stripModelSuffix } from '../../accounts.ts';
 import { END_TURN_FULL_NAME, END_TURN_NUDGE, endTurnMessageStands, endTurnWantsReply, ONE_REPLY_END_TURN_NUDGE, ONE_REPLY_WRITE_NUDGE, owedReplyAfterCompact } from '../../needs.ts';
@@ -297,6 +299,15 @@ class ClaudeSession implements AgentSession {
   private abort = new AbortController();
   private normalizer: ClaudeNormalizer;
   private mode: PermissionMode;
+  // The permission mode each Edit and Write call went through on, by tool
+  // use id, from its PreToolUse hook (and lowered by its approval card):
+  // 'full' only when the runner and the CLI were both on Full access then.
+  // Sent with the call's 'wrote', so a switch to Full access after an
+  // edit was let through in Ask or Auto doesn't make it trusted.
+  private writeModes = new Map<string, PermissionMode>();
+  // Edit and Write calls outside Full access to a file that runs as code,
+  // which the hook made ask (code-writes.ts).
+  private codeWrites = new Set<string>();
   private exited = false;
   private exitPromise: Promise<void>;
   private resolveExit!: () => void;
@@ -369,6 +380,10 @@ class ClaudeSession implements AgentSession {
       hooks: {
         Stop: [{ hooks: [(input) => this.onStop(input)] }],
         PostToolUse: [{ matcher: END_TURN_FULL_NAME, hooks: [async (input) => this.onEndTurn(input)] }],
+        // Every Edit and Write, in every mode, a sub-agent's too: where the
+        // mode it ran on is recorded, and where one that writes code is
+        // made to ask outside Full access (onEditCall).
+        PreToolUse: [{ matcher: [...EDIT_TOOLS].join('|'), hooks: [async (input) => this.onEditCall(input)] }],
         SessionStart: [{ hooks: [async (input) => this.onCompact(input)] }],
       },
       abortController: this.abort,
@@ -446,6 +461,45 @@ class ClaudeSession implements AgentSession {
     return {};
   }
 
+  // Before the CLI decides on an Edit or Write's permission. A hook's
+  // "ask" goes to canUseTool whatever allow rule ("Always allow", the
+  // user's settings) or auto classifier would have let it through, so an
+  // edit of a file that runs as code gets a card in Ask and Auto.
+  private onEditCall(input: HookInput): { hookSpecificOutput?: { hookEventName: 'PreToolUse'; permissionDecision: 'ask'; permissionDecisionReason: string } } {
+    const call = input as { tool_name?: string; tool_use_id?: string; tool_input?: unknown; permission_mode?: string };
+    if (typeof call.tool_name !== 'string' || !EDIT_TOOLS.has(call.tool_name) || typeof call.tool_use_id !== 'string') return {};
+    const id = call.tool_use_id;
+    // Both sides on Full access: the runner's mode, and the CLI's own for
+    // this call (it says, from this CLI on; one that doesn't is taken as
+    // not, so nothing it writes is trusted unasked).
+    const full = this.mode === 'full' && call.permission_mode === 'bypassPermissions';
+    this.noteWriteMode(id, full ? 'full' : this.mode === 'full' ? 'ask' : this.mode);
+    if (this.mode === 'full') return {};
+    const file = this.editTarget(call.tool_input);
+    if (!file || !this.runsAsCode(file)) return {};
+    this.codeWrites.add(id);
+    return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: RUNS_AS_CODE_REASON } };
+  }
+
+  // Keeps the strictest mode a call was seen on.
+  private noteWriteMode(id: string, mode: PermissionMode): void {
+    const was = this.writeModes.get(id);
+    this.writeModes.set(id, was && was !== 'full' ? was : mode);
+    // Calls whose result never came (a turn stopped mid-call) aren't kept
+    // for ever.
+    while (this.writeModes.size > 500) this.writeModes.delete(this.writeModes.keys().next().value!);
+    while (this.codeWrites.size > 500) this.codeWrites.delete(this.codeWrites.values().next().value!);
+  }
+
+  private editTarget(input: unknown): string | undefined {
+    const file = (input as { file_path?: unknown } | undefined)?.file_path;
+    return typeof file === 'string' && file ? path.resolve(this.opts.cwd, file) : undefined;
+  }
+
+  private runsAsCode(file: string): boolean {
+    return runsAsCodeByName(file) || this.opts.runsAsCode?.(file) === true;
+  }
+
   private stderr(line: string): void {
     if (!line.trim()) return;
     this.stderrTail.push(line);
@@ -467,7 +521,15 @@ class ClaudeSession implements AgentSession {
           this.owedReply = undefined;
           this.endTurnAsks.clear();
         }
-        for (const out of this.normalizer.handle(msg as Record<string, unknown>)) {
+        for (let out of this.normalizer.handle(msg as Record<string, unknown>)) {
+          // The mode the call went through on, recorded at the call.
+          if (out.kind === 'wrote') {
+            const mode = this.writeModes.get(out.itemId);
+            out = { ...out, ...(mode ? { mode } : {}) };
+          } else if (out.kind === 'event' && out.event.type === 'tool.result') {
+            this.writeModes.delete(out.event.itemId);
+            this.codeWrites.delete(out.event.itemId);
+          }
           this.sink.output(out);
           // Words after end_turn's result, by the events' own order: the
           // hook that sets endTurnTaken can run before the text written
@@ -550,17 +612,26 @@ class ClaudeSession implements AgentSession {
     }
     if (this.deps.neverAsk?.has(name) && !this.deps.alwaysAsk?.has(name)) return { behavior: 'allow', updatedInput: input, toolUseID: o.toolUseID };
     if (this.mode === 'full' && !this.deps.alwaysAsk?.has(name)) return { behavior: 'allow', updatedInput: input, toolUseID: o.toolUseID };
+    // Approved outside Full access, whatever the hook saw.
+    if (EDIT_TOOLS.has(name)) this.noteWriteMode(o.toolUseID, this.mode);
+    // An edit that writes code Threadbear runs: asked about every time, and
+    // the card says why (code-writes.ts).
+    const target = EDIT_TOOLS.has(name) ? this.editTarget(input) : undefined;
+    const code = this.codeWrites.has(o.toolUseID) || (target !== undefined && this.runsAsCode(target));
     if (!sub) for (const out of this.normalizer.beforeApproval(o.toolUseID, name, input)) this.sink.output(out);
+    const title = toolTitle(name, input, this.opts.cwd);
     const ans = await this.sink.requestApproval({
       toolUseId: itemId,
       name,
-      title: toolTitle(name, input, this.opts.cwd),
+      title: code ? `${title} (${RUNS_AS_CODE})` : title,
       input: truncateInput(input),
       // "Always allow" would defeat a tool that's meant to ask every time.
-      canAlwaysAllow: !o.suppressAlwaysAllowRule && !this.deps.alwaysAsk?.has(name),
+      canAlwaysAllow: !code && !o.suppressAlwaysAllowRule && !this.deps.alwaysAsk?.has(name),
       signal: o.signal,
     });
-    switch (ans.decision) {
+    // A client that offers it anyway gets this once, never a rule.
+    const decision = code && ans.decision === 'allowAlways' ? 'allow' : ans.decision;
+    switch (decision) {
       case 'allow':
         return { behavior: 'allow', updatedInput: input, toolUseID: o.toolUseID, decisionClassification: 'user_temporary' };
       case 'allowAlways': {
@@ -638,8 +709,11 @@ class ClaudeSession implements AgentSession {
     await this.q.applyFlagSettings({ effortLevel: claudeEffort(effort) ?? null });
   }
 
+  // Leaving Full access counts at once and coming to it only once the CLI
+  // has, so between the two the stricter mode is the one in force here.
   async setPermissionMode(mode: PermissionMode): Promise<void> {
     if (this.exited) return;
+    if (mode !== 'full') this.mode = mode;
     await this.q.setPermissionMode(sdkPermissionMode(mode));
     this.mode = mode;
   }

@@ -631,15 +631,19 @@ export function cutUtf8(text: string, max: number): string {
 // the file by the time the runner looks (a command run straight after may
 // have changed it). Undefined when it can't be rebuilt (no originalFile,
 // text that has moved): then nothing is trusted, and a patch waits for
-// Mike as one written any other way does.
+// Mike as one written any other way does. `base`: an edit's originalFile's
+// hash, as the rest of the file is that and not the agent's (F21); null
+// for a Write, or an edit of a file that was missing or empty.
 export function wroteFromResult(name: string, input: Record<string, unknown>, tur: AnyMsg | undefined): AgentWrite | undefined {
   const file = (typeof tur?.filePath === 'string' && tur.filePath) || (typeof input.file_path === 'string' ? input.file_path : '');
   if (!file) return undefined;
   let after: string | null = null;
+  let base: string | null = null;
   if (name === 'Write') {
     after = typeof tur?.content === 'string' ? tur.content : typeof input.content === 'string' ? input.content : null;
   } else {
     let text: string | null = typeof tur?.originalFile === 'string' ? tur.originalFile : tur?.originalFile === null ? '' : null;
+    if (text) base = sha256Of(text);
     const edits =
       name === 'MultiEdit'
         ? Array.isArray(input.edits)
@@ -654,7 +658,11 @@ export function wroteFromResult(name: string, input: Record<string, unknown>, tu
     after = text;
   }
   if (after === null) return undefined;
-  return { path: file, sha256: crypto.createHash('sha256').update(Buffer.from(after, 'utf8')).digest('hex') };
+  return { path: file, sha256: sha256Of(after), base };
+}
+
+function sha256Of(text: string): string {
+  return crypto.createHash('sha256').update(Buffer.from(text, 'utf8')).digest('hex');
 }
 
 // One edit as Claude Code's Edit applies it: an empty old_string makes a

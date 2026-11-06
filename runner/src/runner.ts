@@ -1709,6 +1709,8 @@ export class Runner {
         env: threadEnv(rec.id, this.cfg.home),
         ...this.briefFor(rec, resume),
         ...(rt.claudeSkipped ? { untrustedProjectSettings: claudeSettingsWithoutCommands(rec.cwd) } : {}),
+        // Read at each call, from the thread's folder then.
+        runsAsCode: (file) => this.writeRunsAsCode(rec.cwd, file),
       },
       sink,
     );
@@ -1939,11 +1941,16 @@ export class Runner {
       case 'wrote':
         // Patch files, and helpers a trusted patch may import, an edit the
         // CLI says it made: trusted as that edit left them, and only while
-        // the file still has those bytes (patch-trust.ts).
+        // the file still has those bytes (patch-trust.ts). Only one made on
+        // Full access, by the mode recorded with the call: in Ask and Auto
+        // permission to edit a file isn't permission to run it, so what it
+        // wrote waits for Mike in Patches (code-writes.ts, Gautam's scan
+        // F1 and F4). Only inside the thread's own folder.
+        if (o.mode !== 'full') break;
         this.trustAgentPatches(
           o.files.map((f) => ({ ...f, path: path.resolve(rec.cwd, f.path) })),
-          true,
           rec.cwd,
+          true,
         );
         break;
       case 'allowRules': {

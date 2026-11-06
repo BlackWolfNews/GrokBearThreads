@@ -198,7 +198,8 @@ function harness(rules: string[] = []) {
     },
     note: (t) => notes.push(t),
     cwd: () => '/work/proj',
-    itemPaths: (id) => (id === 'fc-3' ? ['/work/proj/a.ts', '/work/proj/b.ts', '/work/proj/c.ts'] : id === 'fc-1' ? ['/work/proj/a.txt'] : undefined),
+    itemPaths: (id) => (id === 'fc-3' ? ['/work/proj/a.ts', '/work/proj/b.ts', '/work/proj/c.ts'] : id === 'fc-1' ? ['/work/proj/a.txt'] : id === 'fc-p' ? ['.threadbear/patches/x.ts'] : undefined),
+    runsAsCode: (f) => f.includes('/.threadbear/'),
     callTool: async () => ({ contentItems: [{ type: 'inputText', text: 'ok' }], success: true }),
     now: () => 1_793_000_000_000,
   };
@@ -352,6 +353,23 @@ test('file changes: titled from the item\'s paths; "Always allow" is the codex:f
   one.a.handle(0, 'item/fileChange/requestApproval', { threadId: 't', turnId: 'u', itemId: 'fc-1', reason: null, grantRoot: null }, { fromChild: false });
   await flush();
   assert.equal(one.asked[0].title, 'Edit a.txt');
+});
+
+test('file changes to a file that runs as code ask every time, past an "Always allow", and never keep a rule (code-writes.ts)', async () => {
+  const h = harness([FILE_CHANGE_RULE]);
+  h.answerWith(async () => ({ decision: 'allowAlways' }));
+  h.a.handle(0, 'item/fileChange/requestApproval', { threadId: 't', turnId: 'u', itemId: 'fc-p', reason: null, grantRoot: null }, { fromChild: false });
+  h.a.handle(1, 'applyPatchApproval', { conversationId: 't', callId: 'c', fileChanges: { '/home/me/.threadbear/patches/mine.ts': {} }, reason: null }, { fromChild: false });
+  // Paths it never saw: asked, as it can't tell.
+  h.a.handle(2, 'item/fileChange/requestApproval', { threadId: 't', turnId: 'u', itemId: 'unseen', reason: null, grantRoot: null }, { fromChild: false });
+  await flush();
+  assert.equal(h.asked.length, 3);
+  for (const card of h.asked.slice(0, 2)) {
+    assert.equal(card.canAlwaysAllow, false);
+    assert.match(card.title, /\(Threadbear runs this file as code\)$/);
+  }
+  assert.deepEqual(h.added, [[FILE_CHANGE_RULE]], 'only the unseen one, an ordinary card, could add the rule');
+  assert.deepEqual(h.replies.map((r) => r.result), [{ decision: 'accept' }, { decision: 'approved' }, { decision: 'accept' }]);
 });
 
 test('permissions: a turn or a session grant, or nothing', async () => {

@@ -202,8 +202,8 @@ test("a successful Edit or Write says what it wrote, by the hash of the bytes re
   }
   const wrote = outs.filter((o) => o.kind === 'wrote');
   assert.deepEqual(wrote, [
-    { kind: 'wrote', itemId: 'toolu_019BcoFgUrhyzun1BBVKSy8Z', files: [{ path: '/work/proj/note.txt', sha256: sha('alpha\nBETA\ngamma\n') }] },
-    { kind: 'wrote', itemId: 'toolu_013dHVx9Xb6KVXVZYAH7zSgX', files: [{ path: '/work/proj/new.txt', sha256: sha('hi') }] },
+    { kind: 'wrote', itemId: 'toolu_019BcoFgUrhyzun1BBVKSy8Z', files: [{ path: '/work/proj/note.txt', sha256: sha('alpha\nBETA\ngamma\n'), base: sha('alpha\nbeta\ngamma\n') }] },
+    { kind: 'wrote', itemId: 'toolu_013dHVx9Xb6KVXVZYAH7zSgX', files: [{ path: '/work/proj/new.txt', sha256: sha('hi'), base: null }] },
   ]);
   // Each just before its result, so the runner hears it before the turn goes on.
   const next = outs[outs.findIndex((o) => o.kind === 'wrote') + 1];
@@ -233,6 +233,14 @@ test('wroteFromResult rebuilds an edit as Claude Code applies it, and gives up r
     sha('c\n'),
   );
   assert.equal(wroteFromResult('Write', { file_path: '/p/a.ts', content: 'from input' }, undefined)?.sha256, sha('from input'));
+  // What the edit started from (F21): the rest of the file is that, not
+  // the agent's. None for a Write, or an edit of a missing or empty file,
+  // whose bytes are all the call's.
+  assert.equal(wroteFromResult('Edit', {}, tur({ originalFile: 'a\nb\nc\n', oldString: 'b', newString: 'B' }))?.base, sha('a\nb\nc\n'));
+  assert.equal(wroteFromResult('MultiEdit', { edits: [{ old_string: 'a', new_string: 'b' }] }, tur({ originalFile: 'a\n' }))?.base, sha('a\n'));
+  assert.equal(wroteFromResult('Edit', {}, tur({ originalFile: null, oldString: '', newString: 'new\n' }))?.base, null);
+  assert.equal(wroteFromResult('Edit', {}, tur({ originalFile: '', oldString: '', newString: 'new\n' }))?.base, null);
+  assert.equal(wroteFromResult('Write', { file_path: '/p/a.ts', content: 'all mine' }, tur({ content: 'all mine', originalFile: 'theirs' }))?.base, null);
   // No original text, or text that isn't there: nothing, so nothing is trusted.
   assert.equal(wroteFromResult('Edit', { file_path: '/p/a.ts', old_string: 'a', new_string: 'b' }, undefined), undefined);
   assert.equal(wroteFromResult('Edit', {}, tur({ originalFile: 'abc', oldString: 'zzz', newString: 'y' })), undefined);

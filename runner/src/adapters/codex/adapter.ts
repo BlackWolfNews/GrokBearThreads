@@ -25,6 +25,7 @@ import {
   type AppServerTimings,
   type OversizedLine,
 } from './appserver.ts';
+import { runsAsCodeByName } from '../../code-writes.ts';
 import { CodexApprovals } from './approvals.ts';
 import { CodexTools, dynamicToolSpecs, toolGuidance, type ToolDefinition } from './tools.ts';
 import { CodexNormalizer, limitsFromAccount } from './normalize.ts';
@@ -462,6 +463,7 @@ export class CodexSession implements AgentSession {
       note: (text) => this.sink.output({ kind: 'event', event: { type: 'system.note', text } }),
       cwd: () => this.cwd,
       itemPaths: (id) => this.itemPaths.get(id),
+      runsAsCode: (file) => runsAsCodeByName(file) || opts.runsAsCode?.(file) === true,
       callTool: (params, o) => this.tools.call(params, o),
       now: this.now,
     });

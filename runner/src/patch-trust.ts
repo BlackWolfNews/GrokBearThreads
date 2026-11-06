@@ -12,9 +12,12 @@
 // of the patch files you said yes to. A file whose content you haven't
 // trusted waits: "new" when nothing in that folder has been trusted yet,
 // "changed" when something has (a git pull brought a new version). A
-// patch file a thread's agent writes with Edit or Write is trusted as it
-// stands, as that agent could already run anything in the folder, and
-// asking about every button you ask for would be noise.
+// patch file a Full access thread's agent writes with Edit or Write in its
+// own folder is trusted as it stands, as that agent could already run
+// anything there, and asking about every button you ask for would be
+// noise. Not in Ask or Auto, where it couldn't (code-writes.ts), and an
+// Edit only when the file it started from was trusted: it vouches for
+// what it changed, not for the rest of the file.
 //
 // A git worktree counts as its main checkout, so a thread's worktree of a
 // trusted repo isn't asked about again. Only a worktree git itself made
@@ -107,25 +110,34 @@ export interface PatchTrustStore extends PatchGate {
   trust(file: string, hash: string): boolean;
   // As they are now, unasked: the first start's seeding.
   trustCurrent(files: string[]): string[];
-  // An agent's verified edit left `file` as bytes hashing to `sha256`
-  // (an adapter's 'wrote'). Trusts the patch files it's part of (itself,
-  // or ones importing or running it) only while it still has those bytes
-  // and every other file in the patch's hash is bytes trusted before or
-  // another such edit's: one edit doesn't vouch for files it didn't write.
-  // Only patches already looked at are known as importing it.
-  trustAgentWrite(file: string, sha256: string): string[];
+  // An agent's verified edit, in a Full access thread in `folder`, left
+  // `file` as bytes hashing to `sha256` (an adapter's 'wrote'). `base`:
+  // the hash of the file it edited, or null when it wrote all of it (a
+  // Write, or an edit of a missing or empty file). Trusts the patch files
+  // it's part of (itself, or ones importing or running it) only while it
+  // still has those bytes and every other file in the patch's hash is
+  // bytes trusted before or another such edit's: one edit doesn't vouch
+  // for files it didn't write, nor an Edit for the rest of a file that
+  // wasn't trusted before it. Only files inside `folder` count, and only
+  // patches already looked at are known as importing it.
+  trustAgentWrite(file: string, sha256: string, base: string | null, folder: string): string[];
+  // Whether `file` is part of a patch this has hashed (the patch file, a
+  // helper, a script it names): an edit to it changes code that runs.
+  covers(file: string): boolean;
   // Whether `file` hashes to `hash` now, read afresh (no cache): checked
   // just before a trusted hook or setup script runs.
   verify(file: string, hash: string): boolean;
   // The thread folder's Claude Code settings (claude-trust.ts).
   checkClaude(cwd: string): ClaudeVerdict;
   trustClaude(cwd: string, hash: string): boolean;
-  // An agent's verified Edit or Write to `file` in a thread in `cwd`,
-  // which wrote bytes hashing to `sha256`: the folder's settings are
-  // trusted as they are only while the file still has those bytes and
-  // every other file they're hashed from is bytes trusted before or
-  // another such edit's. True when they were.
-  trustClaudeEdit(cwd: string, file: string, sha256: string): boolean;
+  // An agent's verified Edit or Write to `file` in a Full access thread in
+  // `cwd`, which wrote bytes hashing to `sha256` from a file hashing to
+  // `base` (null: it wrote all of it): the folder's settings are trusted
+  // as they are only while the file still has those bytes, an Edit's
+  // `base` was bytes trusted before, and every other file they're hashed
+  // from is bytes trusted before or another such edit's. Only a file
+  // inside `cwd`. True when they were.
+  trustClaudeEdit(cwd: string, file: string, sha256: string, base: string | null): boolean;
   save(): void;
 }
 
@@ -137,6 +149,7 @@ export const TRUST_ALL: PatchTrustStore = {
   trust: () => true,
   trustCurrent: (files) => files,
   trustAgentWrite: () => [],
+  covers: () => false,
   verify: () => true,
   checkClaude: () => ({ trusted: true }),
   trustClaude: () => true,
@@ -238,8 +251,12 @@ export class PatchTrust implements PatchTrustStore {
     return true;
   }
 
-  trustClaudeEdit(cwd: string, file: string, sha256: string): boolean {
+  trustClaudeEdit(cwd: string, file: string, sha256: string, base: string | null): boolean {
     const target = path.resolve(cwd, file);
+    if (!isInside(realpath(target), realpath(path.resolve(cwd)))) return false;
+    // An Edit wrote only what it changed; the rest is the file it started
+    // from, which counts only if it was trusted (F21).
+    if (base !== null && !this.isApproved(target, base)) return false;
     this.approve(target, sha256);
     const verdict = this.checkClaude(cwd);
     if (verdict.trusted) return false;
@@ -266,11 +283,20 @@ export class PatchTrust implements PatchTrustStore {
     return this.trustWhere(files, () => true);
   }
 
-  trustAgentWrite(file: string, sha256: string): string[] {
+  trustAgentWrite(file: string, sha256: string, base: string | null, folder: string): string[] {
     const target = realpath(path.resolve(file));
+    // The thread's own folder only: an agent working in one repo doesn't
+    // vouch for another project's patches, or a tool patch's.
+    const within = realpath(path.resolve(folder));
+    if (!isInside(target, within)) return [];
+    // An Edit wrote only what it changed; the rest of the file is what it
+    // started from. Unless that was trusted bytes (a version of a trusted
+    // patch, or another such edit's), a small edit to a cloned or pulled
+    // file would trust all of it (Gautam's scan, F21).
+    if (base !== null && !this.isApproved(target, base)) return [];
     this.approve(target, sha256);
     const files = isPatchFile(file) ? [file] : [];
-    for (const [f, h] of this.hashes) if (!files.includes(f) && h.deps.some((d) => d.path === target)) files.push(f);
+    for (const [f, h] of this.hashes) if (!files.includes(f) && isInside(realpath(f), within) && h.deps.some((d) => d.path === target)) files.push(f);
     // The edited file as the edit left it (the bytes hashed now are its),
     // and every other file trusted bytes or another verified edit's.
     return this.trustWhere(files, (entry) => {
@@ -278,6 +304,14 @@ export class PatchTrust implements PatchTrustStore {
       const mine = parts.find((d) => d.path === target);
       return mine?.sha256 === sha256 && parts.every((d) => d.sha256 === undefined || this.isApproved(d.path, d.sha256));
     });
+  }
+
+  // Without case, as macOS names a file either way: a wider match only asks more.
+  covers(file: string): boolean {
+    const target = realpath(path.resolve(file)).toLowerCase();
+    const same = (p: string) => p.toLowerCase() === target;
+    for (const h of this.hashes.values()) if (same(h.root) || h.deps.some((d) => same(d.path))) return true;
+    return false;
   }
 
   verify(file: string, hash: string): boolean {

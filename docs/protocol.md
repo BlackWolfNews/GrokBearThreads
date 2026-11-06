@@ -2652,15 +2652,28 @@ panels or hooks, no live functions, and no worktree for new threads.
   the repo's record of it must name each other, so a folder can't claim
   to be a worktree of a trusted repo.
 - A patch file a Claude thread's agent writes with an Edit or Write call
-  is trusted as that edit left it: the agent can run anything in the
-  folder already. Only an edit the CLI says it made counts, when its
+  on Full access, inside the thread's own folder, is trusted as that edit
+  left it: the agent can run anything in the folder already. Not in Ask
+  or Auto, where it couldn't: there the write waits for Mike like any
+  other, and the edit asks first (below, "Agent writes that run as
+  code"). The mode is the one the call went through on, recorded with
+  it, not the thread's when the result comes, so switching to Full access
+  after approving an edit in Ask doesn't trust it. A file outside the
+  thread's folder (another project's patch, a tool patch) waits too.
+  Only an edit the CLI says it made counts, when its
   successful result comes in, never the diff shown to approve one, so a
   denied or failed edit trusts nothing. And only the bytes it wrote: the
   hash of the file rebuilt from the result (a Write's content, an Edit
   applied to the original text it reports), which the file must still
   have, in the same read the trust hash is made from. A file written
   over after that (a command run straight after the edit) isn't
-  covered, and one the result can't be rebuilt for waits. Nor does one
+  covered, and one the result can't be rebuilt for waits. An Edit or
+  MultiEdit vouches only for what it changed: the rest of the file is
+  the text it started from (the result's original), so it counts only
+  when that was bytes trusted before (a version of a trusted patch or
+  helper, or another such edit's), or when there was no file or an empty
+  one. A Write is all the agent's. So a one-line Edit to a cloned repo's
+  patch, or to a helper a pull changed, trusts nothing. Nor does one
   edit vouch for files it didn't write: the patch is trusted only when
   every other file its hash covers (its helpers, the scripts it names)
   is bytes that were part of a version trusted while the runner has run,
@@ -2721,8 +2734,8 @@ can't parse, or one that reaches more than 100 local files. Loads are read
 from the parsed syntax (oxc), so comments and strings don't count either way. `patches.trust` can't trust it; changing it to plain
 imports can. An agent's Edit or Write to a helper carries on the trusted
 patches that import it, as it does for the patch file (only with the
-helper as that edit left it); it doesn't trust a patch that's still
-waiting. A trust file from before helpers counted
+helper as that edit left it, and an Edit only of the helper as it was
+trusted); it doesn't trust a patch that's still waiting. A trust file from before helpers counted
 (`version: 1`) is read as it is: a patch with no helpers is still trusted,
 and one with helpers is asked about again (`"changed"`), as version 1 never
 saw them. A changed helper is only imported again when the runner restarts
@@ -2918,7 +2931,27 @@ trust's store and rules.
   leaves them; to a script they name, only when an earlier version was
   trusted, as with a patch's helpers. Either only with the file as that
   edit left it, and every other file the settings' hash covers bytes
-  trusted before or another such edit's, as for patch files.
+  trusted before or another such edit's, as for patch files. The same
+  rules as there: only on Full access, only a file inside the thread's
+  folder, and an Edit only of a file that was trusted bytes (or none).
+
+**Agent writes that run as code** (`src/code-writes.ts`). Outside Full
+access, permission to edit a file isn't permission to run it, so an Edit,
+MultiEdit or Write by a Claude thread in Ask or Auto, or a Codex patch
+outside Full access, of a file Threadbear runs by itself always asks: a patch file anywhere (`.threadbear/patches`,
+home's included, which is trusted whatever it holds), anything under
+`~/.threadbear`, a file a patch the runner has hashed covers (a helper, a
+script it names), `.claude/settings*.json` (home's too), an `.mcp.json`,
+and a script the thread folder's Claude settings name. Names are matched
+as the disk has them (through symlinks, and without case, as macOS names
+a file either way). The runner's PreToolUse hook answers `ask` for these,
+which reaches the approval card whatever an "Always allow" rule, the
+user's own allow rules or Auto's classifier would have said. The card's
+`title` ends "(Threadbear runs this file as code)", its `options` have no
+`allowAlways`, and an `allowAlways` answer counts as `allow` once (Codex:
+the thread's file-change rule is passed over for it, and isn't added). What
+it writes still isn't trusted (above): Mike trusts it in Patches. On Full
+access none of this changes anything.
 
 **Built in**, from the folder alone:
 

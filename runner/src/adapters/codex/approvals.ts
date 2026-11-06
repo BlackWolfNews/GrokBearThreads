@@ -2,6 +2,8 @@
 // elicitations, Threadbear tool calls and the clock. This owns the pending
 // map, the decision mapping, serverRequest/resolved and the "Always allow"
 // rules. Every request gets an answer: a card, a rule, or a refusal at once.
+import path from 'node:path';
+import { RUNS_AS_CODE } from '../../code-writes.ts';
 import type { Question } from '../../protocol.ts';
 import type { Logger } from '../../log.ts';
 import { displayPath, truncateInput } from '../../tools.ts';
@@ -239,6 +241,9 @@ export type ApprovalsDeps = {
   // What the session saw of an item on item/started: the paths a fileChange
   // touches, for the card's title.
   itemPaths(itemId: string): string[] | undefined;
+  // Whether a file (absolute) is one Threadbear runs as code
+  // (code-writes.ts): a patch that changes one always asks.
+  runsAsCode(file: string): boolean;
   callTool(params: DynamicToolCallParams, o: { fromChild: boolean; signal: AbortSignal }): Promise<DynamicToolCallResponse>;
   now(): number;
 };
@@ -255,6 +260,11 @@ export class CodexApprovals {
 
   get pendingCount(): number {
     return this.pending.size;
+  }
+
+  // Codex reports a patch's paths as written, maybe relative to the folder.
+  private runsAsCode(paths: string[]): boolean {
+    return paths.some((f) => this.deps.runsAsCode(path.resolve(this.deps.cwd(), f)));
   }
 
   // `fromChild`: the request came from a subagent's thread. Its card goes to
@@ -359,20 +369,25 @@ export class CodexApprovals {
   }
 
   private fileChange(id: RequestId, p: FileChangeRequestApprovalParams, fromChild: boolean): void {
-    if (hasRule(this.deps.rules(), FILE_CHANGE_RULE)) {
+    const known = p.itemId ? this.deps.itemPaths(p.itemId) : undefined;
+    const paths = known ?? [];
+    // A patch to a file that runs as code asks every time, past an "Always
+    // allow", as does one whose files weren't seen (code-writes.ts).
+    const code = this.runsAsCode(paths);
+    if (!code && known && hasRule(this.deps.rules(), FILE_CHANGE_RULE)) {
       this.deps.reply(id, { decision: 'accept' });
       return;
     }
-    const paths = (p.itemId && this.deps.itemPaths(p.itemId)) || [];
     const input: Record<string, unknown> = { paths };
     if (p.reason) input.reason = p.reason;
     if (p.grantRoot) input.grantRoot = p.grantRoot;
+    const title = editTitle(paths, this.deps.cwd());
     this.ask(
       id,
       'item/fileChange/requestApproval',
-      { toolUseId: fromChild ? undefined : p.itemId, name: 'apply_patch', title: editTitle(paths, this.deps.cwd()), input, canAlwaysAllow: true },
+      { toolUseId: fromChild ? undefined : p.itemId, name: 'apply_patch', title: code ? `${title} (${RUNS_AS_CODE})` : title, input, canAlwaysAllow: !code },
       (a) => {
-        if (a.decision === 'allowAlways') this.deps.addRules([FILE_CHANGE_RULE]);
+        if (a.decision === 'allowAlways' && !code) this.deps.addRules([FILE_CHANGE_RULE]);
         return { decision: commandDecision(a) };
       },
     );
@@ -517,19 +532,21 @@ export class CodexApprovals {
   }
 
   private legacyPatch(id: RequestId, p: ApplyPatchApprovalParams, fromChild: boolean): void {
-    if (hasRule(this.deps.rules(), FILE_CHANGE_RULE)) {
+    const paths = Object.keys(p.fileChanges ?? {});
+    const code = this.runsAsCode(paths);
+    if (!code && hasRule(this.deps.rules(), FILE_CHANGE_RULE)) {
       this.deps.reply(id, { decision: 'approved' });
       return;
     }
-    const paths = Object.keys(p.fileChanges ?? {});
     const input: Record<string, unknown> = { paths };
     if (p.reason) input.reason = p.reason;
+    const title = editTitle(paths, this.deps.cwd());
     this.ask(
       id,
       'applyPatchApproval',
-      { toolUseId: fromChild ? undefined : p.callId, name: 'apply_patch', title: editTitle(paths, this.deps.cwd()), input, canAlwaysAllow: true },
+      { toolUseId: fromChild ? undefined : p.callId, name: 'apply_patch', title: code ? `${title} (${RUNS_AS_CODE})` : title, input, canAlwaysAllow: !code },
       (a) => {
-        if (a.decision === 'allowAlways') this.deps.addRules([FILE_CHANGE_RULE]);
+        if (a.decision === 'allowAlways' && !code) this.deps.addRules([FILE_CHANGE_RULE]);
         return { decision: legacyDecision(a) };
       },
     );

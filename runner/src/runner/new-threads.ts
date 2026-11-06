@@ -111,7 +111,7 @@ export const newThreadsPart = {
     const patchFile = path.join(cwd, '.threadbear', 'patches', 'welcome.ts');
     fs.mkdirSync(path.dirname(patchFile), { recursive: true });
     if (!fs.existsSync(patchFile)) fs.writeFileSync(patchFile, WELCOME_PATCH);
-    if (fs.readFileSync(patchFile, 'utf8') === WELCOME_PATCH) this.trustAgentPatches([{ path: patchFile, sha256: crypto.createHash('sha256').update(WELCOME_PATCH).digest('hex') }]);
+    if (fs.readFileSync(patchFile, 'utf8') === WELCOME_PATCH) this.trustAgentPatches([{ path: patchFile, sha256: crypto.createHash('sha256').update(WELCOME_PATCH).digest('hex'), base: null }], cwd);
     const made: ThreadSummary[] = [];
     // Oldest first, so the first in SAMPLE_THREADS is the newest in the list.
     for (const sample of [...SAMPLE_THREADS].reverse()) {

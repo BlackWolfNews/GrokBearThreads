@@ -57,6 +57,12 @@ export type StartSessionOptions = {
   // local settings and gets these instead: the same settings without the
   // parts that run anything.
   untrustedProjectSettings?: Record<string, unknown>;
+  // Whether an edit of this file (absolute) changes code Threadbear runs
+  // by itself: a patch, what a hashed patch covers, Claude settings and
+  // what they name (code-writes.ts). Outside Full access such an edit
+  // always asks, with no "Always allow". The adapter checks the names in
+  // code-writes.ts too, so leaving this out never asks less.
+  runsAsCode?: (file: string) => boolean;
 };
 
 export type TurnResult = {
@@ -115,11 +121,19 @@ export type AdapterOutput =
   // trusts patch files by these alone (patch-trust.ts). `sha256` is the
   // hash of the bytes the edit wrote, rebuilt from the result. Only
   // Claude's adapter sends it: a Codex patch's result doesn't say what it
-  // wrote, so a patch file Codex writes waits for Mike.
-  | { kind: 'wrote'; itemId: string; files: AgentWrite[] }
+  // wrote, so a patch file Codex writes waits for Mike. `mode`: the
+  // thread's permission mode when the CLI let the call through, recorded
+  // with the call (not read when the result comes, after a switch to Full
+  // access); only 'full' trusts anything (code-writes.ts). Absent when it
+  // wasn't recorded, which trusts nothing.
+  | { kind: 'wrote'; itemId: string; files: AgentWrite[]; mode?: PermissionMode }
   | { kind: 'result'; result: TurnResult };
 
-export type AgentWrite = { path: string; sha256: string };
+// `base`: the hash of the file an Edit or MultiEdit started from, as the
+// result reports it; null when the call wrote the whole file (a Write, or
+// an edit of a missing or empty one). An edit vouches only for what it
+// changed, so the rest counts only when `base` was trusted (patch-trust.ts).
+export type AgentWrite = { path: string; sha256: string; base: string | null };
 
 // A background shell or subagent the CLI reports. `type` is the CLI's own
 // name for it (Claude: local_bash, local_agent, ...), `kind` the protocol's.

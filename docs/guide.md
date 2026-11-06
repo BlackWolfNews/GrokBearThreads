@@ -255,6 +255,11 @@ shown on the composer (the box you type in) and changed by clicking it.
   text you didn't write, like an error report or a web page. It catches a lot
   but it's no guarantee, and on a Codex thread it behaves like Ask before edits.
 
+In Ask before edits and Auto, an edit to a file Threadbear runs by itself
+(a patch, a file a patch uses, or Claude Code's settings) always asks, with
+no Always allow, and the card says Threadbear runs the file as code. Even
+once you allow it, the patch waits for you to trust it in Patches.
+
 The mode belongs to one thread. A new thread starts on Full access again
 unless you pick otherwise, so if you're unsure about a task, switch it to Ask
 before edits before you send. Deleting a thread is one thing an agent always
@@ -1046,11 +1051,14 @@ and the agent writes the patch into the folder's `.threadbear/patches/`
 folder). It shows up within a few seconds. A patch is code that runs on your
 Mac, so keep only the ones you'd be happy to run.
 
-Patches only run once you've trusted them. One the agent writes for you is
-trusted as it wrote it (in a Claude thread; one Codex writes waits for
-you), though not if you turn the edit down, not a change made to it
-afterwards some other way, and not other files it uses that changed
-some other way. One that arrives some other way, in a repo you've
+Patches only run once you've trusted them. One the agent writes for you in
+that folder is trusted as it wrote it (in a Claude thread on Full access;
+one written in Ask before edits or Auto, or by Codex, waits for you),
+though not if you turn the edit down, not a change made to it afterwards
+some other way, and not other files it uses that changed some other way.
+A small edit to a patch you hadn't trusted yet (one from a repo you
+cloned, or a pull) doesn't trust it either: the rest of it isn't the
+agent's. One that arrives some other way, in a repo you've
 cloned or with a `git pull`, waits: a "patch to trust" chip shows above the
 composer, and Patches lists it as "Not run yet" (or "Changed since you
 trusted it") with a Trust button. Open its file to read it first, and
@@ -1084,7 +1092,8 @@ thread says they were skipped. The rest of the folder's settings
 CLAUDE.md files in the folders above it, wait too. Trust them and your
 next message starts Claude afresh with all of it, carrying on the same
 conversation. A change to them, or to a script they run, asks again; ones
-the agent writes for you are trusted as it wrote them. Settings with no
+the agent writes for you on Full access are trusted as it wrote them, as
+patches are. Settings with no
 commands or environment settings in them never ask.
 
 A project's page has its own panels and Patches on the right-hand rail:

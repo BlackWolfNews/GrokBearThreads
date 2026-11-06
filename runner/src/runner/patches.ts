@@ -12,7 +12,8 @@ import { threadEnv } from '../restart.ts';
 import { paths } from '../config.ts';
 import { isPatchFile, type ClaudeVerdict } from '../patch-trust.ts';
 import type { AgentWrite } from '../adapters/types.ts';
-import { CLAUDE_PATCH_ID } from '../claude-trust.ts';
+import { CLAUDE_PATCH_ID, claudeCommands } from '../claude-trust.ts';
+import { canonicalPath, runsAsCodeByName } from '../code-writes.ts';
 import type { PatchInfo } from '../protocol.ts';
 import { automaticTrust, EMPTY_PATCH_SET, hookApplies, loadPatchSet, applyLive, hasLive, projectPanels, renderListPanel, renderPanel, runCommand, type CommandOutcome, type PanelRender, type PatchSet, type ProjectFolder, projectPatchFiles } from '../patches.ts';
 import os from 'node:os';
@@ -240,22 +241,40 @@ export const patchesPart = {
     return { trusted };
   },
 
-  // Trusts patch files an agent's verified edit wrote (an adapter's
-  // 'wrote', never a preview), as that edit left them: each only while it
-  // still hashes to `sha256`, checked in the same read the trust hash is
-  // made from, and only when every other file in the patch is bytes
-  // trusted before or another verified edit's (patch-trust.ts). A helper
-  // the agent edited carries on the patches importing it the same way.
-  // With `cwd` (the thread's folder), its Claude Code settings and the
-  // scripts they name count too (claude-trust.ts). `reread` false when
-  // the caller reads them again itself.
-  trustAgentPatches(this: Runner, files: AgentWrite[], reread = true, cwd?: string): void {
+  // Trusts patch files a Full access thread's verified edit wrote (an
+  // adapter's 'wrote' on 'full', never a preview: the caller checks), as
+  // that edit left them: each only while it still hashes to `sha256`,
+  // checked in the same read the trust hash is made from, only inside
+  // `folder` (the thread's), only an Edit of trusted bytes or a whole
+  // Write, and only when every other file in the patch is bytes trusted
+  // before or another verified edit's (patch-trust.ts). A helper the agent
+  // edited carries on the patches importing it the same way. With
+  // `claude`, the folder's Claude Code settings and the scripts they name
+  // count too (claude-trust.ts).
+  trustAgentPatches(this: Runner, files: AgentWrite[], folder: string, claude = false): void {
     const done: string[] = [];
-    for (const { path: file, sha256 } of files) {
-      done.push(...this.patchTrust.trustAgentWrite(file, sha256));
-      if (cwd && !isPatchFile(file) && this.patchTrust.trustClaudeEdit(cwd, file, sha256)) done.push(file);
+    for (const { path: file, sha256, base } of files) {
+      done.push(...this.patchTrust.trustAgentWrite(file, sha256, base, folder));
+      if (claude && !isPatchFile(file) && this.patchTrust.trustClaudeEdit(folder, file, sha256, base)) done.push(file);
     }
-    if (done.length && reread) this.rereadAllPatches();
+    if (done.length) this.rereadAllPatches();
+  },
+
+  // Whether an edit of `file` (absolute) by a thread in `cwd` changes code
+  // the runner runs by itself, beyond what code-writes.ts knows by name: a
+  // file a patch it has hashed covers, or a script the folder's Claude
+  // Code settings name. Outside Full access such an edit always asks.
+  writeRunsAsCode(this: Runner, cwd: string, file: string): boolean {
+    const real = canonicalPath(file);
+    if (runsAsCodeByName(real, this.panelsRoot ?? os.homedir()) || this.patchTrust.covers(real)) return true;
+    try {
+      const found = claudeCommands(cwd, this.panelsRoot ?? os.homedir());
+      const same = (f: string) => canonicalPath(f).toLowerCase() === real.toLowerCase();
+      return !!found && [...found.files, ...found.named].some(same);
+    } catch {
+      // Settings it can't read: the edit asks.
+      return true;
+    }
   },
 
   // The thread folder's Claude Code settings, as an entry in its patch
