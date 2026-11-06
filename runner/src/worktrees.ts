@@ -10,6 +10,7 @@ import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { WorktreePatch } from './patches.ts';
+import { inBackground } from './background.ts';
 
 // What a thread's record keeps about its worktree.
 export type WorktreeRecord = {
@@ -389,7 +390,8 @@ export function overwrittenFiles(text: string): string[] {
 // where a test runner says what failed).
 function runCheck(command: string, cwd: string, shell = ['/bin/sh', '-c']): Promise<{ ok: boolean; code?: number; text: string; durationMs: number }> {
   const started = Date.now();
-  const [bin, ...args] = shell;
+  // At background priority: a land's check is the full quick suite.
+  const [bin, args] = inBackground(shell[0], [...shell.slice(1), command]);
   const keep = 256 * 1024;
   return new Promise((resolve) => {
     let text = '';
@@ -397,7 +399,7 @@ function runCheck(command: string, cwd: string, shell = ['/bin/sh', '-c']): Prom
       text += b.toString('utf8');
       if (text.length > keep * 2) text = text.slice(-keep);
     };
-    const child = spawn(bin, [...args, command], { cwd, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(bin, args, { cwd, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
     child.stdout.on('data', take);
     child.stderr.on('data', take);
     child.on('error', (e) => resolve({ ok: false, text: `${text}\n${e.message}`, durationMs: Date.now() - started }));

@@ -59,6 +59,7 @@ import { imageRefFor } from './media.ts';
 import { FolderCache } from './folder-cache.ts';
 import { automaticCommand, TRUST_ALL, unhashedFiles, worktreeOf, type PatchGate } from './patch-trust.ts';
 import { verifiedUrl } from './verified-imports.ts';
+import { inBackground } from './background.ts';
 
 export const CONVEX_DASHBOARD = 'https://dashboard.convex.dev';
 // `npx convex dev` on an anonymous (no account) deployment serves the
@@ -1098,10 +1099,13 @@ export const ACTION_TIMEOUT_MS = 10 * 60_000;
 // shell and a short timeout.
 export function runCommand(
   command: string,
-  opts: { cwd: string; env: Record<string, string | undefined>; shell?: string[]; timeoutMs?: number },
+  // `background`: builds and tests (a worktree's setup, turn hooks) run at
+  // background priority (background.ts). Buttons Mike presses don't.
+  opts: { cwd: string; env: Record<string, string | undefined>; shell?: string[]; timeoutMs?: number; background?: boolean },
 ): Promise<CommandOutcome> {
   const started = Date.now();
-  const [bin, ...args] = opts.shell ?? loginShell();
+  const [shellBin, ...shellArgs] = opts.shell ?? loginShell();
+  const [bin, args] = opts.background ? inBackground(shellBin, [...shellArgs, command]) : [shellBin, [...shellArgs, command]];
   return new Promise((resolve) => {
     const chunks: Buffer[] = [];
     let size = 0;
@@ -1124,7 +1128,7 @@ export function runCommand(
     };
     let child;
     try {
-      child = spawn(bin, [...args, command], { cwd: opts.cwd, env: opts.env as NodeJS.ProcessEnv, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+      child = spawn(bin, args, { cwd: opts.cwd, env: opts.env as NodeJS.ProcessEnv, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
     } catch (e) {
       resolve({ ok: false, text: String((e as Error).message ?? e), truncated: false, durationMs: Date.now() - started });
       return;

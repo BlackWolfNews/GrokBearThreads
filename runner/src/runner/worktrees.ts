@@ -84,6 +84,7 @@ export const worktreesPart = {
       env: { ...process.env, ...threadEnv(rec.id, this.cfg.home) },
       shell: this.actionShell,
       timeoutMs: this.actionTimeoutMs,
+      background: true,
     });
     if (rt.deleted) return;
     const body: EventBody = {

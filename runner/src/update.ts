@@ -19,6 +19,7 @@ import type { Logger } from './log.ts';
 import { currentLink, readRelease, readState, type ReleaseJson } from './release.ts';
 import type { RestartResult } from './restart.ts';
 import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
+import { inBackground } from './background.ts';
 
 export const CHECK_INTERVAL_MS = 5 * 60_000;
 // After main's ref changes in the checkout (a commit or merge landing), the
@@ -302,7 +303,8 @@ export function runBackendDeploy(repoDir: string, runnerDir: string, home: strin
       resolve({ ok: false, error: `couldn't open ${logFile}: ${(e as Error).message}` });
       return;
     }
-    const child = spawn(process.execPath, [script, '--home', home, '--repo', repoDir, '--commit', commit], { cwd: repoDir, env, stdio: ['ignore', fd, fd] });
+    // Background priority (background.ts): it builds the backend from main.
+    const child = spawn(...inBackground(process.execPath, [script, '--home', home, '--repo', repoDir, '--commit', commit]), { cwd: repoDir, env, stdio: ['ignore', fd, fd] });
     fs.closeSync(fd);
     child.on('error', (e) => resolve({ ok: false, error: e.message }));
     child.on('close', (code, signal) => {
@@ -333,7 +335,8 @@ export function runDeploy(runnerDir: string, home: string, logFile: string, foll
       resolve({ ok: false, error: `couldn't open ${logFile}: ${(e as Error).message}` });
       return;
     }
-    const child = spawn(process.execPath, [path.join(runnerDir, 'scripts', 'deploy.mjs'), '--no-restart', '--home', home, '--follow', follow], {
+    // Background priority (background.ts): the release build is npm ci and tsc.
+    const child = spawn(...inBackground(process.execPath, [path.join(runnerDir, 'scripts', 'deploy.mjs'), '--no-restart', '--home', home, '--follow', follow]), {
       cwd: runnerDir,
       env,
       stdio: ['ignore', fd, fd],

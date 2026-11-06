@@ -1,0 +1,55 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { tmpDir } from '../helpers/fakes.ts';
+import { inBackground, TASKPOLICY } from '../../src/background.ts';
+import { runCommand } from '../../src/patches.ts';
+import { land } from '../../src/worktrees.ts';
+
+// Builds and tests Threadbear spawns itself run at background priority on
+// a Mac (a land's check held Mike's M5 above load 24 on 6 Nov).
+
+test('inBackground: taskpolicy -b on a Mac that has it, the command as it is elsewhere', () => {
+  assert.deepEqual(inBackground('/bin/sh', ['-c', 'x'], { platform: 'darwin', exists: () => true }), [TASKPOLICY, ['-b', '/bin/sh', '-c', 'x']]);
+  assert.deepEqual(inBackground('/bin/sh', ['-c', 'x'], { platform: 'darwin', exists: () => false }), ['/bin/sh', ['-c', 'x']]);
+  assert.deepEqual(inBackground('/bin/sh', ['-c', 'x'], { platform: 'linux', exists: () => true }), ['/bin/sh', ['-c', 'x']]);
+});
+
+// A darwin-background process reports scheduling priority 4 in ps (20 is
+// normal). Only the background side is checked: the suite itself may run
+// under taskpolicy -b, and then everything it starts is 4 anyway.
+const onMac = process.platform === 'darwin' && fs.existsSync(TASKPOLICY);
+const PRI = 'ps -o pri= -p $$';
+
+test('runCommand: background runs at background priority', { skip: !onMac }, async () => {
+  const r = await runCommand(PRI, { cwd: tmpDir(), env: { PATH: '/usr/bin:/bin' }, shell: ['/bin/sh', '-c'], background: true });
+  assert.equal(r.ok, true, r.text);
+  assert.equal(r.text.trim(), '4');
+});
+
+test("land: the check runs at background priority", { skip: !onMac }, async () => {
+  const root = fs.realpathSync(tmpDir('tb-bg-'));
+  const main = path.join(root, 'repo');
+  const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+  fs.mkdirSync(main);
+  git(main, 'init', '-q', '-b', 'main');
+  git(main, 'config', 'user.email', 't@example.com');
+  git(main, 'config', 'user.name', 'T');
+  fs.writeFileSync(path.join(main, 'a.txt'), 'a\n');
+  git(main, 'add', '.');
+  git(main, 'commit', '-q', '-m', 'init');
+  const wt = path.join(root, 'wt');
+  git(main, 'worktree', 'add', '-q', '-b', 'thread/bg', wt);
+  fs.writeFileSync(path.join(wt, 'b.txt'), 'b\n');
+  git(wt, 'add', '.');
+  git(wt, 'commit', '-q', '-m', 'b');
+  const pri = path.join(root, 'pri.txt');
+  const code = await land(
+    { path: wt, branch: 'thread/bg', mainCheckout: main, check: `${PRI} > '${pri}'` },
+    { out: () => {}, err: () => {}, shell: ['/bin/sh', '-c'] },
+  );
+  assert.equal(code, 0);
+  assert.equal(fs.readFileSync(pri, 'utf8').trim(), '4');
+});

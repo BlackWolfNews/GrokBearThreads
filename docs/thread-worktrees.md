@@ -30,6 +30,11 @@ The first patch in the thread's folder chain with a `worktree` wins (home's
 repo is the git toplevel of the folder the patch is in, and its main
 checkout is the one with `main` checked out.
 
+On a Mac, `setup`, `check` and turn hooks run at background priority
+(`taskpolicy -b`, `runner/src/background.ts`), as do the runner's and the
+app's own update builds, so a land's test suite stays off the cores you're
+using. Action buttons you press run as normal.
+
 ## A new thread
 
 `threads.create` (and `create_thread`, and schedules that start a thread)
