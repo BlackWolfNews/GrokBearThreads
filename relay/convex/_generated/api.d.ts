@@ -10,6 +10,7 @@
 
 import type * as apns from "../apns.js";
 import type * as http from "../http.js";
+import type * as reasons from "../reasons.js";
 import type * as relay from "../relay.js";
 import type * as verify from "../verify.js";
 
@@ -22,6 +23,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   apns: typeof apns;
   http: typeof http;
+  reasons: typeof reasons;
   relay: typeof relay;
   verify: typeof verify;
 }>;
