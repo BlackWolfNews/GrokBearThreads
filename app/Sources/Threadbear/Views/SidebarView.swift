@@ -589,6 +589,11 @@ struct ThreadRowView: View {
     @State private var landed = false
     /// Two fingers sliding the row left to archive it (RowSwipe.swift).
     @State private var swipe = RowSwipeController()
+    /// The thread's being dragged out (ThreadDrag), till it's let go.
+    @State private var draggingOut = false
+    /// What the window showed before the press opened this thread, to go
+    /// back to if the press turns into dragging it out.
+    @State private var placeBeforePress: NavigationPlace?
     @Environment(\.sidebarRowSpace) private var listSpace
     /// Not in Projects: a thread in two projects has a row under each, and
     /// two rows can't both be the one the highlight and the glide follow.
@@ -604,6 +609,19 @@ struct ThreadRowView: View {
     /// Kept while its moon's menu is open, which the pointer leaves the row
     /// to get into (`MenuAnchor.held`).
     private var showsActions: Bool { (pointerOver || app.menuOpenRow == thread.id) && !swipe.isSwiping && !slidingOff }
+
+    /// The press became dragging the thread out. The press opened it, as
+    /// a click does on mouse down, but it's being dragged into the thread
+    /// that was open, so that one comes back to drop it on.
+    private func dragOut() {
+        guard ThreadDrag.begin(thread, ended: { draggingOut = false }) else { return }
+        draggingOut = true
+        // AppKit has the mouse till the drop, so the gesture may never hear
+        // it come up.
+        pressed = false
+        swipe.dragEnded()
+        if let before = placeBeforePress, app.place != before { app.goBack() }
+    }
 
     var body: some View {
         // The Projects view's rows say what they're doing too: it has no
@@ -725,10 +743,18 @@ struct ThreadRowView: View {
         // Selects on mouse down, as the system list did and Mail does; a
         // tap gesture waits for the mouse to come back up. Dragging left
         // swipes the row, for a mouse (global, as the row moves with it).
+        // Any other way drags the thread out, to drop into the open
+        // thread's message (ThreadDrag).
         .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .global).onChanged { value in
+            guard !draggingOut else { return }
+            if pressed, !swipe.isSwiping, RowSwipe.dragsOut(dx: value.translation.width, dy: value.translation.height) {
+                dragOut()
+                return
+            }
             swipe.drag(value.translation)
             guard !pressed else { return }
             pressed = true
+            placeBeforePress = app.place
             select()
         }.onEnded { _ in
             pressed = false

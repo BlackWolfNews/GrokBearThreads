@@ -275,6 +275,43 @@ final class ComposerTests: XCTestCase {
         XCTAssertEqual(host.draggingEntered(outside), [])
     }
 
+    /// A thread dragged out of the sidebar and let go over the open thread
+    /// goes into its message as the thread's chip, as pasting its id does
+    /// (Mike, 6 Nov). The drag starts in this app, unlike a file's.
+    @MainActor func testAThreadDroppedOnTheTranscriptGoesInAsItsChip() throws {
+        let id = "th_drag_\(UUID().uuidString.prefix(6))"
+        AppModel.shared.threads[id] = ThreadSummary(id: id, title: "Fix the sidebar", accountId: "claude-main")
+        defer { AppModel.shared.threads[id] = nil }
+        let board = NSPasteboard(name: NSPasteboard.Name("thread-drop-test-\(UUID().uuidString)"))
+        defer { board.releaseGlobally() }
+        board.clearContents()
+        board.setString(id, forType: .string)
+
+        let (window, parent, composer) = composerInWindow()
+        defer { window.close() }
+        composer.string = "Look at "
+        composer.setSelectedRange(NSRange(location: 8, length: 0))
+        let handle = ComposerHandle()
+        handle.textView = composer
+        let controller = TranscriptController()
+        controller.composerHandle = handle
+        let host = TranscriptHost(controller: controller, ghost: false)
+        host.frame = parent.bounds
+        parent.addSubview(host)
+        XCTAssertTrue(host.registeredDraggedTypes.contains(.string))
+
+        let drag = FakeDrag(pasteboard: board, window: window, location: .zero, source: ThreadDrag.Source(ended: {}))
+        XCTAssertEqual(host.draggingEntered(drag), .copy)
+        XCTAssertTrue(host.performDragOperation(drag))
+        XCTAssertEqual(composer.draftNow.text, "Look at [Fix the sidebar](thread:\(id))")
+        XCTAssertTrue(window.firstResponder === composer)
+
+        // An id of a thread this Mac doesn't know is only words.
+        board.clearContents()
+        board.setString("th_nobody", forType: .string)
+        XCTAssertEqual(host.draggingEntered(drag), [])
+    }
+
     /// A picture dropped from a temp folder goes to the runner as a copy, as
     /// a screenshot thumbnail's file is deleted as the drop ends (issue #2).
     func testAPictureFromATempFolderIsKept() throws {

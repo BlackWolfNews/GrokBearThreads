@@ -938,17 +938,26 @@ final class ComposerTextView: NSTextView {
         // Where it's dropped, as a paste goes where the cursor is.
         let at = characterIndexForInsertion(at: convert(sender.draggingLocation, from: nil))
         if takeImages(from: sender.draggingPasteboard, at: NSRange(location: at, length: 0)) { return true }
+        if Self.isThread(sender.draggingPasteboard) {
+            window?.makeFirstResponder(self)
+            setSelectedRange(NSRange(location: at, length: 0))
+            return takeThread(from: sender.draggingPasteboard)
+        }
         return super.performDragOperation(sender)
     }
 
-    static let droppedTypes: [NSPasteboard.PasteboardType] = [.fileURL, .png, .tiff]
+    /// Text too, for a thread dragged out of the sidebar (ThreadDrag): its id.
+    static let droppedTypes: [NSPasteboard.PasteboardType] = [.fileURL, .png, .tiff, .string]
 
     /// Whether a drag over the rest of the thread (`ComposerDropView`) is one
-    /// for this box. A drag that started in this app isn't: it's a file on
-    /// its way out to another app, and letting go of it back over the thread
-    /// shouldn't attach it. The box itself still takes those.
+    /// for this box: a thread from the sidebar, or files from another app.
+    /// A file being dragged from this app isn't: it's on its way out to
+    /// another app, and letting go of it back over the thread shouldn't
+    /// attach it. The box itself still takes those.
     func takesDropFromThread(_ sender: NSDraggingInfo) -> Bool {
-        isEditable && sender.draggingSource == nil && hasFiles(sender.draggingPasteboard)
+        guard isEditable else { return false }
+        if Self.isThread(sender.draggingPasteboard) { return true }
+        return sender.draggingSource == nil && hasFiles(sender.draggingPasteboard)
     }
 
     /// One let go over the rest of the thread goes where the cursor is, as a
@@ -956,7 +965,20 @@ final class ComposerTextView: NSTextView {
     func takeDropFromThread(_ sender: NSDraggingInfo) -> Bool {
         guard takesDropFromThread(sender) else { return false }
         window?.makeFirstResponder(self)
+        if Self.isThread(sender.draggingPasteboard) { return takeThread(from: sender.draggingPasteboard) }
         return takeImages(from: sender.draggingPasteboard)
+    }
+
+    /// A thread's id (or link) and nothing else, as a sidebar row's drag
+    /// carries. Words that merely contain one aren't.
+    private static func isThread(_ pasteboard: NSPasteboard) -> Bool {
+        guard let words = pasteboard.string(forType: .string) else { return false }
+        return threadReference(words) != nil
+    }
+
+    /// The thread's chip where the cursor is, as pasting its id gives.
+    private func takeThread(from pasteboard: NSPasteboard) -> Bool {
+        readSelection(from: pasteboard, type: .string)
     }
 
     private func fileURLs(_ pasteboard: NSPasteboard) -> [URL] {

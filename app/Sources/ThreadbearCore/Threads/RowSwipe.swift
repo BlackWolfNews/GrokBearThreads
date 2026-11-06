@@ -58,6 +58,16 @@ public struct RowSwipe: Sendable, Equatable {
 
     public var isSwiping: Bool { phase == .tracking }
 
+    /// A mouse dragging a row `dx`, `dy` from where it went down (left
+    /// negative): true once that's the thread being dragged out, to drop
+    /// into another thread's message (ThreadDrag in the app), rather than
+    /// this swipe. Any way but mostly left, by the same rule that decides a
+    /// swipe, so the two never both start.
+    public static func dragsOut(dx: Double, dy: Double) -> Bool {
+        guard max(abs(dx), abs(dy)) >= decideAfter else { return false }
+        return !(dx < 0 && abs(dx) >= abs(dy) * across)
+    }
+
     /// Fingers touched the trackpad.
     public mutating func begin() {
         phase = .deciding
