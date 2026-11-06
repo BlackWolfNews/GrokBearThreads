@@ -259,13 +259,30 @@ export class Scheduler {
 
   /** Resolves once the checks under way have finished (and kept what they printed), or after limitMs (a check's own time limit). */
   async settled(limitMs = CHECK_TIMEOUT_MS + 5000): Promise<void> {
-    if (!this.inFlight.size) return;
+    if (!this.inFlight.size) {
+      this.flushMemKept();
+      return;
+    }
     let timer: TimerHandle | undefined;
     const limit = new Promise<void>((r) => {
       timer = this.clock.setTimeout(r, limitMs);
     });
     await Promise.race([Promise.allSettled([...this.inFlight]), limit]);
     timer?.cancel();
+    this.flushMemKept();
+  }
+
+  // What couldn't be written down when its check ran gets one more try
+  // before the runner exits, so the next one finds it.
+  private flushMemKept(): void {
+    for (const [k, kept] of [...this.memKept]) {
+      try {
+        keepCheck(this.home, k.slice(0, k.indexOf('\n')), kept);
+        this.memKept.delete(k);
+      } catch {
+        // Still can't; it goes with this process.
+      }
+    }
   }
 
   stop(): void {
@@ -773,7 +790,8 @@ export class Scheduler {
     this.tickAgain = false;
     try {
       const now = this.clock.now();
-      for (const rec of [...this.items.values()]) {
+      for (const row of [...this.items.values()]) {
+        let rec = row;
         if (!this.mine(rec)) continue;
         if (rec.finishedAt && now - Date.parse(rec.finishedAt) > KEEP_FINISHED_MS) {
           await backend.remove(rec.id).catch(() => {});
@@ -788,13 +806,23 @@ export class Scheduler {
           return false;
         });
         if (!claimed || this.stopped) continue;
-        const checked = await this.checked(rec);
-        if (this.stopped) continue;
-        // Deleted while it was claimed or checked (another runner can).
-        if (!this.items.has(rec.id)) {
+        // The record as it is now: the subscription may have brought a
+        // newer one (its check changed) or none (deleted, maybe by another
+        // runner) while the claim was out, and again while it checked.
+        const fresh = this.items.get(rec.id);
+        if (!fresh) {
           this.dropKept(rec.id);
           continue;
         }
+        rec = fresh;
+        const checked = await this.checked(rec);
+        if (this.stopped) continue;
+        const after = this.items.get(rec.id);
+        if (!after) {
+          this.dropKept(rec.id);
+          continue;
+        }
+        rec = after;
         if (checked === 'later') {
           await backend.release(rec.id).catch(() => {});
           continue;
@@ -829,10 +857,13 @@ export class Scheduler {
   }
 
   // A schedules.run another runner asked for: sent as if run here.
-  private async runRequested(backend: ScheduleBackend, rec: ScheduleRecord): Promise<void> {
-    const request = rec.runRequestedAt!;
-    const claimed = await backend.claim(rec.id, 'request', request).catch(() => false);
+  private async runRequested(backend: ScheduleBackend, row: ScheduleRecord): Promise<void> {
+    const request = row.runRequestedAt!;
+    const claimed = await backend.claim(row.id, 'request', request).catch(() => false);
     if (!claimed || this.stopped) return;
+    // As it is now (backendTick says why): deleted meanwhile, it isn't sent.
+    const rec = this.items.get(row.id);
+    if (!rec) return;
     let res: ReturnType<Scheduler['send']>;
     try {
       this.notMidCheck(rec);

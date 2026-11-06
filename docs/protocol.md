@@ -2260,7 +2260,8 @@ the thread if a sub-agent stalls, so an ask can't stay hidden for good.
   "Its check failed (…)" and the output, so a broken check isn't silent.
   Output (either kind) is kept in
   `<home>/schedule-checks/<id>.<hash of the command>.kept.json` (or in
-  memory, if that can't be written), until a run carrying it is sent: a
+  memory, if that can't be written, with one more try to write it as the
+  runner stops), until a run carrying it is sent: a
   run refused by a restart or handover, a failed send or a skip because
   the last run's thread is still going leaves it, and the next due run
   sends it without running the check again (a check that keeps state

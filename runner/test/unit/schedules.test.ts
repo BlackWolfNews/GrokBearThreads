@@ -606,6 +606,42 @@ test('a backend schedule deleted while its check runs sends nothing', async () =
   s.stop();
 });
 
+test('a backend run uses the schedule as it is once its claim comes back, not as it was', async () => {
+  const h = makeHarness();
+  const b = fakeBackend(h.clock, [M5]);
+  const seen: string[] = [];
+  const s = new Scheduler({
+    runner: h.runner, home: h.home, clock: h.clock, log: nullLogger, zone: () => 'UTC', self: M5, syncOn: true, checksOn: () => true,
+    runCheck: async (p) => {
+      seen.push(p.command);
+      return { ok: true, output: '' };
+    },
+  });
+  s.start();
+  // Claims held until let go, as a slow backend would.
+  const real = b.for('m5', M5.id);
+  let letGo: (() => void) | undefined;
+  const slow: ScheduleBackend = { ...real, claim: (id, kind, expect) => new Promise((r) => (letGo = () => void real.claim(id, kind, expect).then(r))) };
+  await s.attach(slow);
+  const sc = await s.create({ text: 'Look', title: 'Fork watch', cron: '*/5 * * * *', check: 'check-a' });
+  await tick();
+  // A's news, kept from a send a restart refused.
+  fs.mkdirSync(path.join(h.home, 'schedule-checks'), { recursive: true });
+  fs.writeFileSync(keptCheckFile(h.home, sc.id, 'check-a'), JSON.stringify({ check: 'check-a', at: 'x', extra: '\n\nnews from a' }));
+  h.clock.advance(5 * MIN);
+  for (let i = 0; i < 5; i++) await tick();
+  assert.ok(letGo, 'claiming');
+  // Changed while the claim is out.
+  await s.update({ scheduleId: sc.id, check: 'check-b' });
+  for (let i = 0; i < 5; i++) await tick();
+  letGo!();
+  for (let i = 0; i < 10; i++) await tick();
+  assert.deepEqual(seen, ['check-b']);
+  assert.equal(h.runner.list(['inbox', 'snoozed', 'archived']).filter((x) => x.title === 'Fork watch').length, 0, "a's news isn't sent as b's");
+  assert.ok(fs.existsSync(keptCheckFile(h.home, sc.id, 'check-a')), 'and is still kept for a');
+  s.stop();
+});
+
 test('runners.list gives each runner\'s version, start and whether it\'s updating, for the Runners panel', async () => {
   const h = makeHarness();
   const bruce = { ...BRUCE, version: '0.4.0', release: 'r-abc', startedAt: '2026-11-05T01:00:00.000Z', draining: true };

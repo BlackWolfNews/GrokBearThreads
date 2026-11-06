@@ -432,3 +432,18 @@ test('scheduleChecks: a check whose output can\'t be written down is still not r
   assert.match(sentText(h)[0] ?? '', /the news/);
   sched.stop();
 });
+
+test('scheduleChecks: output kept only in memory is written down before the runner exits', async () => {
+  const h = makeHarness();
+  const sched = schedulerOn(h, onceCheck('the news'));
+  const sc = await sched.create({ text: 'Look', title: 'Watch Sentry', cron: '*/5 * * * *', check: 'fork-watch' });
+  const file = keptCheckFile(h.home, sc.id, 'fork-watch');
+  fs.mkdirSync(file, { recursive: true });
+  h.runner.refuseNewTurns('The runner is restarting; send again in a moment.');
+  h.clock.advance(5 * MIN);
+  await tick(6);
+  fs.rmdirSync(file);
+  sched.stop();
+  await sched.settled();
+  assert.match(JSON.parse(fs.readFileSync(file, 'utf8')).extra, /the news/);
+});
