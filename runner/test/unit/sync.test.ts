@@ -2060,7 +2060,10 @@ test('a project picture held back by the upload allowance goes by itself once th
   h.clock.advance(11 * 60_000);
   await tick(20);
   h.clock.advance(SYNC_COALESCE_MS * 2);
-  await tick(20);
+  // The flush the timer started reads the picture's file for real, which a
+  // busy machine doesn't finish in a set number of ticks (6 Nov, with the
+  // rest of the suite running): wait for it, up to a generous limit.
+  for (const end = Date.now() + 10_000; setIcons().length === 0 && Date.now() < end; ) await new Promise((r) => setTimeout(r, 5));
   assert.equal(setIcons().length, 1);
 });
 
