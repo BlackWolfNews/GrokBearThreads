@@ -32,7 +32,7 @@ final class LocalPreviewSchemeHandler: NSObject, WKURLSchemeHandler {
     ].joined(separator: "; ")
     /// For a page running its scripts: frames of this scheme only, so a
     /// script can't make a data: or blob: frame to run in (clipboardGuard).
-    static let scriptsPolicy = policy.replacingOccurrences(of: "frame-src \(scheme): data: blob:", with: "frame-src \(scheme)")
+    static let scriptsPolicy = policy.replacingOccurrences(of: "frame-src \(scheme): data: blob:", with: "frame-src \(scheme):")
     /// In every frame, first: a click on a link (HTML or SVG, in a shadow
     /// root too) to anywhere but this scheme is cancelled before WebKit
     /// starts the navigation, which is when it would open a connection.
@@ -78,12 +78,18 @@ final class LocalPreviewSchemeHandler: NSObject, WKURLSchemeHandler {
     (() => {
       try { delete Navigator.prototype.clipboard; } catch (_) {}
       try { Object.defineProperty(Navigator.prototype, 'clipboard', { get: () => undefined, configurable: false }); } catch (_) {}
+      // Everything the wrapper uses is taken now, before the page's scripts
+      // can replace it, and the command is made a string once and that
+      // string passed on: a name that reads "bold" to the check and "copy"
+      // to WebKit got past the first version (Codex review).
       const exec = Document.prototype.execCommand;
+      const apply = Reflect.apply, toString = String, lower = String.prototype.toLowerCase;
       Object.defineProperty(Document.prototype, 'execCommand', {
-        value: function (command, ...rest) {
-          const name = String(command).toLowerCase();
-          if (name === 'copy' || name === 'cut') return false;
-          return exec.call(this, command, ...rest);
+        value: function (command, showUI, value) {
+          const name = toString(command);
+          const key = apply(lower, name, []);
+          if (key === 'copy' || key === 'cut') return false;
+          return apply(exec, this, arguments.length > 2 ? [name, showUI, value] : arguments.length > 1 ? [name, showUI] : [name]);
         },
         writable: false, configurable: false,
       });

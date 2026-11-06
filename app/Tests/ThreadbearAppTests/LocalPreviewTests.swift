@@ -322,6 +322,33 @@ final class LocalPreviewTests: XCTestCase {
                 if let saved { NSPasteboard.general.setString(saved, forType: .string) }
             }
         }
+        // And it can't be talked round: a name that changes each time it's
+        // read is read once, and nothing the page replaces later is used.
+        let tricks = try await run("""
+        let reads = 0;
+        document.execCommand({ toString() { reads += 1; return reads === 1 ? 'bold' : 'copy'; } });
+        const used = [];
+        const originals = [String.prototype.toLowerCase, Function.prototype.call, Function.prototype.apply, Reflect.apply];
+        String.prototype.toLowerCase = function () { used.push('toLowerCase'); return 'bold'; };
+        Function.prototype.call = function () { used.push('call'); };
+        Function.prototype.apply = function () { used.push('apply'); };
+        Reflect.apply = function () { used.push('Reflect.apply'); };
+        document.execCommand('copy');
+        [String.prototype.toLowerCase, Function.prototype.call, Function.prototype.apply, Reflect.apply] = originals;
+        return [String(reads), used.join(',')];
+        """, in: view) as? [String]
+        XCTAssertEqual(tricks, ["1", ""])
+        // Its own frames still load (the scripts-on CSP keeps the scheme's).
+        let ownFrame = try await run("""
+        const f = document.createElement('iframe'); f.src = location.href; document.body.appendChild(f);
+        await new Promise((r) => { f.onload = r; setTimeout(r, 2000); });
+        let data = 'none';
+        const d = document.createElement('iframe'); d.src = 'data:text/html,<title>d</title>'; document.body.appendChild(d);
+        await new Promise((r) => setTimeout(r, 500));
+        try { data = d.contentDocument ? 'loaded' : 'blocked'; } catch (e) { data = 'blocked'; }
+        return [f.contentDocument?.title ?? 'none', data];
+        """, in: view) as? [String]
+        XCTAssertEqual(ownFrame?.first, "script ran", "a frame of the page itself")
         // WebKit lets a page copy only during a click, which a test can't
         // give it, so this checks the guard is what the page gets: in the
         // page, in a frame it makes, and after document.open().
