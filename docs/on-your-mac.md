@@ -127,8 +127,11 @@ File references are where to look.
   When a project's notes pass 12,000 characters, the librarian sends them
   the same way to be rewritten shorter, and keeps the old notes in the
   data folder's `project-notes/` (the last 5 for each project).
-- **Housekeeping** (`runner/src/housekeeping.ts`): trims logs and deletes
-  old pasted images, trash and archived threads' media.
+- **Housekeeping** (`runner/src/housekeeping.ts`): trims logs, deletes
+  week-old copies of pictures pasted into drafts (a sent message keeps its
+  own copy) and deleted threads after 30 days in the trash. Archived
+  threads keep their pictures unless you set `"archivedMediaDays": <days>`
+  in `runner.json`.
 - **Presence** (`runner/src/presence.ts`): reads how long the keyboard and
   mouse have been idle (`ioreg`), so your phone knows whether you're at
   the Mac.

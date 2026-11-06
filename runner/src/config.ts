@@ -165,6 +165,9 @@ export type RunnerJson = {
   // (docs/on-your-mac.md).
   sync?: { enabled?: boolean; url?: string; name?: string; runnerId?: string; icon?: string; rpcUrl?: string; pastedPictures?: boolean; full?: boolean };
   secretCheck?: { enabled?: boolean };
+  // Days after a thread is archived that housekeeping clears its pictures
+  // (housekeeping.ts). Absent: they're kept. Mike's runners set 30.
+  archivedMediaDays?: number;
   // Features still being tried out, each off unless it says (experiments.ts).
   experiments?: Record<string, boolean>;
   // The gateway, when it isn't the `connectors` MCP server in
