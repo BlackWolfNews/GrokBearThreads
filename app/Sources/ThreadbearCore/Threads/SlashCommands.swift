@@ -145,6 +145,25 @@ public enum SlashPalette {
         forArguments ? "/\(command.name) " : "/\(command.name)"
     }
 
+    /// The categories' and the list's widths for a palette `total` wide,
+    /// from what each needs to show its longest entry whole. The detail
+    /// gets the rest, never less than `detailMin`: in a narrow box the list
+    /// gives way first (its names then end in "…", whole on hover), then
+    /// the categories, down to their least. Cut to fit, the list showed
+    /// "/cloudfl…" in a wide window (Mike, 6 Nov).
+    public static func columnWidths(total: Double, categories: Double, list: Double,
+                                    detailMin: Double = 200, listMin: Double = 120, categoriesMin: Double = 110) -> (categories: Double, list: Double) {
+        var cats = categories
+        // The list never takes more than half of what's left, so the
+        // description stays readable beside a very long name.
+        var lst = min(list, max(listMin, (total - cats) / 2))
+        let over = cats + lst + detailMin - total
+        if over > 0 { lst = max(listMin, lst - over) }
+        let still = cats + lst + detailMin - total
+        if still > 0 { cats = max(categoriesMin, cats - still) }
+        return (cats, lst)
+    }
+
     /// The recently used list after using `name`: newest first, eight kept.
     public static func used(_ name: String, recent: [String]) -> [String] {
         Array(([name] + recent.filter { $0 != name }).prefix(8))

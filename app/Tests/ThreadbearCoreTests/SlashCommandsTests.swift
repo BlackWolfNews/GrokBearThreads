@@ -65,4 +65,20 @@ final class SlashCommandsTests: XCTestCase {
         XCTAssertEqual(SlashPalette.shortPath("/Users/m/.claude/skills/v/SKILL.md", home: "/Users/m"), "~/.claude/skills/v/SKILL.md")
         XCTAssertEqual(SlashPalette.shortPath("/opt/x", home: "/Users/m"), "/opt/x")
     }
+
+    func testColumnsFitTheirLongestEntryAndGiveWayWhenNarrow() {
+        // Wide: each column as wide as it needs.
+        let wide = SlashPalette.columnWidths(total: 900, categories: 160, list: 230)
+        XCTAssertEqual(wide.categories, 160)
+        XCTAssertEqual(wide.list, 230)
+        // A very long name takes at most half of what's left.
+        XCTAssertEqual(SlashPalette.columnWidths(total: 900, categories: 160, list: 600).list, 370)
+        // Narrow: the list gives way first, then the categories.
+        let narrow = SlashPalette.columnWidths(total: 520, categories: 160, list: 230)
+        XCTAssertEqual(narrow.list, 160)
+        XCTAssertEqual(narrow.categories, 160)
+        let tiny = SlashPalette.columnWidths(total: 450, categories: 160, list: 230)
+        XCTAssertEqual(tiny.list, 120)
+        XCTAssertEqual(tiny.categories, 130)
+    }
 }

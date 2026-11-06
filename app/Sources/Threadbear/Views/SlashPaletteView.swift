@@ -41,20 +41,25 @@ struct SlashPaletteView: View {
         let all = commands ?? []
         let matches = SlashPalette.matches(all, query: query, category: state.category, recent: recent)
         let picked = matches.first { $0.name == state.selected } ?? matches.first
-        HStack(spacing: 0) {
-            // The box can be narrow (a small window, a wide side pane), so
-            // the columns give way rather than spilling past it: the list
-            // first down to its least, then the detail.
-            categories(all)
-                .frame(width: zoomed(132))
-            Divider()
-            list(matches, picked: picked)
-                .frame(minWidth: zoomed(110), idealWidth: zoomed(190), maxWidth: zoomed(190))
-            Divider()
-            detail(picked)
-                .frame(minWidth: 0, maxWidth: .infinity, alignment: .topLeading)
-                // Narrow, the description is what matters; names fit short.
-                .layoutPriority(1)
+        // Each column as wide as its longest entry needs, the description
+        // the rest (SlashPalette.columnWidths). Measured over every command,
+        // not just the matches, so the columns hold still while typing.
+        GeometryReader { geo in
+            let widths = SlashPalette.columnWidths(
+                total: geo.size.width,
+                categories: Self.categoriesWidth(all, query: query, recent: recent, provider: provider),
+                list: Self.listWidth(all)
+            )
+            HStack(spacing: 0) {
+                categories(all)
+                    .frame(width: widths.categories)
+                Divider()
+                list(matches, picked: picked)
+                    .frame(width: widths.list)
+                Divider()
+                detail(picked)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
         }
         .frame(maxWidth: .infinity)
         .frame(height: Self.height)
@@ -78,7 +83,6 @@ struct SlashPaletteView: View {
                     HStack {
                         Text(category.title(provider: provider))
                             .lineLimit(1)
-                            .minimumScaleFactor(0.85)
                         Spacer(minLength: zoomed(6))
                         Text("\(count)").monospacedDigit().foregroundStyle(.secondary)
                     }
@@ -125,6 +129,7 @@ struct SlashPaletteView: View {
         Text("/\(command.name)")
             .font(.system(size: TypeScale.label + 1))
             .lineLimit(1)
+            .truncationMode(.middle)
             .foregroundStyle(on ? Color.white : .primary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, zoomed(14))
@@ -139,7 +144,7 @@ struct SlashPaletteView: View {
                 if NSApp.currentEvent?.clickCount ?? 1 >= 2, state.selected == command.name { onRun(command) }
                 else { state.selected = command.name }
             }
-            .tip(command.description.map { "\($0) (double-click to run)" } ?? "Double-click to run it")
+            .tip("/\(command.name): double-click to run it")
     }
 
     @ViewBuilder
@@ -233,6 +238,24 @@ struct SlashPaletteView: View {
 }
 
 extension SlashPaletteView {
+    private static func textWidth(_ text: String) -> Double {
+        (text as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: TypeScale.label + 1)]).width
+    }
+
+    /// The list's: the longest name, its row's padding and the scroller.
+    static func listWidth(_ commands: [SlashCommand]) -> Double {
+        let longest = commands.map { textWidth("/\($0.name)") }.max() ?? 0
+        return longest + zoomed(14) * 2 + zoomed(14)
+    }
+
+    /// The categories': the longest title beside its count.
+    static func categoriesWidth(_ commands: [SlashCommand], query: String, recent: [String], provider: String) -> Double {
+        let longest = SlashPalette.counts(commands, query: "", recent: recent)
+            .map { textWidth($0.0.title(provider: provider)) + textWidth("\($0.1)") }.max() ?? 0
+        // Row and column padding, and the gap between title and count.
+        return longest + zoomed(10) * 2 + zoomed(8) * 2 + zoomed(14)
+    }
+
     static func categoryTip(_ category: SlashPalette.Category, provider: String) -> String {
         switch category {
         case .all: "Every command this thread can run"
