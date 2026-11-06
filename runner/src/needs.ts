@@ -458,10 +458,21 @@ export function triedFirstNudged(events: PersistedEvent[]): boolean {
   return events.slice(start).some((e) => e.type === 'tool.result' && typeof e.text === 'string' && e.text.startsWith(TRY_FIRST_NUDGE));
 }
 
+// A change only Mike can judge, left as a soft line at the end of a done
+// reply. On 6 Nov 2026 (thread 524cd997) two turns in a row put Whisper
+// dictation on his phone with needs "nothing" and ended "I haven't heard how
+// Whisper does on the phone yet. If it's slow or mishears things, tell me",
+// while he was in the middle of trying it; he asked why it wasn't in Needs
+// you. Waiting for something to turn up later by itself stays "nothing".
+// Replays: ~/dev/me/misc/end-turn-eval/needs-you.
+export const ONLY_THEY_CAN_TRY =
+  'When only the user can tell whether what you made works (their voice, their phone, how it feels to use) and nobody has tried it yet, trying it is an ask, with needs "you" ("Dictate a sentence on your phone and tell me what it typed"), not an "if it\'s off, tell me" line at the end of your reply. Something that will only show up later by itself (the next thread that hits it) is no ask. ';
+
 // What to put in it, the same for both providers.
 const END_TURN_ASKS =
   'needs "nothing" when the work is finished (or still going by itself) and nothing waits on the user. ' +
   'needs "you" when it does: an approval, a decision, a key, something to look at, a question. Give one ask per thing they have to do, most blocking first. ' +
+  ONLY_THEY_CAN_TRY +
   'The asks are your "What I need from you" list: the user reads and answers them in a card under your message, each drawn as one paragraph of message text, its action then its why, with its buttons under it. So don\'t also list them in your message. ' +
   'Write each ask the way you would in that list, so it makes sense on its own to someone who has forgotten everything: action is its first sentence, the thing to do or the question ("Next time you leave the room, take your phone and leave the laptop idle on power."); why carries on the same paragraph with what it is about and what you want back, in a sentence or two ("It should lock within a minute of you going. Tell me whether it did, and I\'ll tune the Bluetooth cutoff."). Say where in it when it matters (System Settings › Bluetooth), and name things rather than places (not "Slack #channel", but "Your Slack draft to Emily names the automation guy Hayden; he is Pete"). When one ask is several questions or choices, end its why with them as a short markdown list, one per line, rather than running them together. ' +
   'Give links whenever there is somewhere to go to do it or judge it: the page to log in on, the Slack message (its permalink), the PR, the preview, the file or screenshot to look at, the project to open (a path opens in its own app, e.g. a .tandem file in Tandem), or review:<id> for a show_options review in this thread (its window, to compare and pick). Each is a button on the ask, so title it as the action ("Open login page", "Open the Slack message", "Open Short 4 in Tandem"). ' +
@@ -550,6 +561,7 @@ const ONE_REPLY_REPLY =
 // (~/dev/me/misc/end-turn-eval/v3, "trim") before landing.
 const ONE_REPLY_FIELDS =
   TRY_IT_FIRST +
+  ONLY_THEY_CAN_TRY +
   'next is only for when nothing is needed: up to 3 follow-ups that really came up and that you\'d tell the user are worth doing; usually none, and never something you\'d call optional or low priority. ' +
   NEXT_ROW +
   'If you leave sub-agents running, the thread stays under Running and your asks don\'t reach the user\'s inbox until the sub-agents finish and you\'ve ended a later turn, so don\'t leave one waiting on the user. ' +

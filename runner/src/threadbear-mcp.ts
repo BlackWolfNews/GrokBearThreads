@@ -794,7 +794,7 @@ export function buildThreadbearTools(
       endTurnDescription(codex ? 'codex' : 'claude', bulletReplies(), true),
       {
         headline: z.string().optional().describe('One line, at most 80 characters, for the sidebar and notifications: the result, or what you need from them.'),
-        needs: z.enum(['you', 'nothing']).optional().describe('"you" when the user has to do something before this can go on (an approval, a decision, a key, something to look at); "nothing" when it is done or still going by itself. Left out, it follows the asks.'),
+        needs: z.enum(['you', 'nothing']).optional().describe('"you" when the user has to do something before this can go on (an approval, a decision, a key, something to look at, or trying what you made when only they can tell whether it works); "nothing" when it is done or still going by itself. Left out, it follows the asks.'),
         asks: z
           .array(
             z.object({
