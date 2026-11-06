@@ -630,7 +630,9 @@ async function dispatch(client, method, p) {
       };
       // Made over /bruce/rpc, it's bruce's: only bruce's clients hear of
       // it, and this runner's through remoteThreads.updated.
-      threads.set(threadId, { summary, events: [], inProgress: new Map(), timers: [], ...(client.as ? { runnerId: client.as } : {}) });
+      // `fresh`: started this session, so the librarian files it after its first turn
+      // (librarianFiles). The demo fixtures never are, so nothing they show changes.
+      threads.set(threadId, { summary, events: [], inProgress: new Map(), timers: [], fresh: true, ...(client.as ? { runnerId: client.as } : {}) });
       broadcastSummary(threadId);
       setTimeout(() => fakeTurn(threadId, p.text, p.images ?? []), 10);
       return { thread: summary };
@@ -845,8 +847,12 @@ async function dispatch(client, method, p) {
       } else if (p.decision === 'answered' && scriptedTurns().some((x) => x.answer && new RegExp(x.answer, 'i').test(Object.values(p.answers ?? {}).join(' ')))) {
         // A made-up turn that carries on from the answer (MOCK_SCRIPTED_TURNS, `answer`).
         const turn = scriptedTurns().find((x) => x.answer && new RegExp(x.answer, 'i').test(Object.values(p.answers ?? {}).join(' ')));
+        // A fresh turn, so the working line counts from the answer rather than from a
+        // fixture's question asked days ago ("Bear with me · 63h" in a clip).
+        const turnId = 'turn_answer_' + crypto.randomBytes(3).toString('hex');
+        persist(t.summary.id, { type: 'turn.started', turnId }, turnId);
         setStatus(t.summary.id, 'running', false);
-        playScripted(t.summary.id, 'turn_resolved', Date.now(), turn, () => false);
+        playScripted(t.summary.id, turnId, Date.now(), turn, () => false);
       } else {
         // A fixture's approval with no fake turn behind it: finish the turn.
         const text = p.decision === 'deny' ? 'OK, I left it alone.' : p.decision === 'answered' ? `Going with ${Object.values(p.answers ?? {}).join(', ') || 'that'}.` : 'Done.';
@@ -1558,6 +1564,45 @@ function finishTurn(threadId, turnId, started, outcome, said) {
   t.interrupt = undefined;
   t.summary.needsYou = true;
   setStatus(threadId, 'idle');
+  if (t.fresh && t.events.filter((e) => e.type === 'turn.completed').length === 1) librarianFiles(threadId);
+}
+
+/**
+ * The librarian's look after a new thread's first turn, as the real one does it: the thread
+ * shows as the one it's looking at, then it's put in the project whose name it mentions
+ * ("Why does the Walkies map jump…" goes in Walkies), with the transcript's note, the row's
+ * project and a "Put it in Walkies" line in the Librarian view. A thread naming no project
+ * is left out, as a one-off. Timed so a screen recording can catch each step.
+ */
+function librarianFiles(threadId) {
+  const t = threads.get(threadId);
+  const s = t.summary;
+  if (s.projects?.length || s.archivedAt) return;
+  const asked = t.events.find((e) => e.type === 'user.message')?.text ?? '';
+  const words = `${s.title} ${asked}`.toLowerCase();
+  const project = projects.find((x) => !x.archived && new RegExp(`\\b${x.title.toLowerCase().replace(/[^a-z0-9 ]/g, '')}\\b`).test(words));
+  const before = librarian.current;
+  t.timers.push(setTimeout(() => {
+    librarian.current = { threadId, threadTitle: s.title, reason: 'first-turn', why: 'Its first turn ended', dueAt: iso(), startedAt: iso() };
+    librarian.state = 'working';
+    broadcastLibrarian();
+  }, 800));
+  t.timers.push(setTimeout(() => {
+    if (!threads.has(threadId) || s.archivedAt) return;
+    const entry = { id: 'l_' + crypto.randomBytes(3).toString('hex'), at: iso(), threadId, threadTitle: s.title, reason: 'first-turn', costUsd: 0.0022 };
+    if (project) {
+      join(s, project, 'librarian', false, iso(), `Asks about ${project.title}`);
+      persist(threadId, { type: 'system.note', text: `Put in ${project.title}` });
+      librarian.recent.unshift({ ...entry, outcome: 'joined', text: `Put it in ${project.title}`, projectIds: [project.id] });
+      broadcastProjects();
+    } else {
+      librarian.recent.unshift({ ...entry, outcome: 'nothing', text: 'Left it out: a one-off errand' });
+    }
+    librarian.looksToday += 1;
+    librarian.current = before;
+    broadcastSummary(threadId);
+    broadcastLibrarian();
+  }, 2600));
 }
 
 /**
