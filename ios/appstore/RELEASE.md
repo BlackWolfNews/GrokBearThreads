@@ -82,6 +82,7 @@ sometimes won't.
 
 ## Once it's approved
 
-Release it by hand in App Store Connect, then in `site/site.mjs` set `APP_STORE_URL` to
+Release it once Mike says to: `node ios/scripts/appstore-release.mjs <version> --release` (without
+`--release` it only says where review is up to), or the button in App Store Connect. Then in `site/site.mjs` set `APP_STORE_URL` to
 `https://apps.apple.com/app/id<Apple ID>` and `APP_STORE_LIVE` to `true`, and `npm run deploy` in
 `site/`.
