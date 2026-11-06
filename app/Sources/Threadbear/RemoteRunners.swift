@@ -118,6 +118,15 @@ extension AppModel {
     /// Where a thread's requests go, without connecting: this Mac's runner
     /// for its own threads (and with no thread), the thread's runner while
     /// it's connected, else nil.
+    /// A tool's output on another runner's thread, from Convex: once for each tool, as
+    /// this Mac's runner keeps it, and it arrives as events on the thread.
+    func fetchHeldBody(threadId: String, seq: Int) {
+        guard viaRelay(threadId), let client else { return }
+        Task {
+            _ = try? await client.call("threads.heldBody", .object(["threadId": .string(threadId), "seq": .number(Double(seq))]), as: JSONValue.self)
+        }
+    }
+
     func client(for threadId: String?) -> RPCClient? {
         guard let threadId, !viaRelay(threadId) else { return client }
         return remoteClients.client(for: route(threadId), local: client)

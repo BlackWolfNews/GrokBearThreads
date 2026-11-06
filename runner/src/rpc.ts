@@ -59,6 +59,7 @@ const THREAD_METHODS = new Set([
   'threads.delete',
   'threads.events',
   'threads.subscribe',
+  'threads.heldBody',
   'threads.markSeen',
   'threads.highlights',
   'threads.commands',

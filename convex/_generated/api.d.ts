@@ -16,6 +16,7 @@ import type * as phone from "../phone.js";
 import type * as projectHeads from "../projectHeads.js";
 import type * as projectNotes from "../projectNotes.js";
 import type * as push from "../push.js";
+import type * as pushHealth from "../pushHealth.js";
 import type * as pushTargets from "../pushTargets.js";
 import type * as pushText from "../pushText.js";
 import type * as redaction from "../redaction.js";
@@ -42,6 +43,7 @@ declare const fullApi: ApiFromModules<{
   projectHeads: typeof projectHeads;
   projectNotes: typeof projectNotes;
   push: typeof push;
+  pushHealth: typeof pushHealth;
   pushTargets: typeof pushTargets;
   pushText: typeof pushText;
   redaction: typeof redaction;

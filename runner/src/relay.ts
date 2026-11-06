@@ -7,15 +7,17 @@
 // app needs no Convex of its own and no link to the other Mac.
 //
 // The backend has a thread's text, one line per tool call, its open approval
-// and its card, but not tool output, diffs or pictures (those wait for full
-// sync, step 4). A tool row's result says the output is kept on that runner,
-// and carries `heldBack: { runnerId, seq }` for step 4 to fetch the body by.
+// and its card. A tool row's result says the output is kept on that runner, and
+// carries `heldBack: { seq }`: opening that tool in the app asks for it
+// (threads.heldBody), and if that runner has full sync on (docs/full-convex.md
+// step 4) its output comes from the backend, once, as more events for the row.
 //
 // Seqs. The rows' seqs are the other runner's event seqs, with gaps where
 // events weren't mirrored. Each row's seq s becomes eight here: 8s a
 // turn.started, 8s+1 the row's own event, 8s+2 a tool's result, 8s+3 and
 // 8s+4 a card from an older runner that didn't say its seq (placed after the
-// newest row when first seen) and its answer, 8s+7 its turn's end. A card
+// newest row when first seen) and its answer (or else a fetched tool's diffs),
+// 8s+5 and 8s+6 a fetched tool's real call and result, 8s+7 its turn's end. A card
 // whose event seq p is known goes at 8p+1 and its answer at 8p+2 (p is never
 // a row's seq). So events made up from a row sit right beside it and stay in
 // order, and every one has a seq of its own. The app takes these threads' events with gaps
@@ -59,6 +61,13 @@ const SWEEP_MS = 15_000;
 const TAKE_MS = 20_000;
 const CALL_MS = 30_000;
 
+// sync:remoteBody's answer: null, or one that's gone, says nothing new.
+export type HeldBody =
+  | { state: 'text'; text: string; ok?: boolean; truncated?: boolean; input?: string; diffs?: string; images?: number; cut?: boolean }
+  | { state: 'withheld'; reason?: string }
+  | { state: 'expired' }
+  | null;
+
 export type RelayRow = {
   seq: number;
   role: 'user' | 'assistant' | 'tool';
@@ -101,6 +110,8 @@ type Watch = {
   cards: Map<string, Card>;
   // What Mike answered from here, for the card's resolution.
   decided: Map<string, { decision: string; message?: string }>;
+  // Tools opened in the app, each fetched once (threads.heldBody).
+  bodies: Map<number, HeldBody>;
   // Seqs already given to the app, in pages or live.
   given: Set<number>;
   unsub: (() => void)[];
@@ -138,7 +149,7 @@ const RUNNING = new Set(['running', 'starting', 'waiting']);
 const TOOL_NAMES: Record<string, string> = { command: 'Bash', read: 'Read', edit: 'Edit', write: 'Write', search: 'Grep', web: 'WebFetch', task: 'Task' };
 
 /** A thread's held rows and row as transcript events, oldest first, in relay seqs. Pure, so a page and the live stream agree. */
-export function relayEvents(threadId: string, rows: RelayRow[], row: RelayThreadRow | null, cards: Card[], olderMore: boolean, runnerName: string, settled = true): RelayEvent[] {
+export function relayEvents(threadId: string, rows: RelayRow[], row: RelayThreadRow | null, cards: Card[], olderMore: boolean, runnerName: string, settled = true, bodies?: Map<number, HeldBody>): RelayEvent[] {
   const out: RelayEvent[] = [];
   const sorted = [...rows].sort((a, b) => a.seq - b.seq);
   // Stopped only once it has said so for a moment (SETTLE_MS).
@@ -165,6 +176,36 @@ export function relayEvents(threadId: string, rows: RelayRow[], row: RelayThread
       // Finished once anything follows it, or its turn has ended.
       if (next || !running) {
         out.push(env(base + 2, r, { type: 'tool.result', itemId, ok: true, text: `The output is kept on ${runnerName}.`, truncated: false, images: [], heldBack: { seq: r.seq } }));
+        const body = bodies?.get(r.seq);
+        if (body?.state === 'withheld') {
+          out.push(env(base + 6, r, { type: 'tool.result', itemId, ok: true, text: `This is kept on ${runnerName}: what this tool read or ran can hold secrets, so its output doesn't go through Convex.`, truncated: false, images: [] }));
+        } else if (body?.state === 'text') {
+          // The app fills in the row it has from these, by itemId.
+          let input: Record<string, unknown> = {};
+          try {
+            const parsed = body.input ? JSON.parse(body.input) : {};
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) input = parsed;
+          } catch {
+            // Shown without it.
+          }
+          out.push(env(base + 5, r, { type: 'tool.call', itemId, name: TOOL_NAMES[kind] ?? 'Tool', kind, title: r.text, input }));
+          let diffs: { path: string; hunks: unknown[] }[] = [];
+          try {
+            const parsed = body.diffs ? JSON.parse(body.diffs) : [];
+            if (Array.isArray(parsed)) diffs = parsed.filter((d) => typeof d?.path === 'string').map((d) => ({ path: d.path, hunks: Array.isArray(d.hunks) ? d.hunks : [] }));
+          } catch {
+            // Likewise.
+          }
+          // Two seqs for diffs, unless an old runner's card is on them. A tool that
+          // changed more files says which.
+          const free = [base + 3, base + 4].filter((seq) => !cards.some((c) => c.slot === seq || c.slot + 1 === seq));
+          const shown = diffs.slice(0, free.length);
+          shown.forEach((d, n) => out.push(env(free[n]!, r, { type: 'edit.diff', itemId, path: d.path, hunks: d.hunks })));
+          const more = diffs.slice(shown.length).map((d) => d.path);
+          const pictures = body.images ? `${body.images === 1 ? '1 picture is' : `${body.images} pictures are`} kept on ${runnerName}.` : '';
+          const notes = [more.length ? `Also changed: ${more.join(', ')}` : '', pictures].filter(Boolean).join('\n');
+          out.push(env(base + 6, r, { type: 'tool.result', itemId, ok: body.ok !== false, text: body.text + (notes ? `${body.text ? '\n\n' : ''}${notes}` : ''), truncated: body.truncated === true || body.cut === true, images: [] }));
+        }
       }
     }
     const ends = r.turn && (next ? next.turn !== r.turn : row !== null && !running);
@@ -390,7 +431,7 @@ export class Relay {
     const t = this.find(threadId);
     if (!t) throw new RpcError(ErrorCode.threadNotFound, `No thread ${threadId}.`);
     if (!w) {
-      w = { threadId, runnerId: t.runnerId, rows: new Map(), olderMore: true, loaded: false, row: null, cards: new Map(), decided: new Map(), given: new Set(), unsub: [], usedAt: this.deps.clock.now() };
+      w = { threadId, runnerId: t.runnerId, rows: new Map(), bodies: new Map(), olderMore: true, loaded: false, row: null, cards: new Map(), decided: new Map(), given: new Set(), unsub: [], usedAt: this.deps.clock.now() };
       this.watches.set(threadId, w);
     }
     w.usedAt = this.deps.clock.now();
@@ -408,7 +449,7 @@ export class Relay {
 
   private events(w: Watch): RelayEvent[] {
     const settled = w.stoppedAt === undefined || this.deps.clock.now() - w.stoppedAt >= SETTLE_MS;
-    return relayEvents(w.threadId, [...w.rows.values()], w.row, [...w.cards.values()], w.olderMore, this.runnerName(w.runnerId), settled);
+    return relayEvents(w.threadId, [...w.rows.values()], w.row, [...w.cards.values()], w.olderMore, this.runnerName(w.runnerId), settled, w.bodies);
   }
 
   // The row's open card, kept so it stays in the transcript once answered;
@@ -674,6 +715,30 @@ export class Relay {
     });
   }
 
+  // A tool opened in the app: fetched once, for as long as this thread is held, and
+  // its events go out like any late one. Nothing's there (full sync off on that
+  // runner, or a tool from before it): the row goes on saying it's kept there.
+  private async heldBody(w: Watch, seq: number | undefined): Promise<{ state: string | null }> {
+    if (seq === undefined || !Number.isSafeInteger(seq)) throw new RpcError(ErrorCode.other, 'seq is required');
+    const held = w.bodies.get(seq);
+    if (held) return { state: held.state };
+    let body: HeldBody = null;
+    try {
+      body = (await this.read('sync:remoteBody', { threadId: w.threadId, seq })) as HeldBody;
+    } catch (e) {
+      // A backend from before API 52, or Convex away: the stub stands.
+      this.deps.log.debug('relay could not fetch a tool body', { threadId: w.threadId, seq, error: String(e) });
+      return { state: null };
+    }
+    // Nothing yet can mean it hasn't gone up yet, and with no `ok` it hasn't answered
+    // yet (a tool still running in the background): asked again next time.
+    if (body && (body.state !== 'text' || body.ok !== undefined)) {
+      w.bodies.set(seq, body);
+      this.emit(w);
+    }
+    return { state: body?.state ?? null };
+  }
+
   private unsupported(w: Watch | undefined, what: string): never {
     const name = w ? this.runnerName(w.runnerId) : 'the other runner';
     throw new RpcError(ErrorCode.other, `${what} isn't possible through Convex yet. Do it on ${name}, or turn on Connect to other machines directly in Settings > Runners.`);
@@ -708,6 +773,8 @@ export class Relay {
         }
         return { events, inProgress: [] };
       }
+      case 'threads.heldBody':
+        return this.heldBody(w, num(p.seq));
       case 'threads.send': {
         if (Array.isArray(p.images) && p.images.length) this.unsupported(w, 'Sending pictures to another Mac');
         const text = typeof p.text === 'string' ? p.text : '';

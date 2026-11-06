@@ -42,6 +42,7 @@ import { listFolderFor } from './files.ts';
 import { Scrubber, type ScrubStatus } from './scrub.ts';
 import { scrubEveryString } from './redaction.ts';
 import { withholdReason } from './withhold.ts';
+import { BodyCollector, prepareBody, type BodyDoc, type RawBody } from './full-sync.ts';
 // A `call` for files.list answers with at most this many entries (the backend keeps it a day).
 const CALL_ENTRIES = 500;
 
@@ -102,6 +103,9 @@ export type SyncConfig = {
   icon?: string;
   rpcUrl?: string;
   pastedPictures?: boolean;
+  // Full sync (docs/full-convex.md step 4): tool output, input and diffs go up too.
+  // Off unless it's asked for; off, nothing here writes eventBodies.
+  full?: boolean;
 };
 
 // runner.status's `sync` (docs/protocol.md, "Sync").
@@ -110,7 +114,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 51;
+export const BACKEND_API_VERSION = 52;
 // From this one the main Mac reads and steers other runners' threads through
 // the backend (convex/relay.ts): commands can be `interrupt` or `call`, and a
 // pending approval carries its event's seq (docs/protocol.md, "Other
@@ -131,6 +135,20 @@ export const SHARED_POOLS_API_VERSION = 38;
 export const SHARED_USAGE_API_VERSION = 39;
 // From this one the backend scrubs secrets again before storing what a runner
 // sends (convex/redaction.ts). A runner scrubs first either way.
+// From this one the backend takes tool output (sync:appendBodies) and a `picture`
+// command's upload. Older, a runner with sync.full on sends none of it.
+export const BODIES_API_VERSION = 52;
+// How much goes up in a mutation, and how much can wait for Convex in memory; past
+// that the oldest are given up on, and those tools show as kept on the runner.
+const BODY_BATCH_ROWS = 50;
+const BODY_BATCH_BYTES = 512 * 1024;
+const BODY_QUEUE_ROWS = 2000;
+const BODY_QUEUE_BYTES = 64 * 1024 * 1024;
+// What a start reads to catch up on tools that finished while it was away. A longer
+// gap isn't worth reading: forward from there.
+const BODY_CATCHUP_EVENTS = 20_000;
+// Events looked through to find a tool's result for a tapped picture.
+const PICTURE_SCAN_EVENTS = 2000;
 export const SCRUB_API_VERSION = 47;
 // From this one sync:sharedUsage takes this runner's id and doesn't read its
 // rows, so it doesn't re-run for this runner's own writes.
@@ -262,6 +280,10 @@ export type SyncStatus = {
   lastError?: string;
   pending?: number; // changes waiting to be written
   retryAt?: string;
+  // Full sync, when it's on: tools' output sent since start, the bytes that took,
+  // and what stayed on the runner. withheld: its command or file can hold secrets.
+  // unsent: given up on (too big, over a key's budget, or the check failed).
+  full?: { bodies: number; bytes: number; withheld: number; unsent: number; pending: number; backendTooOld?: boolean };
   // The phone's commands: whether the runner is listening for them, how
   // many it has applied since start, and the last one that failed.
   commands?: { state: 'off' | 'on' | 'error'; applied: number; failed: number; lastError?: string };
@@ -785,6 +807,11 @@ export function forBackend(d: ThreadDoc, v: number, now: number): ThreadDoc {
   return out;
 }
 
+// A body's size in memory and on the way, near enough.
+function rawChars(b: RawBody): number {
+  return (b.text?.length ?? 0) + (b.reasoning?.length ?? 0) + (b.input ? JSON.stringify(b.input).length : 0) + (b.diffs ? JSON.stringify(b.diffs).length : 0);
+}
+
 // A persisted user.message or assistant.text as a message row; anything
 // else is undefined.
 // Scrubbed before it's cut, the one place a value could be split in two and
@@ -1073,6 +1100,11 @@ export class ConvexSync {
   private scrubber: Scrubber;
   // Tool calls on a file of secrets that haven't finished.
   private secretCalls = new Map<string, string>();
+  // Full sync: following events into bodies, and those waiting to go up.
+  private bodyCollector = new BodyCollector();
+  private bodies: RawBody[] = [];
+  private bodyStats = { bodies: 0, bytes: 0, withheld: 0, unsent: 0 };
+  private bodyQueueChars = 0;
 
   constructor(deps: SyncDeps) {
     this.deps = deps;
@@ -1098,6 +1130,12 @@ export class ConvexSync {
       // again, rather than go up missing values that would have been masked.
       // A heartbeat has no thread's words in it, and says the runner's alive.
       if (fn !== 'sync:heartbeat' && !(await this.scrubber.known.settled())) throw new Error('still reading what to take out of text before sending it');
+      // Tool output: scrubbed and cut in one go, a body at a time. A check that
+      // fails holds that body back whole, and input and diffs stay JSON.
+      if (fn === 'sync:appendBodies') {
+        const { bodies, ...rest } = args as { bodies: RawBody[] };
+        return send(kind, fn, { ...rest, bodies: bodies.map((b) => this.safeBody(b)) });
+      }
       // A call's answer is JSON text: scrub what it says, not the text, which a
       // match could leave unparseable. The backend does the same.
       if (fn === 'sync:finishCommand' && typeof args.result === 'string') {
@@ -1145,6 +1183,7 @@ export class ConvexSync {
   }
 
   start(): void {
+    if (this.off || !this.deps.config.full) this.forgetBodiesNote();
     if (this.off || this.running) return;
     this.running = true;
     this.projectsSent = undefined;
@@ -1263,6 +1302,9 @@ export class ConvexSync {
     }
     const held = this.deps.schedules?.heldLocal?.().length ?? 0;
     if (held) s.schedulesHeld = held;
+    if (this.deps.config.full) {
+      s.full = { ...this.bodyStats, pending: this.bodies.length, ...((this.backendApiVersion ?? 0) < BODIES_API_VERSION && this.backendApiVersion !== undefined ? { backendTooOld: true } : {}) };
+    }
     s.scrub = { ...this.scrubber.status(), ...(this.backendApiVersion !== undefined ? { backendChecks: this.backendApiVersion >= SCRUB_API_VERSION } : {}) };
     return s;
   }
@@ -1365,6 +1407,168 @@ export class ConvexSync {
   // rows still refused are left out with a log line, so one can't stall the
   // whole mirror; anything else (an outage) throws, for the flush's retry.
   // Rows the backend left out itself (`skipped`) are said the same way.
+  // ---- Full sync: tool output (docs/full-convex.md step 4). Nothing here runs with
+  // sync.full off.
+
+  private queueBodies(found: RawBody[]): void {
+    if (!found.length) return;
+    this.bodies.push(...found);
+    for (const b of found) this.bodyQueueChars += rawChars(b);
+    // Convex away for a long time: memory isn't for ever, and each is on the runner.
+    while (this.bodies.length > BODY_QUEUE_ROWS || this.bodyQueueChars > BODY_QUEUE_BYTES) {
+      this.bodyQueueChars -= rawChars(this.bodies.shift()!);
+      this.bodyStats.unsent++;
+    }
+    this.cacheChanged = true;
+    this.scheduleFlush();
+  }
+
+  private safeBody(raw: RawBody): BodyDoc {
+    try {
+      return prepareBody(raw, this.scrubber.strict);
+    } catch {
+      // The check itself failed: nothing of it goes, as it can't be known to be safe.
+      return { threadId: raw.threadId, seq: raw.seq, withheld: true, reason: 'the secret check failed' };
+    }
+  }
+
+  // After a failed write this is called again with what's still here, so a body
+  // comes off the queue only once the backend has it. Up to one mutation's worth a
+  // go, in order, and always behind what the mirror itself has to write.
+  private async sendBodies(v: number): Promise<void> {
+    if (!this.bodies.length) return;
+    if (v < BODIES_API_VERSION) {
+      this.bodyStats.unsent += this.bodies.length;
+      this.bodies = [];
+      this.bodyQueueChars = 0;
+      return;
+    }
+    while (this.bodies.length) {
+      const batch: RawBody[] = [];
+      let size = 0;
+      for (const b of this.bodies) {
+        const len = rawChars(b);
+        if (batch.length && (batch.length >= BODY_BATCH_ROWS || size + len > BODY_BATCH_BYTES)) break;
+        batch.push(b);
+        size += len;
+      }
+      const left = await this.writeRows('sync:appendBodies', 'bodies', batch, (b) => `${b.threadId}:${b.seq}`, { key: this.deps.key });
+      // By which ones, not how many: the queue can have moved under the write.
+      const sent = new Set(batch);
+      this.bodies = this.bodies.filter((b) => !sent.has(b));
+      this.bodyQueueChars = this.bodies.reduce((n, b) => n + rawChars(b), 0);
+      for (const b of batch) {
+        if (left.has(`${b.threadId}:${b.seq}`)) this.bodyStats.unsent++;
+        else if (b.withheld) this.bodyStats.withheld++;
+        else this.bodyStats.bodies++;
+      }
+      // What came up, near enough: what's sent has been scrubbed and cut since.
+      this.bodyStats.bytes += batch.reduce((n, b) => n + rawChars(b), 0);
+      this.noteSent();
+    }
+  }
+
+  // Where each thread's tools have got to, for a start to catch up from: nothing
+  // past this has to be read again, and a body still queued isn't past it.
+  private bodyHeads(): Record<string, number> {
+    const heads: Record<string, number> = {};
+    for (const id of this.bodyCollector.threadIds()) {
+      const h = this.bodyCollector.head(id);
+      if (h !== undefined) heads[id] = h;
+    }
+    for (const b of this.bodies) {
+      const from = (b.from ?? b.seq) - 1;
+      if (heads[b.threadId] !== undefined && heads[b.threadId]! > from) heads[b.threadId] = from;
+    }
+    return heads;
+  }
+
+  // A start, from what the last run noted. Only threads that moved while it was
+  // away are read, from where it had got to; a thread with no note starts from now,
+  // as full sync goes forward only. A body sent twice writes nothing.
+  private catchUpBodies(saved: Record<string, number> | undefined): void {
+    let budget = BODY_CATCHUP_EVENTS;
+    for (const [id, head] of Object.entries(saved ?? {})) {
+      // Not here: a thread the release before still has, whose note stands for when
+      // it comes across (fillBodies), or one that's gone, which costs one number.
+      this.bodyCollector.resume(id, head);
+      let lastSeq: number;
+      try {
+        lastSeq = this.deps.runner.get(id).lastSeq;
+      } catch {
+        continue;
+      }
+      budget -= this.readBodies(id, head, lastSeq + 1, budget);
+    }
+  }
+
+  // Turned off, or the mirror is: the note goes now, not at some later write, so
+  // turning it back on can't send what happened in between.
+  private forgetBodiesNote(): void {
+    const file = this.deps.cachePath;
+    if (!file) return;
+    try {
+      const raw = JSON.parse(fs.readFileSync(file, 'utf8')) as { bodies?: unknown };
+      if (raw.bodies === undefined) return;
+      delete raw.bodies;
+      fs.writeFileSync(file, JSON.stringify(raw));
+    } catch {
+      // No file, or not one it can read, which is no note either.
+    }
+  }
+
+  // Reads events (after, before) into bodies, at most `budget`. Past that, or if
+  // they can't be read, it goes on from `before`: forward only.
+  private readBodies(id: string, after: number, before: number, budget: number): number {
+    let read = 0;
+    let at = after;
+    try {
+      while (at < before - 1 && read < budget) {
+        const { events } = this.deps.runner.events(id, { afterSeq: at, limit: Math.min(BACKFILL_EVENTS, budget - read) });
+        const next = events.at(-1)?.seq ?? at;
+        if (next <= at) break;
+        read += events.length;
+        for (const e of events) if (e.seq > at && e.seq < before) this.queueBodies(this.bodyCollector.see(id, e));
+        at = next;
+      }
+    } catch {
+      // Still on the release before, say. Those tools show as kept on the runner.
+    }
+    // Gave up short: what it was waiting for may be past here, so it can't hold the
+    // head back, or every start reads the same events again.
+    if (at < before - 1) this.bodyCollector.abandon(id);
+    this.bodyCollector.resume(id, before - 1);
+    return read;
+  }
+
+  // Seqs are contiguous, so a jump means events this runner never saw: a thread that
+  // came across from the release before.
+  private fillBodies(id: string, last: number, seq: number): void {
+    this.readBodies(id, last, seq, BODY_CATCHUP_EVENTS);
+  }
+
+  // A `picture` command: one picture a tool handed back, uploaded because someone
+  // tapped it, for a day. Only the picture that tool's result names, only from this
+  // thread's media folder, and never a tool the withhold list holds back.
+  private async sendHeldPicture(threadId: string, seq: number, index: number): Promise<void> {
+    if (!this.deps.config.full) throw new Error('Full sync is off on this runner.');
+    if ((this.backendApiVersion ?? 0) < BODIES_API_VERSION) throw new Error('The backend is too old for that.');
+    if (!Number.isSafeInteger(seq) || !Number.isSafeInteger(index) || seq < 1 || index < 0) throw new Error('No such picture.');
+    const { events } = this.deps.runner.events(threadId, { afterSeq: seq - 1, limit: PICTURE_SCAN_EVENTS });
+    const call = events.find((e) => e.seq === seq);
+    if (call?.type !== 'tool.call') throw new Error('No such tool.');
+    if (withholdReason(call)) throw new Error('This one stays on the runner.');
+    const result = events.find((e) => e.type === 'tool.result' && e.itemId === call.itemId);
+    const image = result?.type === 'tool.result' ? result.images?.[index] : undefined;
+    if (!image) throw new Error('No such picture.');
+    const read = readShareImage(image.path, this.deps.home ? paths.media(this.deps.home, threadId) : undefined);
+    if ('skip' in read) throw new Error(`That picture isn't available: ${read.skip}.`);
+    const url = (await this.post('mutation', 'sync:iconUploadUrl', { key: this.deps.key })) as string;
+    const storageId = await this.upload(url, read.bytes, read.mediaType);
+    const { mediaType, width, height } = read;
+    await this.post('mutation', 'sync:addHeldPicture', { key: this.deps.key, threadId, seq, index, storageId, mediaType, ...(width ? { width } : {}), ...(height ? { height } : {}) });
+  }
+
   private async writeRows<T>(fn: string, field: string, rows: T[], idOf: (row: T) => string, extra: Record<string, unknown>): Promise<Set<string>> {
     const left = new Set<string>();
     const once = async (some: T[]) => {
@@ -1466,6 +1670,9 @@ export class ConvexSync {
         this.replyDue.delete(id);
         this.replyUp.delete(id);
         this.pendingReplyImages = this.pendingReplyImages.filter((i) => i.threadId !== id);
+        this.bodyCollector.forget(id);
+        this.bodies = this.bodies.filter((b) => b.threadId !== id);
+        this.bodyQueueChars = this.bodies.reduce((n, b) => n + rawChars(b), 0);
         this.removed.add(id);
         this.scheduleFlush();
         break;
@@ -1519,6 +1726,11 @@ export class ConvexSync {
       }
     }
     this.woke.see(e);
+    if (this.deps.config.full) {
+      const last = this.bodyCollector.lastSeen(threadId);
+      if (last !== undefined && e.seq > last + 1) this.fillBodies(threadId, last, e.seq);
+      this.queueBodies(this.bodyCollector.see(threadId, e));
+    }
     // A thread that's just touched a file of secrets may quote what's in it.
     // Looked at once it's done: a write hasn't happened yet when it's asked for.
     // Any reason, as `printenv > .env` is an environment command first.
@@ -1663,6 +1875,7 @@ export class ConvexSync {
     if (c.projects) this.projectsSent = new Map(Object.entries(c.projects));
     if (c.accounts) this.accountsSent = new Map(Object.entries(c.accounts));
     if (c.apiVersion !== undefined) this.backendApiVersion = c.apiVersion;
+    if (this.deps.config.full) this.catchUpBodies(c.bodies);
     this.fullAt = c.at;
     this.full = false;
     this.catchUpDue = true;
@@ -1729,6 +1942,7 @@ export class ConvexSync {
         ...(this.projectsSent ? { projects: Object.fromEntries(this.projectsSent) } : {}),
         ...(this.accountsSent ? { accounts: Object.fromEntries(this.accountsSent) } : {}),
         ...(index ? { index } : {}),
+        ...(this.deps.config.full ? { bodies: this.bodyHeads() } : {}),
       });
     } catch (e) {
       this.deps.log.warn('could not save what the mirror has', { error: String(e) });
@@ -1955,7 +2169,7 @@ export class ConvexSync {
     // Project pictures waiting (picturesDue) count too: one an upload
     // allowance held back goes once its pause is over, idle or not.
     const picturesWaiting = this.picturesDue && (this.backendApiVersion ?? 0) >= ICONS_API_VERSION && !this.picturesPaused();
-    if (!picturesWaiting && !this.dirty.size && !this.removed.size && !this.messages.length && !this.dirtyLists.size && !this.full && !this.catchUpDue && !this.imagesDue.size && !this.imagesDrop.size && !this.pendingImages.length && !this.replyDue.size && !this.pendingReplyImages.length) return;
+    if (!picturesWaiting && !this.bodies.length && !this.dirty.size && !this.removed.size && !this.messages.length && !this.dirtyLists.size && !this.full && !this.catchUpDue && !this.imagesDue.size && !this.imagesDrop.size && !this.pendingImages.length && !this.replyDue.size && !this.pendingReplyImages.length) return;
     const now = this.deps.clock.now();
     let delay = Math.max(0, this.lastFlushAt + SYNC_COALESCE_MS - now);
     if (this.retryAt !== undefined) delay = Math.max(delay, this.retryAt - now);
@@ -2063,6 +2277,7 @@ export class ConvexSync {
       this.markFilled(filling.filter((id) => !notFilled.has(id)));
       if (v >= SHARE_API_VERSION) await this.sendShareImages();
       if (v >= REPLY_IMAGES_API_VERSION) await this.sendReplyImages();
+      await this.sendBodies(v);
       this.lastSyncAt = this.deps.clock.now();
       this.backoffMs = 0;
       this.retryAt = undefined;
@@ -3005,6 +3220,9 @@ export class ConvexSync {
         const list = listFolderFor({ path: params.path });
         return { result: { ...list, entries: list.entries.slice(0, CALL_ENTRIES), truncated: list.truncated || list.entries.length > CALL_ENTRIES } };
       }
+      case 'picture':
+        await this.sendHeldPicture(needThread(), Number(a.seq), Number(a.index));
+        return undefined;
       case 'share': {
         // The website's Stop sharing, Share again and New link (API 8).
         if (a.access !== 'off' && a.access !== 'link') throw new Error('access is "off" or "link"');

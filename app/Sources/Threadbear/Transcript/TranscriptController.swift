@@ -460,6 +460,11 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
             session.setModelExpanded(rowId, !group.isExpanded)
             return
         }
+        // Opening another runner's tool asks for its output, which fills in the row
+        // as more events if that runner has full sync on.
+        if !session.expanded.contains(rowId), case .tool(let tool) = row.content, let seq = tool.result?.heldBackSeq {
+            session.app?.fetchHeldBody(threadId: session.threadId, seq: seq)
+        }
         DiffPreview.set(rowId, open: !session.expanded.contains(rowId), in: &session.expanded)
         refreshInPlace(index: index, row: row)
     }

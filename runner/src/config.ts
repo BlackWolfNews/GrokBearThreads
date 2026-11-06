@@ -109,7 +109,7 @@ export type Config = {
   // The Convex mirror (src/sync.ts): the project's URL, whether it's on,
   // the name the phone shows for this runner and its id (made once).
   // THREADBEAR_SYNC=off turns it off for tests and dev runners.
-  sync: { enabled: boolean; url?: string; name?: string; runnerId?: string; icon?: string; rpcUrl?: string; pastedPictures?: boolean };
+  sync: { enabled: boolean; url?: string; name?: string; runnerId?: string; icon?: string; rpcUrl?: string; pastedPictures?: boolean; full?: boolean };
   // The silent on-device secret check (src/secret-check.ts): off unless asked.
   secretCheck?: boolean;
   // Mike's Connectors gateway's base URL (connectors.ts), for the app's
@@ -153,9 +153,11 @@ export type RunnerJson = {
   models?: { pool?: string | null; privateFolders?: string[] };
   // icon: an SF Symbol for this runner in lists (machine.ts works one out).
   // rpcUrl: how a Mac app reaches this runner over the tailnet (step 6 part 2).
+  // full: true sends tool output to your Convex deployment as well, scrubbed first
+  // (docs/full-convex.md). Off unless you say so.
   // pastedPictures: false keeps pictures you paste off your Convex deployment
   // (docs/on-your-mac.md).
-  sync?: { enabled?: boolean; url?: string; name?: string; runnerId?: string; icon?: string; rpcUrl?: string; pastedPictures?: boolean };
+  sync?: { enabled?: boolean; url?: string; name?: string; runnerId?: string; icon?: string; rpcUrl?: string; pastedPictures?: boolean; full?: boolean };
   secretCheck?: { enabled?: boolean };
   // Features still being tried out, each off unless it says (experiments.ts).
   experiments?: Record<string, boolean>;
@@ -294,6 +296,7 @@ function syncConfig(raw: RunnerJson['sync'], env: NodeJS.ProcessEnv): Config['sy
   const rpcUrl = nonEmpty(raw?.rpcUrl);
   if (rpcUrl) out.rpcUrl = rpcUrl;
   if (raw?.pastedPictures === false) out.pastedPictures = false;
+  if (raw?.full === true) out.full = true;
   return out;
 }
 

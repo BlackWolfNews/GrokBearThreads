@@ -285,6 +285,8 @@ export default defineSchema({
     messages: v.optional(v.number()),
     // Its messages' bytes, against its budget (sync.ts appendMessages).
     messageBytes: v.optional(v.number()),
+    // Its tool output's bytes (eventBodies), against CAP.bodyBytes.
+    bodyBytes: v.optional(v.number()),
     pushMinute: v.optional(v.number()),
     pushes: v.optional(v.number()),
   }).index('by_runnerId', ['runnerId']),
@@ -364,7 +366,7 @@ export default defineSchema({
     runnerId: v.string(), // or "any"
     threadId: v.optional(v.string()),
     // interrupt and call (API 44) come only from the main Mac's runner (relay.ts queueCommand).
-    kind: v.union(v.literal('send'), v.literal('respond'), v.literal('update'), v.literal('create'), v.literal('page'), v.literal('share'), v.literal('quickAsk'), v.literal('interrupt'), v.literal('call'), v.literal('schedule')),
+    kind: v.union(v.literal('send'), v.literal('respond'), v.literal('update'), v.literal('create'), v.literal('page'), v.literal('share'), v.literal('quickAsk'), v.literal('interrupt'), v.literal('call'), v.literal('schedule'), v.literal('picture')),
     args: v.any(),
     state: v.union(v.literal('pending'), v.literal('taken'), v.literal('done'), v.literal('failed')),
     note: v.optional(v.string()),
@@ -378,6 +380,49 @@ export default defineSchema({
     .index('by_state', ['state'])
     // pruneOld: finished ones by when they finished.
     .index('by_state_done', ['state', 'doneAt']),
+
+  // Full sync (API 52, docs/full-convex.md step 4; sync.full in runner.json).
+  // One row per tool call, under the seq of its one-line `messages` row, with
+  // its output, input, diffs and the reasoning before it. Convex charges a read
+  // for the whole document, so these are never in a list read: each is fetched
+  // once, by seq, when someone opens that tool (sync:remoteBody, phone:eventBody).
+  // `withheld`: its command or file can hold secrets (runner/src/withhold.ts), so
+  // nothing of it came up. input and diffs are JSON text. Kept 30 days (pruneBodies).
+  eventBodies: defineTable({
+    threadId: v.string(),
+    seq: v.number(),
+    runnerId: v.optional(v.string()), // a runner key's, for its budget (CAP.bodyBytes)
+    at: v.number(), // when it was stored
+    withheld: v.optional(v.boolean()),
+    reason: v.optional(v.string()),
+    text: v.optional(v.string()),
+    ok: v.optional(v.boolean()),
+    truncated: v.optional(v.boolean()),
+    input: v.optional(v.string()),
+    diffs: v.optional(v.string()),
+    reasoning: v.optional(v.string()),
+    images: v.optional(v.number()), // how many pictures the tool handed back (see heldPictures)
+    cut: v.optional(v.boolean()), // shortened to fit (docs/full-convex.md)
+  })
+    .index('by_thread_seq', ['threadId', 'seq'])
+    .index('by_at', ['at'])
+    .index('by_runner_at', ['runnerId', 'at']),
+
+  // A tool's picture someone tapped to see (API 52): the runner uploads that
+  // one for a day, on a `picture` command. Screenshots otherwise stay on it.
+  heldPictures: defineTable({
+    threadId: v.string(),
+    seq: v.number(),
+    index: v.number(),
+    storageId: v.id('_storage'),
+    mediaType: v.string(),
+    width: v.optional(v.number()),
+    height: v.optional(v.number()),
+    at: v.number(),
+  })
+    .index('by_thread_seq', ['threadId', 'seq', 'index'])
+    .index('by_at', ['at'])
+    .index('by_storageId', ['storageId']),
 
   // Phone tokens: only the hash is kept. Issued from the Mac app through
   // the runner (sync:issueToken) or by hand with

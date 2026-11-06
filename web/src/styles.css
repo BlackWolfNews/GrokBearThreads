@@ -140,6 +140,16 @@ code, pre { font-family: var(--mono); font-size: 13px; }
 .tools li { display: flex; gap: 8px; min-width: 0; }
 .tools li span:last-child { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .tool-glyph { width: 12px; flex: none; text-align: center; }
+.tools li.tool-open { display: block; }
+.tool-line { display: flex; gap: 8px; min-width: 0; max-width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.tool-line:hover { color: var(--muted); }
+.tool-line span:last-child { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.tool-body { margin: 4px 0 8px 20px; display: grid; gap: 6px; color: var(--text); font-size: 12.5px; min-width: 0; }
+.tool-body.muted, .tool-body .muted { color: var(--muted); }
+.tool-body pre { margin: 0; padding: 8px 10px; border-radius: 6px; background: var(--code); font-family: var(--mono); font-size: 12px; max-height: 360px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tool-body pre.failed { color: var(--muted); }
+.tool-thought { margin: 0; color: var(--muted); font-style: italic; white-space: pre-wrap; }
+.tool-picture { max-width: 100%; border-radius: 6px; }
 .working { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 14px; }
 
 /* ================================================================

@@ -159,7 +159,9 @@ export function readShareImage(file: string, mediaDir: string | undefined): { by
     } catch {
       return { skip: 'the file is gone' };
     }
-    if (!open.isFile() || open.ino !== atReal.ino || open.dev !== atReal.dev) return { skip: "it can't be read" };
+    // Against what was looked at first too: a folder on the way swapped for a link
+    // after that would otherwise agree with itself.
+    if (!open.isFile() || open.ino !== atReal.ino || open.dev !== atReal.dev || open.ino !== st.ino || open.dev !== st.dev) return { skip: "it can't be read" };
     if (open.size > SHARE_IMAGE_BYTES) return { skip: `it's ${Math.round(open.size / 1024 / 1024)} MB` };
     const bytes = Buffer.alloc(open.size);
     let got = 0;

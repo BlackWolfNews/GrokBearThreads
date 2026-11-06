@@ -19,7 +19,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-export const TABLES = ['messages', 'threads', 'threadIndex', 'projects', 'schedules', 'pocketCards', 'accounts', 'commands', 'replyImages', 'shareImages', 'pools', 'runners', 'tokens', 'runnerKeys', 'runnerStats', 'projectIcons', 'projectHeads', 'projectNotes'];
+export const TABLES = ['messages', 'threads', 'threadIndex', 'projects', 'schedules', 'pocketCards', 'accounts', 'commands', 'replyImages', 'shareImages', 'pools', 'runners', 'tokens', 'runnerKeys', 'runnerStats', 'projectIcons', 'projectHeads', 'projectNotes', 'eventBodies'];
 
 export async function scrubStored({ post, key, tables = TABLES, apply = false, batch = 200, say = () => {} }) {
   const totals = {};

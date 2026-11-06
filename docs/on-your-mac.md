@@ -237,6 +237,18 @@ picture that goes up (ones agents post or pin, and anything in a thread you
 share) goes as it is. Scrubbing also can't undo a leak. A key that shows up in
 a thread has already been to the AI provider, so rotate it.
 
+**Full sync** is off unless a runner's `runner.json` has `"sync": { "full": true }`.
+With it off, tool output, diffs and tool screenshots stay on that runner, and
+nothing below happens. With it on, from then on (older tools aren't sent), that
+runner also sends each finished tool's output, its full input, its diffs and the
+reasoning before it to your deployment, after the same scrubbing, where they're
+kept 30 days. This lets you read them from any device while the runner's off. It's
+the same not-a-guarantee as above, over much more text. A tool whose command or file
+can hold secrets (`.env` files, `env list`, key files: `runner/src/withhold.ts`) sends
+nothing of itself, and a runner without an on-device model relies on these checks
+alone, which `tb status` says. A tool's screenshots stay on the runner unless you tap
+one on the website, which uploads that one for a day.
+
 `runner/scripts/scrub-stored.mjs` runs today's rules over what's already stored,
 and only when you run it. Convex backups and snapshot exports keep their copies.
 

@@ -838,6 +838,7 @@ the summary and then the reply.
 | `threads.retitle` | `{ dryRun?: boolean, threadIds?: string[] }` | `{ threads: { threadId, from: string, to?: string, reason?: string }[] }`. Gives a model title to every thread, archived and snoozed included, whose title is still its first message's first line and that nobody has named (`titleSet`); see "Titles" under "Settings and models". One entry per such thread: `to` when it was renamed, `reason` when it wasn't (no key, private folder, over budget, renamed meanwhile). With `threadIds`, those threads whatever their title (a poor model title can be asked for again), still never one named by hand. The model also gets the start of the thread's first reply. `dryRun` lists them without asking the model (`tb retitle`) |
 | `threads.delete` | `{ threadId }` | `{}`. Stops the thread's CLI and moves its folder to `trash/` in the data dir (a Codex thread is archived in Codex too). Every client gets `thread.deleted` |
 | `threads.events` | `{ threadId, afterSeq?: number, beforeSeq?: number, limit?: number }` (default: the newest 500) | `{ events: Event[], firstSeq, lastSeq, inProgress: { itemId, type: "assistant.text" \| "reasoning", text }[] }` |
+| `threads.heldBody` | `{ threadId, seq }` | `{ state }`. Another runner's thread only: one tool's output from the backend (see "Other runners' threads through the backend") |
 | `threads.subscribe` | `{ threadId, afterSeq?: number }` | `{ events: Event[], inProgress: { itemId, type, text }[] }` (everything after `afterSeq`, and the text streamed so far for items still streaming), then pushes `thread.event` notifications. Deltas pushed after the reply carry on from `inProgress` |
 | `threads.unsubscribe` | `{ threadId }` | `{}` |
 | `threads.subagent` | `{ threadId, subagentId }` | `{ subagent?: Subagent, events: Event[] }`: what the sub-agent has done so far, read from the CLI's own record of it, as events (`user.message` for its brief, then `assistant.text`, `reasoning`, `tool.call`, `tool.result`, `edit.diff`) numbered from 1, with no `turnId`. Read again for more while it runs: thread.updated says when it has done something. `subagent` is absent once the thread's list has dropped it. `-32006` when there's no record of it (an older thread, or the CLI cleaned it up) |
@@ -3620,12 +3621,17 @@ default).
   app takes them as they come rather than asking for a catch-up (its
   ThreadFeed's sparse mode). No deltas: a remote thread shows finished
   messages and the working line, not live typing.
-- **What's held back.** Tool output, diffs, reasoning, sub-agents and
-  pictures aren't in the backend until full sync (step 4). A tool's result
-  says `The output is kept on <runner>.` and carries `heldBack: { seq }`,
-  the row's own seq, for step 4 to fetch the body by (`sync:remoteBody`,
-  planned). `files.read` with a `runnerId` is `-32000`, and the app doesn't ask:
-  it says the file is kept on that machine.
+- **What's held back.** A tool's result says `The output is kept on <runner>.`
+  and carries `heldBack: { seq }`, the row's own seq. Opening that tool in the app
+  calls `threads.heldBody { threadId, seq }` → `{ state: "text" | "withheld" | "expired" | null }`:
+  once for each tool while the thread's held, through `sync:remoteBody`. With a body
+  (that runner has `sync.full` on, see Sync), its real `tool.call` goes out at 8s+5,
+  its `tool.result` at 8s+6, and up to two `edit.diff`s at 8s+3 and 8s+4, unless an
+  old runner's card has those; any more files are named in the result. The app fills
+  the row in by `itemId`. Withheld, the result says why. Otherwise the stub stands.
+  Reasoning, sub-agents and pictures stay on that runner from here. `files.read` with
+  a `runnerId` is `-32000`, and the app doesn't ask: it says the file is kept on that
+  machine.
 - **Reads.** A thread is watched only while a client is subscribed to it,
   through `relay:remoteTail` (its newest 15 rows) and `relay:remoteThread`
   (its one row); a minute after the last subscriber goes, both stop. Older
@@ -3728,7 +3734,8 @@ the mirror back as state. The Mac app doesn't use it.
   them and opens them itself) and `view` (`inbox`, `hibernating` or `den`,
   worked out the way the app's lists are). Nothing else from
   `ThreadSummary`: no `lastSeq`, context, panels, other actions, hooks or
-  sub-agents, and never a tool result, diff or image. A `thread.updated`
+  sub-agents, and never a tool result, diff or image (full sync, below, keeps those
+  in a table of their own). A `thread.updated`
   whose phone view differs from the last one written marks the thread
   dirty; dirty threads are written together, at most once every 2
   seconds, 50 to a mutation. A change only to its preview or unread waits
@@ -3890,7 +3897,32 @@ the mirror back as state. The Mac app doesn't use it.
   scrubbed (`matchAnswers`). A schedule that lives in the backend comes back
   scrubbed, so one whose text holds a secret runs with `[REDACTED]`. Pictures
   aren't scrubbed. `src/withhold.ts` says which tool calls' output must never
-  upload; no tool output goes up today, so nothing calls it on the way up yet.
+  upload.
+- **Full sync** (API 52, docs/full-convex.md step 4). `sync.full: true` in
+  `runner.json`, off by default; off, none of this runs. Each finished tool goes up
+  as one `eventBodies` row under its call's seq, the same seq as its `messages` row
+  (`sync:appendBodies`, at most 50 rows or about 512 KB a mutation, behind the
+  mirror's own writes): `text`, `ok`, `truncated`, `input` and `diffs` as JSON text,
+  `reasoning` from before it, `images` as a count. Reasoning with no tool after it
+  goes under the next message's seq, or its own at the turn's end; nothing shows
+  those yet. `src/withhold.ts`'s say-so, or a check that throws, makes the row
+  `withheld` with nothing of the tool in it. Scrubbed then cut (`src/full-sync.ts`:
+  96 KB of text, 48 KB of input, 64 KB of diffs, 32 KB of reasoning; `cut` says so),
+  and scrubbed again in the mutation. Forward only: where each thread had got to is
+  in `sync-sent.json` (`bodies`), and a start reads only threads past that, up to
+  20,000 events, then goes on from now. It's sent again only after a lost reply, and
+  an identical row writes nothing. `runner.status`'s `sync.full` is `{ bodies, bytes,
+  withheld, unsent, pending, backendTooOld? }`. Reads: `phone:eventBody { token,
+  threadId, seq }` and `sync:remoteBody { key, threadId, seq }` answer `null`, `{ state:
+  "withheld", reason? }`, `{ state: "expired" }` or `{ state: "text", text, ok?, truncated?,
+  input?, diffs?, reasoning?, images?, cut? }`, one query per opening, never live;
+  `share:view` has none of it. `pruneBodies` deletes past 30 days, 100 rows every 15
+  minutes. A runner key's rows count against `CAP.bodyBytes` (32 MB), oldest first.
+- **A tool's picture** (API 52). `phone:requestPicture { token, threadId, seq, index }`
+  queues a `picture` command for the thread's runner, which checks `sync.full` is on,
+  the tool isn't withheld and `index` is one its result names in that thread's media
+  folder, then uploads it (`sync:addHeldPicture`). `phone:heldPicture` has its URL for a
+  day (`pruneOld`). An older runner fails the command as unknown.
 - **Status.** `runner.status` has `sync: { state: "off" | "ok" | "error",
   reason?, url?, runnerId?, name?, threads?, messages?, lastSyncAt?,
   lastError?, pending?, retryAt?, commands?: { state: "off" | "on" |
@@ -4279,6 +4311,9 @@ anyone's); "any runner" is any good key. Anything not sorted is owner only.
 | `queueCommand` | owner only | work for another runner: a thread's command goes to the runner the backend says has it |
 | `commandState` | owner only | |
 | `remoteAccounts` | owner only | another runner's logins |
+| `remoteBody` | owner only | one tool's output on another runner's thread (full sync) |
+| `appendBodies` | its own | each body's thread row is the key's runner's; a key's total is capped, oldest going first |
+| `addHeldPicture` | its own | one tool picture tapped on the website, on its own thread, gone after a day |
 
 `sync:uploadTicketOk` and `sync:redeemUpload` are internal, for
 `/runner/upload`.

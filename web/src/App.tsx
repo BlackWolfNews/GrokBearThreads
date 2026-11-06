@@ -207,14 +207,14 @@ function ThreadView({ token, threadId }: { token: string; threadId: string }) {
     if (item.kind === 'worked') {
       return (
         <Worked key={`w${item.key}`} ms={item.ms}>
-          {item.items.map((w) => (w.kind === 'tools' ? <ToolRun key={w.items[0]!.seq} items={w.items} open /> : renderItem(w)))}
+          {item.items.map((w) => (w.kind === 'tools' ? <ToolRun key={w.items[0]!.seq} items={w.items} open source={{ token, threadId }} /> : renderItem(w)))}
         </Worked>
       );
     }
     if (item.kind === 'tools') {
       return (
         <div key={item.items[0]!.seq}>
-          <ToolRun items={item.items} />
+          <ToolRun items={item.items} source={{ token, threadId }} />
           <Pictures items={item.items.flatMap((m) => after.get(m.seq) ?? [])} />
         </div>
       );

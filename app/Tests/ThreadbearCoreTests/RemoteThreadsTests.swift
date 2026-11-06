@@ -307,4 +307,12 @@ final class RemoteClientsTests: XCTestCase {
         XCTAssertEqual(ProjectMark.place(summary), "misc")
         XCTAssertEqual(ProjectMark.lineTip(summary), "You: try the GPU route")
     }
+
+    func testAToolResultSaysWhereItsOutputCanBeAskedFor() throws {
+        let json = #"{"itemId":"relay-5","ok":true,"text":"The output is kept on bruce.","truncated":false,"images":[],"heldBack":{"seq":5}}"#
+        let held = try JSONDecoder().decode(ToolResult.self, from: Data(json.utf8))
+        XCTAssertEqual(held.heldBackSeq, 5)
+        let plain = try JSONDecoder().decode(ToolResult.self, from: Data(#"{"itemId":"i","ok":true,"text":"x","truncated":false,"images":[]}"#.utf8))
+        XCTAssertNil(plain.heldBackSeq)
+    }
 }

@@ -403,3 +403,32 @@ test("a new thread there, a folder there and that runner's logins", async () => 
   assert.equal(logins.defaults.cwd, '/Users/b/x');
   assert.deepEqual(logins.accounts, [{ id: 'claude-main', provider: 'claude', title: 'Claude', configDir: '' }]);
 });
+
+test('an opened tool fills in from its body: its real call, result and diffs, in seqs of their own', () => {
+  const bodies = new Map([[14, { state: 'text' as const, text: 'all passed', ok: true, input: JSON.stringify({ command: 'npm test' }), diffs: JSON.stringify([{ path: 'a.ts', hunks: [] }, { path: 'b.ts', hunks: [] }, { path: 'c.ts', hunks: [] }]), images: 2 }]]);
+  const ev = relayEvents(T, rows, idle, [], false, 'bruce', true, bodies);
+  const of = (n: number) => ev.find((e) => e.seq === 14 * SCALE + n) as Record<string, unknown> | undefined;
+  assert.equal(of(2)!.type, 'tool.result', 'the stub stays, and is replaced by itemId');
+  assert.deepEqual(of(5)!.input, { command: 'npm test' });
+  assert.equal(of(5)!.itemId, of(2)!.itemId);
+  assert.equal(of(3)!.path, 'a.ts');
+  assert.equal(of(4)!.path, 'b.ts');
+  assert.match(String(of(6)!.text), /all passed[\s\S]*Also changed: c\.ts[\s\S]*2 pictures are kept on bruce/);
+  assert.equal(of(6)!.heldBack, undefined, 'nothing more to ask for');
+  assert.equal(new Set(ev.map((e) => e.seq)).size, ev.length, 'every seq once');
+  assert.deepEqual(ev.map((e) => e.seq), [...ev.map((e) => e.seq)].sort((a, b) => a - b));
+});
+
+test("a body that's withheld says so, and one that's missing changes nothing", () => {
+  const withheld = relayEvents(T, rows, idle, [], false, 'bruce', true, new Map([[14, { state: 'withheld' as const, reason: 'environment' }]]));
+  assert.match(String((withheld.find((e) => e.seq === 14 * SCALE + 6) as { text?: string }).text), /can hold secrets/);
+  const plain = relayEvents(T, rows, idle, [], false, 'bruce');
+  for (const body of [null, { state: 'expired' as const }]) assert.deepEqual(relayEvents(T, rows, idle, [], false, 'bruce', true, new Map([[14, body]])), plain);
+});
+
+test("a card from an older runner keeps its seqs: the body's diffs make way", () => {
+  const card = { pending: { approvalId: 'a', kind: 'approval' as const, name: 'Bash', title: 'x', options: [] }, slot: 14 * SCALE + 3 };
+  const ev = relayEvents(T, rows, idle, [card], false, 'bruce', true, new Map([[14, { state: 'text' as const, text: 'x', diffs: JSON.stringify([{ path: 'a.ts', hunks: [] }]) }]]));
+  assert.equal(new Set(ev.map((e) => e.seq)).size, ev.length);
+  assert.match(String((ev.find((e) => e.seq === 14 * SCALE + 6) as { text?: string }).text), /Also changed: a\.ts/);
+});

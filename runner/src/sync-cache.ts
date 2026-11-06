@@ -31,6 +31,8 @@ export type SyncCacheFile = {
   projects?: Record<string, [string, string, string?]>;
   accounts?: Record<string, string>;
   index?: { at: number; rows: Record<string, string>; removed?: string[] };
+  // Full sync: where each thread's tool output had got to (sync.ts catchUpBodies).
+  bodies?: Record<string, number>;
 };
 
 export function digest(s: string): string {

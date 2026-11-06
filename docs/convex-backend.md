@@ -674,6 +674,16 @@ it may only hold things back, never clear them: tool output is untrusted and can
 tell the model to answer "clean". Linux has no such model, so a Linux runner has
 the rules and the withhold list, and `tb status` says so.
 
+## Full sync (API 52, 6 Nov 2026)
+
+Tool output, input and diffs for a runner with `sync.full` on (docs/full-convex.md
+step 4; docs/protocol.md "Sync" has the fields). Convex charges a read for the whole
+document, so they're in `eventBodies`, not `messages`: no list ever reads one, and
+each is fetched once, by seq, when someone opens that tool. Writes are the cost, plus
+reading each row again to delete it after 30 days (`pruneBodies`), so about twice what
+comes up. Bumping the rules re-sends nothing; `scrub-stored.mjs` covers this table,
+but it's the one table where a run over everything costs real I/O.
+
 ## The Pocket (API 19)
 
 The phone's deck of cards for when Mike's out (`pocketCards`, the `pocket`

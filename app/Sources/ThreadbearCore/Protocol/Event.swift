@@ -48,14 +48,18 @@ public struct ToolResult: Sendable, Hashable, Decodable {
     public var truncated: Bool
     public var blobPath: String?
     public var images: [ImageRef]
+    /// Another runner's thread through Convex: the output is on that runner, and
+    /// opening the tool asks for it by this row's seq (`threads.heldBody`).
+    public var heldBackSeq: Int?
 
-    public init(itemId: String, ok: Bool, text: String, truncated: Bool = false, blobPath: String? = nil, images: [ImageRef] = []) {
+    public init(itemId: String, ok: Bool, text: String, truncated: Bool = false, blobPath: String? = nil, images: [ImageRef] = [], heldBackSeq: Int? = nil) {
         self.itemId = itemId
         self.ok = ok
         self.text = text
         self.truncated = truncated
         self.blobPath = blobPath
         self.images = images
+        self.heldBackSeq = heldBackSeq
     }
 
     public init(from decoder: Decoder) throws {
@@ -66,9 +70,12 @@ public struct ToolResult: Sendable, Hashable, Decodable {
         truncated = (try? c.decodeIfPresent(Bool.self, forKey: .truncated)) ?? false
         blobPath = try? c.decodeIfPresent(String.self, forKey: .blobPath)
         images = c.lossyArray(ImageRef.self, forKey: .images)
+        heldBackSeq = (try? c.decodeIfPresent(HeldBack.self, forKey: .heldBack))?.seq
     }
 
-    enum CodingKeys: String, CodingKey { case itemId, ok, text, truncated, blobPath, images }
+    private struct HeldBack: Decodable { let seq: Int }
+
+    enum CodingKeys: String, CodingKey { case itemId, ok, text, truncated, blobPath, images, heldBack }
 }
 
 public struct DiffHunk: Sendable, Hashable, Codable {
