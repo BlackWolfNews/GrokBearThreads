@@ -2026,14 +2026,19 @@ the thread if a sub-agent stalls, so an ask can't stay hidden for good.
   reply, as it comes next: the accepted result says "Now write your
   reply" (`ONE_REPLY_NEXT`), and the runner, seeing it, keeps the turn's
   text after it, streams it, and writes it with `final: true`; thinking
-  before it is kept too and folds into the work. Claude's result also says
-  the user never sees its thinking, so what the asks are about (a draft to
-  approve, the options weighed) goes in the reply in full, and when the
-  turn has words since its last step (`turnReply`), that they folded away
-  too and are to be written again in full (`WROTE_FIRST`): on 5 Nov 2026
-  Opus twice wrote a Slack draft or three designs as narration before
+  before it is kept too and folds into the work. Claude's result asks
+  for a final answer that includes any draft or descriptions of choices
+  needed for a decision. When words precede the call (`turnReply`), it
+  asks for a self-contained answer with the result and supporting evidence
+  and any requested draft, explanation or descriptions of choices in full
+  (`WROTE_FIRST`). The Stop hook keeps this content reminder too. It does not ask the
+  agent to reproduce its working or thinking: on 6 Nov 2026 the earlier
+  "write it again in full" instruction immediately preceded an Anthropic
+  `reasoning_extraction` refusal (thread ba756ff4). On 5 Nov 2026 Opus
+  twice wrote a Slack draft or three designs as narration before
   `end_turn`, then replied "Nothing has been sent yet." under a card
-  asking about them (thread 1d9689e6). A compaction between an accepted
+  asking about them (thread 1d9689e6), so drafts still need to be included.
+  A compaction between an accepted
   `end_turn` and its reply loses the reply too, as the summary doesn't say
   one is owed (thread 1b770c6a, 5 Nov 2026: the agent went back to work
   and the launcher plan its card asked about was never written), so the

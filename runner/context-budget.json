@@ -1,13 +1,13 @@
 {
   "claude": {
     "instructions": 2733,
-    "tools": 34847,
-    "total": 37580
+    "tools": 34780,
+    "total": 37513
   },
   "codex": {
     "instructions": 2158,
-    "tools": 34946,
-    "total": 37104
+    "tools": 34879,
+    "total": 37037
   },
   "worktreeInstructions": 498,
   "perTool": {
@@ -16,7 +16,7 @@
     "create_thread": 2373,
     "delete_schedule": 267,
     "delete_thread": 445,
-    "end_turn": 7839,
+    "end_turn": 7772,
     "interrupt_thread": 335,
     "join_project": 524,
     "leave_project": 460,

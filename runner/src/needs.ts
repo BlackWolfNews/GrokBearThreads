@@ -568,7 +568,7 @@ const ONE_REPLY_REPLY =
   'If they may have lost track (a long turn, work picked up from another thread, a thread they didn\'t start), open with one line on what the work is for and where it stands, before the latest step. ' +
   'A work report is a few bullets of what changed and the result, each linked to where it can be checked: [tests pass](work:npm test) quotes a few words of a step in your working (the command you ran or its description) and opens it there, lit up; [its own thread](thread:<its id from list_threads>) opens another thread; web pages and files link as usual. ' +
   'An explanation, a draft or an answer to their question is prose, at the length it needs. ' +
-  'When you\'re asking something, end the reply with what they need to know to answer it, in full, as they never see your thinking: the draft to approve, the options you weighed. The question itself, and what each answer would do, are in the card under the reply, so don\'t repeat them. ' +
+  'When you\'re asking something, include the full draft to approve or the options to choose from in the reply. The question itself, and what each answer would do, are in the card under the reply, so don\'t repeat them. ' +
   'Never write a "What I need from you" section, a "Nothing needed from you" line or a list of follow-ups in the reply: asks and next are those. ';
 
 // Only what the fields' own descriptions don't say (threadbear-mcp.ts):
@@ -604,24 +604,18 @@ export const ONE_REPLY_NEXT = 'Now write your reply';
 export function oneReplyAccepted(needsYou: boolean, restart = '', wroteFirst = false): string {
   const first = wroteFirst ? WROTE_FIRST : '';
   return needsYou
-    ? `${ENDED} will wait in Needs you.${restart} ${ONE_REPLY_NEXT}: it's the only text the user sees from this turn, with the card of asks under it. ${first}${ASKS_NEED_THE_REPLY} Don't repeat the card's questions or answers, and write nothing after your reply.`
+    ? `${ENDED} will wait in Needs you.${restart} ${ONE_REPLY_NEXT}: it's the only text the user sees from this turn, with the card of asks under it. ${first}${ASKS_NEED_THE_REPLY} Leave the question and button labels on the card, and write nothing after your reply.`
     : `${ENDED} is done. ${ONE_REPLY_NEXT}: it's the only text the user sees from this turn. ${first}Write nothing after it.`;
 }
 
-// On 5 Nov 2026 (thread 1d9689e6) Opus wrote a Slack draft for Mike to
-// approve, and another time three designs for him to pick from, before
-// end_turn, as narration blocks (which reach the runner only as a
-// one-line summary), then took "Don't repeat the questions or answers" to
-// mean the draft was already in front of him and wrote one line after
-// it: "Nothing has been sent yet." He got a card asking him to approve a
-// message he couldn't see. Everything before end_turn folds into the
-// working with one reply, so when the turn has words since its last step
-// (turnReply), they were meant as the reply and have to be written again.
-// Asking for more text gets more text (16509f4), which is the point here.
+// Drafts and options written before end_turn are hidden with the work.
+// Ask for the answer the user needs, rather than reproducing that work:
+// the old "write it again in full" result immediately preceded an
+// Anthropic reasoning_extraction refusal (6 Nov 2026, thread ba756ff4).
 const WROTE_FIRST =
-  'What you wrote just before this call folded into your working with the rest, out of sight, so they haven\'t read it: write it again in full as your reply. ';
+  'Give a self-contained answer with the result and supporting evidence. Include any requested draft, explanation or descriptions of choices in full. ';
 const ASKS_NEED_THE_REPLY =
-  'They never see your thinking either, so whatever the asks are about (a draft for them to approve, the options you weighed) goes in the reply in full.';
+  'If the user needs a draft or descriptions of choices to decide, include them in full.';
 
 // For an end_turn the Stop hook asked for, in a turn that has its message:
 // the nudge said "your message above is the reply", and "Now write your reply"
@@ -675,7 +669,7 @@ export const ONE_REPLY_END_TURN_NUDGE =
   "Your message above is the reply: don't write it again.";
 export const ONE_REPLY_WRITE_NUDGE =
   'Write your reply now, as ordinary text: the user sees only what you write after end_turn, with the card under it. ' +
-  "Don't repeat the questions or answers on the card.";
+  'Include any requested draft, explanation or descriptions of choices in full. Leave the question and button labels on the card.';
 
 // What a compaction between an accepted one-reply end_turn and its reply
 // adds after the summary (adapter.ts, onCompact), with the card's

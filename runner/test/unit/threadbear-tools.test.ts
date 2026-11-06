@@ -1305,10 +1305,10 @@ test('one reply: a nudged end_turn with no message to keep still asks for the re
 // 5 Nov 2026, thread 1d9689e6: a Slack draft for Mike to approve was
 // written before end_turn, as narration, and the reply after it was "Nothing
 // has been sent yet." Words since the last step fold away with one reply, so
-// the result asks for them again in full; words before a step don't count.
-test('one reply: words written just before end_turn are asked for again in full, as they fold away', async () => {
+// the result asks for a self-contained answer; words before a step don't count.
+test('one reply: after hidden text, end_turn asks for the answer and evidence, including drafts', async () => {
   const h = makeHarness();
-  const again = /write it again in full as your reply/;
+  const again = /self-contained answer with the result and supporting evidence/;
   const input = { headline: 'Draft update for Jamie ready to send', asks: [{ question: 'Send the Hetzner update to Jamie in your Slack DM?', options: [{ label: 'Send it' }, { label: "I'll edit and send" }] }] };
   // The draft as narration, straight before the call.
   const first = start(h);
@@ -1321,7 +1321,8 @@ test('one reply: words written just before end_turn are asked for again in full,
   assert.equal(r.error, false, r.text);
   assert.match(r.text, /Now write your reply/);
   assert.match(r.text, again);
-  assert.match(r.text, /never see your thinking/);
+  assert.match(r.text, /If the user needs a draft or descriptions of choices/);
+  assert.doesNotMatch(r.text, /thinking|working|write it again/i);
   // Plain text counts too, and a done turn hears it as well.
   const second = start(h);
   const two = tools(h, second.thread.id, undefined, () => true);
@@ -1330,6 +1331,7 @@ test('one reply: words written just before end_turn are asked for again in full,
   r = await two.call('end_turn', { headline: 'Laid out three designs', needs: 'nothing' });
   assert.match(r.text, /^Noted: this thread is done/);
   assert.match(r.text, again);
+  assert.match(r.text, /Include any requested draft, explanation or descriptions of choices in full/);
   // A status line before a step is just working: nothing to write again.
   const third = start(h);
   const three = tools(h, third.thread.id, undefined, () => true);
@@ -1340,7 +1342,7 @@ test('one reply: words written just before end_turn are asked for again in full,
   r = await three.call('end_turn', input);
   assert.match(r.text, /Now write your reply/);
   assert.doesNotMatch(r.text, again);
-  assert.match(r.text, /never see your thinking/, 'what the asks are about always goes in the reply');
+  assert.match(r.text, /If the user needs a draft or descriptions of choices/, 'what the asks are about always goes in the reply');
 });
 
 // One reply (docs/protocol.md, "One reply"; 1 Nov 2026): end_turn carries
