@@ -20,6 +20,7 @@ struct ComposerView: View {
     @State private var height: CGFloat = ComposerTextField.minHeight
     @State private var importing = 0
     @State private var handle = ComposerHandle()
+    @State private var palette = PaletteState()
 
     static var cornerRadius: CGFloat { zoomed(20) }
     static var padding: CGFloat { zoomed(14) }
@@ -94,6 +95,7 @@ struct ComposerView: View {
                 pictures: ComposerTextView.Pictures(allowed: { picturesAllowed() }, importOne: { await importPicture($0) }),
                 handle: handle,
                 onEscape: { cancelEdit() },
+                onPaletteKey: { paletteKey($0, text: draft.wrappedValue.text) },
                 editable: !creating
             )
             .frame(height: height)
@@ -118,6 +120,28 @@ struct ComposerView: View {
         }
         // The transcript above is drop space for this box too.
         .onAppear { controller?.composerHandle = handle }
+        }
+        // The slash command palette, over the transcript just above the box.
+        .overlay(alignment: .top) {
+            if let thread, let query = paletteQuery(draft.wrappedValue.text) {
+                SlashPaletteView(
+                    commands: app.slashCommands[thread.id],
+                    query: query,
+                    provider: thread.provider,
+                    recent: app.recentSlashCommands,
+                    state: $palette,
+                    onFill: { pick($0, run: false) },
+                    onRun: { pick($0, run: true) }
+                )
+                // Its height is fixed, so lifting it by that sits it just above.
+                .offset(y: -(SlashPaletteView.height + zoomed(8)))
+                .onAppear { app.loadSlashCommands(thread.id) }
+            }
+        }
+        // Esc closed the palette at that text only: any change reopens it,
+        // even back to the same words later.
+        .onChange(of: draft.wrappedValue.text) { _, text in
+            if palette.closedAt != nil, palette.closedAt != text { palette.closedAt = nil }
         }
         // The transcript's reading column: 780 wide at most at 100%,
         // centred, with the same side insets once the window is narrower.
@@ -144,6 +168,42 @@ struct ComposerView: View {
             .overlay(shape.strokeBorder(attention ? Color(nsColor: .controlAccentColor) : Color(nsColor: .separatorColor), lineWidth: attention ? 1 : 0.5))
             .contentShape(shape)
             .onTapGesture { app.focusComposer(draftKey) }
+    }
+
+    /// What's typed while the palette is open: the command so far. Not
+    /// in a new thread (it has no CLI yet), and not once Esc closed it at
+    /// this text.
+    private func paletteQuery(_ text: String) -> String? {
+        guard thread != nil, palette.closedAt != text else { return nil }
+        return SlashPalette.query(in: text)
+    }
+
+    /// Arrows, Tab, Return and Esc while the palette is open. False lets
+    /// the box have the key as usual.
+    private func paletteKey(_ key: PaletteKey, text: String) -> Bool {
+        guard let thread, let query = paletteQuery(text) else { return false }
+        let matches = SlashPalette.matches(app.slashCommands[thread.id] ?? [], query: query, category: palette.category, recent: app.recentSlashCommands)
+        // Return with nothing to pick sends what's typed, as words.
+        if key == .enter, matches.isEmpty { return false }
+        if let (command, run) = SlashPaletteView.handle(key, matches: matches, state: &palette, text: text) {
+            pick(command, run: run)
+        }
+        return true
+    }
+
+    /// Puts the command in the box: to send now, or with a space after it
+    /// for its arguments. Through the text view, so it's one undo.
+    private func pick(_ command: SlashCommand, run: Bool) {
+        app.recentSlashCommands = SlashPalette.used(command.name, recent: app.recentSlashCommands)
+        palette = PaletteState()
+        let text = SlashPalette.fill(command, forArguments: !run)
+        if let textView = handle.textView {
+            textView.insertText(text, replacementRange: NSRange(location: 0, length: (textView.string as NSString).length))
+            textView.window?.makeFirstResponder(textView)
+        } else {
+            app.drafts[draftKey, default: Draft()].text = text
+        }
+        if run { send() }
     }
 
     /// Esc while editing a message leaves the edit.
@@ -490,6 +550,8 @@ struct ComposerTextField: NSViewRepresentable {
     var handle: ComposerHandle?
     /// Esc: true if it did something (left an edit).
     var onEscape: () -> Bool = { false }
+    /// The slash command palette's keys, first: true if it took the key.
+    var onPaletteKey: (PaletteKey) -> Bool = { _ in false }
     /// False while what's in it is being sent (a new thread being made).
     var editable = true
 
@@ -565,6 +627,7 @@ struct ComposerTextField: NSViewRepresentable {
         textView.onReturnWhenEmpty = onReturnWhenEmpty
         textView.pictures = pictures
         textView.onEscape = onEscape
+        textView.onPaletteKey = onPaletteKey
         textView.placeholder = placeholder
         handle?.textView = textView
         if textView.isEditable != editable { textView.isEditable = editable }
@@ -639,6 +702,7 @@ final class ComposerTextView: NSTextView {
     var inAnswerBox = false
     var onSend: (() -> Void)?
     var onReturnWhenEmpty: (() -> Bool)?
+    var onPaletteKey: ((PaletteKey) -> Bool)?
     var onEscape: (() -> Bool)?
     /// Pictures pasted or dropped in an ask's box, which keeps them beside
     /// its words (AskAnswerBox). The composer sets `pictures` instead.
@@ -800,6 +864,7 @@ final class ComposerTextView: NSTextView {
 
     override func keyDown(with event: NSEvent) {
         hoverChip(nil)
+        if !hasMarkedText(), let key = Self.paletteKey(event), onPaletteKey?(key) == true { return }
         let isReturn = event.keyCode == 36 || event.keyCode == 76
         if isReturn, !hasMarkedText() {
             if event.modifierFlags.contains(.shift) || event.modifierFlags.contains(.option) {
@@ -812,6 +877,20 @@ final class ComposerTextView: NSTextView {
             return
         }
         super.keyDown(with: event)
+    }
+
+    /// The palette's keys, bare (Shift-Return is still a new line).
+    static func paletteKey(_ event: NSEvent) -> PaletteKey? {
+        let mods = event.modifierFlags.intersection([.shift, .option, .command, .control])
+        guard mods.isEmpty else { return nil }
+        switch event.keyCode {
+        case 126: return .up
+        case 125: return .down
+        case 48: return .tab
+        case 36, 76: return .enter
+        case 53: return .escape
+        default: return nil
+        }
     }
 
     /// A new line that carries on a markdown list ("2. " after "1. foo"),

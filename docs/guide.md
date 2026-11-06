@@ -358,6 +358,14 @@ box, so the change sticks. On their own they say what the thread is on and
 what you can pick. `/clear` starts the agent on a fresh session; the
 transcript above stays for you to read.
 
+Type `/` in a thread's message box and a palette opens above it with
+every command the thread can run: Threadbear's, the CLI's and your
+skills, with Recent for the ones you picked lately. What you type narrows
+it, and the one picked is described on the right with how to use it.
+Up and Down move, Return runs it, Tab puts it in the box so you can type
+its details after it, and Esc closes the palette. Clicking a category
+shows only those; double-clicking a command runs it.
+
 A command waits for a running turn to finish rather than going into it.
 Commands that only make sense in a CLI's terminal (`/resume`, `/rewind`,
 `/login`) get a line saying how to do that here. Anything else starting

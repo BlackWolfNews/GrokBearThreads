@@ -120,6 +120,13 @@ public extension RPCClient {
         try await call("threads.highlights", .object(["threadId": .string(threadId)]), as: ThreadHighlights.self)
     }
 
+    /// The slash commands the thread can run, for the composer's palette
+    /// (docs/protocol.md, "Slash commands"). The first ask for a folder
+    /// starts a CLI to list them, which takes a second or two.
+    func threadCommands(threadId: String) async throws -> [SlashCommand] {
+        try await call("threads.commands", .object(["threadId": .string(threadId)]), as: SlashCommandList.self, timeout: .seconds(30)).commands
+    }
+
     /// Asks the small model about words selected in the thread (see
     /// "Explain"). The pool's CLI can take a few seconds to start.
     func explain(_ session: ExplainSession, threadId: String, turn index: Int) async throws -> ExplainResult {

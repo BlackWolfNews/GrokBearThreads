@@ -514,6 +514,14 @@ final class AppModel {
     }
     /// A thread's chosen pane section, as `PaneSection.id`.
     var panelChoice: [String: String] = [:]
+    /// Each thread's slash commands once `threads.commands` has answered
+    /// (SlashPalette.swift), for the composer's palette.
+    var slashCommands: [String: [SlashCommand]] = [:]
+    @ObservationIgnored var slashFetches: [String: Task<Void, Never>] = [:]
+    /// The commands picked from the palette lately, newest first.
+    var recentSlashCommands: [String] = UserDefaults.standard.stringArray(forKey: "recentSlashCommands") ?? [] {
+        didSet { UserDefaults.standard.set(recentSlashCommands, forKey: "recentSlashCommands") }
+    }
     /// Each thread's highlights once `threads.highlights` has answered
     /// (PaneModel.swift). Only threads Mike has opened this session.
     var highlights: [String: ThreadHighlights] = [:]

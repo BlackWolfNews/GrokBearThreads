@@ -982,6 +982,41 @@ async function dispatch(client, method, p) {
       if (p.question) return { answer: `About "${sel}": ${p.question} That's the mock runner's answer to a follow-up.`, model: 'mock' };
       return { answer: `**${sel}** is what the agent called this step. It means the smallest piece to move first, so the rest can follow.\n\n- It's in \`runner/src/explain.ts\`\n- Nothing here goes into the thread`, model: 'mock' };
     }
+    case 'threads.commands': {
+      // The palette's list (docs/protocol.md, "Slash commands"): Threadbear's
+      // own, the CLI's, then skills, as a real Claude thread lists them.
+      const t = need(p.threadId);
+      const codex = t.summary.provider === 'codex';
+      const own = [
+        { name: 'model', description: "Switch this thread's model", argumentHint: '[model]', source: 'threadbear' },
+        { name: 'effort', description: "Set this thread's effort level", argumentHint: '[low|medium|high|xhigh|max]', source: 'threadbear' },
+      ];
+      const cli = codex
+        ? [
+            { name: 'compact', description: 'Summarise the conversation so far to free up context', source: 'cli' },
+            { name: 'review', description: 'Review the uncommitted changes, or what you describe', argumentHint: '[instructions]', source: 'cli' },
+            { name: 'clear', description: 'Start a fresh session in this thread (the transcript stays)', source: 'threadbear' },
+            { name: 'status', description: "The model, effort, context used and the login's limits", source: 'threadbear' },
+          ]
+        : [
+            { name: 'clear', description: 'Clear conversation history and free up context', source: 'cli' },
+            { name: 'compact', description: 'Clear conversation history but keep a summary in context', argumentHint: '<optional custom summarization instructions>', source: 'cli' },
+            { name: 'context', description: 'Show current context usage', source: 'cli' },
+            { name: 'cost', description: 'Show the total cost and duration of the current session', source: 'cli' },
+            { name: 'config', description: 'Open config panel', source: 'cli' },
+            { name: 'init', description: 'Initialize a new CLAUDE.md file with codebase documentation', source: 'cli' },
+          ];
+      const skills = [
+        { name: 'code-review', description: 'Review the current diff, or a PR number, branch or path, for correctness bugs, at the effort level given first.', argumentHint: '[low|medium|high] [target]', source: 'skill' },
+        { name: 'computercub', description: "Drive Mac apps and the parts of Chrome extensions can't reach.", source: 'skill' },
+        { name: 'cloudflare', description: 'Cloudflare platform: Workers, Pages, KV, D1, R2 and the rest.', source: 'skill' },
+        { name: 'claude-api', description: 'Model ids, pricing, params and the Anthropic SDK.', source: 'skill' },
+        { name: 'deslop', description: 'A second-pass cleanup over AI-written code using the repo style guide.', source: 'skill' },
+        { name: 'delegate', description: 'Get answers from other labs and models, and run consensus panels.', source: 'skill' },
+        { name: 'ship', description: 'Drive a branch to merge-ready: PR, checks, bot comments.', source: 'skill' },
+      ];
+      return { commands: [...own, ...cli, ...skills] };
+    }
     case 'threads.highlights': {
       const t = need(p.threadId);
       return highlights.get(t.summary.id) ?? { highlights: [], edited: [] };
