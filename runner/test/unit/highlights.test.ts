@@ -200,6 +200,7 @@ test('pageHasScripts: handlers and javascript: links count, and a FIFO never blo
   const dir = tmpDir();
   const page = (name: string, html: string) => (fs.writeFileSync(path.join(dir, name), html), path.join(dir, name));
   assert.equal(pageHasScripts(page('a.html', '<body onload="draw()">')), true);
+  assert.equal(pageHasScripts(page('a2.html', '<body\n  onload = "draw()">')), true);
   assert.equal(pageHasScripts(page('b.htm', '<a href="javascript:go()">go</a>')), true);
   assert.equal(pageHasScripts(page('c.html', '<p>Just words, once = twice</p>')), false);
   assert.equal(pageHasScripts(page('d.md', '<script>x</script>')), false, 'only pages');

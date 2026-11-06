@@ -147,7 +147,7 @@ export function pageHasScripts(file: string): boolean {
     if (!fs.fstatSync(fd).isFile()) return false;
     const buf = Buffer.alloc(4 * 1024 * 1024);
     const n = fs.readSync(fd, buf, 0, buf.length, 0);
-    return /<script|\son[a-z]+=|javascript:/i.test(buf.subarray(0, n).toString('utf8'));
+    return /<script|<[^>]*\son[a-z]+\s*=|javascript:/i.test(buf.subarray(0, n).toString('utf8'));
   } catch {
     return false;
   } finally {

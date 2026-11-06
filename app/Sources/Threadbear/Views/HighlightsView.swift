@@ -690,9 +690,11 @@ struct LocalPagePreview: View {
         }
         .task(id: "\(url) \(opened)") {
             let path = url.path
-            scripted = await Task.detached(priority: .utility) {
+            let found = await Task.detached(priority: .utility) {
                 LocalPreviewSite.fileHasScripts(atPath: path)
             }.value
+            // A scan for the page before can finish after this one's.
+            if !Task.isCancelled { scripted = found }
         }
     }
 }

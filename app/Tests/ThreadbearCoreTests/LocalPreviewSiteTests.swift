@@ -192,6 +192,8 @@ final class LocalPreviewSiteTests: XCTestCase {
         XCTAssertFalse(LocalPreviewSite.hasScripts(Data("<p>A script-free mockup</p>".utf8)))
         XCTAssertFalse(LocalPreviewSite.hasScripts(Data()))
         XCTAssertTrue(LocalPreviewSite.hasScripts(Data("<body onload=\"draw()\">".utf8)))
+        XCTAssertTrue(LocalPreviewSite.hasScripts(Data("<body\n  onload = \"draw()\">".utf8)))
+        XCTAssertFalse(LocalPreviewSite.hasScripts(Data("<p>Do it once = twice</p>".utf8)), "words, not a handler")
         XCTAssertTrue(LocalPreviewSite.hasScripts(Data("<a href=\"javascript:go()\">go</a>".utf8)))
     }
 
