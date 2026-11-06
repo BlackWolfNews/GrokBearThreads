@@ -184,8 +184,9 @@ home_runner_running() {
 # process, so a pid reused since doesn't pass for the one recorded.
 started_at() { ps -p "$1" -o lstart= 2>/dev/null | sed 's/^ *//;s/ *$//'; }
 
-# The dev-app.sh that's starting this instance is still at it (building,
-# usually). Its pid and start time are in the instance from the first line.
+# The dev-app.sh that's starting or rebuilding this instance is still at it
+# (building, usually). start writes its pid and start time with the first
+# lines of the instance, rebuild before it stops the old app.
 starter_running() {
   alive "$I_STARTER" && [ -n "$I_STARTER_SINCE" ] && [ "$(started_at "$I_STARTER")" = "$I_STARTER_SINCE" ]
 }
@@ -243,8 +244,8 @@ default_id() {
 
 # Cleans up instances whose app has quit: the caller's straight away, other
 # threads' once they've been quiet for a while (their log may be wanted).
-# A start still under way (no pid yet) is left alone while the dev-app.sh
-# doing it is running, however long its build takes: with a load of 150
+# A start still under way (no pid yet), or a rebuild, is left alone while
+# the dev-app.sh doing it is running, however long its build takes: with a load of 150
 # one took over 20 minutes, and another thread's start reaped it at 10 and
 # its own start died at the end (6 Nov). One whose dev-app.sh has gone
 # (killed before it could clean up, or from an older dev-app.sh that didn't
@@ -255,8 +256,10 @@ reap() {
   for id in $(all_ids); do
     load_instance "$id"
     app_running && continue
+    # A start, or a rebuild between quitting the old app and launching the
+    # new one (its pid is the old app's then).
+    starter_running && continue
     if [ -z "$I_PID" ]; then
-      starter_running && continue
       [ $(( now - I_CREATED )) -gt 600 ] || continue
     elif ! is_mine; then
       local quiet; quiet="$(mtime "$I_LOG")"
@@ -458,7 +461,9 @@ cmd_start() {
     # So reap leaves it alone while this start is under way.
     echo "starter=$$"
     echo "starter_since=$(started_at $$)"
-  } >"$dir/instance"
+  } >"$dir/instance.tmp"
+  # Whole, or a reap reading it half written finds no created or starter.
+  mv "$dir/instance.tmp" "$dir/instance"
   CLEANUP_ID="$ID"
   trap 'die "start failed"' ERR
   load_instance "$ID"
@@ -656,6 +661,9 @@ cmd_rebuild() {
   echo "Building the debug app..."
   # The running app stays up if the build fails.
   build_binary "$I_ID" || exit 1
+  # So reap leaves it while the old app's gone and the new one isn't up.
+  set_field starter "$$"
+  set_field starter_since "$(started_at $$)"
   # Before the quit: the mock checks app.pid every 2 s and exits once that
   # app is gone, and a check landing between the quit and the removal used
   # to take the mock (and its state) down with the old build. A missing
