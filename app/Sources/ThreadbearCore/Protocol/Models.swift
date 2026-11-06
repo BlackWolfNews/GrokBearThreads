@@ -1580,7 +1580,7 @@ public struct RunnerUpdates: Sendable, Hashable, Decodable {
             public var commit: String?
             public var changes: Int
             public var subjects: [String]
-            /// Each release main doesn't have yet that came with notes,
+            /// Each verified release main doesn't have yet, with notes or subjects,
             /// newest first. Empty from an older runner.
             public var notes: [Notes]
 

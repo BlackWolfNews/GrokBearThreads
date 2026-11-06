@@ -131,7 +131,7 @@ export type UpstreamDeps = {
   // (bring-in.ts decides from it whether to start a thread).
   onChecked?: (status: UpstreamStatus) => void;
   // Mike's runner: writes plain-words notes for a release from its
-  // commits, for the tag message (main.ts asks the configured model), as "- "
+  // commits, for the tag message (main.ts asks Opus through the Claude pool), as "- "
   // lines. Nothing, or a failure, leaves them out; the release goes out anyway.
   writeNotes?: (commits: string) => Promise<string | undefined>;
   // Replaced in tests.
@@ -236,7 +236,7 @@ export function parseNotes(message: string): string[] {
   return out.slice(0, MAX_NOTE_LINES);
 }
 
-// For the configured model writing a release's notes (main.ts writeNotes). The
+// For Opus writing a release's notes (main.ts writeNotes). The
 // readers use Threadbear on their own Mac and never see its code.
 export const RELEASE_NOTES_SYSTEM = `You write the release notes for Threadbear, a Mac app for running AI coding agents in threads, with an iPhone app and a website. The reader uses Threadbear on their own Mac and wants to know what they'll notice in this release. You get its commit messages.
 
@@ -267,8 +267,9 @@ export class Upstream {
   private running: Promise<UpstreamStatus> | undefined;
   private stopped = false;
   // verified()'s answers, by signers file, object and name.
-  private noteDraft?: { key: string; lines: string[] };
   private readonly answers = new Map<string, SignedTag | null>();
+  // Reused if signing or pushing the same release needs another try.
+  private noteDraft?: { key: string; lines: string[] };
   private readonly git: (cwd: string, args: string[]) => Promise<string>;
   private readonly deps: UpstreamDeps;
 

@@ -547,7 +547,7 @@ export function formatUpstream(u: UpstreamStatus, now: number): string {
       return [
         `Mike's releases: ${r.tag} has ${r.changes} change${r.changes === 1 ? '' : 's'} this copy's main doesn't${checked}`,
         // Mike's plain-words notes first, when his runner wrote some.
-        ...(r.notes ?? []).flatMap((n) => [`  What's new in ${n.tag}:`, ...n.lines.map((l) => `    ${l}`)]),
+        ...(r.notes ?? []).flatMap((n) => [`  What changed in ${n.tag}:`, ...n.lines.map((l) => `    ${l}`)]),
         ...(r.notes?.length ? ['  Every change:'] : []),
         ...r.subjects.map((x) => `  ${x}`),
       ].join('\n') + more + `\nIts commit, signed with the pinned key: ${r.commit}. To bring it in, follow docs/bringing-in-updates.md and merge that commit (git merge ${r.commit}), or use Bring them in, in the app's Updates panel.`;

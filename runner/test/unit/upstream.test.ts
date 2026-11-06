@@ -207,7 +207,7 @@ test("Mike's runner tags main once a day, signed, once it has settled", async ()
   assert.match(git(w.mike, 'cat-file', 'tag', tag!), /- Newer work/);
   // Pushed, and signed so that a fork's runner takes it.
   assert.ok(git(w.mike, 'ls-remote', 'origin', `refs/tags/${tag}`));
-  assert.equal((await upstreamFor(w.theirs, w.home).check()).release?.tag, tag);
+  assert.equal((await upstreamFor(w.theirs, w.home, clock).check()).release?.tag, tag);
   assert.equal(up.status().published?.tag, tag);
 
   // Not again the same day, and not on a later day with nothing new.
@@ -250,12 +250,12 @@ test("release notes: Mike's runner writes them into the tag, and a fork reads ea
   assert.doesNotMatch(git(w.mike, 'cat-file', 'tag', second), /What's new:/);
 
   // A fork behind both sees the first's notes (the second has none).
-  const s = await upstreamFor(w.theirs, w.home).check();
+  const s = await upstreamFor(w.theirs, w.home, clock).check();
   assert.equal(s.release?.tag, second);
   assert.deepEqual(s.release?.notes, [{ tag: second, lines: ['Tidy the tests'] }, { tag: first, lines: ['Threads can be pinned', 'Search is quicker'] }]);
   // Once main has the first, only what's newer counts.
   git(w.theirs, 'merge', '-q', '--no-edit', git(w.mike, 'rev-parse', `${first}^{commit}`));
-  assert.deepEqual((await upstreamFor(w.theirs, w.home).check()).release?.notes, [{ tag: second, lines: ['Tidy the tests'] }]);
+  assert.deepEqual((await upstreamFor(w.theirs, w.home, clock).check()).release?.notes, [{ tag: second, lines: ['Tidy the tests'] }]);
 });
 
 test('release notes exclude signed tags outside the offered history and unsigned notes', async () => {
