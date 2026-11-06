@@ -5,6 +5,8 @@
 // ordinary snoozedUntil; a topic is the librarian's to notice, in the next
 // thread Mike talks about it in (librarian.ts).
 
+import { trimEndOfOrSpace } from './linear-text.ts';
+
 export type WakeWhen = {
   // What Mike typed.
   said: string;
@@ -56,7 +58,7 @@ export function readWakeAnswer(text: string, now: number): WakeAnswer | { error:
   const obj = parseObject(text);
   if (!obj) return { error: "The model's answer wasn't JSON." };
   const why = typeof obj.why === 'string' ? obj.why.trim().slice(0, 200) : '';
-  const topic = typeof obj.topic === 'string' && obj.topic.trim() ? obj.topic.trim().replace(/[.\s]+$/, '').slice(0, TOPIC_MAX) : undefined;
+  const topic = typeof obj.topic === 'string' && obj.topic.trim() ? trimEndOfOrSpace(obj.topic.trim(), '.').slice(0, TOPIC_MAX) : undefined;
   let until: string | undefined;
   if (typeof obj.until === 'string' && obj.until.trim()) {
     const t = Date.parse(obj.until);

@@ -29,6 +29,7 @@ import { SYMBOLS, fileHash, findIcon, storeIcon } from './project-icons.ts';
 import { userLine } from './user-name.ts';
 import type { PocketCardInput, PocketCardSummary } from './sync.ts';
 import { POCKET_ICONS, type PocketIconName } from './pocket-icons.ts';
+import { trimEndOf, trimStartOf } from './linear-text.ts';
 
 // The phone's Pocket, in the Convex backend (sync.ts). Asked for each look,
 // as sync can be off.
@@ -740,7 +741,7 @@ export class Librarian {
         if (!p || !member.has(pid) || !Array.isArray(list)) continue;
         const add = list.filter(
           (l): l is { title?: string; url: string } =>
-            !!l && typeof l === 'object' && typeof (l as { url?: unknown }).url === 'string' && seen.includes((l as { url: string }).url) && !p.links.some((h) => h.url.replace(/\/+$/, '') === (l as { url: string }).url.replace(/\/+$/, '')),
+            !!l && typeof l === 'object' && typeof (l as { url?: unknown }).url === 'string' && seen.includes((l as { url: string }).url) && !p.links.some((h) => trimEndOf(h.url, '/') === trimEndOf((l as { url: string }).url, '/')),
         );
         if (!add.length || p.links.length + add.length > LINKS_MAX) continue;
         try {
@@ -984,7 +985,7 @@ export class Librarian {
     this.rollDay();
     this.used(res);
     const words = res.value.toLowerCase().match(/[a-z0-9.]+/g) ?? [];
-    return words.map((w) => w.replace(/\.+$/, '')).find((w) => SYMBOLS.includes(w));
+    return words.map((w) => trimEndOf(w, '.')).find((w) => SYMBOLS.includes(w));
   }
 
   // ------------------------------------------------------------- notes
@@ -1179,17 +1180,45 @@ function selfFiled(rec: ThreadRecord): boolean {
 
 // The main checkout of a git worktree (its .git is a file naming
 // <main>/.git/worktrees/<name>), else the folder itself.
+//
+// Any folder an agent touched can have a file called .git (an unpacked
+// archive), so only its start is read, and its first line taken apart by
+// hand, as git does: `/^gitdir:\s*(.+?)\s*$/m` on "gitdir: a", a MB of
+// spaces and "b" was some 10^11 steps on the event loop (Gautam's scan,
+// F29). A worktree's .git is one short line.
+const GIT_FILE_BYTES = 4096;
 export function mainCheckout(dir: string): string {
   try {
-    const text = fs.readFileSync(path.join(dir, '.git'), 'utf8');
-    const m = /^gitdir:\s*(.+?)\s*$/m.exec(text);
-    const gitdir = m ? path.resolve(dir, m[1]) : undefined;
+    const gitdir = gitdirOf(readStart(path.join(dir, '.git'), GIT_FILE_BYTES), dir);
     const marker = `${path.sep}.git${path.sep}worktrees${path.sep}`;
     if (gitdir && gitdir.includes(marker)) return gitdir.slice(0, gitdir.indexOf(marker));
   } catch {
     // A .git folder (EISDIR) or none: the folder is its own checkout.
   }
   return dir;
+}
+
+// The folder a .git file's first line names, resolved against the folder
+// it's in, or undefined when that line isn't `gitdir: <path>`.
+export function gitdirOf(text: string, dir: string): string | undefined {
+  const nl = text.indexOf('\n');
+  const line = nl < 0 ? text : text.slice(0, nl);
+  if (!line.startsWith('gitdir:')) return undefined;
+  const target = line.slice('gitdir:'.length).trim();
+  return target ? path.resolve(dir, target) : undefined;
+}
+
+// Up to `max` bytes from the start of a file. Throws as readFileSync does,
+// EISDIR for a folder.
+function readStart(file: string, max: number): string {
+  const fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
+  try {
+    const buf = Buffer.alloc(max);
+    const n = fs.readSync(fd, buf, 0, max, 0);
+    return buf.toString('utf8', 0, n);
+  } finally {
+    fs.closeSync(fd);
+  }
 }
 
 const PROJECT_MARKERS = ['.git', 'package.json', 'Package.swift', 'pyproject.toml', 'Cargo.toml', 'go.mod', 'AGENTS.md', 'CLAUDE.md'];
@@ -1386,12 +1415,10 @@ function readNew(v: unknown): { title: string; folders: string[]; goals: string;
 // A project name from the model, tidied like a thread title: no quotes or
 // full stop round it. Too long reads as a sentence, not a name.
 function projectTitle(name: string): string | undefined {
-  const t = name
-    .trim()
-    .replace(/^["'“‘]+|["'”’]+$/g, '')
-    .replace(/\.+$/, '')
-    .replace(/^["'“‘]+|["'”’]+$/g, '')
-    .trim();
+  // By hand, not `/^["'“‘]+|["'”’]+$/g` and `/\.+$/`: a model's name ending
+  // in a long run of quotes or dots made those quadratic.
+  const unquote = (s: string) => trimEndOf(trimStartOf(s, `"'“‘`), `"'”’`);
+  const t = unquote(trimEndOf(unquote(name.trim()), '.')).trim();
   return t && t.length <= 60 ? t : undefined;
 }
 

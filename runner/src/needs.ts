@@ -4,6 +4,7 @@
 // the agent that did the work is the one that knows.
 
 import type { Ask, AskLink, NeedsWho, PersistedEvent } from './protocol.ts';
+import { hasLineBreak, replaceLinks } from './linear-text.ts';
 
 export type Needs = { needs: NeedsWho; asks?: Ask[]; next?: string[] };
 
@@ -213,14 +214,27 @@ function clipText(v: unknown, max: number): string | undefined {
   return `${(space > max * 0.6 ? cut.slice(0, space) : cut).replace(/[\s,;:.-]+$/, '')}…`;
 }
 
+// These read a model's reply, which content it read can steer, so none of
+// them may backtrack: no two runs of whitespace side by side with only
+// optional marks between, and a line's rest taken with `[\s\S]*`, which
+// can't fail, rather than `.*$`, which a lone \r or U+2028 made fail after
+// trying every split. "What I need from you" then a few thousand spaces and
+// a full stop took minutes to hours (Gautam's scan, F26). headingOf and
+// itemOf say no where `.*$` did, so the answers are the same.
+//
 // The heading starts a line, in bold or as a # heading (a plain mention in
 // a sentence isn't one), with a colon either side of the ** or none.
 // Text after it on the same line ("**What I need from you:** nothing right
 // now") is the section's first line.
-const HEADING = /^\s*(#{1,6}\s+)?(\*\*)?\s*What I need from you\s*:?\s*(\*\*)?\s*:?\s*(.*)$/i;
+const HEADING = /^\s*(#{1,6}\s+)?(?:(\*\*)\s*)?What I need from you\s*:?\s*(\*\*)?\s*:?\s*([\s\S]*)/i;
 // Without a heading, a closing "Nothing needed from you right now" says it.
-const NOTHING_LINE = /(?:^|[.!]\s+|\band\s+)\**\s*nothing (?:else )?(?:is )?needed from you\b/i;
-const ITEM = /^(\s*)(\d{1,2}[.)]|[-*•])\s+(.*)$/;
+const NOTHING_LINE = /(?:^\**\s*|[.!]\s+(?:\*+\s*)?|\band\s+(?:\*+\s*)?)nothing (?:else )?(?:is )?needed from you\b/i;
+const ITEM = /^(\s*)(\d{1,2}[.)]|[-*•])\s+([\s\S]*)/;
+const headingOf = (line: string) => noBreakInRest(HEADING.exec(line), 4);
+const itemOf = (line: string) => noBreakInRest(ITEM.exec(line), 3);
+function noBreakInRest(m: RegExpExecArray | null, rest: number): RegExpExecArray | null {
+  return m && !hasLineBreak(m[rest]) ? m : null;
+}
 const NOTHING = /\bnothing\b(?:[^.\n]{0,40}\b(?:needed|from you|for you to do)\b|\s+(?:right now|for now|yet)\b)/i;
 // How far from the end the heading may be: agents sometimes quote it
 // earlier in a message, and the real one closes it.
@@ -232,7 +246,7 @@ export function needsFromText(text: string): Needs | undefined {
   let at = -1;
   let first = '';
   for (let i = lines.length - 1; i >= 0 && i >= lines.length - NEAR_END_LINES; i--) {
-    const m = HEADING.exec(lines[i]);
+    const m = headingOf(lines[i]);
     if (m && ((m[2] && m[3]) || (m[1] && !m[2]))) {
       at = i;
       first = m[4].trim();
@@ -255,7 +269,7 @@ export function needsFromText(text: string): Needs | undefined {
   let top: { indent: number; numbered: boolean } | undefined;
   for (const line of body) {
     if (/^\s*```/.test(line)) inFence = !inFence;
-    const m = inFence ? null : ITEM.exec(line);
+    const m = inFence ? null : itemOf(line);
     if (m) {
       const kind = { indent: m[1].length, numbered: /\d/.test(m[2]) };
       top ??= kind;
@@ -299,7 +313,7 @@ function nextFromList(lines: string[]): string[] {
   let inFence = false;
   for (const line of lines) {
     if (/^\s*```/.test(line)) inFence = !inFence;
-    const m = inFence ? null : ITEM.exec(line);
+    const m = inFence ? null : itemOf(line);
     if (m && (!items.length || m[1].length === 0)) items.push(m[3]);
     else if (m || (items.length && /^\s{2,}\S/.test(line))) items[items.length - 1] += ` ${line.trim()}`;
     else if (!line.trim()) continue;
@@ -312,9 +326,11 @@ function nextFromList(lines: string[]): string[] {
 // card: "**Check your next call:** confirm Bruce used Nemotron on it. Its
 // service is untested." becomes "Check your next call: confirm Bruce used
 // Nemotron on it". Only the first sentence, as the rest says why.
+const NEXT_LINK = { titleStopsAtNewline: false, titleMin: 1, titleMax: Infinity, targetStopsAtSpace: false, targetMin: 0 };
 function nextFrom(item: string): string {
-  const t = item
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+  // A link's text: replaceLinks is `/\[([^\]]+)\]\([^)]*\)/g` read once,
+  // as that was quadratic on a long run of "[" in a model's reply.
+  const t = replaceLinks(item, NEXT_LINK, (title) => title)
     .replace(/\*\*(.+?)\*\*/g, '$1')
     .replace(/\s+/g, ' ')
     .trim();
@@ -681,12 +697,14 @@ export function owedReplyAfterCompact(questions: string[]): string {
 // so a turn whose end_turn has no asks or follow-ups takes its card from
 // here, and the reply loses the section the card now shows. The heading
 // may be a line on its own with no bold or #, as Sonnet wrote it.
-const BARE_HEADING = /^\s*(?:#{1,6}\s+)?(?:\*\*)?\s*What I need from you\s*:?\s*(?:\*\*)?\s*:?\s*$/i;
+// Each optional mark after it takes the whitespace before it, so no two
+// runs of whitespace meet (that was O(n^4) on a run of spaces, F26).
+const BARE_HEADING = /^\s*(?:#{1,6}\s+)?(?:\*\*\s*)?What I need from you(?:\s*:)?(?:\s*\*\*)?(?:\s*:)?\s*$/i;
 export function splitReplySection(reply: string): { reply: string; needs?: Needs } {
   const lines = reply.replace(/\r\n/g, '\n').split('\n');
   const from = Math.max(0, lines.length - NEAR_END_LINES);
   for (let i = lines.length - 1; i >= from; i--) {
-    const m = HEADING.exec(lines[i]);
+    const m = headingOf(lines[i]);
     const heading = BARE_HEADING.test(lines[i]) || (m && ((m[2] && m[3]) || (m[1] && !m[2])));
     if (!heading) continue;
     const section = lines.slice(i);
@@ -727,7 +745,7 @@ function proseAfterList(lines: string[]): string {
   let inFence = false;
   for (const [i, line] of lines.entries()) {
     if (/^\s*```/.test(line)) inFence = !inFence;
-    if (!inFence && ITEM.test(line)) seen = inItem = true;
+    if (!inFence && itemOf(line)) seen = inItem = true;
     else if (!line.trim()) inItem = false;
     else if (seen && !inItem && !inFence && !/^\s{2,}\S/.test(line)) return lines.slice(i).join('\n').trimEnd();
   }

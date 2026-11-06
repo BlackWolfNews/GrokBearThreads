@@ -57,6 +57,7 @@ import type { Action, Hook, ImageRef, Panel, PanelItem, PatchInfo } from './prot
 import { LIMITS } from './protocol.ts';
 import { imageRefFor } from './media.ts';
 import { FolderCache } from './folder-cache.ts';
+import { hasLineBreak, stripEnvComment } from './linear-text.ts';
 import { automaticCommand, TRUST_ALL, unhashedFiles, worktreeOf, type PatchGate } from './patch-trust.ts';
 import { verifiedUrl } from './verified-imports.ts';
 import { inBackground } from './background.ts';
@@ -848,18 +849,25 @@ export function parseEnvValue(text: string, name: string): string | undefined {
   return parseEnvWhere(text, (n) => n === name);
 }
 
+// The file is a cloned repo's, so nothing here may take longer than the
+// text is long (linear-text.ts): `/\s+#.*$/` on a value of a few MB of
+// spaces froze the runner (Gautam's scan, F9).
 function parseEnvWhere(text: string, test: (name: string) => boolean): string | undefined {
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
     if (!line || line.startsWith('#')) continue;
-    const m = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line);
+    const m = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/.exec(line);
     if (!m || !test(m[1])) continue;
-    let value = m[2].trim();
+    // What `\s*(.*)$` took: a line break left in the value (a lone \r)
+    // was no match.
+    const rest = line.slice(m[0].length).trimStart();
+    if (hasLineBreak(rest)) continue;
+    let value = rest.trim();
     if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
       value = value.slice(1, -1);
     } else {
       // An unquoted value ends at a comment.
-      value = value.replace(/\s+#.*$/, '').trim();
+      value = stripEnvComment(value).trim();
     }
     return value;
   }

@@ -7,7 +7,7 @@ import type { RunnerPart } from './part.ts';
 import type { PanelPlace, PanelRequest, ThreadSummary } from '../protocol.ts';
 import { ErrorCode, RpcError } from '../protocol.ts';
 import { cutOut } from '../store.ts';
-import { emptyHighlights, observe as observeHighlights, pinItem, remove as removeHighlight, unpin as unpinHighlight, upsert as upsertHighlight, view as highlightsView, absolute, type ThreadHighlights } from '../highlights.ts';
+import { emptyHighlights, MAX_URL, observe as observeHighlights, pinItem, remove as removeHighlight, unpin as unpinHighlight, upsert as upsertHighlight, view as highlightsView, absolute, type ThreadHighlights } from '../highlights.ts';
 import { PANEL_ACK_WAIT_MS, PANEL_PLACES, resolvePanel } from '../panel-requests.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -42,6 +42,8 @@ export const highlightsPart = {
       if (!fs.statSync(file, { throwIfNoEntry: false })?.isFile()) throw new RpcError(ErrorCode.badParams, `There's no file at ${file}.`);
     } else if (!/^[a-z][a-z0-9+.-]*:\/\/\S/i.test(target.url!)) {
       throw new RpcError(ErrorCode.badParams, 'A url needs a scheme, like https://.');
+    } else if (target.url!.length > MAX_URL) {
+      throw new RpcError(ErrorCode.badParams, `That url is over ${MAX_URL} characters.`);
     }
     this.catchUpHighlights(st);
     const state = st.rec.highlights!;
@@ -139,6 +141,9 @@ export type HighlightsPart = RunnerPart<typeof highlightsPart>;
 // test (LocalPreviewSite.hasScripts): a `<script`, an `on...=` handler or a
 // `javascript:` link. Opened without blocking and checked on the open file,
 // so a FIFO swapped in after pin's stat can't hang the runner (Codex review).
+// The test is `/<script|<[^>]*\son[a-z]+\s*=|javascript:/i`, read in one pass
+// (hasScriptMarks): as a regex, a page of 4 MB of "<" with no ">" started
+// a scan to its end at every "<", which held the runner for hours.
 export function pageHasScripts(file: string): boolean {
   if (!/\.html?$/i.test(file)) return false;
   let fd: number | undefined;
@@ -147,10 +152,27 @@ export function pageHasScripts(file: string): boolean {
     if (!fs.fstatSync(fd).isFile()) return false;
     const buf = Buffer.alloc(4 * 1024 * 1024);
     const n = fs.readSync(fd, buf, 0, buf.length, 0);
-    return /<script|<[^>]*\son[a-z]+\s*=|javascript:/i.test(buf.subarray(0, n).toString('utf8'));
+    return hasScriptMarks(buf.subarray(0, n).toString('utf8'));
   } catch {
     return false;
   } finally {
     if (fd !== undefined) fs.closeSync(fd);
   }
+}
+
+// A handler counts inside a tag: after a "<" with no ">" since, which is what
+// `<[^>]*` before it allowed.
+export function hasScriptMarks(html: string): boolean {
+  if (/<script|javascript:/i.test(html)) return true;
+  let lastOpen = -1;
+  let lastClose = -1;
+  let read = 0;
+  for (const m of html.matchAll(/\son[a-z]+\s*=/gi)) {
+    for (; read < m.index; read++) {
+      if (html[read] === '<') lastOpen = read;
+      else if (html[read] === '>') lastClose = read;
+    }
+    if (lastOpen > lastClose) return true;
+  }
+  return false;
 }

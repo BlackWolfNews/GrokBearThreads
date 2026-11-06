@@ -22,6 +22,7 @@
 import fs from 'node:fs';
 import { registerHooks } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { cutQueryAndHash } from './linear-text.ts';
 
 // Module URL (the patch file's with its ?v= query, a helper's plain) to
 // the bytes to serve for it.
@@ -30,7 +31,7 @@ const sources = new Map<string, Buffer>();
 const edges = new Map<string, Map<string, string>>();
 let installed = false;
 
-const plain = (url: string) => url.replace(/[?#].*$/, '');
+const plain = (url: string) => cutQueryAndHash(url);
 
 // The URL to import a trusted patch at, after noting its code. `root` is
 // the patch file's real path, `hash` its trust hash (so a new version is
