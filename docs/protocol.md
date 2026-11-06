@@ -2950,11 +2950,14 @@ every Claude login's user settings (`settings*.json` and `.claude.json` in
 its config folder, and `~/.claude.json`, by their names and what a link
 from them points at) and the paths their commands and the thread folder's
 settings' name, there yet or not, from the login's folder or the thread's
-(where hooks run), and for patches that load without trust (home's,
-Threadbear's own checkout's) what each is a link to, imports and names,
-absolute or `~/` paths in it, and its `./` paths from the thread's folder,
-where its commands run; one of those whose code can't all be followed
-makes every edit ask. What such a hook runs by name (`npm test`, a tool on PATH)
+(where hooks run), with what each command reaches as a shell runs it (the
+script, quoted names included, and what it imports or runs in turn), and
+for patches that load without trust (home's, Threadbear's own checkout's)
+what each is a link to, imports and names, absolute or `~/` paths in it,
+and what each of its strings reaches as a command from the thread's
+folder, where its commands run; one of those whose code can't all be
+followed (apart from a script that isn't there yet, which is guarded
+itself) makes every edit ask. What such a hook runs by name (`npm test`, a tool on PATH)
 is the folder's own code, run as its owner set it up, and isn't followed.
 Names are matched as written and as the disk has them (through symlinks,
 a link to a file not there yet included, and without case, as macOS names

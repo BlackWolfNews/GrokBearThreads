@@ -10,9 +10,9 @@ import { ErrorCode, RpcError } from '../protocol.ts';
 import { Projects } from '../projects.ts';
 import { threadEnv } from '../restart.ts';
 import { paths } from '../config.ts';
-import { isPatchFile, namedPaths, patchHash, type ClaudeVerdict, type PatchHash } from '../patch-trust.ts';
+import { commandFiles, isPatchFile, namedPaths, patchHash, scanModule, type ClaudeVerdict, type PatchHash } from '../patch-trust.ts';
 import type { AgentWrite } from '../adapters/types.ts';
-import { CLAUDE_PATCH_ID, claudeCommands, settingsNamedPaths } from '../claude-trust.ts';
+import { CLAUDE_PATCH_ID, claudeCommands, settingsCommands, settingsNamedPaths } from '../claude-trust.ts';
 import { canonicalPath, runsAsCodeByName } from '../code-writes.ts';
 import type { PatchInfo } from '../protocol.ts';
 import { automaticTrust, EMPTY_PATCH_SET, PATCH_EXTENSIONS, patchDirs, hookApplies, loadPatchSet, applyLive, hasLive, projectPanels, renderListPanel, renderPanel, runCommand, type CommandOutcome, type PanelRender, type PatchSet, type ProjectFolder, projectPatchFiles } from '../patches.ts';
@@ -23,17 +23,46 @@ import type { ThreadState, Turn } from '../runner.ts';
 import type { ThreadRecord } from '../store.ts';
 import { FOLDER_CACHE_MS, HOOK_TELL_CHARS, HOOK_TELL_LIMIT, LIVE_POLL_MS, LIVE_SHARE_MS, PATCHES_TTL_MS } from '../runner.ts';
 
-// writeRunsAsCode's hashes of patches that load without one, kept until
-// anything they were made from changes (the same test as patch trust's own
-// cache), so an edit doesn't read every patch's graph again.
-const scans = new Map<string, PatchHash>();
-function scannedPatch(file: string): PatchHash {
-  const hit = scans.get(file);
-  if (hit && hit.looked.same()) return hit;
+// What a patch that loads without a hash makes code, for a thread in
+// `cwd` (writeRunsAsCode): every file it reaches, as canonical lower-case
+// paths, or `all` when it can't all be followed. Kept until anything its
+// hash was made from changes, and for a few seconds at most, as what a
+// command reaches from the thread's folder isn't in that hash.
+type CodeScan = { at: number; h: PatchHash; all: boolean; files: Set<string> };
+const scans = new Map<string, CodeScan>();
+const SCAN_TTL_MS = 10_000;
+function codeOfUnhashedPatch(file: string, cwd: string, now: number): CodeScan {
+  const key = `${file}\0${cwd}`;
+  const hit = scans.get(key);
+  if (hit && now - hit.at < SCAN_TTL_MS && hit.h.looked.same()) return hit;
   const h = patchHash(file);
-  scans.set(file, h);
+  const files = new Set<string>();
+  const add = (f: string) => files.add(canonicalPath(f).toLowerCase());
+  // One it can't follow all of, or that names a script that runs
+  // something it can't follow: any edit might be what it runs.
+  let all = Boolean(h.incomplete || h.blocked);
+  for (const f of [file, h.root, ...h.deps.map((d) => d.path), ...h.unnamed]) add(f);
+  for (const [from, bytes] of all ? [] : h.code) {
+    const text = bytes.toString('utf8');
+    for (const n of namedPaths(text)) add(path.resolve(cwd, n));
+    // Each string in it as a command run from the thread's folder, as its
+    // hooks are: what that reaches.
+    for (const command of scanModule(text, from).strings) {
+      if (!/\S/.test(command) || command.length > 2000) continue;
+      const reach = commandFiles(command, cwd);
+      if (reach.problem) all = true;
+      reach.files.forEach(add);
+    }
+    // Absolute and `~/` paths, there yet or not.
+    for (const word of text.split(/[\s'"`;&|()<>=,[\]{}]+/)) {
+      if (word.startsWith('/') && word.length > 1) add(word);
+      else if (word.startsWith('~/')) add(path.join(os.homedir(), word.slice(2)));
+    }
+  }
+  const scan = { at: now, h, all, files };
+  scans.set(key, scan);
   if (scans.size > 200) scans.delete(scans.keys().next().value!);
-  return h;
+  return scan;
 }
 
 export const patchesPart = {
@@ -316,6 +345,13 @@ export const patchesPart = {
       for (const s of settings) {
         if (same(s.file)) return true;
         if (settingsNamedPaths(s.file, s.dir, os.homedir(), cwd).some(same)) return true;
+        // Each command as a shell runs it, from where hooks run (the
+        // thread's folder) and the login's: the script it names, quoted
+        // names with spaces too, and what that imports or runs in turn.
+        for (const command of settingsCommands(s.file)) {
+          const text = command.replace(/\$\{?CLAUDE_CONFIG_DIR\}?/g, s.dir).replace(/\$\{?CLAUDE_PROJECT_DIR\}?/g, cwd);
+          for (const from of new Set([cwd, s.dir])) if (commandFiles(text, from).files.some(same)) return true;
+        }
       }
       const found = claudeCommands(cwd, home);
       if (found && [...found.files, ...found.named].some(same)) return true;
@@ -329,21 +365,13 @@ export const patchesPart = {
           if (!PATCH_EXTENSIONS.includes(path.extname(name)) || name.endsWith('.d.ts') || name.startsWith('.')) continue;
           const p = path.join(dir, name);
           if (same(p)) return true;
-          let h: PatchHash;
+          let scan: CodeScan;
           try {
-            h = scannedPatch(p);
+            scan = codeOfUnhashedPatch(p, cwd, this.clock.now());
           } catch {
             continue; // can't be read, so can't be loaded either
           }
-          if (h.incomplete) return true;
-          if (same(h.root) || h.deps.some((x) => same(x.path)) || h.unnamed.some(same)) return true;
-          for (const bytes of h.code.values()) {
-            const text = bytes.toString('utf8');
-            if (namedPaths(text).some((n) => same(path.resolve(cwd, n)))) return true;
-            for (const word of text.split(/[\s'"`;&|()<>=,[\]{}]+/)) {
-              if (word.startsWith('/') && word.length > 1 ? same(word) : word.startsWith('~/') && same(path.join(os.homedir(), word.slice(2)))) return true;
-            }
-          }
+          if (scan.all || scan.files.has(real)) return true;
         }
       }
       return false;

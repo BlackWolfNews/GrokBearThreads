@@ -227,6 +227,21 @@ function namedScripts(parts: unknown, dir: string): string[] {
 // run unasked in every session on that login, so an edit of one outside
 // Full access asks (code-writes.ts). A file that isn't plain JSON names
 // nothing it can tell, so its own name (code-writes.ts) is what's guarded.
+// Every string in a settings file's parts that run something: the
+// commands, for code-writes to follow as a shell would (commandFiles).
+export function settingsCommands(file: string): string[] {
+  const read = readJson(file);
+  if (!read?.ok) return [];
+  const strings: string[] = [];
+  const walk = (v: unknown) => {
+    if (typeof v === 'string') strings.push(v);
+    else if (Array.isArray(v)) v.forEach(walk);
+    else if (isObject(v)) Object.values(v).forEach(walk);
+  };
+  walk(commandParts(read.value));
+  return strings.slice(0, MAX_NAMED);
+}
+
 export function settingsNamedPaths(file: string, dir: string, home: string = os.homedir(), cwd?: string): string[] {
   const read = readJson(file);
   if (!read?.ok) return [];
