@@ -439,6 +439,32 @@ test('labReview: an owed review is dropped by a next turn that needs Mike', asyn
   assert.equal(b.get(id).snoozedUntil, undefined, 'his question stays in the inbox');
 });
 
+// From Codex's fourth review: /model is answered by the runner itself, so
+// it's no agent turn to settle the debt.
+test('labReview: a slash command the runner answers itself keeps an owed review', async () => {
+  const h = setup();
+  const id = start(h);
+  await h.runner.beginDrain([id], { onHandedOver: () => {} });
+  turn(h, id, { diffs: [codeDiff()] });
+  await tick();
+  const file = path.join(h.home, 'threads', id, 'thread.json');
+  const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+  saved.queue = [{ turnId: 'q1', text: '/effort high', images: [] }];
+  fs.writeFileSync(file, JSON.stringify(saved));
+  const codex = new FakeAdapter('codex', { ...CODEX_FLAGS, archives: true });
+  const b = new Runner({
+    config: testConfig(h.home), store: new ThreadStore(h.home),
+    adapters: { claude: new FakeAdapter(), codex }, accounts: new FakeAccounts(withCodex()),
+    clock: new FakeClock(), log: nullLogger, defer: (fn) => fn(), copyTranscript: () => false,
+    subagentTranscript: () => null, reachable: async () => true, backgroundJobs: false,
+  });
+  b.start({ skip: new Set([id]) });
+  b.adopt(id);
+  b.startOwedReviews(id);
+  assert.equal(b.get(id).effort, 'high', 'the command ran');
+  assert.equal(b.get(id).waitingOn?.length, 1, 'and the review still started');
+});
+
 test('labReview: an edit that cuts the owed turn drops its review', async () => {
   const h = setup();
   const id = start(h);

@@ -2119,8 +2119,9 @@ export class Runner {
     // One the last runner owed (a handover) is settled by the next turn to
     // complete: a finish gives this turn's change if it made one worth it,
     // else that earlier one; a turn that needs Mike, or waits, drops it,
-    // as it would have stopped that review from starting too.
-    const owed = outcome === 'completed' ? rec.labReviewOwed : undefined;
+    // as it would have stopped that review from starting too. Not a slash
+    // command the runner answered itself (/model): that's no agent turn.
+    const owed = outcome === 'completed' && !turn.local ? rec.labReviewOwed : undefined;
     if (owed) {
       delete rec.labReviewOwed;
       this.markDirty(st);
