@@ -143,11 +143,20 @@ struct UpdatesPanel: View {
                     section("From Mike") {
                         line(text)
                         if upstream.available, let release = upstream.release {
-                            ForEach(release.subjects.prefix(5), id: \.self) { subject in
-                                Text(subject)
-                                    .font(.system(size: zoomed(11)))
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
+                            // Mike's plain-words notes, or commit subjects
+                            // from a release made before there were any.
+                            ForEach(Array(UpdatesText.releaseLines(release).enumerated()), id: \.offset) { _, group in
+                                if let heading = group.heading {
+                                    Text(heading)
+                                        .font(.system(size: zoomed(11), weight: .medium))
+                                        .padding(.top, zoomed(2))
+                                }
+                                ForEach(group.lines, id: \.self) { line in
+                                    Text(line)
+                                        .font(.system(size: zoomed(11)))
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                }
                             }
                             HStack(spacing: zoomed(8)) {
                                 Button("Bring Them In") { app.bringInUpstream(upstream) }

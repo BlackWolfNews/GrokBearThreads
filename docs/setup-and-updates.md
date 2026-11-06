@@ -121,7 +121,11 @@ It also waits until GitHub's checks (the Xcode 26 builds) have passed on that ex
 commit, as the runner staying up says nothing about the apps building. A release held
 back says why in `tb status` and the Updates panel, and goes out on the next hourly look
 once the checks are green. The tag is signed with Mike's SSH signing key and pushed to GitHub. The tag's message
-lists the changes since the last tag, which is what the app shows.
+starts with plain-words notes ("What's new:", a few lines Opus writes from the commits
+on Mike's runner, for people who use Threadbear rather than work on it), then lists
+every commit since the last tag. The app's Updates panel shows the notes, and the
+commit subjects only for a release from before there were notes. If the model call
+fails, the release goes out without notes.
 
 **Signed, because it's code that runs as you.** Setup pins Mike's public key
 (`scripts/release-signers`) into the data folder. The runner ignores any release tag that

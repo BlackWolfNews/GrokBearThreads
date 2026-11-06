@@ -6,7 +6,7 @@ import path from 'node:path';
 import { tmpDir } from '../helpers/fakes.ts';
 import { FakeClock } from '../../src/clock.ts';
 import { nullLogger } from '../../src/log.ts';
-import { type CiRun, FETCH_INTERVAL_MS, FIRST_LOOK_MS, SETTLE_MS, Upstream, ciVerdict, parseImportant, repoKey, signersPath, splitSignedTag, tagFor } from '../../src/upstream.ts';
+import { type CiRun, ciVerdict, FETCH_INTERVAL_MS, FIRST_LOOK_MS, SETTLE_MS, Upstream, cleanNotes, parseImportant, parseNotes, repoKey, signersPath, splitSignedTag, tagFor } from '../../src/upstream.ts';
 import { PATIENCE_MS } from '../helpers/patience.ts';
 
 // Commits and tags in the throwaway repos need a name, and must not pick
@@ -216,6 +216,49 @@ test("Mike's runner tags main once a day, signed, once it has settled", async ()
   assert.equal(await up.publishOnce(), undefined);
 });
 
+test("release notes: Mike's runner writes them into the tag, and a fork reads each release's", async () => {
+  const w = world();
+  const prompts: string[] = [];
+  let reply: string | undefined = '- Threads can be pinned\n- Search is quicker';
+  commit(w.mike, 'b.txt', 'Pinning: a pin button on rows\n\nBecause Mike asked.');
+  git(w.mike, 'push', '-q', 'origin', 'main');
+  const committed = Number(git(w.mike, 'log', '-1', '--format=%ct')) * 1000;
+  const clock = new FakeClock(committed + 2 * SETTLE_MS);
+  const up = upstreamFor(w.mike, w.home, clock, {
+    publish: { publish: true, signingKey: w.mikeKey.priv }, runningMainSettled: () => true,
+    writeNotes: async (commits: string) => { prompts.push(commits); if (reply === 'throw') throw new Error('no room'); return reply; },
+  });
+  const first = await up.publishOnce();
+  assert.match(prompts[0], /Pinning: a pin button on rows\nBecause Mike asked\./);
+  const message = git(w.mike, 'cat-file', 'tag', first!);
+  assert.match(message, /What's new:\n- Threads can be pinned\n- Search is quicker\n\nEvery change:\n- Pinning: a pin button on rows/);
+
+  // The next day, the model fails: the release goes out without notes.
+  commit(w.mike, 'c.txt', 'Tidy the tests');
+  git(w.mike, 'push', '-q', 'origin', 'main');
+  clock.advance(24 * 60 * 60_000 + 2 * SETTLE_MS);
+  reply = 'throw';
+  const second = await up.publishOnce();
+  assert.ok(second && second !== first);
+  assert.doesNotMatch(git(w.mike, 'cat-file', 'tag', second), /What's new:/);
+
+  // A fork behind both sees the first's notes (the second has none).
+  const s = await upstreamFor(w.theirs, w.home).check();
+  assert.equal(s.release?.tag, second);
+  assert.deepEqual(s.release?.notes, [{ tag: first, lines: ['Threads can be pinned', 'Search is quicker'] }]);
+  // Once main has the first, only what's newer counts.
+  git(w.theirs, 'merge', '-q', '--no-edit', git(w.mike, 'rev-parse', `${first}^{commit}`));
+  assert.equal((await upstreamFor(w.theirs, w.home).check()).release?.notes, undefined);
+});
+
+test('parseNotes and cleanNotes', () => {
+  assert.deepEqual(parseNotes("Threadbear 2026-11-06\n\nImportant: x\n\nWhat's new:\n- One\n- Two\n\nEvery change:\n- a"), ['One', 'Two']);
+  assert.deepEqual(parseNotes('Threadbear 2026-11-01\n\n- an old one with only subjects'), []);
+  assert.deepEqual(cleanNotes('Here you go:\n- One — and more\n* Two\nnot a line'), ['One, and more', 'Two']);
+  assert.deepEqual(cleanNotes(' NONE '), []);
+  assert.deepEqual(cleanNotes(undefined), []);
+});
+
 test("ciVerdict: every workflow's latest attempt has to pass", () => {
   const run = (workflow: string, status: string, conclusion: string | null, attempt = 1): CiRun => ({ workflow, name: `wf ${workflow}`, status, conclusion, attempt });
   assert.equal(ciVerdict([run('1', 'completed', 'success'), run('2', 'completed', 'skipped')]), undefined);
@@ -240,9 +283,11 @@ test("Mike's runner holds a release until GitHub's checks pass on that commit", 
   const clock = new FakeClock(committed + 2 * SETTLE_MS);
   let runs: CiRun[] | Error = [{ workflow: '7', name: 'Builds on Xcode 26', status: 'completed', conclusion: 'failure', attempt: 1 }];
   const asked: string[] = [];
+  let notesCalls = 0;
   const up = upstreamFor(w.mike, w.home, clock, {
     publish: { publish: true, signingKey: w.mikeKey.priv },
     runningMainSettled: () => true,
+    writeNotes: async () => { notesCalls++; return "- Checks keep releases buildable"; },
     ciRuns: async (repo: string, sha: string) => {
       asked.push(`${repo} ${sha}`);
       if (runs instanceof Error) throw runs;
@@ -263,12 +308,15 @@ test("Mike's runner holds a release until GitHub's checks pass on that commit", 
   assert.equal(await up.publishOnce(), undefined, "checks it can't read hold it too");
   assert.match(up.status().held!.why, /couldn't read GitHub's checks/);
 
+  assert.equal(notesCalls, 0, 'notes generation waits for the exact commit checks too');
   runs = [{ workflow: '7', name: 'Builds on Xcode 26', status: 'completed', conclusion: 'success', attempt: 2 }];
   const tag = await up.publishOnce();
   assert.equal(tag, tagFor(new Date(clock.now())));
   assert.equal(git(w.mike, 'rev-parse', `${tag}^{commit}`), tip);
   assert.equal(up.status().held, undefined);
   assert.equal(up.status().published?.tag, tag);
+  assert.equal(notesCalls, 1);
+  assert.match(git(w.mike, "cat-file", "tag", tag!), /What's new:\n- Checks keep releases buildable/);
 });
 
 test("a main whose origin isn't GitHub can't show its checks, so it waits", async () => {

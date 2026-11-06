@@ -10,7 +10,7 @@ import { PatchTrust } from './patch-trust.ts';
 import type { RunnerUpdates } from './runner.ts';
 import { Peers, PrimaryLink, ThreadRouter, drainChildrenName, peersElsewhere, phoneCommands, primaryElsewhere, projectRouter, removeDrainInfo, scheduleRouter, writeDrainInfo, type CrossRunnerHooks, type Elsewhere } from './handover.ts';
 import { RunnerUpdater, releaseTreeAt } from './update.ts';
-import { SETTLE_MS, Upstream } from './upstream.ts';
+import { RELEASE_NOTES_SYSTEM, SETTLE_MS, Upstream } from './upstream.ts';
 import { BringIn } from './bring-in.ts';
 import { UpdateFixer } from './fix-update.ts';
 import { bringInSetting } from './settings.ts';
@@ -542,6 +542,11 @@ async function main(): Promise<void> {
     },
     onChange: () => publishUpdates(),
     onChecked: (status) => void bringIn.consider(status),
+    // Only asked on Mike's runner, once a day as it tags a release.
+    writeNotes: async (commits) => {
+      const res = await models.generate({ feature: 'release-notes', cwd: thisRelease?.checkout, system: RELEASE_NOTES_SYSTEM, prompt: commits, maxTokens: 800, strong: true });
+      return res.ok ? res.value : undefined;
+    },
   });
   // runner.updates: sent when what hello's `updates` says changes.
   let lastUpdates = '';

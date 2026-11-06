@@ -96,6 +96,15 @@ public enum UpdatesText {
         }
     }
 
+    /// What the From Mike section lists under a release: the plain-words
+    /// notes Mike's runner wrote, a heading per release when there's more
+    /// than one, or (from older tags) the first commit subjects.
+    public static func releaseLines(_ r: RunnerUpdates.Upstream.Release) -> [(heading: String?, lines: [String])] {
+        guard !r.notes.isEmpty else { return [(nil, Array(r.subjects.prefix(5)))] }
+        if r.notes.count == 1 { return [(nil, r.notes[0].lines)] }
+        return r.notes.map { (String(releaseDate($0.tag).dropFirst("of ".count)), $0.lines) }
+    }
+
     /// "release/2026-10-30" as "of 30 Oct".
     public static func releaseDate(_ tag: String) -> String {
         let date = tag.hasPrefix("release/") ? String(tag.dropFirst("release/".count)) : tag

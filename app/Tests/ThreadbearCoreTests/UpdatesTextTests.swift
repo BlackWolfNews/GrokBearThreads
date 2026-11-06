@@ -136,4 +136,17 @@ final class UpdatesTextTests: XCTestCase {
         XCTAssertEqual(UpdatesText.upstreamLine(held.upstream), #"Your next release for everyone else is waiting: "Builds on Xcode 26" didn't pass on it."#)
         XCTAssertNil(UpdatesText.upstreamLine(nil))
     }
+
+    func testReleaseLinesPreferMikesNotes() throws {
+        let json = #"{"tag":"release/2026-11-06","changes":40,"subjects":["Convex I/O: round 5"],"notes":[{"tag":"release/2026-11-06","lines":["Search finds goals again"]},{"tag":"release/2026-11-05","lines":["Private card for keys"]},{"tag":"x","lines":[]}]}"#
+        let r = try JSONDecoder().decode(RunnerUpdates.Upstream.Release.self, from: Data(json.utf8))
+        XCTAssertEqual(r.notes.count, 2, "a release with no lines is dropped")
+        let groups = UpdatesText.releaseLines(r)
+        XCTAssertEqual(groups.map(\.heading), ["6 Nov", "5 Nov"])
+        XCTAssertEqual(groups.map(\.lines), [["Search finds goals again"], ["Private card for keys"]])
+        let one = RunnerUpdates.Upstream.Release(tag: "release/2026-11-06", changes: 3, subjects: ["a"], notes: [.init(tag: "release/2026-11-06", lines: ["b"])])
+        XCTAssertNil(UpdatesText.releaseLines(one)[0].heading)
+        let old = RunnerUpdates.Upstream.Release(tag: "release/2026-11-01", changes: 9, subjects: (1...9).map(String.init))
+        XCTAssertEqual(UpdatesText.releaseLines(old).first?.lines, ["1", "2", "3", "4", "5"], "older tags: the first subjects")
+    }
 }

@@ -1563,18 +1563,33 @@ public struct RunnerUpdates: Sendable, Hashable, Decodable {
     /// Mike's releases, for a fork (protocol "Mike's releases").
     public struct Upstream: Sendable, Hashable, Decodable {
         public struct Release: Sendable, Hashable, Decodable {
+            /// One release's plain-words notes ("What's new:" in Mike's tag).
+            public struct Notes: Sendable, Hashable, Decodable {
+                public var tag: String
+                public var lines: [String]
+
+                public init(tag: String, lines: [String]) {
+                    self.tag = tag
+                    self.lines = lines
+                }
+            }
+
             public var tag: String
             /// The commit the verified tag names: what Bring them in merges,
             /// rather than a ref name a later fetch could move.
             public var commit: String?
             public var changes: Int
             public var subjects: [String]
+            /// Each release main doesn't have yet that came with notes,
+            /// newest first. Empty from older tags or an older runner.
+            public var notes: [Notes]
 
-            public init(tag: String, commit: String? = nil, changes: Int, subjects: [String] = []) {
+            public init(tag: String, commit: String? = nil, changes: Int, subjects: [String] = [], notes: [Notes] = []) {
                 self.tag = tag
                 self.commit = commit
                 self.changes = changes
                 self.subjects = subjects
+                self.notes = notes
             }
 
             public init(from decoder: Decoder) throws {
@@ -1583,9 +1598,10 @@ public struct RunnerUpdates: Sendable, Hashable, Decodable {
                 commit = (try? c.decodeIfPresent(String.self, forKey: .commit)) ?? nil
                 changes = ((try? c.decodeIfPresent(Int.self, forKey: .changes)) ?? nil) ?? 0
                 subjects = ((try? c.decodeIfPresent([String].self, forKey: .subjects)) ?? nil) ?? []
+                notes = c.lossyArray(Notes.self, forKey: .notes).filter { !$0.lines.isEmpty }
             }
 
-            enum CodingKeys: String, CodingKey { case tag, commit, changes, subjects }
+            enum CodingKeys: String, CodingKey { case tag, commit, changes, subjects, notes }
         }
 
         /// off, idle, checking, available or failed.

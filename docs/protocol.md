@@ -1053,6 +1053,9 @@ type UpstreamStatus = {
     // Commits in it with an `Important:` trailer (a security or data fix),
     // and the trailer's text; covered by the tag's signature.
     important?: { commit: string; why: string }[]
+    // The "What's new:" lines of each signed release main doesn't have,
+    // newest first, left out of releases tagged without them
+    notes?: { tag: string; lines: string[] }[]
   }
   // Mike's runner (runner.json releases.publish): the last tag it made.
   published?: { tag: string; at: string }

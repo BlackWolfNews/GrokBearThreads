@@ -88,6 +88,10 @@ export type UpstreamRelease = {
   // signed tag names the commit and so its whole history. bring-in.ts
   // starts a thread for these straight away rather than on its timer.
   important?: { commit: string; why: string }[];
+  // Plain-words notes for people, from each release main doesn't have yet,
+  // newest first (the "What's new:" part of Mike's tag messages). Older
+  // tags have none, and then the app shows the subjects instead.
+  notes?: { tag: string; lines: string[] }[];
 };
 
 // runner.status's `upstream`, and RunnerUpdates' (docs/protocol.md).
@@ -126,6 +130,10 @@ export type UpstreamDeps = {
   // After every check that got as far as the releases, with what it found
   // (bring-in.ts decides from it whether to start a thread).
   onChecked?: (status: UpstreamStatus) => void;
+  // Mike's runner: writes plain-words notes for a release from its
+  // commits, for the tag message (main.ts asks the small model), as "- "
+  // lines. Nothing, or a failure, leaves them out; the release goes out anyway.
+  writeNotes?: (commits: string) => Promise<string | undefined>;
   // Replaced in tests.
   git?: (cwd: string, args: string[]) => Promise<string>;
   gitBytes?: (cwd: string, args: string[]) => Promise<Buffer>;
@@ -198,6 +206,52 @@ export function parseImportant(out: string): { commit: string; why: string }[] {
     .map((line) => line.split('\x1f'))
     .filter(([commit, why]) => commit && why?.trim())
     .map(([commit, why]) => ({ commit: commit.trim(), why: why.trim().slice(0, 200) }));
+}
+
+// A tag message's "What's new:" bullets. Release messages look like:
+//
+//   Threadbear 2026-11-06
+//
+//   Important: keeps API keys out of Convex      (only when there's one)
+//
+//   What's new:                                   (when notes were written)
+//   - Searching projects finds goals and state again
+//
+//   Every change:
+//   - Website: project search reaches goals and state again
+export const NOTES_HEADING = "What's new:";
+export const CHANGES_HEADING = 'Every change:';
+const MAX_NOTE_LINES = 12;
+
+export function parseNotes(message: string): string[] {
+  const lines = message.split('\n');
+  const at = lines.findIndex((l) => l.trim() === NOTES_HEADING);
+  if (at < 0) return [];
+  const out: string[] = [];
+  for (const l of lines.slice(at + 1)) {
+    if (!l.startsWith('- ')) break;
+    const text = l.slice(2).trim();
+    if (text) out.push(text.slice(0, 200));
+  }
+  return out.slice(0, MAX_NOTE_LINES);
+}
+
+// For the small model writing a release's notes (main.ts writeNotes). The
+// readers use Threadbear on their own Mac and never see its code.
+export const RELEASE_NOTES_SYSTEM = `You write the release notes for Threadbear, a Mac app for running AI coding agents in threads, with an iPhone app and a website. The reader uses Threadbear on their own Mac and wants to know what they'll notice in this release. You get its commit messages.
+
+Write 2 to 8 lines, the most noticeable first, each starting "- ". Plain words, as if telling a friend: what they can now do or what works better. Under 15 words each. Fold several commits about one thing into one line. Leave out work they'd never notice (tests, docs, refactors, review rounds, internal speedups) unless it changes something they see. No file, function or code names, no jargon, no em dashes, no marketing words. Reply with only the lines. If nothing in it would be noticed, reply NONE.`;
+
+// What the model wrote, as bullets: "- " lines only, nothing if it said NONE.
+export function cleanNotes(text: string | undefined): string[] {
+  if (!text || /^\s*NONE\s*$/i.test(text)) return [];
+  return text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => /^[-*•] /.test(l))
+    .map((l) => l.replace(/^[-*•] /, '').replace(/\s*—\s*/g, ', ').trim())
+    .filter(Boolean)
+    .slice(0, MAX_NOTE_LINES);
 }
 
 // release/2026-10-30 for a local date.
@@ -394,9 +448,36 @@ export class Upstream {
         this.git(checkout, ['log', '--no-merges', '--format=%H%x1f%(trailers:key=Important,valueonly,separator=%x20)', range]),
       ]);
       const important = parseImportant(trailers);
-      return { tag, commit, ...(date ? { date } : {}), changes: Number(count) || 0, subjects: log.split('\n').filter(Boolean), ...(important.length ? { important } : {}) };
+      const changes = Number(count) || 0;
+      const notes = changes > 0 ? await this.notesSince(checkout, { ...signed, name }, signers) : [];
+      return { tag, commit, ...(date ? { date } : {}), changes, subjects: log.split('\n').filter(Boolean), ...(important.length ? { important } : {}), ...(notes.length ? { notes } : {}) };
     }
     return undefined;
+  }
+
+  // The notes of each signed release main doesn't have, newest first,
+  // stopping at the first one main already has (at most 10). Only the
+  // newest is kept in REF_NS (promote), so older ones are read from the
+  // incoming tags, each verified against the pinned key the same way, and
+  // the text comes from the verified bytes, never from a ref git could move.
+  private async notesSince(checkout: string, newest: SignedTag & { name: string }, signers: string): Promise<{ tag: string; lines: string[] }[]> {
+    const older = [...(await this.refs(checkout, INCOMING_NS))]
+      .filter(([name]) => RELEASE_NAME.test(name) && name < newest.name)
+      .sort(([x], [y]) => (x < y ? 1 : -1))
+      .slice(0, 9);
+    const out: { tag: string; lines: string[] }[] = [];
+    const add = (name: string, signed: SignedTag) => {
+      const lines = parseNotes(signed.payload.toString('utf8'));
+      if (lines.length) out.push({ tag: TAG_PREFIX + name, lines });
+    };
+    add(newest.name, newest);
+    for (const [name, ref] of older) {
+      const signed = await this.verified(checkout, ref, TAG_PREFIX + name, signers);
+      if (!signed) continue;
+      if (await this.isAncestor(checkout, signed.commit, 'refs/heads/main')) break;
+      add(name, signed);
+    }
+    return out;
   }
 
   // The tag object `oid`, if it is signed by the pinned key as `tag`.
@@ -455,12 +536,16 @@ export class Upstream {
       return undefined;
     }
     this.hold(undefined);
-    const subjects = (await this.git(checkout, ['log', '--no-merges', '--format=- %s', last ? `${last}..${tip}` : tip, '--max-count=200'])).trim();
+
+    const range = last ? `${last}..${tip}` : tip;
+    const subjects = (await this.git(checkout, ['log', '--no-merges', '--format=- %s', range, '--max-count=200'])).trim();
     // Important commits lead the message, so the release says so wherever
     // it's read (forks find them from the commits' trailers themselves).
     const important = parseImportant(await this.git(checkout, ['log', '--no-merges', '--format=%H%x1f%(trailers:key=Important,valueonly,separator=%x20)', last ? `${last}..${tip}` : tip, '--max-count=200']));
     const lead = important.length ? important.map((i) => `Important: ${i.why}`).join('\n') + '\n\n' : '';
-    const message = `Threadbear ${tag.slice(TAG_PREFIX.length)}\n\n${lead}${subjects}\n`;
+    const notes = await this.notesFor(checkout, range);
+    const whatsNew = notes.length ? `${NOTES_HEADING}\n${notes.map((n) => `- ${n}`).join('\n')}\n\n` : '';
+    const message = `Threadbear ${tag.slice(TAG_PREFIX.length)}\n\n${lead}${whatsNew}${CHANGES_HEADING}\n${subjects}\n`;
     const file = path.join(this.deps.home, 'runner', 'release-tag-message.txt');
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, message);
@@ -475,6 +560,20 @@ export class Upstream {
     this.deps.log.info('tagged a release', { tag, commit: tip });
     this.set({ ...this.st, published: { tag, at: new Date(now).toISOString() } });
     return tag;
+  }
+
+  // Plain-words notes for a release, from its commits' subjects and bodies.
+  private async notesFor(checkout: string, range: string): Promise<string[]> {
+    if (!this.deps.writeNotes) return [];
+    try {
+      // Each commit's body cut short, so a busy day's last commits still fit.
+      const log = await this.git(checkout, ['log', '--no-merges', '--format=%s%n%b%x1e', range, '--max-count=200']);
+      const commits = log.split('\x1e').map((c) => c.trim()).filter(Boolean).map((c) => (c.length > 600 ? `${c.slice(0, 600)}…` : c));
+      return cleanNotes(await this.deps.writeNotes(commits.join('\n---\n').slice(0, 60_000)));
+    } catch (e) {
+      this.deps.log.warn('could not write release notes; tagging without them', { error: String(e) });
+      return [];
+    }
   }
 
   // Why GitHub's checks hold this commit back, or undefined when they
