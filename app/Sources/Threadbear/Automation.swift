@@ -1267,6 +1267,15 @@ enum Automation {
             app.actsActive = on
             if on { app.appBecameActive() }
             return "ok \(on ? "on" : "off")"
+        case "error":
+            // Puts text in the error bar, as a failure would (its
+            // Investigate button needs one to show); no text clears it.
+            if let text = c["text"] as? String {
+                app.showError(text, in: c["threadId"] as? String, doing: c["doing"] as? String)
+            } else {
+                app.errorMessage = nil
+            }
+            return "ok"
         case "waitFor":
             return await waitFor(c, app: app)
         case "menu":

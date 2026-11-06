@@ -474,6 +474,7 @@ Tools/dev-app.sh start --home <dev runner home>  # runner/scripts/dev-runner.sh
 Tools/dev-app.sh do '{"cmd":"open","id":"demo_upload"}' '{"cmd":"expand","row":"g:"}'
 Tools/dev-app.sh do '{"cmd":"collapse","highlightSection":"subagents"}'   # a Highlights heading; see HighlightFold
 Tools/dev-app.sh do '{"cmd":"click","tip":"Hide Links"}'   # presses a SwiftUI control by its tooltip, without moving the pointer
+Tools/dev-app.sh do '{"cmd":"error","text":"Thread not found"}'   # fills the error bar ({"cmd":"error"} clears it)
 Tools/dev-app.sh dump            # sidebar, rows (id, kind, height, open, text), panels, actions, composer, banner
 Tools/dev-app.sh shot /tmp/a.png # the window alone
 Tools/dev-app.sh rebuild         # a new build, same options and runner, same thread open

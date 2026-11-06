@@ -861,6 +861,18 @@ private struct ErrorBanner: View {
                 Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
                 Text(message).lineLimit(2).tip(message)
                 Spacer()
+                if app.ownCheckout != nil {
+                    // Spins until the thread is made (it can take a second),
+                    // so it can't be pressed twice.
+                    if app.creatingThread {
+                        SpinnerMark(color: .secondaryLabelColor).frame(width: zoomed(13), height: zoomed(13))
+                            .tip("Starting a thread to look into it")
+                    }
+                    Button("Investigate") { app.investigateError() }
+                        .buttonStyle(.borderless)
+                        .disabled(app.creatingThread)
+                        .tip("Start a thread in Threadbear's own repo to find what caused this and fix it")
+                }
                 Button("Dismiss") { app.errorMessage = nil }
                     .buttonStyle(.borderless)
                     .tip("Hide this message")

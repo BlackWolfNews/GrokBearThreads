@@ -1247,6 +1247,12 @@ quick look. Most settings live in `runner.json` in Threadbear's data folder,
 and an agent can change them or set up anything more involved, so ask one
 first.
 
+When something goes wrong, the app says so in an orange bar at the top of
+the thread. Investigate on that bar starts a thread in your Threadbear
+folder with the error, the thread it came up in, what you were doing and
+which versions you're on, and asks it to find the cause and fix it. The new
+thread opens and the bar goes once it's made.
+
 Updates then arrive by themselves. Within a few minutes of a change landing
 on `main`, the runner builds it and switches over without cutting off any
 thread that's partway through a turn, and the app builds its new version in

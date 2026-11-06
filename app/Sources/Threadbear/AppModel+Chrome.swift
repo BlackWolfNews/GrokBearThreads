@@ -208,7 +208,7 @@ extension AppModel {
             do {
                 _ = try await client.runAction(threadId: threadId, actionId: action.id)
             } catch {
-                errorMessage = "\(action.title) didn't run: \(error.localizedDescription)"
+                showError("\(action.title) didn't run: \(error.localizedDescription)", in: threadId, doing: "running the \(action.title) action chip")
             }
             runningActions.remove(key)
         }
@@ -223,7 +223,69 @@ extension AppModel {
             do {
                 try await client.trustPatches(threadId: threadId, files: files)
             } catch {
-                errorMessage = "Couldn't trust \(patches.count == 1 ? patches[0].id : "the patches"): \(error.localizedDescription)"
+                showError("Couldn't trust \(patches.count == 1 ? patches[0].id : "the patches"): \(error.localizedDescription)", in: threadId,
+                          doing: "pressing Trust on \(patches.count == 1 ? "a patch" : "patches") in the Patches panel")
+            }
+        }
+    }
+
+    /// Shows `message` in the error bar, saying which thread it was about
+    /// and what he was doing, for its Investigate button.
+    func showError(_ message: String, in threadId: String?, doing: String?) {
+        nextErrorThread = threadId
+        nextErrorDoing = doing
+        errorMessage = message
+    }
+
+    /// The checkout this app follows, where a thread can fix it: the
+    /// running build's, the runner's, or for a debug build the one it was
+    /// compiled from. Nil when there's none to work in.
+    var ownCheckout: String? {
+        if let checkout = AppUpdater.shared.running?.checkout ?? runnerUpdates?.upstream?.checkout { return checkout }
+        #if DEBUG
+        // Sources/Threadbear/AppModel+Chrome.swift, four folders down from the repo.
+        var url = URL(fileURLWithPath: #filePath)
+        for _ in 0..<4 { url.deleteLastPathComponent() }
+        return FileManager.default.fileExists(atPath: url.appendingPathComponent("AGENTS.md").path) ? url.path : nil
+        #else
+        return nil
+        #endif
+    }
+
+    /// What the error bar's Investigate hands its new thread.
+    func errorReport() -> InvestigateText.Report? {
+        guard let message = errorMessage else { return nil }
+        let shown = errorShown
+        let thread = shown?.threadId.flatMap { threads[$0] }
+        return InvestigateText.Report(
+            message: message, at: shown?.at ?? Date(),
+            threadId: shown?.threadId, threadTitle: thread?.title, threadFolder: thread?.cwd,
+            doing: shown?.doing,
+            appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+            appCommit: AppUpdater.shared.running?.short,
+            runnerVersion: runnerVersion.isEmpty ? nil : runnerVersion)
+    }
+
+    /// The error bar's Investigate: a new thread in the app's own checkout
+    /// that finds the error's cause and fixes it, made as Bring In makes
+    /// its thread. The bar goes and the new thread opens once it's made;
+    /// a failure says so in the bar instead.
+    func investigateError() {
+        guard let report = errorReport(), let checkout = ownCheckout, let client, !creatingThread else { return }
+        var request = newThreadRequest(text: InvestigateText.prompt(report), images: [])
+        request.cwd = checkout
+        request.permissionMode = .full
+        request.title = InvestigateText.title(report)
+        creatingThread = true
+        Task {
+            defer { creatingThread = false }
+            do {
+                let thread = try await client.createThread(request)
+                if errorMessage == report.message { errorMessage = nil }
+                threads[thread.id] = thread
+                select(thread.id)
+            } catch {
+                show(error)
             }
         }
     }

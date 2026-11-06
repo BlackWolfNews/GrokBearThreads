@@ -189,6 +189,46 @@ final class PendingSendTests: XCTestCase {
         XCTAssertEqual(app.errorMessage, "Busy")
     }
 
+    /// The error bar's Investigate: one thread in the app's own checkout,
+    /// told the error, the thread it came up in and what he was doing; it
+    /// spins until made, then the bar goes and the new thread opens.
+    func testInvestigateStartsAThreadAboutTheErrorAndOpensIt() async throws {
+        let (app, transport) = try await connected()
+        app.select("th1")
+        app.threads["th2"] = try JSONDecoder().decode(ThreadSummary.self, from: Data(#"{"id":"th2","title":"Poddle","cwd":"/Users/m/dev/me/poddle","lastSeq":1}"#.utf8))
+        app.showError("Couldn't trust poddle: Thread not found: th2", in: "th2", doing: "pressing Trust on a patch in the Patches panel")
+        let checkout = try XCTUnwrap(app.ownCheckout, "a debug build knows the checkout it was built from")
+        app.investigateError()
+        XCTAssertTrue(app.creatingThread)
+        try await until { transport.waiting("threads.create") }
+        app.investigateError()
+        XCTAssertEqual(transport.count("threads.create"), 1, "a second press while it's made does nothing")
+        let params = try XCTUnwrap(transport.params("threads.create"))
+        XCTAssertEqual(params["cwd"] as? String, checkout)
+        let text = try XCTUnwrap(params["text"] as? String)
+        XCTAssertTrue(text.contains("> Couldn't trust poddle: Thread not found: th2"))
+        XCTAssertTrue(text.contains("In thread th2 (\"Poddle\"), folder /Users/m/dev/me/poddle"), "the thread acted on, not the one open")
+        XCTAssertTrue(text.contains("Mike was pressing Trust on a patch in the Patches panel"))
+        XCTAssertNotNil(app.errorMessage, "the bar stays until the thread is made")
+        transport.answer("threads.create", ["thread": ["id": "th_new", "title": "Error"]])
+        try await until { app.selection == "th_new" }
+        XCTAssertNil(app.errorMessage)
+        XCTAssertFalse(app.creatingThread)
+    }
+
+    /// An error shown plainly is about the thread that's open.
+    func testAPlainErrorIsAboutTheOpenThread() async throws {
+        let (app, _) = try await connected()
+        app.select("th1")
+        app.errorMessage = "Busy"
+        let report = try XCTUnwrap(app.errorReport())
+        XCTAssertEqual(report.threadId, "th1")
+        XCTAssertEqual(report.threadTitle, "Fix it")
+        XCTAssertNil(report.doing)
+        app.errorMessage = nil
+        XCTAssertNil(app.errorReport())
+    }
+
     /// Archive shows at once; a refusal puts the thread back.
     func testArchiveShowsAtOnceAndARefusalPutsItBack() async throws {
         let (app, transport) = try await connected()
@@ -230,6 +270,7 @@ private final class HoldingTransport: RPCTransport, @unchecked Sendable {
     private var waiter: CheckedContinuation<Data, Error>?
     private var held: [(id: Int, method: String)] = []
     private var counts: [String: Int] = [:]
+    private var lastParams: [String: [String: Any]] = [:]
 
     func open() async throws {}
 
@@ -239,6 +280,7 @@ private final class HoldingTransport: RPCTransport, @unchecked Sendable {
         lock.lock()
         held.append((id, method))
         counts[method, default: 0] += 1
+        lastParams[method] = object["params"] as? [String: Any]
         lock.unlock()
     }
 
@@ -246,6 +288,13 @@ private final class HoldingTransport: RPCTransport, @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return held.contains { $0.method == method }
+    }
+
+    /// The params of the latest request for `method`.
+    func params(_ method: String) -> [String: Any]? {
+        lock.lock()
+        defer { lock.unlock() }
+        return lastParams[method]
     }
 
     func count(_ method: String) -> Int {

@@ -227,7 +227,19 @@ final class AppModel {
     /// What's typed in the search on the Projects page. Here rather than in
     /// the page, so backing out of a project finds the same results.
     var projectSearchQuery = ""
-    var errorMessage: String?
+    var errorMessage: String? {
+        // What the app knew as it came up, for the bar's Investigate:
+        // the thread acted on (or else the one open) and what he was doing.
+        didSet {
+            errorShown = errorMessage == nil ? nil : (threadId: nextErrorThread ?? selection, doing: nextErrorDoing, at: Date())
+            nextErrorThread = nil
+            nextErrorDoing = nil
+        }
+    }
+    @ObservationIgnored var errorShown: (threadId: String?, doing: String?, at: Date)?
+    /// Set just before `errorMessage` by `showError(_:in:doing:)`.
+    @ObservationIgnored var nextErrorThread: String?
+    @ObservationIgnored var nextErrorDoing: String?
     var continuingRefusals: Set<String> = []
     /// Bumped to put the cursor in a composer, by its draft key (a thread's
     /// id, or "new"): with threads open in several panels, only that one's.
