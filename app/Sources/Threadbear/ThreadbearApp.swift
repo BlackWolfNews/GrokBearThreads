@@ -262,11 +262,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+    // The completion-handler forms, not `async`: Swift calls an async
+    // delegate method's handler from a background thread when its task
+    // ends, which crashed the iPhone app on every tapped push
+    // (THREADBEAR-12). Each handler is called on the main actor.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping @Sendable () -> Void) {
         let threadId = response.notification.request.content.userInfo["threadId"] as? String
-        await MainActor.run {
+        Task { @MainActor in
             NSApp.activate()
             if let threadId { show(threadId: threadId) }
+            completionHandler()
         }
     }
 
@@ -286,8 +291,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         AppModel.shared.select(threadId)
     }
 
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        [.banner, .sound]
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping @Sendable (UNNotificationPresentationOptions) -> Void) {
+        Task { @MainActor in completionHandler([.banner, .sound]) }
     }
 }
 

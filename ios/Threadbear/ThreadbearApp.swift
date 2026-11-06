@@ -174,14 +174,22 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         Task { @MainActor in model?.report(error) }
     }
 
+    // The completion-handler forms, not `async`: Swift calls an async
+    // delegate method's handler from a background thread when its task
+    // ends, and UIKit asserts it's on main, which crashed every tapped
+    // push (THREADBEAR-12). Each handler is called on the main actor.
+
     /// Banners show while the app's open too, since the push is usually
     /// about a thread other than the one on screen.
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        [.banner, .sound]
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping @Sendable (UNNotificationPresentationOptions) -> Void) {
+        Task { @MainActor in completionHandler([.banner, .sound]) }
     }
 
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        guard let threadId = response.notification.request.content.userInfo["threadId"] as? String else { return }
-        await MainActor.run { model?.openThreadId = threadId }
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping @Sendable () -> Void) {
+        let threadId = response.notification.request.content.userInfo["threadId"] as? String
+        Task { @MainActor in
+            if let threadId { model?.openThreadId = threadId }
+            completionHandler()
+        }
     }
 }
