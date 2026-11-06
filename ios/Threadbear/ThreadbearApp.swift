@@ -139,6 +139,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         // First, to catch a crash at launch. App Store builds only.
         CrashReporting.start()
         UNUserNotificationCenter.current().delegate = self
+        WhisperModel.shared.reconnect()
+        #if DEBUG
+        WhisperEngine.testFromLaunchArguments()
+        #endif
         return true
     }
 
@@ -146,6 +150,19 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         Task { @MainActor in
             let granted = (try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])) ?? false
             if granted { UIApplication.shared.registerForRemoteNotifications() }
+        }
+    }
+
+    /// Whisper's download finishing with the app closed (WhisperModel).
+    func application(_ application: UIApplication, handleEventsForBackgroundURLSession identifier: String,
+                     completionHandler: @escaping () -> Void) {
+        guard identifier == WhisperModel.sessionId else { completionHandler(); return }
+        Task { @MainActor in
+            WhisperModel.shared.backgroundCompletion = completionHandler
+            WhisperModel.shared.reconnect()
+        #if DEBUG
+        WhisperEngine.testFromLaunchArguments()
+        #endif
         }
     }
 

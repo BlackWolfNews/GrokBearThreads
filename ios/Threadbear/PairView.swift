@@ -105,6 +105,7 @@ struct SettingsView: View {
                     .labelsHidden()
                 }
             }
+            DictationSettingsSection()
             QuickAskSettingsSection()
             if model.isFake {
                 Section {
