@@ -49,8 +49,11 @@ struct NewThreadView: View {
                             ProgressView()
                         } else {
                             Button(action: toggleDictation) {
-                                Label(dictation.isListening ? "Stop" : "Dictate",
-                                      systemImage: dictation.isListening ? "stop.circle.fill" : "mic")
+                                if dictation.isListening {
+                                    ListeningLabel(dictation: dictation)
+                                } else {
+                                    Label("Dictate", systemImage: "mic")
+                                }
                             }
                             .tint(dictation.isListening ? .red : nil)
                         }
@@ -189,5 +192,33 @@ struct NewThreadView: View {
         } catch {
             model.report(error)
         }
+    }
+}
+
+/// The mic button while it's listening: the waveform, the time so far and a
+/// small stop square, so it's plain the phone's hearing.
+private struct ListeningLabel: View {
+    let dictation: Dictation
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1.0 / 15)) { context in
+            HStack(spacing: 8) {
+                HStack(alignment: .center, spacing: 2) {
+                    ForEach(Array(dictation.level.history.enumerated()), id: \.offset) { _, value in
+                        Capsule().frame(width: 2, height: 3 + CGFloat(value) * 15)
+                    }
+                }
+                .frame(height: 18)
+                .animation(.linear(duration: 1.0 / 15), value: dictation.level.history)
+                Text(elapsed(at: context.date)).monospacedDigit()
+                Image(systemName: "stop.fill").imageScale(.small)
+            }
+        }
+        .accessibilityLabel("Stop dictating")
+    }
+
+    private func elapsed(at now: Date) -> String {
+        let seconds = Int(now.timeIntervalSince(dictation.startedAt ?? now))
+        return String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
 }

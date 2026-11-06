@@ -22,6 +22,11 @@ final class Dictation {
     private(set) var isListening = false
     /// Whisper working on what was said, after the mic's tapped off.
     private(set) var isTranscribing = false
+    /// When the mic started, for the elapsed time on the button.
+    private(set) var startedAt: Date?
+    /// How loud the mic is, for the waveform on the button, so it's clear
+    /// it's hearing (Mike, 6 Nov). Read by the view on a timer, not observed.
+    let level = MicLevel()
     private(set) var problem: String?
 
     private let log = Logger(subsystem: "com.mikecann.threadbear", category: "speech")
@@ -82,12 +87,16 @@ final class Dictation {
             // buffer: dispatch_assert_queue in Dictation.start. So it's
             // @Sendable and reaches the request through MicSink.
             let sink = MicSink(request)
+            let level = level
             // MicTap refuses while the mic's format is still settling after
             // the category change, for a few tens of milliseconds: try again.
             var refusal: MicTap.Refusal?
             for attempt in 0..<20 {
                 do {
-                    try MicTap.install(on: input) { buffer, _ in sink.append(buffer) }
+                    try MicTap.install(on: input) { buffer, _ in
+                        sink.append(buffer)
+                        level.push(buffer)
+                    }
                     refusal = nil
                     break
                 } catch {
@@ -105,6 +114,8 @@ final class Dictation {
             engine.prepare()
             try engine.start()
             isListening = true
+            level.reset()
+            startedAt = .now
             carry = Carry()
             task = recognizer.recognitionTask(with: request) { [weak self] result, error in
                 let text = result?.bestTranscription.formattedString
@@ -177,10 +188,14 @@ final class Dictation {
             let input = engine.inputNode
             input.removeTap(onBus: 0)
             let sink = WhisperSink(from: input.outputFormat(forBus: 0))
+            let level = level
             var refusal: MicTap.Refusal?
             for attempt in 0..<20 {
                 do {
-                    try MicTap.install(on: input) { buffer, _ in sink.append(buffer) }
+                    try MicTap.install(on: input) { buffer, _ in
+                        sink.append(buffer)
+                        level.push(buffer)
+                    }
                     refusal = nil
                     break
                 } catch {
@@ -199,6 +214,8 @@ final class Dictation {
             try engine.start()
             whisper = (sink, onText)
             isListening = true
+            level.reset()
+            startedAt = .now
         } catch {
             problem = "Couldn't start the microphone: \(error.localizedDescription)"
             stop()
@@ -221,6 +238,7 @@ final class Dictation {
         request = nil
         task = nil
         isListening = false
+        startedAt = nil
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
@@ -319,5 +337,39 @@ nonisolated private final class WhisperSink: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return kept
+    }
+}
+
+/// The mic's loudness over the last couple of seconds, written on the audio
+/// thread and read by the waveform a few times a second.
+nonisolated final class MicLevel: @unchecked Sendable {
+    static let count = 24
+    private let lock = NSLock()
+    private var levels = [Float](repeating: 0, count: MicLevel.count)
+
+    /// Each buffer's RMS, as 0 to 1 over -50 to -10 dB, so speech fills the
+    /// bars and room noise barely moves them.
+    func push(_ buffer: AVAudioPCMBuffer) {
+        guard let channel = buffer.floatChannelData?[0], buffer.frameLength > 0 else { return }
+        var sum: Float = 0
+        for i in 0..<Int(buffer.frameLength) { sum += channel[i] * channel[i] }
+        let db = 10 * log10(max(sum / Float(buffer.frameLength), 1e-10))
+        let value = min(max((db + 50) / 40, 0), 1)
+        lock.lock()
+        levels.removeFirst()
+        levels.append(value)
+        lock.unlock()
+    }
+
+    func reset() {
+        lock.lock()
+        levels = [Float](repeating: 0, count: Self.count)
+        lock.unlock()
+    }
+
+    var history: [Float] {
+        lock.lock()
+        defer { lock.unlock() }
+        return levels
     }
 }
