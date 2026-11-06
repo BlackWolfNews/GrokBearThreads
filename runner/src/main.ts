@@ -719,7 +719,9 @@ async function main(): Promise<void> {
     scheduler.stop();
     // A check under way keeps what it prints for the next runner, but only
     // if this one is still here when it ends.
-    const checksDone = scheduler.settled();
+    // launch.mjs gives a runner 20 s after its own SIGTERM (STOP_GRACE_MS);
+    // a restart of its own has no deadline.
+    const checksDone = scheduler.settled(/^SIG|supervisor/.test(signal) ? 15_000 : undefined);
     librarian.stop();
     stuckJobs.stop();
     frozenClis.stop();

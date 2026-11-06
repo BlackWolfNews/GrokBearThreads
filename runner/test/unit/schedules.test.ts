@@ -585,6 +585,26 @@ test('a check\'s output survives a handover in the backend too, and is sent once
   next.stop();
 });
 
+test('a backend schedule deleted while its check runs sends nothing', async () => {
+  const h = makeHarness();
+  const b = fakeBackend(h.clock, [M5]);
+  let finish!: (r: { ok: true; output: string }) => void;
+  const s = new Scheduler({ runner: h.runner, home: h.home, clock: h.clock, log: nullLogger, zone: () => 'UTC', self: M5, syncOn: true, checksOn: () => true, runCheck: () => new Promise((r) => (finish = r)) });
+  s.start();
+  await s.attach(b.for('m5', M5.id));
+  const sc = await s.create({ text: 'Look', title: 'Fork watch', cron: '*/5 * * * *', check: 'fork-watch' });
+  await tick();
+  h.clock.advance(5 * MIN);
+  for (let i = 0; i < 5; i++) await tick();
+  await s.delete(sc.id);
+  for (let i = 0; i < 5; i++) await tick();
+  finish({ ok: true, output: 'news' });
+  for (let i = 0; i < 5; i++) await tick();
+  assert.equal(h.runner.list(['inbox', 'snoozed', 'archived']).filter((x) => x.title === 'Fork watch').length, 0);
+  assert.ok(!fs.existsSync(path.join(h.home, 'schedule-checks', `${sc.id}.kept.json`)));
+  s.stop();
+});
+
 test('runners.list gives each runner\'s version, start and whether it\'s updating, for the Runners panel', async () => {
   const h = makeHarness();
   const bruce = { ...BRUCE, version: '0.4.0', release: 'r-abc', startedAt: '2026-11-05T01:00:00.000Z', draining: true };

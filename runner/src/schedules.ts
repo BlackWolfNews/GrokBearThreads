@@ -249,12 +249,12 @@ export class Scheduler {
     this.tick();
   }
 
-  /** Resolves once the checks under way have finished (and kept what they printed), or after a check's time limit. */
-  async settled(): Promise<void> {
+  /** Resolves once the checks under way have finished (and kept what they printed), or after limitMs (a check's own time limit). */
+  async settled(limitMs = CHECK_TIMEOUT_MS + 5000): Promise<void> {
     if (!this.inFlight.size) return;
     let timer: TimerHandle | undefined;
     const limit = new Promise<void>((r) => {
-      timer = this.clock.setTimeout(r, CHECK_TIMEOUT_MS + 5000);
+      timer = this.clock.setTimeout(r, limitMs);
     });
     await Promise.race([Promise.allSettled([...this.inFlight]), limit]);
     timer?.cancel();
@@ -600,12 +600,10 @@ export class Scheduler {
       replan = true;
     }
     if (p.check !== undefined) {
-      const was = rec.check;
+      // What an earlier check kept stays with that command (readKeptCheck):
+      // news no thread has seen yet is sent if that check is put back.
       if (p.check === null || !p.check.trim()) delete rec.check;
       else rec.check = checkedCheck(p.check);
-      // The old check's news isn't the new one's, and shouldn't come back
-      // if the old check is put back later.
-      if (rec.check !== was) this.dropKept(rec.id);
     }
     if (!rec.threadId) {
       if (p.cwd !== undefined) rec.cwd = away ? p.cwd.trim() || undefined : this.checkedFolder(p.cwd);
@@ -667,7 +665,7 @@ export class Scheduler {
       this.changed();
       return { schedule: this.view(rec), queued: true };
     }
-    const res = this.send(rec, true);
+    const res = this.send(rec, true, this.keptFor(rec));
     if (res.outcome !== 'sent') throw new RpcError(ErrorCode.other, res.note ?? "Couldn't run it.");
     if (rec.at) this.finish(rec);
     if (this.mode === 'backend') await this.recordRun(rec, true);
@@ -771,6 +769,7 @@ export class Scheduler {
         if (rec.finishedAt && now - Date.parse(rec.finishedAt) > KEEP_FINISHED_MS) {
           await backend.remove(rec.id).catch(() => {});
           this.items.delete(rec.id);
+          this.dropKept(rec.id);
           continue;
         }
         if (rec.runRequestedAt) await this.runRequested(backend, rec);
@@ -783,7 +782,8 @@ export class Scheduler {
         const checked = await this.checked(rec);
         if (this.stopped) continue;
         if (checked === 'later') {
-          await backend.release(rec.id).catch(() => {});
+          if (!this.items.has(rec.id)) this.dropKept(rec.id);
+          else await backend.release(rec.id).catch(() => {});
           continue;
         }
         const res = this.send(rec, false, checked);
@@ -822,7 +822,7 @@ export class Scheduler {
     if (!claimed || this.stopped) return;
     let res: ReturnType<Scheduler['send']>;
     try {
-      res = this.send(rec, true);
+      res = this.send(rec, true, this.keptFor(rec));
     } catch (e) {
       // Busy (a restart, or its thread finishing on the old runner): leave
       // the request for the next look.
@@ -856,8 +856,8 @@ export class Scheduler {
     // than asking again, as a check that keeps state won't print it twice.
     const command = rec.check;
     const id = rec.id;
-    const kept = readKeptCheck(this.home, id, command);
-    if (kept && !this.delivered.has(`${id} ${kept.at}`)) return { extra: kept.extra, kept: kept.at };
+    const kept = this.keptFor(rec);
+    if (kept) return kept;
     if (checkRunningElsewhere(this.home, id, this.clock.now())) return 'later';
     try {
       markCheckRunning(this.home, id, this.clock.now());
@@ -868,9 +868,10 @@ export class Scheduler {
       .catch((e: unknown) => ({ ok: false as const, output: '', why: String(e) }))
       .then((r) => {
         const out = checkOutcome(r);
-        // Changed or taken off while it ran: this isn't that check's news.
+        // Deleted meanwhile: nothing to send it with.
         const now = this.items.get(id);
-        if (now && now.check !== command) return 'later' as const;
+        if (!now) return 'later' as const;
+        let res: typeof out | { extra: string; kept: string } = out;
         if ('extra' in out) {
           const at = this.iso();
           try {
@@ -878,9 +879,12 @@ export class Scheduler {
           } catch (e) {
             this.log.warn("could not keep a schedule check's output", { scheduleId: id, error: String(e) });
           }
-          return { extra: out.extra, kept: at };
+          res = { extra: out.extra, kept: at };
         }
-        return out;
+        // Changed or taken off while it ran: not sent under the new check
+        // (kept with its own command, as update says).
+        if (now.check !== command) return 'later' as const;
+        return res;
       })
       .finally(() => {
         try {
@@ -895,6 +899,15 @@ export class Scheduler {
     } finally {
       this.inFlight.delete(run);
     }
+  }
+
+  // Run now doesn't run the check, but sends what it kept and no thread
+  // has seen, rather than leaving it to a next run a one-off won't have.
+  private keptFor(rec: ScheduleRecord): { extra: string; kept: string } | undefined {
+    if (!rec.check || !this.checksOn()) return undefined;
+    const kept = readKeptCheck(this.home, rec.id, rec.check);
+    if (!kept || this.delivered.has(`${rec.id} ${kept.at}`)) return undefined;
+    return { extra: kept.extra, kept: kept.at };
   }
 
   // A run carrying a check's output was sent, so it needn't be kept.
@@ -995,9 +1008,8 @@ export class Scheduler {
   private finish(rec: ScheduleRecord): void {
     rec.finishedAt = this.iso();
     delete rec.nextRunAt;
-    // A one-off has no next run to carry what its check printed (a failed
-    // send says so in lastRun).
-    this.dropKept(rec.id);
+    // What its check kept stays until the schedule goes (prune): a one-off
+    // whose send failed and is given a new time sends it then.
   }
 
   private prune(now: number): boolean {
@@ -1005,6 +1017,7 @@ export class Scheduler {
     for (const rec of this.items.values()) {
       if (rec.finishedAt && now - Date.parse(rec.finishedAt) > KEEP_FINISHED_MS) {
         this.items.delete(rec.id);
+        this.dropKept(rec.id);
         gone = true;
       }
     }

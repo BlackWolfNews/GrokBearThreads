@@ -220,7 +220,7 @@ test('scheduleChecks: what a check printed survives the runner stopping mid-chec
   next.stop();
 });
 
-test('scheduleChecks: kept output is for that check only, and Run now leaves it', async () => {
+test('scheduleChecks: Run now sends what was kept, and a changed check runs afresh', async () => {
   const h = makeHarness();
   const seen: string[] = [];
   const old = schedulerOn(h, onceCheck('old news'), seen);
@@ -229,32 +229,23 @@ test('scheduleChecks: kept output is for that check only, and Run now leaves it'
   h.clock.advance(5 * MIN);
   await tick(6);
   h.runner.refusing = undefined;
-  // Run now doesn't run the check, so it doesn't use up what was kept.
+  // Run now doesn't run the check, but carries what it kept.
   await old.runNow(sc.id);
-  assert.doesNotMatch(sentText(h)[0], /old news/);
-  // While that thread is going the due run is skipped, and still keeps it.
-  h.clock.advance(MIN);
-  await tick(6);
-  assert.equal(newThreads(h).length, 1);
-  assert.equal(old.find(sc.id).lastRun?.outcome, 'skipped');
+  assert.equal(seen.length, 1);
+  assert.match(sentText(h)[0], /old news/);
   h.adapter.last.init();
   h.adapter.last.result('completed');
+  // So the next due run asks the check again.
   h.clock.advance(5 * MIN);
   await tick(6);
-  assert.equal(seen.length, 1);
-  assert.equal(sentText(h).filter((m) => /old news/.test(m)).length, 1);
+  assert.equal(seen.length, 2);
+  assert.equal(old.find(sc.id).lastRun?.outcome, 'skipped');
 
-  // A changed check doesn't send what the old one printed.
-  h.runner.refuseNewTurns('The runner is restarting; send again in a moment.');
-  const again = schedulerOn(h, onceCheck('news from the old check'), seen);
+  // A changed check runs, rather than sending what another command kept.
+  fs.writeFileSync(path.join(h.home, 'schedule-checks', `${sc.id}.kept.json`), JSON.stringify({ check: 'fork-watch', at: 'x', extra: '\n\nnews from the old check' }));
+  await old.update({ scheduleId: sc.id, check: 'fork-watch --all' });
   old.stop();
-  h.clock.advance(5 * MIN);
-  await tick(6);
-  await again.update({ scheduleId: sc.id, check: 'fork-watch --all' });
-  again.stop();
-  h.runner.refusing = undefined;
   const last = schedulerOn(h, () => ({ ok: true, output: 'from the new check' }), seen);
-  // The update planned it afresh, for its next five minutes.
   h.clock.advance(5 * MIN);
   await tick(6);
   assert.equal(seen.at(-1), 'fork-watch --all');
@@ -315,7 +306,7 @@ test('scheduleChecks: while another runner process has the check under way, the 
   sched.stop();
 });
 
-test('scheduleChecks: a check changed while it runs, or changed and put back, never sends the old news', async () => {
+test('scheduleChecks: a check changed while it runs is not sent under the new one, and comes back with the old', async () => {
   const h = makeHarness();
   const seen: string[] = [];
   let finish!: (r: CheckResult) => void;
@@ -328,37 +319,53 @@ test('scheduleChecks: a check changed while it runs, or changed and put back, ne
   slow = false;
   finish({ ok: true, output: 'news from a' });
   await tick(6);
-  assert.equal(newThreads(h).length, 0, "a's news isn't sent");
-  assert.ok(!fs.existsSync(path.join(h.home, 'schedule-checks', `${sc.id}.kept.json`)));
-
-  // Kept from a refused send, then the check changed and put back.
+  assert.equal(newThreads(h).length, 0, "a's news isn't sent as b's");
+  assert.equal(sched.find(sc.id).lastRun, undefined, 'left due');
+  h.clock.advance(MIN);
+  await tick(6);
+  assert.equal(seen.at(-1), 'check-b');
+  assert.equal(newThreads(h).length, 0);
+  // Put back, a's news reaches a thread after all, without a running again.
   await sched.update({ scheduleId: sc.id, check: 'check-a' });
-  h.runner.refuseNewTurns('The runner is restarting; send again in a moment.');
-  const once = onceCheck('stale news');
-  const s2 = schedulerOn(h, once, seen);
+  h.clock.advance(5 * MIN);
+  await tick(6);
+  assert.deepEqual(seen, ['check-a', 'check-b']);
+  assert.match(sentText(h)[0] ?? '', /news from a/);
   sched.stop();
-  h.clock.advance(5 * MIN);
-  await tick(6);
-  assert.ok(fs.existsSync(path.join(h.home, 'schedule-checks', `${sc.id}.kept.json`)));
-  await s2.update({ scheduleId: sc.id, check: 'check-b' });
-  await s2.update({ scheduleId: sc.id, check: 'check-a' });
-  h.runner.refusing = undefined;
-  h.clock.advance(5 * MIN);
-  await tick(6);
-  assert.ok(!sentText(h).some((m) => /stale news/.test(m)));
-  s2.stop();
 });
 
-test('scheduleChecks: a one-off whose send fails drops what it kept, as it has no next run', async () => {
+test('scheduleChecks: a schedule deleted mid-check sends nothing and keeps nothing', async () => {
+  const h = makeHarness();
+  let finish!: (r: CheckResult) => void;
+  const sched = schedulerOn(h, () => new Promise<CheckResult>((r) => (finish = r)));
+  const sc = await sched.create({ text: 'Look', title: 'Watch Sentry', cron: '*/5 * * * *', check: 'check-a' });
+  h.clock.advance(5 * MIN);
+  await tick(6);
+  await sched.delete(sc.id);
+  finish({ ok: true, output: 'news' });
+  await tick(6);
+  assert.equal(newThreads(h).length, 0);
+  assert.ok(!fs.existsSync(path.join(h.home, 'schedule-checks', `${sc.id}.kept.json`)));
+  sched.stop();
+});
+
+test('scheduleChecks: a one-off whose send fails keeps what its check printed, for when it is given a new time', async () => {
   const h = makeHarness();
   const dir = path.join(h.home, 'gone-soon');
   fs.mkdirSync(dir);
-  const sched = schedulerOn(h, () => ({ ok: true, output: 'the news' }));
+  const seen: string[] = [];
+  const sched = schedulerOn(h, onceCheck('the news'), seen);
   const sc = await sched.create({ text: 'Look', title: 'Watch Sentry', at: new Date(h.clock.now() + MIN).toISOString(), cwd: dir, check: 'fork-watch' });
   fs.rmSync(dir, { recursive: true });
   h.clock.advance(MIN);
   await tick(6);
   assert.equal(sched.find(sc.id).lastRun?.outcome, 'failed');
-  assert.ok(!fs.existsSync(path.join(h.home, 'schedule-checks', `${sc.id}.kept.json`)));
+  assert.ok(sched.find(sc.id).finishedAt);
+  fs.mkdirSync(dir);
+  await sched.update({ scheduleId: sc.id, at: new Date(h.clock.now() + MIN).toISOString() });
+  h.clock.advance(MIN);
+  await tick(6);
+  assert.equal(seen.length, 1);
+  assert.match(sentText(h)[0] ?? '', /the news/);
   sched.stop();
 });
