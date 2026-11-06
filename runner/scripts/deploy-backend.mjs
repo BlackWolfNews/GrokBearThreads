@@ -111,6 +111,7 @@ function syncDeployment(home) {
 // it deploys only what the other one left (usually nothing).
 const LOCK_WAIT_SECS = 30 * 60;
 const LOCKED_ENV = 'DEPLOY_BACKEND_LOCK_HELD';
+let unlocked = false;
 
 function lockTool(file, cmd, { wait }) {
   if (process.platform === 'darwin' && fs.existsSync('/usr/bin/lockf')) {
@@ -126,14 +127,16 @@ function lockTool(file, cmd, { wait }) {
 }
 
 // Runs this script again under the lock and returns its exit status, or
-// undefined when this is already that copy (or there's no lock tool).
+// undefined when this is already that copy.
 function underLock(home, argv) {
   if (process.env[LOCKED_ENV] === '1') return undefined;
   const file = path.join(home, 'backend.flock');
   const again = [process.execPath, import.meta.filename, ...argv];
   const tool = lockTool(file, again, { wait: LOCK_WAIT_SECS });
+  // Most Macs and runners with no lock tool never deploy (a runner key, no
+  // deploy key), so it's only an error once there's a deploy to do.
   if (!tool) {
-    say('No lockf or flock here, so this deploy runs without waiting for any other.');
+    unlocked = true;
     return undefined;
   }
   // Only for the message: a busy lock right now means a wait.
@@ -143,6 +146,36 @@ function underLock(home, argv) {
   if (r.error) throw new Fail(`${tool.cmd} failed: ${r.error.message}`);
   if (r.status === tool.timedOut) throw new Fail(`Another backend deploy was still running after ${LOCK_WAIT_SECS / 60} minutes.`);
   return r.status ?? 1;
+}
+
+// Releases before 6 Nov took backend.lock, a file with their pid in it. One
+// still running from an old runner handing over gets waited for too.
+function waitForOldLock(home) {
+  const file = path.join(home, 'backend.lock');
+  const until = Date.now() + LOCK_WAIT_SECS * 1000;
+  for (;;) {
+    let pid;
+    try {
+      pid = Number(fs.readFileSync(file, 'utf8'));
+    } catch {
+      return;
+    }
+    let alive = false;
+    try {
+      if (Number.isInteger(pid) && pid > 0) {
+        process.kill(pid, 0);
+        alive = true;
+      }
+    } catch {
+      // gone
+    }
+    if (!alive) {
+      fs.rmSync(file, { force: true });
+      return;
+    }
+    if (Date.now() > until) throw new Fail(`An older backend deploy (pid ${pid}) was still running after ${LOCK_WAIT_SECS / 60} minutes.`);
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
+  }
 }
 
 // Runs a step with its output in a log file, printed only if it fails.
@@ -184,11 +217,18 @@ function main(argv) {
   }
   const home = path.resolve(v.home ?? process.env.THREADBEAR_HOME ?? process.env.THREADBARE_HOME ?? DEFAULT_HOME);
   const stateFile = path.join(home, 'backend.json');
-  const state = readJson(stateFile);
   if (v.status) {
-    say(JSON.stringify(state, null, 2));
+    say(JSON.stringify(readJson(stateFile), null, 2));
     return 0;
   }
+  // Before anything is read: whether it's up to date, and which commit HEAD
+  // is, are only true once no other deploy is changing them.
+  if (!v['dry-run']) {
+    const locked = underLock(home, argv);
+    if (locked !== undefined) return locked;
+    waitForOldLock(home);
+  }
+  const state = readJson(stateFile);
   const repo = path.resolve(v.repo ?? git(import.meta.dirname, ['rev-parse', '--show-toplevel']));
   const commit = git(repo, ['rev-parse', v.commit ?? 'HEAD']);
   const short = commit.slice(0, 7);
@@ -224,8 +264,7 @@ function main(argv) {
     return 0;
   }
 
-  const locked = underLock(home, argv);
-  if (locked !== undefined) return locked;
+  if (unlocked) throw new Fail('No lockf or flock here to keep two backend deploys apart. Install flock (util-linux).');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'threadbear-backend-'));
   process.on('exit', () => fs.rmSync(tmp, { recursive: true, force: true }));
   const archive = spawnSync('git', ['-C', repo, 'archive', '--format=tar', commit, '--', ...EXPORT_PATHS], { maxBuffer: 512 * 1024 * 1024 });

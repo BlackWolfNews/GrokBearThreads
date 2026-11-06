@@ -29,20 +29,27 @@ test('a second backend deploy waits for the first, then has nothing left to do',
     functions: { tree: treeOf(['convex', 'convex.json', 'package.json', 'package-lock.json']) },
     site: { tree: treeOf(['web', 'package.json', 'package-lock.json']) },
   };
-  // The first deploy: holds the kernel lock the script takes, records its
-  // deploy, then lets go.
+  // The first deploy: holds the kernel lock the script takes, says so with
+  // a ready file, and once told to (the second has said it's waiting)
+  // records its deploy and lets go.
   const lockFile = path.join(home, 'backend.flock');
-  const record = `setTimeout(() => require('fs').writeFileSync(${JSON.stringify(path.join(home, 'backend.json'))}, ${JSON.stringify(JSON.stringify(done))}), 1500)`;
-  const holder = process.platform === 'darwin' ? ['/usr/bin/lockf', ['-k', lockFile, process.execPath, '-e', record]] as const : ['flock', [lockFile, process.execPath, '-e', record]] as const;
+  const ready = path.join(home, 'ready');
+  const release = path.join(home, 'release');
+  const holderJs = `const fs = require('fs'); setTimeout(() => process.exit(1), 60000).unref(); fs.writeFileSync(${JSON.stringify(ready)}, ''); const t = setInterval(() => { if (fs.existsSync(${JSON.stringify(release)})) { fs.writeFileSync(${JSON.stringify(path.join(home, 'backend.json'))}, ${JSON.stringify(JSON.stringify(done))}); clearInterval(t); } }, 20);`;
+  const holder = process.platform === 'darwin' ? ['/usr/bin/lockf', ['-k', lockFile, process.execPath, '-e', holderJs]] as const : ['flock', [lockFile, process.execPath, '-e', holderJs]] as const;
   const first = spawn(holder[0], [...holder[1]], { stdio: 'ignore' });
   const firstDone = new Promise((resolve) => first.on('close', resolve));
-  // Until it holds the lock.
-  while (!fs.existsSync(lockFile)) await new Promise((r) => setTimeout(r, 20));
+  // Its command only runs once the lock is held.
+  while (!fs.existsSync(ready)) await new Promise((r) => setTimeout(r, 20));
   const r = await new Promise<{ status: number | null; out: string }>((resolve) => {
     const c = spawn(process.execPath, [script, '--home', home, '--repo', repo], { env: { ...process.env, PATH: '/usr/bin:/bin' } });
     let out = '';
-    c.stdout.on('data', (d) => (out += d));
-    c.stderr.on('data', (d) => (out += d));
+    const seen = (d: Buffer) => {
+      out += d;
+      if (/Waiting for another backend deploy/.test(out)) fs.writeFileSync(release, '');
+    };
+    c.stdout.on('data', seen);
+    c.stderr.on('data', seen);
     c.on('close', (status) => resolve({ status, out }));
   });
   assert.equal(r.status, 0, r.out);
@@ -50,4 +57,3 @@ test('a second backend deploy waits for the first, then has nothing left to do',
   assert.match(r.out, /up to date/);
   await firstDone;
 });
-
