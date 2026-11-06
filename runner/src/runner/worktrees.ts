@@ -187,26 +187,35 @@ export const worktreesPart = {
     return land ? [...set.actions, land] : set.actions;
   },
 
-  // At start: an archived thread whose worktree and branch have gone (or
-  // whose folder another thread has taken) but whose record never said so (a handover saved it mid-cleanup before
-  // 6 Nov, THREADBEAR-16, or the runner stopped there) is told now, so it
-  // shows no Land chip and, brought back, leaves the missing folder.
-  async settleLostCleanups(this: Runner): Promise<void> {
-    for (const st of [...this.threads.values()]) {
-      const w = st.rec.worktree;
-      if (!st.rec.archivedAt || !w || w.removedAt || st.rt.cleaning) continue;
-      let gone;
-      try {
-        gone = await worktreeGone(w);
-      } catch {
-        continue;
-      }
-      if (!gone || st.rt.deleted || w.removedAt) continue;
-      w.removedAt = this.isoNow();
-      if (gone === 'taken') w.spare = true;
-      this.markDirty(st);
-      this.log.info("recorded a worktree's removal the record missed", { threadId: st.rec.id, path: w.path });
+  // At start (and when a thread is handed over): an archived thread whose
+  // worktree and branch have gone (or whose folder another thread has
+  // taken) but whose record never said so (a handover saved it mid-cleanup
+  // before 6 Nov, THREADBEAR-16, or the runner stopped there) is told now,
+  // so it shows no Land chip and, brought back, never carries on in the
+  // folder. Each check counts as the thread's cleanup, so a message sent
+  // meanwhile waits for it (deliver).
+  settleLostCleanups(this: Runner, threads: Iterable<ThreadState> = this.threads.values()): Promise<void> {
+    const checks = [];
+    for (const st of threads) {
+      const { rec, rt } = st;
+      const w = rec.worktree;
+      if (!rec.archivedAt || !w || w.removedAt || rt.cleaning) continue;
+      const check = worktreeGone(w)
+        .then((gone) => {
+          if (!gone || rt.deleted || w.removedAt) return;
+          w.removedAt = this.isoNow();
+          if (gone === 'taken') w.spare = true;
+          this.markDirty(st);
+          this.log.info("recorded a worktree's removal the record missed", { threadId: rec.id, path: w.path });
+        })
+        .catch((e: unknown) => this.log.warn("couldn't check an archived thread's worktree", { threadId: rec.id, error: String(e) }))
+        .finally(() => {
+          if (rt.cleaning === check) rt.cleaning = undefined;
+        });
+      rt.cleaning = check;
+      checks.push(check);
     }
+    return Promise.all(checks).then(() => undefined);
   },
 
   // When the thread is archived or deleted: its worktree and branch go if
@@ -218,7 +227,7 @@ export const worktreesPart = {
     if (!w || w.removedAt) return;
     let result;
     try {
-      result = await cleanUpWorktree(w);
+      result = await cleanUpWorktree(w, () => deleted || !st.rt.deleted);
     } catch (e) {
       result = { removed: false as const, reason: String((e as Error).message ?? e) };
     }

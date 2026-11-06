@@ -524,7 +524,11 @@ export async function worktreeGone(w: WorktreeRecord): Promise<false | 'gone' | 
 // on main is removed with its branch (`--force` only for untracked
 // files), or, with `keep` and room for another spare, set aside as one;
 // otherwise both stay, and the reason says why.
-export async function cleanUpWorktree(w: WorktreeRecord): Promise<Cleanup> {
+export async function cleanUpWorktree(w: WorktreeRecord, stillOurs: () => boolean = () => true): Promise<Cleanup> {
+  // Checked before each change: a runner handing the thread over stops
+  // waiting for a slow git after a while, and from then the folder may be
+  // the new runner's to use, so nothing more is changed here.
+  const LET_GO: Cleanup = { removed: false, reason: 'the thread was handed to another runner' };
   let branchThere = (await git(w.mainCheckout, ['rev-parse', '--verify', '--quiet', `refs/heads/${w.branch}`])).ok;
   if (branchThere) {
     const merged = await git(w.mainCheckout, ['merge-base', '--is-ancestor', w.branch, MAIN]);
@@ -542,6 +546,7 @@ export async function cleanUpWorktree(w: WorktreeRecord): Promise<Cleanup> {
     ours = checkouts.some((c) => realpath(c.path) === here && c.branch === w.branch);
     if (!ours) {
       if (branchThere) {
+        if (!stillOurs()) return LET_GO;
         const del = await git(w.mainCheckout, ['branch', '-D', w.branch]);
         if (!del.ok) return { removed: false, reason: `deleting ${w.branch} failed: ${firstLine(del.stderr)}` };
       }
@@ -556,20 +561,26 @@ export async function cleanUpWorktree(w: WorktreeRecord): Promise<Cleanup> {
     if (w.keep && (await spares(w.mainCheckout, path.dirname(w.path))).length < MAX_SPARES) {
       // Detached where it is (no files change), so the branch can go; its
       // untracked files go when the next thread takes it.
+      if (!stillOurs()) return LET_GO;
       if ((await git(w.path, ['checkout', '-q', '--detach'])).ok) {
+        if (!stillOurs()) return LET_GO;
         if (branchThere && (await git(w.mainCheckout, ['branch', '-D', w.branch])).ok) branchThere = false;
+        if (!stillOurs()) return LET_GO;
         if (!branchThere && (await git(w.mainCheckout, ['worktree', 'lock', '--reason', SPARE, w.path])).ok) return { removed: true, spare: true };
       }
       // Couldn't be set aside: removed instead, below.
     }
     const args = ['worktree', 'remove', ...(lines.length ? ['--force'] : []), w.path];
+    if (!stillOurs()) return LET_GO;
     const rm = await git(w.mainCheckout, args);
     if (!rm.ok) return { removed: false, reason: `git worktree remove failed: ${firstLine(rm.stderr)}` };
   } else {
+    if (!stillOurs()) return LET_GO;
     await git(w.mainCheckout, ['worktree', 'prune']);
   }
   // Checked above that it's all on main, so -D loses nothing.
   if (branchThere) {
+    if (!stillOurs()) return LET_GO;
     const del = await git(w.mainCheckout, ['branch', '-D', w.branch]);
     if (!del.ok) return { removed: false, reason: `the worktree went, but deleting ${w.branch} failed: ${firstLine(del.stderr)}` };
   }

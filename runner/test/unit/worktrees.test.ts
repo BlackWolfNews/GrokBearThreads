@@ -1009,3 +1009,30 @@ test('at start, an archived thread whose slot folder another thread has since ta
   assert.equal(rec.worktree.spare, true, 'so it never carries on in the other thread\'s folder');
   assert.ok(fs.existsSync(w.path));
 });
+
+test('a message sent to a stale archived thread while the start check runs waits for it, so never starts in the reused folder', async () => {
+  const { main } = makeRepo();
+  const h = harness();
+  const { id, w } = await threadWithWorktree(h, main);
+  sh(main, `git worktree remove --force ${w.path} && git branch -D ${w.branch}`);
+  sh(main, `git worktree add -q -b thread/xxxx0000 ${w.path} main`);
+  // As at a start: no CLI, archived.
+  const st = (h.runner as any).threads.get(id);
+  (h.runner as any).releaseSession(st);
+  await st.rt.closing;
+  st.rec.archivedAt = new Date(h.clock.now()).toISOString();
+  const settled = h.runner.settleLostCleanups();
+  h.runner.send(id, 'More please');
+  await settled;
+  await until(() => h.adapter.sessions.length === 2, 'a new CLI');
+  assert.equal(h.adapter.last.opts.cwd, path.join(main, 'runner'));
+});
+
+test('cleanUpWorktree changes nothing once the thread has been handed to another runner', async () => {
+  const { main } = makeRepo();
+  const t = makeBranch(main);
+  const rec = { repo: 'proj', mainCheckout: main, path: t.path, branch: t.branch, base: sh(main, 'git rev-parse main') };
+  assert.deepEqual(await cleanUpWorktree(rec, () => false), { removed: false, reason: 'the thread was handed to another runner' });
+  assert.ok(fs.existsSync(t.path));
+  assert.ok(sh(main, `git branch --list ${t.branch}`).includes(t.branch));
+});

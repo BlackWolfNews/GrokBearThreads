@@ -727,7 +727,7 @@ export class Runner {
     // including ones a draining runner still has.
     this.seedPatchTrust(records.map((r) => r.cwd));
     this.flush();
-    void this.settleLostCleanups().catch((e: unknown) => this.log.warn('could not check archived worktrees', { error: String(e) }));
+    void this.settleLostCleanups();
     for (const st of this.threads.values()) if (st.rec.queue.some(q => q.reviewId) && this.bucket(st.rec) === 'inbox') this.kickQueue(st);
     this.armSnoozeTimer();
     // Waits for room are in thread.json, so they outlive a restart.

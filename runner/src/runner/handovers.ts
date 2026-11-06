@@ -175,6 +175,8 @@ export const handoversPart = {
     // start, so it learns its "You: ..." line here too.
     if (rec.asked === undefined && !rec.archivedAt) this.backfillAsked(rec);
     this.recoverReviews(st);
+    // Handed over before its worktree cleanup finished (letGo's limit).
+    void this.settleLostCleanups([st]);
     if (opts.crashed) {
       // main.ts carries it on (carryOnStopped), after any resume of its own.
       if (this.recover(st)) this.notice('info', `The old runner stopped while "${rec.title}" was mid-turn.`);
