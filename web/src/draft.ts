@@ -55,27 +55,18 @@ export function fenceClosed(source: string, start: number, end: number): boolean
   if (mark !== '`' && mark !== '~') return false;
   const width = /^(`+|~+)/.exec(opening)![1]!.length;
   if (width < 3) return false;
-  // The closing line has the same quote markers in front, then at most
-  // three spaces past where the container's text starts: a list item's
-  // marker and the spaces after it count as container, spaces alone in
-  // front of the fence don't (a fence opened two spaces in closes at the
-  // margin).
-  const before = source.slice(openingStart, start);
-  const quotes = before.split('>').length - 1;
-  let tail = before.slice(before.lastIndexOf('>') + 1);
-  // The one space after a quote's ">" belongs to the quote.
-  if (quotes > 0 && tail.startsWith(' ')) tail = tail.slice(1);
-  const listIndent = /[^ \t]/.test(tail) ? tail.length : 0;
-  let closing = source.slice(closingStart, end).replace(/\r$/, '');
+  // The closing line has the same quote markers in front, then the fence
+  // and only whitespace. How far it's indented isn't checked: a list's
+  // indent is hard to read back from here, and the worst a wrong guess does
+  // is show the box a line early.
+  const quotes = source.slice(openingStart, start).split('>').length - 1;
+  let closing = source.slice(closingStart, end);
   for (let q = 0; q < quotes; q++) {
     closing = closing.replace(/^[ \t]*/, '');
     if (!closing.startsWith('>')) return false;
     closing = closing.slice(1);
   }
-  if (quotes > 0 && closing.startsWith(' ')) closing = closing.slice(1);
-  const indent = /^ */.exec(closing)![0].length;
-  if (indent > listIndent + 3 || indent < listIndent) return false;
-  const fence = closing.slice(indent).trim();
+  const fence = closing.trim();
   return fence.length >= width && [...fence].every((c) => c === mark);
 }
 

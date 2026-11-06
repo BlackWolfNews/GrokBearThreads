@@ -59,11 +59,11 @@ import Testing
     }
 
     @Test func aDraftNeedsItsOwnClosingFence() {
-        // Only a fence on its own closes it, indented less than four spaces
-        // past the opening one; anything else is part of the draft.
+        // Only a fence on its own closes it, at any indent.
         #expect(MarkdownBlock.parse("```slack\nhello\n> ```") == [.code("hello\n> ```")])
-        #expect(MarkdownBlock.parse("```slack\nhello\n    ```") == [.code("hello\n    ```")])
         #expect(MarkdownBlock.parse("```slack\nhello\n   ```") == [.draft(DraftBlock(kind: .slack, source: "hello"))])
+        #expect(MarkdownBlock.parse("```slack\nhello\n    ```") == [.draft(DraftBlock(kind: .slack, source: "hello"))])
+        #expect(MarkdownBlock.parse("```slack\nhello\n``` x") == [.code("hello\n``` x")])
         // A fence opening on a list item's own line: the block, in the item.
         #expect(MarkdownBlock.parse("- ```slack\n  hello\n  ```") == [.draft(DraftBlock(kind: .slack, source: "hello"))])
         #expect(MarkdownBlock.parse("- Run:\n1. ```sh\n   tb land\n   ```") == [
@@ -91,12 +91,10 @@ import Testing
         #expect(MarkdownBlock.parse("~~~slack `x`\nhi\n~~~") == [.draft(DraftBlock(kind: .slack, source: "hi"))])
     }
 
-    @Test func aClosingFenceIsMeasuredFromItsContainer() {
-        // At the margin, at most three spaces in, wherever the opener was.
-        #expect(MarkdownBlock.parse("   ```slack\n   hello\n    ```") == [.code("hello\n ```")])
+    @Test func aClosingFenceClosesAtAnyIndent() {
+        #expect(MarkdownBlock.parse("   ```slack\n   hello\n    ```") == [.draft(DraftBlock(kind: .slack, source: "hello"))])
         #expect(MarkdownBlock.parse("  ```slack\n  hello\n```") == [.draft(DraftBlock(kind: .slack, source: "hello"))])
-        // In a list item, from where the item's words start.
-        #expect(MarkdownBlock.parse("- ```slack\n  hello\n```") == [.code("hello\n```")])
+        #expect(MarkdownBlock.parse("- ```slack\n  hello\n```") == [.draft(DraftBlock(kind: .slack, source: "hello"))])
         #expect(MarkdownBlock.parse("- ```slack\n  hello\n     ```") == [.draft(DraftBlock(kind: .slack, source: "hello"))])
         #expect(MarkdownBlock.parse("- Steps:\n\n  ```slack\n  hello\n  ```") == [
             .listItem(text: "Steps:", marker: "•", depth: 0, task: nil),
@@ -106,6 +104,21 @@ import Testing
             .listItem(text: "a", marker: "•", depth: 0, task: nil),
             .listItem(text: "b", marker: "•", depth: 1, task: nil),
             .code("code"),
+        ])
+        // Round four: a reply's words after the block stay words, under a
+        // nested list or after a heading that ended one.
+        #expect(MarkdownBlock.parse("- root\n  - middle\n    - child\n\n    ```swift\n    let x = 1\n    ```\n\nAfter.") == [
+            .listItem(text: "root", marker: "•", depth: 0, task: nil),
+            .listItem(text: "middle", marker: "•", depth: 1, task: nil),
+            .listItem(text: "child", marker: "•", depth: 2, task: nil),
+            .code("let x = 1"),
+            .paragraph("After."),
+        ])
+        #expect(MarkdownBlock.parse("- item\n\n# Heading\n\n  ```swift\n  let x = 1\n```\n\nAfter.") == [
+            .listItem(text: "item", marker: "•", depth: 0, task: nil),
+            .heading(level: 1, text: "Heading"),
+            .code("let x = 1"),
+            .paragraph("After."),
         ])
     }
 

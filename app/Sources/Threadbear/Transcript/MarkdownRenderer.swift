@@ -424,12 +424,14 @@ enum MarkdownRenderer {
             return draft
         }
 
-        /// Whether the fence has its closing line: the same character as
-        /// it opened with, at least as many, after whatever the fence sits
-        /// in (a quote's ">", a list item's indent) and at most three
-        /// spaces. cmark ends an unclosed fence's range on its last line of
-        /// code, so a line of code that only looks like a fence ("> ```"
-        /// in a fence that isn't in a quote) doesn't count.
+        /// Whether the fence has its closing line. cmark ends an unclosed
+        /// fence's range on its last line of code, so the range's last line
+        /// is checked: the same character the fence opened with, at least
+        /// as many, behind as many quote markers as the opening line. Its
+        /// indent isn't checked: list indents are cmark's to work out
+        /// (three tries at it each broke a nested case, 6 Nov), and the
+        /// worst a line of code indented like a fence can do is show a
+        /// box a moment early while it streams in.
         private func isClosed(_ code: CodeBlock) -> Bool {
             guard !sourceLines.isEmpty, let range = code.range, range.lowerBound.line >= 1,
                   range.upperBound.line > range.lowerBound.line, range.upperBound.line <= sourceLines.count else { return false }
@@ -441,27 +443,13 @@ enum MarkdownRenderer {
             guard let mark = opening.first, mark == "`" || mark == "~" else { return false }
             let width = opening.prefix(while: { $0 == mark }).count
             guard width >= 3 else { return false }
-            // The closing line has the same quote markers in front, then
-            // at most three spaces past where the container's text starts:
-            // a list item's marker and the spaces after it count as
-            // container, spaces alone in front of the fence don't (a fence
-            // opened two spaces in closes at the margin).
-            let before = Array(openingLine.prefix(container))
-            let quotes = before.filter { $0 == UInt8(ascii: ">") }.count
-            var tail = before.suffix(before.lastIndex(of: UInt8(ascii: ">")).map { before.count - $0 - 1 } ?? before.count)
-            // The one space after a quote's ">" belongs to the quote.
-            if quotes > 0, tail.first == UInt8(ascii: " ") { tail = tail.dropFirst() }
-            let listIndent = tail.contains(where: { $0 != UInt8(ascii: " ") && $0 != UInt8(ascii: "\t") }) ? tail.count : 0
+            let quotes = openingLine.prefix(container).filter { $0 == UInt8(ascii: ">") }.count
             var closing = Substring(sourceLines[range.upperBound.line - 1])
             for _ in 0..<quotes {
                 closing = closing.drop(while: { $0 == " " || $0 == "\t" })
                 guard closing.first == ">" else { return false }
                 closing = closing.dropFirst()
             }
-            if quotes > 0, closing.first == " " { closing = closing.dropFirst() }
-            let indent = closing.prefix(while: { $0 == " " }).count
-            guard indent <= listIndent + 3, indent >= listIndent else { return false }
-            closing = closing.dropFirst(indent)
             let fence = closing.trimmingCharacters(in: .whitespaces)
             return fence.count >= width && fence.allSatisfy({ $0 == mark })
         }

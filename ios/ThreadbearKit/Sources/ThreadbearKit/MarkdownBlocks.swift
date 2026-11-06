@@ -91,9 +91,6 @@ private struct Parser {
     var listIndents: [Int] = []
     /// A wrapped line belongs to the list item above it, until a blank line.
     var lastWasListItem = false
-    /// The column the last list item's words start at, so a fence under
-    /// it knows how far in its closing fence may be.
-    var itemContent: Int?
 
     init(lines: [String]) { self.lines = lines }
 
@@ -106,10 +103,7 @@ private struct Parser {
             if let fence = Self.fence(line) {
                 flush()
                 let info = String(line.dropFirst(fence.count)).trimmingCharacters(in: .whitespaces)
-                // A fence under a list item is in the item: its closing
-                // fence is measured from the item's words, not the margin.
-                let container = !listIndents.isEmpty && indent >= (itemContent ?? .max) ? itemContent ?? 0 : 0
-                let (body, closed) = code(fence: fence, indent: indent, container: container)
+                let (body, closed) = code(fence: fence, indent: indent)
                 // Drawn only once its fence is closed (a reply still
                 // streaming in stays code) and not too big to draw, as on
                 // the Mac (RichBlock.from). A draft is the same: closed only.
@@ -165,12 +159,10 @@ private struct Parser {
                     // Still an item of the list, so the ones after it nest
                     // as they would after any other.
                     _ = depth(for: indent)
-                    itemContent = content
                     lines[i] = String(repeating: " ", count: content) + match.2
                     lastWasListItem = false
                     continue
                 }
-                itemContent = content
                 var text = String(match.2)
                 var task: Bool?
                 if let box = text.firstMatch(of: /^\[([ xX])\]\s+/) {
@@ -254,9 +246,7 @@ private struct Parser {
     }
 
     /// The fenced block's lines, and whether its closing fence came.
-    /// `container` is the column the fence's container starts its text at
-    /// (a list item's words, or 0 at the margin).
-    mutating func code(fence: String, indent: Int, container: Int) -> (String, Bool) {
+    mutating func code(fence: String, indent: Int) -> (String, Bool) {
         i += 1
         var body: [String] = []
         var closed = false
@@ -264,12 +254,13 @@ private struct Parser {
             let raw = lines[i]
             i += 1
             let line = raw.trimmingCharacters(in: .whitespaces)
-            // Only a fence on its own closes it, at most three spaces past
-            // where its container's text starts (CommonMark, and the Mac's
-            // MarkdownRenderer): four more is a line of the block.
-            let closeIndent = Self.indent(of: raw)
-            if closeIndent >= container, closeIndent <= container + 3, line.hasPrefix(fence),
-               line.allSatisfy({ $0 == fence.first }) { closed = true; break }
+            // A fence on its own, of the same character and at least as
+            // wide, closes it at any indent, as on the Mac. Measuring the
+            // indent from a list item's words swallowed ordinary replies
+            // when the list state was wrong (cross-lab review, 6 Nov); a
+            // fence-like line indented four spaces inside a block ending
+            // it early is the price.
+            if line.hasPrefix(fence), line.allSatisfy({ $0 == fence.first }) { closed = true; break }
             // Code fenced inside a list item is indented with it; take that off.
             var drop = min(indent, Self.indent(of: raw))
             var trimmed = Substring(raw)

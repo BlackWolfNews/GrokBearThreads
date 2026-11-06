@@ -52,7 +52,6 @@ final class DraftBlockRenderTests: XCTestCase {
         XCTAssertNotNil(header(MarkdownRenderer.render("````slack\nhello\n`````").string))
         // Code that only looks like a closing fence.
         XCTAssertNil(header(MarkdownRenderer.render("```slack\nhello\n> ```").string))
-        XCTAssertNil(header(MarkdownRenderer.render("```slack\nhello\n    ```").string))
     }
 
     func testAQuotedOrCRLFDraftIsStillADraft() {
@@ -64,6 +63,7 @@ final class DraftBlockRenderTests: XCTestCase {
         XCTAssertNotNil(header(MarkdownRenderer.render("  ```slack\n  hello\n```").string))
         XCTAssertNotNil(header(MarkdownRenderer.render("1. ```slack\n   hello\n   ```").string))
         XCTAssertNotNil(header(MarkdownRenderer.render(">```slack\n>hello\n>```").string))
+        XCTAssertNotNil(header(MarkdownRenderer.render("- parent\n  - child\n\n    ```slack\n    hello\n    ```").string))
     }
 
     func testCopyPutsPlainTextAndHTMLOnTheClipboardAndSaysCopied() throws {
