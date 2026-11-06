@@ -456,6 +456,34 @@ function backendScheduler(h: ReturnType<typeof makeHarness>, self = M5, home = h
   return sched;
 }
 
+// From the cross-lab review of the raising-access fix (6 Nov 2026): each
+// update copies the record, so two at once lost the earlier one's change.
+test('two updates at once both land: a rename after a lowering keeps it lowered', async () => {
+  const h = makeHarness();
+  const sched = new Scheduler({ runner: h.runner, home: h.home, clock: h.clock, log: nullLogger, zone: () => 'UTC', self: M5, syncOn: true });
+  sched.start();
+  const b = fakeBackend(h.clock, [M5, BRUCE]);
+  const be = b.for('m5-a', M5.id);
+  let slow = false;
+  await sched.attach({
+    ...be,
+    save: async (sc) => {
+      if (slow && sc.permissionMode === 'ask') await new Promise((r) => setTimeout(r, 30));
+      return be.save(sc);
+    },
+  });
+  await tick();
+  const sc = await sched.create({ text: 'Tidy', cron: '@daily', title: 'Daily' });
+  slow = true;
+  const lowered = sched.update({ scheduleId: sc.id, permissionMode: 'ask' });
+  const renamed = sched.update({ scheduleId: sc.id, title: 'Daily 2' });
+  await Promise.all([lowered, renamed]);
+  const now = await sched.find(sc.id);
+  assert.deepEqual([now.permissionMode, now.title], ['ask', 'Daily 2']);
+  assert.equal(b.rows.get(sc.id)?.permissionMode, 'ask');
+  sched.stop();
+});
+
 test('meeting a backend moves schedules.json up once, then the file is only its copy', async () => {
   const h = makeHarness();
   const { thread } = idleThread(h);

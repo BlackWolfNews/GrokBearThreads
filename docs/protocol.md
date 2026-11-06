@@ -4463,9 +4463,9 @@ above the target's (`ask` < `auto` < `full`), `create_thread` or a
 `new_thread` `schedule_message` with a mode above the caller's,
 `send_message`, `move_thread` or `schedule_message` to a thread with more
 access than the caller, `join_project` putting such a thread in a project,
-`update_project` changing the title, goals, state or notes of a project
-such a thread is in, `move_thread` of a thread a schedule's check runs for
-(the check runs in its folder), `update_schedule` changing the text, time,
+`update_project` changing the title, goals, state, notes or folders of a
+project such a thread is in (by the project's list or the thread's own), `move_thread` of a thread a schedule's check runs for
+(the check runs in its folder), `update_schedule` changing the text, title, time,
 folder or paused state of a schedule whose runs are above the caller or that
 has a check, and any `check`. A thread's access there is the most its agent
 has now (`Runner.accessOf`): its mode, or more while a turn that had more is

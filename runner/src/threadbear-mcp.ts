@@ -640,9 +640,9 @@ export function buildThreadbearTools(
           const was = current.threadId ? (await accessOf(current.threadId)).mode : (current.permissionMode ?? 'full');
           const raised = !current.threadId && permissionMode !== undefined && raises(permissionMode, was);
           const will = raised ? permissionMode! : was;
-          // What it sends, where, or that it runs again; not its title,
-          // login, model or zone, and not pausing it.
-          const changes = [text, when, cron, f].some((x) => x !== undefined) || (paused === false && current.paused);
+          // What it sends (its title goes into the message too), where, or
+          // that it runs again; not its login, model or zone, and not pausing it.
+          const changes = [text, title, when, cron, f].some((x) => x !== undefined) || (paused === false && current.paused);
           const reasons = [
             ...(raised ? [`Switch the schedule "${current.title}" to ${MODE_NAMES[permissionMode!]}`] : changes && raises(will, caller) ? [`Change the schedule "${current.title}", whose runs have ${MODE_NAMES[will]}`] : []),
             ...(changes && current.check && check === undefined ? [`Change the schedule "${current.title}", which runs a shell command as you first`] : []),
@@ -821,10 +821,13 @@ export function buildThreadbearTools(
         const pc = mustProjects();
         const p = await project(q);
         // Raising access (above): the brief its threads are told (title,
-        // goals, state, notes) is a message to each of them.
+        // goals, state, notes, folders) is a message to each of them. Its
+        // threads are the project's own list and every thread that says it's
+        // in it, so a thread still on a draining runner counts too.
         const caller = await restricted();
-        if (caller && [title, goals, state, notes, appendNote].some((x) => x !== undefined)) {
-          const { threadIds } = await pc.get(p.id);
+        if (caller && ([title, goals, state, notes, appendNote].some((x) => x !== undefined) || addFolders?.length)) {
+          const listed = (await pc.get(p.id)).threadIds;
+          const threadIds = [...new Set([...listed, ...(await all()).filter((t) => t.projects?.some((m) => m.id === p.id)).map((t) => t.id)])];
           let above: { mode: PermissionMode; title: string } | undefined;
           for (const id of threadIds) {
             if (id === selfId) continue;
@@ -832,7 +835,7 @@ export function buildThreadbearTools(
             if (raises(t.mode, caller) && (!above || raises(t.mode, above.mode))) above = t;
           }
           if (above) {
-            const fields = Object.fromEntries(Object.entries({ title, goals, state, notes, appendNote }).filter(([, v]) => v !== undefined));
+            const fields = Object.fromEntries(Object.entries({ title, goals, state, notes, appendNote, addFolders }).filter(([, v]) => v !== undefined));
             await confirm('update_project', [`Change the brief of the project "${p.title}", which "${above.title}" (${MODE_NAMES[above.mode]}) is told`], { project: p.id, ...fields }, extra?.signal);
           }
         }

@@ -538,7 +538,18 @@ export class Scheduler {
     return this.view(this.items.get(rec.id) ?? rec);
   }
 
-  async update(p: UpdateScheduleParams): Promise<Schedule> {
+  // One at a time: each copies the record as it stands, so two at once
+  // would have the later save put back what the earlier one changed (a
+  // rename landing after a lowering would raise the mode back).
+  private updating: Promise<unknown> = Promise.resolve();
+
+  update(p: UpdateScheduleParams): Promise<Schedule> {
+    const run = this.updating.then(() => this.updateNow(p));
+    this.updating = run.catch(() => undefined);
+    return run;
+  }
+
+  private async updateNow(p: UpdateScheduleParams): Promise<Schedule> {
     // A copy, so a write the backend turns down changes nothing here.
     const rec: ScheduleRecord = structuredClone(this.mustGet(p.scheduleId));
     const away = !this.mine(rec);
