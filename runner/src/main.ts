@@ -62,7 +62,7 @@ import { devicesMethods } from './devices.ts';
 import { flushSentry, reportException, reportLoggedError, reportLoggedWarning, startSentry } from './sentry.ts';
 import { ALWAYS_ASK_TOOLS, NEVER_ASK_TOOLS, RICH_BLOCKS_LINE, SERVER_NAME, buildThreadbearTools, threadbearMcpServer, type RemoteControl } from './threadbear-mcp.ts';
 import { CrossRunner } from './cross-runner.ts';
-import { EFFORT_LEVELS, type EffortLevel } from './protocol.ts';
+import { EFFORT_LEVELS, ErrorCode, RpcError, type EffortLevel } from './protocol.ts';
 
 // Tells launch.mjs this runner calls its listening() hook (release.ts), so
 // it may stop one that hasn't started listening in time.
@@ -589,6 +589,14 @@ async function main(): Promise<void> {
   methods['remoteThreads.list'] = () => relayRef?.overlay(sync.remoteThreads()) ?? sync.remoteThreads();
   // Every runner's machine figures, for the Mac app's Runners panel.
   methods['runners.stats'] = async () => ({ stats: await sync.runnerStats() });
+  // Mike's runner order (docs/protocol.md, "Other runners' threads"): every
+  // runner's id, this one's too. The answer comes back as remoteThreads.updated.
+  methods['runners.setOrder'] = async (p) => {
+    const ids = (p as { runnerIds?: unknown } | undefined)?.runnerIds;
+    if (!Array.isArray(ids) || !ids.every((x) => typeof x === 'string')) throw new RpcError(ErrorCode.badParams, 'runnerIds must be a list of runner ids');
+    await sync.setRunnerOrder(ids);
+    return {};
+  };
   // A file here, for a Mac app showing one of this runner's threads from
   // another Mac (files.ts).
   Object.assign(methods, filesMethods());

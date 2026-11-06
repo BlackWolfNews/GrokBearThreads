@@ -26,6 +26,11 @@ extension AppModel {
     func receive(remote: RemoteThreads) {
         remoteIndex = remote
         if remoteRunners != remote.runners { remoteRunners = remote.runners }
+        if let pending = pendingRunnerOrder {
+            if remote.order == pending { pendingRunnerOrder = nil }
+        } else if runnerOrder != remote.order {
+            runnerOrder = remote.order
+        }
         applyRemoteIndex()
         applyDefaultRunner()
     }
@@ -68,6 +73,61 @@ extension AppModel {
         guard viaRelay(threadId), let thread = threads[threadId] else { return }
         let next = withRelayCard(thread)
         if next != thread { threads[threadId] = next }
+    }
+
+    // MARK: The order
+
+    /// Every runner as Settings > Runners lists them: in Mike's order, then
+    /// any he hasn't placed, this Mac first and the rest as the runner has
+    /// them (the phone's list does the same, convex/phone.ts orderedRunners).
+    var orderedRunnerIds: [String] {
+        let selfId = runners.first(where: \.isSelf)?.id
+        let all = (selfId.map { [$0] } ?? []) + remoteRunners.map(\.id)
+        let order = runnerOrder ?? []
+        let rank = { (id: String) in order.firstIndex(of: id) ?? order.count }
+        return all.enumerated().sorted { (rank($0.element), $0.offset) < (rank($1.element), $1.offset) }.map(\.element)
+    }
+
+    /// Moves a runner to where another is (a drag), or one place up or down.
+    func moveRunner(_ id: String, to target: String) {
+        var ids = orderedRunnerIds
+        guard let from = ids.firstIndex(of: id), let to = ids.firstIndex(of: target), from != to else { return }
+        ids.remove(at: from)
+        ids.insert(id, at: to)
+        setRunnerOrder(ids)
+    }
+
+    func moveRunner(_ id: String, by offset: Int) {
+        let ids = orderedRunnerIds
+        guard let from = ids.firstIndex(of: id), ids.indices.contains(from + offset) else { return }
+        moveRunner(id, to: ids[from + offset])
+    }
+
+    /// Saves the order through this Mac's runner, here at once.
+    func setRunnerOrder(_ ids: [String]) {
+        guard let client else { return }
+        pendingRunnerOrder = ids
+        runnerOrder = ids
+        Task {
+            do {
+                try await client.setRunnerOrder(ids)
+                // Saved. Normally the list comes back in it at once; if
+                // something else (the phone) moved it again before that, the
+                // backend's order wins after a moment rather than this one
+                // staying on screen for good.
+                try? await Task.sleep(for: .seconds(5))
+                if pendingRunnerOrder == ids {
+                    pendingRunnerOrder = nil
+                    runnerOrder = remoteIndex.order
+                }
+            } catch {
+                if pendingRunnerOrder == ids {
+                    pendingRunnerOrder = nil
+                    runnerOrder = remoteIndex.order
+                }
+                errorMessage = "Couldn't save the runner order. \(error.localizedDescription)"
+            }
+        }
     }
 
     func isRemote(_ threadId: String) -> Bool { threads[threadId]?.isRemote == true }

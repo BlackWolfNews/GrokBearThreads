@@ -369,6 +369,11 @@ final class AppModel {
     /// reach them. Their threads are in `threads`, marked with `runnerId`
     /// (RemoteRunners.swift).
     var remoteRunners: [RemoteRunner] = []
+    /// Mike's runner order (`remoteIndex.order`, backend API 58), or the
+    /// one just dragged to until the runner's list comes back in it, so a
+    /// heartbeat in between doesn't snap the rows back. Nil with none to give.
+    var runnerOrder: [String]?
+    @ObservationIgnored var pendingRunnerOrder: [String]?
     /// Each runner's machine figures by runner id (`runners.stats`), asked
     /// every 10 s while a runner's details are open in the Runners panel.
     var runnerStats: [String: RunnerMachineStats] = [:]

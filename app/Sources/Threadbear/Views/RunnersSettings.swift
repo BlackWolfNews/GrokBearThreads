@@ -5,7 +5,9 @@ import ThreadbearCore
 /// one new threads start on. Deliberately thin: a runner is set up on its
 /// own machine (its runner.json, INSTALL.md section 6 for a Linux server),
 /// so naming, adding or pairing one is a job for an agent, which the ⓘ
-/// says. The one control is the default, which is this Mac's own choice.
+/// says. The controls are the default, which is this Mac's own choice, and
+/// the runners' order, which is everyone's: it's the one the phone sets,
+/// and its new threads start on the first one online in it (backend API 58).
 struct RunnersSettings: View {
     @Environment(AppModel.self) private var app
 
@@ -28,11 +30,26 @@ struct RunnersSettings: View {
             }
 
             SettingsSection("Runners",
-                            about: "The machines your threads can run on. Each runner is set up on its own machine.",
+                            about: canOrder
+                                ? "The machines your threads can run on, in your order. New threads from your phone start on the first one that's online. Drag to change the order. Each runner is set up on its own machine."
+                                : "The machines your threads can run on. Each runner is set up on its own machine.",
                             ask: "add one, rename one, pair it with this Mac or change how it runs. It knows how, and a Linux server's steps are in INSTALL.md.") {
-                RunnerRow(icon: app.selfRunnerIcon, name: selfName, status: "This Mac", isDefault: app.defaultRunnerId == nil)
-                ForEach(app.remoteRunners) { runner in
-                    RunnerRow(icon: RunnerIcon.symbol(runner.icon), name: runner.name, status: status(runner), isDefault: app.defaultRunnerId == runner.id)
+                if canOrder {
+                    let ids = app.orderedRunnerIds
+                    ForEach(Array(ids.enumerated()), id: \.element) { index, id in
+                        row(for: id, move: Move(up: index > 0, down: index < ids.count - 1) { app.moveRunner(id, by: $0) })
+                            .draggable(id)
+                            .dropDestination(for: String.self) { dropped, _ in
+                                guard let from = dropped.first, from != id, ids.contains(from) else { return false }
+                                app.moveRunner(from, to: id)
+                                return true
+                            }
+                    }
+                } else {
+                    RunnerRow(icon: app.selfRunnerIcon, name: selfName, status: "This Mac", isDefault: app.defaultRunnerId == nil)
+                    ForEach(app.remoteRunners) { runner in
+                        RunnerRow(icon: RunnerIcon.symbol(runner.icon), name: runner.name, status: status(runner), isDefault: app.defaultRunnerId == runner.id)
+                    }
                 }
             }
 
@@ -54,6 +71,19 @@ struct RunnersSettings: View {
         Binding(get: { app.defaultRunnerId }, set: { app.setDefaultRunner($0) })
     }
 
+    /// The order is in once this Mac's runner and its backend have it (API 58).
+    /// Not before this Mac's own id is known (runners.list): a move then
+    /// would save an order without it and push it down the phone's list.
+    private var canOrder: Bool { app.runnerOrder != nil && !app.remoteRunners.isEmpty && app.runners.contains(where: \.isSelf) }
+
+    @ViewBuilder private func row(for id: String, move: Move) -> some View {
+        if let runner = app.remoteRunners.first(where: { $0.id == id }) {
+            RunnerRow(icon: RunnerIcon.symbol(runner.icon), name: runner.name, status: status(runner), isDefault: app.defaultRunnerId == runner.id, move: move)
+        } else {
+            RunnerRow(icon: app.selfRunnerIcon, name: selfName, status: "This Mac", isDefault: app.defaultRunnerId == nil, move: move)
+        }
+    }
+
     /// This runner's own name, as other machines see it ("M5").
     private var selfName: String { app.runners.first(where: \.isSelf)?.name ?? "This Mac" }
 
@@ -63,12 +93,22 @@ struct RunnersSettings: View {
     }
 }
 
-/// A runner: its icon, name and how it is, with a star on the default.
+/// A row's arrows: one place up or down the order, for anyone who'd rather
+/// click than drag, as with a pool's logins.
+private struct Move {
+    let up: Bool
+    let down: Bool
+    let by: (Int) -> Void
+}
+
+/// A runner: its icon, name and how it is, with a star on the default, and
+/// in the ordered list its arrows.
 private struct RunnerRow: View {
     let icon: String
     let name: String
     let status: String
     let isDefault: Bool
+    var move: Move?
 
     var body: some View {
         HStack(spacing: 8) {
@@ -87,6 +127,16 @@ private struct RunnerRow: View {
             Spacer(minLength: 8)
             Text(status)
                 .foregroundStyle(.secondary)
+            if let move {
+                Button { move.by(-1) } label: { Image(systemName: "chevron.up") }
+                    .buttonStyle(.borderless)
+                    .disabled(!move.up)
+                    .tip("Earlier in the order")
+                Button { move.by(1) } label: { Image(systemName: "chevron.down") }
+                    .buttonStyle(.borderless)
+                    .disabled(!move.down)
+                    .tip("Later in the order")
+            }
         }
     }
 }

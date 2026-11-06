@@ -611,7 +611,8 @@ within a second or two while it's online (state `taken`, then `done` or
   `{ snooze: { until?, untilRestart? } }`, `{ wake: true }`, `{ archive:
   true }`, `{ unarchive: true }`, `{ markSeen: true }`, `{ title }`.
 - `phone:setRunnerOrder({ token, runnerIds })` (API 56): Mike's order for
-  his runners, from the phone's Settings, at most 50 ids, kept in the one
+  his runners, from the phone's Settings (or the Mac's, through its runner:
+  `sync:runnerOrder` and `sync:setRunnerOrder`, API 58, the owner key only), at most 50 ids, kept in the one
   `runnerOrder` row. The phone's new thread sheet offers a runner, starting
   on the first one online in it.
 - `phone:create({ token, text, runnerId?, cwd?, accountId?, model? })`.

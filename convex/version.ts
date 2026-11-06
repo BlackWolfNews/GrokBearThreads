@@ -256,4 +256,8 @@
 // 57: phone:waiting, a thread's sends its runner hasn't applied yet, and
 //    phone:cancel, which takes back one still pending. An older phone
 //    never asks for either.
-export const API_VERSION = 57;
+// 58: sync:runnerOrder and sync:setRunnerOrder, the main Mac's key only:
+//    the same runner order the phone sets (API 56), for the Mac's Settings >
+//    Runners. An older runner sends the Mac no order, and its Settings list
+//    the runners as before.
+export const API_VERSION = 58;

@@ -115,7 +115,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 57;
+export const BACKEND_API_VERSION = 58;
 // From this one a runner key's archived threads stay in the sidebar table, so
 // those an older backend dropped go again, once (thread-index.ts resendArchived).
 export const ARCHIVED_INDEX_API_VERSION = 54;
@@ -234,6 +234,8 @@ export const LINKS_API_VERSION = 28;
 // (sync:otherRunnersList and sync:threadIndexSince), rather than read whole
 // on every change.
 export const INDEX_SINCE_API_VERSION = 29;
+// sync:runnerOrder and sync:setRunnerOrder, for the Mac's Settings > Runners.
+export const RUNNER_ORDER_API_VERSION = 58;
 // Only the projects that changed go up (sync:upsertProjects), after the
 // whole list once per start.
 export const PROJECTS_DIFF_API_VERSION = 30;
@@ -1189,6 +1191,7 @@ export class ConvexSync {
         takesStars: () => (this.backendApiVersion ?? 0) >= STARS_API_VERSION,
         takesAsked: () => (this.backendApiVersion ?? 0) >= INDEX_ASKED_API_VERSION,
         takesSince: () => (this.backendApiVersion ?? 0) >= INDEX_SINCE_API_VERSION,
+        takesOrder: () => (this.backendApiVersion ?? 0) >= RUNNER_ORDER_API_VERSION,
         seed: () => {
           const file = deps.cachePath;
           const url = deps.config.url;
@@ -1370,6 +1373,13 @@ export class ConvexSync {
     const r = (await this.backend('mutation', 'sync:issueToken', { key: this.deps.key, ...args })) as { id?: unknown; token?: unknown; expiresAt?: unknown } | null;
     if (!r || typeof r.id !== 'string' || typeof r.token !== 'string' || typeof r.expiresAt !== 'string') throw new Error('The backend gave no token back.');
     return { id: r.id, token: r.token, expiresAt: r.expiresAt };
+  }
+
+  /** runners.setOrder: Mike's runner order, the one the phone sets too (API 58). */
+  async setRunnerOrder(runnerIds: string[]): Promise<void> {
+    this.mustBeOn();
+    if ((this.backendApiVersion ?? 0) < RUNNER_ORDER_API_VERSION) throw new Error('The backend is too old for a runner order: it needs deploying.');
+    await this.backend('mutation', 'sync:setRunnerOrder', { key: this.deps.key, runnerIds });
   }
 
   async listTokens(): Promise<Device[]> {

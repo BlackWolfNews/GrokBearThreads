@@ -202,6 +202,10 @@ export const ACCESS: Record<string, Access> = {
   finishCommand: 'own',
   setThreadIndex: 'own',
   otherRunnersList: 'owner',
+  // Mike's runner order (API 58): a runner key that could move it could put
+  // itself first for his new threads from the phone.
+  runnerOrder: 'owner',
+  setRunnerOrder: 'owner',
   threadIndexSince: 'owner',
   otherRunnersThreads: 'owner',
   addRunnerKey: 'owner',

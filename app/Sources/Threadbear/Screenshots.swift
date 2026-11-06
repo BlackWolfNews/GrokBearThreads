@@ -289,6 +289,11 @@ enum ScreenshotRunner {
                 app.settingsTab = .models
                 try? await Task.sleep(for: .milliseconds(600))
                 await capture(settings, dir.appendingPathComponent("15h-settings-models.png"))
+                // Settings › Runners: every runner in Mike's order, which
+                // the phone shares, with the arrows to move one.
+                app.settingsTab = .runners
+                try? await Task.sleep(for: .milliseconds(600))
+                await capture(settings, dir.appendingPathComponent("15i-settings-runners.png"))
                 settings.close()
             } else {
                 print("settings: the window didn't open")

@@ -99,3 +99,19 @@ export async function runnerStatsRows(ctx: QueryCtx) {
   }
   return out;
 }
+
+// Mike's runner order (the runnerOrder row, API 56): set from the phone's
+// Settings (phone:setRunnerOrder) or the Mac's (sync:setRunnerOrder, the
+// owner key only, API 58), one order for both. New threads that name no
+// runner start on the first one online in it (phone.ts mainRunner).
+export async function readRunnerOrder(ctx: QueryCtx): Promise<string[]> {
+  return (await ctx.db.query('runnerOrder').first())?.runnerIds ?? [];
+}
+
+export async function saveRunnerOrder(ctx: MutationCtx, runnerIds: string[]): Promise<void> {
+  if (runnerIds.length > 50 || runnerIds.some((id) => !id || id.length > 100)) throw new ConvexError({ kind: 'invalid', message: 'runnerIds must be at most 50 ids of 1 to 100 characters' });
+  const ids = [...new Set(runnerIds)];
+  const row = await ctx.db.query('runnerOrder').first();
+  if (row) await ctx.db.patch(row._id, { runnerIds: ids });
+  else await ctx.db.insert('runnerOrder', { runnerIds: ids });
+}

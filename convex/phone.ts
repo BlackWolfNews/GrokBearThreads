@@ -7,7 +7,7 @@ import { ConvexError, v, type Infer } from 'convex/values';
 import { mutation, query, type QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { threadFields, views } from './schema';
-import { checkPhoneToken, hasLiveKey, runnerStatsRows, watchRunnersFor } from './lib';
+import { checkPhoneToken, hasLiveKey, readRunnerOrder, runnerStatsRows, saveRunnerOrder, watchRunnersFor } from './lib';
 import { API_VERSION } from './version';
 import { imagesFrom, phoneImage, replyImagesFrom } from './share';
 import { deleteIfUnused, eventBodyAnswer, finishedArgs, readEventBody, runnerName } from './sync';
@@ -77,7 +77,7 @@ export const runners = query({
   returns: v.array(v.object({ runnerId: v.string(), name: v.string(), version: v.string(), lastSeenAt: v.string(), draining: v.boolean(), release: v.optional(v.string()), startedAt: v.optional(v.string()), threadCount: v.optional(v.number()), pressure: v.optional(v.string()), placed: v.optional(v.boolean()), main: v.optional(v.boolean()) })),
   handler: async (ctx, { token }) => {
     await checkPhoneToken(ctx, token);
-    const saved = (await ctx.db.query('runnerOrder').first())?.runnerIds ?? [];
+    const saved = await readRunnerOrder(ctx);
     const runners = await orderedRunners(ctx);
     // `main`: the owner-key Mac a new thread waits for when none of the
     // placed ones is online, so the phone never falls back to just "the
@@ -95,11 +95,7 @@ export const setRunnerOrder = mutation({
   returns: v.null(),
   handler: async (ctx, { token, runnerIds }) => {
     await checkPhoneToken(ctx, token);
-    if (runnerIds.length > 50 || runnerIds.some((id) => !id || id.length > 100)) throw new ConvexError({ kind: 'invalid', message: 'runnerIds must be at most 50 ids of 1 to 100 characters' });
-    const ids = [...new Set(runnerIds)];
-    const row = await ctx.db.query('runnerOrder').first();
-    if (row) await ctx.db.patch(row._id, { runnerIds: ids });
-    else await ctx.db.insert('runnerOrder', { runnerIds: ids });
+    await saveRunnerOrder(ctx, runnerIds);
     return null;
   },
 });
@@ -111,7 +107,7 @@ export const setRunnerOrder = mutation({
 async function orderedRunners(ctx: QueryCtx): Promise<Doc<'runners'>[]> {
   const all: Doc<'runners'>[] = [];
   for await (const r of ctx.db.query('runners')) all.push(r);
-  const saved = (await ctx.db.query('runnerOrder').first())?.runnerIds ?? [];
+  const saved = await readRunnerOrder(ctx);
   const main = await mainOwnerRunner(ctx, all, false);
   const rank = (r: Doc<'runners'>) => {
     const i = saved.indexOf(r.runnerId);
@@ -811,7 +807,7 @@ async function mainRunner(ctx: QueryCtx): Promise<string> {
   const all: Doc<'runners'>[] = [];
   for await (const r of ctx.db.query('runners')) all.push(r);
   const online = (r: Doc<'runners'>) => !r.draining && Date.now() - r.lastSeenAt <= ONLINE_MS;
-  for (const id of (await ctx.db.query('runnerOrder').first())?.runnerIds ?? []) {
+  for (const id of await readRunnerOrder(ctx)) {
     const r = all.find((x) => x.runnerId === id);
     if (r && online(r)) return r.runnerId;
   }

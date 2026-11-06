@@ -736,7 +736,9 @@ thread on another Mac, pick it with the machine chip on the composer: the
 folder, account and model are then that Mac's. New threads start on the
 starred one: change it under Default in that chip's menu, or in
 Settings > Runners, which also lists your runners and whether they're
-online. Adding, renaming or pairing a runner is done on its own machine,
+online, in your order: drag them (or use the arrows) to change it. The
+phone has the same order, and a new thread from it starts on the first
+runner that's online in it. Adding, renaming or pairing a runner is done on its own machine,
 so ask an agent to do it for you. Schedules need your
 Convex backend: with no internet, they wait.
 

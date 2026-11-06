@@ -565,6 +565,13 @@ public extension RPCClient {
         }
     }
 
+    /// Puts the runners in this order (every runner's id, this one's too):
+    /// the one order the phone sets as well. It comes back in
+    /// `remoteThreads.updated`.
+    func setRunnerOrder(_ runnerIds: [String]) async throws {
+        _ = try await call("runners.setOrder", .object(["runnerIds": .array(runnerIds.map { .string($0) })]), as: EmptyResult.self)
+    }
+
     /// Runs it now, as if it were due, even when paused. Another runner's
     /// schedule comes back `queued`, with no thread: that runner runs it.
     func runSchedule(_ scheduleId: String) async throws -> ScheduleRunResult {

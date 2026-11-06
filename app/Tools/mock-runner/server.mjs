@@ -328,6 +328,10 @@ const runners = [SELF_RUNNER, { id: 'runner_bruce', name: 'bruce', icon: 'macmin
 // runner hears of them through remoteThreads.list and remoteThreads.updated,
 // as the real runner passes on what the backend has.
 const BRUCE = 'runner_bruce';
+// Mike's runner order (backend API 58), every runner's id: set with
+// runners.setOrder and said back in remoteThreads.updated, as the real
+// runner passes on the backend's.
+let runnerOrder = ['runner_mock', BRUCE];
 // Files on bruce's Mac that its threads name, for files.read from
 // /bruce/rpc (docs/protocol.md, "Other runners' threads"): the picture is a
 // real PNG, the rest text. None of these paths exist on this Mac.
@@ -1095,6 +1099,13 @@ async function dispatch(client, method, p) {
     case 'remoteThreads.list':
       if (oldRunner) throw rpcError(-32601, `Unknown method ${method}`);
       return remoteThreads(client);
+    case 'runners.setOrder': {
+      if (oldRunner) throw rpcError(-32601, `Unknown method ${method}`);
+      if (!Array.isArray(p.runnerIds) || !p.runnerIds.every((x) => typeof x === 'string')) throw rpcError(-32602, 'runnerIds must be a list of runner ids');
+      runnerOrder = [...new Set(p.runnerIds)];
+      for (const c of clients) if (c.authed && c.as === null) send(c, 'remoteThreads.updated', remoteThreads(c));
+      return {};
+    }
     case 'runners.list':
       if (oldRunner) throw rpcError(-32601, `Unknown method ${method}`);
       // With what each one's heartbeat says, for the Runners panel: bruce
@@ -1915,6 +1926,7 @@ function remoteThreads(client) {
       rpcUrl: `ws://127.0.0.1:${port}/bruce/rpc`, tokenFile: path.join(dataDir, `secrets/runners/${BRUCE}.token`),
     }],
     threads: rows,
+    order: runnerOrder,
   };
 }
 

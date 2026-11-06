@@ -8,7 +8,7 @@ import type { Doc, Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import { threadFields, views } from './schema';
 import { API_VERSION } from './version';
-import { actAs, checkRunnerId, forbidden, hasLiveKey, runnerAuth, runnerStatsRows, sha256, watchRunnersFor } from './lib';
+import { actAs, checkRunnerId, forbidden, hasLiveKey, readRunnerOrder, runnerAuth, runnerStatsRows, saveRunnerOrder, sha256, watchRunnersFor } from './lib';
 import { scrubDoc, scrubEveryString, SCRUB_RULES_VERSION, HELD_BACK } from './redaction';
 import { dropHead, seedHeads, syncHead, syncHeads } from './projectHeads';
 import { dropNotes, putNotes, syncNotes } from './projectNotes';
@@ -2571,6 +2571,29 @@ export const otherRunnersList = query({
   handler: async (ctx, { key, runnerId }) => {
     await runnerAuth(ctx, key, 'otherRunnersList');
     return otherRunners(ctx, runnerId);
+  },
+});
+
+// API 58: Mike's runner order (lib.ts readRunnerOrder), the same one the
+// phone sets, for the Mac's Settings > Runners. The main Mac's key only: a
+// runner key can neither see nor move it, so no Mac with one can put
+// itself first for his new threads.
+export const runnerOrder = query({
+  args: { key: v.string() },
+  returns: v.array(v.string()),
+  handler: async (ctx, { key }) => {
+    await runnerAuth(ctx, key, 'runnerOrder');
+    return readRunnerOrder(ctx);
+  },
+});
+
+export const setRunnerOrder = mutation({
+  args: { key: v.string(), runnerIds: v.array(v.string()) },
+  returns: v.null(),
+  handler: async (ctx, { key, runnerIds }) => {
+    await runnerAuth(ctx, key, 'setRunnerOrder');
+    await saveRunnerOrder(ctx, runnerIds);
+    return null;
   },
 });
 
