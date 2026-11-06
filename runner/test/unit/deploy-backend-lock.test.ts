@@ -29,12 +29,15 @@ test('a second backend deploy waits for the first, then has nothing left to do',
     functions: { tree: treeOf(['convex', 'convex.json', 'package.json', 'package-lock.json']) },
     site: { tree: treeOf(['web', 'package.json', 'package-lock.json']) },
   };
-  // The first deploy: holds the lock, records its deploy, then lets go.
-  const first = spawn(process.execPath, [
-    '-e',
-    `setTimeout(() => { require('fs').writeFileSync(${JSON.stringify(path.join(home, 'backend.json'))}, ${JSON.stringify(JSON.stringify(done))}); require('fs').rmSync(${JSON.stringify(path.join(home, 'backend.lock'))}); }, 1500)`,
-  ]);
-  fs.writeFileSync(path.join(home, 'backend.lock'), String(first.pid));
+  // The first deploy: holds the kernel lock the script takes, records its
+  // deploy, then lets go.
+  const lockFile = path.join(home, 'backend.flock');
+  const record = `setTimeout(() => require('fs').writeFileSync(${JSON.stringify(path.join(home, 'backend.json'))}, ${JSON.stringify(JSON.stringify(done))}), 1500)`;
+  const holder = process.platform === 'darwin' ? ['/usr/bin/lockf', ['-k', lockFile, process.execPath, '-e', record]] as const : ['flock', [lockFile, process.execPath, '-e', record]] as const;
+  const first = spawn(holder[0], [...holder[1]], { stdio: 'ignore' });
+  const firstDone = new Promise((resolve) => first.on('close', resolve));
+  // Until it holds the lock.
+  while (!fs.existsSync(lockFile)) await new Promise((r) => setTimeout(r, 20));
   const r = await new Promise<{ status: number | null; out: string }>((resolve) => {
     const c = spawn(process.execPath, [script, '--home', home, '--repo', repo], { env: { ...process.env, PATH: '/usr/bin:/bin' } });
     let out = '';
@@ -45,6 +48,6 @@ test('a second backend deploy waits for the first, then has nothing left to do',
   assert.equal(r.status, 0, r.out);
   assert.match(r.out, /Waiting for another backend deploy/);
   assert.match(r.out, /up to date/);
-  assert.equal(fs.existsSync(path.join(home, 'backend.lock')), false);
+  await firstDone;
 });
 
