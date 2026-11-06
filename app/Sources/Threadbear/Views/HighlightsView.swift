@@ -608,6 +608,8 @@ struct PreviewBody: View {
 
     var body: some View {
         switch preview.target {
+        case .page(let url) where url.isFileURL:
+            LocalPagePreview(url: url, opened: preview.opened)
         case .page(let url):
             WebPanel(url: url)
         case .remote(_, let failed):
@@ -646,12 +648,54 @@ struct PreviewBody: View {
         if !FileManager.default.fileExists(atPath: path) {
             PaneNote(text: "This file isn't there any more.")
         } else if PreviewRules.viewer(forPath: path) == .web {
-            WebPanel(url: URL(fileURLWithPath: path))
+            LocalPagePreview(url: URL(fileURLWithPath: path), opened: preview.opened)
         } else if TextFileView.shows(path) {
             TextFileView(url: URL(fileURLWithPath: path), opened: preview.opened, editing: preview.editing)
                 .id(path)
         } else {
             QuickLookView(url: URL(fileURLWithPath: path), opened: preview.opened)
+        }
+    }
+}
+
+/// A local HTML file in the pane. Its scripts never run here (WebPanelPool,
+/// Daybreak finding 6), so a page that draws itself would show as empty
+/// boxes with nothing to say why: one with scripts gets a line over it
+/// saying so, and a button opening it in the browser, where they run, as a
+/// double-click in the Finder would (6 Nov 2026).
+struct LocalPagePreview: View {
+    @Environment(AppModel.self) private var app
+    let url: URL
+    let opened: Int
+    @State private var scripted: Bool?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if scripted == true {
+                HStack(spacing: zoomed(8)) {
+                    Text("Scripts are off in this preview, so parts of the page may be empty.")
+                        .font(.system(size: TypeScale.small))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                    Spacer(minLength: 0)
+                    Button("Open in Browser") { app.openExternally(url) }
+                        .controlSize(.small)
+                        .tip("Open the page in your browser, where its scripts run")
+                }
+                .padding(.horizontal, zoomed(10))
+                .padding(.vertical, zoomed(6))
+                Divider()
+            }
+            WebPanel(url: url)
+        }
+        .task(id: "\(url) \(opened)") {
+            let path = url.path
+            scripted = await Task.detached(priority: .utility) {
+                let handle = FileHandle(forReadingAtPath: path)
+                defer { try? handle?.close() }
+                let data = (try? handle?.read(upToCount: LocalPreviewSite.scriptScanBytes)) ?? nil
+                return data.map(LocalPreviewSite.hasScripts) ?? false
+            }.value
         }
     }
 }

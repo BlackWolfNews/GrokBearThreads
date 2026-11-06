@@ -153,6 +153,12 @@ test('the runner keeps a thread\'s highlights from its events, pins from the too
   const pin = tools.find((t) => t.name === 'pin')!;
   const res = await pin.handler({ path: 'mock.html', note: 'Pick a layout', show: true } as never, {} as never);
   assert.equal(res.isError, undefined, JSON.stringify(res));
+  assert.doesNotMatch(JSON.stringify(res), /scripts off/, 'a page without scripts gets no warning');
+  // One that draws itself is blank in the Mac app's static preview: say so.
+  fs.writeFileSync(path.join(dir, 'chart.html'), '<div id=c></div><SCRIPT>draw()</SCRIPT>');
+  const scripted = await pin.handler({ path: 'chart.html' } as never, {} as never);
+  assert.match(JSON.stringify(scripted), /scripts off.*127\.0\.0\.1/);
+  h.runner.unpin(thread.id, `file:${path.join(dir, 'chart.html')}`);
   const bad = await pin.handler({ path: 'nope.html' } as never, {} as never);
   assert.equal(bad.isError, true);
   const after = h.runner.get(thread.id);

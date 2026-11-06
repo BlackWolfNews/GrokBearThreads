@@ -197,4 +197,17 @@ public final class LocalPreviewSite: @unchecked Sendable {
         guard !stack.isEmpty, safeParts(stack.joined(separator: "/")) != nil else { return nil }
         return stack.joined(separator: "/")
     }
+
+    /// Whether a page has scripts of its own, which the preview never runs:
+    /// the pane says so (with a way to open it in the browser) rather than
+    /// showing a page that draws itself as blank boxes (6 Nov 2026). The
+    /// runner's `pin` tool tells the agent the same (runner/src/runner/highlights.ts).
+    /// A `<script` anywhere counts, even in a comment: saying so wrongly
+    /// costs a line, missing one looks broken.
+    public static func hasScripts(_ html: Data) -> Bool {
+        String(decoding: html.prefix(scriptScanBytes), as: UTF8.self).range(of: "<script", options: .caseInsensitive) != nil
+    }
+
+    /// How much of a page `hasScripts` reads.
+    public static let scriptScanBytes = 4 * 1024 * 1024
 }

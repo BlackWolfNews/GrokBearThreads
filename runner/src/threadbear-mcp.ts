@@ -409,8 +409,12 @@ export function buildThreadbearTools(
       },
       handle(async (input) => {
         if (!control.pin) throw new Error("This runner doesn't keep highlights yet.");
-        const { id } = await control.pin(selfId, input);
-        return `Pinned (${id})${input.show ? ', and shown in the side pane' : ''}.`;
+        const { id, scriptsOff } = await control.pin(selfId, input);
+        const pinned = `Pinned (${id})${input.show ? ', and shown in the side pane' : ''}.`;
+        // Older runners (a handover) don't say; then nothing's added.
+        return scriptsOff
+          ? `${pinned} The side pane shows local pages with their scripts off, so anything this page draws with JavaScript will be blank there. If it needs them, serve its folder on 127.0.0.1 (python3 -m http.server --bind 127.0.0.1) and pin that URL as well.`
+          : pinned;
       }),
     ),
     tool(

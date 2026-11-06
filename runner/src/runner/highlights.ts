@@ -33,7 +33,7 @@ export const highlightsPart = {
 
   // The `pin` tool: a file (relative to the thread's folder is fine) or a
   // URL, for Mike to look at. Returns the highlight's id.
-  pin(this: Runner, threadId: string, target: { path?: string; url?: string; title?: string; note?: string; show?: boolean }): { id: string } {
+  pin(this: Runner, threadId: string, target: { path?: string; url?: string; title?: string; note?: string; show?: boolean }): { id: string; scriptsOff?: true } {
     const st = this.mustGet(threadId);
     if (Boolean(target.path) === Boolean(target.url)) throw new RpcError(ErrorCode.badParams, 'Pin a path or a url, one of the two.');
     let file: string | undefined;
@@ -50,7 +50,7 @@ export const highlightsPart = {
     state.removed = state.removed?.filter((id) => id !== item.id);
     upsertHighlight(state, item);
     this.highlightsChanged(st);
-    return { id: item.id };
+    return file && pageHasScripts(file) ? { id: item.id, scriptsOff: true } : { id: item.id };
   },
 
   unpin(this: Runner, threadId: string, highlightId: string): { removed: boolean } {
@@ -132,3 +132,23 @@ export const highlightsPart = {
 };
 
 export type HighlightsPart = RunnerPart<typeof highlightsPart>;
+
+// A local page the Mac app previews runs none of its own scripts (Daybreak
+// finding 6), so a page that draws itself shows as empty boxes there. `pin`
+// tells the agent, so it can serve the folder on localhost and pin that
+// instead (6 Nov 2026). The app's note over the page uses the same test
+// (LocalPreviewSite.hasScripts).
+export function pageHasScripts(file: string): boolean {
+  if (!/\.html?$/i.test(file)) return false;
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(file, 'r');
+    const buf = Buffer.alloc(4 * 1024 * 1024);
+    const n = fs.readSync(fd, buf, 0, buf.length, 0);
+    return /<script/i.test(buf.subarray(0, n).toString('utf8'));
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}

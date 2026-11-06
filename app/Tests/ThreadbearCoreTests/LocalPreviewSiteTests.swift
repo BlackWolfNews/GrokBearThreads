@@ -185,4 +185,11 @@ final class LocalPreviewSiteTests: XCTestCase {
         XCTAssertNil(LocalPreviewSite(file: dir.appendingPathComponent("app.js")), "only a page is a page")
         XCTAssertNil(LocalPreviewSite(file: dir.appendingPathComponent("pic.png")))
     }
+
+    func testHasScripts() {
+        XCTAssertTrue(LocalPreviewSite.hasScripts(Data("<p>x</p><script>draw()</script>".utf8)))
+        XCTAssertTrue(LocalPreviewSite.hasScripts(Data("<SCRIPT src=app.js></SCRIPT>".utf8)))
+        XCTAssertFalse(LocalPreviewSite.hasScripts(Data("<p>A script-free mockup</p>".utf8)))
+        XCTAssertFalse(LocalPreviewSite.hasScripts(Data()))
+    }
 }

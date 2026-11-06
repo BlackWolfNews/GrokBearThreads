@@ -215,8 +215,9 @@ don't run, and script files, SVGs and other pages beside it don't load,
 so a mockup made of several HTML or JS files shows only its main page,
 and one that draws itself with JavaScript shows what its HTML has
 without it. It's kept off the internet too, so a font or picture from
-the web is left out, and its links don't open. Open the file in your
-browser to see it working.
+the web is left out, and its links don't open. A page with scripts gets
+a line over it saying they're off, with Open in Browser to see it
+working.
 
 To share a file somewhere else, drag it out of the app: a file link in a
 reply, a picture in the transcript, a file in Highlights, a row in a folder
