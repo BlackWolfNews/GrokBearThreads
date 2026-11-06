@@ -225,19 +225,16 @@ final class ReviewWindowTests: XCTestCase {
     }
 
     func testDraggingMovesAroundAndTheImageFollowsTheHand() {
-        let (session, host, window) = make(tall())
+        // Narrow enough to stay centred on a 1x display as well as Retina.
+        let (session, host, window) = make(tall(width: 300))
         defer { window.close() }
         let image = stage(in: host)
         session.zoom(.actual)
         pump()
         XCTAssertEqual(image.magnification, 1, accuracy: 0.0001)
         XCTAssertEqual(image.visibleForTests.minY, 0, accuracy: 1, "full size starts at the top of the page")
-        // Actual size is a pixel per screen pixel: the 780 pixel page is
-        // 390 points wide on a Retina screen, narrower than the stage, but
-        // 780 on a 1x one (Tinker Desk's 1080p, where checks run since 6 Nov).
-        if 780 / window.backingScaleFactor < image.bounds.width {
-            XCTAssertLessThan(image.visibleForTests.minX, 0, "narrower than the stage, so it's in the middle")
-        }
+        XCTAssertLessThan(image.visibleForTests.minX, 0, "narrower than the stage, so it's in the middle")
+        XCTAssertEqual(image.visibleForTests.midX, image.pictureSizeForTests.width / 2, accuracy: 1)
 
         let from = image.convert(NSPoint(x: image.bounds.midX, y: image.bounds.midY), to: nil)
         press(.leftMouseDown, from, window)
@@ -346,8 +343,8 @@ final class ReviewWindowTests: XCTestCase {
 
     /// A page as long as the phone shots that prompted zooming, with today's
     /// version of the same size to flick to, and a shot after it to move to.
-    private func tall() -> DesignReview {
-        func image(_ name: String) -> ImageRef { ImageRef(path: "/tmp/\(name).png", mediaType: "image/png", width: 780, height: 20852) }
+    private func tall(width: Int = 780) -> DesignReview {
+        func image(_ name: String) -> ImageRef { ImageRef(path: "/tmp/\(name).png", mediaType: "image/png", width: width, height: 20852) }
         var page = ReviewOption(id: "A", title: "Option A", image: image("A"))
         page.shots = [ReviewShot(title: "Phone", image: image("A")), ReviewShot(title: "Top", image: image("A2"))]
         return DesignReview(id: "review", title: "Page", options: [
