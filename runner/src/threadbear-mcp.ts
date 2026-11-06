@@ -75,7 +75,9 @@ export const ALWAYS_ASK_TOOLS = new Set([`mcp__${SERVER_NAME}__delete_thread`]);
 // picked, or a panel that runs commands), pocket (it can take out or
 // replace another thread's card) and wait_for_app_restart (its text comes
 // back later as a turn of its own). Codex's own review of the first list
-// found those (6 Nov).
+// found those (6 Nov). end_turn's own waitFor, snooze, archive and
+// Restart to Update asks only wake or file this thread, with the runner's
+// words, and the turn they start runs in its mode then, so they stay in.
 export const NEVER_ASK_TOOLS = new Set(
   ['end_turn', 'list_threads', 'read_thread', 'list_accounts', 'list_schedules', 'list_projects', 'read_project', 'unpin', 'ask_secret'].map(
     (n) => `mcp__${SERVER_NAME}__${n}`,
