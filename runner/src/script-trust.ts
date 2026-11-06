@@ -148,6 +148,15 @@ export type FollowOptions = {
   namedPaths: (src: string) => string[];
   // Shared with the caller's hash, so it hashes the bytes followed here.
   reads?: Reads;
+  // For a Claude Code hook, which runs by itself (claude-trust.ts): what
+  // patch trust lets through as installed code is a problem instead. A
+  // package run by name (`npx x`, `pnpm dlx x`: whatever the name resolves
+  // to then, the registry's latest or a bin of the repo's own), a test
+  // runner finding its own tests (`node --test`, `bun test`), and, as the
+  // command itself, a program on PATH that isn't one known to load nothing
+  // from the folder (a formatter, a test runner or a build tool loads its
+  // config and plugins from there by its own rules).
+  strict?: boolean;
 };
 
 // Bounds: a script reaching more than this can't be checked.
@@ -179,7 +188,22 @@ const RISKY_ENV = new Set([
   'PERL5LIB', 'PROMPT_COMMAND', 'npm_config_script_shell', 'NPM_CONFIG_SCRIPT_SHELL', 'npm_config_node_options',
   'NPM_CONFIG_NODE_OPTIONS', 'BUN_OPTIONS', 'GIT_EXEC_PATH', 'SHELLOPTS', 'BASHOPTS', 'FPATH', 'fpath',
 ]);
-const LOADING_FLAG = /(^|\s)(-r|-e|-p|--require|--import|--loader|--experimental-loader|--preload|--eval|--print)(\s|=|$)/;
+
+// Programs a Claude Code hook (and what it runs) may run with nothing more
+// to follow (FollowOptions.strict): ones that neither load code from the
+// folder nor run a command they're handed, and shell builtins. Not git (an
+// alias or core.hooksPath runs anything), open (an app in the repo), sed
+// (its `e`), sort (--compress-program) or terminal-notifier (-execute).
+const INERT_PROGRAMS = new Set([
+  'echo', 'printf', 'true', 'false', 'test', '[', ':', 'cat', 'head', 'tail', 'ls', 'pwd', 'date', 'sleep', 'say', 'afplay',
+  'jq', 'grep', 'egrep', 'fgrep', 'tr', 'wc', 'cut', 'uniq', 'tee', 'mkdir', 'touch', 'rm', 'rmdir', 'cp', 'mv', 'ln',
+  'chmod', 'basename', 'dirname', 'realpath', 'readlink', 'stat', 'pbcopy', 'pbpaste', 'curl', 'wget', 'which', 'whoami',
+  'hostname', 'uname', 'tput', 'notify-send', 'logger', 'mktemp',
+  'cd', 'export', 'set', 'unset', 'shift', 'exit', 'return', 'read', 'local', 'declare', 'typeset', 'wait', 'umask',
+  'break', 'continue', 'pushd', 'popd', 'type', 'hash', 'let', 'shopt', 'ulimit',
+]);
+
+const LOADING_FLAG = /(^|\s)(-r|-e|-p|--require|--import|--loader|--experimental-loader|--preload|--eval|--print|--preserve-symlinks|--preserve-symlinks-main)(\s|=|$)/;
 const LIFECYCLE = ['preinstall', 'install', 'postinstall', 'prepublish', 'preprepare', 'prepare', 'postprepare', 'prepack', 'postpack', 'prepublishOnly', 'publish', 'postpublish', 'dependencies'];
 const PATH_SENTINEL = '\u0000PATH';
 
@@ -605,6 +629,8 @@ class Reach {
   problem?: string;
   private visits = new Set<string>();
   private wraps = 0;
+  // Each function a script defines, by the line it's defined on.
+  private functions = new Map<string, number>();
   private home: string;
   private o: FollowOptions;
   readonly reads: Reads;
@@ -671,7 +697,10 @@ class Reach {
     const depth = (ctx?.depth ?? 0) + 1;
     if (depth > MAX_DEPTH) return this.fail(ctx, line, `runs scripts more than ${MAX_DEPTH} deep, more than patch trust follows.`);
     const dirs = ctx && !ctx.lost ? [...ctx.dirs].sort().join('\n') : this.o.folder;
-    const key = `${how} ${real} ${dirs}`;
+    // By the path as named too: a shell script's $0 and BASH_SOURCE are
+    // that, not where a link leads, so its `$(dirname "$0")/x.sh` is beside
+    // the link.
+    const key = `${how} ${real} ${abs} ${dirs}`;
     if (this.visits.has(key)) return;
     if (this.visits.size >= MAX_VISITS) return this.fail(undefined, undefined, `what it runs is more than patch trust follows.`);
     this.visits.add(key);
@@ -704,15 +733,22 @@ class Reach {
     // it: one too big for a script fails closed.
     if (text.length > MAX_CONFIG_BYTES) return this.fail(ctx, line, `runs ${label}, a shell script over ${MAX_CONFIG_BYTES / 1024} KB, more than patch trust reads.`);
     if (how === 'source' && ctx) {
-      return this.shell(text, { ...ctx, label, file: real, argv0: [...ctx.argv0, real], depth });
+      return this.shell(text, { ...ctx, label, file: abs, argv0: [...ctx.argv0, abs], depth });
     }
-    this.shell(text, { label, file: real, argv0: [real], dirs: startDirs, vars: new Map(), depth });
+    this.shell(text, { label, file: abs, argv0: [abs], dirs: startDirs, vars: new Map(), depth });
   }
 
   private js(file: string, text: string, dirs: Set<string>, depth: number): void {
     const scan = this.o.scanJs(text, file);
     const label = this.rel(file);
     if (scan.problem) return this.fail(undefined, undefined, `${label}: ${scan.problem}`);
+    // Commands it runs itself aren't followed from JavaScript, which a
+    // Claude Code hook (FollowOptions.strict) can't leave out.
+    // The parsed strings too, which a `\u0070` in a name has been decoded in.
+    // An escape (`B\u0075n`, "child_\x70rocess") can spell any of those.
+    if (this.o.strict && (/child_process|\bBun\b|\bDeno\b|\bprocess\s*\.\s*(binding|dlopen)\b|\\(u[0-9a-fA-F{]|x[0-9a-fA-F]{2}|[0-7])/.test(text) || scan.strings.some((x) => /child_process|worker_threads|^(node:)?(vm|module|cluster|inspector)$/.test(x)))) {
+      return this.fail(undefined, undefined, `${label} runs other commands or native code itself, which a hash can't follow. Run them from a shell script instead.`);
+    }
     const ctx: Ctx = { label, file, argv0: [file], dirs, vars: new Map(), depth };
     for (const spec of scan.specifiers) this.follow(this.o.resolveImport(path.dirname(file), spec), 'load', ctx);
     this.namedIn(text, file, ctx);
@@ -747,6 +783,44 @@ class Reach {
     } catch (e) {
       return this.fail(ctx, undefined, `can't be read as a shell script (${(e as Error).message}), so patch trust can't follow what it runs.`);
     }
+    // The functions a script defines are its own words, not programs on
+    // PATH (FollowOptions.strict): `name ()` and `function name`, as the
+    // lexer reads them, so a comment or a here-doc doesn't define one.
+    // Only at a command's start, and only for this script's own commands:
+    // a shell it starts (`sh -c`) doesn't have them.
+    const outer = this.functions;
+    if (this.o.strict) {
+      // A command substitution is the same shell's, so it has them too.
+      this.functions = ctx.inSub ? new Map(outer) : new Map();
+      const t = lexed.toks;
+      // A function defined in a subshell `( ... )` is gone after it.
+      let depth = 0;
+      for (let i = 0; i < t.length; i++) {
+        const a = t[i];
+        const before = t[i - 1];
+        if (a.t === 'op' && a.op === '(' && !(before?.t === 'word' && t[i + 1]?.t === 'op' && (t[i + 1] as { op: string }).op === ')')) depth++;
+        else if (a.t === 'op' && a.op === ')' && !(t[i - 1]?.t === 'op' && (t[i - 1] as { op: string }).op === '(' && t[i - 2]?.t === 'word')) depth = Math.max(0, depth - 1);
+        if (depth > 0) continue;
+        if (a.t !== 'word' || (before && !(before.t === 'op' && [';', '\n', '&&', '||', '&', '{', '(', ')', '|'].includes(before.op)))) continue;
+        const name = bareOf(a.w);
+        if (!name) continue;
+        const b = t[i + 1];
+        const c = t[i + 2];
+        if (b?.t === 'op' && b.op === '(' && c?.t === 'op' && c.op === ')' && !this.functions.has(name)) this.functions.set(name, a.w.line);
+        if (name === 'function' && b?.t === 'word') {
+          const f = bareOf(b.w);
+          if (f && !this.functions.has(f)) this.functions.set(f, a.w.line);
+        }
+      }
+    }
+    try {
+      this.shellBody(text, lexed, ctx);
+    } finally {
+      this.functions = outer;
+    }
+  }
+
+  private shellBody(text: string, lexed: Lexer, ctx: Ctx): void {
     this.namedIn(text, ctx.file, ctx);
     for (const x of lexed.extra) this.shell(x.src, { ...ctx, inSub: true }, x.line);
     for (const cmd of simpleCommands(lexed.toks)) {
@@ -1089,6 +1163,11 @@ class Reach {
     if (OTHER_LANGS.test(name)) return this.fail(ctx, line, `runs ${name}, whose loads patch trust can't follow.`);
     // Anything else: a program on PATH, a builtin or a function in the
     // script (whose body was read with the rest).
+    // A function only once it's defined (by line: a call before it runs the program).
+    const defined = this.functions.get(name);
+    if (this.o.strict && !INERT_PROGRAMS.has(name) && !(defined !== undefined && defined <= line)) {
+      return this.fail(ctx, line, `runs ${name}, a program that may load code from the folder by its own rules (its config, plugins or tests), which a hash can't follow. Run a script in the repo instead.`);
+    }
   }
 
   private cd(args: Word[], ctx: Ctx, line: number): void {
@@ -1268,17 +1347,27 @@ class Reach {
       if (sub === undefined) return args[i] ? this.fail(ctx, line, `runs ${name} with a subcommand worked out as it runs, which patch trust can't follow.`) : this.fail(ctx, line, `runs ${name} reading what to run from its input, which patch trust can't follow.`);
       if (name === 'deno') {
         if (sub === 'task' || sub === 'eval') return this.fail(ctx, line, `runs \`deno ${sub}\`, which patch trust doesn't follow.`);
-        if (sub !== 'run') return this.isScriptPath(sub, ctx) ? this.runFile(sub, ctx, line) : undefined;
+        if (sub !== 'run') {
+          if (this.isScriptPath(sub, ctx)) return this.runFile(sub, ctx, line);
+          return this.o.strict ? this.fail(ctx, line, `runs \`deno ${sub}\`, which finds what to run by its own rules.`) : undefined;
+        }
         i++;
       } else {
         if (['install', 'i', 'add', 'a', 'update', 'link', 'pm'].includes(sub)) return this.lifecycle(ctx, line);
         if (sub === 'x') return this.npx(args.slice(i + 1), ctx, line);
-        if (['test', 'build', 'create', 'init', 'upgrade', 'outdated', 'publish', 'patch', 'remove', 'rm', 'repl', 'help', 'completions', 'audit', 'info', 'why'].includes(sub)) return;
+        if (['test', 'build', 'create', 'init', 'upgrade', 'outdated', 'publish', 'patch', 'remove', 'rm', 'repl', 'help', 'completions', 'audit', 'info', 'why'].includes(sub)) {
+          if (this.o.strict && ['test', 'build', 'create', 'init', 'upgrade', 'publish', 'patch', 'repl'].includes(sub)) return this.fail(ctx, line, `runs \`bun ${sub}\`, which finds what to run by its own rules.`);
+          return;
+        }
         if (sub === 'run') i++;
         while (i < args.length && (this.str(args[i], ctx) ?? '').startsWith('-')) i++;
         const target = this.str(args[i], ctx);
         if (target === undefined) return args[i] ? this.fail(ctx, line, `runs bun with a target worked out as it runs, which patch trust can't follow.`) : undefined;
-        if (this.isScriptPath(target, ctx)) return this.runFile(target, ctx, line);
+        if (this.isScriptPath(target, ctx)) {
+          // Bun loads bunfig.toml (its preloads) before the script.
+          if (this.o.strict && [...ctx.dirs].some((d) => { for (let x = d; this.inRepo(x); x = path.dirname(x)) { if (isFile(path.join(x, 'bunfig.toml'))) return true; if (x === this.o.top) break; } return false; })) return this.fail(ctx, line, 'runs bun beside a bunfig.toml, whose preloads run first by their own rules.');
+          return this.runFile(target, ctx, line);
+        }
         return this.packageScript(target, ctx, line);
       }
     }
@@ -1299,9 +1388,14 @@ class Reach {
         const v = load[2] ?? this.str(args[++i], ctx);
         if (v === undefined) return this.fail(ctx, line, `runs ${name} loading a module worked out as it runs, which patch trust can't follow.`);
         if (/^\.{0,2}\//.test(v) || v.startsWith('file:')) this.runFile(v.replace(/^file:\/\//, ''), ctx, line);
+        else if (this.o.strict && /^(data|https?|blob):/i.test(v)) return this.fail(ctx, line, `runs ${name} loading code from a URL (${v.slice(0, 40)}), which a hash can't follow.`);
         continue;
       }
-      if (/^(--env-file|--conditions|-C|--input-type|--title|--test-reporter|--test-name-pattern|--watch-path|--cpu-prof-dir|--heap-prof-dir|--diagnostic-dir|--redirect-warnings|--tsconfig|--project|-P)$/.test(s)) {
+      // Symlinks kept as named change which files a module's imports are.
+      if (this.o.strict && /^--preserve-symlinks(-main)?$/.test(s)) return this.fail(ctx, line, `runs ${name} keeping symlinked paths, which changes which files it loads.`);
+      // An env file can set NODE_OPTIONS, which loads more code.
+      if (this.o.strict && /^--env-file(-if-exists)?(=|$)/.test(s)) return this.fail(ctx, line, `runs ${name} with an env file, which can load code by its own rules.`);
+      if (/^(--env-file|--env-file-if-exists|--conditions|-C|--input-type|--title|--test-reporter|--test-name-pattern|--watch-path|--cpu-prof-dir|--heap-prof-dir|--diagnostic-dir|--redirect-warnings|--tsconfig|--project|-P)$/.test(s)) {
         i++;
         continue;
       }
@@ -1310,7 +1404,11 @@ class Reach {
     }
     const file = this.str(args[i], ctx);
     if (file === undefined) {
-      if (args.some((w) => litOf(w) === '--test')) return; // node's test runner finding tests
+      if (args.some((w) => litOf(w) === '--test')) {
+        // node's test runner finding tests
+        if (this.o.strict) return this.fail(ctx, line, `runs ${name}'s test runner, which finds its own tests to run, so a hash can't cover them.`);
+        return;
+      }
       return this.fail(ctx, line, `runs ${name} reading what to run from its input${extra ? ' (from xargs)' : ''}, which patch trust can't follow.`);
     }
     this.runFile(file, ctx, line);
@@ -1416,6 +1514,11 @@ class Reach {
   private packageScript(name: string, ctx: Ctx, line: number): void {
     const pkgs = this.packages(ctx, line);
     if (!pkgs) return;
+    // One that isn't there runs something by default (npm start runs
+    // server.js; pnpm and yarn a package's bin of that name).
+    if (this.o.strict && !pkgs.some(({ pkg }) => typeof pkg?.scripts?.[name] === 'string')) {
+      return this.fail(ctx, line, `runs the package script ${name}, which isn't in package.json, so what runs instead is worked out by the package manager.`);
+    }
     for (const { dir, pkg } of pkgs) this.runScripts(dir, pkg, [`pre${name}`, name, `post${name}`], ctx);
   }
 
@@ -1530,6 +1633,7 @@ class Reach {
       }
       if (s.startsWith('-')) continue;
       if (/^\.{0,2}\//.test(s)) return this.runFile(s, ctx, line);
+      if (this.o.strict) return this.fail(ctx, line, `runs the package ${s} by name (npx or the like), which runs whatever that name resolves to then, so a hash can't cover it.`);
       // A package: its version is the package.json's.
       this.packages(ctx, line);
       return;
@@ -1613,6 +1717,7 @@ class Reach {
     if (!mk) return;
     if (!('lines' in mk)) return this.fail(mctx, undefined, mk.problem);
     const { lines, text } = mk;
+    if (this.o.strict && /\.RECIPEPREFIX/.test(text)) return this.fail(mctx, undefined, 'sets .RECIPEPREFIX, so its recipes are lines this doesn\'t read as recipes.');
     let recipe = '';
     for (const [n, raw] of lines.entries()) {
       const inc = /^\s*-?(?:include|sinclude)\s+(.+)$/.exec(raw);
@@ -1943,10 +2048,12 @@ export function reachOf(file: string, opts: FollowOptions): ScriptReach {
 // The same for a command a patch writes (an action's `run`, a live
 // function's `sh(...)`), run by a shell in `opts.folder`. `label` names it
 // in a problem. A string that isn't a command only names files to hash.
-export function reachOfCommand(command: string, label: string, opts: FollowOptions): ScriptReach {
+// `vars`: what the shell it runs in already has set (a Claude Code hook's
+// CLAUDE_PROJECT_DIR).
+export function reachOfCommand(command: string, label: string, opts: FollowOptions, vars: Record<string, string> = {}): ScriptReach {
   const r = new Reach(opts);
   try {
-    r.shell(command, { label, file: opts.folder, argv0: [], dirs: new Set([opts.folder]), vars: new Map(), depth: 0 });
+    r.shell(command, { label, file: opts.folder, argv0: [], dirs: new Set([opts.folder]), vars: new Map(Object.entries(vars).map(([k, v]) => [k, [v]])), depth: 0 });
   } catch (e) {
     r.problem ??= `couldn't be followed (${(e as Error).message}).`;
   }

@@ -659,12 +659,16 @@ public struct PatchInfo: Sendable, Hashable, Codable, Identifiable {
     /// With `untrusted`: the local files it imports, which the hash covers
     /// too, so Patches can say what else trusting it would run.
     public var helpers: [String]?
+    /// With `untrusted`, a folder's Claude Code settings in a thread that
+    /// asks before tools run: what they'd let run without asking, in words.
+    public var grants: [String]?
 
     public init(id: String, source: String = "project", file: String? = nil, error: String? = nil, folder: String? = nil, projectId: String? = nil,
-                matched: [String]? = nil, liveError: String? = nil, untrusted: String? = nil, hash: String? = nil, helpers: [String]? = nil) {
+                matched: [String]? = nil, liveError: String? = nil, untrusted: String? = nil, hash: String? = nil, helpers: [String]? = nil, grants: [String]? = nil) {
         self.untrusted = untrusted
         self.hash = hash
         self.helpers = helpers
+        self.grants = grants
         self.matched = matched
         self.liveError = liveError
         self.id = id
@@ -690,6 +694,7 @@ public struct PatchInfo: Sendable, Hashable, Codable, Identifiable {
         untrusted = (try? c.decodeIfPresent(String.self, forKey: .untrusted)) ?? nil
         hash = (try? c.decodeIfPresent(String.self, forKey: .hash)) ?? nil
         helpers = (try? c.decodeIfPresent([String].self, forKey: .helpers)) ?? nil
+        grants = (try? c.decodeIfPresent([String].self, forKey: .grants)) ?? nil
     }
 }
 

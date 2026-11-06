@@ -63,6 +63,11 @@ export type StartSessionOptions = {
   // always asks, with no "Always allow". The adapter checks the names in
   // code-writes.ts too, so leaving this out never asks less.
   runsAsCode?: (file: string) => boolean;
+  // Claude, in Full with the folder's settings loaded: they hold
+  // permission rules that aren't trusted for a thread that asks first, so
+  // the session must be able to stop them applying if the thread leaves
+  // Full (askBeforeEveryTool).
+  heldGrants?: boolean;
 };
 
 export type TurnResult = {
@@ -208,6 +213,11 @@ export interface AgentSession {
   setModel(model: string | undefined): Promise<void>;
   setEffort(effort: EffortLevel | undefined): Promise<void>;
   setPermissionMode(mode: PermissionMode): Promise<void>;
+  // From now on every tool call goes to the approval card's check, past
+  // any allow rule the CLI loaded: a session started in Full with a
+  // folder's untrusted permission rules, after the thread left Full, for
+  // the turns the CLI starts by itself before the next message replaces it.
+  askBeforeEveryTool?(): void;
   // Moves the session to another folder from its next turn, in the same
   // native session. Only on adapters with movesFolders.
   setCwd?(cwd: string): Promise<void>;

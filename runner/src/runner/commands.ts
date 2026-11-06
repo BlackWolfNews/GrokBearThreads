@@ -8,7 +8,7 @@ import type { RunnerPart } from './part.ts';
 import type { Account, EffortLevel } from '../protocol.ts';
 import { isEffortLevel } from '../protocol.ts';
 import type { QueuedSend } from '../store.ts';
-import { claudeSettingsWithoutCommands } from '../claude-trust.ts';
+import { claudeOptions, claudeSettingsWithoutCommands } from '../claude-trust.ts';
 import { commandList, parseCommand, planCommand, type CommandPlan, type SlashCommand } from '../slash-commands.ts';
 
 // A folder's command list (its skills, its .claude/commands) changes
@@ -138,7 +138,7 @@ export const commandsPart = {
     let cli: SlashCommand[] = [];
     // Claude's list in a folder whose settings Mike hasn't trusted is made
     // without them (claude-trust.ts), so it's cached apart.
-    const claude = rec.provider === 'claude' ? this.patchTrust.checkClaude(rec.cwd) : undefined;
+    const claude = rec.provider === 'claude' ? this.patchTrust.checkClaude(rec.cwd, claudeOptions(rec)) : undefined;
     const skipped = claude && !claude.trusted ? claude.hash : undefined;
     const untrusted = skipped ? claudeSettingsWithoutCommands(rec.cwd) : undefined;
     const key = `${rec.accountId}\0${rec.cwd}\0${skipped ?? 'trusted'}`;

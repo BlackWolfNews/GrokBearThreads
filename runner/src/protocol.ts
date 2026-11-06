@@ -471,6 +471,7 @@ export type PatchInfo = {
   untrusted?: 'new' | 'changed';
   hash?: string;
   helpers?: string[]; // with untrusted: the local files it imports, which the hash covers too
+  grants?: string[]; // with untrusted, a folder's Claude settings in a thread that asks first: what they'd let run without asking, in words
   icon?: string; // the patch file's icon, an SF Symbol
   iconFile?: string; // or its picture (absolute path: an image or a .app)
 };

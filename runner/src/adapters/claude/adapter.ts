@@ -182,8 +182,8 @@ export class ClaudeAdapter implements AgentAdapter {
     const options: Options = {
       cwd,
       pathToClaudeCodeExecutable: deps.claudePath,
-      env: { ...cliEnv(account), ...(untrusted ? { CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1' } : {}) },
-      ...(untrusted ? untrustedSettings(cwd, untrusted) : { settingSources: ['user', 'project', 'local'] }),
+      env: { ...cliEnv(account), ...(untrusted || isHome(cwd) ? { CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1' } : {}) },
+      ...(untrusted ? untrustedSettings(cwd, untrusted) : trustedSettings(cwd)),
       tools: [],
       abortController: abort,
       spawnClaudeCodeProcess: groupSpawner(deps.registry, deps.log, () => {}, `commands:${account.id}`),
@@ -273,6 +273,28 @@ export function untrustedSettings(cwd: string, settings: Record<string, unknown>
   return { settingSources: ['user'], additionalDirectories: [cwd], ...(Object.keys(settings).length ? { settings } : {}) };
 }
 
+// A trusted folder's: all its settings. Except home, whose project
+// settings are Mike's own user ones already, but where the project source
+// would also have Claude pick up the .claude/skills of any folder under
+// home (a cloned repo's, hooks and all) as the agent works on a file
+// there, which folder trust can't look through all of home for
+// (claude-trust.ts). Its CLAUDE.md comes back as an extra directory's,
+// with CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD (set by the caller).
+export function trustedSettings(cwd: string, home: string = os.homedir()): Pick<Options, 'settingSources' | 'additionalDirectories'> {
+  return isHome(cwd, home) ? { settingSources: ['user', 'local'], additionalDirectories: [cwd] } : { settingSources: ['user', 'project', 'local'] };
+}
+
+function isHome(cwd: string, home: string = os.homedir()): boolean {
+  const real = (p: string) => {
+    try {
+      return fs.realpathSync(p);
+    } catch {
+      return path.resolve(p);
+    }
+  };
+  return real(cwd) === real(home);
+}
+
 // The CLI's rows as the protocol's ModelChoice. The "default" row stands
 // for whatever the CLI would pick, which the account's settings can
 // override, so it's left out: the runner works the default out itself.
@@ -323,6 +345,8 @@ class ClaudeSession implements AgentSession {
   // the turn now ending called it (a taken call, from the PostToolUse hook).
   private hasEndTurn = false;
   private endTurnTaken = false;
+  // askBeforeEveryTool was called.
+  private askEvery = false;
   // One reply: whether this session's end_turn is that kind, and whether
   // the agent has written words since the turn's end_turn.
   private oneReply = false;
@@ -363,9 +387,9 @@ class ClaudeSession implements AgentSession {
         ...env,
         CLAUDE_CODE_TERMINAL_MCP_TOOLS: terminalMcpTools(env.CLAUDE_CODE_TERMINAL_MCP_TOOLS, this.oneReply),
         ...opts.env,
-        ...(untrusted ? { CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1' } : {}),
+        ...(untrusted || isHome(opts.cwd) ? { CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1' } : {}),
       },
-      ...(untrusted ? untrustedSettings(opts.cwd, untrusted) : { settingSources: ['user', 'project', 'local'] }),
+      ...(untrusted ? untrustedSettings(opts.cwd, untrusted) : trustedSettings(opts.cwd)),
       systemPrompt: { type: 'preset', preset: 'claude_code', ...(opts.instructions ? { append: opts.instructions } : {}) },
       includePartialMessages: true,
       thinking: { type: 'adaptive', display: 'summarized' },
@@ -388,7 +412,13 @@ class ClaudeSession implements AgentSession {
         // Every Edit and Write, in every mode, a sub-agent's too: where the
         // mode it ran on is recorded, and where one that writes code is
         // made to ask outside Full access (onEditCall).
-        PreToolUse: [{ matcher: [...EDIT_TOOLS].join('|'), hooks: [async (input) => this.onEditCall(input)] }],
+        PreToolUse: [
+          { matcher: [...EDIT_TOOLS].join('|'), hooks: [async (input) => this.onEditCall(input)] },
+          // A hook's ask comes before allow rules, so it's how a folder's
+          // untrusted ones stop applying once the thread leaves Full
+          // (askBeforeEveryTool). Only on a session that may need it.
+          ...(opts.heldGrants ? [{ hooks: [async () => (this.askEvery ? { hookSpecificOutput: { hookEventName: 'PreToolUse' as const, permissionDecision: 'ask' as const, permissionDecisionReason: "The folder's permission rules aren't trusted for this thread." } } : {})] }] : []),
+        ],
         SessionStart: [{ hooks: [async (input) => this.onCompact(input)] }],
       },
       abortController: this.abort,
@@ -737,6 +767,10 @@ class ClaudeSession implements AgentSession {
   // Only the newest switch's ending sets it: a switch to Full finishing
   // after a later one away from it would bring Full back (Codex review).
   private modeSwitch = 0;
+  askBeforeEveryTool(): void {
+    this.askEvery = true;
+  }
+
   async setPermissionMode(mode: PermissionMode): Promise<void> {
     if (this.exited) return;
     const n = ++this.modeSwitch;

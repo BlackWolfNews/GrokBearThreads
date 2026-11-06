@@ -237,7 +237,8 @@ export function checkSummary(t: Obj): string[] {
         if (p.untrusted !== undefined && (!['new', 'changed'].includes(p.untrusted) || !/^[0-9a-f]{64}$/.test(p.hash ?? '') || !isStr(p.file))) problems.push('patches: untrusted needs file and hash');
         if (p.hash !== undefined && p.untrusted === undefined) problems.push('patches: hash only with untrusted');
         if (p.helpers !== undefined && (p.untrusted === undefined || !Array.isArray(p.helpers) || !p.helpers.every(isStr))) problems.push('patches: helpers only with untrusted');
-        for (const k of Object.keys(p)) if (!['id', 'source', 'file', 'folder', 'projectId', 'error', 'matched', 'liveError', 'icon', 'iconFile', 'untrusted', 'hash', 'helpers'].includes(k)) problems.push(`patches: unexpected field ${k}`);
+        if (p.grants !== undefined && (p.untrusted === undefined || p.source !== 'claude' || !Array.isArray(p.grants) || !p.grants.every(isStr))) problems.push('patches: grants only with untrusted claude settings');
+        for (const k of Object.keys(p)) if (!['id', 'source', 'file', 'folder', 'projectId', 'error', 'matched', 'liveError', 'icon', 'iconFile', 'untrusted', 'hash', 'helpers', 'grants'].includes(k)) problems.push(`patches: unexpected field ${k}`);
       }
     }
   }

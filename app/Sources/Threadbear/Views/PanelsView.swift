@@ -386,8 +386,18 @@ struct PatchesList: View {
                     Button("Trust") { app.trustPatches([patch], in: thread.id) }
                         .controlSize(.small)
                         .tip(patch.source == "claude"
-                             ? "Let this folder's Claude Code hooks, status line and MCP servers run on your Mac, and its environment settings (which can change where Claude sends your messages) apply, from your next message. Open the files below to read them first."
+                             ? "Let this folder's Claude Code hooks, status line and MCP servers run on your Mac, and its environment settings (which can change where Claude sends your messages) and permission rules apply, from your next message. Open the files below to read them first."
                              : "Load this patch and let its code run on your Mac from now on. Open the file below to read it first.")
+                }
+                // What its permission rules would let run without asking.
+                if let grants = patch.grants, !grants.isEmpty {
+                    ForEach(grants, id: \.self) { grant in
+                        Text(grant)
+                            .font(.system(size: TypeScale.small))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                    }
                 }
             } else if let error = patch.error {
                 Text(error)

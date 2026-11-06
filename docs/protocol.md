@@ -3074,56 +3074,120 @@ which nothing had hashed (Gautam's scan, 6 Nov).
 The runner starts Claude in a thread's folder with that folder's own
 settings, `.claude/settings.json` and `.claude/settings.local.json`, and
 its `.mcp.json` (the folder's, and those of the folders above it, up to
-home). Some of what they hold is a command Claude runs by itself: `hooks`
-(a SessionStart hook runs as the CLI starts), `statusLine`,
-`subagentStatusLine`, `fileSuggestion`, `apiKeyHelper`,
-`proxyAuthHelper`, `awsCredentialExport`, `awsAuthRefresh`,
-`gcpAuthRefresh`, `otelHeadersHelper` and `extraKnownMarketplaces`, and
-an MCP server with a `command` or a `headersHelper`. The settings' `env`
-counts too, as a whole: nothing in it runs, but any variable can send
-Claude's traffic and the user's login elsewhere (`ANTHROPIC_BASE_URL`,
-`ANTHROPIC_API_KEY`, `HTTPS_PROXY`, `CLAUDE_CODE_USE_BEDROCK` and its
-endpoint, `OTEL_*` exporters) or load code (`NODE_OPTIONS`, `PATH`).
-Claude Code in a terminal asks before trusting a folder; the SDK never
-does, so the runner asks instead (`src/claude-trust.ts`), with patch
-trust's store and rules.
+home), and Claude loads the agents, skills and commands in `.claude/agents`,
+`.claude/skills` and `.claude/commands` of the folder and the folders above
+it (up to home), and a skill in `.claude/skills` anywhere under the folder
+once the agent works on a file beside it (CLI 2.1.318). Some of what they
+hold is a command Claude runs by itself: `hooks` (a SessionStart hook runs
+as the CLI starts), `statusLine`, `subagentStatusLine`, `fileSuggestion`,
+`apiKeyHelper`, `proxyAuthHelper`, `awsCredentialExport`, `awsAuthRefresh`,
+`gcpAuthRefresh`, `otelHeadersHelper`, `extraKnownMarketplaces` (and its
+alias `additionalMarketplaces`), an MCP server with a `command` or a
+`headersHelper`, and the `hooks` and `mcpServers` in an agent's, skill's
+or command's frontmatter. The settings' `env` counts too, as a whole:
+nothing in it runs, but any variable can send Claude's traffic and the
+user's login elsewhere (`ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`,
+`HTTPS_PROXY`, `CLAUDE_CODE_USE_BEDROCK` and its endpoint, `OTEL_*`
+exporters) or load code (`NODE_OPTIONS`, `PATH`). In a thread that asks
+before tools run (Ask or Auto), so do the parts that let tools run without
+asking, as Claude applies them before the runner's approval card: the
+settings' `permissions` (allow rules, `additionalDirectories`,
+`defaultMode`, anything but `deny`, `ask`,
+`blockReadsOutsideWorkingDirectories` and `disableBypassPermissionsMode`,
+which only narrow), `sandbox` (turning it on lets sandboxed Bash run
+unasked), a skill's or command's `allowed-tools` and an agent's
+`permissionMode`. In Full they grant nothing more, so they don't count
+there. Claude Code in a terminal asks before trusting a folder; the SDK
+never does, so the runner asks instead (`src/claude-trust.ts`), with
+patch trust's store and rules.
 
-- A folder whose settings have none of those (permissions, a model,
-  plugins switched on) asks nothing, and nothing changes. Nor does home,
-  whose `.claude/settings.json` is the user's own.
-- Otherwise the hash covers those parts, by file, and the files inside
-  the folder that their commands or variables name
-  (`bun .claude/hooks/start.mjs`, `"$CLAUDE_PROJECT_DIR"/scripts/x.sh`, a
-  server's args, `NODE_OPTIONS=--require ./x.js`), hashed and not
-  followed. Settings with commands and no `env` hash as they did before
-  `env` counted, so trusting them holds. A settings file that isn't plain JSON counts whole. It's kept
-  in `patch-trust.json` in the folder's list, as `claude:<hash>`, under
-  the same folder key, so a worktree counts as its main checkout and
+- A folder whose settings have none of those (a model, plugins switched
+  on, deny rules; allow rules in a Full thread) asks nothing, and nothing
+  changes. Nor does home, whose `.claude/settings.json` is the user's own;
+  a thread there starts with the user and local settings only
+  (`settingSources: ["user", "local"]`, home named as an extra directory
+  for its CLAUDE.md), as the project source would have Claude pick up the
+  `.claude/skills` of any folder under home as the agent works there.
+  Frontmatter is read as top-level keys at the left margin.
+- Otherwise the hash covers those parts, by file, and every file inside
+  the repo that they reach: each word in them that is a file there, with
+  a `/` or without (`node hook.mjs`, a server's `"args": ["server.js"]`,
+  `NODE_OPTIONS=--require ./x.js`, an allow rule's
+  `Bash(./scripts/x.sh:*)`), and what each command runs in turn, followed
+  as patch trust follows a patch's commands (`src/script-trust.ts`:
+  imports, shell scripts, `npm run`, `make`). Settings with commands and
+  no `env` or grants hash as they did before those counted, so trusting
+  them holds. It's kept in `patch-trust.json` in the folder's list, as `claude:<hash>`,
+  under the same folder key, so a worktree counts as its main checkout and
   Threadbear's own checkout is always trusted.
+- What the hash can't cover can't be trusted, whatever's stored: a
+  command that runs code it can't follow (`python -m x`, `node .`, `curl
+  ... | sh`, a command in a variable, a dynamic `import()` in a script it
+  runs), a package run by name (`npx`, `bunx`, `pnpm dlx`, `npm exec`), a
+  test runner finding its own tests (`node --test`, `bun test`), a program
+  on PATH, anywhere in what a command runs, that may load or run code from
+  the folder by its own rules (a formatter, a test runner, a build tool,
+  `git`, which an alias or `core.hooksPath` makes run anything) rather
+  than a script, a shell, a JS runner, a package script, a function the
+  script defines or a program known to do neither (`echo`, `say`,
+  `afplay`, `jq` and the like, `INERT_PROGRAMS` in `src/script-trust.ts`), a
+  file or folder in the repo named in an environment variable, or any
+  named there by a relative path (`PATH=./bin`, `PYTHONPATH=.`,
+  `BASH_ENV=./startup` or `BASH_ENV=startup`, `NODE_OPTIONS=--require
+  ./x.js`: whatever reads the variable loads it from wherever it runs),
+  `--preserve-symlinks` for Node, a settings file that isn't
+  plain JSON, `hooks` or `mcpServers` frontmatter that isn't YAML in the
+  one shape read line by line (block mappings and lists, each nested
+  deeper than its key, with one-line plain or unescaped quoted values or
+  one-line `[a, b]` lists: no block scalars, escapes, anchors, tags,
+  comments, flow mappings or quoted keys), other frontmatter that can't be
+  read key by key, more than 300 files, or more than 20,000 folders to
+  look through for agents, skills and commands (nested skills, outside
+  git, or through a link to a folder). Nor can an allow rule (or `allowed-tools`) that covers
+  Threadbear's own tools (`mcp__threadbear...`, `mcp__*`, `*`, or
+  bypassing permissions: `defaultMode` or an agent's `permissionMode`), in
+  a thread that asks first. JavaScript a hook reaches that runs commands
+  itself (`child_process`, `Bun.spawn`) is one too: what it runs isn't
+  followed.
 - While that version isn't trusted, a Claude thread's `patches` has
   `{ id: "claude-settings", source: "claude", file, untrusted, hash,
-  helpers? }`: `file` is the first file with something that runs,
-  `helpers` the other files and the scripts. Codex threads don't get it.
+  helpers?, grants? }`: `file` is the first file with something that runs,
+  `helpers` the other files and the scripts, `grants` (a thread that asks
+  first) what they'd let run without asking, in words ("Allows Bash
+  without asking (.claude/settings.json)"). One that can't be trusted is
+  `{ id: "claude-settings", source: "claude", file, error }` instead, with
+  no hash to trust. Codex threads don't get it.
 - A Claude session starts without the folder's project and local
-  settings (`settingSources: ["user"]`), and gets them back without the
-  parts that run and without `env`, merged as Claude merges them, as flag
-  settings (the SDK's `settings`), so permission rules and the rest still
-  apply. Flag settings can set what Claude ignores from a repo's own, so
-  those are left out of the copy too: `autoMemoryDirectory`,
-  `modelPicker`, `footerLinksRegexes`, `spellcheck`, and `sandbox`'s
-  `ripgrep`, `filesystem.disabled`, `network.strictAllowlist` and
-  `credentials` `allowPlaintextInject`, `awsPairs` and `sigv4`. The
-  folder is named as an extra directory with
-  `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`, which brings its
-  CLAUDE.md back without its settings. What doesn't come: the folder's
-  `.claude/skills`, `agents` and `commands`, CLAUDE.md files above the
-  folder, and `.mcp.json` servers. The thread gets a `system.note` saying
-  so, once per version.
-- `patches.trust` with that `file` and `hash` trusts it. A session that
-  started without them is replaced by a fresh one (resuming the same
-  conversation) at the next message, as is one that started with them
-  when a new version arrives that isn't trusted. A CLI's own turns
-  between messages keep what it started with.
+  settings (`settingSources: ["user"]`), and gets back, as flag settings
+  (the SDK's `settings`), only what can't run anything or widen access,
+  merged as Claude merges them: the narrowing `permissions` above,
+  `model`, `effortLevel`, `alwaysThinkingEnabled`, `outputStyle`,
+  `language`, `attribution`, `includeCoAuthoredBy`,
+  `includeGitInstructions`, `respectGitignore`, `cleanupPeriodDays`,
+  `enabledPlugins`, `deniedMcpServers`, `disabledMcpjsonServers`,
+  `claudeMdExcludes` and `skillOverrides`. Flag settings sit above project
+  ones, and Claude takes some keys from them that it ignores from a repo
+  (`processWrapper`, `autoMemoryDirectory`, `sandbox` paths), so the copy
+  is a list of what's kept, not of what's dropped. The folder is named as
+  an extra directory with `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`,
+  which brings its CLAUDE.md back without its settings. What doesn't
+  come: the folder's `.claude/skills`, `agents` and `commands`, CLAUDE.md
+  files above the folder, and `.mcp.json` servers. The thread gets a
+  `system.note` saying so, once per version.
+- `patches.trust` with that `file` and `hash` trusts it. Trusting the
+  version a thread that asks first was shown also trusts what it runs for
+  a Full thread there. A session that started without them is replaced by
+  a fresh one (resuming the same conversation) at the next message, as is
+  one that started with them when a new version arrives that isn't
+  trusted, or when the thread leaves Full and the folder's grants aren't
+  trusted. A CLI's own turns between messages keep what it started with,
+  except that a session started in Full with grants that aren't trusted
+  for a thread that asks first (`heldGrants`) sends every tool call to the
+  approval check, past the CLI's allow rules, from the moment the thread
+  leaves Full (a PreToolUse hook answering `ask`).
+- What a command reaches is hashed up to the top of the repo, or of the
+  outer repo when an `.mcp.json` or `.claude` folder above the thread's
+  folder is in one (a thread in a submodule).
 - An agent's Edit or Write to one of the settings files trusts them as it
   leaves them; to a script they name, only when an earlier version was
   trusted, as with a patch's helpers. Either only with the file as that

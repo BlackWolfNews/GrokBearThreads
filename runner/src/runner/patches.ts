@@ -12,7 +12,7 @@ import { threadEnv } from '../restart.ts';
 import { paths } from '../config.ts';
 import { commandFiles, isPatchFile, namedPaths, patchHash, scanModule, type ClaudeVerdict, type PatchHash } from '../patch-trust.ts';
 import type { AgentWrite } from '../adapters/types.ts';
-import { CLAUDE_PATCH_ID, claudeCommands, settingsCommands, settingsNamedPaths } from '../claude-trust.ts';
+import { CLAUDE_PATCH_ID, claudeCommands, claudeOptions, settingsCommands, settingsNamedPaths, type ClaudeOptions } from '../claude-trust.ts';
 import { canonicalPath, runsAsCodeByName } from '../code-writes.ts';
 import type { PatchInfo } from '../protocol.ts';
 import { automaticTrust, EMPTY_PATCH_SET, PATCH_EXTENSIONS, patchDirs, hookApplies, loadPatchSet, applyLive, hasLive, projectPanels, renderListPanel, renderPanel, runCommand, type CommandOutcome, type PanelRender, type PatchSet, type ProjectFolder, projectPatchFiles } from '../patches.ts';
@@ -72,7 +72,8 @@ export const patchesPart = {
     const { rec, rt } = st;
     const now = this.clock.now();
     const folders = this.projects?.foldersFor(rec) ?? [];
-    const key = JSON.stringify([rec.cwd, folders]);
+    // A mode change can change what the folder's Claude settings wait on.
+    const key = JSON.stringify([rec.cwd, folders, rec.provider === 'claude' && claudeOptions(rec).grants]);
     if (rt.patches && rt.patches.cwd === rec.cwd && rt.patches.key !== key) {
       // Same folder, different projects: keep showing what there is while
       // the new set loads, rather than flashing the panels away.
@@ -127,7 +128,7 @@ export const patchesPart = {
     try {
       base = await this.loadSharedPatchSet(cwd, this.projects?.foldersFor(rec) ?? [], this.projects?.allFolders() ?? []);
       // Claude threads only: a Codex thread doesn't read them.
-      const claude = rec.provider === 'claude' ? this.claudePatchInfo(cwd) : undefined;
+      const claude = rec.provider === 'claude' ? this.claudePatchInfo(cwd, claudeOptions(rec)) : undefined;
       if (claude) base = { ...base, patches: [...base.patches, claude] };
       set = await applyLive(base, { cwd, threadId: rec.id, run: (command, dir) => this.runLiveCommand(rec.id, command, dir), verify: (file, hash) => this.patchTrust.verify(file, hash) });
     } catch (e) {
@@ -387,17 +388,23 @@ export const patchesPart = {
   // The thread folder's Claude Code settings, as an entry in its patch
   // list while they run commands that aren't trusted, so Patches shows
   // them with a Trust button as it does a waiting patch file.
-  claudePatchInfo(this: Runner, cwd: string): PatchInfo | undefined {
+  // A thread that asks before tools run also waits on what would let them
+  // run unasked (`grants`, listed for the app to show), so the check is
+  // kept per folder and kind of thread. One that can't be checked shows
+  // why, with nothing to trust.
+  claudePatchInfo(this: Runner, cwd: string, opts: ClaudeOptions = {}): PatchInfo | undefined {
     const now = this.clock.now();
-    let hit = this.claudeChecks.get(cwd);
+    const key = `${opts.grants ? 'grants' : 'full'}\0${cwd}`;
+    let hit = this.claudeChecks.get(key);
     if (!hit || now - hit.at >= FOLDER_CACHE_MS) {
-      hit = { at: now, verdict: this.patchTrust.checkClaude(cwd) };
-      this.claudeChecks.set(cwd, hit);
+      hit = { at: now, verdict: this.patchTrust.checkClaude(cwd, opts) };
+      this.claudeChecks.set(key, hit);
     }
     const v = hit.verdict;
     if (v.trusted) return undefined;
+    if (v.reason === 'unchecked') return { id: CLAUDE_PATCH_ID, source: 'claude', ...(v.files.length ? { file: v.files[0] } : {}), error: `Skipped, and can't be trusted as they are: ${v.problem}` };
     const helpers = [...v.files.slice(1), ...v.named];
-    return { id: CLAUDE_PATCH_ID, source: 'claude', file: v.files[0], untrusted: v.reason, hash: v.hash, ...(helpers.length ? { helpers } : {}) };
+    return { id: CLAUDE_PATCH_ID, source: 'claude', file: v.files[0], untrusted: v.reason, hash: v.hash, ...(helpers.length ? { helpers } : {}), ...(v.grants?.length ? { grants: v.grants } : {}) };
   },
 
   // Says in the thread, once per version, that the CLI started without the
@@ -406,9 +413,13 @@ export const patchesPart = {
     const { rt } = st;
     if (rt.claudeNoted === v.hash) return;
     rt.claudeNoted = v.hash;
-    const what = v.files.map((f) => path.relative(st.rec.cwd, f)).join(' and ');
+    const what = v.files.map((f) => path.relative(st.rec.cwd, f)).join(' and ') || 'its .claude folders';
+    if (v.reason === 'unchecked') {
+      this.emit(st, { type: 'system.note', text: `Skipped this folder's Claude Code hooks, commands, permissions and environment settings (${what}): ${v.problem} Its other settings and CLAUDE.md still apply.` }, rt.turn?.turnId);
+      return;
+    }
     const why = v.reason === 'changed' ? 'they changed since you trusted them' : "you haven't trusted them yet";
-    this.emit(st, { type: 'system.note', text: `Skipped this folder's Claude Code hooks, commands and environment settings (${what}): ${why}. Its other settings and CLAUDE.md still apply. Trust them in Patches to run them from your next message.` }, rt.turn?.turnId);
+    this.emit(st, { type: 'system.note', text: `Skipped this folder's Claude Code hooks, commands, permissions and environment settings (${what}): ${why}. Its other settings and CLAUDE.md still apply. Trust them in Patches to run them from your next message.` }, rt.turn?.turnId);
   },
 
   // Every thread whose patches have been read reads them again now: a

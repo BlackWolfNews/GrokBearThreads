@@ -120,6 +120,21 @@ test("a folder's own settings load normally; with untrusted Claude settings, onl
   held.state.close!();
 });
 
+test("F2/F8: a session started in Full with a folder's untrusted permission rules can make every tool ask once the thread leaves Full", async () => {
+  const plain = start();
+  assert.equal(plain.state.options.hooks.PreToolUse.length, 1, "only the edit check's hook, and no round trip per tool, where none is needed");
+  plain.state.close!();
+  const held = start([], { permissionMode: 'full', heldGrants: true });
+  assert.ok(held.state.options.hooks.PreToolUse[0].matcher, 'the edit check stays');
+  const pre = held.state.options.hooks.PreToolUse[1].hooks[0];
+  assert.deepEqual(await pre({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: {} }), {});
+  held.session.askBeforeEveryTool!();
+  const out = await pre({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: {} });
+  // A hook's ask comes before the CLI's allow rules, so the call reaches canUseTool.
+  assert.equal(out.hookSpecificOutput.permissionDecision, 'ask');
+  held.state.close!();
+});
+
 test('effort: sent at start, changed through flag settings, and read back from the Stop hook', async () => {
   const { session, state, outputs } = start([], { effort: 'low' });
   assert.equal(state.options.effort, 'low');

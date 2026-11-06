@@ -98,7 +98,7 @@ import type { Needs } from './needs.ts';
 import { asksForAppRestart } from './app-restarts.ts';
 import type { ConnectorsStatus } from './connectors.ts';
 import { isPatchFile, PatchTrust, type ClaudeVerdict, type PatchTrustStore } from './patch-trust.ts';
-import { claudeSettingsWithoutCommands } from './claude-trust.ts';
+import { claudeOptions, claudeSettingsWithoutCommands } from './claude-trust.ts';
 import {
   EMPTY_PATCH_SET,
   findWorktreePatch,
@@ -357,6 +357,9 @@ type Runtime = {
   // skipped (claude-trust.ts). `claudeNoted` is the last one said in the
   // thread, so a session restart doesn't say it again.
   claudeSkipped?: string;
+  // Started in Full with the folder's settings, which hold permission
+  // rules not trusted for a thread that asks first (StartSessionOptions.heldGrants).
+  claudeHeldGrants?: boolean;
   claudeNoted?: string;
   // The installed version when the live session was started (what E says
   // new sessions start on), and whether it has got going since.
@@ -1539,7 +1542,7 @@ export class Runner {
     // The folder's Claude Code hooks were trusted since the CLI started
     // without them, or new ones came that aren't (a pull): a fresh CLI
     // reads the folder's settings again.
-    else if (rt.session && rec.provider === 'claude' && Boolean(rt.claudeSkipped) === this.patchTrust.checkClaude(rec.cwd).trusted) this.releaseSession(st);
+    else if (rt.session && rec.provider === 'claude' && Boolean(rt.claudeSkipped) === this.patchTrust.checkClaude(rec.cwd, claudeOptions(rec)).trusted) this.releaseSession(st);
     // Never two live CLIs on one session: wait for a releasing one to exit.
     while (rt.closing) await rt.closing;
     // An archive's worktree cleanup still running: where this turn starts
@@ -1706,8 +1709,9 @@ export class Runner {
     rt.startVersion = this.cliList()?.find((c) => c.provider === rec.provider)?.installedVersion;
     // Read now, not from the patch list's cache: a pull just before this
     // message may have brought hooks.
-    const claude = rec.provider === 'claude' ? this.patchTrust.checkClaude(rec.cwd) : undefined;
+    const claude = rec.provider === 'claude' ? this.patchTrust.checkClaude(rec.cwd, claudeOptions(rec)) : undefined;
     rt.claudeSkipped = claude && !claude.trusted ? claude.hash : undefined;
+    rt.claudeHeldGrants = Boolean(claude?.trusted && rec.permissionMode === 'full' && !this.patchTrust.checkClaude(rec.cwd, { grants: true }).trusted);
     rt.session = adapter.start(
       {
         threadId: rec.id,
@@ -1728,6 +1732,7 @@ export class Runner {
         ...(rt.claudeSkipped ? { untrustedProjectSettings: claudeSettingsWithoutCommands(rec.cwd) } : {}),
         // Read at each call, from the thread's folder then.
         runsAsCode: (file) => this.writeRunsAsCode(rec, file),
+        ...(rt.claudeHeldGrants ? { heldGrants: true } : {}),
       },
       sink,
     );
@@ -2586,6 +2591,13 @@ export class Runner {
       // Claude CLI takes a raise now, and a lowered Codex turn carries on
       // as it started.
       if (rt.turn) rt.turn.access = moreAccess(rt.turn.access, params.permissionMode);
+      // Out of Full with the folder's untrusted permission rules loaded:
+      // they stop applying now, even to a turn the CLI starts by itself,
+      // and the next message gets a CLI without them.
+      if (rt.session && rt.claudeHeldGrants && params.permissionMode !== 'full') {
+        rt.session.askBeforeEveryTool?.();
+        rt.releaseWhenIdle = true;
+      }
       if (rt.session && !release) {
         rt.session.setPermissionMode(params.permissionMode).catch(() => {
           rt.releaseWhenIdle = true;

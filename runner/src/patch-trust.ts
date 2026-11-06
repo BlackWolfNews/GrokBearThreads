@@ -52,8 +52,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseSync } from 'oxc-parser';
 import { atomicWriteFileSync } from './fsutil.ts';
-import { claudeCommands } from './claude-trust.ts';
-import { looksRunnable, MAX_READ_BYTES, reachOf, reachOfCommand, Reads } from './script-trust.ts';
+import { claudeCommands, type ClaudeOptions } from './claude-trust.ts';
+import { looksRunnable, MAX_READ_BYTES, reachOf, reachOfCommand, Reads, type FollowOptions } from './script-trust.ts';
 
 export type TrustVerdict =
   // `files`: the local files its hash covered, real paths. Absent when the
@@ -73,10 +73,14 @@ export type TrustVerdict =
 
 // A folder's Claude Code settings that run commands (claude-trust.ts):
 // trusted, or nothing in them runs anything, or waiting with what would.
+// `grants`: with ClaudeOptions.grants, what they'd let run unasked, in
+// words. 'unchecked': the hash can't cover what would run (`problem`), so
+// nothing can trust it as it stands.
 export type ClaudeVerdict =
   | { trusted: true }
   // `read`: each file the hash was made from, by the hash of the bytes read.
-  | { trusted: false; reason: 'new' | 'changed'; hash: string; files: string[]; named: string[]; read: Record<string, string> };
+  | { trusted: false; reason: 'new' | 'changed'; hash: string; files: string[]; named: string[]; read: Record<string, string>; grants?: string[] }
+  | { trusted: false; reason: 'unchecked'; problem: string; hash: string; files: string[]; named: string[]; read: Record<string, string>; grants?: string[] };
 
 // Claude settings hashes go in the same per-folder list as patch files',
 // with this in front, so a runner from before them keeps them when it
@@ -85,6 +89,13 @@ export const CLAUDE_PREFIX = 'claude:';
 // A patch hash from a trust file before version 3, kept only to say the
 // folder had something trusted: it never matches (see TrustFile).
 const LEGACY_PREFIX = 'legacy:';
+
+// Where a Claude settings file's approved bytes are kept, by kind of
+// thread: apart from patch files', and a thread that asks first apart
+// from a Full one.
+function claudeScope(opts: ClaudeOptions): string {
+  return opts.grants ? 'claude-grants\0' : 'claude\0';
+}
 
 // Hashes kept per folder: enough for a repo's patches across a few
 // branches and versions, without the file growing for ever.
@@ -145,8 +156,10 @@ export interface PatchTrustStore extends PatchGate {
   // Whether `file` hashes to `hash` now, read afresh (no cache): checked
   // just before a trusted hook or setup script runs.
   verify(file: string, hash: string): boolean;
-  // The thread folder's Claude Code settings (claude-trust.ts).
-  checkClaude(cwd: string): ClaudeVerdict;
+  // The thread folder's Claude Code settings (claude-trust.ts), with
+  // what lets tools run unasked counted too for a thread that asks first
+  // (`grants`).
+  checkClaude(cwd: string, opts?: ClaudeOptions): ClaudeVerdict;
   trustClaude(cwd: string, hash: string): boolean;
   // An agent's verified Edit or Write to `file` in a Full access thread in
   // `cwd`, which wrote bytes hashing to `sha256` from a file hashing to
@@ -259,42 +272,72 @@ export class PatchTrust implements PatchTrustStore {
     return { trusted: false, reason: before ? 'changed' : 'new', hash, ...(helpers.length ? { helpers } : {}) };
   }
 
-  checkClaude(cwd: string): ClaudeVerdict {
+  checkClaude(cwd: string, opts: ClaudeOptions = {}): ClaudeVerdict {
     this.load();
     const key = folderKeyOfDir(cwd);
     if (this.always.some((d) => isInside(key, d))) return { trusted: true };
-    const found = claudeCommands(cwd, this.claudeHome);
+    const found = claudeCommands(cwd, this.claudeHome, opts);
     if (!found) return { trusted: true };
     const known = (this.folders.get(key) ?? []).filter((h) => h.startsWith(CLAUDE_PREFIX));
+    const base = { hash: found.hash, files: found.files, named: found.named, read: found.read, ...(found.grants ? { grants: found.grants } : {}) };
+    // Before the stored hashes: a yes can't vouch for code the hash didn't see.
+    if (found.incomplete) return { trusted: false, reason: 'unchecked', problem: found.incomplete, ...base };
     if (known.includes(CLAUDE_PREFIX + found.hash)) {
-      for (const [f, sha] of Object.entries(found.read)) this.approve(f, sha);
+      // Kept apart by kind: bytes trusted for what they run (Full) haven't
+      // been trusted for the permission rules in them, so an edit can't
+      // carry those on (trustClaudeEdit).
+      for (const [f, sha] of Object.entries(found.read)) this.approve(claudeScope(opts) + f, sha);
       return { trusted: true };
     }
-    return { trusted: false, reason: known.length ? 'changed' : 'new', hash: found.hash, files: found.files, named: found.named, read: found.read };
+    return { trusted: false, reason: known.length ? 'changed' : 'new', ...base };
   }
 
+  // Trusting the version a thread that asks first was shown (grants and
+  // all) trusts what it runs for a Full thread there too, as it covers it:
+  // both hashes are made from this one look, and only when the one shown
+  // is what's there now.
   trustClaude(cwd: string, hash: string): boolean {
     if (!/^[0-9a-f]{64}$/.test(hash)) return false;
-    this.add(folderKeyOfDir(cwd), [CLAUDE_PREFIX + hash]);
+    const hashes = [CLAUDE_PREFIX + hash];
+    const asking = claudeCommands(cwd, this.claudeHome, { grants: true });
+    if (asking && !asking.incomplete && asking.hash === hash) {
+      const full = claudeCommands(cwd, this.claudeHome);
+      if (full && !full.incomplete && full.hash !== hash) hashes.push(CLAUDE_PREFIX + full.hash);
+    }
+    this.add(folderKeyOfDir(cwd), hashes);
     return true;
   }
 
+  // As a thread that asks first sees them (which covers a Full thread's),
+  // when every other file was trusted for that; else as a Full thread
+  // does, which leaves the permission rules to be asked about.
   trustClaudeEdit(cwd: string, file: string, sha256: string, base: string | null): boolean {
     const target = path.resolve(cwd, file);
     if (!isInside(realpath(target), realpath(path.resolve(cwd)))) return false;
-    // An Edit wrote only what it changed; the rest is the file it started
-    // from, which counts only if it was trusted (F21).
-    if (base !== null && !this.isApproved(target, base)) return false;
-    this.approve(target, sha256);
-    const verdict = this.checkClaude(cwd);
-    if (verdict.trusted) return false;
-    // The hash was made from these bytes, so it vouches for the edit's
-    // output and nothing written over it since; and every other file it
-    // was made from must be bytes trusted or written by such an edit: a
-    // settings.local.json a command wrote isn't the edit's to approve.
-    if (verdict.read[target] !== sha256) return false;
-    if (!Object.entries(verdict.read).every(([f, sha]) => this.isApproved(f, sha))) return false;
-    return this.trustClaude(cwd, verdict.hash);
+    for (const opts of [{ grants: true }, {}]) {
+      // An Edit wrote only what it changed; the rest is the file it started
+      // from, which counts only if it was trusted for this kind of thread (F21).
+      if (base !== null && !this.isApproved(claudeScope(opts) + target, base)) continue;
+      this.approve(claudeScope(opts) + target, sha256);
+      const verdict = this.checkClaude(cwd, opts);
+      if (verdict.trusted) return false;
+      // Nothing can trust it for a thread that asks first; Full may still.
+      if (verdict.reason === 'unchecked') {
+        if (opts.grants) continue;
+        return false;
+      }
+      // The hash was made from these bytes, so it vouches for the edit's
+      // output and nothing written over it since; and every other file it
+      // was made from must be bytes trusted (for this kind of thread) or
+      // written by such an edit: a settings.local.json a command wrote
+      // isn't the edit's to approve.
+      if (verdict.read[target] !== sha256) return false;
+      if (!Object.entries(verdict.read).every(([f, sha]) => this.isApproved(claudeScope(opts) + f, sha))) continue;
+      if (opts.grants) return this.trustClaude(cwd, verdict.hash);
+      this.add(folderKeyOfDir(cwd), [CLAUDE_PREFIX + verdict.hash]);
+      return true;
+    }
+    return false;
   }
 
   // Trusts one version of a patch file, by the hash the app showed. False
@@ -900,6 +943,14 @@ export function liveCommandProblem(command: string, folder: string, files: strin
   if (stuck) return `runs ${path.relative(real, stuck)}, and patch trust can't follow everything that runs: ${blocked[stuck]}`;
   if (reach.problem) return reach.problem;
   return undefined;
+}
+
+// What script-trust needs to follow a command run from `folder` (a Claude
+// Code hook, claude-trust.ts) the way it follows a patch's: the same
+// module scan and import resolution, bounded by the repo's top.
+export function followOptions(folder: string, reads?: Reads): FollowOptions {
+  const real = realpath(folder);
+  return { folder: real, top: repoTop(real), scanJs: scriptScan, resolveImport: (dir, spec) => resolveHelper(dir, spec, reads), namedPaths, ...(reads ? { reads } : {}) };
 }
 
 // The top of the git checkout (or worktree) `dir` is in, else `dir`.
