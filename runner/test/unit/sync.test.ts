@@ -1067,7 +1067,8 @@ test('project pictures: sent to file storage once the backend takes them, once p
   fs.writeFileSync(next, Buffer.from('NEWBYTES'));
   change({ icon: { image: { path: next, mediaType: 'image/png' }, by: 'mike', updatedAt: '2026-10-28T00:00:00.000Z' } });
   h.clock.advance(SYNC_COALESCE_MS);
-  await tick(20);
+  // A loaded machine takes more than a set number of ticks (it stopped a Linux runner following main).
+  for (let i = 0; i < 200 && uploads.length < 2; i++) await tick(5);
   assert.equal(uploads.length, 2);
   assert.equal(uploads[1]!.bytes, 'NEWBYTES');
   assert.equal(setIcons()[1]!.args.picture, 'p1-def456');

@@ -810,7 +810,8 @@ async function smoke(c, id) {
     let port = null;
     while (!port) {
       if (exited) throw new Error(`it exited (${exited.code ?? exited.signal}) before listening`);
-      if (Date.now() - started > 30_000) throw new Error('it was not listening after 30 s');
+      // Long enough for a busy Mac: at 30 s, load kept every release from going out for hours.
+      if (Date.now() - started > 90_000) throw new Error('it was not listening after 90 s');
       port = /listening on (\d+)/.exec(fs.readFileSync(out, 'utf8'))?.[1];
       if (!port) await sleep(100);
     }
