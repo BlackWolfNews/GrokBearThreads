@@ -223,9 +223,11 @@ extension AppModel {
 
     /// Goes to a folder from the one showing, which Back then returns to as
     /// `memory` says. `selecting` is what to show picked there: the folder
-    /// Mike came up out of, as the Finder does.
-    func browseFolder(_ path: String, from memory: FolderMemory, selecting: String? = nil, in thread: ThreadSummary) {
-        guard let current = panePreview[thread.id] else { return }
+    /// Mike came up out of, as the Finder does. `current` is the folder
+    /// the browser is showing: the rail's Files panel shows the thread's
+    /// folder without storing a preview, so the pane's stored one may be
+    /// none, or another section's.
+    func browseFolder(_ path: String, from memory: FolderMemory, selecting: String? = nil, showing current: PanePreview, in thread: ThreadSummary) {
         var next = PanePreview(target: .folder(path), title: (path as NSString).lastPathComponent, from: current.from)
         next.away = current.away
         next.back = backStack(of: current, leaving: memory)
@@ -236,9 +238,8 @@ extension AppModel {
     /// A double-click in the folder browser. A folder goes in; a file shows
     /// in the pane with Back to here; a package or a project file opens in
     /// its app, as neither means anything in the pane.
-    func openFromFolder(_ entry: FolderEntry, from memory: FolderMemory, in thread: ThreadSummary) {
-        if entry.isFolder { return browseFolder(entry.path, from: memory, in: thread) }
-        guard let current = panePreview[thread.id] else { return }
+    func openFromFolder(_ entry: FolderEntry, from memory: FolderMemory, showing current: PanePreview, in thread: ThreadSummary) {
+        if entry.isFolder { return browseFolder(entry.path, from: memory, showing: current, in: thread) }
         let back = backStack(of: current, leaving: memory)
         if thread.isRemote {
             return openRemoteFile(URL(fileURLWithPath: entry.path), .panel, in: thread, title: entry.name, back: back)

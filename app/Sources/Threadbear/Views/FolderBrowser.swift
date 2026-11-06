@@ -65,8 +65,11 @@ struct FolderBrowser: NSViewRepresentable {
             source = { folder in try await Task.detached(priority: .userInitiated) { try FolderListing.read(folder) }.value }
         }
         let view = FolderPaneView(path: path, away: preview.away, memory: preview.folderMemory, mode: mode, source: source)
-        view.onOpen = { [weak app] entry, memory in app?.openFromFolder(entry, from: memory, in: thread) }
-        view.onBrowse = { [weak app] folder, memory, selecting in app?.browseFolder(folder, from: memory, selecting: selecting, in: thread) }
+        // The folder this browser shows, which a file or folder opened from
+        // it comes Back to.
+        let showing = preview
+        view.onOpen = { [weak app] entry, memory in app?.openFromFolder(entry, from: memory, showing: showing, in: thread) }
+        view.onBrowse = { [weak app] folder, memory, selecting in app?.browseFolder(folder, from: memory, selecting: selecting, showing: showing, in: thread) }
         view.onExternal = { [weak app] url in app?.openExternally(url) }
         view.onReveal = { [weak app] file in app?.revealInFinder(file) }
         return view
