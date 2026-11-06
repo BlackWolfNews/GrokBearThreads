@@ -138,6 +138,24 @@ export function readImageInfo(file: string): ImageInfo | null {
   }
 }
 
+// A video file's type and, when its header has it near the start, its
+// picture size (sniffVideo). For design reviews' clips (reviews.ts).
+export function readVideoInfo(file: string): ImageInfo | null {
+  let fd: number | null = null;
+  try {
+    const st = fs.statSync(file);
+    if (!st.isFile()) return null;
+    fd = fs.openSync(file, 'r');
+    const buf = Buffer.alloc(Math.min(st.size, 1024 * 1024));
+    fs.readSync(fd, buf, 0, buf.length, 0);
+    return sniffVideo(buf);
+  } catch {
+    return null;
+  } finally {
+    if (fd !== null) fs.closeSync(fd);
+  }
+}
+
 export function imageRefFor(file: string, fallbackType?: string): ImageRef {
   const info = readImageInfo(file);
   const ref: ImageRef = { path: file, mediaType: info?.mediaType ?? fallbackType ?? 'application/octet-stream' };

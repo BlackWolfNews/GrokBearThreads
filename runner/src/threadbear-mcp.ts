@@ -460,18 +460,18 @@ export function buildThreadbearTools(
   const reviewTools = [
     tool(
       'show_options',
-      'Shows the user design options (mockups, wireframes, screenshots of variants) in a review window to choose between, instead of pinning them, listing them or reading every image into the transcript. Give an option\u2019s other screens or states as its shots, never as options of their own. The window steps through every shot in order, then shows the options side by side; the user can pick any number or none, and reply. Returns a review ID promptly; finish your turn and the answer arrives later as a message. A reference option (today\u2019s version, say) can\u2019t be picked.',
+      'Shows the user design options (mockups, wireframes, screenshots, videos or HTML pages of variants) in a review window to choose between, instead of pinning them, listing them or reading every image into the transcript. Give an option\u2019s other screens or states as its shots, never as options of their own. The window steps through every shot in order, then shows the options side by side; the user can pick any number or none, and reply. Returns a review ID promptly; finish your turn and the answer arrives later as a message. A reference option (today\u2019s version, say) can\u2019t be picked.',
       {
         title: z.string().min(1).max(200).describe('What the user is reviewing.'),
         note: z.string().max(4000).optional().describe('A short explanation or question for the whole review.'),
         options: z.array(z.object({
           id: z.string().min(1).max(200).describe('Stable option ID, such as A or B.'),
           title: z.string().min(1).max(200),
-          path: z.string().min(1).optional().describe('Image path, absolute or relative to this thread\u2019s folder. Or give shots.'),
+          path: z.string().min(1).optional().describe('Image, video (MP4, MOV) or HTML page path, absolute or relative to this thread\u2019s folder; videos play, pages show with scripts off. Or give shots.'),
           shots: z.array(z.object({
             path: z.string().min(1),
             title: z.string().max(200).optional().describe('What it shows: "Mid-drag". The same across options.'),
-          })).max(8).optional().describe('More images of this option, after path.'),
+          })).max(8).optional().describe('More images, videos or pages of this option, after path.'),
           url: z.string().max(2000).optional().describe('Where it runs live, http(s).'),
           note: z.string().max(4000).optional(),
           reference: z.boolean().optional().describe('Context to compare against, not to pick.'),

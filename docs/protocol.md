@@ -648,7 +648,8 @@ type Settings = {
 
 ### Design reviews
 
-`show_options` gives the calling thread a durable image review. It returns
+`show_options` gives the calling thread a durable review of pictures,
+videos and pages. It returns
 promptly, with the review's id and the `review:<id>` link that opens it
 from an ask or a message (see Needs you); the agent may finish its turn
 while Mike reviews the options.
@@ -669,7 +670,9 @@ or none, and answered most reviews in the thread in his own words (4 Nov
 // Clients send pickedIds (it wins over pickedId); a client that sends only
 // pickedId still works. none: none of them will do, never with picks.
 type ReviewDraft = { pickedId?: string, pickedIds?: string[], notes: Record<string, string>, reply?: string, none?: true }
-type ReviewShot = { title?: string, image: ImageRef }
+// media: a video (video/mp4, video/quicktime) or an HTML page (text/html)
+// the window plays or shows in place of image, which is then its still.
+type ReviewShot = { title?: string, image: ImageRef, media?: ImageRef }
 type DesignReview = {
   id: string
   title: string
@@ -680,7 +683,7 @@ type DesignReview = {
     note?: string
     reference?: boolean // can have notes, cannot be picked
     image: ImageRef     // the first shot: a copy owned by the thread, never the source path
-    shots?: ReviewShot[] // every shot in order, image first; only when more than one or the one has a title
+    shots?: ReviewShot[] // every shot in order, image first; only when more than one, the one has a title, or it has media
     url?: string        // http(s): where it runs live
   }[]
   status: "pending" | "answered" | "cancelled" | "superseded"
@@ -704,11 +707,24 @@ The following RPCs take full thread/review IDs. Unknown IDs are errors.
 | `reviews.respond` | `{ threadId, reviewId, revision, draft: ReviewDraft }` | `{ review: DesignReview, turnId?: string }` |
 | `reviews.cancel` | `{ threadId, reviewId, revision }` | `{ review: DesignReview }` |
 
-Creation validates the whole request and imports supported image files
-before publishing the card. Paths can be absolute, home-relative or
+Creation validates the whole request and imports supported files before
+publishing the card. A shot's `path` is a picture (PNG, JPEG, GIF, WebP), a
+video (MP4 or QuickTime, by its header) or a page (`.html`/`.htm`). Agents
+had to hand Mike stills of clips that only made sense moving (6 Nov 2026).
+A video or page is copied in as the shot's `media`, and its still, made by
+Quick Look on a Mac or ffmpeg for a video elsewhere (a plain dark card when
+neither can), is its `image`, which thumbnails and older clients show. A
+page comes in a folder of its own with the files it names (`src`, `href`,
+`url()`, a stylesheet's own) from its folder down, at most 100 files and
+50 MB; never anything above its folder, nor other pages it links to. The
+Mac window shows the page the way the side pane does: scripts off, nothing
+loaded from outside, and Open in Browser for a page with scripts. A video
+plays muted and looping, with controls on the stage and side by side with
+the others in the grid. Paths can be absolute, home-relative or
 relative to the thread's folder. An option's shots are `path` then
 `shots`, or `shots` alone; it needs at least one. Limit: 12 options, 8
-shots each and 40 in all, each image at most 25 MB, nonempty unique option
+shots each and 40 in all, each image at most 25 MB, video 200 MB and page
+5 MB (videos and pages 500 MB in all), nonempty unique option
 IDs and titles, title/note at most 200/4000 characters, `url` http or https.
 Draft notes are at most 4000 characters per option and the reply 8000;
 unknown option IDs, picks of reference options and `none` with picks are
@@ -755,8 +771,8 @@ MCP tool definitions, bound to the calling thread. Its schema matches
 `reviews.create` without `threadId`; it returns the review ID and explains
 that the choice/notes will arrive as a later message. The existing URL
 patch panels are independent of these review windows. Reviews take
-images, with a live `url` per option opened in the browser; HTML previews
-and overlays are deferred.
+pictures, videos and pages, with a live `url` per option opened in the
+browser; overlays are deferred.
 
 Every persisted event has an envelope:
 

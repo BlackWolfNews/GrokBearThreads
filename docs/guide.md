@@ -161,7 +161,11 @@ strip under the picture. Next and back (or the left and right arrow keys)
 step through every picture of every option, up and down jump to the option
 before or after, and after the last one they're all side by side. Click an
 option on the right, one of its small pictures, or a dot under the stage, to
-go straight to it, and Open live to try one the agent has running. When
+go straight to it, and Open live to try one the agent has running. An
+agent can show a video or an HTML page in place of a picture: videos play
+quietly on a loop, side by side when they're all showing, with controls
+for sound when one is big; a page shows as it does in the side pane, with
+its scripts off. When
 the agent includes today's version to compare against, hold Space (or click
 its button over the picture) to flick to it and back. To look closer at a
 picture, scroll or pinch over it to zoom in where the pointer is (a long page

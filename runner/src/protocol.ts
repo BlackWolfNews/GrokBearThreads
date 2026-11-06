@@ -594,7 +594,9 @@ export type CodexTurnUsage = {
 export type ReviewDraft = { pickedId?: string; pickedIds?: string[]; notes: Record<string, string>; reply?: string; none?: true };
 
 // One picture of an option: its first, or another screen or state of it.
-export type ReviewShot = { title?: string; image: ImageRef };
+// media: a video (video/mp4, video/quicktime) or page (text/html) the
+// window plays or shows in place of image, which is then its still.
+export type ReviewShot = { title?: string; image: ImageRef; media?: ImageRef };
 
 export type DesignReview = {
   id: string;

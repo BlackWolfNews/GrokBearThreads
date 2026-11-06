@@ -76,11 +76,27 @@ public struct ReviewDraft: Sendable, Hashable, Codable {
 /// One picture of an option: its first, or another screen or state of it.
 public struct ReviewShot: Sendable, Hashable, Codable {
     public var title: String?
+    /// The picture, or a video's or page's still for thumbnails.
     public var image: ImageRef
+    /// A video or an HTML page, shown in place of `image` on the stage.
+    public var media: ImageRef?
 
-    public init(title: String? = nil, image: ImageRef) {
+    public init(title: String? = nil, image: ImageRef, media: ImageRef? = nil) {
         self.title = title
         self.image = image
+        self.media = media
+    }
+
+    /// The video to play, when the shot is one.
+    public var video: URL? {
+        guard let media, media.mediaType.hasPrefix("video/") else { return nil }
+        return URL(fileURLWithPath: media.path)
+    }
+
+    /// The page to show, when the shot is one.
+    public var page: URL? {
+        guard let media, media.mediaType == "text/html" else { return nil }
+        return URL(fileURLWithPath: media.path)
     }
 }
 

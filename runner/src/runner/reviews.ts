@@ -9,6 +9,7 @@ import type { DesignReview, ReviewDraft } from '../protocol.ts';
 import { ErrorCode, RpcError } from '../protocol.ts';
 import type { QueuedSend } from '../store.ts';
 import { copyImageInto } from '../media.ts';
+import { copyReviewMedia } from '../review-media.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -25,10 +26,12 @@ export const reviewsPart = {
     const now = this.isoNow();
     try {
       const options = input.options.map(({shots: sources, ...option}) => {
-        const shots = sources.map(s => ({...(s.title ? {title: s.title} : {}), image: copyImageInto(dir, s.path)}));
-        // image stays the first shot for clients that show one per option;
-        // shots only when there's more to say than that one picture.
-        return {...option, image: shots[0].image, ...(shots.length > 1 || shots[0].title ? {shots} : {})};
+        const shots = sources.map(s => ({...(s.title ? {title: s.title} : {}),
+          ...(s.kind === 'video' || s.kind === 'page' ? copyReviewMedia(dir, s.path, s.kind) : {image: copyImageInto(dir, s.path)})}));
+        // image stays the first shot for clients that show one per option
+        // (a video's or page's still); shots only when there's more to say
+        // than that one picture.
+        return {...option, image: shots[0].image, ...(shots.length > 1 || shots[0].title || 'media' in shots[0] ? {shots} : {})};
       });
       const review: DesignReview = { id, title: input.title, ...(input.note ? {note: input.note} : {}), options,
         status: 'pending', revision: 0, createdAt: now, updatedAt: now, draft: {notes: {}} };

@@ -1,4 +1,5 @@
 import AppKit
+import AVKit
 import BearDock
 import SwiftUI
 import ThreadbearCore
@@ -38,7 +39,7 @@ extension AppModel {
     private func presentReviewWindow(_ session: ReviewSession) {
         let threadId = session.threadId
         let key = threadId + "/" + session.review.id
-        let controller = ReviewWindowController(session: session, threadTitle: threads[threadId]?.title ?? "Thread", back: { [weak self] in
+        let controller = ReviewWindowController(session: session, app: self, threadTitle: threads[threadId]?.title ?? "Thread", back: { [weak self] in
             self?.select(threadId)
             #if DEBUG
             if Automation.instanceId != nil { return }
@@ -114,7 +115,7 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
     let session: ReviewSession
     var onClose: (() -> Void)?
 
-    init(session: ReviewSession, threadTitle: String, back: @escaping () -> Void) {
+    init(session: ReviewSession, app: AppModel, threadTitle: String, back: @escaping () -> Void) {
         self.session = session
         // On the screen Threadbear's in, not wherever the mouse is.
         let screen = NSApp.keyWindow?.screen ?? NSApp.mainWindow?.screen ?? NSScreen.main
@@ -130,7 +131,9 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
         // whatever the last one was dragged to.
         super.init(window: window)
         window.delegate = self
-        window.contentView = NSHostingView(rootView: ReviewWindow(session: session, back: back, close: { [weak self] in self?.close() }).allowsWindowActivationEvents())
+        // The app, for a page's Open in Browser (LocalPagePreview).
+        window.contentView = NSHostingView(rootView: ReviewWindow(session: session, back: back, close: { [weak self] in self?.close() })
+            .environment(app).allowsWindowActivationEvents())
         // Up in the title bar rather than a row of their own, so the images
         // and the choices get that height. Wide enough for all of them, as an
         // accessory doesn't resize when some come and go.
@@ -242,6 +245,9 @@ private struct ReviewTitlebarButtons: View {
             Spacer(minLength: 0)
             if session.mode == .single {
                 icon("square.grid.2x2", "See them all (Esc)") { session.showAll() }
+            }
+            // A video or page has its own controls and scrolling; zoom is for pictures.
+            if session.mode == .single, session.shownShot?.media == nil {
                 icon(session.zoomed ? "minus.magnifyingglass" : "plus.magnifyingglass",
                      session.zoomed ? "Fit the image in its space (\u{2318}0)" : "Show at full size. Scroll or pinch to zoom, drag to move around") {
                     session.zoom(session.zoomed ? .fit : .actual)
@@ -380,7 +386,20 @@ struct ReviewWindow: View {
             let room = CGSize(width: max(0, geo.size.width - Self.stageInset * 2), height: max(0, geo.size.height - Self.stageInset * 2))
             Group {
                 if session.mode == .single, let shot = session.shownShot {
-                    enlarged(shot.image)
+                    if let video = shot.video {
+                        // Plays on its own, quietly, round and round, as
+                        // X does: the controls turn the sound up.
+                        ReviewVideo(url: video, controls: true)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .accessibilityLabel("\(session.shownOption?.label ?? ""), video")
+                    } else if let page = shot.page {
+                        LocalPagePreview(url: page, opened: 0)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .accessibilityLabel("\(session.shownOption?.label ?? ""), page")
+                    } else {
+                        enlarged(shot.image)
+                    }
                 } else {
                     let layout = ReviewGalleryLayout.best(
                         aspects: session.review.options.map { aspect($0.image) }, width: room.width, height: room.height, spacing: Self.cellSpacing,
@@ -519,7 +538,17 @@ struct ReviewWindow: View {
                 if count > 1 { Text("\(count) shots").font(.system(size: TypeScale.detail)).foregroundStyle(.tertiary) }
             }
             .lineLimit(1).frame(height: Self.captionHeight, alignment: .topLeading)
-            ReviewCanvas(image: option.image, onClick: { session.enlarge(index) })
+            Group {
+                // A clip plays side by side with the others, so they can
+                // be compared moving; a page shows its still, as a live
+                // page this small can't be read or used.
+                if let video = option.allShots.first?.video {
+                    ReviewVideo(url: video, controls: false)
+                        .overlay { Color.clear.contentShape(Rectangle()).onTapGesture { session.enlarge(index) } }
+                } else {
+                    ReviewCanvas(image: option.image, onClick: { session.enlarge(index) })
+                }
+            }
                 .tip("\(option.id): click to enlarge")
                 .frame(width: fit.width, height: fit.height)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -721,6 +750,55 @@ struct ReviewWindow: View {
 
 /// A small picture of a shot, cropped from its top left, where a mockup's
 /// title and controls are, rather than squashed.
+/// A shot that's a video: muted and looping from the start. On the stage
+/// it has the player's controls, for sound and scrubbing; in a cell among
+/// them all it has none, and a click on it enlarges it.
+struct ReviewVideo: NSViewRepresentable {
+    let url: URL
+    let controls: Bool
+
+    final class Coordinator {
+        var url: URL?
+        var looper: AVPlayerLooper?
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    /// Never the window's first responder, so the arrow keys keep stepping
+    /// through the shots after a click on its controls, not scrubbing.
+    final class Player: AVPlayerView {
+        override var acceptsFirstResponder: Bool { false }
+    }
+
+    func makeNSView(context: Context) -> AVPlayerView {
+        let view = Player()
+        view.videoGravity = .resizeAspect
+        // Live Text over a paused frame would take the click.
+        view.allowsVideoFrameAnalysis = false
+        return view
+    }
+
+    func updateNSView(_ view: AVPlayerView, context: Context) {
+        view.controlsStyle = controls ? .floating : .none
+        guard context.coordinator.url != url else { return }
+        view.player?.pause()
+        let player = AVQueuePlayer()
+        player.isMuted = true
+        // Looping and quiet: it mustn't keep the Mac awake on its own.
+        player.preventsDisplaySleepDuringVideoPlayback = false
+        context.coordinator.looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
+        context.coordinator.url = url
+        view.player = player
+        player.play()
+    }
+
+    static func dismantleNSView(_ view: AVPlayerView, coordinator: Coordinator) {
+        view.player?.pause()
+        coordinator.looper?.disableLooping()
+        view.player = nil
+    }
+}
+
 private struct ReviewThumb: View {
     let path: String
     let width: CGFloat
