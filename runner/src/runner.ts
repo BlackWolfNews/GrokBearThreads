@@ -366,6 +366,9 @@ type Runtime = {
   // once that CLI has exited, so a second process never touches the thread
   // while the live one still has it loaded.
   archivePending?: boolean;
+  // The archived thread's worktree cleanup while it runs: a handover waits
+  // for it before saving the record, or its result is lost (THREADBEAR-16).
+  cleaning?: Promise<void>;
   // Background work that ended and whose result the CLI hasn't started a
   // turn to read yet. Shown as `finished` in the summary's background list
   // while wakeTimer runs; cleared when that turn starts or the grace ends.
@@ -724,6 +727,7 @@ export class Runner {
     // including ones a draining runner still has.
     this.seedPatchTrust(records.map((r) => r.cwd));
     this.flush();
+    void this.settleLostCleanups().catch((e: unknown) => this.log.warn('could not check archived worktrees', { error: String(e) }));
     for (const st of this.threads.values()) if (st.rec.queue.some(q => q.reviewId) && this.bucket(st.rec) === 'inbox') this.kickQueue(st);
     this.armSnoozeTimer();
     // Waits for room are in thread.json, so they outlive a restart.
@@ -2687,11 +2691,16 @@ export class Runner {
     rt.session = undefined;
     const ended = session?.end({ hard: true }).catch((e: unknown) => this.log.warn('stopping a deleted thread failed', { threadId, error: String(e) }));
     this.archiveNative(st, ended ?? rt.closing);
-    // Its worktree goes once the CLI has let go of the folder.
+    // Its worktree goes once the CLI has let go of the folder, and after an
+    // archive's cleanup still running, rather than beside it (that one may
+    // already have removed it).
     if (rec.worktree && !rec.worktree.removedAt) {
+      const cleaning = rt.cleaning;
       void Promise.resolve(ended ?? rt.closing)
         .catch(() => undefined)
-        .then(() => this.cleanUpWorktree(st, true));
+        .then(() => cleaning)
+        .then(() => this.cleanUpWorktree(st, true))
+        .catch((e: unknown) => this.log.error('worktree cleanup failed', { threadId, error: String(e) }));
     }
     this.store.trash(threadId, this.clock.now());
     this.log.info('thread deleted', { threadId, title: rec.title });
@@ -2760,7 +2769,14 @@ export class Runner {
     rt.archivePending = false;
     if (rec.archivedAt) {
       this.archiveNative(st);
-      void this.cleanUpWorktree(st);
+      if (rec.worktree && !rec.worktree.removedAt && !rt.cleaning) {
+        const cleaning = this.cleanUpWorktree(st)
+          .catch((e: unknown) => this.log.error('worktree cleanup failed', { threadId: rec.id, error: String(e) }))
+          .finally(() => {
+            if (rt.cleaning === cleaning) rt.cleaning = undefined;
+          });
+        rt.cleaning = cleaning;
+      }
     }
   }
 

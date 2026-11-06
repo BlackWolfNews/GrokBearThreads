@@ -876,3 +876,79 @@ test(`with keep, past ${MAX_SPARES} spares an archived worktree is removed as be
   assert.ok(!fs.existsSync(last.path));
   assert.equal(sh(main, `git branch --list ${last.branch}`), '');
 });
+
+// ------------------------------------------------- handovers and stale records
+
+// THREADBEAR-16 (6 Nov): a thread archived as a handover began. The cleanup
+// was still running git when the draining runner saved the record and let
+// the thread go, so its result (removedAt and the note) was lost, and the
+// note's emit threw on the let-go thread.
+test('a handover waits for an archived thread\'s worktree cleanup, so the saved record says it was removed', async () => {
+  const { main } = makeRepo();
+  const h = harness();
+  const { id, w } = await threadWithWorktree(h, main);
+  h.runner.update({ threadId: id, archived: true });
+  const rt = (h.runner as any).threads.get(id).rt;
+  // The CLI has gone and the cleanup has started, but git hasn't finished.
+  await until(() => rt.archivePending === false, 'the cleanup to start');
+  assert.ok(fs.existsSync(w.path), 'still removing');
+  await h.runner.beginDrain([], { onHandedOver: () => undefined });
+  assert.equal(h.runner.has(id), false);
+  const saved = JSON.parse(fs.readFileSync(path.join(h.home, 'threads', id, 'thread.json'), 'utf8'));
+  assert.ok(saved.worktree.removedAt, 'removedAt was saved');
+  assert.ok(!fs.existsSync(w.path));
+  assert.ok(notes(h, id).includes(`Removed this thread's worktree and its branch ${w.branch}: everything on it is on main.`));
+});
+
+test('cleanUpWorktree leaves a folder that is now another thread\'s worktree, from a record that missed its removal', async () => {
+  const { main } = makeRepo();
+  const old = makeBranch(main, 'old00000');
+  const rec = { repo: 'proj', mainCheckout: main, path: old.path, branch: old.branch, base: sh(main, 'git rev-parse main') };
+  // Removed, but the record never heard; then a new thread took the folder.
+  sh(main, `git worktree remove ${old.path} && git branch -D ${old.branch}`);
+  sh(main, `git worktree add -q -b thread/new00000 ${old.path} main`);
+  write(old.path, { 'scratch.txt': 'the new thread\'s untracked work\n' });
+  assert.deepEqual(await cleanUpWorktree(rec), { removed: true, taken: true });
+  assert.equal(fs.readFileSync(path.join(old.path, 'scratch.txt'), 'utf8'), 'the new thread\'s untracked work\n');
+  assert.equal(sh(old.path, 'git rev-parse --abbrev-ref HEAD'), 'thread/new00000');
+
+  // A spare (detached and locked) or a borrowed worktree is left alone too,
+  // and a landed branch of ours that's still there goes.
+  const other = makeBranch(main, 'oth00000');
+  const rec2 = { repo: 'proj', mainCheckout: main, path: other.path, branch: other.branch, base: rec.base };
+  sh(other.path, 'git checkout -q --detach');
+  assert.deepEqual(await cleanUpWorktree(rec2), { removed: true, taken: true });
+  assert.ok(fs.existsSync(other.path));
+  assert.equal(sh(main, `git branch --list ${other.branch}`), '');
+});
+
+test('a thread brought back whose worktree folder is now another\'s carries on in the main checkout', async () => {
+  const { main } = makeRepo();
+  const h = harness();
+  const { id, w } = await threadWithWorktree(h, main);
+  // As THREADBEAR-16 left it: worktree and branch gone, record not told,
+  // and then another thread took the folder.
+  sh(main, `git worktree remove --force ${w.path} && git branch -D ${w.branch}`);
+  sh(main, `git worktree add -q -b thread/zzzz0000 ${w.path} main`);
+  h.runner.update({ threadId: id, archived: true });
+  await until(() => notes(h, id).some((n) => n.includes('another')), 'the cleanup');
+  assert.ok(fs.existsSync(w.path), "the other thread's worktree stays");
+  assert.equal(h.runner.get(id).worktree, undefined, 'no Land chip');
+  h.runner.send(id, 'More please');
+  await until(() => h.adapter.last.opts.cwd === path.join(main, 'runner'), 'a new CLI in the main checkout');
+});
+
+test("at start, an archived thread whose worktree and branch went unrecorded is told; one that's still there isn't", async () => {
+  const { main } = makeRepo();
+  const h = harness();
+  const lost = await threadWithWorktree(h, main);
+  const kept = await threadWithWorktree(h, main);
+  sh(main, `git worktree remove --force ${lost.w.path} && git branch -D ${lost.w.branch}`);
+  const threads = (h.runner as any).threads;
+  for (const id of [lost.id, kept.id]) threads.get(id).rec.archivedAt = new Date(h.clock.now()).toISOString();
+  await h.runner.settleLostCleanups();
+  assert.ok(threads.get(lost.id).rec.worktree.removedAt);
+  assert.equal(h.runner.get(lost.id).worktree, undefined, 'no Land chip');
+  assert.equal(threads.get(kept.id).rec.worktree.removedAt, undefined);
+  assert.equal(notes(h, lost.id).filter((n) => n.includes('worktree')).length, 1, 'quietly: only the note from when it was made');
+});

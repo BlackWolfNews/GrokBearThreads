@@ -7,7 +7,7 @@ import type { RunnerPart } from './part.ts';
 import type { Action, EventBody } from '../protocol.ts';
 import type { ThreadRecord } from '../store.ts';
 import { BIN_DIR, threadEnv } from '../restart.ts';
-import { cleanUpWorktree, makeWorktree, sameSubfolder } from '../worktrees.ts';
+import { cleanUpWorktree, makeWorktree, sameSubfolder, worktreeGone } from '../worktrees.ts';
 import { isDirectory } from '../fsutil.ts';
 import { automaticTrust, findWorktreePatch, isInside, readWorktreePatch, runCommand, type PatchSet, worktreePatchFiles } from '../patches.ts';
 import fs from 'node:fs';
@@ -187,6 +187,27 @@ export const worktreesPart = {
     return land ? [...set.actions, land] : set.actions;
   },
 
+  // At start: an archived thread whose worktree and branch have gone but
+  // whose record never said so (a handover saved it mid-cleanup before
+  // 6 Nov, THREADBEAR-16, or the runner stopped there) is told now, so it
+  // shows no Land chip and, brought back, leaves the missing folder.
+  async settleLostCleanups(this: Runner): Promise<void> {
+    for (const st of [...this.threads.values()]) {
+      const w = st.rec.worktree;
+      if (!st.rec.archivedAt || !w || w.removedAt || st.rt.cleaning) continue;
+      let gone;
+      try {
+        gone = await worktreeGone(w);
+      } catch {
+        continue;
+      }
+      if (!gone || st.rt.deleted || w.removedAt) continue;
+      w.removedAt = this.isoNow();
+      this.markDirty(st);
+      this.log.info("recorded a worktree's removal the record missed", { threadId: st.rec.id, path: w.path });
+    }
+  },
+
   // When the thread is archived or deleted: its worktree and branch go if
   // everything on them is on main; otherwise they stay, and the thread (or,
   // once it's deleted, a notice) says so and how to land or drop them.
@@ -201,13 +222,19 @@ export const worktreesPart = {
       result = { removed: false as const, reason: String((e as Error).message ?? e) };
     }
     this.log.info('worktree cleanup', { threadId: rec.id, path: w.path, ...result });
+    // Deleted meanwhile: nothing to record it in, and emit would throw.
+    if (st.rt.deleted && !deleted) return;
     if (result.removed) {
       w.removedAt = this.isoNow();
-      if ('spare' in result && result.spare) w.spare = true;
+      // A folder that's another checkout's now counts as a spare: the
+      // thread, brought back, never carries on in it (leavesRemovedWorktree).
+      if (result.spare || result.taken) w.spare = true;
       if (deleted) return;
-      const text = w.spare
-        ? `Deleted this thread's branch ${w.branch} (everything on it is on main) and kept its worktree, build caches and all, for the next thread.`
-        : `Removed this thread's worktree and its branch ${w.branch}: everything on it is on main.`;
+      const text = result.taken
+        ? `This thread's worktree had already gone, and its folder ${w.path} is another checkout's now, so it was left alone. Its branch ${w.branch} is gone too.`
+        : w.spare
+          ? `Deleted this thread's branch ${w.branch} (everything on it is on main) and kept its worktree, build caches and all, for the next thread.`
+          : `Removed this thread's worktree and its branch ${w.branch}: everything on it is on main.`;
       this.emit(st, { type: 'system.note', text });
       this.markDirty(st);
       return;

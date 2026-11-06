@@ -127,6 +127,9 @@ export const handoversPart = {
       this.releaseSession(st);
     }
     if (rt.closing) await rt.closing;
+    // An archive's worktree cleanup, started as the CLI went: its removedAt
+    // and note belong in the record saved below (THREADBEAR-16).
+    if (rt.cleaning) await rt.cleaning;
     rt.deltaTimer?.cancel();
     rt.wakeTimer?.cancel();
     rt.generation++;

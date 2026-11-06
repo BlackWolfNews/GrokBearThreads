@@ -501,7 +501,19 @@ export async function landTargetFromGit(cwd: string): Promise<{ target?: Omit<La
 
 // ------------------------------------------------------------- cleaning up
 
-export type Cleanup = { removed: true; spare?: boolean } | { removed: false; reason: string };
+// `taken`: the folder is another checkout's now (another thread's worktree,
+// a spare or a borrowed one), so it was left alone; only this thread's
+// landed branch, if it was still there, went.
+export type Cleanup = { removed: true; spare?: boolean; taken?: boolean } | { removed: false; reason: string };
+
+// Whether a worktree the record still has is gone: its folder and its
+// branch both. Reads only, for records that missed hearing it went.
+export async function worktreeGone(w: WorktreeRecord): Promise<boolean> {
+  if (isDir(w.path)) return false;
+  const branch = await git(w.mainCheckout, ['rev-parse', '--verify', '--quiet', `refs/heads/${w.branch}`]);
+  // 1 is "no such ref"; anything else (no repo there) proves nothing.
+  return !branch.ok && branch.code === 1;
+}
 
 // When its thread is archived or deleted: a worktree whose branch is all
 // on main is removed with its branch (`--force` only for untracked
@@ -513,7 +525,25 @@ export async function cleanUpWorktree(w: WorktreeRecord): Promise<Cleanup> {
     const merged = await git(w.mainCheckout, ['merge-base', '--is-ancestor', w.branch, MAIN]);
     if (!merged.ok) return { removed: false, reason: `${w.branch} has commits that aren't on ${MAIN}` };
   }
+  // A record can outlive its worktree without hearing (THREADBEAR-16: a
+  // handover saved it while the cleanup ran), and slot folders are reused.
+  // So the folder is only touched if it's still this branch's checkout:
+  // otherwise it may be another thread's, and --force would take its work.
+  let ours = false;
   if (fs.existsSync(w.path)) {
+    const checkouts = await listCheckouts(w.mainCheckout);
+    if (!checkouts) return { removed: false, reason: `git couldn't list the worktrees of ${w.mainCheckout}` };
+    const here = realpath(w.path);
+    ours = checkouts.some((c) => realpath(c.path) === here && c.branch === w.branch);
+    if (!ours) {
+      if (branchThere) {
+        const del = await git(w.mainCheckout, ['branch', '-D', w.branch]);
+        if (!del.ok) return { removed: false, reason: `deleting ${w.branch} failed: ${firstLine(del.stderr)}` };
+      }
+      return { removed: true, taken: true };
+    }
+  }
+  if (ours) {
     const status = await gitOut(w.path, ['status', '--porcelain', '--untracked-files=all']);
     if (status === undefined) return { removed: false, reason: `git couldn't read ${w.path}` };
     const lines = status ? status.split('\n') : [];
