@@ -205,6 +205,14 @@ take_copylock() {
   else /usr/bin/lockf -k "$1" /bin/sh -c "$hold" sh "$ready" "$$" "$release" & fi
   holder=$!
   until [ -e "$ready" ] || ! kill -0 "$holder" 2>/dev/null; do sleep 0.2; done
+  # The helper gone with no ready file never had the lock (a lock file it
+  # can't open): no copy without it.
+  if [ ! -e "$ready" ]; then
+    wait "$holder" 2>/dev/null
+    rm -f "$release"
+    holder="" release=""
+    return 1
+  fi
   rm -f "$ready"
 }
 drop_copylock() {
@@ -233,7 +241,12 @@ while :; do
   # Two checks from this checkout at once take turns at the mirror, from
   # the upload until the run's copy is made, so neither copies the other's
   # files.
-  take_copylock "${TMPDIR:-/tmp}/tb-check-copy-$key-$HOST.lock"
+  if ! take_copylock "${TMPDIR:-/tmp}/tb-check-copy-$key-$HOST.lock"; then
+    rm -f "$files" "$changed"
+    # Not 255: running it here instead isn't the answer to a broken lock.
+    echo "Couldn't take the lock on this checkout's copy (${TMPDIR:-/tmp}/tb-check-copy-$key-$HOST.lock)." >&2
+    exit 1
+  fi
   # By content (-c), not size and time: an edit that keeps both would
   # otherwise leave the mirror's old copy in the run.
   if ! "${SSH[@]}" "$HOST" "mkdir -p '$mirror' '$remote_run' && touch '$mirror'" \
