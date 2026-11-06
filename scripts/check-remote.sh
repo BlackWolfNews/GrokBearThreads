@@ -20,8 +20,12 @@
 # copies this checkout's files (tracked and untracked, as check.sh sees
 # them) into ~/.cache/threadbear-check/runs/<id> there, runs check.sh on
 # it, and deletes it. What's kept there between runs is only what makes
-# the next run quick: node_modules per lockfile and the Swift build
-# folders. Delete ~/.cache/threadbear-check to take it all away.
+# the next run quick: node_modules per lockfile, the Swift build folders,
+# and a mirror of each checkout that sends to it (mirror/<key>), so a run
+# sends only what changed since that checkout's last, compressed: a whole
+# copy is 17 MB, and on a congested link (6 Nov) that took minutes. Each
+# run's copy is made from the mirror there. Delete ~/.cache/threadbear-check
+# to take it all away.
 #
 # One run at a time on the host (lockf); a second waits and says so. The
 # copy always runs from the same path, src/, as SwiftPM's build cache only
@@ -51,6 +55,8 @@ if [ "${1:-}" = "--on-host" ]; then
   # nobody fetched) goes after half a day.
   find "$base/runs" "$base" -mindepth 1 -maxdepth 1 \( -name '[0-9]*' -o -name 'tmp-*' -o -name 'kept-*' -o -name 'shots-*' \) \
     -mmin +720 -exec rm -rf {} + 2>/dev/null
+  # A checkout's mirror that hasn't sent a run for a week (a removed worktree).
+  find "$base/mirror" -mindepth 1 -maxdepth 1 -type d -mtime +7 -exec rm -rf {} + 2>/dev/null
   mkdir -p "$TMPDIR"
   mv "$base/runs/$id" "$src" || { echo "The copy for run $id isn't on $(hostname -s)." >&2; exit 1; }
   # A failed check keeps its logs in $TMPDIR; they move aside for this
@@ -109,7 +115,11 @@ HOST_LIST="${1:?usage: check-remote.sh <ssh host>[,<ssh host>...] [check.sh opti
 shift
 read -ra HOSTS <<<"$(printf '%s' "$HOST_LIST" | tr ',' ' ')"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SSH=(ssh -o BatchMode=yes -o ConnectTimeout=8 -o ServerAliveInterval=30 -o ServerAliveCountMax=4)
+# One connection per host, shared by every ssh and rsync this run makes:
+# a run makes half a dozen, and on a congested link (6 Nov, 2 s pings) each
+# new one took 20 s to set up. A short path, as a socket's can't be long.
+SSH=(ssh -o BatchMode=yes -o ConnectTimeout=8 -o ServerAliveInterval=30 -o ServerAliveCountMax=4
+  -o ControlMaster=auto -o "ControlPath=/tmp/tbc-$(id -u)-%C" -o ControlPersist=60)
 
 ARGS=()
 SHOTS=""
@@ -155,6 +165,8 @@ choose() {
   for h in "${HOSTS[@]}"; do
     # An ssh host, never something ssh would take for an option.
     case "$h" in -*|"") continue ;; esac
+    # One that dropped out during a copy this run isn't tried again.
+    case " $SKIP " in *" $h "*) continue ;; esac
     out="$("${SSH[@]}" "$h" "$probe" 2>/dev/null)" || { echo "Couldn't reach $h over ssh." >&2; continue; }
     { read -r b; read -r os; read -r state; } <<<"$out"
     # Every rm -rf over there is under this, so never let it be empty.
@@ -177,6 +189,7 @@ files="$(mktemp)"
 (cd "$ROOT" && git ls-files -co --exclude-standard -z) | tr '\0' '\n' \
   | grep -vE '^(docs|site)/.*\.(png|gif|jpe?g|mp4|mov|webp)$' | tr '\n' '\0' >"$files"
 BASE_ARGS=(${ARGS[@]+"${ARGS[@]}"})
+SKIP=""
 tries=0
 while :; do
   if ! choose; then
@@ -187,12 +200,22 @@ while :; do
   id="$(date +%H%M%S)-$$-$tries"
   remote_run="$remote_base/runs/$id"
   start=$SECONDS
-  if ! rsync -a --from0 --files-from="$files" -e "${SSH[*]}" "$ROOT/" "$HOST:$remote_run/" \
+  # This checkout's mirror on the host: one per Mac and checkout, so two
+  # worktrees never write the same one. Only what changed goes over the
+  # link; the run's copy is made from it there, of exactly this run's files
+  # (a file deleted here stays in the mirror but isn't copied).
+  mirror="$remote_base/mirror/$(printf '%s' "$(hostname -s):$ROOT" | shasum | cut -c1-16)"
+  if ! "${SSH[@]}" "$HOST" "mkdir -p '$mirror' '$remote_run' && touch '$mirror'" \
+    || ! rsync -az --from0 --files-from="$files" -e "${SSH[*]}" "$ROOT/" "$HOST:$mirror/" \
+    || ! rsync -a -e "${SSH[*]}" "$files" "$HOST:$remote_run.files" \
+    || ! "${SSH[@]}" "$HOST" "rsync -a --from0 --files-from='$remote_run.files' '$mirror/' '$remote_run/' && rm -f '$remote_run.files'" \
     || ! rsync -a -e "${SSH[*]}" "$changed" "$HOST:$remote_run/.check-changed"; then
-    rm -f "$files" "$changed"
-    "${SSH[@]}" "$HOST" "rm -rf '$remote_run'"
-    echo "Couldn't copy this checkout to $HOST." >&2
-    exit 255
+    "${SSH[@]}" "$HOST" "rm -rf '$remote_run' '$remote_run.files'" 2>/dev/null
+    # The next host that can run it, before this Mac (6 Nov: Tinker Desk
+    # dropped off mid-copy and the check ran on the M5).
+    echo "Couldn't copy this checkout to $HOST; trying the others." >&2
+    SKIP+=" $HOST"
+    continue
   fi
   echo "Checking on $HOST (copied in $((SECONDS - start))s; THREADBEAR_CHECK_HOST= ./check.sh --local runs here)"
 
