@@ -2967,6 +2967,10 @@ export class ConvexSync {
       },
       requestRun: async (scheduleId, at) => (await call('mutation', 'sync:requestScheduleRun', { scheduleId, at })) === true,
       runners: async () => {
+        // Only the main key may list runners (docs/protocol.md, "Runner keys"), so
+        // a runner key's asking only ever failed, 11 times in 25 minutes of prod
+        // logs, and the callers treat this the same as being refused.
+        if (this.deps.key?.startsWith('tbr_')) return [];
         const rows = await call('query', 'sync:runnersList', {});
         return Array.isArray(rows)
           ? (rows as { runnerId: string; name: string; lastSeenAt: number; icon?: string; version?: string; release?: string; startedAt?: string; draining?: boolean }[]).map((r) => ({

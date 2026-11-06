@@ -212,6 +212,27 @@ The original plan for this step follows.
 
 ### 6. On by default
 
+**Free accounts, worked out 6 Nov** from 1.52 hours of real rows: 2,797 bodies, 5.21 MB, 221 M5
+turns, so about 24 KB of body rows a turn. Writes plus 30-day deletion make about 48 KB a turn of
+I/O, and storage levels off at 30 days' writes. These are estimates, before index overhead.
+
+| Turns a day | I/O a month | Storage held |
+|---|---|---|
+| 15 | about 20 MB | about 11 MB |
+| 100 | about 140 MB | about 70 MB |
+| 500 | about 720 MB | about 350 MB |
+
+Free is 1 GB of I/O and 0.5 GB of storage, and they're the team's, shared with other projects. On Free,
+going over means new writes may fail; on Starter it bills at $0.22 a GB. So full sync fits at light and
+ordinary use, and 500 turns a day, a heavy user, is what gets close, on top of the mirror's own reads.
+Mike's real rate is the check: this morning's "3.3 GB a month" assumed a busy morning's pace all day.
+
+**The silent check, reviewed 6 Nov** with every value masked: 32 flagged of 722 checked (4.4%), and none
+looks like a real credential: code and docs about secrets, status text, logs, `ps` output, a public deploy
+key, screenshots of sign-in fields. So holding back on its word would hide about 1 output in 25 for
+nothing today. Keep it counting. It's not ready to hold anything back, and how much it misses on real
+data is still unknown, as nothing in the sample hit the rules either.
+
 - Only once 2, 3 and 4 have run on Mike's runners, and step 5 works.
 - New installs: on, and setup says in plain words what goes up, what can't be
   scrubbed, and where the switch is.

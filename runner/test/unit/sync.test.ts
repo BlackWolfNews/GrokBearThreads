@@ -2201,6 +2201,33 @@ test("an archived thread's folder is looked at for its history", async () => {
   await sync.stop();
 });
 
+test("a runner key doesn't ask for the list of runners, which only the main key may read", async () => {
+  const { h } = setup();
+  const make = (key: string) => {
+    const calls: Call[] = [];
+    const sync = new ConvexSync({
+      config: { enabled: true, url: 'https://x.convex.cloud', name: 'TestMac', runnerId: 'r1' },
+      key,
+      runner: h.runner,
+      version: '0.1.0+test',
+      startedAt: '2026-10-27T00:00:00.000Z',
+      clock: h.clock,
+      log: nullLogger,
+      post: async (kind, fn, args) => {
+        calls.push({ kind, fn, args });
+        return fn === 'sync:runnersList' ? [{ runnerId: 'r2', name: 'other', lastSeenAt: 1 }] : null;
+      },
+    });
+    return { sync, calls };
+  };
+  const keyed = make(`tbr_${'ab12'.repeat(16)}`);
+  assert.deepEqual(await keyed.sync.scheduleBackend().runners(), []);
+  assert.equal(keyed.calls.filter((c) => c.fn === 'sync:runnersList').length, 0);
+  const main = make('k');
+  assert.equal((await main.sync.scheduleBackend().runners())[0]!.id, 'r2');
+  assert.equal(main.calls.filter((c) => c.fn === 'sync:runnersList').length, 1);
+});
+
 test('text waits rather than go up while .env files are still being read', async () => {
   const { h } = setup();
   const calls: Call[] = [];
