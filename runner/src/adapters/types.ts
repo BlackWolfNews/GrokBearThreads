@@ -242,7 +242,7 @@ export interface AgentAdapter {
   models?(account: Account): Promise<ModelChoice[]>;
   // The slash commands the account's CLI offers in a folder (skills
   // included), without starting a turn, for the composer's picker.
-  commands?(account: Account, cwd: string): Promise<SlashCommand[]>;
+  commands?(account: Account, cwd: string, untrusted?: Record<string, unknown>): Promise<SlashCommand[]>;
   // A same-account folder change calls setCwd on a live session, or passes
   // the folder to the next start or resume, instead of copying the
   // transcript and adding a handoff (Codex).

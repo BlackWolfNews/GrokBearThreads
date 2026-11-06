@@ -1410,6 +1410,9 @@ export class Runner {
     const turn = rt.turn;
     if (!turn || !rt.session || rt.closing || this.stopping || rt.editing) return false;
     if (rec.queue.length || rec.handoff || rec.moved || rt.releaseWhenIdle || turn.interruptRequested) return false;
+    // Nor into a slash command's turn: a CLI can't take words into its
+    // compaction or review, so they wait for the next turn.
+    if (turn.command || turn.local) return false;
     return !turn.auto || Boolean(turn.cliStarted);
   }
 
@@ -2029,7 +2032,8 @@ export class Runner {
     // The CLI resumed at the cut an edit asked for and has written a turn
     // after it, which is the conversation's end from now on. Kept until
     // then, so a CLI that died first cuts again on the next start.
-    if (rec.resumeAt && rt.resumed) delete rec.resumeAt;
+    // Not a command the runner answered: no CLI resumed for it.
+    if (rec.resumeAt && rt.resumed && !turn.local) delete rec.resumeAt;
     if (outcome === 'failed' && r.error) this.emit(st, { type: 'error', message: r.error }, turn.turnId);
     const body: EventBody = {
       type: 'turn.completed',

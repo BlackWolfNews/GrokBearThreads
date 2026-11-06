@@ -851,9 +851,10 @@ export class CodexSession implements AgentSession {
     this.turn = turn;
     this.state = 'turnPending';
     const params = this.turnParams(input);
+    const sentBefore = this.sentCwd;
     if (params.cwd) this.sentCwd = params.cwd;
     this.normalizer.startingTurn?.(input.id);
-    this.commandOrTurn(input, params)
+    this.commandOrTurn(input, params, sentBefore)
       .then((res) => this.enqueue(() => this.turnStartAnswered(turn, res)))
       .catch((e: unknown) => this.enqueue(() => this.turnStartFailed(turn, e)));
   }
@@ -862,10 +863,13 @@ export class CodexSession implements AgentSession {
   // that does it (docs/protocol.md, "Slash commands"). Each still runs as a
   // turn: Codex sends turn/started and turn/completed for it. Anything else
   // is a turn/start, with the skill a /<skill> names added to it.
-  private async commandOrTurn(input: UserInput, params: TurnStartParams): Promise<TurnStartResponse> {
+  // sentBefore: a folder move this turn would have carried isn't carried
+  // by a compaction or review, so the next turn/start sends it.
+  private async commandOrTurn(input: UserInput, params: TurnStartParams, sentBefore: string): Promise<TurnStartResponse> {
     const cmd = parseCommand(input.text);
     if (!cmd || !this.threadId) return this.turnStart(params);
     const name = cmd.name.toLowerCase();
+    if ((name === 'compact' || name === 'review') && params.cwd) this.sentCwd = sentBefore;
     if (name === 'compact') {
       await this.proc.request('thread/compact/start', { threadId: this.threadId });
       // No turn in the answer; turn/started brings its id (turnStarted).
@@ -887,7 +891,11 @@ export class CodexSession implements AgentSession {
       const paths = this.proc
         .request<SkillsListResponse>('skills/list', { cwds: [this.cwd] }, 10_000)
         .then((r) => skillMap(r))
-        .catch(() => new Map<string, string>());
+        .catch(() => {
+          // Asked again next time rather than going without for good.
+          this.skills = undefined;
+          return new Map<string, string>();
+        });
       this.skills = { cwd: this.cwd, paths };
     }
     return this.skills.paths;
@@ -924,6 +932,10 @@ export class CodexSession implements AgentSession {
       if (!turn.codexTurnId) turn.codexTurnId = id;
       this.normalizer.turnAccepted?.(id);
     }
+    // A /compact's answer has no turn: it stays pending until turn/started
+    // brings the id (turnStarted), so a Stop or words sent meanwhile wait
+    // for it rather than going nowhere.
+    else if (!turn.codexTurnId) return;
     this.activate(turn);
   }
 
@@ -963,10 +975,7 @@ export class CodexSession implements AgentSession {
         // Our turn/start hasn't answered yet, but this is its turn.
         turn.codexTurnId = id;
         this.activate(turn);
-      } else if (turn && !turn.own && !turn.codexTurnId) {
-        // A /compact's: thread/compact/start answers with no turn id, and
-        // that answer comes first.
-        turn.codexTurnId = id;
+
       } else if (!turn) {
         // Codex started a turn by itself (a goal, background work).
         this.turn = this.newTurn({ ids: [], own: true, codexTurnId: id });

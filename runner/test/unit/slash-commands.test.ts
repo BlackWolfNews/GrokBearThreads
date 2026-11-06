@@ -43,7 +43,9 @@ test('planCommand: Claude runs its own; Codex gets the app-server ones, the runn
   assert.match((p('codex', '/mcp') as { text: string }).text, /terminal app/);
   // Not one Codex knows: words for the model, as before (a skill's name is
   // added to the turn by the adapter).
-  assert.equal(p('codex', '/deslop'), undefined);
+  assert.deepEqual(p('codex', '/deslop'), { kind: 'cli' });
+  // ...but a skill of that name wins over a terminal-only command.
+  assert.deepEqual(planCommand('codex', parseCommand('/init')!, new Set(['init'])), { kind: 'cli' });
 });
 
 test('commandList puts Threadbear\'s own first and hides Claude\'s terminal-only ones', () => {
@@ -232,4 +234,55 @@ test('a CLI command\'s output leaves no card, as it asks nothing', async () => {
   await tick();
   const done = h.events(thread.id).filter((e) => e.type === 'turn.completed').at(-1);
   assert.equal(done.needs, undefined);
+});
+
+test('words sent during a command\'s turn wait for the next one', async () => {
+  const h = harness();
+  const { thread } = h.runner.create({ text: '/compact', accountId: 'claude-main' });
+  const s = h.adapter.last;
+  s.init();
+  await tick();
+  h.runner.send(thread.id, 'then this');
+  await tick();
+  assert.equal(s.sent.length, 1);
+  s.result();
+  await tick();
+  assert.equal(s.sent.at(-1)!.text, 'then this');
+});
+
+test('a command with a move to another login waiting asks for a message first; /clear drops the move\'s catch-up', async () => {
+  const h = harness();
+  const { thread } = h.runner.create({ text: 'hi', accountId: 'claude-main' });
+  const s = h.adapter.last;
+  s.init();
+  s.result();
+  h.runner.update({ threadId: thread.id, accountId: 'codex-main' });
+  h.runner.send(thread.id, '/compact');
+  await tick();
+  assert.match(notes(h, thread.id).at(-1)!, /just moved to .*Send one first, then \/compact again/);
+  assert.equal(h.codex.sessions.length, 0, 'no Codex CLI for it');
+  h.runner.send(thread.id, '/clear');
+  await tick();
+  h.runner.send(thread.id, 'fresh start');
+  await tick();
+  const c = h.codex.last;
+  assert.equal(c.opts.resume, false);
+  assert.equal(c.sent[0].text, 'fresh start', 'no handoff note in front');
+});
+
+test('threads.commands lists a folder whose Claude settings aren\'t trusted without them', async () => {
+  const h = harness();
+  let got: unknown = 'unset';
+  h.adapter.commands = async (_a, _cwd, untrusted) => {
+    got = untrusted;
+    return [];
+  };
+  (h.runner as any).patchTrust = { ...(h.runner as any).patchTrust, checkClaude: () => ({ trusted: false, hash: 'h1' }) };
+  const { thread } = h.runner.create({ text: 'hi', accountId: 'claude-main' });
+  h.adapter.last.init();
+  h.adapter.last.result();
+  await h.runner.end?.(thread.id);
+  await h.runner.threadCommands(thread.id);
+  assert.notEqual(got, 'unset');
+  assert.equal(typeof got, 'object', 'the settings without their commands');
 });

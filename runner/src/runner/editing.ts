@@ -110,6 +110,8 @@ export const editingPart = {
       if (later.length) {
         rec.queue.push(...later);
         this.markDirty(st);
+        // A slash command the runner answered has already ended its turn.
+        if (!rt.turn) this.kickQueue(st);
       }
       return { turnId, rewound: { seq: ev.seq, fromSeq: seq, toSeq, files } };
     } finally {

@@ -7,7 +7,7 @@
 //   - Threadbear's: the runner does it, as the app would (/model, /effort,
 //     Codex's /clear and /status), so the thread's settings stay the truth;
 //   - one that can't work here: answered with a note saying what does.
-// Anything else that starts with "/" (a path, a command neither knows) goes
+// A path ("/Users/mike") isn't a command; a command neither CLI knows goes
 // to the model as words, as it did before.
 import type { Provider } from './protocol.ts';
 
@@ -101,10 +101,10 @@ export type CommandPlan =
   // Answered with this note, and nothing sent.
   | { kind: 'note'; text: string };
 
-// What to do with a message that starts with a slash command, or undefined
-// to send it as words. skills: the Codex thread's skill names, which run as
-// a skill (its adapter adds the skill to the message).
-export function planCommand(provider: Provider, cmd: ParsedCommand, skills: ReadonlySet<string> = new Set()): CommandPlan | undefined {
+// What to do with a message that starts with a slash command. skills: the
+// Codex thread's skill names when known, which win over a terminal-only
+// command of the same name (its adapter adds the skill to the message).
+export function planCommand(provider: Provider, cmd: ParsedCommand, skills: ReadonlySet<string> = new Set()): CommandPlan {
   const name = cmd.name.toLowerCase();
   if (name === 'model') return { kind: 'model', args: cmd.args };
   if (name === 'effort') return { kind: 'effort', args: cmd.args };
@@ -121,7 +121,9 @@ export function planCommand(provider: Provider, cmd: ParsedCommand, skills: Read
     const said = ELSEWHERE[name];
     return { kind: 'note', text: `/${name} is part of Codex's terminal app and doesn't run in Threadbear.${said ? ` ${said}` : ''}` };
   }
-  return undefined;
+  // Its adapter adds the skill when one has this name (the runner may not
+  // have its list yet), else Codex gets it as words.
+  return { kind: 'cli' };
 }
 
 // The picker's list for a thread: Threadbear's own first, then the CLI's.

@@ -164,15 +164,17 @@ export class ClaudeAdapter implements AgentAdapter {
   // The slash commands the CLI offers in a folder (its built-in ones, the
   // folder's and Mike's commands and skills), for the picker. Like
   // models(): a CLI with no prompt answers initialize without a turn.
-  async commands(account: Account, cwd: string): Promise<SlashCommand[]> {
+  // untrusted: as for a session (StartSessionOptions), so listing never
+  // runs what a folder's settings would that Mike hasn't trusted.
+  async commands(account: Account, cwd: string, untrusted?: Record<string, unknown>): Promise<SlashCommand[]> {
     const { deps } = this;
     const never = { async *[Symbol.asyncIterator]() { await new Promise<never>(() => {}); } } as AsyncIterable<SDKUserMessage>;
     const abort = new AbortController();
     const options: Options = {
       cwd,
       pathToClaudeCodeExecutable: deps.claudePath,
-      env: cliEnv(account),
-      settingSources: ['user', 'project', 'local'],
+      env: { ...cliEnv(account), ...(untrusted ? { CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1' } : {}) },
+      ...(untrusted ? untrustedSettings(cwd, untrusted) : { settingSources: ['user', 'project', 'local'] }),
       tools: [],
       abortController: abort,
       spawnClaudeCodeProcess: groupSpawner(deps.registry, deps.log, () => {}, `commands:${account.id}`),

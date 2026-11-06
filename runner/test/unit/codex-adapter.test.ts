@@ -1096,3 +1096,28 @@ test('/<skill> adds the skill to the turn; other commands and paths go as words'
   assert.deepEqual(words.params.input, [{ type: 'text', text: '/Users/mike/x.md looks off', text_elements: [] }]);
   await h.session.end();
 });
+
+test('a folder move waits past /compact for the next turn/start, and a Stop during a compaction goes once its turn starts', async () => {
+  const h = await open();
+  await started(h);
+  const other = tmp('tb-cxa-moved-');
+  await h.session.setCwd!(other);
+  h.session.send({ id: 'm1', text: '/compact', images: [] });
+  const req = await h.conn.request('thread/compact/start');
+  h.conn.respond(req.id, {});
+  await sleep(20);
+  const stopping = h.session.interrupt();
+  await sleep(20);
+  assert.equal(h.conn.sent('turn/interrupt').length, 0, 'no turn id yet');
+  h.conn.notify('turn/started', { threadId: 'th-1', turn: { id: 'c1', rootTurnId: 'c1', status: 'inProgress' } });
+  const intr = await h.conn.request('turn/interrupt');
+  assert.equal(intr.params.turnId, 'c1');
+  h.conn.respond(intr.id, {});
+  complete(h, 'c1', 'interrupted');
+  await stopping;
+  await waitFor(() => h.rec.results().length === 1);
+  h.session.send({ id: 'm2', text: 'b', images: [] });
+  const next = await turnStarts(h, 'u2');
+  assert.equal(next.params.cwd, other);
+  await h.session.end();
+});

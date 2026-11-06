@@ -8,6 +8,7 @@ import type { RunnerPart } from './part.ts';
 import type { Account, EffortLevel } from '../protocol.ts';
 import { isEffortLevel } from '../protocol.ts';
 import type { QueuedSend } from '../store.ts';
+import { claudeSettingsWithoutCommands } from '../claude-trust.ts';
 import { commandList, parseCommand, planCommand, type CommandPlan, type SlashCommand } from '../slash-commands.ts';
 
 // A folder's command list (its skills, its .claude/commands) changes
@@ -16,18 +17,29 @@ const LIST_TTL_MS = 10 * 60_000;
 
 export const commandsPart = {
   // The plan for a message, or undefined when it's words for the agent.
+  // A Codex thread's skills, from the picker's list when it has been
+  // fetched, so a skill named like one of Codex's terminal commands runs.
   commandPlan(this: Runner, st: ThreadState, text: string): CommandPlan | undefined {
     const cmd = parseCommand(text);
-    return cmd ? planCommand(st.rec.provider, cmd) : undefined;
+    if (!cmd) return undefined;
+    const listed = [...this.commandCache.entries()].find(([k]) => k.startsWith(`${st.rec.accountId}\0${st.rec.cwd}\0`))?.[1].commands ?? [];
+    return planCommand(st.rec.provider, cmd, new Set(listed.filter((c) => c.source === 'skill').map((c) => c.name)));
   },
 
   // Runs a command the runner answers itself, as the turn the message
   // started, and ends that turn. False for one the CLI is to run.
   runLocalCommand(this: Runner, st: ThreadState, msg: QueuedSend): boolean {
-    const plan = this.commandPlan(st, msg.text);
-    if (!plan || plan.kind === 'cli') return false;
+    let plan = this.commandPlan(st, msg.text);
+    if (!plan) return false;
     const { rec, rt } = st;
     const turn = rt.turn!;
+    // A move to another login or provider is waiting: the agent is told
+    // what came before in words put in front of the message, which would
+    // turn the command into words too. It needs a message first.
+    if (plan.kind === 'cli' && rec.handoff) {
+      plan = { kind: 'note', text: `This thread has just moved to ${this.modelLabel(rec)}, and the agent catches up on the conversation with your next message. Send one first, then ${msg.text.trim().split(/\s/)[0]} again.` };
+    }
+    if (plan.kind === 'cli') return false;
     // Settings changed here apply to the next turn, which is the one
     // that matters; this turn is the command's and is already over.
     turn.local = true;
@@ -79,6 +91,9 @@ export const commandsPart = {
           rec.sessionCostTotal = 0;
           delete rec.resumeAt;
           delete rec.contextTokens;
+          // Nor is it told what came before on another login: clear means clear.
+          delete rec.handoff;
+          rt.carried = undefined;
           // The new session hears about the thread's projects again.
           delete rec.projectsTold;
           say('Cleared the conversation. The agent starts fresh from your next message; the transcript above stays here for you.');
@@ -102,14 +117,19 @@ export const commandsPart = {
     const { rec, rt } = st;
     const account = this.accounts.get(rec.accountId);
     let cli: SlashCommand[] = [];
-    const key = `${rec.accountId}\0${rec.cwd}`;
+    // Claude's list in a folder whose settings Mike hasn't trusted is made
+    // without them (claude-trust.ts), so it's cached apart.
+    const claude = rec.provider === 'claude' ? this.patchTrust.checkClaude(rec.cwd) : undefined;
+    const skipped = claude && !claude.trusted ? claude.hash : undefined;
+    const untrusted = skipped ? claudeSettingsWithoutCommands(rec.cwd) : undefined;
+    const key = `${rec.accountId}\0${rec.cwd}\0${skipped ?? 'trusted'}`;
     const cached = this.commandCache.get(key);
     if (cached && this.clock.now() - cached.at < LIST_TTL_MS) cli = cached.commands;
     else {
       try {
         const live = rt.session?.commands ? await rt.session.commands() : undefined;
         const adapter = this.adapters[rec.provider];
-        cli = live ?? (account && adapter?.commands ? await adapter.commands(account, rec.cwd) : []);
+        cli = live ?? (account && adapter?.commands ? await adapter.commands(account, rec.cwd, untrusted) : []);
         this.commandCache.set(key, { at: this.clock.now(), commands: cli });
       } catch (e) {
         this.log.warn('could not list commands', { threadId, error: String(e) });
