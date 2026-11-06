@@ -651,8 +651,10 @@ tool row says so. Editing a message, its highlights and patches, and
 changing its login or model are done on that Mac. Agents see them the
 same way: `list_threads` lists and searches them (each row says which Mac),
 `read_thread` reads them and `send_message` messages them. A Mac that's off shows
-its threads but can't take a message until it's back. Settings > Runners >
-Connect to other machines directly opens them over Tailscale instead, with
+its threads but can't take a message until it's back. Its archived
+threads are in your Archived list with the rest, to reopen or unarchive.
+Settings > Runners > Connect to other machines directly opens them over
+Tailscale instead, with
 everything, as before: that needs that Mac to be on and its key and host
 copied to this one (run `tb pair` on that Mac and it prints the two files
 to make here and how). To add a Mac, give it a key of its own from this one: `tb runner

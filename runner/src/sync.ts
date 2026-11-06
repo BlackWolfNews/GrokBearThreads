@@ -115,7 +115,10 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 53;
+export const BACKEND_API_VERSION = 54;
+// From this one a runner key's archived threads stay in the sidebar table, so
+// those an older backend dropped go again, once (thread-index.ts resendArchived).
+export const ARCHIVED_INDEX_API_VERSION = 54;
 // From this one the main Mac reads and steers other runners' threads through
 // the backend (convex/relay.ts): commands can be `interrupt` or `call`, and a
 // pending approval carries its event's seq (docs/protocol.md, "Other
@@ -1272,6 +1275,8 @@ export class ConvexSync {
       this.deps.log.warn('the convex backend is older than this runner', { backend: v, expected: BACKEND_API_VERSION, url: this.deps.config.url });
     }
     if (v >= INDEX_STARTED_BY_API_VERSION) this.index?.refresh();
+    // Only a runner key's were dropped; the owner's always stayed.
+    if (v >= ARCHIVED_INDEX_API_VERSION && this.deps.key?.startsWith('tbr_')) this.index?.resendArchived();
     // Shared threads held back their share from an older backend (or
     // before the first heartbeat said which): they go again now.
     if (v >= SHARE_API_VERSION && this.running) {

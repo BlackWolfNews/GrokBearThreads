@@ -241,4 +241,9 @@
 //    stored read no later than now. sync:pools gives a runner key no member
 //    named by another runner's id. An older runner takes the rows it's given
 //    as before.
-export const API_VERSION = 53;
+// 54: a runner key's archived threads stay in threadIndex (within its cap,
+//    archived rows giving way first), so the main Mac's Archived list has
+//    other machines' archived threads and can open and unarchive them
+//    (docs/protocol.md, "Other runners' threads"). A runner sends the
+//    archived rows an older backend dropped once, on first hearing 54.
+export const API_VERSION = 54;

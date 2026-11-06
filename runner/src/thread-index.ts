@@ -126,7 +126,7 @@ export class ThreadIndex {
     appConnected?: () => boolean;
     // What was sent before the runner last stopped (sync-cache.ts): a start
     // then writes only what changed, and doesn't read every row to prune.
-    seed?: () => { at: number; rows: Record<string, string>; removed?: string[] } | undefined;
+    seed?: () => { at: number; rows: Record<string, string>; removed?: string[]; archived?: boolean } | undefined;
     onSent?: () => void;
   };
   private running = false;
@@ -141,6 +141,10 @@ export class ThreadIndex {
   private unlisten?: () => void;
   private unsubscribe?: () => void;
   private remote: RemoteThreads = { runners: [], threads: [] };
+  // A backend before API 53 dropped a runner key's archived rows while this
+  // remembered them as sent: they go once more, then this says so (snapshot).
+  private archivedSent = false;
+  private archivedWanted = false;
   // The backend said this runner's key can't read other runners' threads.
   private refused = false;
   // Whether the list has had the backend's answer since the watch started
@@ -171,6 +175,7 @@ export class ThreadIndex {
     if (seed) {
       this.sent = new Map(Object.entries(seed.rows));
       this.fullAt = seed.at;
+      this.archivedSent = seed.archived === true;
       this.full = false;
       const here = new Set(this.deps.host.list(['inbox', 'snoozed', 'archived']).map((t) => t.id));
       for (const id of seed.removed ?? []) if (!here.has(id)) this.removed.add(id);
@@ -186,6 +191,10 @@ export class ThreadIndex {
       } else return;
       this.schedule();
     });
+    if (this.archivedWanted) {
+      this.archivedWanted = false;
+      this.resendArchived();
+    }
     this.schedule(0);
     this.appGoneAt = undefined;
     if (this.deps.appConnected) this.checkWatch();
@@ -351,9 +360,9 @@ export class ThreadIndex {
   }
 
   /** For sync-cache.ts: undefined until a full write has finished. */
-  snapshot(): { at: number; rows: Record<string, string>; removed?: string[] } | undefined {
+  snapshot(): { at: number; rows: Record<string, string>; removed?: string[]; archived?: boolean } | undefined {
     if (this.full || !this.fullAt) return undefined;
-    return { at: this.fullAt, rows: Object.fromEntries(this.sent), ...(this.removed.size || this.removing.length ? { removed: [...new Set([...this.removed, ...this.removing])] } : {}) };
+    return { at: this.fullAt, rows: Object.fromEntries(this.sent), ...(this.archivedSent ? { archived: true } : {}), ...(this.removed.size || this.removing.length ? { removed: [...new Set([...this.removed, ...this.removing])] } : {}) };
   }
 
   /** The deployment doesn't know this runner: everything goes again. */
@@ -366,6 +375,26 @@ export class ThreadIndex {
   }
 
   /** The backend got new enough for what rows held back: they go again. */
+  /** Once a backend keeps a runner key's archived rows (API 53): those it dropped go again, once. */
+  resendArchived(): void {
+    if (this.archivedSent) return;
+    // Heard before the index has started (the heartbeat comes first): at start.
+    if (!this.running) {
+      this.archivedWanted = true;
+      return;
+    }
+    this.archivedSent = true;
+    let n = 0;
+    for (const t of this.deps.host.list(['archived'])) {
+      if (!t.archivedAt) continue;
+      this.sent.delete(t.id);
+      this.mark(t);
+      n++;
+    }
+    if (n) this.deps.log.info('thread index: sending archived threads again', { threads: n });
+    this.schedule();
+  }
+
   refresh(): void {
     if (!this.running) return;
     // Now able to watch only what changed: start the watch over that way.

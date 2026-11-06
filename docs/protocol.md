@@ -3741,6 +3741,12 @@ runner itself. Runners never talk to each other.
   of those but `preview` and `lastActivityAt` changes (those two go along
   but never cause a write), and on its first write after starting it
   drops rows for threads it no longer has. A deleted thread's row goes.
+  Archived threads have rows too, so the app's Archived list has other
+  machines' archived threads to open and unarchive. A runner key's rows
+  are capped (`CAP.indexRows`), and past the cap its oldest archived row
+  gives way before a live one; a backend before API 53 dropped a runner
+  key's archived rows, and a runner sends those again once on first
+  hearing 53 (its sync cache's `index.archived` says it has).
 - **Watching the others.** The runner subscribes to
   `sync:otherRunnersThreads` (every runner but itself, with its threads)
   and gives the result to clients as `remoteThreads.list` and

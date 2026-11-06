@@ -240,7 +240,9 @@ export const RUNNER_KEY_CAPS = {
   bodyEvictPerWrite: 20,
   pushesPerMinute: 10,
   indexRow: 2_048,
-  indexRows: 800, // every row, tombstones too
+  indexRows: 800, // every row, tombstones too, archived ones too (API 53)
+  // How many of its oldest rows a write past that looks through for an archived one to give way.
+  indexEvictScan: 100,
   cardTitle: 60,
   cardText: 2_000,
   cardPlace: 100,
@@ -2482,17 +2484,13 @@ export const setThreadIndex = mutation({
     const updatedMs = Date.now();
     // A runner key's rows are capped in number (CAP.indexRows), tombstones
     // included, keeping the most recent: a new one past the cap takes the
-    // place of its oldest row. Archived threads aren't listed for it (the
-    // sidebar doesn't need them), and rows too big even when cut are left out.
+    // place of its oldest row, an archived one first. Archived threads are
+    // listed too (API 53), so the main Mac's Archived list can reopen them;
+    // rows too big even when cut are left out.
     let count = caller.owner ? 0 : (await ctx.db.query('threadIndex').withIndex('by_runnerId', (q) => q.eq('runnerId', runnerId)).take(CAP.indexRows + 1)).length;
     for (const given of rows) {
       const row = caller.owner ? given : fitIndexRow(given);
       if (!row) continue;
-      if (!caller.owner && row.archivedAt) {
-        const had = await ctx.db.query('threadIndex').withIndex('by_runner_thread', (q) => q.eq('runnerId', runnerId).eq('threadId', row.threadId)).unique();
-        if (had && !had.deleted) await ctx.db.patch(had._id, { deleted: true, updatedMs });
-        continue;
-      }
       const existing = await ctx.db
         .query('threadIndex')
         .withIndex('by_runner_thread', (q) => q.eq('runnerId', runnerId).eq('threadId', row.threadId))
@@ -2508,8 +2506,13 @@ export const setThreadIndex = mutation({
       if (existing) await ctx.db.replace(existing._id, { ...row, runnerId, updatedMs });
       else {
         if (!caller.owner && count >= CAP.indexRows) {
-          // A tombstone gives way first; a live row only when there are none.
-          const oldest = (await ctx.db.query('threadIndex').withIndex('by_runner_deleted', (q) => q.eq('runnerId', runnerId).eq('deleted', true)).first()) ?? (await ctx.db.query('threadIndex').withIndex('by_runner_updated', (q) => q.eq('runnerId', runnerId)).first());
+          // A tombstone gives way first, then the oldest archived row among
+          // the oldest few, and a live one only when there's neither.
+          const oldestFew = await ctx.db.query('threadIndex').withIndex('by_runner_updated', (q) => q.eq('runnerId', runnerId)).take(CAP.indexEvictScan);
+          const oldest =
+            (await ctx.db.query('threadIndex').withIndex('by_runner_deleted', (q) => q.eq('runnerId', runnerId).eq('deleted', true)).first()) ??
+            oldestFew.find((r) => r.archivedAt) ??
+            oldestFew[0];
           if (oldest) {
             await ctx.db.delete(oldest._id);
             count--;
