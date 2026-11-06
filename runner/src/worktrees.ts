@@ -287,26 +287,34 @@ export async function land(t: LandTarget, opts: LandOptions = {}): Promise<numbe
 async function lockLanding(file: string, out: (line: string) => void): Promise<() => Promise<void>> {
   const holder = "process.stdin.resume(); process.stdin.on('end', () => process.exit(0)); process.stdout.write('locked');";
   const mac = process.platform === 'darwin';
-  const child = spawn(mac ? '/usr/bin/lockf' : 'flock', [mac ? '-k' : '-x', file, process.execPath, '-e', holder], {
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
-  const closed = new Promise<void>((resolve) => child.once('close', () => resolve()));
-  let errors = '';
-  child.stderr.on('data', (d) => { errors += d; });
-  const waiting = setTimeout(() => out('Waiting for another landing of this repo to finish...'), 100);
-  try {
-    await new Promise<void>((resolve, reject) => {
-      child.once('error', reject);
-      child.once('close', (code) => reject(new Error(errors.trim() || `landing lock exited (${code})`)));
-      child.stdout.once('data', () => resolve());
+  const take = async (wait: boolean): Promise<(() => Promise<void>) | undefined> => {
+    // 75 is EX_TEMPFAIL for lockf, and explicitly chosen for flock. A
+    // nonblocking try distinguishes contention from a slow Node startup.
+    const args = mac ? ['-k', ...(wait ? [] : ['-t', '0'])] : ['-x', '-E', '75', ...(wait ? [] : ['-n'])];
+    const child = spawn(mac ? '/usr/bin/lockf' : 'flock', [...args, file, process.execPath, '-e', holder], {
+      stdio: ['pipe', 'pipe', 'pipe'],
     });
-  } finally {
-    clearTimeout(waiting);
-  }
-  return async () => {
-    child.stdin.end();
-    await closed;
+    const closed = new Promise<void>((resolve) => child.once('close', () => resolve()));
+    let errors = '';
+    child.stderr.on('data', (d) => { errors += d; });
+    const acquired = await new Promise<boolean>((resolve, reject) => {
+      child.once('error', reject);
+      child.once('close', (code) => {
+        if (!wait && code === 75) resolve(false);
+        else reject(new Error(errors.trim() || `landing lock exited (${code})`));
+      });
+      child.stdout.once('data', () => resolve(true));
+    });
+    if (!acquired) return undefined;
+    return async () => {
+      child.stdin.end();
+      await closed;
+    };
   };
+  const release = await take(false);
+  if (release) return release;
+  out('Waiting for another landing of this repo to finish...');
+  return (await take(true))!;
 }
 
 async function landLocked(t: LandTarget, opts: LandOptions): Promise<number> {
