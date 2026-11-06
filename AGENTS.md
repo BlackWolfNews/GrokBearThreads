@@ -97,6 +97,11 @@ and ask the user what they use instead, rather than trying to reach them.
   stepped from a display link showed Mike a couple of frames, as the
   same click opens the next thread (30 Oct). The perf run
   (`app/Tools/perf-run.sh`) times archiving too.
+- On Mike's Hetzner Cloud runner (and sandboxes to come), git pushes with a
+  one-hour token his main Mac hands over (`~/dev/me/misc/github-app` there),
+  and the repo's rulesets let it write only `cloud/**` branches: push your
+  work as `cloud/<topic>` and say so. `main`, other branches and tags are
+  refused; landing happens from the main Mac.
 - Assume every action is slow to land. Another runner's thread goes
   through Convex and that runner taking the command (a second or more),
   and the main Mac's runner can be busy. Anything Mike clicks either shows
