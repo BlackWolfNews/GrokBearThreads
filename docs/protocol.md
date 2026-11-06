@@ -1527,6 +1527,30 @@ type UsageStats = {
 - A draining runner (Handovers) keeps neither file: both are the new
   runner's to write.
 
+## Sandboxed threads
+
+An experiment (6 Nov 2026, runner/src/sandbox.ts), off unless a runner's
+`runner.json` has `sandbox: { folders: ["~/sandboxed"], image: "threadbear-sandbox",
+docker?: "docker" }`. A Claude thread whose folder is under one of `folders`
+runs its CLI inside `docker run -i --rm --init` from `image`, as the runner's
+own user, with only these mounted in, each at the same path as on the
+machine: the thread's folder and the login's config folder (plus
+`~/.claude.json` for the default login), read-write; the CLI's real file and
+any other path it's handed as an argument, read-only. Nothing else of the
+machine is there (the runner, its data folder and secrets, other repos), so
+an agent with full access can change only its own folder. The runner, its
+transcripts, Convex sync, pools and schedules don't change, and the
+threadbear tools and hooks reach the CLI over its stdin and stdout as
+always. Model and command probes, and Codex threads, run as before.
+
+The container lasts as long as the CLI: when the runner stops a thread's
+CLI (idle, a restart, interrupt), the container is killed with it, and the
+next message starts a new one that resumes the session from the login's
+config folder. Anything outside the mounts doesn't survive that, like an
+installed package or a running server. The image needs the tools agents
+run (git, ripgrep, Node, Python); a worktree whose git folder is elsewhere
+isn't mounted yet.
+
 ## Pools
 
 A pool is a named, ordered list of logins, of any provider. Mike picks a
