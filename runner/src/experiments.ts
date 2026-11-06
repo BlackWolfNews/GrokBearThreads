@@ -47,9 +47,16 @@ export const EXPERIMENTS: readonly Experiment[] = [
     on: false,
     reminder: '6328eeda',
   },
+  {
+    id: 'richBlocks',
+    title: 'Diagrams and pages in replies: agents are told the apps draw ```mermaid and ```html blocks',
+    added: '2026-11-06',
+    on: false,
+    reminder: '72b91442',
+  },
 ];
 
-export type ExperimentId = 'labReview' | 'keepAwake' | 'scheduleChecks';
+export type ExperimentId = 'labReview' | 'keepAwake' | 'scheduleChecks' | 'richBlocks';
 
 // Read from runner.json each time, so turning one on or off takes effect
 // at the next turn, with no restart.

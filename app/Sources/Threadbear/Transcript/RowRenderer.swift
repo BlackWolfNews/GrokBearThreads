@@ -178,8 +178,18 @@ final class RenderCache: @unchecked Sendable {
     /// costs nothing.
     static func key(_ row: TranscriptRow, expanded: Bool, showAll: Bool = false, width: CGFloat) -> NSString {
         let open = openLevel(row, expanded: expanded, showAll: showAll)
-        return "\(row.id)|\(row.version)|\(open)|\(row.inGroup ? 1 : 0)|\(Int(RowMetrics.column(tableWidth: width).width))|\(TypeScale.percent)" as NSString
+        return "\(row.id)|\(row.version)|\(open)|\(row.inGroup ? 1 : 0)|\(Int(RowMetrics.column(tableWidth: width).width))|\(TypeScale.percent)|\(richStamp(row))" as NSString
     }
+
+    /// A reply with a ```mermaid or ```html box renders again when one is
+    /// drawn or flipped to its source; every other row keys on -1.
+    static func richStamp(_ row: TranscriptRow) -> Int {
+        guard case .assistant(let item) = row.content, RichBlocks.mayHoldRich(item.text) else { return -1 }
+        return RichBlocks.shared.generation
+    }
+
+    /// Whether a row is drawn differently once its rich blocks change.
+    static func holdsRich(_ row: TranscriptRow) -> Bool { richStamp(row) != -1 }
 
     func cached(_ row: TranscriptRow, expanded: Bool, showAll: Bool = false, width: CGFloat) -> RowRender? {
         cache.object(forKey: Self.key(row, expanded: expanded, showAll: showAll, width: width))

@@ -58,6 +58,12 @@ File references are where to look.
   `~/Library/Caches/Threadbear/update`;
   `~/Library/Caches/Threadbear/remote` (copies of pictures and files from
   threads on your other Macs, at most 512 MB, unused ones go after 30 days);
+  `~/Library/Caches/Threadbear/rich` (pictures of the ```` ```mermaid ```` and
+  ```` ```html ```` blocks in replies, and each one's page for the side pane,
+  newest 900 files kept). They're drawn on this Mac in web views that load
+  nothing from the network: the diagram library, [Pele](https://pele.run/),
+  is bundled with the app (`Resources/Rich/pele.js`, MIT), and a block's
+  page runs no scripts;
   `~/Library/Logs/threadbear-runner.log` and `threadbear-update.log`;
   `~/Library/Logs/Threadbear/hangs` (the last 10 times the app froze: if its
   main thread is stuck for 4 seconds it runs macOS's `sample` on itself, in

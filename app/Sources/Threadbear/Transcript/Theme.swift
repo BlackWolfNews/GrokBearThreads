@@ -207,6 +207,13 @@ enum Theme {
     /// Behind an ask's answer rows (one reply): barely there, as the box's
     /// border does the work.
     static let answerRowsFill = dynamic(dark: NSColor(white: 1, alpha: 0.02), light: NSColor(white: 0, alpha: 0.015))
+    /// A ```mermaid or ```html box's Diagram / Source switch (RichBlockCell).
+    static let switchTrack = dynamic(dark: NSColor(white: 1, alpha: 0.06), light: NSColor(white: 0, alpha: 0.05))
+    static let switchThumb = dynamic(dark: NSColor(white: 1, alpha: 0.16), light: NSColor(white: 1, alpha: 1))
+    /// codeBackground over the transcript, as one solid colour, for a fade
+    /// that has to end in it (RichPalette's bg is the same).
+    static let codeBackgroundOpaque = dynamic(dark: NSColor(srgbRed: 0x28 / 255, green: 0x28 / 255, blue: 0x28 / 255, alpha: 1),
+                                              light: NSColor(srgbRed: 0xf7 / 255, green: 0xf7 / 255, blue: 0xf7 / 255, alpha: 1))
     static let hairline = dynamic(dark: NSColor(white: 1, alpha: 0.1), light: NSColor(white: 0, alpha: 0.1))
 
     /// Text tiers that read the same in both looks. The system's tertiary
@@ -327,6 +334,9 @@ extension NSAttributedString.Key {
     /// A Notion card's chip in Mike's bubble (RowRenderer.cardChips): the
     /// value is the card's title, the words its one U+FFFC stands for.
     static let tbCardChip = NSAttributedString.Key("tbCardChip")
+    /// What a copy puts in place of this run's one U+FFFC: a ```mermaid or
+    /// ```html box's fenced source (RichBlockCell).
+    static let tbCopyText = NSAttributedString.Key("tbCopyText")
     /// The room an open card leaves under an ask for its Something else
     /// box (an NSNumber, the ask's index): one line as tall as the box, with
     /// the box itself a text view the cell puts over it (AskAnswerBox).

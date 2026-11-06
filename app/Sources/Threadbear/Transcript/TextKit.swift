@@ -430,6 +430,13 @@ final class TranscriptTextView: NSTextView {
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
+        // A ```mermaid or ```html box's buttons. Elsewhere in the box a
+        // press selects as text does.
+        if let box = richBox(at: point), let action = box.cell.action(at: point, in: box.frame) {
+            closeChipCard()
+            perform(action, on: box.cell.block)
+            return
+        }
         // A press on a link (a file, a web page, an asks card's link
         // button) that moves drags it out (FileDrag); let go first and
         // it's a click as before.
@@ -503,6 +510,75 @@ final class TranscriptTextView: NSTextView {
 
     /// The character under `point` (view coordinates, which already
     /// include a slice's bounds offset), if the point is on its glyph.
+    // MARK: Rich blocks
+
+    /// The ```mermaid or ```html box at `point`, and its frame in this
+    /// view's coordinates (RichBlockCell).
+    func richBox(at point: NSPoint) -> (cell: RichBlockCell, frame: NSRect)? {
+        guard let layoutManager, let textContainer, let storage = textStorage, storage.length > 0,
+              storage.string.utf16.contains(0xFFFC) else { return nil }
+        let origin = textContainerOrigin
+        let local = NSPoint(x: point.x - origin.x, y: point.y - origin.y)
+        let glyph = layoutManager.glyphIndex(for: local, in: textContainer)
+        let index = layoutManager.characterIndexForGlyph(at: glyph)
+        guard index < storage.length, let cell = (storage.attribute(.attachment, at: index, effectiveRange: nil) as? NSTextAttachment)?.attachmentCell as? RichBlockCell
+        else { return nil }
+        let frame = richFrame(glyph: glyph)
+        return frame.contains(point) ? (cell, frame) : nil
+    }
+
+    private func richFrame(glyph: Int) -> NSRect {
+        guard let layoutManager, let textContainer else { return .zero }
+        let box = layoutManager.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: textContainer)
+        let size = layoutManager.attachmentSize(forGlyphAt: glyph)
+        let origin = textContainerOrigin
+        // The attachment sits on the line's baseline, at the bottom of its box.
+        return NSRect(x: box.minX + origin.x, y: box.maxY - size.height + origin.y, width: size.width, height: size.height)
+    }
+
+    private func isRichButton(at point: NSPoint) -> Bool {
+        guard let box = richBox(at: point) else { return false }
+        return box.cell.action(at: point, in: box.frame) != nil
+    }
+
+    private func perform(_ action: RichBlockCell.Action, on block: RichBlock) {
+        switch action {
+        case .drawn: RichBlocks.shared.setShowsSource(block.id, false)
+        case .source: RichBlocks.shared.setShowsSource(block.id, true)
+        case .copy:
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(block.source, forType: .string)
+        case .open:
+            RichRenderer.shared.openBeside(block)
+        }
+    }
+
+    /// A tip over each of the boxes' buttons, placed again whenever the
+    /// text or the width changes.
+    private func placeRichTips() {
+        subviews.filter { $0 is RichTipAnchor }.forEach { $0.removeFromSuperview() }
+        guard let layoutManager, let textContainer, let storage = textStorage, storage.length > 0,
+              storage.string.utf16.contains(0xFFFC) else { return }
+        layoutManager.ensureLayout(for: textContainer)
+        storage.enumerateAttribute(.attachment, in: NSRange(location: 0, length: storage.length)) { value, range, _ in
+            guard let cell = (value as? NSTextAttachment)?.attachmentCell as? RichBlockCell else { return }
+            let frame = richFrame(glyph: layoutManager.glyphIndexForCharacter(at: range.location))
+            let layout = cell.layout(in: frame)
+            for action in RichBlockCell.Action.allCases {
+                guard let rect = layout.buttons[action] else { continue }
+                let anchor = RichTipAnchor(frame: rect)
+                anchor.text = action.tip(cell.block)
+                addSubview(anchor)
+            }
+        }
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        let changed = newSize.width != frame.width
+        super.setFrameSize(newSize)
+        if changed { placeRichTips() }
+    }
+
     private func character(at point: NSPoint) -> Int? {
         guard let layoutManager, let textContainer, let storage = textStorage, storage.length > 0 else { return nil }
         let origin = textContainerOrigin
@@ -572,6 +648,7 @@ final class TranscriptTextView: NSTextView {
     /// Works out which id-shaped words are chips now, after the text or
     /// the thread list changed.
     func refreshChips() {
+        placeRichTips()
         guard let layoutManager, let storage = textStorage else { return }
         let had = !chips.isEmpty
         chips = ThreadChips.chips(in: storage)
@@ -646,7 +723,7 @@ final class TranscriptTextView: NSTextView {
         let chip = chip(at: point)
         let row = onAction == nil ? nil : row(at: point)
         hoverRow(row?.range)
-        if chip != nil || row != nil || isAction(at: point) || pictureChip(at: point) != nil { NSCursor.pointingHand.set() }
+        if chip != nil || row != nil || isAction(at: point) || pictureChip(at: point) != nil || isRichButton(at: point) { NSCursor.pointingHand.set() }
         if let chip { hoverChip(chip) } else { hoverPeek(peek(at: point)) }
     }
 
@@ -663,7 +740,7 @@ final class TranscriptTextView: NSTextView {
 
     override func cursorUpdate(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        if isOverPointerButton(event) || chip(at: point) != nil || isAction(at: point) || pictureChip(at: point) != nil || (onAction != nil && row(at: point) != nil) {
+        if isOverPointerButton(event) || chip(at: point) != nil || isAction(at: point) || pictureChip(at: point) != nil || isRichButton(at: point) || (onAction != nil && row(at: point) != nil) {
             NSCursor.pointingHand.set()
         } else {
             super.cursorUpdate(with: event)
@@ -964,8 +1041,10 @@ final class TranscriptTextView: NSTextView {
     /// one U+FFFC.
     private static func wordsWithCards(_ selection: NSAttributedString) -> String {
         let out = NSMutableString(string: selection.string)
-        selection.enumerateAttribute(.tbCardChip, in: NSRange(location: 0, length: selection.length), options: .reverse) { value, range, _ in
-            if let title = value as? String { out.replaceCharacters(in: range, with: title) }
+        selection.enumerateAttributes(in: NSRange(location: 0, length: selection.length), options: .reverse) { attributes, range, _ in
+            if let title = attributes[.tbCardChip] as? String { out.replaceCharacters(in: range, with: title) }
+            // A ```mermaid or ```html box copies as its fenced source.
+            else if let source = attributes[.tbCopyText] as? String { out.replaceCharacters(in: range, with: source) }
         }
         return out as String
     }
@@ -978,8 +1057,8 @@ final class TranscriptTextView: NSTextView {
         guard let storage = textStorage, range.length > 0, NSMaxRange(range) <= storage.length else { return super.writeSelection(to: pboard, types: types) }
         let selection = storage.attributedSubstring(from: range)
         var hasCard = false
-        selection.enumerateAttribute(.tbCardChip, in: NSRange(location: 0, length: selection.length)) { value, _, stop in
-            if value != nil {
+        selection.enumerateAttributes(in: NSRange(location: 0, length: selection.length)) { attributes, _, stop in
+            if attributes[.tbCardChip] != nil || attributes[.tbCopyText] != nil {
                 hasCard = true
                 stop.pointee = true
             }
@@ -1105,3 +1184,7 @@ final class TranscriptTextView: NSTextView {
         return nil
     }
 }
+
+
+/// A tip over one of a rich box's buttons (TranscriptTextView.placeRichTips).
+final class RichTipAnchor: TipAnchorView {}

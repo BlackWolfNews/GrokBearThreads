@@ -60,7 +60,7 @@ import { detectMachineIcon } from './machine.ts';
 import { filesMethods } from './files.ts';
 import { devicesMethods } from './devices.ts';
 import { flushSentry, reportException, reportLoggedError, reportLoggedWarning, startSentry } from './sentry.ts';
-import { ALWAYS_ASK_TOOLS, NEVER_ASK_TOOLS, SERVER_NAME, buildThreadbearTools, threadbearMcpServer, type RemoteControl } from './threadbear-mcp.ts';
+import { ALWAYS_ASK_TOOLS, NEVER_ASK_TOOLS, RICH_BLOCKS_LINE, SERVER_NAME, buildThreadbearTools, threadbearMcpServer, type RemoteControl } from './threadbear-mcp.ts';
 import { CrossRunner } from './cross-runner.ts';
 import { EFFORT_LEVELS, type EffortLevel } from './protocol.ts';
 
@@ -196,7 +196,7 @@ async function main(): Promise<void> {
     claudePath: cfg.claudePath,
     registry,
     log,
-    mcpServersFor: (threadId) => ({ [SERVER_NAME]: threadbearMcpServer(router(), threadId, scheduleControl(), projectControl(), appRestarts, () => cfg.bulletReplies, pocketControl, () => cfg.oneReply, () => cfg.connectorsUrl, gatewayHealth, () => experimentOn(cfg.home, 'scheduleChecks'), remoteControl) }),
+    mcpServersFor: (threadId) => ({ [SERVER_NAME]: threadbearMcpServer(router(), threadId, scheduleControl(), projectControl(), appRestarts, () => cfg.bulletReplies, pocketControl, () => cfg.oneReply, () => cfg.connectorsUrl, gatewayHealth, () => experimentOn(cfg.home, 'scheduleChecks'), remoteControl, () => experimentOn(cfg.home, 'richBlocks')) }),
     oneReply: () => cfg.oneReply,
     sandboxFor: (cwd) => sandboxFor(cfg.sandbox, cwd),
     alwaysAsk: ALWAYS_ASK_TOOLS,
@@ -211,6 +211,7 @@ async function main(): Promise<void> {
     log,
     toolsFor: (threadId) => buildThreadbearTools(router(), threadId, Date.now, scheduleControl(), projectControl(), appRestarts, { provider: 'codex', bulletReplies: () => cfg.bulletReplies, oneReply: () => cfg.oneReply, pocket: pocketControl, gateway: () => cfg.connectorsUrl, gatewayHealth, scheduleChecks: () => experimentOn(cfg.home, 'scheduleChecks'), remote: remoteControl }),
     onNotice: (text) => runner.notice('warning', text),
+    extraGuidance: () => (experimentOn(cfg.home, 'richBlocks') ? RICH_BLOCKS_LINE : ''),
   });
   // The runner's own small-model calls, on the settings' Claude pool.
   const models = new Models({

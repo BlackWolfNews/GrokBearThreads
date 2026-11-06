@@ -110,6 +110,40 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         NotificationCenter.default.addObserver(self, selector: #selector(boundsChanged), name: NSView.boundsDidChangeNotification, object: scrollView.contentView)
         NotificationCenter.default.addObserver(self, selector: #selector(frameChanged), name: NSView.frameDidChangeNotification, object: scrollView.contentView)
         NotificationCenter.default.addObserver(self, selector: #selector(zoomChanged), name: TextZoom.didChange, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(richChanged), name: RichBlocks.changed, object: nil)
+    }
+
+    /// A ```mermaid or ```html box was drawn, or flipped between its
+    /// picture and its source: the replies holding one render again (their
+    /// render keys changed), keeping what's on screen where it is. Several
+    /// finishing together are done once.
+    private var richPending = false
+    @objc private func richChanged() {
+        guard !richPending else { return }
+        richPending = true
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.richPending = false
+                guard let session = self.session else { return }
+                let indices = IndexSet((0..<session.displayCount).filter { RenderCache.holdsRich(session.displayRow($0)) })
+                guard !indices.isEmpty else { return }
+                let wasPinned = self.isAtBottom
+                let anchor = wasPinned ? nil : self.captureMemory()
+                NSAnimationContext.beginGrouping()
+                NSAnimationContext.current.duration = 0
+                for index in indices {
+                    if let row = self.row(at: index) { self.refreshCell(at: index, row: row) }
+                }
+                self.tableView.noteHeightOfRows(withIndexesChanged: indices)
+                NSAnimationContext.endGrouping()
+                if wasPinned {
+                    self.scrollToBottom()
+                } else if let anchor, let id = anchor.anchorId, let index = session.displayIndex(of: id) {
+                    self.scroll(toRow: index, offset: anchor.offset)
+                }
+            }
+        }
     }
 
     // MARK: Edge fades

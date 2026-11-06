@@ -1649,6 +1649,13 @@ export const SHOWING_THE_USER =
   "For a single file or link they should look at (a doc, a screenshot, a preview URL, a PR), use pin, with show: true to open it in Threadbear's side pane rather than running `open`. " +
   "To put one of Threadbear's own panels in front of them (this thread's Highlights, a patch panel such as the Convex dashboard, Usage), use show_panel.";
 
+// With the richBlocks experiment on (experiments.ts): the Mac and iPhone
+// apps draw these fences as what they show, in a box with a switch to the
+// source (Ayush's bearfooding notes, 6 Nov). Agents don't reach for a
+// diagram unless they know it'll be drawn.
+export const RICH_BLOCKS_LINE =
+  'Threadbear draws a ```mermaid block in your reply as a diagram, and a ```html block as a small static page (no scripts or network: inline CSS, SVG and data: images only), each with a switch to its source. Use one when a picture explains better than words.';
+
 // Only for a thread that has the pocket tool: the Pocket lives in the Convex
 // backend, so with phone sync off there's no tool to tell it about.
 export const POCKET_LINE =
@@ -1704,7 +1711,7 @@ export function patchesLine(guide = guidePath(), exists: (p: string) => boolean 
 // What a Claude session's threadbear server tells it, standing in every
 // turn's context. Measured by the context budget test with the tools
 // (test/unit/context-budget.test.ts), so growth is a choice.
-export function serverInstructions(selfId: string, o: { one: boolean; bulletReplies: boolean; pocket: boolean; projects: boolean }): string {
+export function serverInstructions(selfId: string, o: { one: boolean; bulletReplies: boolean; pocket: boolean; projects: boolean; richBlocks?: boolean }): string {
   const guide = guideLine();
   const patches = patchesLine();
   return (
@@ -1715,6 +1722,7 @@ export function serverInstructions(selfId: string, o: { one: boolean; bulletRepl
     'These tools manage Threadbear itself: list and read threads, start new ones, message them, rename, snooze, archive, move and delete them, schedule messages for later (once or on a cron), and keep the user\'s projects (groupings above folders with goals, state and notes) up to date. ' +
     'Use move_thread when the work belongs in another folder (for example a repo), so this thread runs there from the next turn. ' +
     `${SHOWING_THE_USER} ` +
+    (o.richBlocks ? `${RICH_BLOCKS_LINE} ` : '') +
     (o.pocket ? `${POCKET_LINE} ` : '') +
     (o.projects ? `${FILING_PROJECTS} ` : '') +
     (o.one
@@ -1725,12 +1733,12 @@ export function serverInstructions(selfId: string, o: { one: boolean; bulletRepl
   );
 }
 
-export function threadbearMcpServer(control: ThreadControl, selfId: string, schedules?: ScheduleControl, projects?: ProjectControl, appRestarts?: AppRestartControl, bulletReplies: () => boolean = () => true, pocket?: () => PocketControl | undefined, oneReply: () => boolean = () => false, gateway?: () => string | undefined, gatewayHealth?: () => Promise<ConnectorService[] | undefined>, scheduleChecks?: () => boolean, remote?: () => RemoteControl | undefined): McpSdkServerConfigWithInstance {
+export function threadbearMcpServer(control: ThreadControl, selfId: string, schedules?: ScheduleControl, projects?: ProjectControl, appRestarts?: AppRestartControl, bulletReplies: () => boolean = () => true, pocket?: () => PocketControl | undefined, oneReply: () => boolean = () => false, gateway?: () => string | undefined, gatewayHealth?: () => Promise<ConnectorService[] | undefined>, scheduleChecks?: () => boolean, remote?: () => RemoteControl | undefined, richBlocks: () => boolean = () => false): McpSdkServerConfigWithInstance {
   const one = oneReply();
   const server = createSdkMcpServer({
     name: SERVER_NAME,
     version: RUNNER_VERSION,
-    instructions: serverInstructions(selfId, { one, bulletReplies: bulletReplies(), pocket: Boolean(pocket?.()), projects: Boolean(projects) }),
+    instructions: serverInstructions(selfId, { one, bulletReplies: bulletReplies(), pocket: Boolean(pocket?.()), projects: Boolean(projects), richBlocks: richBlocks() }),
     tools: buildThreadbearTools(control, selfId, Date.now, schedules, projects, appRestarts, { bulletReplies, pocket, oneReply: () => one, gateway, gatewayHealth, scheduleChecks, remote }),
   });
   server.tools = [...ALWAYS_ASK_TOOLS].map((name) => ({ name: name.split('__').at(-1)!, permission_policy: 'always_ask' as const }));

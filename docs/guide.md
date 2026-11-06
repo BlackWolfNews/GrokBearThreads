@@ -123,6 +123,18 @@ to the step it's about: click
 it and the work opens there, with that step lit up. A link to another
 thread opens that thread.
 
+An agent can draw a diagram or a small page in its reply: a ```` ```mermaid ````
+block shows as the diagram (drawn with [Pele](https://pele.run/), in
+Threadbear's colours, light or dark), and an ```` ```html ```` block as the
+page, each in a box with the language on the left. Its Diagram / Source
+switch (Preview / Source for a page) flips it to the code, the copy button
+copies the code, and the arrows open it full size in the side pane. A
+diagram that can't be drawn says why above its code. A page is only shown,
+never run: its scripts are off, it can't reach the internet or your files,
+and it can't open anything, so only its own styles, SVG and `data:`
+pictures appear. Your phone draws them the same way, with the arrows
+opening it full screen.
+
 A reply that needs nothing from you ends with a Done card at the top of
 the message box, with an Archive button to put the thread away. When something it talked about is
 still worth doing (a piece it didn't get to, a check that's due), the
@@ -921,6 +933,11 @@ Threadbear, and its switch goes.
   isn't cut off halfway. The screen still dims and locks as usual. It
   stops below 15% battery when you're not plugged in, and closing the lid
   on battery still puts the Mac to sleep.
+- **Diagrams and pages in replies** (`richBlocks`, since 6 Nov 2026). Tells
+  agents that Threadbear draws ```` ```mermaid ```` and ```` ```html ````
+  blocks (Reading a reply, above), so they use one when a picture explains
+  better than words. The apps draw those blocks either way; this is only
+  whether agents are told.
 
 ## Connectors
 <!-- slug: connectors -->

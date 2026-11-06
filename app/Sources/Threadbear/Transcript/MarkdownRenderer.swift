@@ -99,13 +99,17 @@ enum MarkdownRenderer {
     }()
 
     static func renderBlock(_ block: String) -> NSAttributedString {
-        // The zoom is in the key: a block's layout is all sizes.
-        let key = "\(TypeScale.percent)|\(block)" as NSString
+        // The zoom is in the key: a block's layout is all sizes. A block
+        // that may hold a ```mermaid or ```html box also keys on whether
+        // those have been drawn, or flipped to their source (RichBlocks).
+        let rich = RichBlocks.mayHoldRich(block)
+        let key = "\(TypeScale.percent)|\(rich ? RichBlocks.shared.generation : -1)|\(block)" as NSString
         if let cached = cache.object(forKey: key) { return cached }
         // `[tests pass](work:npm test)`: a space ends a link's destination
         // for the parser, so work: and thread: links are escaped first.
         let document = Document(parsing: WorkLinks.escapeDestinations(block), options: [.disableSmartOpts])
         var builder = Builder()
+        if rich { builder.sourceLines = block.split(separator: "\n", omittingEmptySubsequences: false) }
         for child in document.children {
             builder.block(child, Context())
         }
@@ -154,6 +158,9 @@ enum MarkdownRenderer {
 
     struct Builder {
         let output = NSMutableAttributedString()
+        /// The block's lines, when it may hold a rich block: a fence still
+        /// open (a reply streaming in) stays code until it's closed.
+        var sourceLines: [Substring] = []
 
         /// Body lines have a fixed height, which would cut a picture down to
         /// one line: a paragraph with one gets a style that lets it grow,
@@ -289,7 +296,11 @@ enum MarkdownRenderer {
                 finishParagraph(from: start, style: paragraphStyle(context, spacing: zoomed(6), before: zoomed(6), line: ceil(font.pointSize * 1.4), font: font))
 
             case let code as CodeBlock:
-                codeBlock(code.code, context)
+                if let rich = richBlock(code) {
+                    richBlock(rich, context)
+                } else {
+                    codeBlock(code.code, context)
+                }
 
             case let quote as BlockQuote:
                 var inner = context
@@ -392,6 +403,29 @@ enum MarkdownRenderer {
                     first = false
                 }
             }
+        }
+
+        /// A closed ```mermaid or ```html fence, to draw as what it shows.
+        func richBlock(_ code: CodeBlock) -> RichBlock? {
+            guard !sourceLines.isEmpty, let rich = RichBlock.from(language: code.language, code: code.code),
+                  let last = code.range?.upperBound.line, last >= 1, last <= sourceLines.count else { return nil }
+            // cmark ends an unclosed fence's range on its last line of code.
+            let closing = sourceLines[last - 1].trimmingCharacters(in: .whitespaces)
+            guard closing.count >= 3, closing.allSatisfy({ $0 == "`" }) || closing.allSatisfy({ $0 == "~" }) else { return nil }
+            return rich
+        }
+
+        /// The box (RichBlockCell): one attachment on a line of its own.
+        mutating func richBlock(_ block: RichBlock, _ context: Context) {
+            let cell = RichBlockCell(block: block, state: RichBlocks.shared.state(block), showsSource: RichBlocks.shared.showsSource(block.id))
+            let attachment = NSTextAttachment()
+            attachment.attachmentCell = cell
+            let start = output.length
+            let fence = block.source.contains("```") ? "~~~~" : "```"
+            let box = NSMutableAttributedString(attachment: attachment)
+            box.addAttribute(.tbCopyText, value: "\(fence)\(block.kind.rawValue)\n\(block.source)\n\(fence)", range: NSRange(location: 0, length: box.length))
+            output.append(box)
+            finishParagraph(from: start, style: paragraphStyle(context))
         }
 
         mutating func codeBlock(_ code: String, _ context: Context) {

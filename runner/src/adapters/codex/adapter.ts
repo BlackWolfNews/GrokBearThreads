@@ -84,6 +84,9 @@ export type CodexAdapterDeps = {
   normalizer?: NormalizerFactory;
   // A runner.notice warning (configWarning: a broken config.toml).
   onNotice?: (text: string) => void;
+  // More developer instructions for a new thread with tools, read at its
+  // start (an experiment's line, RICH_BLOCKS_LINE).
+  extraGuidance?: () => string;
   timings?: Partial<CodexTimings>;
   maxLineBytes?: number;
   now?: () => number;
@@ -526,7 +529,7 @@ export class CodexSession implements AgentSession {
       const tools = dynamicToolSpecs(defs);
       // With tools, the guidance on using them leads the developer
       // instructions (the namespace description is too short to hold it).
-      const developer = [tools.length ? toolGuidance(defs) : '', opts.instructions ?? ''].filter(Boolean).join('\n\n');
+      const developer = [tools.length ? toolGuidance(defs) : '', tools.length ? (this.deps.extraGuidance?.() ?? '') : '', opts.instructions ?? ''].filter(Boolean).join('\n\n');
       const config = { ...common.config, ...(developer ? { developer_instructions: developer } : {}) };
       const params: ThreadStartParams = { ...common, config, ...(tools.length ? { dynamicTools: tools } : {}) };
       res = await this.proc.request<ThreadStartResponse>('thread/start', params);

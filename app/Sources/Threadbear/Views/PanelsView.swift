@@ -827,28 +827,11 @@ final class WebPanelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUI
             // it only itself and the assets it names (LocalPreviewSite), in
             // a store of its own so it shares nothing with dashboards' logins.
             config.setURLSchemeHandler(previews, forURLScheme: LocalPreviewSchemeHandler.scheme)
-            let store = WKWebsiteDataStore.nonPersistent()
-            // Every connection the store would make goes to a proxy on this
-            // Mac that isn't there. The rule list and the navigation policy
-            // stop loads, but WebKit opens a connection for a clicked link
-            // (and looks its host up) before asking; through the proxy, no
-            // name is looked up and nothing leaves (the egress test caught it).
-            store.proxyConfigurations = [ProxyConfiguration(httpCONNECTProxy: previewProxy)]
-            // Loopback skips any proxy, so a click on a link away from the
-            // preview is stopped in the page, before WebKit would connect.
-            config.userContentController.addUserScript(WKUserScript(
-                source: LocalPreviewSchemeHandler.linkGuard, injectionTime: .atDocumentStart, forMainFrameOnly: false))
-            config.websiteDataStore = store
-            config.preferences.javaScriptCanOpenWindowsAutomatically = false
-            // A local preview is static: the page's own scripts never run.
-            // Whatever its markup names it can show, but no script can read
-            // those bytes back (verify-fix: `<a href="private.png">` let a
-            // page's script fetch the file). Other panels keep JavaScript.
-            // The app's own scripts (the link guard) still run. Once Mike
-            // lets this page's bytes run (Run them), its own view has them
-            // on: a script can then read what the page names, and the
-            // guards here and in LocalPreviewSchemeHandler keep it in the pane.
-            config.defaultWebpagePreferences.allowsContentJavaScript = digest != nil
+            PreviewSandbox.lockDown(config, proxy: previewProxy, pageScripts: digest != nil)
+            // Once Mike lets this page's bytes run (Run them), its own view
+            // has its scripts on: a script can then read what the page
+            // names, and the guards here and in LocalPreviewSchemeHandler
+            // keep it in the pane.
             if digest != nil {
                 config.userContentController.addUserScript(WKUserScript(
                     source: LocalPreviewSchemeHandler.scriptsGuard, injectionTime: .atDocumentStart, forMainFrameOnly: false,
@@ -856,13 +839,8 @@ final class WebPanelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUI
                 config.userContentController.addUserScript(WKUserScript(
                     source: LocalPreviewSchemeHandler.clipboardGuard, injectionTime: .atDocumentStart, forMainFrameOnly: false))
                 // And the async Clipboard API off in WebKit itself, which only
-                // offers it privately, like WebRTC's switch below.
+                // offers it privately, like WebRTC's switch (PreviewSandbox).
                 Self.setFeature("AsyncClipboardAPIEnabled", false, in: config.preferences)
-            }
-            // WebRTC goes round proxies and content rules alike. WebKit only
-            // offers the switch privately; KVC finds `_setPeerConnectionEnabled:`.
-            if config.preferences.responds(to: NSSelectorFromString("_setPeerConnectionEnabled:")) {
-                config.preferences.setValue(false, forKey: "peerConnectionEnabled")
             }
         } else {
             config.websiteDataStore = .default()
@@ -871,7 +849,7 @@ final class WebPanelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUI
         keep(view, as: slot)
         if url.isFileURL {
             // No load until the rule list blocking the network is on it.
-            withPreviewRules { [weak self, weak view] rules in
+            PreviewSandbox.withRules { [weak self, weak view] rules in
                 guard let self, let view else { return }
                 guard let rules else {
                     // Without it the page could reach the network: show nothing.
@@ -908,27 +886,6 @@ final class WebPanelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUI
     /// by its configuration, the only kind with the preview scheme's handler.
     private func isPreviewView(_ view: WKWebView) -> Bool {
         view.configuration.urlSchemeHandler(forURLScheme: LocalPreviewSchemeHandler.scheme) != nil
-    }
-
-    /// The content rule list that keeps a local preview off the network,
-    /// compiled once (WebKit keeps it in its own store for next time).
-    private var previewRules: WKContentRuleList?
-    private var previewRulesWaiting: [(WKContentRuleList?) -> Void]?
-    private func withPreviewRules(_ use: @escaping (WKContentRuleList?) -> Void) {
-        if let previewRules { return use(previewRules) }
-        if previewRulesWaiting != nil { previewRulesWaiting?.append(use); return }
-        previewRulesWaiting = [use]
-        WKContentRuleListStore.default().compileContentRuleList(
-            forIdentifier: "threadbear-local-preview", encodedContentRuleList: LocalPreviewSchemeHandler.ruleList
-        ) { [weak self] rules, _ in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                self.previewRules = rules
-                let waiting = self.previewRulesWaiting ?? []
-                self.previewRulesWaiting = nil
-                waiting.forEach { $0(rules) }
-            }
-        }
     }
 
     /// Serves every local HTML preview (Daybreak finding 6).
