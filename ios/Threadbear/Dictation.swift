@@ -137,13 +137,14 @@ final class Dictation {
         guard let whisper, isListening else { stop(); return }
         let samples = whisper.sink.samples()
         let onText = whisper.onText
+        let prompt = DictationWords.shared.prompt
         stop()
         let current = generation
         isTranscribing = true
         Task {
             defer { if generation == current { isTranscribing = false } }
             do {
-                let text = try await WhisperEngine.shared.transcribe(samples)
+                let text = try await WhisperEngine.shared.transcribe(samples, prompt: prompt)
                 // Closed or started again meanwhile: those words aren't wanted.
                 guard generation == current else { return }
                 if !text.isEmpty { onText(text) }

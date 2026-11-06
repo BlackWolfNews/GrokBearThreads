@@ -29,11 +29,12 @@ nonisolated final class WhisperEngine: @unchecked Sendable {
         }
     }
 
-    /// 16 kHz mono samples in, text out ("" for nothing heard).
-    func transcribe(_ samples: [Float]) async throws -> String {
+    /// 16 kHz mono samples in, text out ("" for nothing heard). `prompt` is
+    /// the word list (DictationWords).
+    func transcribe(_ samples: [Float], prompt: String? = nil) async throws -> String {
         try await withCheckedThrowingContinuation { continuation in
             queue.async {
-                continuation.resume(with: Result { try self.run(samples) })
+                continuation.resume(with: Result { try self.run(samples, prompt: prompt) })
             }
         }
     }
@@ -58,7 +59,7 @@ nonisolated final class WhisperEngine: @unchecked Sendable {
         return context
     }
 
-    private func run(_ samples: [Float]) throws -> String {
+    private func run(_ samples: [Float], prompt: String?) throws -> String {
         // Under a third of a second, or near silence: nothing to hear, and
         // Whisper makes words up ("Thank you.") when given nothing.
         guard samples.count > 5_000, let peak = samples.lazy.map(abs).max(), peak > 0.01 else { return "" }
@@ -83,9 +84,16 @@ nonisolated final class WhisperEngine: @unchecked Sendable {
         p.logprob_thold = -1.0
         p.no_speech_thold = 0.6
         p.detect_language = false
+        // Every 30 s window gets the word list, not just the first.
+        p.carry_initial_prompt = true
+        let tokens = promptTokens(prompt, context: context)
         let rc: Int32 = "en".withCString { language in
             p.language = language
-            return samples.withUnsafeBufferPointer { whisper_full(context, p, $0.baseAddress, Int32($0.count)) }
+            return tokens.withUnsafeBufferPointer { prompt in
+                p.prompt_tokens = prompt.isEmpty ? nil : prompt.baseAddress
+                p.prompt_n_tokens = Int32(prompt.count)
+                return samples.withUnsafeBufferPointer { whisper_full(context, p, $0.baseAddress, Int32($0.count)) }
+            }
         }
         guard rc == 0 else { throw WhisperError.failed(rc) }
         var text = ""
@@ -94,6 +102,18 @@ nonisolated final class WhisperEngine: @unchecked Sendable {
         }
         log.info("Whisper: \(samples.count / 16) ms of audio in \(Int(Date().timeIntervalSince(started) * 1000)) ms")
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+nonisolated extension WhisperEngine {
+    /// With a leading space, as mlx-whisper encoded the prompts Voice Type's
+    /// benchmark measured (VocabularyPrompt.tokenizerInput there).
+    fileprivate func promptTokens(_ prompt: String?, context: OpaquePointer) -> [whisper_token] {
+        guard let prompt else { return [] }
+        let text = " " + prompt.trimmingCharacters(in: .whitespaces)
+        var tokens = [whisper_token](repeating: 0, count: 512)
+        let n = whisper_tokenize(context, text, &tokens, Int32(tokens.count))
+        return n > 0 ? Array(tokens.prefix(Int(n))) : []
     }
 }
 
@@ -112,7 +132,7 @@ enum WhisperError: LocalizedError {
 #if DEBUG
 import AVFoundation
 
-extension WhisperEngine {
+nonisolated extension WhisperEngine {
     /// `-WhisperTestWAV <path>`: transcribes a recording at launch and prints
     /// it, to check Whisper in the simulator, which has no useful mic.
     static func testFromLaunchArguments() {
@@ -133,7 +153,8 @@ extension WhisperEngine {
                 }
                 let samples = Array(UnsafeBufferPointer(start: out.floatChannelData![0], count: Int(out.frameLength)))
                 let started = Date()
-                let text = try await shared.transcribe(samples)
+                let prompt = await DictationWords.shared.prompt
+                let text = try await shared.transcribe(samples, prompt: prompt)
                 FileHandle.standardError.write(Data("WHISPER-TEST (\(Int(Date().timeIntervalSince(started) * 1000)) ms incl. load): \(text)\n".utf8))
             } catch {
                 FileHandle.standardError.write(Data("WHISPER-TEST failed: \(error)\n".utf8))

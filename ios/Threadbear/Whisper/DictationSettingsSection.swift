@@ -15,6 +15,9 @@ struct DictationSettingsSection: View {
                 DictationEngine.chosen = engine
                 if engine == .whisper { whisper.download() }
             }
+            if engine == .whisper {
+                NavigationLink("Words") { DictationWordsView() }
+            }
             if engine == .whisper || whisper.installed {
                 if let progress = whisper.progress {
                     ProgressView(value: progress) { Text("Downloading Whisper") }

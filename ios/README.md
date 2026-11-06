@@ -29,8 +29,10 @@ directly, so it works with the Mac asleep: whatever you send waits in
   the release Voice Type on the Mac runs) with large-v3-turbo q8_0, an
   874 MB background download into Application Support
   (`Threadbear/Whisper/`), on the GPU. It records while listening and types
-  it all out on stop; Apple's fills in until the download's done. No word
-  list yet: Voice Type's is private. Debug builds take `-WhisperTestWAV
+  it all out on stop; Apple's fills in until the download's done. Whisper gets a
+  word list as its prompt, as Voice Type does ("Convex, Claude."):
+  `DictationWords` has defaults, Settings › Dictation › Words edits them,
+  and `-ThreadbearAddWords "A, B"` at launch adds some. Debug builds take `-WhisperTestWAV
   <path>` to transcribe a file at launch and print it (the simulator runs
   it on the CPU, as its Metal can't map the model: about 50 s a clip).
 - `Threadbear/`: the SwiftUI app. iOS 18, so the XS Max runs it too.

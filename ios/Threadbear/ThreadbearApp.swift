@@ -143,6 +143,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         CrashReporting.start()
         UNUserNotificationCenter.current().delegate = self
         WhisperModel.shared.reconnect()
+        _ = DictationWords.shared  // takes -ThreadbearAddWords
         #if DEBUG
         WhisperEngine.testFromLaunchArguments()
         #endif
@@ -163,9 +164,6 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         Task { @MainActor in
             WhisperModel.shared.backgroundCompletion = completionHandler
             WhisperModel.shared.reconnect()
-        #if DEBUG
-        WhisperEngine.testFromLaunchArguments()
-        #endif
         }
     }
 
