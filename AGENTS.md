@@ -15,6 +15,11 @@ are in `docs/convex-backend.md` and `docs/website.md`. The public landing
 page (threadbear.mikecann.app) is `site/`, a separate
 static site with its own `package.json`; its comments say how to build it.
 
+This file is written for Mike's own copy. The machines it names (the M5,
+`bruce`, `cloud`, `tinker-desk`) and paths under `~/dev/me` are his: in
+anyone else's copy (`origin` isn't mikecann/threadbear), skip those steps
+and ask the user what they use instead, rather than trying to reach them.
+
 ## Rules
 
 - Test first for anything non-trivial. While you work, run the one test

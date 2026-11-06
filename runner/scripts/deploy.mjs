@@ -276,7 +276,7 @@ function requireReleases(c) {
   const what = how === 'missing' ? `isn't installed as a LaunchAgent (${c.label})` : `runs from a checkout (${c.plist} doesn't start ${path.join(c.dir, 'launch.mjs')})`;
   if (c.isDefaultHome || c.inThread) {
     throw new Fail(
-      `The runner at ${c.home} ${what}, so a release would never start. Mike has to switch it to releases once, from a terminal:\n  ${path.join(c.runnerDir, 'scripts', 'install-runner.sh')}\nDon't run that from a thread: it stops the runner the thread runs on. Until then, runner changes wait for him.`,
+      `The runner at ${c.home} ${what}, so a release would never start. the user has to switch it to releases once, from a terminal:\n  ${path.join(c.runnerDir, 'scripts', 'install-runner.sh')}\nDon't run that from a thread: it stops the runner the thread runs on. Until then, runner changes wait for him.`,
     );
   }
   // Without --label, the default would be the real runner's, which
@@ -860,7 +860,7 @@ async function refuseNowWhileBusy(c, v) {
   const others = (await busyThreads(c)).filter((t) => t.id !== c.threadId);
   if (!others.length || (v.force && !c.inThread)) return;
   const names = others.map((t) => `  ${t.id.slice(0, 8)}  ${t.title}`).join('\n');
-  const mine = c.inThread ? ' If it really can\'t wait, finish your turn and ask Mike to run this from a terminal with --now --force.' : '';
+  const mine = c.inThread ? ' If it really can\'t wait, finish your turn and ask the user to run this from a terminal with --now --force.' : '';
   const other = c.threadId ? 'other ' : '';
   const whose = others.length === 1 ? `1 ${other}thread's` : `${others.length} ${other}threads'`;
   throw new Fail(`--now would cut short ${whose} work (turns, background shells, subagents):\n${names}\nLeave --now out: the runner then restarts once they finish.${mine}`);
@@ -905,7 +905,7 @@ async function restartAndCheck(c, v, id, before, waitMs) {
     // threads, so this does, then kickstarts it.
     if (c.inThread) {
       say(`Release ${id} is current, but the live runner is too old to restart itself without ending this turn.`);
-      say(`It starts ${id} on its next restart. When no thread is running, Mike can run:\n  ${restartCommand(c)}`);
+      say(`It starts ${id} on its next restart. When no thread is running, the user can run:\n  ${restartCommand(c)}`);
       return 0;
     }
     if (v.now) say(`Restarting now: ${restartCommand(c)}`);
@@ -925,12 +925,12 @@ async function restartAndCheck(c, v, id, before, waitMs) {
     // Listening but not answering in time: busy, not down. A kickstart
     // would stop every turn, so that's left to whoever can see why.
     throw new Fail(
-      `The runner is listening but didn't answer runner.restart (${err.message}). Release ${id} is current and starts on its next restart. If it's stuck, ${c.inThread ? 'Mike can run' : 'run'}:\n  ${restartCommand(c)}`,
+      `The runner is listening but didn't answer runner.restart (${err.message}). Release ${id} is current and starts on its next restart. If it's stuck, ${c.inThread ? 'the user can run' : 'run'}:\n  ${restartCommand(c)}`,
     );
   } else if (err) {
     // Nothing listening: down, or not started.
     if (c.inThread) {
-      say(`Release ${id} is current, but the runner isn't answering (${err.message}). Mike can restart it with:\n  ${restartCommand(c)}`);
+      say(`Release ${id} is current, but the runner isn't answering (${err.message}). the user can restart it with:\n  ${restartCommand(c)}`);
       return 0;
     }
     if (!c.labelKnown || !jobLoaded(c)) {
@@ -955,7 +955,7 @@ async function restartAndCheck(c, v, id, before, waitMs) {
         lines.push(
           `${tbCommand(c)} status shows the old runner and what it's finishing.`,
           noResume
-            ? 'End your turn now (that is what moves this thread across), and say in your reply that Mike has to message this thread to check the change.'
+            ? 'End your turn now (that is what moves this thread across), and say in your reply that the user has to message this thread to check the change.'
             : 'End your turn now; that is what moves this thread across.',
         );
       } else {
@@ -991,7 +991,7 @@ async function restartAndCheck(c, v, id, before, waitMs) {
       lines.push(
         `${tbCommand(c)} status shows what it's waiting for.`,
         noResume
-          ? 'End your turn now, and say in your reply that Mike has to message this thread once the runner is back, to check the change.'
+          ? 'End your turn now, and say in your reply that the user has to message this thread once the runner is back, to check the change.'
           : "End your turn now; there's nothing more to do here until then.",
       );
       say(lines.join('\n'));
@@ -1080,7 +1080,7 @@ async function wentWrong(c, id, before, r, waitMs) {
     if (now.state === 'up' && releaseOf(now.version) === before.current) {
       console.error(`The runner is already running ${before.current}.`);
     } else if (c.inThread) {
-      console.error(`It starts on the runner's next restart. Mike can run:\n  ${restartCommand(c)}`);
+      console.error(`It starts on the runner's next restart. The user can run:\n  ${restartCommand(c)}`);
     } else if (now.state === 'up') {
       // Up on yet another release (a crash rollback to an older lastGood,
       // say). Turns may have started on it since, so it restarts once
