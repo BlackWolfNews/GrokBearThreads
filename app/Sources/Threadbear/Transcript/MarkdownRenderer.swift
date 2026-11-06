@@ -109,7 +109,8 @@ enum MarkdownRenderer {
         // for the parser, so work: and thread: links are escaped first.
         let document = Document(parsing: WorkLinks.escapeDestinations(block), options: [.disableSmartOpts])
         var builder = Builder()
-        if rich || DraftBlock.mayHold(block) { builder.sourceLines = block.split(separator: "\n", omittingEmptySubsequences: false) }
+        // Split as cmark counts lines: "\r\n" is one Character, and one line end.
+        if rich || DraftBlock.mayHold(block) { builder.sourceLines = block.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline) }
         for child in document.children {
             builder.block(child, Context())
         }
@@ -420,11 +421,19 @@ enum MarkdownRenderer {
             return draft
         }
 
+        /// Whether the fence has its closing line: the same character as
+        /// it opened with, at least as many. cmark ends an unclosed fence's
+        /// range on its last line of code. A fence in a quote or a list has
+        /// the quote's ">" and the indent in front of both.
         private func isClosed(_ code: CodeBlock) -> Bool {
-            guard !sourceLines.isEmpty, let last = code.range?.upperBound.line, last >= 1, last <= sourceLines.count else { return false }
-            // cmark ends an unclosed fence's range on its last line of code.
-            let closing = sourceLines[last - 1].trimmingCharacters(in: .whitespaces)
-            return closing.count >= 3 && (closing.allSatisfy({ $0 == "`" }) || closing.allSatisfy({ $0 == "~" }))
+            guard !sourceLines.isEmpty, let first = code.range?.lowerBound.line, let last = code.range?.upperBound.line,
+                  first >= 1, last > first, last <= sourceLines.count else { return false }
+            func fence(_ line: Substring) -> Substring { line.drop(while: { $0 == " " || $0 == "\t" || $0 == ">" }) }
+            let opening = fence(sourceLines[first - 1])
+            guard let mark = opening.first, mark == "`" || mark == "~" else { return false }
+            let width = opening.prefix(while: { $0 == mark }).count
+            let closing = fence(sourceLines[last - 1]).trimmingCharacters(in: .whitespaces)
+            return width >= 3 && closing.count >= width && closing.allSatisfy({ $0 == mark })
         }
 
         /// A draft's box: the header (DraftBlockCell) and then each of the

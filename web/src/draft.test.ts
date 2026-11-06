@@ -4,7 +4,7 @@
 // DraftBlockTests check the same cases.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { bareLinks, draftFrom, draftHTML, draftLabel, draftLines, draftPlainText, slackSpans, type Draft } from './draft.ts';
+import { bareLinks, draftFrom, fenceClosed, maxFormattedLine, maxSource, draftHTML, draftLabel, draftLines, draftPlainText, slackSpans, type Draft } from './draft.ts';
 
 const joined = (draft: Draft) => draftLines(draft).map((l) => l.spans.map((s) => s.text).join(''));
 
@@ -93,4 +93,48 @@ test('bare addresses in an email or plain draft are links when drawn', () => {
   const draft: Draft = { kind: 'email', source: 'See https://x.dev' };
   assert.equal(draftPlainText(draft), 'See https://x.dev');
   assert.equal(draftHTML(draft), '<meta charset="utf-8"><div>See https://x.dev</div>');
+});
+
+// Cross-lab review, 6 Nov.
+test('tokens inside code stay as written, and a link can be bold', () => {
+  assert.deepEqual(slackSpans('`<@U123>` and `a < b`'), [{ text: '<@U123>', code: true }, { text: ' and ' }, { text: 'a < b', code: true }]);
+  assert.deepEqual(slackSpans('*See <https://x.dev|docs>*'), [{ text: 'See ', bold: true }, { text: 'docs', bold: true, link: 'https://x.dev' }]);
+  assert.deepEqual(slackSpans('<https://x.dev|a>_b_'), [{ text: 'a', link: 'https://x.dev' }, { text: 'b', italic: true }]);
+});
+
+test('hostile lines stay quick', () => {
+  const start = Date.now();
+  slackSpans('<'.repeat(maxFormattedLine));
+  slackSpans(' *a'.repeat(maxFormattedLine / 3));
+  draftPlainText({ kind: 'slack', source: '<'.repeat(maxSource) });
+  draftPlainText({ kind: 'slack', source: '<'.repeat(maxSource - 1) + '>' });
+  assert.ok(Date.now() - start < 2000);
+  // A line past the limit is shown as written; a draft past its limit stays code.
+  const long = '*' + 'a'.repeat(maxFormattedLine) + '*';
+  assert.deepEqual(slackSpans(long), [{ text: long }]);
+  assert.equal(draftFrom('slack', 'a'.repeat(maxSource + 1)), undefined);
+  // A placeholder character in the text itself turns formatting off for the line.
+  assert.deepEqual(slackSpans('*a* \u{E000}'), [{ text: '*a* \u{E000}' }]);
+});
+
+test('copied html keeps indents and lined up spaces', () => {
+  const draft: Draft = { kind: 'email', source: '    • nested\nA    B' };
+  assert.equal(draftHTML(draft), '<meta charset="utf-8"><div>&nbsp;&nbsp;&nbsp;&nbsp;• nested<br>A &nbsp;&nbsp;&nbsp;B</div>');
+});
+
+test('only a closed fence makes a draft', () => {
+  const closed = (text: string) => fenceClosed(text, 0, text.length);
+  assert.ok(closed('```slack\nhello\n```'));
+  assert.ok(closed('````slack\nhello\n`````'));
+  assert.ok(closed('~~~email\nhi\n~~~  '));
+  assert.ok(closed('```slack\r\nhello\r\n```'));
+  // In a quote the node starts at the fence, and later lines keep their ">".
+  assert.ok(closed('```slack\n> hello\n> ```'));
+  assert.ok(!closed('```slack\n*unfinished'));
+  assert.ok(!closed('```slack\nhello\n~~~'));
+  assert.ok(!closed('````slack\nhello\n```'));
+  assert.ok(!closed('```slack'));
+  // Offsets pick the block out of the whole reply.
+  const reply = 'Here:\n\n```slack\nhi\n```\n\nThanks';
+  assert.ok(fenceClosed(reply, reply.indexOf('```'), reply.indexOf('```', 10) + 3));
 });

@@ -22,14 +22,36 @@ export type Line = { spans: Span[]; quote: boolean };
 
 const kinds: readonly string[] = ['slack', 'email', 'draft'];
 
+// Past this a fence stays plain code: a draft that size isn't a message,
+// and the box shouldn't be what makes a reply slow. Counted in code points
+// (the Swift side counts Characters, which only differs for emoji and
+// accents built from several).
+export const maxSource = 20_000;
+
 // The draft for a fence's info string (only the first word counts), or
 // undefined for any other fence.
 export function draftFrom(language: string | null | undefined, code: string): Draft | undefined {
   const word = language?.split(/[ \t{]/).find((w) => w !== '')?.toLowerCase();
   if (!word || !kinds.includes(word)) return undefined;
   const source = code.replace(/\r\n/g, '\n').replace(/\n+$/, '');
-  if (!source.trim()) return undefined;
+  if (!source.trim() || Array.from(source).length > maxSource) return undefined;
   return { kind: word as DraftKind, source };
+}
+
+// Whether the fenced code block written at source[start..<end] (the hast
+// node's position in the exact text handed to Markdown) has its closing
+// fence: the last line all the opening fence's character, at least as wide,
+// once a quote's ">" and the indent are taken off each. While a reply
+// streams, an unclosed fence runs to the end of the text, and it stays
+// plain code until it's done, as on the Mac and the phone.
+export function fenceClosed(source: string, start: number, end: number): boolean {
+  const lines = source.slice(start, end).split(/\r?\n/);
+  if (lines.length < 2) return false;
+  const strip = (line: string) => line.replace(/^[ \t>]*/, '');
+  const open = /^(`{3,}|~{3,})/.exec(strip(lines[0]!))?.[1];
+  if (!open) return false;
+  const last = strip(lines[lines.length - 1]!).replace(/[ \t]+$/, '');
+  return last.length >= open.length && [...last].every((c) => c === open[0]);
 }
 
 // What the box's header calls it.
@@ -58,12 +80,15 @@ export function draftPlainText(draft: Draft): string {
   if (draft.kind !== 'slack') return draft.source;
   return draft.source
     .split('\n')
-    .map((line) =>
-      replaceTokens(line, (token) => {
-        if (token.kind === 'mention') return token.text;
-        return token.label === token.url || token.label === '' ? token.url : `${token.label} (${token.url})`;
-      }),
-    )
+    .map((line) => {
+      let out = '';
+      scanTokens(line, (piece) => {
+        if (piece.kind === 'text') out += decode(piece.text);
+        else if (piece.token.kind === 'mention') out += piece.token.text;
+        else out += piece.token.label === piece.token.url || piece.token.label === '' ? piece.token.url : `${piece.token.label} (${piece.token.url})`;
+      });
+      return out;
+    })
     .join('\n');
 }
 
@@ -71,7 +96,14 @@ export function draftPlainText(draft: Draft): string {
 // into Slack or Mail keeps the bold and the links.
 export function draftHTML(draft: Draft): string {
   const body = draftLines(draft).map((line) => {
-    const inner = line.spans.map(spanHTML).join('');
+    let afterSpace = true;
+    const inner = line.spans
+      .map((span) => {
+        const out = spanHTML(span, afterSpace);
+        afterSpace = span.text.endsWith(' ');
+        return out;
+      })
+      .join('');
     return line.quote ? `<blockquote>${inner}</blockquote>` : inner;
   });
   // Quotes are blocks of their own, so no <br> beside one.
@@ -83,14 +115,35 @@ export function draftHTML(draft: Draft): string {
   return `<meta charset="utf-8"><div>${out}</div>`;
 }
 
-function spanHTML(span: Span): string {
-  let text = escapeHTML(span.text);
+function spanHTML(span: Span, afterSpace: boolean): string {
+  let text = keepSpaces(escapeHTML(span.text), afterSpace);
   if (span.code) text = `<code>${text}</code>`;
   if (span.strike) text = `<s>${text}</s>`;
   if (span.italic) text = `<i>${text}</i>`;
   if (span.bold) text = `<b>${text}</b>`;
   if (span.link) text = `<a href="${escapeHTML(span.link)}">${text}</a>`;
   return text;
+}
+
+// HTML folds runs of spaces into one, so a line's indent and any spaces
+// lined up in it would go in a paste: each space at the start of a line or
+// after another is a no-break space.
+function keepSpaces(text: string, afterSpace: boolean): string {
+  let out = '';
+  let previousSpace = afterSpace;
+  for (const c of text) {
+    if (c === ' ') {
+      out += previousSpace ? '&nbsp;' : ' ';
+      previousSpace = true;
+    } else if (c === '\t') {
+      out += '&nbsp;&nbsp;&nbsp;&nbsp;';
+      previousSpace = true;
+    } else {
+      out += c;
+      previousSpace = false;
+    }
+  }
+  return out;
 }
 
 function escapeHTML(text: string): string {
@@ -144,52 +197,106 @@ export function token(inside: string): Token | undefined {
   return { kind: 'link', url: target, label: shown };
 }
 
-// The line with each <...> token replaced, and Slack's escapes (&lt; &gt;
-// &amp;) read back.
-function replaceTokens(line: string, replace: (token: Token) => string): string {
-  let out = '';
-  let rest = line;
-  for (let open = rest.indexOf('<'); open >= 0; open = rest.indexOf('<')) {
-    out += decode(rest.slice(0, open));
-    const after = rest.slice(open + 1);
-    const close = after.indexOf('>');
-    const found = close >= 0 ? token(after.slice(0, close)) : undefined;
-    if (!found) {
-      out += '<';
-      rest = after;
-      continue;
+// `raw`: the <...> the token was written as.
+type Piece = { kind: 'text'; text: string } | { kind: 'token'; token: Token; raw: string };
+
+// Walks a line once, handing over its words and its <...> tokens in order.
+// A "<" that doesn't start a token is a word like any other. The next ">"
+// is looked for once and kept until it's passed, so a line of many "<" (or
+// one with no ">") takes one pass, not one per "<" (cross-lab review, 6 Nov).
+function scanTokens(line: string, visit: (piece: Piece) => void): void {
+  const chars = Array.from(line);
+  let plain = '';
+  // -1: not looked for yet; null: there's no ">" after here.
+  let close: number | null = -1;
+  let i = 0;
+  while (i < chars.length) {
+    if (chars[i] === '<') {
+      if (close !== null && close <= i) {
+        const found = chars.indexOf('>', i + 1);
+        close = found < 0 ? null : found;
+      }
+      if (close !== null) {
+        // A token never holds a "<", so with another before the ">" this
+        // one isn't a token, and what's between isn't read.
+        let next = false;
+        for (let j = i + 1; j < close; j++) {
+          if (chars[j] === '<') {
+            next = true;
+            break;
+          }
+        }
+        const found = next ? undefined : token(chars.slice(i + 1, close).join(''));
+        if (found) {
+          if (plain) {
+            visit({ kind: 'text', text: plain });
+            plain = '';
+          }
+          visit({ kind: 'token', token: found, raw: chars.slice(i, close + 1).join('') });
+          i = close + 1;
+          continue;
+        }
+      }
     }
-    out += replace(found);
-    rest = after.slice(close + 1);
+    plain += chars[i];
+    i += 1;
   }
-  return out + decode(rest);
+  if (plain) visit({ kind: 'text', text: plain });
 }
 
 function decode(text: string): string {
   return text.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
 }
 
-// A Slack line's spans: links and mentions first, then *bold*, _italic_,
-// ~strike~ and `code` in the words between them.
+// Past this many characters a line is shown as written, so a huge line
+// can't keep the formatting busy.
+export const maxFormattedLine = 2_000;
+// Where the placeholders for a line's tokens start (Unicode's private use
+// area).
+const placeholderBase = 0xe000;
+
+// A Slack line's spans: *bold*, _italic_, ~strike~, `code`, links and
+// mentions. Each <...> token stands in the line as one placeholder character
+// while the emphasis is worked out, so a link can be bold (*see <url|docs>*)
+// and a token inside `code` stays as written.
 export function slackSpans(line: string): Span[] {
-  const spans: Span[] = [];
-  let rest = line;
-  for (let open = rest.indexOf('<'); open >= 0; open = rest.indexOf('<')) {
-    const after = rest.slice(open + 1);
-    const close = after.indexOf('>');
-    const found = close >= 0 ? token(after.slice(0, close)) : undefined;
-    if (!found) {
-      // Not a token: the "<" is a word like any other.
-      spans.push(...emphasis(rest.slice(0, open + 1)));
-      rest = after;
-      continue;
+  if (Array.from(line).length > maxFormattedLine || /[\u{E000}-\u{F8FF}]/u.test(line)) return [{ text: decode(line) }];
+  let marked = '';
+  const tokens: { token: Token; raw: string }[] = [];
+  scanTokens(line, (piece) => {
+    if (piece.kind === 'text') {
+      marked += piece.text;
+    } else {
+      marked += String.fromCodePoint(placeholderBase + tokens.length);
+      tokens.push({ token: piece.token, raw: piece.raw });
     }
-    spans.push(...emphasis(rest.slice(0, open)));
-    if (found.kind === 'link') spans.push({ text: found.label || found.url, link: found.url });
-    else spans.push({ text: found.text, bold: true });
-    rest = after.slice(close + 1);
+  });
+  const spans: Span[] = [];
+  for (const span of emphasis(marked)) {
+    let words = '';
+    const flush = () => {
+      if (!words) return;
+      spans.push({ ...span, text: words });
+      words = '';
+    };
+    for (const c of span.text) {
+      const index = c.codePointAt(0)! - placeholderBase;
+      const found = index >= 0 && index < tokens.length ? tokens[index]! : undefined;
+      if (!found) {
+        words += c;
+        continue;
+      }
+      if (span.code) {
+        // Code shows what was typed.
+        words += found.raw;
+        continue;
+      }
+      flush();
+      if (found.token.kind === 'link') spans.push({ ...span, text: found.token.label || found.token.url, link: found.token.url });
+      else spans.push({ ...span, text: found.token.text, bold: true });
+    }
+    flush();
   }
-  spans.push(...emphasis(rest));
   return merge(spans);
 }
 

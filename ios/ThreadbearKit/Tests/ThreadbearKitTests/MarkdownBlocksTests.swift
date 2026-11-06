@@ -58,6 +58,18 @@ import Testing
         #expect(MarkdownBlock.parse("```slackbot\nhi\n```") == [.code("hi")])
     }
 
+    @Test func aDraftNeedsItsOwnClosingFence() {
+        // A different fence character, or a shorter run, doesn't close it.
+        #expect(MarkdownBlock.parse("```slack\nhello\n~~~") == [.code("hello\n~~~")])
+        #expect(MarkdownBlock.parse("````slack\nhello\n```") == [.code("hello\n```")])
+        #expect(MarkdownBlock.parse("````slack\nhello\n````") == [.draft(DraftBlock(kind: .slack, source: "hello"))])
+        #expect(MarkdownBlock.parse("```slack\r\nhi\r\nthere\r\n```\r\n") == [.draft(DraftBlock(kind: .slack, source: "hi\nthere"))])
+        #expect(MarkdownBlock.parse("> ```slack\n> hello\n> ```") == [.quote([.draft(DraftBlock(kind: .slack, source: "hello"))])])
+        // Too big to be a message: code.
+        let big = String(repeating: "a", count: DraftBlock.maxSource + 1)
+        #expect(MarkdownBlock.parse("```slack\n\(big)\n```") == [.code(big)])
+    }
+
     @Test func aFenceStillStreamingInOrTooBigStaysCode() {
         // The reply so far, its fence not closed yet: drawn once it is.
         #expect(MarkdownBlock.parse("```mermaid\nflowchart TD\n  A -->") == [.code("flowchart TD\n  A -->")])

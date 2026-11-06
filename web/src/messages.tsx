@@ -14,7 +14,7 @@ import { useLiveQuery } from './live';
 import type { FunctionReturnType } from 'convex/server';
 import { api } from '../../convex/_generated/api';
 import { useState, type ReactNode } from 'react';
-import { bareLinks, draftFrom, draftHTML, draftLabel, draftLines, draftPlainText, type Draft, type Span } from './draft';
+import { bareLinks, draftFrom, fenceClosed, draftHTML, draftLabel, draftLines, draftPlainText, type Draft, type Span } from './draft';
 
 // A message or tool line, from phone:messages or share:view.
 export type PageMessage = TurnMessage;
@@ -200,6 +200,8 @@ export function MessageText({
   // This message's pasted pictures that went up, by number (picture-chips.ts).
   pasted?: Map<number, string>;
 }) {
+  // The exact text Markdown reads, so a block's position can be looked up in it.
+  const markdown = escapeDestinations(text);
   return (
     <div className="md" id={seq === undefined ? undefined : stepId(seq)}>
       <Markdown
@@ -213,11 +215,13 @@ export function MessageText({
         components={{
           // A ```slack, ```email or ```draft fence is a draft to send
           // elsewhere (draft.ts); any other <pre> is drawn as before.
-          // An unclosed fence while a reply streams is already a code block
-          // to the end of the text, so it shows as a draft as it's written.
+          // Only a closed one: while a reply streams, an unclosed fence
+          // runs to the end of the text and stays code until it's done.
           pre: ({ node, children, ...p }) => {
             const fence = fenceOf(node);
-            const draft = fence && draftFrom(fence.language, fence.code);
+            const at = node?.position;
+            const closed = at?.start.offset !== undefined && at.end.offset !== undefined && fenceClosed(markdown, at.start.offset, at.end.offset);
+            const draft = fence && closed && draftFrom(fence.language, fence.code);
             return draft ? <DraftBox draft={draft} /> : <pre {...p}>{children}</pre>;
           },
           a: ({ node: _, href, children, ...p }) => {
@@ -298,7 +302,7 @@ export function MessageText({
           },
         }}
       >
-        {escapeDestinations(text)}
+        {markdown}
       </Markdown>
     </div>
   );

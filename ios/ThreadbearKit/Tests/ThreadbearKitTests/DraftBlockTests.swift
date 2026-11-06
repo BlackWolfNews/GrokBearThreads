@@ -69,4 +69,32 @@ import Testing
         let draft = DraftBlock(kind: .email, source: "Hi <script>alert(\"x\")</script> & bye")
         #expect(draft.html == "<meta charset=\"utf-8\"><div>Hi &lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt; &amp; bye</div>")
     }
+
+    // Cross-lab review, 6 Nov.
+    @Test func tokensInsideCodeStayAsWrittenAndALinkCanBeBold() {
+        #expect(DraftBlock.slackSpans("`<@U123>` and `a < b`") == [.init("<@U123>", code: true), .init(" and "), .init("a < b", code: true)])
+        let url = URL(string: "https://x.dev")!
+        #expect(DraftBlock.slackSpans("*See <https://x.dev|docs>*") == [.init("See ", bold: true), .init("docs", bold: true, link: url)])
+        #expect(DraftBlock.slackSpans("<https://x.dev|a>_b_") == [.init("a", link: url), .init("b", italic: true)])
+    }
+
+    @Test func hostileLinesStayQuick() {
+        let start = Date()
+        _ = DraftBlock.slackSpans(String(repeating: "<", count: DraftBlock.maxFormattedLine))
+        _ = DraftBlock.slackSpans(String(repeating: " *a", count: DraftBlock.maxFormattedLine / 3))
+        _ = DraftBlock(kind: .slack, source: String(repeating: "<", count: DraftBlock.maxSource)).plainText
+        _ = DraftBlock(kind: .slack, source: String(repeating: "<", count: DraftBlock.maxSource - 1) + ">").plainText
+        #expect(Date().timeIntervalSince(start) < 2)
+        // A line past the limit is shown as written; a draft past its limit stays code.
+        let long = "*" + String(repeating: "a", count: DraftBlock.maxFormattedLine) + "*"
+        #expect(DraftBlock.slackSpans(long) == [.init(long)])
+        #expect(DraftBlock.from(language: "slack", code: String(repeating: "a", count: DraftBlock.maxSource + 1)) == nil)
+        // A placeholder character in the text itself turns formatting off for the line.
+        #expect(DraftBlock.slackSpans("*a* \u{E000}") == [.init("*a* \u{E000}")])
+    }
+
+    @Test func copiedHTMLKeepsIndentsAndLinedUpSpaces() {
+        let draft = DraftBlock(kind: .email, source: "    • nested\nA    B")
+        #expect(draft.html == "<meta charset=\"utf-8\"><div>&nbsp;&nbsp;&nbsp;&nbsp;• nested<br>A &nbsp;&nbsp;&nbsp;B</div>")
+    }
 }

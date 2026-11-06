@@ -21,6 +21,10 @@ public struct DraftBlock: Hashable, Sendable {
         self.source = source
     }
 
+    /// Past this a fence stays plain code: a draft that size isn't a
+    /// message, and the box shouldn't be what makes a reply slow.
+    public static let maxSource = 20_000
+
     /// The draft for a fence's info string (only the first word counts),
     /// or nil for any other fence.
     public static func from(language: String?, code: String) -> DraftBlock? {
@@ -28,8 +32,16 @@ public struct DraftBlock: Hashable, Sendable {
               let kind = Kind(rawValue: word) else { return nil }
         var source = code.replacingOccurrences(of: "\r\n", with: "\n")
         while source.hasSuffix("\n") { source.removeLast() }
-        guard !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        guard !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, source.count <= maxSource else { return nil }
         return DraftBlock(kind: kind, source: source)
+    }
+
+    /// Whether a block of a reply's text could hold one, so only those
+    /// are checked for a closed fence.
+    public static func mayHold(_ text: String) -> Bool {
+        guard text.contains("```") || text.contains("~~~") else { return false }
+        let lowered = text.lowercased()
+        return lowered.contains("slack") || lowered.contains("email") || lowered.contains("draft")
     }
 
     /// What the box's header calls it.
@@ -89,12 +101,15 @@ public struct DraftBlock: Hashable, Sendable {
     public var plainText: String {
         guard kind == .slack else { return source }
         return source.split(separator: "\n", omittingEmptySubsequences: false).map { line in
-            Self.replaceTokens(String(line)) { token in
-                switch token {
-                case let .link(url, label): return label == url.absoluteString || label.isEmpty ? url.absoluteString : "\(label) (\(url.absoluteString))"
-                case let .mention(text): return text
+            var out = ""
+            Self.scanTokens(String(line)) { piece in
+                switch piece {
+                case let .text(text): out += Self.decode(text)
+                case let .token(.link(url, label), _): out += label == url.absoluteString || label.isEmpty ? url.absoluteString : "\(label) (\(url.absoluteString))"
+                case let .token(.mention(text), _): out += text
                 }
             }
+            return out
         }.joined(separator: "\n")
     }
 
@@ -102,7 +117,11 @@ public struct DraftBlock: Hashable, Sendable {
     /// pasting into Slack or Mail keeps the bold and the links.
     public var html: String {
         let body = lines.map { line -> String in
-            let inner = line.spans.map(Self.html).joined()
+            var afterSpace = true
+            let inner = line.spans.map { span -> String in
+                defer { afterSpace = span.text.last == " " }
+                return Self.html(span, afterSpace: afterSpace)
+            }.joined()
             return line.quote ? "<blockquote>\(inner)</blockquote>" : inner
         }
         // Quotes are blocks of their own, so no <br> beside one.
@@ -114,14 +133,35 @@ public struct DraftBlock: Hashable, Sendable {
         return "<meta charset=\"utf-8\"><div>\(out)</div>"
     }
 
-    private static func html(_ span: Span) -> String {
-        var text = escape(span.text)
+    private static func html(_ span: Span, afterSpace: Bool) -> String {
+        var text = keepSpaces(escape(span.text), afterSpace: afterSpace)
         if span.code { text = "<code>\(text)</code>" }
         if span.strike { text = "<s>\(text)</s>" }
         if span.italic { text = "<i>\(text)</i>" }
         if span.bold { text = "<b>\(text)</b>" }
         if let link = span.link { text = "<a href=\"\(escape(link.absoluteString))\">\(text)</a>" }
         return text
+    }
+
+    /// HTML folds runs of spaces into one, so a line's indent and any
+    /// spaces lined up in it would go in a paste: each space at the start
+    /// of a line or after another is a no-break space.
+    private static func keepSpaces(_ text: String, afterSpace: Bool) -> String {
+        var out = ""
+        var previousSpace = afterSpace
+        for c in text {
+            if c == " " {
+                out += previousSpace ? "&nbsp;" : " "
+                previousSpace = true
+            } else if c == "\t" {
+                out += "&nbsp;&nbsp;&nbsp;&nbsp;"
+                previousSpace = true
+            } else {
+                out.append(c)
+                previousSpace = false
+            }
+        }
+        return out
     }
 
     private static func escape(_ text: String) -> String {
@@ -131,7 +171,7 @@ public struct DraftBlock: Hashable, Sendable {
 
     // MARK: Slack's formatting
 
-    enum Token {
+    enum Token: Equatable {
         case link(URL, String)
         /// <@U123>, <#C123|general>, <!here>: shown as their words.
         case mention(String)
@@ -159,50 +199,101 @@ public struct DraftBlock: Hashable, Sendable {
         return .link(url, shown)
     }
 
-    /// The line with each <...> token replaced, and Slack's escapes
-    /// (&lt; &gt; &amp;) read back.
-    static func replaceTokens(_ line: String, _ replace: (Token) -> String) -> String {
-        var out = ""
-        var rest = Substring(line)
-        while let open = rest.firstIndex(of: "<") {
-            out += decode(String(rest[..<open]))
-            let after = rest[rest.index(after: open)...]
-            guard let close = after.firstIndex(of: ">"), let token = token(String(after[..<close])) else {
-                out += "<"
-                rest = after
-                continue
+    enum Piece: Equatable {
+        case text(String)
+        /// The token, and the <...> it was written as.
+        case token(Token, String)
+    }
+
+    /// Walks a line once, handing over its words and its <...> tokens in
+    /// order. A "<" that doesn't start a token is a word like any other.
+    /// The next ">" is looked for once and kept until it's passed, so a
+    /// line of many "<" (or one with no ">") takes one pass, not one per
+    /// "<" (cross-lab review, 6 Nov).
+    static func scanTokens(_ line: String, _ visit: (Piece) -> Void) {
+        let chars = Array(line)
+        var plain = ""
+        var close: Int? = -1
+        var i = 0
+        while i < chars.count {
+            if chars[i] == "<" {
+                if let known = close, known <= i { close = chars[(i + 1)...].firstIndex(of: ">") }
+                // A token never holds a "<", so with another before the ">"
+                // this one isn't a token, and what's between isn't read.
+                let next = close.flatMap { end in chars[(i + 1)..<end].firstIndex(of: "<") }
+                if let end = close, next == nil, let token = token(String(chars[(i + 1)..<end])) {
+                    if !plain.isEmpty { visit(.text(plain)); plain = "" }
+                    visit(.token(token, String(chars[i...end])))
+                    i = end + 1
+                    continue
+                }
             }
-            out += replace(token)
-            rest = after[after.index(after: close)...]
+            plain.append(chars[i])
+            i += 1
         }
-        return out + decode(String(rest))
+        if !plain.isEmpty { visit(.text(plain)) }
     }
 
     static func decode(_ text: String) -> String {
         text.replacingOccurrences(of: "&lt;", with: "<").replacingOccurrences(of: "&gt;", with: ">").replacingOccurrences(of: "&amp;", with: "&")
     }
 
-    /// A Slack line's spans: links and mentions first, then *bold*,
-    /// _italic_, ~strike~ and `code` in the words between them.
+    /// Past this many characters a line is shown as written, so a huge
+    /// line can't keep the formatting busy.
+    public static let maxFormattedLine = 2_000
+    /// Where the placeholders for a line's tokens start (Unicode's private
+    /// use area).
+    private static let placeholderBase: UInt32 = 0xE000
+
+    /// A Slack line's spans: *bold*, _italic_, ~strike~, `code`, links and
+    /// mentions. Each <...> token stands in the line as one placeholder
+    /// character while the emphasis is worked out, so a link can be bold
+    /// (*see <url|docs>*) and a token inside `code` stays as written.
     static func slackSpans(_ line: String) -> [Span] {
-        var spans: [Span] = []
-        var rest = Substring(line)
-        while let open = rest.firstIndex(of: "<") {
-            let after = rest[rest.index(after: open)...]
-            guard let close = after.firstIndex(of: ">"), let token = token(String(after[..<close])) else {
-                // Not a token: the "<" is a word like any other.
-                spans += emphasis(String(rest[...open]))
-                rest = after
-                continue
+        guard line.count <= maxFormattedLine,
+              !line.unicodeScalars.contains(where: { (0xE000...0xF8FF).contains($0.value) }) else { return [Span(decode(line))] }
+        var marked = ""
+        var tokens: [(token: Token, raw: String)] = []
+        scanTokens(line) { piece in
+            switch piece {
+            case let .text(text): marked += text
+            case let .token(token, raw):
+                marked.unicodeScalars.append(Unicode.Scalar(placeholderBase + UInt32(tokens.count))!)
+                tokens.append((token, raw))
             }
-            spans += emphasis(String(rest[..<open]))
-            switch token {
-            case let .link(url, label): spans.append(Span(label.isEmpty ? url.absoluteString : label, link: url))
-            case let .mention(text): spans.append(Span(text, bold: true))
-            }
-            rest = after[after.index(after: close)...]
         }
-        spans += emphasis(String(rest))
+        var spans: [Span] = []
+        for span in emphasis(marked) {
+            var words = ""
+            func flush() {
+                guard !words.isEmpty else { return }
+                var piece = span
+                piece.text = words
+                spans.append(piece)
+                words = ""
+            }
+            for scalar in span.text.unicodeScalars {
+                let index = Int(scalar.value) - Int(placeholderBase)
+                guard index >= 0, index < tokens.count else { words.unicodeScalars.append(scalar); continue }
+                if span.code {
+                    // Code shows what was typed.
+                    words += tokens[index].raw
+                    continue
+                }
+                flush()
+                var piece = span
+                switch tokens[index].token {
+                case let .link(url, label):
+                    piece.text = label.isEmpty ? url.absoluteString : label
+                    piece.link = url
+                case let .mention(text):
+                    piece.text = text
+                    piece.bold = true
+                }
+                spans.append(piece)
+            }
+            flush()
+        }
         return merge(spans)
     }
 

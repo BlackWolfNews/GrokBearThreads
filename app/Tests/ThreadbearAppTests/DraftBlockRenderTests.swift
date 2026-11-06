@@ -46,6 +46,15 @@ final class DraftBlockRenderTests: XCTestCase {
     func testAFenceStillStreamingInStaysCode() {
         XCTAssertNil(header(MarkdownRenderer.render("```slack\n• one\n• tw").string))
         XCTAssertNil(header(MarkdownRenderer.render("```text\n• one\n```").string))
+        // Cross-lab review, 6 Nov: a closing line has to match the opening one.
+        XCTAssertNil(header(MarkdownRenderer.render("```slack\nhello\n~~~").string))
+        XCTAssertNil(header(MarkdownRenderer.render("````slack\nhello\n```").string))
+        XCTAssertNotNil(header(MarkdownRenderer.render("````slack\nhello\n`````").string))
+    }
+
+    func testAQuotedOrCRLFDraftIsStillADraft() {
+        XCTAssertNotNil(header(MarkdownRenderer.render("> ```slack\n> hello\n> ```").string))
+        XCTAssertNotNil(header(MarkdownRenderer.render("Here:\r\n\r\n```slack\r\nhello\r\n```\r\n").string))
     }
 
     func testCopyPutsPlainTextAndHTMLOnTheClipboardAndSaysCopied() throws {
