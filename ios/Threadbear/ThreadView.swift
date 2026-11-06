@@ -143,11 +143,10 @@ struct ThreadView: View {
                     } else if isDone(thread, messages: messages) {
                         // Ticked follow-ups go from the card's Send on their
                         // own; anything typed stays in the box for later.
-                        DoneCard(next: thread.next ?? [], picked: $nextPicks, busy: sent != nil,
-                                 asksVerdict: model.canGiveVerdict) {
+                        DoneCard(next: thread.next ?? [], picked: $nextPicks, busy: sent != nil) {
                             Task { _ = await send("", to: thread) }
-                        } archive: { verdict in
-                            archive(verdict: verdict)
+                        } archive: {
+                            archive()
                         }
                         .onChange(of: messages.last?.seq, initial: true) {
                             // A new reply's card starts with nothing ticked.
@@ -384,8 +383,8 @@ struct ThreadView: View {
     }
 
     /// Back to the inbox, where the thread's row slides away.
-    private func archive(verdict: ArchiveVerdict? = nil) {
-        model.archive(threadId, leavingThread: true, verdict: verdict)
+    private func archive() {
+        model.archive(threadId, leavingThread: true)
         dismiss()
     }
 

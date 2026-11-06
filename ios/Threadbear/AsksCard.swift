@@ -95,12 +95,8 @@ struct DoneCard: View {
     let next: [String]
     @Binding var picked: Set<Int>
     var busy: Bool
-    /// Whether Archive asks how it went first (backend API 42). Older
-    /// backends can't take the answer, so there it archives straight away.
-    var asksVerdict = false
     var send: () -> Void
-    /// The verdict picked from the menu, or nil from the plain button.
-    var archive: (ArchiveVerdict?) -> Void
+    var archive: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -109,7 +105,13 @@ struct DoneCard: View {
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(.secondary)
                 Spacer()
-                archiveButton
+                Button(action: archive) {
+                    Image(systemName: "archivebox")
+                }
+                .buttonStyle(.bordered)
+                .tint(.secondary)
+                .controlSize(.small)
+                .accessibilityLabel("Archive")
             }
             if !next.isEmpty {
                 Text("Or carry on").font(.footnote).foregroundStyle(.secondary)
@@ -141,56 +143,6 @@ struct DoneCard: View {
         }
         .padding(12)
         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-
-    /// A tap opens the menu and archives nothing; only a pick archives, so
-    /// every archive from here says how the thread went. Dismissing the menu
-    /// leaves the thread as it is.
-    @ViewBuilder private var archiveButton: some View {
-        if asksVerdict {
-            Menu {
-                ForEach(ArchiveVerdict.allCases, id: \.self) { verdict in
-                    Button { archive(verdict) } label: { Label(verdict.title, systemImage: verdict.symbol) }
-                }
-                // No verdict: for threads that are just done and fit none of
-                // the three (Mike, 5 Nov), as on the Mac.
-                Divider()
-                Button { archive(nil) } label: { Label("Okey-dokey", systemImage: "archivebox") }
-            } label: {
-                Image(systemName: "archivebox")
-            }
-            .menuStyle(.button)
-            .buttonStyle(.bordered)
-            .tint(.secondary)
-            .controlSize(.small)
-            .accessibilityLabel("Archive")
-        } else {
-            Button { archive(nil) } label: {
-                Image(systemName: "archivebox")
-            }
-            .buttonStyle(.bordered)
-            .tint(.secondary)
-            .controlSize(.small)
-            .accessibilityLabel("Archive")
-        }
-    }
-}
-
-extension ArchiveVerdict {
-    var title: String {
-        switch self {
-        case .worked: "Worked"
-        case .didntWork: "Didn't work"
-        case .notNeeded: "Not needed"
-        }
-    }
-
-    var symbol: String {
-        switch self {
-        case .worked: "checkmark"
-        case .didntWork: "xmark"
-        case .notNeeded: "minus"
-        }
     }
 }
 

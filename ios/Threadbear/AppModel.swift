@@ -108,9 +108,6 @@ final class AppModel {
     var canSendPhotos: Bool { isFake || (apiVersion ?? 0) >= BackendCompatibility.photosAPIVersion }
     /// Whether a secret card can be answered here (backend API 35, phone:secret).
     var canAnswerSecrets: Bool { isFake || (apiVersion ?? 0) >= BackendCompatibility.secretsAPIVersion }
-    /// Whether an archive can say how the thread went (backend API 42), for
-    /// the done card's Archive menu.
-    var canGiveVerdict: Bool { isFake || (apiVersion ?? 0) >= BackendCompatibility.archiveVerdictAPIVersion }
     /// The demo's kept runner keys, in memory so it never writes the keychain,
     /// with the sample Mac's as if it came in a pairing link.
     private let demoRunnerKeys = MemoryRunnerKeyStore(FakeBackend.sampleRunnerKeys)
@@ -248,9 +245,7 @@ final class AppModel {
     /// the page to clear, then slides off where he can see it go (Mike, 31
     /// Oct). The command is only sent once the row has gone, as the runner
     /// can answer within the animation and a list update would snap it away.
-    /// `verdict` is the done card's pick; it's only sent to a backend that
-    /// takes it (`canGiveVerdict`), and anything older just archives.
-    func archive(_ threadId: String, leavingThread: Bool = false, verdict: ArchiveVerdict? = nil) {
+    func archive(_ threadId: String, leavingThread: Bool = false) {
         guard let backend, !archiving.contains(threadId), !slidingOff.contains(threadId) else { return }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         // Hibernating threads can be archived from their page but have no inbox row to animate.
@@ -268,8 +263,7 @@ final class AppModel {
             }
             slidingOff.remove(threadId)
             do {
-                let change: ThreadChange = if let verdict, canGiveVerdict { .archiveWithVerdict(verdict) } else { .archive }
-                let command = try await backend.update(threadId: threadId, change: change)
+                let command = try await backend.update(threadId: threadId, change: .archive)
                 for try await status in backend.command(command) {
                     if status?.state == .failed { throw TransportError.server(status?.note ?? "The runner couldn't archive that thread.") }
                     if status?.state == .done { return }

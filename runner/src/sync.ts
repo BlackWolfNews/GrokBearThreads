@@ -2878,7 +2878,7 @@ export class ConvexSync {
           await host.update({ threadId: id, snoozedUntil: s.untilRestart ? 'restart' : s.until ?? null });
         } else if (a.wake) await host.update({ threadId: id, snoozedUntil: null });
         else if (a.archive) {
-          // The phone's done card asks how it went first (backend API 42).
+          // A verdict still rides along if sent (backend API 42), though no app sends one now.
           const verdict = ARCHIVE_VERDICTS.includes(a.verdict as ArchiveVerdict) ? { verdict: a.verdict as ArchiveVerdict } : {};
           await host.update({ threadId: id, archived: true, ...verdict });
         }

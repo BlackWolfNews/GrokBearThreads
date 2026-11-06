@@ -1723,17 +1723,16 @@ away. So every archive records who did it, as `archivedBy`:
 | `agent` | `update_thread`, `end_turn`'s `archive`, `tb archive` from inside a thread |
 | `threadbear` | the runner itself, such as a dialog notice archiving itself once it's gone |
 
-The done card's Archive, on the Mac, the phone and the website, opens a
-menu: Worked, Didn't work, Not needed. Only a pick archives (Mike chose a
-forced choice from mockups, 5 Nov), and it goes as `verdict` (`worked`,
-`didntWork`, `notNeeded`), kept as `archiveVerdict` and said in the thread as
-a `system.note` ("Archived by you: it worked."). ⌘E, a swipe and a row's box
-archive straight away with no verdict. A verdict from anyone but Mike is
-dropped. Both fields are set afresh by each archive and only reported while
+An archive can also carry a `verdict` (`worked`, `didntWork`,
+`notNeeded`), kept as `archiveVerdict` and said in the thread as a
+`system.note` ("Archived by you: it worked."). For a day (5 to 6 Nov) the
+done card's Archive opened a menu of these on the Mac, the phone and the
+website; Mike went back to a plain button, so no app sends one now, but the
+API still takes it and threads archived that day keep theirs. A verdict
+from anyone but Mike is dropped. Both fields are set afresh by each archive and only reported while
 `archivedAt` is set, so bringing a thread back needn't clear them; threads
 archived before 5 Nov have neither. `read_thread` and `list_threads` say
-them ("archived by the user: it worked"). The phone and website send
-`verdict` only to a backend of API 42 or later.
+them ("archived by the user: it worked").
 
 ## What Mike last asked
 

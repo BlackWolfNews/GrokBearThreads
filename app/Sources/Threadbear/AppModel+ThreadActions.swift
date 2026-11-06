@@ -487,7 +487,7 @@ extension AppModel {
     /// Archive (Mike calls it settling): leaves the inbox, stops its CLI.
     /// Its row slides off first, as a swiped one does;
     /// `slid` is a swipe that's already done that.
-    func archive(_ threadId: String? = nil, slid: Bool = false, verdict: ArchiveVerdict? = nil) {
+    func archive(_ threadId: String? = nil, slid: Bool = false) {
         guard let threadId = threadId ?? selection else { return }
         let next = neighbour(of: threadId)
         if let thread = threads[threadId] {
@@ -497,7 +497,7 @@ extension AppModel {
             flyToArchive(threadId)
             select(next)
         }
-        if slid { return update(threadId, ThreadUpdate(archived: true, verdict: verdict)) }
+        if slid { return update(threadId, ThreadUpdate(archived: true)) }
         guard !slidingOff.contains(threadId) else { return }
         slideOff(threadId)
         archivesNotSent.insert(threadId)
@@ -507,7 +507,7 @@ extension AppModel {
             guard archivesNotSent.remove(threadId) != nil else { return }
             do {
                 let client = try await rowClient(for: threadId)
-                threads[threadId] = try await client.updateThread(threadId, ThreadUpdate(archived: true, verdict: verdict))
+                threads[threadId] = try await client.updateThread(threadId, ThreadUpdate(archived: true))
                 await endSlide(threadId)
             } catch {
                 // Still in the inbox: bring the row back.

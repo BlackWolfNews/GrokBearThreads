@@ -864,8 +864,7 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// A button on the open asks card: `pick:<ask>:<n>` picks (or unpicks)
     /// an answer, which waits in the composer; `link:<ask>:<n>` opens one of
     /// the ask's links where links open (the pane or the browser). The done
-    /// card's `archive` opens the menu that asks how it went, then archives
-    /// the thread with that (`archive:<verdict>` picks without the menu), and `next:<n>`
+    /// card's `archive` archives the thread, as ⌘E does, and `next:<n>`
     /// ticks or unticks a suggested follow-up, which waits in the composer;
     /// `explain:<n>` (the "?" at its right) turns on asking the agent what
     /// it meant, which waits in the composer the same way.
@@ -876,17 +875,9 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         if action == "archive" {
             // Already archived (end_turn's archive: true, or ⌘E): nothing to do,
             // and archiving again would move the selection off it.
-            guard !thread.isArchived else { return }
-            // Archive asks how it went before it goes, and there's no
-            // archiving from here without an answer (Mike, 5 Nov, from
-            // mockups): it's the mark that he put it away on purpose.
-            ArchiveVerdictMenu.show { [weak app] verdict in app?.archive(thread.id, verdict: verdict) }
-            return
-        }
-        if action.hasPrefix("archive:") {
-            // Scripted runs pick straight away: `archive:worked`.
-            guard !thread.isArchived, let verdict = ArchiveVerdict(rawValue: String(action.dropFirst(8))) else { return }
-            app.archive(thread.id, verdict: verdict)
+            // A plain button again: Mike dropped the Worked / Didn't work /
+            // Not needed menu it opened for a day (6 Nov).
+            if !thread.isArchived { app.archive(thread.id) }
             return
         }
         if action.hasPrefix("page:") {

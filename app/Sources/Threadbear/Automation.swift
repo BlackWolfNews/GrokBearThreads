@@ -513,7 +513,7 @@ enum Automation {
         case "ask":
             // {"cmd":"ask","row":"ak:6","action":"pick:0:1"} clicks an open
             // asks card's button: "pick:<ask>:<choice>" or "link:<ask>:<link>",
-            // 0-based, "page:<n>" on a paged card, "collapse", or the done card's "next:<n>", "explain:<n>" or "archive:<verdict>" (worked, didntWork, notNeeded; plain "archive" opens the menu).
+            // 0-based, "page:<n>" on a paged card, "collapse", or the done card's "next:<n>", "explain:<n>" or "archive".
             guard let id = c["row"] as? String, let action = c["action"] as? String,
                   case .asks(let card)? = app.transcript.session?.model.row(id: id)?.content else { return "error no asks card" }
             guard card.isOpen else { return "error that card is closed" }
