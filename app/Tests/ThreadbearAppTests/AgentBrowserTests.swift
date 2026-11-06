@@ -34,6 +34,15 @@ struct AgentBrowserTests {
         #expect(tab.thread == nil && tab.handoffs == nil)
     }
 
+    /// Chrome's passkey sheet over a page, from BrowserBear's agent host.
+    @Test func aSheetOverThePageDecodes() throws {
+        let json = #"{"tabId":1026,"targetId":"A","url":"https://x.com/","title":"X","sheet":{"moved":true,"since":1,"later":"ignored"}}"#
+        let tab = try JSONDecoder().decode(AgentTab.self, from: Data(json.utf8))
+        #expect(tab.sheet?.moved == true)
+        let none = try JSONDecoder().decode(AgentTab.self, from: Data(#"{"tabId":1,"url":"","title":"","sheet":null}"#.utf8))
+        #expect(none.sheet == nil)
+    }
+
     @Test func keysGetTheNamesChromeWants() {
         #expect(KeyNames.lookup(0).0 == "KeyA" && KeyNames.lookup(0).1 == 65)
         #expect(KeyNames.lookup(51).0 == "Backspace")

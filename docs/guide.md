@@ -209,7 +209,9 @@ window. Capture and input pause while you use that window; press the button agai
 to return to the panel. Closing the panel restores the page's normal size.
 
 An agent can also use a separate Chrome with `--profile agent`. Its pages show in
-the same panel, with its own sign-ins. Existing-profile pages use captured frames,
+the same panel, with its own sign-ins. When that Chrome asks for a passkey or a
+permission, its window comes to the middle of your screen and the panel says so,
+with Show it to bring it to the front. Existing-profile pages use captured frames,
 so movement is less smooth than the separate Chrome's stream.
 
 A link to a folder opens it in the side pane, where it works like a Finder

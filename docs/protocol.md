@@ -3423,6 +3423,13 @@ using the panel for ordinary pages, with new windows opening in Chrome.
 Dialogs already open at attach are replayed, and a heartbeat keeps a displayed
 JavaScript dialog attached until it is answered.
 The separate `--profile agent` Chrome retains its existing direct CDP path.
+Its host lists that Chrome's pages in `agent/tabs.json`. A tab's `sheet` is
+set (`{moved, since}`, else null) while one of Chrome's own windows is up
+over the page, such as the passkey sheet or a permission prompt, which the
+page's picture can't show. The host brings the page's window to the middle
+of the screen for it (`moved: true`) and parks it again once it closes.
+While any tab has one, the panel says so with a Show it button and lets
+Chrome keep the focus it takes. Both sides ignore fields they don't know.
 
 ## Connectors
 

@@ -43,7 +43,18 @@ struct AgentTab: Decodable, Identifiable, Equatable {
     var handoffAt: Double?
     var popup: Bool?
     var openedAt: Double?
+    /// The agent's Chrome has a window of its own up over this page (a
+    /// passkey, a permission), which the panel's picture can't show.
+    var sheet: AgentSheet?
     var id: String { "\(profile ?? "agent-chrome")/\(tabId)" }
+}
+
+/// BrowserBear's agent host (agent/sheets.mjs) sets this while one of
+/// Chrome's own windows is up over a page.
+struct AgentSheet: Decodable, Equatable {
+    /// The host brought the page's window onto the screen with it.
+    var moved: Bool?
+    var since: Double?
 }
 
 struct BrowserProfile: Decodable, Identifiable, Equatable {
@@ -126,7 +137,15 @@ final class AgentBrowserModel: ObservableObject {
             lastApp = app
             return
         }
-        if !realWindowShown { lastApp?.activate() }
+        // A passkey or permission sheet needs Chrome in front to take a
+        // click or Touch ID, so it keeps the focus while one is up.
+        if !realWindowShown && !agentTabs.contains(where: { $0.sheet != nil }) { lastApp?.activate() }
+    }
+
+    /// Brings the agent's Chrome forward, with whatever sheet it has up.
+    func showChromeSheet() {
+        guard let chromePid else { return }
+        NSRunningApplication(processIdentifier: chromePid)?.activate()
     }
 
     private func read() {
@@ -135,7 +154,14 @@ final class AgentBrowserModel: ObservableObject {
         guard let data = FileManager.default.contents(atPath: path), data != last else { return }
         last = data
         guard let state = try? JSONDecoder().decode(AgentState.self, from: data) else { return }
+        let hadSheet = agentTabs.contains { $0.sheet != nil }
         agentTabs = state.tabs
+        // The sheet's done and its window's parked again, but Chrome kept the
+        // focus it took for it: give it back, as for any other activation.
+        if hadSheet, !agentTabs.contains(where: { $0.sheet != nil }), !realWindowShown,
+           let pid = state.chromePid, NSWorkspace.shared.frontmostApplication?.processIdentifier == pid {
+            lastApp?.activate()
+        }
         mergeTabs()
         port = state.port
         chromePid = state.chromePid
@@ -262,6 +288,7 @@ struct AgentBrowserPanel: View {
             }
             if tabs.count > 1 { tabStrip }
             if let tab, tab.state == "yours" { yourTurn(tab) }
+            if let tab, let sheet = tab.sheet { chromeSheet(sheet) }
             if let tab, tab.inChrome == true || tab.suspended == true || tab.requiresConsent == true {
                 VStack(spacing: zoomed(10)) {
                     PaneNote(text: tab.inChrome == true ? "This page is open in Chrome's window." : "This Chrome tab is not connected to the panel.")
@@ -434,6 +461,22 @@ struct AgentBrowserPanel: View {
             Button("Done") { model.done(tab) }
                 .controlSize(.small)
                 .tip("Tell the agent you've finished here")
+        }
+        .padding(.horizontal, zoomed(10))
+        .padding(.vertical, zoomed(5))
+    }
+
+    /// Chrome's own window over the page, which the picture here can't show.
+    private func chromeSheet(_ sheet: AgentSheet) -> some View {
+        HStack(spacing: zoomed(8)) {
+            Image(systemName: "macwindow").font(.system(size: TypeScale.label)).foregroundStyle(.orange)
+            Text(sheet.moved == true ? "Chrome is asking for something in its own window, like a passkey. It's in the middle of your screen." : "Chrome is asking for something in its own window, like a passkey.")
+                .font(.system(size: TypeScale.label))
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            Button("Show it") { model.showChromeSheet() }
+                .controlSize(.small)
+                .tip("Bring Chrome's window to the front")
         }
         .padding(.horizontal, zoomed(10))
         .padding(.vertical, zoomed(5))
