@@ -649,9 +649,11 @@ export async function findWorktreePatch(
   cache: PatchCache = new Map(),
   dirs: FolderCache = new FolderCache(),
   gate: PatchGate = TRUST_ALL,
+  strict = false,
 ): Promise<WorktreePatch | undefined> {
   for (const file of worktreePatchFiles(cwd, home, dirs)) {
     const found = await readWorktreePatch(file, cache, dirs, gate);
+    if (strict && found && 'error' in found) throw new Error(`${file}: ${found.error}`);
     if (found && !('error' in found)) return found;
   }
   return undefined;

@@ -321,7 +321,7 @@ async function landCommand(cfg: ReturnType<typeof loadConfig>, dryRun: boolean):
     dryRun,
     // Read after the landing lock and rebase: main may have changed the
     // check while we waited. Running tb land asks for this patch's check.
-    readCheck: async () => (await findWorktreePatch(from, undefined, undefined, undefined, TRUST_ALL))?.check,
+    readCheck: async () => (await findWorktreePatch(from, undefined, undefined, undefined, TRUST_ALL, true))?.check,
   });
 }
 

@@ -605,7 +605,10 @@ export const patchesPart = {
         cwd: action.folder ?? st.rec.cwd,
         env: { ...process.env, ...threadEnv(threadId, this.cfg.home) },
         shell: this.actionShell,
-        timeoutMs: this.actionTimeoutMs,
+        // Landing waits for the repo lock as well as the remote check
+        // queue. The ordinary ten-minute action limit can kill it before
+        // validation has even started.
+        timeoutMs: action.id === 'worktree.land' && action.patch === 'worktree' ? 60 * 60_000 : this.actionTimeoutMs,
       });
       if (st.rt.deleted) return { ok: outcome.ok, exitCode: outcome.exitCode, durationMs: outcome.durationMs };
       const body: EventBody = {

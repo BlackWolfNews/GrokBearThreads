@@ -259,7 +259,7 @@ const CHECK_TAIL_LINES = 40;
 // check, fast-forwards main in its checkout and prints what landed.
 // Returns the exit code. Every refusal leaves main as it was.
 export async function land(t: LandTarget, opts: LandOptions = {}): Promise<number> {
-  const common = await gitOut(t.path, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
+  const common = await gitOut(t.path, ['rev-parse', '--git-common-dir']);
   if (!common) {
     (opts.err ?? console.error)(`${t.path} isn't a git checkout, so there's nothing to land.`);
     return 1;
@@ -269,7 +269,7 @@ export async function land(t: LandTarget, opts: LandOptions = {}): Promise<numbe
   // CLI processes, so waiting for that queue cannot stale another landing.
   let release: () => Promise<void>;
   try {
-    release = await lockLanding(path.join(common, 'threadbear-land.lock'), opts.out ?? console.log);
+    release = await lockLanding(path.resolve(t.path, common, 'threadbear-land.lock'), opts.out ?? console.log);
   } catch (e) {
     (opts.err ?? console.error)(`Couldn't lock the repo for landing: ${(e as Error).message}`);
     return 1;
@@ -416,8 +416,8 @@ async function landLocked(t: LandTarget, opts: LandOptions): Promise<number> {
   if ((await gitOut(t.path, ['rev-parse', 'HEAD'])) !== checked ||
       (await gitOut(t.path, ['rev-parse', t.branch])) !== checked ||
       (await gitOut(t.path, ['rev-parse', '--abbrev-ref', 'HEAD'])) !== t.branch ||
-      !(await git(t.path, ['diff', '--quiet', 'HEAD', '--'])).ok) {
-    return fail(`The branch or tracked files in ${t.path} changed while the check ran, so nothing landed. Commit the changes and run tb land again.`);
+      (await gitOut(t.path, ['status', '--porcelain', '--untracked-files=all'])) !== '') {
+    return fail(`The branch or files in ${t.path} changed while the check ran, so nothing landed. Commit the changes and run tb land again.`);
   }
 
   if (opts.dryRun) {

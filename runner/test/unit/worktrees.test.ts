@@ -390,6 +390,17 @@ test('threads.create takes worktree: false over RPC, and refuses a worktree that
 
 // --------------------------------------------------------------- landing
 
+test('the Land chip can wait beyond the ordinary command timeout', async () => {
+  const h = makeHarness(undefined, {}, { actionShell: ['/bin/sh', '-c'], actionTimeoutMs: 20 });
+  const { thread } = h.runner.create({ text: 'Go', accountId: 'claude-3', cwd: tmpDir() });
+  const action = { id: 'worktree.land', title: 'Land', kind: 'command' as const, patch: 'worktree', command: 'sleep 0.1; echo checked' };
+  h.runner.worktreeAction = () => action;
+  assert.equal((await h.runner.runAction(thread.id, action.id)).ok, true);
+  // A project action cannot opt into the built-in landing's longer limit.
+  h.runner.worktreeAction = () => ({ ...action, patch: 'project' });
+  assert.equal((await h.runner.runAction(thread.id, action.id)).ok, false);
+});
+
 test('land serializes separate CLIs before rebasing, so each checks the commit it lands once', async () => {
   const { root, main } = makeRepo(PATCH(`{ check: "./check.sh" }`));
   commit(main, { 'check.sh': `#!/bin/sh
@@ -436,7 +447,7 @@ test('land refuses a branch changed by the check instead of merging an unchecked
 });
 
 test('land releases its lock when a CLI is killed during the check', async () => {
-  const { root, main } = makeRepo(PATCH(`{ check: "touch ../checking; sleep 1" }`));
+  const { root, main } = makeRepo(PATCH(`{ check: "touch ../checking; while ! test -f ../release; do sleep 0.05; done" }`));
   const t = makeBranch(main);
   commit(t.path, { 'first.txt': 'first\n' }, 'First');
   const env = { THREADBEAR_HOME: path.join(root, 'no-runner'), THREADBEAR_THREAD_ID: undefined };
@@ -447,9 +458,19 @@ test('land releases its lock when a CLI is killed during the check', async () =>
     first.child.kill('SIGKILL');
     await first.done;
   }
-  // It must not need stale-file cleanup after SIGKILL. Bypass the check
-  // here; the abandoned check child is just a bounded one-second sleep.
-  assert.equal(await land(t, capture().opts), 0);
+  // Acquire while the orphan check is still alive, so a pipe inherited
+  // by that check cannot make a leaked lock look like a passing test.
+  const next = land(t, capture().opts);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    assert.equal(await Promise.race([next, new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('Killed CLI kept its landing lock')), 10_000);
+    })]), 0);
+  } finally {
+    clearTimeout(timer);
+    write(path.dirname(t.path), { release: '' });
+    await next;
+  }
   assert.equal(sh(main, 'git rev-parse main'), sh(t.path, 'git rev-parse HEAD'));
 });
 
@@ -464,6 +485,29 @@ test('land refuses tracked edits made by the check, and releases the lock on fai
   assert.equal(sh(main, 'git rev-parse main'), before);
   sh(t.path, 'git restore first.txt');
   assert.equal(await land(t, capture().opts), 0);
+});
+
+test('tb land refuses a check patch that cannot load after rebasing', async () => {
+  const { root, main } = makeRepo(PATCH(`{ check: "true" }`));
+  const t = makeBranch(main);
+  commit(t.path, { 'first.txt': 'first\n' }, 'First');
+  commit(main, { '.threadbear/patches/checks.ts': 'export default { worktree: { check: ' }, 'Broken check');
+  const before = sh(main, 'git rev-parse main');
+  const result = await runTb(['land'], t.path, { THREADBEAR_HOME: path.join(root, 'no-runner'), THREADBEAR_THREAD_ID: undefined });
+  assert.equal(result.code, 1, result.out);
+  assert.match(result.out, /Couldn't read the repo's patches for its check/);
+  assert.equal(sh(main, 'git rev-parse main'), before);
+});
+
+test('land refuses untracked inputs created during validation', async () => {
+  const { main } = makeRepo();
+  const t = makeBranch(main);
+  commit(t.path, { 'first.txt': 'first\n' }, 'First');
+  const before = sh(main, 'git rev-parse main');
+  const c = capture();
+  assert.equal(await land({ ...t, check: 'echo extra > extra.txt' }, c.opts), 1);
+  assert.match(c.err.join('\n'), /changed while the check ran/);
+  assert.equal(sh(main, 'git rev-parse main'), before);
 });
 
 test('land: rebases on main, runs the check in the worktree, fast-forwards main and says what landed', async () => {

@@ -3316,8 +3316,10 @@ asked for. The summary carries `worktree` from then on.
 git directory before reading or rebasing either branch, and holds it through
 the check and fast-forward. The CLI reads the patch's check after rebasing.
 Other landings of that repo wait, even from
-other CLI processes; exiting releases it. A check that changes the branch
-or tracked files stops the landing. The fast-forward names the checked
+other CLI processes; exiting releases it. A patch load error, or a check
+that changes the branch or leaves changed or untracked files, stops the landing.
+The Land command action has an hour for its wait and check, rather than
+the usual ten-minute command limit. The fast-forward names the checked
 commit, so it cannot pick up a later, unchecked branch tip.
 
 `tb land`, in the worktree, refuses with uncommitted changes, rebases on

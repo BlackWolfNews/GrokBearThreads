@@ -84,9 +84,10 @@ crash; the empty lock file stays. Separate repos do not block one another.
    docs/bringing-in-updates.md) is never rebased, since that would flatten
    the merge and rewrite Mike's commits: if main has moved, main is merged
    into it instead, with the same undo-and-name-the-files on a conflict.
-3. Runs `check` in the worktree, if there is one. A failure stops here,
-   with the last lines of its output. Changing the branch or tracked files
-   during the check also stops it.
+3. Reads the patch's `check` after rebasing, and runs it in the worktree,
+   if there is one. A patch load error or failing check stops here, with
+   the last lines of its output. Changing the branch or leaving changed
+   or untracked files during the check also stops it.
 4. `git -C <mainCheckout> merge --ff-only <checked commit>`. If main's working
    tree has uncommitted changes in files the merge touches, git refuses;
    `tb land` says so and which files, and leaves everything as it was.
@@ -94,6 +95,10 @@ crash; the empty lock file stays. Separate repos do not block one another.
 
 It never pushes. The runner and the app follow the local main by
 themselves.
+
+The Land chip has an hour for waiting and checking; other command actions
+keep their usual ten-minute limit. In an agent tool with its own shorter
+command limit, run `tb land` in the background and collect its result.
 
 After landing, the branch stays and the thread can carry on: the next
 `tb land` lands only what's new. `tb land --dry-run` does steps 1 to 3 and
