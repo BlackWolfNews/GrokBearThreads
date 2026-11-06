@@ -12,6 +12,7 @@ import { Peers, PrimaryLink, ThreadRouter, drainChildrenName, peersElsewhere, ph
 import { RunnerUpdater, releaseTreeAt } from './update.ts';
 import { SETTLE_MS, Upstream } from './upstream.ts';
 import { BringIn } from './bring-in.ts';
+import { UpdateFixer } from './fix-update.ts';
 import { bringInSetting } from './settings.ts';
 import { Restarter, restartMethods } from './restart.ts';
 import { AppRestarts } from './app-restarts.ts';
@@ -463,14 +464,40 @@ async function main(): Promise<void> {
     handOver: (keeps) => void handOver(keeps),
     elsewhere: (id) => peers.owns(id),
   });
+  const openThread = (threadId: string): boolean => {
+    try {
+      return !runner.get(threadId).archivedAt;
+    } catch {
+      return false;
+    }
+  };
+  // A thread in the background when an update to main fails, in place of
+  // a banner (fix-update.ts).
+  const updateRelease = readRelease();
+  const updateFixer = new UpdateFixer({
+    home: cfg.home,
+    log,
+    start: ({ text, title, why }) => runner.create({
+      text,
+      title,
+      cwd: updateRelease?.checkout,
+      // It fixes, lands and watches the build without anyone to approve.
+      permissionMode: 'full',
+      startedBy: { kind: 'runner', label: 'Threadbear', why },
+    }).thread.id,
+    open: openThread,
+    send: (threadId, text) => void runner.send(threadId, text, [], { queue: true }),
+  });
   // Follows main once this release has been marked good (below).
   const updater = new RunnerUpdater({
     home: cfg.home,
-    release: readRelease(),
+    release: updateRelease,
     enabled: cfg.followMain,
     clock: realClock,
     log,
     notice: (level, message) => runner.notice(level, message),
+    // Only with a checkout to work in (a release that records one).
+    onFailed: (f) => Boolean(updateRelease?.checkout) && (updateFixer.failed(f), true),
     restart: (p) => restarter.request({ when: 'idle', ...p }),
     pendingRestart: () => Boolean(restarter.status().pendingRestart),
     onChange: () => publishUpdates(),
@@ -493,13 +520,7 @@ async function main(): Promise<void> {
       permissionMode: 'full',
       startedBy: { kind: 'runner', label: 'Threadbear', why },
     }).thread.id,
-    open: (threadId) => {
-      try {
-        return !runner.get(threadId).archivedAt;
-      } catch {
-        return false;
-      }
-    },
+    open: openThread,
     send: (threadId, text) => void runner.send(threadId, text, [], { queue: true }),
     // The app's Bring Them In and Let's Discuss titles (UpdatesPanel).
     openByHand: () => runner.list(['inbox', 'snoozed']).find((t) => /^(Bring in|Discuss) Mike's release /.test(t.title))?.id,
