@@ -855,6 +855,9 @@ final class WebPanelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUI
                     in: .world(name: "threadbear-preview-guard")))
                 config.userContentController.addUserScript(WKUserScript(
                     source: LocalPreviewSchemeHandler.clipboardGuard, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+                // And the async Clipboard API off in WebKit itself, which only
+                // offers it privately, like WebRTC's switch below.
+                Self.setFeature("AsyncClipboardAPIEnabled", false, in: config.preferences)
             }
             // WebRTC goes round proxies and content rules alike. WebKit only
             // offers the switch privately; KVC finds `_setPeerConnectionEnabled:`.
@@ -882,6 +885,18 @@ final class WebPanelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUI
             load(url, in: view)
         }
         return view
+    }
+
+    /// Turns one of WebKit's features (`+[WKPreferences _features]`) on or
+    /// off, through `-_setEnabled:forFeature:`; nothing if either is gone.
+    static func setFeature(_ key: String, _ on: Bool, in preferences: WKPreferences) {
+        let features = NSSelectorFromString("_features"), set = NSSelectorFromString("_setEnabled:forFeature:")
+        guard (WKPreferences.self as AnyObject).responds(to: features), preferences.responds(to: set),
+              let list = (WKPreferences.self as AnyObject).perform(features)?.takeUnretainedValue() as? [NSObject],
+              let feature = list.first(where: { ($0.value(forKey: "key") as? String) == key }),
+              let method = class_getInstanceMethod(WKPreferences.self, set) else { return }
+        typealias Setter = @convention(c) (AnyObject, Selector, Bool, AnyObject) -> Void
+        unsafeBitCast(method_getImplementation(method), to: Setter.self)(preferences, set, on, feature)
     }
 
     /// Where a local preview's connections go: a port on this Mac nothing

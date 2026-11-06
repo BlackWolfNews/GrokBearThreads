@@ -30,6 +30,9 @@ final class LocalPreviewSchemeHandler: NSObject, WKURLSchemeHandler {
         "frame-src \(scheme): data: blob:",
         "base-uri 'none'",
     ].joined(separator: "; ")
+    /// For a page running its scripts: frames of this scheme only, so a
+    /// script can't make a data: or blob: frame to run in (clipboardGuard).
+    static let scriptsPolicy = policy.replacingOccurrences(of: "frame-src \(scheme): data: blob:", with: "frame-src \(scheme)")
     /// In every frame, first: a click on a link (HTML or SVG, in a shadow
     /// root too) to anywhere but this scheme is cancelled before WebKit
     /// starts the navigation, which is when it would open a connection.
@@ -64,12 +67,26 @@ final class LocalPreviewSchemeHandler: NSObject, WKURLSchemeHandler {
       }
     })();
     """
-    /// The same view, in the page's world: no async Clipboard API, which a
-    /// script could write to on any click in the page.
+    /// The same view, in the page's world, in every frame: no Clipboard
+    /// API, and no `execCommand('copy')` or `'cut'`, either of which a
+    /// script can use on any click in the page to put what it read on the
+    /// pasteboard. WebKit writes those itself, past SealedPreviewWebView
+    /// (Codex review). Defined before the page's scripts and not
+    /// configurable, and a scripts-on page gets no data: or blob: frames
+    /// (`scriptsPolicy`), where it could look for a copy of its own.
     static let clipboardGuard = """
     (() => {
       try { delete Navigator.prototype.clipboard; } catch (_) {}
       try { Object.defineProperty(Navigator.prototype, 'clipboard', { get: () => undefined, configurable: false }); } catch (_) {}
+      const exec = Document.prototype.execCommand;
+      Object.defineProperty(Document.prototype, 'execCommand', {
+        value: function (command, ...rest) {
+          const name = String(command).toLowerCase();
+          if (name === 'copy' || name === 'cut') return false;
+          return exec.call(this, command, ...rest);
+        },
+        writable: false, configurable: false,
+      });
     })();
     """
 
@@ -116,12 +133,12 @@ final class LocalPreviewSchemeHandler: NSObject, WKURLSchemeHandler {
         guard url.scheme == Self.scheme, let token = url.host, let site = sites[token],
               let served = site.serve(url.path) else {
             let refused = HTTPURLResponse(url: url, statusCode: 404, httpVersion: "HTTP/1.1",
-                                          headerFields: ["Content-Type": "text/plain", "Content-Security-Policy": Self.policy])!
+                                          headerFields: ["Content-Type": "text/plain", "Content-Security-Policy": Self.scriptsPolicy])!
             return (refused, Data("Not available to this preview.".utf8))
         }
         let ok = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1",
                                  headerFields: ["Content-Type": served.mimeType, "Content-Length": "\(served.data.count)",
-                                                "Content-Security-Policy": Self.policy])!
+                                                "Content-Security-Policy": site.pageDigest == nil ? Self.policy : Self.scriptsPolicy])!
         return (ok, served.data)
     }
 

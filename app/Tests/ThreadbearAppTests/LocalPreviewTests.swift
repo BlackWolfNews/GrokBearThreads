@@ -312,6 +312,31 @@ final class LocalPreviewTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(300))
         XCTAssertEqual(NSPasteboard.general.changeCount, pasteboard, "Copy wrote to the pasteboard")
         XCTAssertFalse(staticView is SealedPreviewWebView)
+        // And a copy the page makes itself, after wiping the page (which
+        // drops in-page listeners) and from a frame of its own. The app's
+        // script runs as a click would, so WebKit would allow the copy.
+        let saved = NSPasteboard.general.string(forType: .string)
+        defer {
+            if NSPasteboard.general.changeCount != pasteboard {
+                NSPasteboard.general.clearContents()
+                if let saved { NSPasteboard.general.setString(saved, forType: .string) }
+            }
+        }
+        // WebKit lets a page copy only during a click, which a test can't
+        // give it, so this checks the guard is what the page gets: in the
+        // page, in a frame it makes, and after document.open().
+        let guarded = "String(!/native code/.test(document.execCommand.toString()) && document.execCommand('copy') === false)"
+        let inFrame = try await run("""
+        const f = document.createElement('iframe'); document.body.appendChild(f);
+        const document_ = f.contentDocument;
+        return String(!/native code/.test(document_.execCommand.toString()) && document_.execCommand('copy') === false);
+        """, in: view) as? String
+        _ = try? await view.evaluateJavaScript("document.open(); window.afterOpen = \(guarded); 0")
+        let afterOpen = try? await view.evaluateJavaScript("String(window.afterOpen)") as? String
+        let copied = [inFrame ?? "?", afterOpen ?? "?"]
+        XCTAssertEqual(copied, ["true", "true"], "the page can reach WebKit's own execCommand")
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(NSPasteboard.general.changeCount, pasteboard, "the page's own copy reached the pasteboard: \(copied)")
 
         // Rewritten after Run them: a reload gets nothing, so the new script never runs.
         try write("index.html", Data(html.replacingOccurrences(of: "script ran", with: "rewritten ran").utf8))
