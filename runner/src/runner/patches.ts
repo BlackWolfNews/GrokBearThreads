@@ -411,7 +411,7 @@ export const patchesPart = {
         env: { ...process.env, ...threadEnv(st.rec.id, this.cfg.home) },
         shell: this.actionShell,
         timeoutMs: this.actionTimeoutMs,
-        background: true,
+        background: this.backgroundJobs,
       });
       if (st.rt.deleted || this.stopping) return;
       const body: EventBody = {

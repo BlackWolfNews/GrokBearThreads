@@ -270,6 +270,9 @@ export function makeHarness(home = tmpDir(), cfgExtra: Partial<Config> = {}, dep
     subagentTranscript: () => null,
     // Never probe the real network: the API is always there unless a test says.
     reachable: async () => true,
+    // Setup and hooks at normal priority: on a busy Mac a background shell
+    // can miss a test's wait. background.test.ts covers the real path.
+    backgroundJobs: false,
     ...depsExtra,
   });
   const notes: Notification[] = [];

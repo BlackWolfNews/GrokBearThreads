@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { tmpDir } from '../helpers/fakes.ts';
+import { makeHarness, tmpDir } from '../helpers/fakes.ts';
 import { inBackground, TASKPOLICY } from '../../src/background.ts';
 import { runCommand } from '../../src/patches.ts';
 import { land } from '../../src/worktrees.ts';
@@ -52,4 +52,27 @@ test("land: the check runs at background priority", { skip: !onMac }, async () =
   );
   assert.equal(code, 0);
   assert.equal(fs.readFileSync(pri, 'utf8').trim(), '4');
+});
+
+test('runner: a turn hook runs at background priority unless the runner is told otherwise', { skip: !onMac }, async () => {
+  const pri = async (backgroundJobs: boolean): Promise<string | undefined> => {
+    const root = tmpDir();
+    const project = path.join(root, 'app');
+    fs.mkdirSync(path.join(project, '.git'), { recursive: true });
+    fs.mkdirSync(path.join(project, '.threadbear', 'patches'), { recursive: true });
+    fs.writeFileSync(path.join(project, '.threadbear', 'patches', 'hooks.ts'), `export default { hooks: [{ title: "Pri", on: "turn.end", run: "${PRI}", tell: "never" }] };\n`);
+    const h = makeHarness(undefined, {}, { panelsRoot: root, actionShell: ['/bin/sh', '-c'], actionTimeoutMs: 20_000, backgroundJobs });
+    const { thread } = h.runner.create({ text: 'hi', accountId: 'claude-3', cwd: project });
+    await new Promise((r) => setImmediate(r));
+    await h.runner.patchesIdle();
+    const s = h.adapter.last;
+    s.init();
+    s.result('completed');
+    const runs = () => h.events(thread.id).filter((e) => e.type === 'action.run');
+    for (let i = 0; i < 2000 && !runs().length; i++) await new Promise((r) => setTimeout(r, 10));
+    return (runs()[0] as { text?: string } | undefined)?.text?.trim();
+  };
+  assert.equal(await pri(true), '4');
+  // Off, it runs as the runner does (20, or 4 if this suite is itself under taskpolicy -b).
+  assert.match((await pri(false)) ?? '', /^(4|20)$/);
 });

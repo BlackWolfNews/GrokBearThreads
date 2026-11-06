@@ -459,6 +459,10 @@ export type RunnerDeps = {
   // tests pass /bin/sh -c and a short limit.
   actionShell?: string[];
   actionTimeoutMs?: number;
+  // A worktree's setup and turn hooks run at background priority
+  // (background.ts) unless this is false. Tests not about priority turn it
+  // off, as a background shell can wait seconds for a core on a busy Mac.
+  backgroundJobs?: boolean;
   // Opens a url action's page, for an app too old to open it itself
   // (runAction); tests pass a fake rather than starting a browser.
   openUrl?: (url: string) => Promise<void>;
@@ -558,6 +562,7 @@ export class Runner {
   panelsRoot?: string;
   actionShell?: string[];
   actionTimeoutMs?: number;
+  backgroundJobs: boolean;
   openUrl: (url: string) => Promise<void>;
   convexKeys: ConvexKeys;
   // Where answers to ask_secret go, and the key the phone seals them to.
@@ -633,6 +638,7 @@ export class Runner {
     this.patchTrust = deps.patchTrust ?? new PatchTrust({ file: path.join(deps.config.home, 'patch-trust.json') });
     this.actionShell = deps.actionShell;
     this.actionTimeoutMs = deps.actionTimeoutMs;
+    this.backgroundJobs = deps.backgroundJobs ?? true;
     this.openUrl = deps.openUrl ?? openInBrowser;
     this.convexKeys = new ConvexKeys(
       path.join(paths.secrets(deps.config.home), 'convex-panels'),
