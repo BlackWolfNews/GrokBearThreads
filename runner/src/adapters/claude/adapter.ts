@@ -1,7 +1,6 @@
 import crypto from 'node:crypto';
 import { sandboxSpawner, type SandboxConfig } from '../../sandbox.ts';
 import os from 'node:os';
-import path from 'node:path';
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import type { HookInput, McpServerConfig, ModelInfo, Options, PermissionResult, Query, SDKUserMessage, PermissionUpdate } from '@anthropic-ai/claude-agent-sdk';
 import type { Account, EffortLevel, ModelChoice, PermissionMode, Question } from '../../protocol.ts';
