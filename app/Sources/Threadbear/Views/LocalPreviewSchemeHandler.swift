@@ -145,8 +145,7 @@ final class LocalPreviewSchemeHandler: NSObject, WKURLSchemeHandler {
     /// drawn once each, and kept they added up to one open folder per
     /// block (cross-lab review, 6 Nov).
     func forget(_ file: URL) {
-        if let token = tokens.removeValue(forKey: file.standardizedFileURL.path + "
-") {
+        if let token = tokens.removeValue(forKey: file.standardizedFileURL.path + "\n") {
             sites[token] = nil
             owners[token] = nil
         }
