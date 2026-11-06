@@ -8,7 +8,7 @@ import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
 import { checkSummary } from '../helpers/protocol-check.ts';
 import { findWorktreePatch, loadPatchSet } from '../../src/patches.ts';
 import type { PatchGate } from '../../src/patch-trust.ts';
-import { folderKey, mainCheckoutOf, PatchTrust, scanModule } from '../../src/patch-trust.ts';
+import { folderKey, mainCheckoutOf, PatchTrust, patchHash, scanModule } from '../../src/patch-trust.ts';
 import { RpcError } from '../../src/protocol.ts';
 import { ClaudeNormalizer } from '../../src/adapters/claude/normalize.ts';
 import { CodexNormalizer } from '../../src/adapters/codex/normalize.ts';
@@ -330,10 +330,10 @@ test('runner: a successful edit trusts only the bytes it wrote, not the file cha
   // Left as the edit wrote it, from a version Mike trusted (an Edit only
   // vouches for what it changed): trusted, by that file's hash alone.
   const fresh = writePatch(project, 'tools', 'Deploy');
-  const trusted = sha(fresh.file);
+  const trusted = patchHash(fresh.file).hash;
   trust.trustCurrent([fresh.file]);
   claudeEdit(s, claude, { id: 'tu2', file: fresh.file, old: '"Deploy"', new: '"Ship"' });
-  const edited = sha(fresh.file);
+  const edited = patchHash(fresh.file).hash;
   await tick();
   await h.runner.patchesIdle();
   t = h.runner.get(thread.id);
@@ -445,13 +445,14 @@ test("a change to a helper a trusted patch imports, even two imports down, asks 
 
 });
 
-test('a patch with no local imports hashes as its own text, so trust from before helpers counted still holds', async () => {
+test('a patch with no local imports is hashed under the version tag too, not as its own text, so no file can stand in for another patch', async () => {
   const root = tmpDir();
   const v = writePatch(path.join(root, 'p'), 'solo', 'Solo');
   const trust = new PatchTrust();
   const set = await loadPatchSet(path.join(root, 'p'), root, new Map(), [], [], undefined, trust);
   const own = crypto.createHash('sha256').update(fs.readFileSync(v.file)).digest('hex');
-  assert.equal(set.patches[0].hash, own);
+  assert.notEqual(set.patches[0].hash, own);
+  assert.equal(set.patches[0].hash, crypto.createHash('sha256').update(JSON.stringify(['threadbear-patch-3', own, []])).digest('hex'));
   assert.equal(set.patches[0].helpers, undefined);
 });
 
@@ -481,7 +482,7 @@ test("an agent's edit to a helper carries on the trusted patches importing it, b
   assert.equal(other.patches[0].untrusted, 'new');
 });
 
-test("a version 1 trust file (hashes of patch files alone) still loads, but a patch with helpers it trusted asks again", async () => {
+test("a version 1 trust file (hashes of patch files alone) still loads, but every patch it trusted asks again", async () => {
   // Version 1 never hashed helpers, so its yes says nothing about the
   // helpers there now: taking them as trusted on first look would trust
   // whatever a pull had put there since (Daybreak, 5 Nov).
@@ -497,9 +498,10 @@ test("a version 1 trust file (hashes of patch files alone) still loads, but a pa
   let set = await loadPatchSet(project, root, new Map(), [], [], undefined, trust);
   assert.equal(set.patches[0].untrusted, 'changed');
   assert.equal(set.actions.length, 0);
-  // One with no helpers hashes the same in both versions, so it holds.
+  // One with no helpers too: version 3 hashes every patch under its tag
+  // (Gautam's scan, 6 Nov), so no old hash carries over.
   set = await loadPatchSet(path.join(root, 'solo'), root, new Map(), [], [], undefined, trust);
-  assert.equal(set.patches[0].untrusted, undefined);
+  assert.equal(set.patches[0].untrusted, 'changed');
 
   // A version 2 file's leftover `legacy` hashes trust nothing either, and
   // aren't written back.
@@ -1024,23 +1026,27 @@ test('a patch is imported from the bytes that were hashed, whatever replaces it 
   }
 });
 
-test('a trusted patch can import a workspace package by a bare name, wherever it lives; a local import the hash never followed refuses it', async () => {
+test("a trusted patch's bare import of a workspace package (a file of the repo's nothing hashed) refuses it; a local import the hash never followed refuses it", async () => {
   const root = tmpDir();
   const folder = path.join(root, 'mono');
   fs.mkdirSync(path.join(folder, '.git'), { recursive: true });
-  // An npm workspace: node_modules/@ws/lib is a link to packages/lib.
+  // An npm workspace: node_modules/@ws/lib is a link to packages/lib,
+  // which Node follows, so the code is the repo's own packages/lib, and a
+  // pull could change it unasked (Gautam's scan, 6 Nov).
   const lib = path.join(folder, 'packages', 'lib');
+  const wsRan = path.join(tmpDir(), 'ws-ran');
   fs.mkdirSync(lib, { recursive: true });
   fs.writeFileSync(path.join(lib, 'package.json'), JSON.stringify({ name: '@ws/lib', type: 'module', exports: './index.mjs' }));
-  fs.writeFileSync(path.join(lib, 'index.mjs'), "export const title = 'From the workspace';\n");
+  fs.writeFileSync(path.join(lib, 'index.mjs'), `import fs from 'node:fs';\nfs.writeFileSync(${JSON.stringify(wsRan)}, 'x');\nexport const title = 'From the workspace';\n`);
   fs.mkdirSync(path.join(folder, 'node_modules', '@ws'), { recursive: true });
   fs.symlinkSync(lib, path.join(folder, 'node_modules', '@ws', 'lib'));
   const file = writeRaw(folder, "import { title } from '@ws/lib';\nexport default { actions: [{ title, run: 'true' }] };\n");
   const trust = new PatchTrust();
   trust.trustCurrent([file]);
   const set = await loadPatchSet(folder, root, new Map(), [], [], undefined, trust);
-  assert.equal(set.patches[0].error, undefined);
-  assert.deepEqual(set.actions.map((a) => a.title), ['From the workspace']);
+  assert.match(set.patches[0].error ?? '', /imports @ws\/lib, which resolves to .*packages\/lib\/index\.mjs, not a package in node_modules/);
+  assert.deepEqual(set.actions, []);
+  assert.equal(fs.existsSync(wsRan), false, "the workspace's code never ran");
 
   // A local specifier the hash didn't follow (put in after the check).
   const other = path.join(root, 'other');

@@ -58,7 +58,7 @@ import { LIMITS } from './protocol.ts';
 import { imageRefFor } from './media.ts';
 import { FolderCache } from './folder-cache.ts';
 import { hasLineBreak, stripEnvComment } from './linear-text.ts';
-import { automaticCommand, TRUST_ALL, unhashedFiles, worktreeOf, type PatchGate } from './patch-trust.ts';
+import { automaticCommand, liveCommandProblem, TRUST_ALL, unhashedFiles, worktreeOf, type PatchGate } from './patch-trust.ts';
 import { verifiedUrl } from './verified-imports.ts';
 import { inBackground } from './background.ts';
 
@@ -399,6 +399,7 @@ async function loadPatchFile(file: string, source: 'home' | 'project', cache: Pa
   }
   const key = verified ? `v:${verified.hash}` : `m:${mtimeMs}`;
   const hit = cache.get(file);
+  if (!files) liveBindings.delete(file);
   if (hit && hit.key === key) return files ? bindAutomatic(hit.loaded, file, files, blocked, verified?.hash) : hit.loaded;
   let loaded: LoadedPatch;
   try {
@@ -423,18 +424,32 @@ export function automaticTrust(run: string): { file: string; hash: string } | un
   return boundBy.get(run);
 }
 
+// What a trusted-by-hash patch's live functions' `sh` commands are held to
+// (liveCommandProblem), by patch file: the folder holding `.threadbear/`
+// (where its commands were followed from for the hash, and where they
+// run, except a tool patch's, which runs in the folder it applies in),
+// the files the hash covered, the scripts it can't follow, and the hash,
+// checked again before they run. A patch trusted whatever it holds (home's,
+// Threadbear's own) has none.
+type LiveBinding = { folder: string; files: string[]; blocked?: Record<string, string>; hash: string; tool: boolean };
+const liveBindings = new Map<string, LiveBinding>();
+
 // A trusted-by-hash patch's commands that run by themselves (its hooks and
 // worktree setup) as they'll run: each must be one hashed script and plain
 // words (automaticCommand), or the whole patch is refused with why, as a
 // patch whose code can't all be checked is. A copy, as `loaded` is cached.
 // Actions aren't held to it: one runs only when it's pressed.
 function bindAutomatic(loaded: LoadedPatch, file: string, files: string[], blocked?: Record<string, string>, hash?: string): LoadedPatch {
+  liveBindings.delete(file);
   if (loaded.info.error) return loaded;
   const note = (run: string) => {
     if (hash) boundBy.set(run, { file, hash });
     return run;
   };
   const folder = path.dirname(path.dirname(path.dirname(file)));
+  // Without a hash there's nothing to check a command against, so a live
+  // function's sh refuses everything (liveSh).
+  liveBindings.set(file, { folder: fs.realpathSync(folder), files: [file, fs.realpathSync(file), ...files], ...(blocked ? { blocked } : {}), hash: hash ?? '', tool: loaded.appliesTo !== undefined });
   const refuse = (what: string, problem: string): LoadedPatch => ({ info: { ...loaded.info, error: `Not run: its ${what} ${problem}` }, panels: [], actions: [], hooks: [] });
   const hooks: Hook[] = [];
   for (const hook of loaded.hooks) {
@@ -880,8 +895,77 @@ export type PanelRender = { image?: ImageRef; items?: PanelItem[]; note?: string
 
 // ------------------------------------------------------------ list panels
 
+// What list panels and live state run their functions' commands with.
+// `verify` hashes a trusted-by-hash patch afresh (PatchTrust.verify): its
+// sh commands run only while it's still the version that was trusted.
+export type LiveContext = {
+  cwd: string;
+  threadId: string;
+  run: (command: string, cwd: string) => Promise<CommandOutcome>;
+  verify?: (file: string, hash: string) => boolean;
+  timeoutMs?: number;
+};
+
+// `key`: what a command's output is shared under in one read; a bound
+// patch's checks are its own, so its refusals don't reach another's.
+// `close`: the function's call is over (it returned, threw or timed
+// out); a command it starts after that isn't run.
+type LiveSh = { dir: string; key: string; run: (command: string) => Promise<CommandOutcome>; close: () => void };
+
+// How a patch's live function runs a command. A trusted-by-hash patch's
+// (liveBindings) run from the folder holding its `.threadbear/` (a tool
+// patch's from the folder it applies in), only while the patch still
+// hashes to the trusted version, checked afresh before each command (a
+// function can wait between two), only what liveCommandProblem allows,
+// and only while the function's call is still going; anything else is
+// refused as a failed command, never run. Others run in `cwd`, as written.
+function liveSh(file: string | undefined, cwd: string, ctx: LiveContext): LiveSh {
+  const bound = file ? liveBindings.get(file) : undefined;
+  let closed = false;
+  const refuse = (why: string): CommandOutcome => ({ ok: false, text: `Not run: ${why}`, truncated: false, durationMs: 0 });
+  const close = () => {
+    closed = true;
+  };
+  if (!bound) return { dir: cwd, key: cwd, run: (command) => ctx.run(command, cwd), close };
+  const dir = bound.tool ? cwd : bound.folder;
+  return {
+    dir,
+    key: `${dir}\u0000${file}`,
+    close,
+    run: async (command) => {
+      if (closed) return refuse('its function had already finished or timed out.');
+      if (!bound.hash || !(ctx.verify?.(file!, bound.hash) ?? false)) return refuse('its patch, or a file it runs, changed since it was trusted.');
+      // A tool patch runs in the folder it applies in, but its own repo's
+      // files are bound by the hash too: checked from both, so an absolute
+      // path to a script of the tool's that the hash didn't cover is refused.
+      const problem = liveCommandProblem(command, dir, bound.files, bound.blocked) ?? (bound.tool ? liveCommandProblem(command, bound.folder, bound.files, bound.blocked) : undefined);
+      if (problem) return refuse(problem);
+      return ctx.run(command, dir);
+    },
+  };
+}
+
+// Calls a live function, closing its sh the moment it returns: at once
+// for a plain value, so a microtask it queued can't start a command after
+// it (Codex's review, 6 Nov), and when its promise settles for an async
+// one. Every command is still checked and verified as it starts.
+function callThenClose(call: () => unknown, shIn: LiveSh): unknown {
+  let out: unknown;
+  try {
+    out = call();
+  } catch (e) {
+    shIn.close();
+    throw e;
+  }
+  if (out && typeof (out as Promise<unknown>).then === 'function') return Promise.resolve(out).finally(() => shIn.close());
+  shIn.close();
+  return out;
+}
+
 // What a list panel's `items` gets: where it applies, and `sh` to run a
-// command there (resolves with what it printed, rejects on failure).
+// command there (resolves with what it printed, rejects on failure); for
+// a patch trusted by its hash, from the folder holding its `.threadbear/`
+// and only what trusting it covers (liveSh).
 // `matched` is what made a tool patch apply: the paths its appliesTo
 // found (two .tandem files in a folder are two), and empty otherwise.
 export type ItemsContext = { cwd: string; threadId: string; matched: string[]; sh: (command: string) => Promise<string> };
@@ -903,22 +987,23 @@ export const LIST_TIMEOUT_MS = 20_000;
 export async function renderListPanel(
   panel: Panel,
   set: PatchSet,
-  ctx: { cwd: string; threadId: string; run: (command: string, cwd: string) => Promise<CommandOutcome>; timeoutMs?: number },
+  ctx: LiveContext,
 ): Promise<PanelRender> {
   const info = set.patches.find((p) => p.id === panel.patch);
   const fn = info?.file ? listFunctions.get(listKey(info.file, panel.id.slice(panel.patch.length))) : undefined;
   if (!fn) return { note: 'This panel has nothing to show.' };
   // A project folder's patch runs in that folder, as its actions do.
   const cwd = info?.folder ?? ctx.cwd;
+  const shIn = liveSh(info?.file, cwd, ctx);
   const sh = async (command: string) => {
-    const out = await ctx.run(command, cwd);
+    const out = await shIn.run(command);
     if (!out.ok) throw new Error(`${command} failed${out.exitCode !== undefined ? ` (exit ${out.exitCode})` : ''}: ${out.text.trim().split('\n').pop() ?? ''}`);
     return out.text;
   };
   let timer: NodeJS.Timeout | undefined;
   try {
     const value = await Promise.race([
-      Promise.resolve().then(() => fn({ cwd, threadId: ctx.threadId, matched: info?.matched ?? [], sh })),
+      Promise.resolve().then(() => callThenClose(() => fn({ cwd, threadId: ctx.threadId, matched: info?.matched ?? [], sh }), shIn)),
       new Promise((_, reject) => {
         timer = setTimeout(() => reject(new Error(`took over ${Math.round((ctx.timeoutMs ?? LIST_TIMEOUT_MS) / 1000)} seconds`)), ctx.timeoutMs ?? LIST_TIMEOUT_MS);
       }),
@@ -929,6 +1014,7 @@ export async function renderListPanel(
     return { note: `Couldn't fill this panel: ${firstLine(e)}` };
   } finally {
     clearTimeout(timer);
+    shIn.close();
   }
 }
 
@@ -960,10 +1046,7 @@ export function hasLive(set: PatchSet): boolean {
 // two of them run (both asking `tandem status`) runs once. A function
 // that throws or takes too long hides its item (a when) or gives no badge,
 // and the patch shows the first such problem as `liveError`.
-export async function applyLive(
-  set: PatchSet,
-  ctx: { cwd: string; threadId: string; run: (command: string, cwd: string) => Promise<CommandOutcome>; timeoutMs?: number },
-): Promise<PatchSet> {
+export async function applyLive(set: PatchSet, ctx: LiveContext): Promise<PatchSet> {
   if (!hasLive(set)) return set;
   const timeoutMs = ctx.timeoutMs ?? LIVE_TIMEOUT_MS;
   const ran = new Map<string, Promise<string>>();
@@ -971,11 +1054,12 @@ export async function applyLive(
   const call = async (patch: string, fn: LiveFunction): Promise<unknown> => {
     const info = set.patches.find((p) => p.id === patch);
     const cwd = info?.folder ?? ctx.cwd;
+    const shIn = liveSh(info?.file, cwd, ctx);
     const sh = (command: string) => {
-      const key = `${cwd}\u0000${command}`;
+      const key = `${shIn.key}\u0000${command}`;
       let out = ran.get(key);
       if (!out) {
-        out = ctx.run(command, cwd).then((o) => {
+        out = shIn.run(command).then((o) => {
           if (!o.ok) throw new Error(`${command} failed${o.exitCode !== undefined ? ` (exit ${o.exitCode})` : ''}: ${o.text.trim().split('\n').pop() ?? ''}`);
           return o.text;
         });
@@ -986,7 +1070,7 @@ export async function applyLive(
     let timer: NodeJS.Timeout | undefined;
     try {
       return await Promise.race([
-        Promise.resolve().then(() => fn({ cwd, threadId: ctx.threadId, matched: info?.matched ?? [], sh })),
+        Promise.resolve().then(() => callThenClose(() => fn({ cwd, threadId: ctx.threadId, matched: info?.matched ?? [], sh }), shIn)),
         new Promise((_, reject) => {
           timer = setTimeout(() => reject(new Error(`took over ${Math.round(timeoutMs / 1000)} seconds`)), timeoutMs);
         }),
@@ -996,6 +1080,7 @@ export async function applyLive(
       throw e;
     } finally {
       clearTimeout(timer);
+      shIn.close();
     }
   };
   const settle = async <T extends { id: string; patch: string; badge?: number; summary?: string }>(item: T): Promise<T | undefined> => {

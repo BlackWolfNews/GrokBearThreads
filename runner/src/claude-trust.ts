@@ -122,6 +122,13 @@ export function claudeCommands(cwd: string, home: string = os.homedir()): Claude
       return `${path.relative(dir, f)} ${h}`;
     })
     .sort();
+  // Joined with newlines, and still only one way to read it: stableJson
+  // escapes every newline, and a named path is a piece of a command split
+  // on whitespace (namedScripts), so it holds no space or newline, and
+  // each line is that path, a space and 64 hex. (Patch trust's version 2
+  // joined paths that could hold newlines, and was fooled: Gautam's scan,
+  // 6 Nov. Moving this to its JSON form too would ask about every
+  // folder's Claude settings again for nothing.)
   const hash = sha256(Buffer.from(['threadbear-claude-1', stableJson(parts), ...lines].join('\n')));
   return { files, named, hash, read: shas };
 }

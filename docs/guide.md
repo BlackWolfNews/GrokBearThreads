@@ -1082,9 +1082,13 @@ Patches says to put the steps in a script. What that script runs in turn
 too, so a change to any of them asks again. A script that runs something
 worked out as it runs (`eval`, `bash -c "$x"`, `curl ... | sh`, a command
 in a variable) can't be covered, so a setup or hook naming it never runs,
-and Patches says which line. A thread's worktree counts as its repo, and
-patches that were already in your folders when this arrived are trusted
-for you.
+and Patches says which line. A patch's badges and list panels run their
+commands from the folder holding its `.threadbear/`, and only while it's
+the version you trusted, with only the files trusting it covered. A
+thread's worktree counts as its repo, and patches that were already in
+your folders when this arrived are trusted for you. Patches you trusted
+before 6 Nov 2026 are asked about once more: the way their trust is
+worked out changed, so the old yes can't carry over.
 
 A repo's own Claude Code settings are asked about the same way. When its
 `.claude/settings.json` or `.claude/settings.local.json` has hooks, a

@@ -2582,7 +2582,10 @@ panel: rows drawn natively, with no page to serve.
 
 `items` gets `{ cwd, threadId, sh }`, where `sh(command)` runs a command
 in `cwd` through a login shell and resolves with what it printed (it
-rejects on a non-zero exit). It returns `PanelItem`s (or a promise of
+rejects on a non-zero exit). For a project's patch trusted by its hash,
+`sh` runs from the folder holding `.threadbear/` instead, and only what
+trusting it covers (see "Trusting a folder's patches"); `cwd` is still
+where the thread is. It returns `PanelItem`s (or a promise of
 them). Give rows a `section` to group them under headings (rows of one
 section next to each other, in the order you want the groups), and a
 `trailing` for a date or count at the end of the line. A panel can have an `icon`, an SF Symbol name for its button on
@@ -2679,7 +2682,9 @@ panels or hooks, no live functions, and no worktree for new threads.
 - A git worktree counts as its main checkout, so a thread's worktree of
   a trusted repo isn't asked about. Only one git made: its `.git` file and
   the repo's record of it must name each other, so a folder can't claim
-  to be a worktree of a trusted repo.
+  to be a worktree of a trusted repo. The `.git` must be a plain file
+  (a symlink to another worktree's, from a zip say, makes no worktree),
+  and the record must name that very entry, `<folder>/.git`.
 - A patch file a Claude thread's agent writes with an Edit or Write call
   on Full access, inside the thread's own folder, is trusted as that edit
   left it: the agent can run anything in the folder already. Not in Ask
@@ -2730,12 +2735,19 @@ text, from the patch's own folder or the folder holding `.threadbear/`
 `setup`, `check`, hook or action `run` calls, so a pull that changes only
 that script asks again. What a named script runs in turn is followed
 and hashed too (below, "What a script runs"), and a named file that
-isn't there yet changes the hash when it turns up. A patch with no
-local files hashes as its own text alone.
+isn't there yet changes the hash when it turns up. The hash is SHA-256
+over the JSON of `["threadbear-patch-3", <the patch file's SHA-256>,
+[[<path from the patch's folder>, <its SHA-256 or "missing">], ...]]`,
+sorted by path, for every patch, helpers or not: JSON quotes each
+string, so no two sets of files read the same. (Version 2 joined
+`<path> <hash>` lines with newlines, and a folder named
+`lib.sh <hash>\nz` could stand in for two files: Gautam's scan, 6 Nov.)
+A patch that reaches a file whose path holds a newline or another
+control character isn't loaded at all (below).
 
 **Only code is hashed.** A file the patch, a helper or a script merely
-names (a string, an argument, `$(cat VERSION)`, `< data.txt`) goes in
-the hash only if it looks runnable: an extension of `.sh`, `.bash`,
+names (a string, an argument, `$(cat VERSION)`, `< data.txt` into
+anything but a shell) goes in the hash only if it looks runnable: an extension of `.sh`, `.bash`,
 `.zsh`, `.ksh`, `.command`, `.js`, `.mjs`, `.cjs`, `.ts`, `.mts`,
 `.cts`, `.tsx`, `.jsx`, `.py`, `.rb` or `.pl`, the executable bit, or a
 `#!` first line; a missing one counts only with one of those
@@ -2766,10 +2778,15 @@ from the parsed syntax (oxc), so comments and strings don't count either way. `p
 imports can. An agent's Edit or Write to a helper carries on the trusted
 patches that import it, as it does for the patch file (only with the
 helper as that edit left it, and an Edit only of the helper as it was
-trusted); it doesn't trust a patch that's still waiting. A trust file from before helpers counted
-(`version: 1`) is read as it is: a patch with no helpers is still trusted,
-and one with helpers is asked about again (`"changed"`), as version 1 never
-saw them. A changed helper is only imported again when the runner restarts
+trusted); it doesn't trust a patch that's still waiting. A trust file
+from an earlier version (`version: 1` or `2`) is
+read as it is, but its patch hashes are kept apart (`legacy:` in front,
+written back as version 3) so none can match a version 3 one, and every
+patch it trusted is asked about again (`"changed"`), once: nothing is
+carried over, as an old hash can't tell apart the file sets it was
+fooled by. (An old helper-less hash is the file's own SHA-256, so an old
+patch whose text was a version 3 hash's JSON would otherwise match the
+patch that JSON names.) A changed helper is only imported again when the runner restarts
 (Node loads a module once per process); the patch file itself loads again
 when it changes.
 
@@ -2781,9 +2798,17 @@ the import changes nothing that runs. Imports are told apart by how
 they're written: a local one (`./`, `../`, `/`, `file:`) loads the very
 file the hash followed it to, from the hashed bytes, whatever a symlink
 points at by then (into `node_modules` too), and one the hash didn't
-follow refuses the patch; a bare one (a package, a workspace package
-under `packages/`, `node:fs`) resolves as Node resolves it, unhashed, as
-packages are the folder's dependencies. A cached hash holds only while every file it was
+follow refuses the patch; a bare one (a package, `node:fs`) resolves
+as Node resolves it, unhashed, as packages are the folder's dependencies,
+and must land in a builtin or in that package's own folder in a
+`node_modules` (`node_modules/zod/...`), else it refuses the patch. Node resolves a bare name through the nearest
+`package.json`'s own `name` and `exports` before `node_modules` (so a
+patch importing its own package's name is refused outright), so a
+pull that renamed the repo's package `zod` sent `import 'zod'` to one of
+the repo's scripts (Gautam's scan, 6 Nov); a workspace package (a link
+in `node_modules` to `packages/x`, which Node follows) is a file of the
+repo's that nothing hashed in the same way, so it refuses the patch too.
+`#` imports are refused for the same reason (above). A cached hash holds only while every file it was
 made from has the same inode, size, mode, mtime and ctime (a write
 can't put ctime back), every path to one still leads to the same real
 file, and nothing that was missing has turned up. A hook or `setup`
@@ -2849,12 +2874,32 @@ scripts deep:
   package, its workspaces and its `file:` dependencies; `npx x`/`bunx x`
   hash `package.json`. `.npmrc`, `.yarnrc(.yml)`, `bunfig.toml`,
   `.pnpmfile.cjs` and `pnpm-workspace.yaml` beside it are hashed, and
-  code they load followed.
+  code they load followed. They're read a line at a time (a multiline
+  regex over the whole file was quadratic in a run of blank lines, so
+  a few MB of newlines held the runner before anyone was asked: Gautam's
+  scan, 6 Nov), each once per hash, and one over 1 MB fails closed, as
+  does a quoted path with an escape that can't be read or a YAML value
+  that isn't a plain path (a tag, anchor, alias, block, or a flow value
+  with a path in it). A plugin's `- path:` counts, and so does Yarn
+  Classic's `yarn-path ./x.cjs`.
 - `make`: the Makefile (and literal `include`s) is hashed and every
-  recipe line followed as shell, `$(MAKE)` as `make`.
+  recipe line followed as shell, `$(MAKE)` as `make`, read a line at a
+  time, and one over 1 MB fails closed. `-f`/`-C` count however they're
+  written (`-fx.mk`, `-sf x.mk`, `--file=x.mk`), and `-f -` (the Makefile
+  from make's input) fails closed, as does an `include` of one; every
+  `-f` is read, a rule's recipe after `;` is followed, a comment is only
+  a comment, `-I` folders are searched for includes, each `-C` goes on
+  from the one before, and `.RECIPEPREFIX` and `X != cmd` fail closed as
+  `SHELL` does. A shell script
+  over 1 MB fails closed too, and so does any file over 32 MB a patch
+  reaches (its hash can't be made). A path into the repo by another
+  name (`/tmp` for `/private/tmp`) counts as the repo's.
 - JavaScript and TypeScript: imports, as for patch files, and every
   plain string that's the path of a file of the repo's that looks
   runnable (`spawnSync('bash', ['scripts/x.sh'])`).
+- A file redirected into a shell or `source`/`.` (`bash ... < ./steps.txt`), whatever it
+  looks like: a flag that makes the shell read commands from its input
+  would run it.
 - Any other file of the repo's a script names (an argument, `< file`,
   a `./` path anywhere in its text) is hashed if it looks runnable
   (above, "Only code is hashed").
@@ -2862,14 +2907,20 @@ scripts deep:
 What it can't follow, it doesn't guess at: `eval`, `alias`, `bash -c` or
 `trap` with code worked out as it runs, `$(cat "$f")` or `$(< "$f")`, a
 shell, `node` or `bun` reading its program from a pipe or a here-doc
-(`curl ... | sh`), a command in a variable or a pattern (`$CMD`,
+(`curl ... | sh`), `node --env-file`, a `$'...'` with an escape in a
+command or file's place, more than 8 wrappers deep, or from a path that's its input or a file it has
+open (`sh /dev/stdin < ./steps.txt`, `node -`, `bash -s` after
+`--rcfile`, a `#!` with `-s`, `-c` or `-i`, `/dev/fd/N`, `/proc/self/fd/N`,
+`/dev/tty`, or anything outside the repo that isn't a plain file), a
+command in a variable or a pattern (`$CMD`,
 `"$f"` in a loop, `./s/*.sh`), `source "$1"`, relative paths after a
 `cd` to somewhere worked out as it runs, `npm run "$x"`, `npx "$x"`,
 workspace-wide runs (`-w`, `--filter`, `-r`), `node -e`, `--require`
 of a module worked out as it runs, a file that isn't there yet
 (`./build/out.sh`), another language (`python3 x.py`, a `#!` that isn't a
 shell or Node), an awk program that runs commands, `$(shell ...)` or
-`SHELL` in a Makefile, and setting `PATH` to a folder in the repo,
+`SHELL` or `.SHELLFLAGS` set in a Makefile (after `export` or
+`override`, or for a target), and setting `PATH` to a folder in the repo,
 `BASH_ENV`, `NODE_OPTIONS` that loads code and the like. A worktree
 `setup` or hook that names such a script fails closed: the patch isn't
 loaded, trusted or not, and its `error` starts `Not run:` with the file,
@@ -2901,7 +2952,22 @@ names the file and says to write the command as plain text. Nor is
 `check` held to the one-script rule, which runs when `tb land` does (the
 Land chip, or an agent that could run anything anyway); it's followed
 the same way. A live function (`items`, `when`, `badge`, `summary`) is
-the patch's own code, hashed with it, and `sh` runs what that code says.
+the patch's own code, hashed with it, and `sh` runs what that code says,
+but by itself, every few seconds, so a trusted-by-hash patch's `sh` is
+held as a hook is, short of the one-script rule (its commands are worked
+out in code by design). It runs from the folder holding `.threadbear/`,
+where the hash followed commands from, whichever folder the thread is in
+(a tool patch's from the folder it applies in, as before). Just before
+it runs, the patch is hashed afresh and must still be the version
+trusted, and the command, followed as above (for a tool patch, from its
+own folder too), may reach only files the hash covered, no script patch
+trust can't follow, and nothing it can't follow itself. A function that
+has returned, thrown or timed out can't run another. Otherwise it isn't run: `sh`
+rejects, as for a failed command, with `Not run:` and why, so a `when`
+hides its item, a `badge` gives none, a list panel shows the note and
+the patch's `liveError` says so. They ran in the thread's folder, so a
+badge's `./tools/count.sh` in a thread in `web/` ran `web/tools/count.sh`,
+which nothing had hashed (Gautam's scan, 6 Nov).
 
 ### Trusting a folder's Claude Code hooks
 

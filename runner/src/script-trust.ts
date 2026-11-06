@@ -37,6 +37,10 @@ import path from 'node:path';
 
 export type ScriptReach = { files: string[]; missing: string[]; problem?: string };
 
+// The most of one file patch trust reads (a patch, a helper, a script, a
+// config file); it reads one bigger than this not at all, and fails closed.
+export const MAX_READ_BYTES = 32 * 1024 * 1024;
+
 // One look at the files a hash is made from: each read once, the bytes
 // kept, so what was scanned for what it runs is what's hashed (and, for a
 // patch's own code, what's imported). `prints` is each file's stat taken
@@ -48,6 +52,10 @@ export class Reads {
   readonly prints = new Map<string, string>();
   readonly bytes = new Map<string, Buffer>();
   readonly links = new Map<string, string>();
+  // What a config file (an .npmrc, a Makefile) was read as, by kind and
+  // real path: every one of a patch's up to 2000 strings is followed as a
+  // command, each by a Reach of its own, and each read them again.
+  readonly parsed = new Map<string, unknown>();
 
   // `p`'s real path, recorded; undefined when it isn't there.
   real(p: string): string | undefined {
@@ -61,6 +69,23 @@ export class Reads {
     return r;
   }
 
+  // A file's bytes as text, decoded once: each of a patch's commands is
+  // followed by a Reach of its own, and each read the same files again.
+  readonly texts = new Map<string, string>();
+  text(real: string): string | undefined {
+    const hit = this.texts.get(real);
+    if (hit !== undefined) return hit;
+    const b = this.read(real);
+    if (!b) return undefined;
+    const t = b.toString('utf8');
+    this.texts.set(real, t);
+    return t;
+  }
+
+  // Files over MAX_READ_BYTES, not read: a hash that needed one can't
+  // be made (patchHash), so nothing that reaches one can be trusted.
+  readonly tooBig = new Set<string>();
+
   // A file's bytes (by real path), read once.
   read(real: string): Buffer | undefined {
     const hit = this.bytes.get(real);
@@ -69,6 +94,10 @@ export class Reads {
     let b: Buffer;
     try {
       print = fingerprint(real);
+      if (fs.statSync(real).size > MAX_READ_BYTES) {
+        this.tooBig.add(real);
+        return undefined;
+      }
       b = fs.readFileSync(real);
     } catch {
       return undefined;
@@ -326,7 +355,10 @@ class Lexer {
         if (j >= s.length) throw new Error(`an unclosed $' on line ${this.line}`);
         const text = s.slice(this.i + 2, j);
         this.line += countLines(text);
-        parts.push({ k: 'lit', s: text, q: true });
+        // With an escape in it (`$'\142ash'` is bash), what it says isn't
+        // the text: taken as worked out as it runs, so a command or file
+        // named by one fails closed (Codex's review, 6 Nov).
+        parts.push(text.includes('\\') ? { k: 'var', name: '', op: "$'" } : { k: 'lit', s: text, q: true });
         this.i = j + 1;
       } else if (c === '"') {
         this.i++;
@@ -483,10 +515,24 @@ function simpleCommands(toks: Tok[]): Simple[] {
   const end = () => {
     if (cur.words.length || cur.redirs.length || cur.arrays.length) out.push(cur);
     cur = { words: [], redirs: [], line: 0, arrays: [] };
+    leadAt = -1;
+    leadIsCase = false;
   };
   const cases: ('pat' | 'body')[] = [];
   let inTest = false;
-  const lead = () => cur.words.findIndex((w) => !RESERVED.has(bareOf(w) ?? ''));
+  // The first of cur's words that isn't a reserved word, kept as words are
+  // added: finding it afresh each time was quadratic in `if if if ...`
+  // (Codex's review, 6 Nov).
+  let leadAt = -1;
+  let leadIsCase = false;
+  const lead = () => leadAt;
+  const push = (w: Word) => {
+    cur.words.push(w);
+    if (leadAt < 0 && !RESERVED.has(bareOf(w) ?? '')) {
+      leadAt = cur.words.length - 1;
+      leadIsCase = bareOf(w) === 'case';
+    }
+  };
   for (let k = 0; k < toks.length; k++) {
     const t = toks[k]!;
     if (cases.at(-1) === 'pat') {
@@ -512,7 +558,7 @@ function simpleCommands(toks: Tok[]): Simple[] {
     }
     if (t.t === 'redir') {
       if (inTest) {
-        if (t.target) cur.words.push(t.target);
+        if (t.target) push(t.target);
         continue;
       }
       cur.redirs.push({ op: t.op, ...(t.target ? { target: t.target } : {}) });
@@ -529,9 +575,9 @@ function simpleCommands(toks: Tok[]): Simple[] {
     }
     if (at < 0 && bare === '[[') inTest = true;
     if (inTest && bare === ']]') inTest = false;
-    cur.words.push(t.w);
+    push(t.w);
     const first = lead();
-    if (first >= 0 && bareOf(cur.words[first]!) === 'case' && cur.words.length === first + 3 && bare === 'in') {
+    if (first >= 0 && leadIsCase && cur.words.length === first + 3 && bare === 'in') {
       end();
       cases.push('pat');
     }
@@ -558,6 +604,7 @@ class Reach {
   missing = new Set<string>();
   problem?: string;
   private visits = new Set<string>();
+  private wraps = 0;
   private home: string;
   private o: FollowOptions;
   readonly reads: Reads;
@@ -569,7 +616,7 @@ class Reach {
 
   private text(file: string): string | undefined {
     const real = this.reads.real(file);
-    return real === undefined ? undefined : this.reads.read(real)?.toString('utf8');
+    return real === undefined ? undefined : this.reads.text(real);
   }
 
   private rel(file: string): string {
@@ -582,9 +629,16 @@ class Reach {
     this.problem = ctx ? `${ctx.label}${line ? ` line ${line}` : ''} ${what}` : what;
   }
 
+  // By the path as written, else by its real one: /tmp/R is /private/tmp/R
+  // on macOS, and a path the lexical test put outside the repo ran a repo
+  // file unfollowed (Codex's review, 6 Nov). A path that isn't there yet
+  // goes by its nearest folder that is.
   private inRepo(p: string): boolean {
-    const rel = path.relative(this.o.top, p);
-    return rel === '' || (!rel.startsWith('..' + path.sep) && rel !== '..' && !path.isAbsolute(rel));
+    const inside = (q: string) => {
+      const rel = path.relative(this.o.top, q);
+      return rel === '' || (!rel.startsWith('..' + path.sep) && rel !== '..' && !path.isAbsolute(rel));
+    };
+    return inside(p) || inside(realOrNearest(p));
   }
 
   // Hashes a file of the repo's and follows it by its kind. `how`: it runs
@@ -621,9 +675,11 @@ class Reach {
     if (this.visits.has(key)) return;
     if (this.visits.size >= MAX_VISITS) return this.fail(undefined, undefined, `what it runs is more than patch trust follows.`);
     this.visits.add(key);
-    const bytes = this.reads.read(real);
-    if (!bytes) return;
-    const text = bytes.toString('utf8');
+    const text = this.reads.text(real);
+    if (text === undefined) {
+      if (this.reads.tooBig.has(real)) this.fail(ctx, line, `reaches ${this.rel(real)}, over ${MAX_READ_BYTES / 1024 / 1024} MB, more than patch trust reads.`);
+      return;
+    }
     const kind = kindOf(real, text, !passive);
     const label = this.rel(real);
     if (kind === 'binary') {
@@ -641,6 +697,12 @@ class Reach {
       if (LOADING_FLAG.test(shebang.replace(/^\S+/, ''))) return this.fail(undefined, undefined, `${label}'s #! line loads other code by a flag (${shebang.trim()}), which patch trust doesn't follow.`);
       return this.js(real, text, startDirs, depth);
     }
+    // A #! that makes the shell read its commands from elsewhere (`-s`
+    // reads its input, `-c` its arguments, `-i` rc files), or env -S.
+    if (!passive && shebangReadsElsewhere(text)) return this.fail(ctx, line, `runs ${label}, whose #! line makes the shell read its commands from somewhere else, which patch trust can't follow.`);
+    // A shell script is lexed whole, again for each command that reaches
+    // it: one too big for a script fails closed.
+    if (text.length > MAX_CONFIG_BYTES) return this.fail(ctx, line, `runs ${label}, a shell script over ${MAX_CONFIG_BYTES / 1024} KB, more than patch trust reads.`);
     if (how === 'source' && ctx) {
       return this.shell(text, { ...ctx, label, file: real, argv0: [...ctx.argv0, real], depth });
     }
@@ -810,19 +872,37 @@ class Reach {
     const first = w.parts[0];
     if (!first || first.k !== 'lit' || first.q) return undefined;
     // The name and = may be split over parts when the lexer reads char by char.
+    // Each part is looked at once: the whole text so far was tested again
+    // at every part, and the lexer makes a part of each character, so a
+    // long word took seconds per 20 KB (Gautam's scan, 6 Nov). Only the
+    // part that brings the first `=` can complete an assignment (before
+    // it, every character must be a name's, a subscript's or a final +).
     let text = '';
-    let k = 0;
-    for (; k < w.parts.length; k++) {
+    let plus = false;
+    for (let k = 0; k < w.parts.length; k++) {
       const p = w.parts[k]!;
       if (p.k !== 'lit' || p.q) break;
       text += p.s;
-      const m = /^([A-Za-z_][A-Za-z0-9_]*)(\[[^\]]*\])?(\+?)=/.exec(text);
-      if (m) {
+      if (p.s.includes('=')) {
+        const m = /^([A-Za-z_][A-Za-z0-9_]*)(\[[^\]]*\])?(\+?)=/.exec(text);
+        if (!m) return undefined;
         const rest = text.slice(m[0].length);
         const parts: Part[] = [...(rest ? [{ k: 'lit' as const, s: rest, q: false }] : []), ...w.parts.slice(k + 1)];
         return { name: m[1]!, append: m[3] === '+', value: { parts, line: w.line } };
       }
-      if (!/^[A-Za-z0-9_[\]]*\+?$/.test(text)) return undefined;
+      if ((plus && p.s) || !/^[A-Za-z0-9_[\]]*\+?$/.test(p.s)) return undefined;
+      plus = p.s.endsWith('+');
+    }
+    return undefined;
+  }
+
+  // The program a simple command's words run, by its base name, past
+  // reserved words and assignments; undefined when it can't be told.
+  private programOf(words: Word[], ctx: Ctx): string | undefined {
+    for (const w of words) {
+      if (RESERVED.has(bareOf(w) ?? '') || this.assignment(w)) continue;
+      const v = this.str(w, ctx);
+      return v === undefined ? undefined : path.basename(v);
     }
     return undefined;
   }
@@ -830,13 +910,25 @@ class Reach {
   private command(cmd: Simple, ctx: Ctx): void {
     const line = cmd.line;
     for (const w of [...cmd.words, ...cmd.arrays]) this.subsOf(w, ctx);
+    // A file redirected into a shell may be what it runs (a flag that
+    // makes it read commands from its input, missed below), so it's hashed
+    // whatever it looks like, not only if it looks like code. Not one into
+    // Node: with a script, its input is the script's data, and without one
+    // it's refused below.
+    const into = this.programOf(cmd.words, ctx);
+    const loads = (into !== undefined && (into === '.' || into === 'source')) || cmd.words.some((w) => {
+      // Past a wrapper too (`env bash`, `command bash`, `nice sh`).
+      const v = litOf(w);
+      return v !== undefined && SHELLS.includes(path.basename(v));
+    });
     for (const r of cmd.redirs) {
       if (!r.target) continue;
       this.subsOf(r.target, ctx);
       if (r.op === '<' || r.op === '<>') {
         const v = this.values(r.target, ctx);
         if (!v && ctx.inSub) return this.fail(ctx, line, 'reads a file it works out as it runs (`$(< ...)`), which patch trust can\'t follow.');
-        this.named(r.target, ctx);
+        if (loads) for (const p of (v ?? []).flatMap((x) => this.abs(x, ctx) ?? [])) this.follow(p, 'load', ctx, line);
+        else this.named(r.target, ctx);
       }
     }
     // Past reserved words (`then`, `do`, `!`, `{`) and `function name`.
@@ -851,13 +943,16 @@ class Reach {
       skip();
     }
     // Assignments before the command (or alone).
-    while (words.length) {
-      const a = this.assignment(words[0]!);
+    // By index: dropping one word at a time copied the rest each time, so
+    // a long run of `a=1` was quadratic (Codex's review, 6 Nov).
+    let k = 0;
+    for (; k < words.length; k++) {
+      const a = this.assignment(words[k]!);
       if (!a) break;
       this.assign(a.name, a.value, a.append, ctx, line);
       if (this.problem) return;
-      words = words.slice(1);
     }
+    words = words.slice(k);
     for (const w of cmd.arrays) this.named(w, ctx);
     if (!words.length) return;
     this.run(words, ctx, line, false);
@@ -865,7 +960,8 @@ class Reach {
 
   // A command's words, from its name. `extra`: xargs adds arguments this
   // can't see.
-  private run(words: Word[], ctx: Ctx, line: number, extra: boolean): void {
+  // `wrappedIn`: run by a wrapper whose own run named these words already.
+  private run(words: Word[], ctx: Ctx, line: number, extra: boolean, wrappedIn = false): void {
     if (this.problem || !words.length) return;
     const head = words[0]!;
     const headVals = this.values(head, ctx);
@@ -874,7 +970,7 @@ class Reach {
     const name = headVals[0]!;
     if (name !== '[' && name !== '[[' && head.parts.some((p) => p.k === 'lit' && !p.q && /[*?[{]/.test(p.s))) return this.fail(ctx, line, `runs a command named by a pattern (\`${shown}\`), which patch trust can't follow.`);
     const args = words.slice(1);
-    for (const w of args) this.named(w, ctx);
+    if (!wrappedIn) for (const w of args) this.named(w, ctx);
     if (this.problem) return;
     // A path: the repo's file runs (followed), or a program outside it,
     // treated by its name (/bin/sh is sh).
@@ -897,6 +993,8 @@ class Reach {
         for (const t of code) this.follow(t, 'run', ctx, line);
         return;
       }
+      // /dev/fd/3 after `exec 3< ./x.sh` is x.sh.
+      if (targets.some(readsInput)) return this.fail(ctx, line, `runs ${name}, which is a file it has open, so patch trust can't tell what runs.`);
       return this.program(path.basename(name), args, ctx, line, extra);
     }
     this.program(name, args, ctx, line, extra);
@@ -918,6 +1016,8 @@ class Reach {
       if (target === undefined) return this.fail(ctx, line, `sources a file worked out as it runs, which patch trust can't follow.`);
       const tries = this.abs(target, ctx);
       if (!tries) return this.fail(ctx, line, `sources ${target} after a cd patch trust couldn't follow (${ctx.lost}).`);
+      // In the repo too: a committed link to /dev/stdin is the input.
+      if (tries.some(readsInput)) return this.fail(ctx, line, `sources ${target}, which reads what to run from its input, which patch trust can't follow.`);
       for (const t of tries) {
         if (isFile(t)) this.follow(t, 'source', ctx, line);
         else if (this.inRepo(t) && this.missing.size < 500) this.missing.add(t);
@@ -959,7 +1059,18 @@ class Reach {
     }
     // Wrappers: what they run is checked the same way.
     const wrapped = this.unwrap(name, args, ctx, line);
-    if (wrapped) return wrapped.words.length ? this.run(wrapped.words, ctx, line, extra || wrapped.extra) : undefined;
+    if (wrapped) {
+      if (!wrapped.words.length) return;
+      // A few deep at most: each one looked at every word after it again,
+      // so `env env env ...` was quadratic (Codex's review, 6 Nov).
+      if (this.wraps >= 8) return this.fail(ctx, line, "runs a command through more wrappers (env, nice...) than patch trust follows.");
+      this.wraps++;
+      try {
+        return this.run(wrapped.words, ctx, line, extra || wrapped.extra, true);
+      } finally {
+        this.wraps--;
+      }
+    }
     if (this.problem) return;
     if (name === 'find') {
       for (let i = 0; i < args.length; i++) {
@@ -1108,6 +1219,16 @@ class Reach {
         i++;
         continue;
       }
+      // bash's options that take a file: it's sourced, not the script
+      // (taking it for the script missed a `-s` after it: Codex's review).
+      if (s === '--rcfile' || s === '--init-file') {
+        const rc = this.str(args[++i], ctx);
+        if (rc === undefined) return this.fail(ctx, line, `runs ${name} with an rc file worked out as it runs, which patch trust can't follow.`);
+        const rcs = this.abs(rc, ctx) ?? [];
+        if (rc === '-' || rcs.some(readsInput)) return this.fail(ctx, line, `runs ${name} with an rc file that reads from its input or another open file, which patch trust can't follow.`);
+        for (const t of rcs) if (isFile(t)) this.follow(t, 'source', ctx, line);
+        continue;
+      }
       if (/^-[a-zA-Z]*c[a-zA-Z]*$/.test(s)) {
         const code = args[i + 1] ? litOf(args[i + 1]!) : undefined;
         if (code === undefined) return this.fail(ctx, line, `runs \`${name} -c\` with code worked out as it runs, which patch trust can't follow.`);
@@ -1121,8 +1242,15 @@ class Reach {
   }
 
   private runFile(file: string, ctx: Ctx, line: number): void {
+    // `-` as the file (`node -- -`, `sh -- -`) is the input, whatever file
+    // is called that.
+    if (file === '-') return this.fail(ctx, line, `runs \`-\`, which reads what to run from its input, which patch trust can't follow.`);
     const tries = this.abs(file, ctx);
     if (!tries) return this.fail(ctx, line, `runs ${file} after a cd patch trust couldn't follow (${ctx.lost}).`);
+    // `sh /dev/stdin < ./steps.txt` runs steps.txt, which a hash of the
+    // script doesn't cover: refused, as `sh < ./steps.txt` is (Gautam's
+    // scan, 6 Nov).
+    if (tries.some(readsInput)) return this.fail(ctx, line, `runs ${file}, which reads what to run from its input, which patch trust can't follow.`);
     const inRepo = tries.filter((t) => this.inRepo(t));
     if (!inRepo.length) return; // a program outside the repo
     const found = inRepo.filter(isFile);
@@ -1161,6 +1289,10 @@ class Reach {
         i++;
         break;
       }
+      // An env file can set NODE_OPTIONS to load other code.
+      if (/^--env-file(-if-exists)?(=|$)/.test(s)) return this.fail(ctx, line, `runs ${name} with an env file, which can make it load code patch trust can't follow.`);
+      // `node -` reads its program from its input, whatever follows.
+      if (s === '-') return this.fail(ctx, line, `runs ${name} reading what to run from its input, which patch trust can't follow.`);
       if (/^(-e|--eval|-p|--print)$/.test(s) || /^--(eval|print)=/.test(s)) return this.fail(ctx, line, `runs ${name} with code on its command line, which patch trust doesn't follow.`);
       const load = /^(-r|--require|--import|--loader|--experimental-loader|--preload)(?:=(.*))?$/.exec(s);
       if (load) {
@@ -1225,20 +1357,39 @@ class Reach {
 
   // Code a package manager's config loads: yarn's yarnPath and plugins,
   // bun's preload, pnpm's .pnpmfile.cjs (followed as it is).
+  //
+  // Read a line at a time, each tested from its own start: `/^\s*x/m` over
+  // the whole file restarted at every newline and ran on through all the
+  // blank lines after it, so an .npmrc of a few MB of newlines held the
+  // runner for minutes, before anyone was asked anything (Gautam's scan,
+  // 6 Nov). Once per file per hash (Reads.parsed), and one too big for a
+  // config file fails closed.
   private rcLoads(file: string, ctx: Ctx): void {
     const base = path.basename(file);
-    const text = this.text(file);
-    if (text === undefined) return;
     if (base === '.pnpmfile.cjs') return;
-    if (base === '.npmrc' && /^\s*(script-shell|node-options|onload-script)\s*=/m.test(text)) {
-      return this.fail(undefined, undefined, `${this.rel(file)} sets a shell or code for npm to load, which patch trust can't follow.`);
-    }
-    const quoted = [...text.matchAll(/["']([^"'\n]+)["']/g)].map((m) => m[1]!);
-    const yarn = [...text.matchAll(/^\s*(?:yarnPath|path):\s*["']?([^"'\s#]+)/gm)].map((m) => m[1]!);
-    for (const s of [...quoted, ...yarn]) {
+    const rc = this.config(file, 'rc', (text) => rcConfig(base, text));
+    if (!rc) return;
+    if ('problem' in rc && rc.problem) return this.fail(undefined, undefined, `${this.rel(file)} ${rc.problem}`);
+    if (!('paths' in rc)) return;
+    for (const s of rc.paths) {
       const p = path.resolve(path.dirname(file), s);
       if (isFile(p)) this.follow(p, 'load', ctx);
     }
+  }
+
+  // A config file's text read once by `parse`, kept on the shared Reads;
+  // undefined when it can't be read. One over MAX_CONFIG_BYTES isn't
+  // parsed: `problem` says so.
+  private config<T extends object>(file: string, kind: string, parse: (text: string) => T): T | { problem: string } | undefined {
+    const real = this.reads.real(file);
+    if (real === undefined) return undefined;
+    const key = `${kind}\u0000${real}`;
+    if (this.reads.parsed.has(key)) return this.reads.parsed.get(key) as T | { problem: string };
+    const bytes = this.reads.read(real);
+    if (!bytes) return undefined;
+    const out = bytes.length > MAX_CONFIG_BYTES ? { problem: `is over ${MAX_CONFIG_BYTES / 1024} KB, more than patch trust reads of a config file.` } : parse(this.reads.text(real) ?? '');
+    this.reads.parsed.set(key, out);
+    return out;
   }
 
   private scriptsOf(pkg: Record<string, any>): Record<string, string> {
@@ -1293,7 +1444,10 @@ class Reach {
     const ws = Array.isArray(pkg.workspaces) ? pkg.workspaces : Array.isArray(pkg.workspaces?.packages) ? pkg.workspaces.packages : [];
     const yaml = path.join(dir, 'pnpm-workspace.yaml');
     if (isFile(yaml)) {
-      for (const m of (this.text(yaml) ?? '').matchAll(/^\s*-\s*["']?([^"'\n#]+?)["']?\s*$/gm)) ws.push(m[1]);
+      // A line at a time, as rcLoads reads; too big a file is refused there
+      // (packages() follows it first), and gives nothing here.
+      const listed = this.config(yaml, 'pnpm-workspace', (text) => ({ items: yamlListItems(text) }));
+      ws.push(...(listed && 'items' in listed ? listed.items : []));
     }
     for (const pattern of ws) {
       if (typeof pattern !== 'string' || pattern.startsWith('!')) continue;
@@ -1384,29 +1538,62 @@ class Reach {
 
   private make(args: Word[], ctx: Ctx, line: number): void {
     let dirs = ctx.lost ? undefined : [...ctx.dirs];
-    let file: string | undefined;
+    // Every -f: make reads them all (only the last was followed: Codex's review).
+    const files: string[] = [];
+    const incDirs: string[] = [];
+    // `-C dir`, `-f file`, as their own word, after `=` or run on (`-fx.mk`,
+    // `-f-`), or last in a bunch of flags (`-sf x.mk`), as getopt reads
+    // them; any other of make's flags that takes a value ends the bunch.
+    const opt = (s: string): { flag: 'C' | 'f' | 'I'; value?: string } | undefined => {
+      const long = /^--(directory|file|makefile|include-dir)(?:=(.*))?$/.exec(s);
+      if (long) return { flag: long[1] === 'directory' ? 'C' : long[1] === 'include-dir' ? 'I' : 'f', ...(long[2] !== undefined ? { value: long[2] } : {}) };
+      if (!/^-[^-]/.test(s)) return undefined;
+      for (let k = 1; k < s.length; k++) {
+        const c = s[k]!;
+        if (c === 'C' || c === 'f') return { flag: c, ...(k + 1 < s.length ? { value: s.slice(k + 1) } : {}) };
+        if (c === 'I') return { flag: 'I', ...(k + 1 < s.length ? { value: s.slice(k + 1) } : {}) };
+        if ('oWjlO'.includes(c)) return undefined;
+      }
+      return undefined;
+    };
     for (let i = 0; i < args.length; i++) {
       const s = this.str(args[i], ctx);
       if (s === undefined) return this.fail(ctx, line, "runs make with words worked out as it runs, which patch trust can't follow.");
-      const v = /^(-C|--directory|-f|--file|--makefile)(?:=(.*))?$/.exec(s);
+      const v = opt(s);
       if (v) {
-        const val = v[2] ?? this.str(args[++i], ctx);
+        const val = v.value ?? this.str(args[++i], ctx);
         if (val === undefined) return this.fail(ctx, line, "runs make with a folder or file worked out as it runs, which patch trust can't follow.");
-        if (v[1] === '-C' || v[1] === '--directory') dirs = this.abs(val, ctx);
-        else file = val;
+        // Each -C from the one before (`-C sub -C nested` is sub/nested).
+        if (v.flag === 'C') dirs = dirs && (path.isAbsolute(val) ? [path.normalize(val)] : dirs.map((d) => path.resolve(d, val)));
+        // `-f -` reads the Makefile from make's input, as `sh < file` does.
+        // -I: the folders an include is looked for in, after the Makefile's.
+        else if (v.flag === 'I') incDirs.push(val);
+        else if (val === '-') return this.fail(ctx, line, "runs make reading its Makefile from its input, which patch trust can't follow.");
+        else files.push(val);
       }
     }
     if (!dirs) return this.fail(ctx, line, `runs make after a cd patch trust couldn't follow (${ctx.lost}).`);
     for (const d of dirs) {
-      const tries = file ? [path.resolve(d, file)] : ['GNUmakefile', 'makefile', 'Makefile'].map((n) => path.join(d, n));
+      if (files.length) {
+        for (const f of files) {
+          const t = path.resolve(d, f);
+          if (readsInput(t)) return this.fail(ctx, line, `runs make with ${f}, which reads what to run from its input or another open file, which patch trust can't follow.`);
+          if (isFile(t)) this.makefile(t, d, ctx, line, incDirs);
+          else if (this.inRepo(t)) return this.fail(ctx, line, `runs make with ${f}, which isn't a file in the repo now, so patch trust can't see what it'll be.`);
+        }
+        continue;
+      }
+      const tries = ['GNUmakefile', 'makefile', 'Makefile'].map((n) => path.join(d, n));
+      // A Makefile that's a link to the input reads the redirected file.
+      if (tries.some(readsInput)) return this.fail(ctx, line, "runs make with a Makefile that reads from its input or another open file, which patch trust can't follow.");
       const found = tries.find(isFile);
       for (const t of tries) if (!isFile(t) && this.inRepo(t) && this.missing.size < 500) this.missing.add(t);
-      if (found) this.makefile(found, d, ctx, line);
+      if (found) this.makefile(found, d, ctx, line, incDirs);
     }
   }
 
   // A Makefile's recipes are shell commands with make's $(VAR)s in them.
-  private makefile(file: string, dir: string, ctx: Ctx, line: number): void {
+  private makefile(file: string, dir: string, ctx: Ctx, line: number, incDirs: string[] = []): void {
     if (!this.inRepo(file)) return;
     const real = this.reads.real(file);
     if (real === undefined) return;
@@ -1414,33 +1601,44 @@ class Reach {
     const key = `make ${file}`;
     if (this.visits.has(key)) return;
     this.visits.add(key);
-    const text = this.reads.read(real)?.toString('utf8') ?? '';
     const label = this.rel(file);
     const mctx: Ctx = { label, file, argv0: [], dirs: new Set([dir]), vars: new Map(), depth: ctx.depth + 1 };
-    if (/\$[({]shell\s/.test(text) || /^\s*(export\s+)?(SHELL|\.SHELLFLAGS)\s*[:+?!]?=/m.test(text)) {
-      return this.fail(mctx, undefined, "runs commands a way patch trust can't follow ($(shell ...) or its own SHELL).");
-    }
-    const lines = text.split('\n');
+    // Its lines, once per file per hash, each tested on its own: a
+    // multiline `/^\s*SHELL=/m` over the whole text was quadratic in a run
+    // of blank lines (Gautam's scan, 6 Nov).
+    const mk = this.config(file, 'make', (text): { lines: string[]; text: string } | { problem: string } => {
+      const lines = text.split('\n');
+      return lines.some(setsMakeShell) ? { problem: "runs commands a way patch trust can't follow ($(shell ...), `!=`, or its own SHELL)." } : { lines, text };
+    });
+    if (!mk) return;
+    if (!('lines' in mk)) return this.fail(mctx, undefined, mk.problem);
+    const { lines, text } = mk;
     let recipe = '';
     for (const [n, raw] of lines.entries()) {
       const inc = /^\s*-?(?:include|sinclude)\s+(.+)$/.exec(raw);
       if (inc) {
         for (const f of inc[1]!.trim().split(/\s+/)) {
           if (/[$*?]/.test(f)) return this.fail(mctx, n + 1, "includes a makefile worked out as it runs, which patch trust can't follow.");
-          const p = path.resolve(dir, f);
-          if (isFile(p)) this.makefile(p, dir, ctx, line);
-          else if (this.missing.size < 500) this.missing.add(p);
+          // Where make looks: the folder, then each -I folder in turn.
+          const where = path.isAbsolute(f) ? [f] : [dir, ...incDirs.map((i) => path.resolve(dir, i))].map((b) => path.resolve(b, f));
+          if (f === '-' || where.some(readsInput)) return this.fail(mctx, n + 1, "includes a makefile that reads from its input or another open file, which patch trust can't follow.");
+          const p = where.find(isFile);
+          if (p) this.makefile(p, dir, ctx, line, incDirs);
+          else for (const w of where) if (this.missing.size < 500) this.missing.add(w);
         }
         continue;
       }
-      if (!raw.startsWith('\t')) continue;
+      if (!raw.startsWith('\t')) {
+        // A rule's recipe can follow a `;` on its own line (`all: ; ./x.sh`).
+        const inline = inlineRecipe(raw);
+        if (inline !== undefined) {
+          this.shell(makeRecipeToShell(inline.replace(/^[ \t]*[@+-]*/, '')), mctx, n + 1);
+          if (this.problem) return;
+        }
+        continue;
+      }
       recipe = raw.slice(1).replace(/^[@+-]+/, '');
-      const shell = recipe
-        .replace(/\$\$/g, '\u0001')
-        .replace(/\$[({]MAKE[)}]/g, 'make')
-        .replace(/\$[({][^)}]*[)}]|\$[A-Za-z@<^?*%+|]/g, '$__make_variable')
-        .replace(/\u0001/g, '$');
-      this.shell(shell, mctx, n + 1);
+      this.shell(makeRecipeToShell(recipe), mctx, n + 1);
       if (this.problem) return;
     }
     this.namedIn(text, file, mctx);
@@ -1457,10 +1655,244 @@ class Reach {
       if (s?.startsWith('-')) continue;
       const prog = args[i] ? litOf(args[i]!) : undefined;
       if (prog === undefined) return this.fail(ctx, line, "runs an awk program worked out as it runs, which patch trust can't follow.");
-      if (/\bsystem\s*\(|\|\s*getline|\|\s*&|print[^;}]*\|\s*"/.test(prog)) return this.fail(ctx, line, "runs an awk program that runs commands, which patch trust doesn't follow.");
+      if (/\bsystem\s*\(|\|\s*getline|\|\s*&/.test(prog) || awkPrintsToCommand(prog)) return this.fail(ctx, line, "runs an awk program that runs commands, which patch trust doesn't follow.");
       return;
     }
   }
+}
+
+// The most of a package manager's config, a pnpm-workspace.yaml or a
+// Makefile that patch trust reads; a bigger one fails closed.
+export const MAX_CONFIG_BYTES = 1024 * 1024;
+
+// .npmrc keys that make npm run a shell or load code.
+const NPM_LOADERS = new Set(['script-shell', 'node-options', 'onload-script']);
+
+// What an rc file loads: the paths of files it may run (yarn's yarnPath and
+// plugins, bun's preload: every quoted string, and a `yarnPath:` or `path:`
+// value, on its line or, YAML-style, the next), or `problem` for an .npmrc
+// that sets npm's shell or code. A line at a time, and each test anchored
+// to that line's own start, so the work is linear in the text.
+export function rcConfig(base: string, text: string): { paths: string[]; problem?: string } {
+  const paths: string[] = [];
+  const odd = (what: string) => ({ paths, problem: `has ${what}, which patch trust doesn't read, so it can't tell what it loads.` });
+  let pending = false;
+  for (const raw of text.split('\n')) {
+    const line = raw.trimStart();
+    if (base === '.npmrc' && NPM_LOADERS.has(npmKey(line))) return { paths, problem: "sets a shell or code for npm to load, which patch trust can't follow." };
+    for (const m of line.matchAll(/["']([^"'\n]+)["']/g)) {
+      // An escape (YAML's and TOML's `"\u002e/x.cjs"` is `./x.cjs`) is
+      // read as JSON reads one; one it can't read fails closed.
+      // As written too: a single-quoted YAML string keeps its backslashes.
+      paths.push(m[1]!);
+      if (!m[1]!.includes('\\')) continue;
+      try {
+        paths.push(JSON.parse(`"${m[1]!.replace(/\\x([0-9a-fA-F]{2})/g, '\\u00$1')}"`) as string);
+      } catch {
+        return odd(`an escaped string (${m[0].slice(0, 60)})`);
+      }
+    }
+    // A list item's key too: yarn's `plugins:` are `- path: .yarn/plugins/x.cjs`.
+    const keyed = line.startsWith('- ') ? line.slice(2).trimStart() : line;
+    if (pending && keyed && !keyed.startsWith('#')) {
+      if (/^[!&*|>{[]/.test(keyed)) return odd(`a YAML value it can't read (${keyed.slice(0, 40)})`);
+      const v = /^["']?([^"'\s#]+)/.exec(keyed);
+      if (v) paths.push(v[1]!);
+      pending = false;
+    }
+    // Yarn Classic's .yarnrc: `yarn-path ./x.cjs`, a space for the colon.
+    const y = /^(["']?)(?:yarnPath|path|yarn-path)\1(?:[ \t]*:|[ \t]+)(.*)$/.exec(keyed);
+    // A path key inside a flow value (`plugins: [{path: x}]`) isn't read.
+    if (!y && /[{[]/.test(keyed) && /path/i.test(keyed)) return odd(`a YAML flow value it can't read (${keyed.slice(0, 40)})`);
+    if (y) {
+      const rest = y[2]!.trimStart();
+      // A tag, anchor, alias, block or flow value: not a plain path.
+      if (/^[!&*|>{[]/.test(rest)) return odd(`a YAML value it can't read (${rest.slice(0, 40)})`);
+      const v = /^["']?([^"'\s#]+)/.exec(rest);
+      if (v) paths.push(v[1]!);
+      else pending = true;
+    }
+  }
+  return { paths };
+}
+
+// An .npmrc line's key as npm's ini reader takes it (quotes off), in one
+// spelling (lower case, `-` for `_`), or '' for a comment.
+function npmKey(line: string): string {
+  if (line.startsWith('#') || line.startsWith(';')) return '';
+  const eq = line.indexOf('=');
+  let key = (eq < 0 ? line : line.slice(0, eq)).trim();
+  if (key.length > 1 && (key[0] === '"' || key[0] === "'") && key.at(-1) === key[0]) key = key.slice(1, -1);
+  return key.toLowerCase().replaceAll('_', '-');
+}
+
+// The `- item` entries of a YAML list (pnpm-workspace.yaml's packages),
+// unquoted, a comment after one dropped. No regex: a lazy match before
+// `\s*$` was quadratic in a line of spaces.
+export function yamlListItems(text: string): string[] {
+  const out: string[] = [];
+  for (const raw of text.split('\n')) {
+    const line = raw.trimStart();
+    if (!line.startsWith('-')) continue;
+    let item = line.slice(1);
+    const hash = item.indexOf('#');
+    if (hash >= 0) item = item.slice(0, hash);
+    item = item.trim();
+    if (item.length > 1 && (item[0] === '"' || item[0] === "'") && item.at(-1) === item[0]) item = item.slice(1, -1);
+    if (item) out.push(item);
+  }
+  return out;
+}
+
+// Whether a Makefile line sets the shell make runs recipes with (SHELL or
+// .SHELLFLAGS, after `export` or `override`, or for a target: `t: SHELL =
+// x`), or runs a command as make reads it (`$(shell ...)`). A recipe line's
+// own `SHELL=` is the shell's business. Scanned by hand, so it's linear.
+export function setsMakeShell(raw: string): boolean {
+  if (raw.startsWith('\t')) return /\$[({]shell(\s|$)/.test(raw);
+  const line = withoutMakeComment(raw);
+  if (/\$[({]shell(\s|$)/.test(line)) return true;
+  // `X != cmd` runs cmd as make reads the line (GNU make 4).
+  if (line.includes('!=')) return true;
+  // .RECIPEPREFIX changes what starts a recipe line, so recipes would be
+  // read as something else: refused with the shell's own settings.
+  for (const name of ['SHELL', '.SHELLFLAGS', '.RECIPEPREFIX']) {
+    for (let i = line.indexOf(name); i >= 0; i = line.indexOf(name, i + 1)) {
+      if (i > 0 && !' \t\r:;'.includes(line[i - 1]!)) continue;
+      let j = i + name.length;
+      while (line[j] === ' ' || line[j] === '\t') j++;
+      let ops = 0;
+      while (ops < 3 && j < line.length && ':+?!'.includes(line[j]!)) {
+        j++;
+        ops++;
+      }
+      if (line[j] === '=') return true;
+    }
+  }
+  return false;
+}
+
+// A Makefile line before its comment (an unescaped #).
+function withoutMakeComment(line: string): string {
+  for (let i = line.indexOf('#'); i >= 0; i = line.indexOf('#', i + 1)) {
+    if (line[i - 1] !== '\\') return line.slice(0, i);
+  }
+  return line;
+}
+
+// The recipe after a rule's `;` (`all: deps ; cmd`), or undefined when the
+// line isn't a rule with one. Not an assignment (`x := a; b`).
+export function inlineRecipe(raw: string): string | undefined {
+  const line = withoutMakeComment(raw);
+  const colon = line.indexOf(':');
+  if (colon < 0 || line[colon + 1] === '=' || line.slice(0, colon).includes('=')) return undefined;
+  const semi = line.indexOf(';', colon);
+  return semi < 0 ? undefined : raw.slice(semi + 1);
+}
+
+// A recipe line as shell: `$$` is a `$`, `$(MAKE)` is make, and any other
+// make variable or function (`$(X)`, `${X}`, `$@`) a variable the shell
+// can't know. One pass, each `$(` finding its `)` from a pointer that only
+// moves on: a regex that scanned to the line's end from every unclosed
+// `$(` was quadratic.
+export function makeRecipeToShell(recipe: string): string {
+  let out = '';
+  let close = 0; // the next ) or } at or after where it was last needed
+  for (let i = 0; i < recipe.length; ) {
+    const c = recipe[i]!;
+    if (c !== '$') {
+      out += c;
+      i++;
+      continue;
+    }
+    const n = recipe[i + 1];
+    if (n === '$') {
+      out += '$';
+      i += 2;
+    } else if (n === '(' || n === '{') {
+      if (close < i + 2) close = i + 2;
+      while (close < recipe.length && recipe[close] !== ')' && recipe[close] !== '}') close++;
+      if (close >= recipe.length) {
+        out += '$';
+        i++;
+        continue;
+      }
+      out += recipe.slice(i + 2, close) === 'MAKE' ? 'make' : '$__make_variable';
+      i = close + 1;
+    } else if (n !== undefined && /[A-Za-z@<^?*%+|]/.test(n)) {
+      out += '$__make_variable';
+      i += 2;
+    } else {
+      out += '$';
+      i++;
+    }
+  }
+  return out;
+}
+
+// `p`'s real path, or, when it isn't there, its nearest folder that is,
+// real, with the rest after it.
+function realOrNearest(p: string): string {
+  let rest = '';
+  for (let d = p; ; d = path.dirname(d)) {
+    try {
+      return path.join(fs.realpathSync(d), rest);
+    } catch {
+      // not there: one up
+    }
+    if (path.dirname(d) === d) return p;
+    rest = rest ? path.join(path.basename(d), rest) : path.basename(d);
+  }
+}
+
+// Paths that are a process's input or another file it has open: a shell
+// or Node given one reads its program from whatever was redirected there
+// (`sh /dev/stdin < ./steps.txt`), which isn't the path it was given.
+const INPUT_PATH = /^\/(dev\/(stdin|tty|fd\/\d+)|proc\/(self|thread-self|\d+)\/fd\/\d+)$/;
+
+// Whether running or sourcing `p` reads what to run from the process's
+// input: one of those paths, or anything there that isn't a plain file
+// (a link to one, in the repo or not, a fifo, a device).
+function readsInput(p: string): boolean {
+  if (INPUT_PATH.test(path.normalize(p))) return true;
+  try {
+    if (INPUT_PATH.test(fs.realpathSync(p))) return true;
+  } catch {
+    // not there, or a link to nowhere
+  }
+  let st: fs.Stats;
+  try {
+    st = fs.statSync(p);
+  } catch {
+    return false; // not there: a program that isn't installed
+  }
+  return !st.isFile() && !st.isDirectory();
+}
+
+// Whether a shell script's #! passes the shell a flag that has it read
+// commands from somewhere other than the script.
+function shebangReadsElsewhere(text: string): boolean {
+  const m = /^#![ \t]*(\S+)([^\n]*)/.exec(text);
+  if (!m) return false;
+  const words = m[2]!.trim().split(/[ \t]+/).filter(Boolean);
+  if (path.basename(m[1]!) === 'env' && words.some((w) => /^(-[a-zA-Z]*S|--split-string)/.test(w))) return true;
+  return words.some((w) => /^[-+][a-zA-Z]*[sci]/.test(w));
+}
+
+// Whether an awk program pipes a print into a command (`print x | "sh"`):
+// a `|` (not `||`) after a print in the same statement. Statement by
+// statement, so it's linear: `print[^;}]*\|` scanned on from every print.
+function awkPrintsToCommand(prog: string): boolean {
+  for (const st of prog.split(/[;}\n]/)) {
+    const at = st.indexOf('print');
+    if (at < 0) continue;
+    const rest = st.slice(at);
+    for (let i = rest.indexOf('|'); i >= 0; i = rest.indexOf('|', i + 1)) {
+      if (rest[i + 1] === '|' || rest[i - 1] === '|') continue;
+      return true;
+    }
+  }
+  return false;
 }
 
 // A missing path in a command's place that could turn up as a program.
