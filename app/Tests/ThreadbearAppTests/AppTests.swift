@@ -312,6 +312,16 @@ final class ComposerTests: XCTestCase {
         XCTAssertEqual(host.draggingEntered(drag), [])
     }
 
+    /// Nothing in a transcript row signs up for drags, or a file let go over
+    /// it would stop there and never reach the transcript. A row's icon (an
+    /// NSImageView) did.
+    @MainActor func testTranscriptRowsLeaveDropsToTheTranscript() {
+        XCTAssertTrue(Symbols.makeView().registeredDraggedTypes.isEmpty, "a row's icon")
+        let text = TranscriptTextView()
+        text.isEditable = false
+        XCTAssertTrue(text.registeredDraggedTypes.isEmpty, "a row's words")
+    }
+
     /// A picture dropped from a temp folder goes to the runner as a copy, as
     /// a screenshot thumbnail's file is deleted as the drop ends (issue #2).
     func testAPictureFromATempFolderIsKept() throws {

@@ -17,6 +17,12 @@ import WebKit
 /// lands on the icon, not the row.
 final class FirstClickImageView: NSImageView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    /// An image view signs up for dragged pictures even when it can't be
+    /// edited, and then turns them away, so a file let go over a row's icon
+    /// went nowhere. Without, the drag reaches the transcript, which hands
+    /// it to the composer (ComposerDropView).
+    override func registerForDraggedTypes(_ newTypes: [NSPasteboard.PasteboardType]) {}
 }
 
 /// The panels' web view, so a dashboard's buttons work on the first click.

@@ -517,6 +517,49 @@ enum Automation {
             board.clearContents()
             board.writeObjects([URL(fileURLWithPath: path) as NSURL])
             return composer.takeImages(from: board) ? "ok" : "error not an image"
+        case "drop":
+            // {"cmd":"drop","path":…,"x":,"y":} drops a file at that spot in
+            // the window (points from its top left), on the view AppKit would
+            // pick: the deepest one under it signed up for a type it has. `"hover":
+            // true` stops before the drop, so a shot shows the mark;
+            // `"leave": true` drags back off. Errors list the views under it.
+            guard let window = mainWindow, let content = window.contentView,
+                  let x = c["x"] as? Double, let y = c["y"] as? Double else { return "error drop needs x and y" }
+            let board = pasteboard
+            if let path = c["path"] as? String {
+                board.clearContents()
+                board.writeObjects([URL(fileURLWithPath: path) as NSURL])
+            }
+            let point = NSPoint(x: x, y: window.frame.height - y)
+            let hit = content.superview?.hitTest(point) ?? content.hitTest(point)
+            var view = hit
+            // As AppKit does: the first view up from the one under the
+            // pointer signed up for any type the drag has.
+            let types = Set(board.types ?? [])
+            while let v = view, types.isDisjoint(with: v.registeredDraggedTypes) { view = v.superview }
+            guard let target = view else {
+                var chain: [String] = []
+                var v = hit
+                while let each = v { chain.append("\(type(of: each))\(each.registeredDraggedTypes.isEmpty ? "" : "\(each.registeredDraggedTypes.map(\.rawValue))")"); v = each.superview }
+                return "error nothing takes files there: \(chain.joined(separator: " < "))"
+            }
+            // AppKit's own views (an image view, say) want more of a drag
+            // than this stand-in has, so those are only named.
+            guard target is ComposerDropView || target is ComposerTextView else {
+                return "error \(type(of: target)) would get it, not the composer"
+            }
+            let drag = AutomationDrag(pasteboard: board, window: window, location: point)
+            if c["leave"] as? Bool == true {
+                target.draggingExited(drag)
+                return "ok left \(type(of: target))"
+            }
+            let operation = target.draggingEntered(drag)
+            _ = target.draggingUpdated(drag)
+            if c["hover"] as? Bool == true { return "ok \(type(of: target)) \(operation.rawValue)" }
+            let dropped = target.performDragOperation(drag)
+            target.concludeDragOperation(drag)
+            target.draggingEnded(drag)
+            return dropped ? "ok dropped on \(type(of: target))" : "error \(type(of: target)) turned it away"
         case "browser":
             // {"cmd":"browser","do":"click|right|scroll|key|type","x":,"y":,...}: real
             // NSEvents to the Browser panel's page, in the page's own points,
@@ -1477,5 +1520,29 @@ private final class FrameWatch: NSObject {
         let dropped = gaps.filter { $0 > frame * 1.5 }.count
         return String(format: "%d frames at %.1f ms, %d dropped, worst %.0f ms, %d over 20 ms", gaps.count + 1, frame, dropped, worst, missed)
     }
+}
+
+/// Just enough of a drag for `drop`: a file at a spot in the window.
+private final class AutomationDrag: NSObject, NSDraggingInfo {
+    let draggingPasteboard: NSPasteboard
+    let draggingDestinationWindow: NSWindow?
+    let draggingLocation: NSPoint
+    init(pasteboard: NSPasteboard, window: NSWindow, location: NSPoint) {
+        draggingPasteboard = pasteboard
+        draggingDestinationWindow = window
+        draggingLocation = location
+    }
+    var draggingSourceOperationMask: NSDragOperation { .copy }
+    var draggedImageLocation: NSPoint { draggingLocation }
+    var draggedImage: NSImage? { nil }
+    var draggingSource: Any? { nil }
+    var draggingSequenceNumber: Int { 1 }
+    func slideDraggedImage(to screenPoint: NSPoint) {}
+    var draggingFormation: NSDraggingFormation = .default
+    var animatesToDestination = false
+    var numberOfValidItemsForDrop = 1
+    func enumerateDraggingItems(options enumOpts: NSDraggingItemEnumerationOptions = [], for view: NSView?, classes classArray: [AnyClass], searchOptions: [NSPasteboard.ReadingOptionKey: Any] = [:], using block: (NSDraggingItem, Int, UnsafeMutablePointer<ObjCBool>) -> Void) {}
+    var springLoadingHighlight: NSSpringLoadingHighlight { .none }
+    func resetSpringLoading() {}
 }
 #endif

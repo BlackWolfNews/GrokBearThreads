@@ -1,4 +1,5 @@
 import AppKit
+import BearDock
 import SwiftUI
 import ThreadbearCore
 import UniformTypeIdentifiers
@@ -12,6 +13,8 @@ import UniformTypeIdentifiers
 struct ComposerView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.colorScheme) private var colorScheme
+    /// The copy drawn while a panel is picked up in the dock.
+    @Environment(\.isDockGhost) private var isGhost
     let thread: ThreadSummary?
     /// The thread's transcript and the controller drawing it, for its open
     /// card (ComposerCard); none for a new thread.
@@ -119,7 +122,10 @@ struct ComposerView: View {
             }
         }
         // The transcript above is drop space for this box too.
-        .onAppear { controller?.composerHandle = handle }
+        // Not the dock's ghost of the panel: its box goes when the ghost
+        // does, and the transcript would have turned drops away after a
+        // panel was picked up (Codex's review, 6 Nov).
+        .onAppear { if !isGhost { controller?.composerHandle = handle } }
         }
         // The slash command palette, over the transcript just above the box.
         .overlay(alignment: .top) {
