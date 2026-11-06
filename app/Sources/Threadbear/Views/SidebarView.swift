@@ -753,7 +753,13 @@ struct ThreadRowView: View {
         // The whole title, which the row often cuts short, and where it runs.
         // The status and project marks have their own tips over this one.
         .tip((thread.title.isEmpty ? "Untitled" : thread.title) + "\n" + (place.map { "\($0), in " } ?? "") + thread.cwd.abbreviatingHome)
-        .iconContextMenu { ThreadMenu(thread: thread) }
+        .iconContextMenu {
+            ThreadMenu(thread: thread)
+            Divider()
+            // As in the thread's ... menu, so Mike can grab a thread's id
+            // to point an agent at it without opening the thread (6 Nov).
+            Button("Copy thread id", systemImage: "number") { app.copyToPasteboard(thread.id) }
+        }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         .accessibilityAction { select() }
