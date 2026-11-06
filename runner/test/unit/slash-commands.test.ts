@@ -281,8 +281,30 @@ test('threads.commands lists a folder whose Claude settings aren\'t trusted with
   const { thread } = h.runner.create({ text: 'hi', accountId: 'claude-main' });
   h.adapter.last.init();
   h.adapter.last.result();
-  await h.runner.end?.(thread.id);
   await h.runner.threadCommands(thread.id);
   assert.notEqual(got, 'unset');
   assert.equal(typeof got, 'object', 'the settings without their commands');
+});
+
+test('a Codex skill named like a terminal command runs, found from the folder\'s list', async () => {
+  const h = harness();
+  h.codex.commands = async () => [{ name: 'init', source: 'skill' }];
+  const { thread } = h.runner.create({ text: 'hi', accountId: 'codex-main' });
+  const s = h.codex.last;
+  s.init('cx-1', 'gpt-6.1-sol');
+  s.result();
+  h.runner.send(thread.id, '/init');
+  await tick();
+  assert.equal(s.sent.at(-1)!.text, '/init');
+});
+
+test('words go into a skill\'s turn, as into any other', async () => {
+  const h = harness();
+  const { thread } = h.runner.create({ text: '/deslop the runner', accountId: 'claude-main' });
+  const s = h.adapter.last;
+  s.init();
+  await tick();
+  h.runner.send(thread.id, 'only runner/src/foo.ts');
+  await tick();
+  assert.equal(s.sent.length, 2);
 });

@@ -28,16 +28,35 @@ export const commandsPart = {
 
   // Runs a command the runner answers itself, as the turn the message
   // started, and ends that turn. False for one the CLI is to run.
-  runLocalCommand(this: Runner, st: ThreadState, msg: QueuedSend): boolean {
-    let plan = this.commandPlan(st, msg.text);
+  // Synchronous but for the one case that has to look something up, so a
+  // message that isn't a command reaches the CLI in the same tick as ever.
+  runLocalCommand(this: Runner, st: ThreadState, msg: QueuedSend): boolean | Promise<boolean> {
+    const plan = this.commandPlan(st, msg.text);
     if (!plan) return false;
     const { rec, rt } = st;
     const turn = rt.turn!;
-    // A move to another login or provider is waiting: the agent is told
-    // what came before in words put in front of the message, which would
-    // turn the command into words too. It needs a message first.
+    // One of Codex's terminal-only names: unless one of its skills has that
+    // name, which only the folder's list can say.
+    if (plan.kind === 'note' && rec.provider === 'codex') {
+      return this.threadCommands(rec.id)
+        .catch(() => undefined)
+        .then(() => (rt.turn !== turn ? true : this.runCommandPlan(st, msg, this.commandPlan(st, msg.text)!)));
+    }
+    return this.runCommandPlan(st, msg, plan);
+  },
+
+  runCommandPlan(this: Runner, st: ThreadState, msg: QueuedSend, plan: CommandPlan): boolean {
+    const { rec, rt } = st;
+    const turn = rt.turn!;
+    // A move to another login or provider is waiting, or the thread's
+    // worktree has gone: the agent is told in words put in front of the
+    // message, which would turn the command into words too. It needs a
+    // message first.
+    const name = msg.text.trim().split(/\s/)[0];
     if (plan.kind === 'cli' && rec.handoff) {
-      plan = { kind: 'note', text: `This thread has just moved to ${this.modelLabel(rec)}, and the agent catches up on the conversation with your next message. Send one first, then ${msg.text.trim().split(/\s/)[0]} again.` };
+      plan = { kind: 'note', text: `This thread has just moved to ${this.modelLabel(rec)}, and the agent catches up on the conversation with your next message. Send one first, then ${name} again.` };
+    } else if (plan.kind === 'cli' && !rt.session && this.leavesRemovedWorktree(rec)) {
+      plan = { kind: 'note', text: `This thread's worktree has gone, so it carries on in the main checkout and the agent hears about the move with your next message. Send one first, then ${name} again.` };
     }
     if (plan.kind === 'cli') return false;
     // Settings changed here apply to the next turn, which is the one

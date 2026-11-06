@@ -869,16 +869,20 @@ export class CodexSession implements AgentSession {
     const cmd = parseCommand(input.text);
     if (!cmd || !this.threadId) return this.turnStart(params);
     const name = cmd.name.toLowerCase();
-    if ((name === 'compact' || name === 'review') && params.cwd) this.sentCwd = sentBefore;
+    if (name === 'compact' && params.cwd) this.sentCwd = sentBefore;
     if (name === 'compact') {
       await this.proc.request('thread/compact/start', { threadId: this.threadId });
       // No turn in the answer; turn/started brings its id (turnStarted).
       return {} as TurnStartResponse;
     }
-    if (name === 'review') {
+    // A review/start runs where Codex last was, so with a move still to
+    // send it's a turn instead, which carries the move, and Codex reviews
+    // as asked in words.
+    if (name === 'review' && !params.cwd) {
       const target = cmd.args ? { type: 'custom', instructions: cmd.args } : { type: 'uncommittedChanges' };
       return this.proc.request<TurnStartResponse>('review/start', { threadId: this.threadId, target, delivery: 'inline' });
     }
+    if (name === 'review') return this.turnStart(params);
     const skill = (await this.skillPaths()).get(cmd.name);
     if (skill) params.input = [{ type: 'skill', name: cmd.name, path: skill }, ...params.input];
     return this.turnStart(params);

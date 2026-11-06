@@ -137,12 +137,19 @@ export const worktreesPart = {
   // A thread whose worktree was removed (it was archived with everything
   // landed) and has now come back carries on in the main checkout. Returns
   // a line for the agent, whose system prompt still names the worktree.
+  // The thread's worktree has gone since its CLI last ran, so its next
+  // start moves it to the main checkout (leaveRemovedWorktree). A spare's
+  // folder is still there, but it's another thread's (or will be), so the
+  // thread never carries on in it.
+  leavesRemovedWorktree(this: Runner, rec: ThreadRecord): boolean {
+    const w = rec.worktree;
+    return Boolean(w?.removedAt && isInside(rec.cwd, w.path) && (w.spare || !isDirectory(rec.cwd)));
+  },
+
   leaveRemovedWorktree(this: Runner, st: ThreadState, turnId: string): string | undefined {
     const { rec } = st;
     const w = rec.worktree;
-    // A spare's folder is still there, but it's another thread's (or will
-    // be), so the thread never carries on in it.
-    if (!w?.removedAt || !isInside(rec.cwd, w.path) || (!w.spare && isDirectory(rec.cwd))) return undefined;
+    if (!w || !this.leavesRemovedWorktree(rec)) return undefined;
     const from = rec.cwd;
     const to = sameSubfolder(from, w.path, w.mainCheckout);
     if (rec.sessionUsed) {

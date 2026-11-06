@@ -252,6 +252,9 @@ export type Turn = {
   // /model's usage line) isn't a reply asking anything: without an
   // end_turn the turn leaves no card.
   command?: boolean;
+  // A compaction, review or clear: the CLI can't take words into it, so
+  // they wait for the next turn. A skill's turn is an ordinary one.
+  noSteer?: boolean;
   // Opened by the runner for work the CLI started itself (a background
   // shell or async subagent finished, or a background subagent asked for
   // approval). There's no user.message.
@@ -1410,9 +1413,8 @@ export class Runner {
     const turn = rt.turn;
     if (!turn || !rt.session || rt.closing || this.stopping || rt.editing) return false;
     if (rec.queue.length || rec.handoff || rec.moved || rt.releaseWhenIdle || turn.interruptRequested) return false;
-    // Nor into a slash command's turn: a CLI can't take words into its
-    // compaction or review, so they wait for the next turn.
-    if (turn.command || turn.local) return false;
+    // Nor into a compaction or review (a skill's turn takes them).
+    if (turn.noSteer || turn.local) return false;
     return !turn.auto || Boolean(turn.cliStarted);
   }
 
@@ -1521,11 +1523,15 @@ export class Runner {
     // Never two live CLIs on one session: wait for a releasing one to exit.
     while (rt.closing) await rt.closing;
     if (rt.turn?.turnId !== msg.turnId) return; // interrupted while waiting
-    if (this.runLocalCommand(st, msg)) return;
+    const local = this.runLocalCommand(st, msg);
+    if (local === true || (local !== false && (await local))) return;
     // A slash command reaches the CLI as typed: anything put in front of it
     // (the phone's line, project news) would make it words to the model.
     const command = this.commandPlan(st, msg.text);
-    if (command && rt.turn) rt.turn.command = true;
+    if (command && rt.turn) {
+      rt.turn.command = true;
+      if (/^\/(compact|review|clear)\b/i.test(msg.text.trim())) rt.turn.noSteer = true;
+    }
     let text = command ? msg.text : this.forAgent(msg);
     // Claude's CLI starts a new session for /clear, which the runner follows
     // (its next init), but says nothing.

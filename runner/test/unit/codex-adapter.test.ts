@@ -1121,3 +1121,15 @@ test('a folder move waits past /compact for the next turn/start, and a Stop duri
   assert.equal(next.params.cwd, other);
   await h.session.end();
 });
+
+test('/review with a folder move still to send is a turn, which carries the move', async () => {
+  const h = await open();
+  await started(h);
+  const other = tmp('tb-cxa-moved-');
+  await h.session.setCwd!(other);
+  h.session.send({ id: 'm1', text: '/review', images: [] });
+  const req = await turnStarts(h, 'u1');
+  assert.equal(req.params.cwd, other);
+  assert.equal(h.conn.sent('review/start').length, 0);
+  await h.session.end();
+});
