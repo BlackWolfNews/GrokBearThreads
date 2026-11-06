@@ -131,6 +131,31 @@ anyone but Mike.
 
 ### 4. Full sync, off by default, on for Mike first
 
+**Built and on for Mike's four runners, 6 Nov** (8b18a30e, backend API 52; "Full
+sync" in docs/protocol.md and docs/convex-backend.md; `sync.full` in each runner's
+runner.json, off for everyone else). Being watched for about a week.
+
+- **Measured** (25 minutes of prod logs, 05:21 to 05:46 UTC on a busy morning, M5
+  doing nearly all of it; Bruce, Hetzner and the Pixel had almost no threads running):
+  `sync:appendBodies` 108.7 MB/day at that rate, 3.9 KB a call, 1.9 MB written and 6 KB
+  read. That's about 98 MB/day of rows, against the 22 MB/day this plan estimated from
+  a quieter 10 days, so the rate is an upper end for now. Overall 599 MB/day, against
+  297 MB/day in the 20 minutes before, though `appendMessages` alone went from 46 to
+  159 MB/day at the same time, which body rows don't touch, so more was running.
+- **Budget:** 100 MB/day across all four, set from 5 Nov's 581 MB (about 390 MB
+  without one-offs). It's at the top of that on a busy morning. **The real figure is
+  the daily usage check's**: at this rate writes are about 3.3 GB a month, and from day
+  31 deleting reads the same rows again, for about 5 GB a month in all, within the 50 GB.
+- **Withheld:** 91 of 1,617 rows (5.6%), 76 of them reading a background job's output.
+- **Left out:** the iPhone (old phones keep working, and it needs a release to open a
+  tool). The Mac shows no reasoning, and its pictures stay "kept" (website only). A
+  thread's first tool in flight across a handover shows as kept on the runner.
+- **Known limits:** a background tool that finishes across a restart stays input-only;
+  a subagent's reply goes up scrubbed like any agent message; the withhold list can't
+  know every command; setup says nothing yet as it's off for new installs (step 6).
+
+The original plan for this step follows.
+
 - New table of bodies by thread and seq, with the small `messages` rows as they
   are. Bodies go through scrubbing and withheld items become a stub saying
   "kept on the runner".

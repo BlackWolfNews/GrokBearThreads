@@ -200,7 +200,8 @@ export class BodyCollector {
       }
       case 'tool.call': {
         const reasoning = this.takeReasoning(t);
-        const job = outputOfJob(e.input);
+        // Stopping a job prints nothing of what it printed.
+        const job = /stop|kill/i.test(e.name) ? undefined : outputOfJob(e.input);
         const withheld = withholdReason(e) ?? (job !== undefined && !t.safeJobs.has(job) ? 'output of an earlier command' : undefined);
         t.open.set(e.itemId, { seq: e.seq, from: reasoning?.seq ?? e.seq, input: e.input ?? {}, withheld, diffs: new Map(), diffChars: 0, ...(reasoning ? { reasoning: reasoning.text } : {}) });
         // A runaway thread can't hold memory for ever. That tool shows as kept on

@@ -114,9 +114,11 @@ test("reading a background job's output is only as safe as the job", () => {
   // One it never saw start: can't be known.
   c.see(T, call(9, 'read3', { task_id: 'who-knows' }));
   assert.equal(c.see(T, result(10, 'read3', 'x'))[0]!.withheld, true);
+  c.see(T, { ...call(13, 'stop', { task_id: 'who-knows' }), name: 'TaskStop' } as PersistedEvent);
+  assert.equal(c.see(T, result(14, 'stop', 'stopped'))[0]!.withheld, undefined, 'stopping one reads nothing of it');
   // Its output file read directly.
-  c.see(T, call(11, 'file', { file_path: '/private/tmp/x/tasks/abc123.output' }));
-  assert.equal(c.see(T, result(12, 'file', 'x'))[0]!.withheld, true);
+  c.see(T, call(15, 'file', { file_path: '/private/tmp/x/tasks/abc123.output' }));
+  assert.equal(c.see(T, result(16, 'file', 'x'))[0]!.withheld, true);
 });
 
 test('a command cut before it got here is withheld, as what was cut is unknown', () => {
