@@ -28,9 +28,24 @@ export type PushFailing = { failure: string; since: number; failed: number; via:
 // since), so the warning goes rather than nagging for ever.
 export const PUSH_FAILING_FRESH_MS = 3 * 86_400_000;
 
-// A failure's text is a status and Apple's or the relay's reason, never a
-// device token or thread text; cut in case a body is odd.
-export const failureText = (status: number, reason?: string) => `${status}${reason ? ` ${reason.replace(/[^\w .:,'-]/g, '').slice(0, 120)}` : ''}`;
+// A failure's text is a status and a reason from a fixed set, never free
+// text: a relay (PUSH_RELAY_URL can name anyone's) or a socket error could
+// put a device token, a key or thread text in its message, and this goes
+// in logs, the pushHealth row and the runner's notice. Apple's reasons are
+// single CamelCase words (BadDeviceToken, InvalidProviderToken); a socket
+// error keeps only its code (ECONNREFUSED); the relay's own few are kept
+// as they are; anything else is "other".
+const KNOWN_REASONS = new Set(['relay not configured', 'timeout', 'unauthorized', 'rate limited', 'bad request', 'too many new installs today', "couldn't register with the relay", 'send threw', 'fetch failed']);
+export function safeReason(reason: string | undefined): string | undefined {
+  if (!reason) return undefined;
+  const r = reason.trim();
+  if (/^[A-Z][A-Za-z]{2,39}$/.test(r) || KNOWN_REASONS.has(r)) return r;
+  return r.match(/\bE[A-Z]{2,20}\b/)?.[0] ?? 'other';
+}
+export const failureText = (status: number, reason?: string) => {
+  const r = safeReason(reason);
+  return `${Number.isFinite(status) ? Math.trunc(status) : 0}${r ? ` ${r}` : ''}`;
+};
 
 // One success clears it: some phone is getting them. A send with only
 // failures starts or extends the failing run.

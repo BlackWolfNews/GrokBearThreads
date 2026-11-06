@@ -46,8 +46,8 @@ async function relayInstall(ctx: ActionCtx, url: string): Promise<{ installId: s
   if (res instanceof Error || !res.ok) {
     const status = res instanceof Error ? 0 : res.status;
     const reason = res instanceof Error ? res.message : ((await res.json().catch(() => ({}))) as { error?: string }).error;
-    console.warn(`[relay] couldn't register: HTTP ${status} ${reason ?? ''}`);
-    return { failure: failureText(status, `couldn't register with the relay${reason ? `: ${reason}` : ''}`) };
+    console.warn(`[relay] couldn't register: ${failureText(status, reason)}`);
+    return { failure: `${failureText(status)} couldn't register with the relay` };
   }
   const install = (await res.json()) as { installId: string; installKey: string };
   await ctx.runMutation(internal.devices.saveRelayInstall, { ...install, url });
@@ -171,7 +171,16 @@ const vSendResult = v.object({ sent: v.number(), failed: v.number(), skipped: v.
 // The payload the phone app expects (docs/convex-backend.md, section 6).
 async function sendAlert(ctx: ActionCtx, alert: { title: string; body: string; threadId: string }, which: (notify: 'away' | 'always' | 'off') => boolean = (n) => n !== 'off'): Promise<SendSummary> {
   const viaRelay = !apnsConfig() || process.env.PUSH_VIA === 'relay';
-  const { failure, broken, ...r } = await deliver(ctx, alert, which);
+  // A throw (a malformed APNS_KEY_P8 makes signing throw) counts as a
+  // failure too, or a broken key would never be reported.
+  let out: SendSummary;
+  try {
+    out = await deliver(ctx, alert, which);
+  } catch (e) {
+    console.error(`[push] send threw: ${(e as Error)?.name ?? 'Error'}`);
+    out = { sent: 0, failed: 1, broken: 1, failure: '0 send threw' };
+  }
+  const { failure, broken, ...r } = out;
   await ctx.runMutation(internal.devices.pushOutcome, { sent: r.sent, failed: broken ?? 0, via: viaRelay ? 'relay' : 'apple', ...(failure ? { failure } : {}) });
   return r;
 }

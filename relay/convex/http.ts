@@ -16,6 +16,7 @@ import { httpRouter } from 'convex/server';
 import { httpAction } from './_generated/server';
 import { internal } from './_generated/api';
 import { convexSite, deploymentVouches } from './verify';
+import { reasonKey } from './reasons';
 
 const http = httpRouter();
 
@@ -76,16 +77,18 @@ http.route({
     if (admitted === 'auth') return json({ error: 'unauthorized' }, 401);
     if (admitted === 'limited') return json({ error: 'rate limited' }, 429);
     const encrypted = str(b.encrypted, 4000);
+    // A throw (a malformed APNS_KEY_P8 makes signing throw) is counted
+    // like any other failure, so relay:stats sees it.
     const r = await ctx.runAction(internal.apns.send, {
       deviceToken,
       environment,
       threadId,
       ...(encrypted ? { encrypted } : { ...(str(b.title, 200) ? { title: str(b.title, 200) } : {}), ...(str(b.body, 1000) ? { body: str(b.body, 1000) } : {}) }),
-    });
+    }).catch(() => ({ status: 0, reason: 'send threw' }) as { status: number; reason?: string });
     const ok = r.status === 200;
     // The status and Apple's reason only (no token, no install), so the
     // relay's own logs say why sends fail; relay:stats tallies the same.
-    if (!ok) console.warn(`[send] failed: ${r.status} ${r.reason ?? ''}`);
+    if (!ok) console.warn(`[send] failed: ${reasonKey(r.status, r.reason)}`);
     await ctx.runMutation(internal.relay.counted, { ok, status: r.status, ...(r.reason ? { reason: r.reason } : {}) });
     const gone = r.status === 410 || r.reason === 'BadDeviceToken' || r.reason === 'Unregistered';
     return json({ ok, status: r.status, ...(r.reason ? { reason: r.reason } : {}), ...(gone ? { gone: true } : {}) });

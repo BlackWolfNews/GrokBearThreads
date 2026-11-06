@@ -23,11 +23,15 @@ test('an old failure stops being news', () => {
   assert.equal(pushFailing(null, 0), null);
 });
 
-test('failure text keeps the status and reason and nothing odd', () => {
+test('failure text keeps the status and a known reason, never free text', () => {
   assert.equal(failureText(403, 'InvalidProviderToken'), '403 InvalidProviderToken');
   assert.equal(failureText(0), '0');
-  assert.equal(failureText(0, 'a<b>"c"\n'), '0 abc');
-  assert.ok(failureText(0, 'x'.repeat(500)).length <= 122);
+  assert.equal(failureText(0, 'timeout'), '0 timeout');
+  assert.equal(failureText(0, 'connect ECONNREFUSED 10.0.0.1:443'), '0 ECONNREFUSED');
+  // A relay (anyone's, through PUSH_RELAY_URL) that echoes a device token or thread text.
+  const token = 'ab'.repeat(32);
+  assert.equal(failureText(400, `Rejected device token ${token}`), '400 other');
+  assert.equal(failureText(400, 'Mike your build finished'), '400 other');
 });
 
 test('tb status says whose key Apple turned down', () => {
@@ -44,5 +48,6 @@ test("the relay tallies a failure's status and reason, never anything longer", a
   assert.equal(reasonKey(403, 'InvalidProviderToken'), '403 InvalidProviderToken');
   assert.equal(reasonKey(0, 'relay not configured'), '0 relay not configured');
   assert.equal(reasonKey(500), '500');
-  assert.ok(reasonKey(0, `$${'y'.repeat(99)}`).length <= 42);
+  assert.equal(reasonKey(0, 'connect ECONNREFUSED 10.0.0.1:443'), '0 ECONNREFUSED');
+  assert.equal(reasonKey(400, `token ${'ab'.repeat(32)}`), '400 other');
 });

@@ -44,6 +44,7 @@ import { removeTempFiles } from './fsutil.ts';
 import { Models } from './models/index.ts';
 import { SettingsService, modelMethods, settingsMethods } from './settings.ts';
 import { ConvexSync, defaultRunnerName, ensureRunnerId, readSyncKey } from './sync.ts';
+import { pushFailingText } from './push-failing.ts';
 import { Scrubber } from './scrub.ts';
 import { SecretCheck } from './secret-check.ts';
 import { SharedPools } from './shared-pools.ts';
@@ -513,7 +514,11 @@ async function main(): Promise<void> {
     helloNotices: () => {
       // Like a missing claude: said to every client, until it's there.
       const noCodex = missingCodex(updates.codexBinary(), cfg);
+      // Pushes failing (sync.ts notePushFailing) is said once as it starts;
+      // an app that wasn't connected then hears it here.
+      const pushFailing = sync.status().pushFailing;
       return [
+        ...(pushFailing ? [{ level: 'warning' as const, message: pushFailingText(pushFailing) }] : []),
         ...(rolledBack ? [{ level: 'warning' as const, message: rolledBack }] : []),
         ...(noCodex ? [{ level: 'warning' as const, message: noCodex }] : []),
         ...restarter.helloNotices(),
