@@ -2262,9 +2262,12 @@ the thread if a sub-agent stalls, so an ask can't stay hidden for good.
   review on, a note says so, once until the next message. A runner that
   is draining (Handovers), restarting or stopping makes no threads, so it records
   `labReviewOwed: { turnId, reply? }` in thread.json instead, and the
-  thread isn't marked finished; the runner that adopts or next loads it
-  starts the review then, or, with a message queued or the thread
-  archived, drops it. A new message from Mike drops it too.
+  thread isn't marked finished. The runner that adopts it (after any
+  resume the restart asked for) or next starts (once listening) starts
+  the review then. A thread busy by then (a resume, a queued message)
+  keeps it for its next finished turn, which reviews its own change if
+  it made one worth it, else the owed one; a hibernating one is marked
+  finished and keeps it the same way; an archived one drops it.
 - **Waiting on threads.** `end_turn` also takes `waitFor?: string[]`, up
   to 5 thread ids (or unique prefixes) on this runner, with `needs:
   "nothing"`. Once the turn is over it hibernates on the same terms as

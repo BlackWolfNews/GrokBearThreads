@@ -265,6 +265,9 @@ async function main(): Promise<void> {
         restarter?.resumeAdopted(threadId);
         // Cut off mid-turn if the old runner crashed with it: carried on.
         if (o?.crashed) runner.carryOnStopped(threadId);
+        // A review the old runner couldn't start (runner/lab-review.ts),
+        // after the resume, which it would otherwise turn away.
+        runner.startOwedReviews(threadId);
         // It may have finished on the old runner while a thread waiting on
         // it had already come across. After its own carry-ons, which are
         // new work, so a finish they replace doesn't count.
@@ -671,6 +674,8 @@ async function main(): Promise<void> {
   // now: waking one starts its CLI, whose tools need what's set up above.
   runner.holdWaits = false;
   runner.reconcileWaits();
+  // Reviews a runner that went away owed (runner/lab-review.ts).
+  runner.startOwedReviews();
 
   let stopping = false;
   const stop = async (signal: string) => {

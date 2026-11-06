@@ -116,18 +116,37 @@ export const labReviewPart = {
     return threadId;
   },
 
-  // A review the last runner owed this thread (startLabReview), now it's
-  // here: adopted from a draining runner, or loaded at start. The thread
-  // then waits on it, or is finished as it would have been. Not with a
-  // message queued (Mike has moved on; that turn can get its own) or once
-  // archived.
+  // Reviews the last runner owed (startLabReview), once they're here: for
+  // one thread as it's adopted from a draining runner, or every thread
+  // once a runner that has just started is listening (main.ts). After the
+  // restart's own resume of that thread, which a review would turn away by
+  // putting it to sleep, and never during start(): a CLI's tools need what
+  // main.ts sets up after it.
+  startOwedReviews(this: Runner, threadId?: string): void {
+    for (const st of threadId ? [this.threads.get(threadId)] : [...this.threads.values()]) if (st?.rec.labReviewOwed) this.startOwedReview(st);
+  },
+
   startOwedReview(this: Runner, st: ThreadState): void {
     const { rec, rt } = st;
     const owed = rec.labReviewOwed;
-    if (!owed) return;
+    if (!owed || rt.deleted) return;
+    // Busy (a resume, a queued message): the next turn to finish gives it
+    // (completeTurn), as its own change if it made one.
+    if (rt.turn || rec.queue.length) return;
+    if (rec.archivedAt) {
+      delete rec.labReviewOwed;
+      this.markDirty(st);
+      return;
+    }
+    // Put to sleep since (by Mike or a schedule, while the handover
+    // waited): a review would wake it early. It counts as finished now,
+    // and its next turn to finish gives the review.
+    if (this.bucket(rec) === 'snoozed') {
+      this.markFinished(st, owed.reply);
+      return;
+    }
     delete rec.labReviewOwed;
     this.markDirty(st);
-    if (rt.deleted || rt.turn || rec.queue.length || rec.archivedAt) return;
     const review = this.startLabReview(st, owed.turnId, owed.reply);
     if (review) this.waitOnReview(st, review);
     // Owed again if this runner is handing over too.

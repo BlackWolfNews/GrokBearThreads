@@ -161,8 +161,6 @@ export const handoversPart = {
       // main.ts carries it on (carryOnStopped), after any resume of its own.
       if (this.recover(st)) this.notice('info', `The old runner stopped while "${rec.title}" was mid-turn.`);
     }
-    // A review the draining runner couldn't start (runner/lab-review.ts).
-    this.startOwedReview(st);
     // Hibernating until the runner restarts: for this thread, coming across
     // is the restart.
     if (this.wakesOnStart(rec)) this.wake(st, 'restart');

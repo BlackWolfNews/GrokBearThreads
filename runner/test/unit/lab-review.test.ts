@@ -261,6 +261,10 @@ test('labReview: a turn that ends on a draining runner is reviewed once the new 
   b.onNotification((n) => notes.push(n));
   b.start({ skip: new Set([id]) });
   b.adopt(id);
+  // main.ts starts it after the restart's resume of the thread, which a
+  // review putting it to sleep would turn away.
+  assert.equal(b.get(id).waitingOn, undefined);
+  b.startOwedReviews(id);
   const t = b.get(id);
   assert.equal(t.waitingOn?.length, 1, 'it waits on the review');
   const reviewId = t.waitingOn![0].threadId;
@@ -272,7 +276,47 @@ test('labReview: a turn that ends on a draining runner is reviewed once the new 
   assert.match(brief.params.event.text, /Fixed the login bug\./);
 });
 
-test('labReview: a review owed from a handover is dropped when Mike has written since', async () => {
+test('labReview: a thread busy when it comes across gives the owed review at its next finish', async () => {
+  const h = setup();
+  const id = start(h);
+  await h.runner.beginDrain([id], { onHandedOver: () => {} });
+  turn(h, id, { diffs: [codeDiff()], reply: 'Fixed the login bug.' });
+  await tick();
+  const file = path.join(h.home, 'threads', id, 'thread.json');
+  const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.ok(saved.labReviewOwed, 'owed on the record');
+  // A message reached the thread before the new runner looked (as a
+  // restart's resume does).
+  saved.queue = [{ turnId: 'q1', text: 'Check the new release', images: [], origin: 'runner' }];
+  fs.writeFileSync(file, JSON.stringify(saved));
+  const claude = new FakeAdapter();
+  const codex = new FakeAdapter('codex', { ...CODEX_FLAGS, archives: true });
+  const b = new Runner({
+    config: testConfig(h.home), store: new ThreadStore(h.home),
+    adapters: { claude, codex }, accounts: new FakeAccounts(withCodex()),
+    clock: new FakeClock(), log: nullLogger, defer: (fn) => fn(), copyTranscript: () => false,
+    subagentTranscript: () => null, reachable: async () => true, backgroundJobs: false,
+  });
+  b.start({ skip: new Set([id]) });
+  b.adopt(id);
+  b.startOwedReviews(id);
+  assert.equal(codex.sessions.length, 0, 'not while its turn runs');
+  assert.ok(b.threads.get(id)!.rec.labReviewOwed, 'still owed');
+  // That turn finishes with no change of its own: the owed one is reviewed.
+  const s = claude.sessions.filter((x) => x.opts.threadId === id).at(-1)!;
+  s.init();
+  s.out({ kind: 'event', event: { type: 'tool.call', itemId: 'e1', name: END_TURN, kind: 'mcp', title: 'end_turn', input: { needs: 'nothing' } } });
+  s.text('m1', 'All good.');
+  s.result();
+  const w = b.get(id).waitingOn;
+  assert.equal(w?.length, 1, 'waits on the review');
+  assert.equal(b.threads.get(id)!.rec.labReviewOwed, undefined);
+  const reviewId = w![0].threadId;
+  assert.equal(b.get(reviewId).provider, 'codex');
+  assert.ok(codex.sessions.some((x) => x.opts.threadId === reviewId));
+});
+
+test('labReview: a thread hibernated before it came across is finished, and keeps the review for its next finish', async () => {
   const h = setup();
   const id = start(h);
   await h.runner.beginDrain([id], { onHandedOver: () => {} });
@@ -280,21 +324,24 @@ test('labReview: a review owed from a handover is dropped when Mike has written 
   await tick();
   const file = path.join(h.home, 'threads', id, 'thread.json');
   const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
-  assert.ok(saved.labReviewOwed, 'owed on the record');
-  // Mike's next message reached the thread before the new runner looked.
-  saved.queue = [{ turnId: 'q1', text: 'Actually, do the logout bug too', images: [] }];
+  const until = new Date(Date.now() + 3 * 3600_000).toISOString();
+  saved.snoozedUntil = until;
   fs.writeFileSync(file, JSON.stringify(saved));
   const codex = new FakeAdapter('codex', { ...CODEX_FLAGS, archives: true });
   const b = new Runner({
     config: testConfig(h.home), store: new ThreadStore(h.home),
     adapters: { claude: new FakeAdapter(), codex }, accounts: new FakeAccounts(withCodex()),
-    clock: new FakeClock(), log: nullLogger, defer: (fn) => fn(), copyTranscript: () => false,
+    clock: new FakeClock(Date.now()), log: nullLogger, defer: (fn) => fn(), copyTranscript: () => false,
     subagentTranscript: () => null, reachable: async () => true, backgroundJobs: false,
   });
   b.start({ skip: new Set([id]) });
   b.adopt(id);
-  assert.equal(codex.sessions.length, 0, 'no review: the next turn is a new ask');
-  assert.equal(b.threads.get(id)!.rec.labReviewOwed, undefined);
+  b.startOwedReviews(id);
+  assert.equal(codex.sessions.length, 0);
+  const rec = b.threads.get(id)!.rec;
+  assert.equal(rec.snoozedUntil, until, 'its own wake time stands');
+  assert.ok(rec.finished, 'finished, so threads waiting on it hear');
+  assert.ok(rec.labReviewOwed);
 });
 
 test('labReview: a review owed from a handover starts when the next runner loads the thread at start', async () => {
@@ -312,6 +359,8 @@ test('labReview: a review owed from a handover starts when the next runner loads
     subagentTranscript: () => null, reachable: async () => true, backgroundJobs: false,
   });
   b.start();
+  // main.ts, once listening.
+  b.startOwedReviews();
   const w = b.get(id).waitingOn;
   assert.equal(w?.length, 1);
   assert.equal(b.get(w![0].threadId).provider, 'codex');
