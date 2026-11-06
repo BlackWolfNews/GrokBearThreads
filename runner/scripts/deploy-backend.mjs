@@ -101,23 +101,64 @@ function syncDeployment(home) {
   }
 }
 
+// Two deploys can overlap: an old runner handing over goes on with the
+// deploy it started while the new one checks main and starts its own for
+// the same commit (6 Nov, 1ba0776). So a second deploy waits for the first
+// rather than failing, and main() then looks again at what's left to do,
+// which is usually nothing.
+const LOCK_WAIT_MS = 30 * 60 * 1000;
+const LOCK_POLL_MS = 1000;
+
+function pidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    // EPERM: it's there, just not ours to signal.
+    return e?.code === 'EPERM';
+  }
+}
+
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+// Returns whether it had to wait for another deploy.
 function lock(home) {
   const file = path.join(home, 'backend.lock');
-  try {
-    fs.writeFileSync(file, String(process.pid), { flag: 'wx' });
-  } catch {
-    const pid = Number(fs.readFileSync(file, 'utf8'));
-    let alive = false;
+  const until = Date.now() + LOCK_WAIT_MS;
+  let waited = false;
+  for (;;) {
     try {
-      process.kill(pid, 0);
-      alive = true;
+      fs.writeFileSync(file, String(process.pid), { flag: 'wx' });
+      break;
     } catch {
-      // gone
+      let pid = NaN;
+      try {
+        pid = Number(fs.readFileSync(file, 'utf8'));
+      } catch {
+        continue; // gone between the two calls: try again
+      }
+      if (!pidAlive(pid)) {
+        // Left by a deploy that died: take it over.
+        fs.rmSync(file, { force: true });
+        continue;
+      }
+      if (Date.now() > until) throw new Fail(`Another backend deploy (pid ${pid}) is still running after ${LOCK_WAIT_MS / 60000} minutes.`);
+      if (!waited) say(`Waiting for another backend deploy (pid ${pid}) to finish...`);
+      waited = true;
+      sleepSync(LOCK_POLL_MS);
     }
-    if (alive) throw new Fail(`Another backend deploy (pid ${pid}) is running.`);
-    fs.writeFileSync(file, String(process.pid));
   }
-  process.on('exit', () => fs.rmSync(file, { force: true }));
+  process.on('exit', () => {
+    try {
+      if (fs.readFileSync(file, 'utf8') === String(process.pid)) fs.rmSync(file, { force: true });
+    } catch {
+      // already gone
+    }
+  });
+  return waited;
 }
 
 // Runs a step with its output in a log file, printed only if it fails.
@@ -199,7 +240,18 @@ function main(argv) {
     return 0;
   }
 
-  lock(home);
+  if (lock(home)) {
+    // The other deploy may have done some or all of this.
+    const now = readJson(stateFile);
+    if (!v.force) {
+      todo.functions &&= now.functions?.tree !== want.functions;
+      todo.site &&= now.site?.tree !== want.site;
+    }
+    if (!todo.functions && !todo.site) {
+      say(`Backend up to date at ${short} (the other deploy did it).`);
+      return 0;
+    }
+  }
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'threadbear-backend-'));
   process.on('exit', () => fs.rmSync(tmp, { recursive: true, force: true }));
   const archive = spawnSync('git', ['-C', repo, 'archive', '--format=tar', commit, '--', ...EXPORT_PATHS], { maxBuffer: 512 * 1024 * 1024 });
@@ -240,7 +292,7 @@ function main(argv) {
     }
     writeJson(stateFile, { ...readJson(stateFile), site: { tree: want.site, commit, at: new Date().toISOString() }, failed: undefined });
   }
-  say(`Backend deployed at ${short} (${what}).`);
+  say(`Backend deployed at ${short} (${[todo.functions && 'functions', todo.site && 'website'].filter(Boolean).join(' and ')}).`);
   return 0;
 }
 
