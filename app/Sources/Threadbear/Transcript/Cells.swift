@@ -11,6 +11,8 @@ protocol RowCellDelegate: AnyObject {
     func respond(approvalId: String, decision: ApprovalDecision, answers: [String: String]?, message: String?)
     /// Another runner's request for a thread: read it for its card.
     func loadStartRequest(_ approvalId: String)
+    /// The card's answer is on its way: a spinner, and no more clicks.
+    func isAnswering(_ approvalId: String) -> Bool
     func questionDraft(_ approvalId: String) -> [Int: Set<String>]
     func setQuestionDraft(_ approvalId: String, _ draft: [Int: Set<String>])
     /// A secret card (docs/protocol.md, "Secrets"): where its answer is,
@@ -46,6 +48,7 @@ protocol RowCellDelegate: AnyObject {
 extension RowCellDelegate {
     var remoteImages: RemoteImages? { nil }
     func secretState(_ approvalId: String) -> SecretCardState { .ready }
+    func isAnswering(_ approvalId: String) -> Bool { false }
     func answerSecret(approvalId: String, _ answer: SecretAnswer) {}
     func secretEdited(_ approvalId: String) {}
     func askNoteChanged(_ card: AsksCard, ask: Int, note: AskNote) {}
@@ -1355,6 +1358,29 @@ final class PillButton: NSButton {
     }
 }
 
+/// The small spinner a card shows beside its buttons while its answer is
+/// on its way (ThreadSession.answering). Core Animation turns it, so a busy
+/// main thread doesn't stop it.
+enum Spinner {
+    static func make() -> NSProgressIndicator {
+        let s = NSProgressIndicator()
+        s.style = .spinning
+        s.controlSize = .small
+        s.isIndeterminate = true
+        s.isDisplayedWhenStopped = false
+        s.usesThreadedAnimation = true
+        return s
+    }
+
+    /// Shows it centred on the left of `at` (a point on the buttons' middle line), or hides it.
+    static func show(_ spinner: NSProgressIndicator, _ busy: Bool, at point: NSPoint) {
+        let side: CGFloat = 16
+        spinner.frame = NSRect(x: point.x, y: point.y - side / 2, width: side, height: side)
+        if busy { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
+        spinner.isHidden = !busy
+    }
+}
+
 // MARK: - Approval card
 
 final class ApprovalRowCell: RowCellView {
@@ -1366,6 +1392,8 @@ final class ApprovalRowCell: RowCellView {
     let allow = PillButton(pill: "Allow", prominent: true, shortcut: "⏎")
     let always = PillButton(pill: "Always allow")
     let deny = PillButton(pill: "Deny")
+    /// Beside the buttons while the answer is on its way.
+    let spinner = Spinner.make()
     private var approvalId = ""
 
     override init(frame frameRect: NSRect) {
@@ -1374,7 +1402,7 @@ final class ApprovalRowCell: RowCellView {
             button.target = self
             button.action = action
         }
-        [card, titleView, payloadBox, payloadView, allow, always, deny].forEach(addSubview)
+        [card, titleView, payloadBox, payloadView, allow, always, deny, spinner].forEach(addSubview)
         allow.setTip("Let it do this once (Return)")
         always.setTip("Allow this, and anything like it for the rest of this thread")
         deny.setTip("Don't let it do this; the agent is told no")
@@ -1424,12 +1452,15 @@ final class ApprovalRowCell: RowCellView {
             if pending, item.startRequest == nil { delegate?.loadStartRequest(approvalId) }
         }
         var buttonX = left
+        let busy = pending && delegate?.isAnswering(approvalId) == true
         for (button, option) in [(allow, ApprovalOption.allow), (always, .allowAlways), (deny, .deny)] {
             button.isHidden = !pending || !options.contains(option)
             guard !button.isHidden else { continue }
+            button.isEnabled = !busy
             button.frame = NSRect(x: buttonX, y: y, width: max(zoomed(76), button.fittingWidth), height: RowMetrics.buttonHeight)
             buttonX = button.frame.maxX + zoomed(8)
         }
+        Spinner.show(spinner, busy, at: NSPoint(x: buttonX + zoomed(2), y: y + RowMetrics.buttonHeight / 2))
     }
 
     override func releaseContent() {
@@ -1475,6 +1506,7 @@ final class QuestionRowCell: RowCellView, NSTextFieldDelegate {
     let otherBox = FillView()
     let other = NSTextField()
     let send = PillButton(pill: "Send answer", prominent: true)
+    let spinner = Spinner.make()
     let answerIcon = Symbols.makeView()
     let answer = makeLabel()
     private var request: QuestionRequest?
@@ -1499,7 +1531,7 @@ final class QuestionRowCell: RowCellView, NSTextFieldDelegate {
         send.target = self
         send.action = #selector(sendClicked)
         send.setTip("Send your answers to the agent")
-        [card, otherBox, other, send, answerIcon, answer].forEach(addSubview)
+        [card, otherBox, other, send, answerIcon, answer, spinner].forEach(addSubview)
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -1563,6 +1595,7 @@ final class QuestionRowCell: RowCellView, NSTextFieldDelegate {
             let height = Theme.workLabelHeight
             answer.frame = NSRect(x: textX, y: y + (RowMetrics.answerHeight - height) / 2, width: left + inner - textX + RowMetrics.labelInset, height: height)
             answer.setTip(resolution.message ?? "")
+            Spinner.show(spinner, false, at: .zero)
         } else {
             otherBox.frame = NSRect(x: left, y: y, width: inner, height: RowMetrics.otherFieldHeight)
             updateOtherBox()
@@ -1596,8 +1629,10 @@ final class QuestionRowCell: RowCellView, NSTextFieldDelegate {
         guard let request else { return }
         let draft = delegate?.questionDraft(request.approvalId) ?? [:]
         let typed = other.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let ready = !Self.answers(for: request, chosen: draft, typed: typed).isEmpty
+        let busy = delegate?.isAnswering(request.approvalId) == true
+        let ready = !busy && !Self.answers(for: request, chosen: draft, typed: typed).isEmpty
         if send.isEnabled != ready { send.isEnabled = ready }
+        Spinner.show(spinner, busy && !send.isHidden, at: NSPoint(x: send.frame.maxX + zoomed(10), y: send.frame.midY))
     }
 
     /// Places each question's views, reusing the ones already made. An

@@ -803,6 +803,16 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         session?.respond(approvalId: approvalId, decision: decision, answers: answers, message: message)
     }
 
+    func isAnswering(_ approvalId: String) -> Bool { session?.answering.contains(approvalId) == true }
+
+    /// Lays out an approval or question card again as its answer goes
+    /// (ThreadSession.answering). Its height doesn't change.
+    func refreshCard(_ approvalId: String) {
+        for id in ["ap:" + approvalId, "q:" + approvalId] {
+            if let index = session?.displayIndex(of: id), let row = row(at: index) { refreshCell(at: index, row: row) }
+        }
+    }
+
     func loadStartRequest(_ approvalId: String) {
         session?.loadStartRequest(approvalId)
     }

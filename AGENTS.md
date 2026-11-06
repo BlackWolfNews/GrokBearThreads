@@ -97,6 +97,15 @@ and ask the user what they use instead, rather than trying to reach them.
   stepped from a display link showed Mike a couple of frames, as the
   same click opens the next thread (30 Oct). The perf run
   (`app/Tools/perf-run.sh`) times archiving too.
+- Assume every action is slow to land. Another runner's thread goes
+  through Convex and that runner taking the command (a second or more),
+  and the main Mac's runner can be busy. Anything Mike clicks either shows
+  the result straight away (an optimistic update the real answer then
+  confirms or rolls back, with the error) or shows a spinner and stops
+  taking clicks until it lands. Never leave a button that looks idle and
+  can be clicked twice. Mike, 6 Nov, after Start it on a cloud thread's
+  card sat for a second with nothing happening:
+  `ThreadSession.answering` and `Spinner` in Cells.swift are the pattern.
 - Every control gets a tooltip, with `.tip("…")` (SwiftUI) or `setTip` (AppKit).
   `.help` and `toolTip` never show in this app; TipsTests fails on them.
 - Transcript files and fixtures made from real sessions are private: keep them

@@ -701,25 +701,48 @@ final class ThreadSession {
         let runnerId = shown?.startsOn?.id
         let fingerprint = shown?.fingerprint
         ActivityRecorder.shared.answered(threadId: threadId, decision: allow ? .allow : .deny)
+        startAnswering(approvalId)
         Task {
             do {
                 try await client.answerStartRequest(threadId: threadId, approvalId: approvalId, allow: allow, runnerId: allow ? runnerId : nil, fingerprint: fingerprint)
             } catch {
+                self.stopAnswering(approvalId)
                 app?.show(error)
             }
         }
         return true
     }
 
+    /// Cards whose answer is on its way. Another runner's thread takes a
+    /// moment or more to hear it (relay.ts waits for that runner to take
+    /// the command), so the card shows a spinner, its buttons stop taking
+    /// clicks, and a second click or Return does nothing. Once the answer
+    /// lands the card turns into its answered line by itself; on a failure
+    /// the buttons come back with the error.
+    private(set) var answering: Set<String> = []
+
+    private func startAnswering(_ approvalId: String) {
+        answering.insert(approvalId)
+        view?.refreshCard(approvalId)
+    }
+
+    private func stopAnswering(_ approvalId: String) {
+        answering.remove(approvalId)
+        view?.refreshCard(approvalId)
+    }
+
     func respond(approvalId: String, decision: ApprovalDecision, answers: [String: String]?, message: String?) {
+        guard !answering.contains(approvalId) else { return }
         if decision != .answered, answerStartRequest(approvalId: approvalId, allow: decision != .deny) { return }
         guard let client = app?.client(for: threadId) else { return }
         let threadId = threadId
         ActivityRecorder.shared.answered(threadId: threadId, decision: decision)
+        startAnswering(approvalId)
         Task {
             do {
                 try await client.respond(threadId: threadId, approvalId: approvalId, decision: decision, message: message, answers: answers)
             } catch {
+                self.stopAnswering(approvalId)
                 app?.show(error)
             }
         }
