@@ -155,8 +155,7 @@ public final class LocalPreviewSite: @unchecked Sendable {
     /// style attributes and `<style>` blocks. Scripts' contents are taken
     /// out first, so nothing a script says counts.
     static func htmlReferences(in text: String) -> [String] {
-        let markup = text.replacingOccurrences(of: #"(<script\b[^>]*>)[\s\S]*?(</script\s*>)"#, with: "$1$2",
-                                               options: [.regularExpression, .caseInsensitive])
+        let markup = withoutScriptContents(text)
         var out = matches(#"\b(?:src|href|poster|data)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))"#, in: markup)
         for srcset in matches(#"\bsrcset\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))"#, in: markup) {
             for piece in srcset.split(separator: ",") {
@@ -168,17 +167,136 @@ public final class LocalPreviewSite: @unchecked Sendable {
 
     /// What a stylesheet names: `url()` and `@import`.
     static func cssReferences(in text: String) -> [String] {
-        matches(#"url\(\s*(?:"([^"]*)"|'([^']*)'|([^)"'\s]*))\s*\)"#, in: text)
-            + matches(#"@import\s+(?:"([^"]*)"|'([^']*)')"#, in: text)
+        cssURLs(in: text) + matches(#"@import\s+(?:"([^"]*)"|'([^']*)')"#, in: text)
+    }
+
+    // These run on the main thread, as the preview's web view asks for each
+    // file (LocalPreviewSchemeHandler), on whatever a page or stylesheet
+    // says. Two of the regexes they used backtracked: `url(` and 16 KB of
+    // spaces took 15 seconds, and `<script>` over and over with no
+    // `</script>` was quadratic (6 Nov 2026). Both are read in one pass
+    // now, giving what the regexes gave: ICU finds where each starts (its
+    // case folding included), and the rest walks the UTF-16 units the
+    // regexes' ranges count, each looked at a bounded number of times.
+
+    /// `text` with what's between each `<script ...>` and the
+    /// `</script>` after it taken out, as `(<script\b[^>]*>)[\s\S]*?(</script\s*>)`
+    /// replaced with `$1$2` did: the tag runs to the first `>`, and a
+    /// script with no `</script>` after its tag keeps its contents.
+    static func withoutScriptContents(_ text: String) -> String {
+        let units = Array(text.utf16)
+        var tagEnd = Seek { $0 == UInt16(UInt8(ascii: ">")) }
+        var out: [UInt16] = []
+        var copied = 0
+        // Where the open tag being matched ends, while looking for its `</script>`.
+        var gt: Int?
+        // One pass over both kinds of tag in order, never a list of them: a
+        // 64 MB page of `<script` would make millions (Codex's review). Neither
+        // kind can start inside the other, so this sees every one.
+        scriptTagRegex.enumerateMatches(in: text, range: NSRange(location: 0, length: units.count)) { match, _, stop in
+            guard let match else { return }
+            if let open = gt {
+                // A `</script>` inside the open tag doesn't close it.
+                guard match.range(at: 2).location != NSNotFound, match.range.location > open else { return }
+                out += units[copied...open]
+                copied = match.range.location
+                gt = nil
+            } else if match.range(at: 1).location != NSNotFound {
+                let end = tagEnd.first(in: units, from: NSMaxRange(match.range))
+                // No `>`: none for a later tag either.
+                if end < units.count { gt = end } else { stop.pointee = true }
+            }
+        }
+        // Nothing taken out (a script with no `</script>` keeps its contents).
+        guard copied > 0 else { return text }
+        out += units[copied...]
+        return String(decoding: out, as: UTF16.self)
+    }
+
+    /// The first group of each match of
+    /// `url\(\s*(?:"([^"]*)"|'([^']*)'|([^)"'\s]*))\s*\)`, trimmed, as
+    /// `matches` gave it: a quoted value, or a bare one up to a space,
+    /// quote or `)`, then `)` after any spaces.
+    static func cssURLs(in text: String) -> [String] {
+        let units = Array(text.utf16)
+        let n = units.count
+        let dq = UInt16(UInt8(ascii: "\"")), sq = UInt16(UInt8(ascii: "'")), paren = UInt16(UInt8(ascii: ")"))
+        // One Seek for each place a search starts, as each one's starts only
+        // move forward.
+        var afterOpen = Seek { !isSpace($0) }, afterBare = Seek { !isSpace($0) }
+        var afterDQ = Seek { !isSpace($0) }, afterSQ = Seek { !isSpace($0) }
+        var bareEnd = Seek { $0 == paren || $0 == dq || $0 == sq || isSpace($0) }
+        var nextDQ = Seek { $0 == dq }, nextSQ = Seek { $0 == sq }
+        var out: [String] = []
+        var resume = 0
+        // Enumerated, not listed: a 64 MB stylesheet of `url(` would make
+        // millions of matches at once (Codex's review).
+        urlOpenRegex.enumerateMatches(in: text, range: NSRange(location: 0, length: n)) { open, _, _ in
+            guard let open, open.range.location >= resume else { return }
+            let p = afterOpen.first(in: units, from: NSMaxRange(open.range))
+            var value: Range<Int>?, close = 0
+            if p < n, units[p] == dq || units[p] == sq {
+                // A quoted value that isn't followed by `)` matches nothing:
+                // a bare value can't start at a quote.
+                let q = units[p] == dq ? nextDQ.first(in: units, from: p + 1) : nextSQ.first(in: units, from: p + 1)
+                if q < n {
+                    let r = units[p] == dq ? afterDQ.first(in: units, from: q + 1) : afterSQ.first(in: units, from: q + 1)
+                    if r < n, units[r] == paren { value = p + 1..<q; close = r }
+                }
+            } else {
+                let e = bareEnd.first(in: units, from: p)
+                let r = afterBare.first(in: units, from: e)
+                if r < n, units[r] == paren { value = p..<e; close = r }
+            }
+            guard let value else { return }
+            out.append(String(decoding: units[value], as: UTF16.self).trimmingCharacters(in: .whitespaces))
+            resume = close + 1
+        }
+        return out
+    }
+
+    private static let scriptTagRegex = try! NSRegularExpression(pattern: #"(<script\b)|(</script\s*>)"#, options: [.caseInsensitive])
+    private static let urlOpenRegex = try! NSRegularExpression(pattern: #"url\("#, options: [.caseInsensitive])
+
+    /// ICU's `\s` for one UTF-16 unit: the White_Space property, all of
+    /// whose characters are in the BMP (a test checks it against ICU).
+    static func isSpace(_ unit: UInt16) -> Bool {
+        Unicode.Scalar(unit)?.properties.isWhitespace ?? false
+    }
+
+    /// The first index at or after `from` whose unit passes `test`, else
+    /// the count, for searches whose `from` only moves forward: an answer
+    /// holds for any `from` up to it, so a run is walked once however many
+    /// searches start in it (thousands of `url(` before one long run of
+    /// spaces each started a walk of it).
+    struct Seek {
+        let test: (UInt16) -> Bool
+        private var from = 0, found = -1
+
+        init(_ test: @escaping (UInt16) -> Bool) { self.test = test }
+
+        mutating func first(in units: [UInt16], from start: Int) -> Int {
+            if start >= from && start <= found { return found }
+            var i = start
+            while i < units.count && !test(units[i]) { i += 1 }
+            (from, found) = (start, i)
+            return i
+        }
     }
 
     /// The first group that matched in each match of `pattern`.
     private static func matches(_ pattern: String, in text: String) -> [String] {
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return [] }
-        return regex.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap { match in
-            (1..<match.numberOfRanges).lazy.compactMap { Range(match.range(at: $0), in: text) }.first
-                .map { String(text[$0]).trimmingCharacters(in: .whitespaces) }
+        // Enumerated, so a page of millions of `src=x` holds the strings, not
+        // a match object for each as well (Codex's review).
+        var out: [String] = []
+        regex.enumerateMatches(in: text, range: NSRange(text.startIndex..., in: text)) { match, _, _ in
+            guard let match else { return }
+            if let first = (1..<match.numberOfRanges).lazy.compactMap({ Range(match.range(at: $0), in: text) }).first {
+                out.append(String(text[first]).trimmingCharacters(in: .whitespaces))
+            }
         }
+        return out
     }
 
     /// `ref`, named in a file in `dir`, as a path from the folder: nil for
@@ -213,13 +331,33 @@ public final class LocalPreviewSite: @unchecked Sendable {
     /// (runner/src/runner/highlights.ts). A `<script`, an `on...=` handler
     /// in a tag or a `javascript:` link anywhere counts, even in a comment:
     /// asking wrongly costs a bar, missing one looks broken. The runner's
-    /// test is the same pattern.
+    /// test is the same (`hasScriptMarks` there).
+    ///
+    /// The test is `<script|<[^>]*\son[a-z]+\s*=|javascript:`, read in one
+    /// pass: as one regex, a page of 4 MB of `<` with no `>` started a scan
+    /// to its end at every `<`, which pinned a core for hours (6 Nov 2026).
+    /// The two regexes left have no overlapping runs, and a handler counts
+    /// when the last `<` before it comes after the last `>`, which is what
+    /// `<[^>]*` before it allowed. `String.range(of:options:)` ran that
+    /// regex as a Swift Regex, which reads characters (a letter with its
+    /// accents is one) and folds case without `ſ` for `s` (ICU folds it), so
+    /// these are Swift Regexes too, and the walk goes by characters.
     public static func hasScripts(_ html: Data) -> Bool {
-        String(decoding: html.prefix(scriptScanBytes), as: UTF8.self)
-            .range(of: scriptPattern, options: [.regularExpression, .caseInsensitive]) != nil
+        let text = String(decoding: html.prefix(scriptScanBytes), as: UTF8.self)
+        if text.firstMatch(of: try! Regex(#"<script|javascript:"#).ignoresCase()) != nil { return true }
+        let handlerRegex = try! Regex(#"\son[a-z]+\s*="#).ignoresCase()
+        var lastOpen: String.Index?, lastClose: String.Index?, read = text.startIndex, from = text.startIndex
+        // One match at a time, not `matches(of:)`, which lists them all first.
+        while let handler = text[from...].firstMatch(of: handlerRegex) {
+            from = handler.range.upperBound
+            while read < handler.range.lowerBound {
+                if text[read] == "<" { lastOpen = read } else if text[read] == ">" { lastClose = read }
+                read = text.index(after: read)
+            }
+            if let lastOpen, lastClose.map({ lastOpen > $0 }) ?? true { return true }
+        }
+        return false
     }
-
-    static let scriptPattern = #"<script|<[^>]*\son[a-z]+\s*=|javascript:"#
 
     /// How much of a page `hasScripts` reads.
     public static let scriptScanBytes = 4 * 1024 * 1024

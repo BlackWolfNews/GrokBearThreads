@@ -195,6 +195,116 @@ final class LocalPreviewSiteTests: XCTestCase {
         XCTAssertTrue(LocalPreviewSite.hasScripts(Data("<body\n  onload = \"draw()\">".utf8)))
         XCTAssertFalse(LocalPreviewSite.hasScripts(Data("<p>Do it once = twice</p>".utf8)), "words, not a handler")
         XCTAssertTrue(LocalPreviewSite.hasScripts(Data("<a href=\"javascript:go()\">go</a>".utf8)))
+        // A handler counts only inside a tag: after a `<` with no `>` since.
+        XCTAssertFalse(LocalPreviewSite.hasScripts(Data("<p>Turn it on now = later</p>".utf8)), "a handler-ish word outside a tag")
+        XCTAssertTrue(LocalPreviewSite.hasScripts(Data("<p> x <img\nsrc=a.png ONERROR=go()>".utf8)))
+        XCTAssertTrue(LocalPreviewSite.hasScripts(Data("<<< <div onclick=go()".utf8)), "an unclosed tag still counts")
+        XCTAssertFalse(LocalPreviewSite.hasScripts(Data("<p>a</p> onclick=go()".utf8)))
+        XCTAssertTrue(LocalPreviewSite.hasScripts(Data("<!-- <script> -->".utf8)), "even in a comment")
+        XCTAssertTrue(LocalPreviewSite.hasScripts(Data("<a href=\"JavaScript:go()\">".utf8)))
+        XCTAssertTrue(LocalPreviewSite.hasScripts(Data("é <b onmouseover\t=x> 😀".utf8)), "past characters of more than one unit")
+        XCTAssertFalse(LocalPreviewSite.hasScripts(Data("😀<b>😀</b> onmouseover=x".utf8)))
+        // What the regex it replaced did with characters and case, kept.
+        XCTAssertFalse(LocalPreviewSite.hasScripts(Data("<\u{017F}cript>".utf8)), "a long s isn't an s")
+        XCTAssertFalse(LocalPreviewSite.hasScripts(Data("<\u{0301}b onclick=x>".utf8)), "a < with an accent isn't a <")
+        XCTAssertTrue(LocalPreviewSite.hasScripts(Data("<b \u{0301}onclick=x>".utf8)), "a space with an accent is a space")
+    }
+
+    /// The one-pass scan gives what the single regex it replaced gave (run
+    /// here on inputs small enough for the regex to be quick).
+    func testHasScriptsMatchesTheOldPattern() {
+        let old = #"<script|<[^>]*\son[a-z]+\s*=|javascript:"#
+        let pieces = ["<", ">", " ", "\n", "on", "ON", "x", "click", "=", "<script", "<SCRIPT", "javascript:", "é", "😀", "\u{00A0}", "a", "<b", "</b>", "<\u{017F}cript", "on\u{212A}", "\t", "\u{0301}", "\r\n"]
+        var rng = SystemRandomNumberGenerator()
+        var differ: [String] = []
+        for _ in 0..<5000 {
+            let text = (0..<Int.random(in: 0...12, using: &rng)).map { _ in pieces.randomElement(using: &rng)! }.joined()
+            let expected = text.range(of: old, options: [.regularExpression, .caseInsensitive]) != nil
+            if LocalPreviewSite.hasScripts(Data(text.utf8)) != expected { differ.append(text) }
+        }
+        XCTAssertEqual(differ, [])
+    }
+
+    /// 4 MB of `<` with no `>` held the old regex at every `<` to the end
+    /// of the page: hours. Each of these takes well under a second now.
+    func testHasScriptsIsQuickOnPathologicalPages() {
+        let size = LocalPreviewSite.scriptScanBytes
+        let pages: [(String, Bool)] = [
+            (String(repeating: "<", count: size), false),
+            (String(repeating: "< on", count: size / 4), false),
+            (String(repeating: "<a onx ", count: size / 7), false),
+            (String(repeating: "<", count: size - 16) + " onclick=go()", true),
+            ("<b" + String(repeating: " ", count: size - 16) + "onx", false),
+            ("<b onx" + String(repeating: " ", count: size - 16) + "y", false),
+        ]
+        for (page, expected) in pages {
+            let started = Date()
+            XCTAssertEqual(LocalPreviewSite.hasScripts(Data(page.utf8)), expected)
+            XCTAssertLessThan(Date().timeIntervalSince(started), 5, "\(page.prefix(8))...")
+        }
+    }
+
+    /// The one-pass reads of a page's and a stylesheet's references give
+    /// what the regexes they replaced gave, on inputs small enough for the
+    /// regexes to be quick.
+    func testReferencesMatchTheOldPatterns() {
+        func oldMatches(_ pattern: String, _ text: String) -> [String] {
+            let regex = try! NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
+            return regex.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap { match in
+                (1..<match.numberOfRanges).lazy.compactMap { Range(match.range(at: $0), in: text) }.first
+                    .map { String(text[$0]).trimmingCharacters(in: .whitespaces) }
+            }
+        }
+        let oldStrip = #"(<script\b[^>]*>)[\s\S]*?(</script\s*>)"#
+        let oldURL = #"url\(\s*(?:"([^"]*)"|'([^']*)'|([^)"'\s]*))\s*\)"#
+        let pieces = ["<script", "<SCRIPT", "<\u{017F}cript", "<scripts", "</script", "</script >", "</SCRIPT>", ">", "<", " ", "\n", "\u{00A0}",
+                      "\u{2028}", "url(", "URL(", "url( ", ")", "\"", "'", "a.png", "x", "😀", "é", "src=", "/", "\u{0301}", "\r\n"]
+        var rng = SystemRandomNumberGenerator()
+        var differ: [String] = []
+        for _ in 0..<20000 {
+            let text = (0..<Int.random(in: 0...14, using: &rng)).map { _ in pieces.randomElement(using: &rng)! }.joined()
+            let strippedOld = text.replacingOccurrences(of: oldStrip, with: "$1$2", options: [.regularExpression, .caseInsensitive])
+            if LocalPreviewSite.withoutScriptContents(text) != strippedOld { differ.append("strip: \(text.debugDescription)") }
+            if LocalPreviewSite.cssURLs(in: text) != oldMatches(oldURL, text) { differ.append("url: \(text.debugDescription)") }
+        }
+        XCTAssertEqual(differ, [])
+        XCTAssertEqual(LocalPreviewSite.withoutScriptContents("<script a>x<script>y</script ><p>"), "<script a></script ><p>")
+        XCTAssertEqual(LocalPreviewSite.withoutScriptContents("<script>never closed"), "<script>never closed")
+        XCTAssertEqual(LocalPreviewSite.cssURLs(in: #"a{b:url( "x y.png" )} c{d:url(z.png) url('w.png')} e{f:url(bad"quote)}"#), ["x y.png", "z.png", "w.png"])
+    }
+
+    /// `isSpace` is ICU's `\s`, which the one-pass reads stand in for.
+    func testIsSpaceIsICUsWhitespace() {
+        let regex = try! NSRegularExpression(pattern: #"\s"#)
+        var differ: [UInt16] = []
+        for unit in UInt16.min...UInt16.max where !(0xD800...0xDFFF).contains(unit) {
+            let s = String(decoding: [unit], as: UTF16.self)
+            let icu = regex.firstMatch(in: s, range: NSRange(location: 0, length: 1)) != nil
+            if LocalPreviewSite.isSpace(unit) != icu { differ.append(unit) }
+        }
+        XCTAssertEqual(differ, [])
+    }
+
+    /// Pages and stylesheets that held the old regexes for minutes to hours
+    /// (`url(` and 16 KB of spaces took 15 seconds), read in well under a
+    /// second each now.
+    func testReferencesAreQuickOnPathologicalText() {
+        let size = 4 * 1024 * 1024
+        let texts = [
+            String(repeating: "<script>", count: size / 8),
+            String(repeating: "<script", count: size / 7),
+            "url(" + String(repeating: " ", count: size),
+            String(repeating: "url(", count: size / 8) + String(repeating: " ", count: size / 2) + "x",
+            String(repeating: "url(\"", count: size / 5),
+            String(repeating: "url('", count: size / 10) + String(repeating: "url(\"", count: size / 10),
+            "url(\"" + String(repeating: " ", count: size) + "\"" + String(repeating: " ", count: size),
+        ]
+        for text in texts {
+            let started = Date()
+            _ = LocalPreviewSite.htmlReferences(in: text)
+            _ = LocalPreviewSite.cssReferences(in: text)
+            XCTAssertLessThan(Date().timeIntervalSince(started), 10, "\(text.prefix(12))...")
+        }
     }
 
     func testScanNeverBlocksOnAFifo() throws {
