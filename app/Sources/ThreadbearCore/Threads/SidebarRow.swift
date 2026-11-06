@@ -338,4 +338,13 @@ public enum SidebarOrder {
         }
         return ids[min(max(index + step, 0), ids.count - 1)]
     }
+
+    /// Next Inbox Thread (⌥⌘↓). From a thread in the Inbox section, the one
+    /// below it; from anywhere else (another section, a project, nothing
+    /// open), the Inbox's first. Nil when there's nothing further: the
+    /// open thread is the Inbox's last, or the Inbox is empty.
+    public static func nextInInbox(after current: String?, inbox: [String]) -> String? {
+        guard let current, let index = inbox.firstIndex(of: current) else { return inbox.first }
+        return index + 1 < inbox.count ? inbox[index + 1] : nil
+    }
 }

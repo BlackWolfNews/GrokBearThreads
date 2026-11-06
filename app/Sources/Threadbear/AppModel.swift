@@ -137,6 +137,13 @@ final class AppModel {
     /// Not for one an agent or the phone archives. `ArchivedToast` takes it
     /// down after a few seconds; the next archive replaces it.
     var archivedNote: ArchivedNote?
+    /// The note at the top of the thread panel when Next Inbox Thread
+    /// (⌥⌘↓) has nowhere to go: the open thread is the Inbox's last, or the
+    /// Inbox is empty. `InboxEndToast` takes it down after a few seconds.
+    var inboxEndNote: InboxEndNote?
+    /// Bumped when a thread is picked from somewhere other than the list
+    /// (Next Inbox Thread), so the list scrolls its row into view.
+    var revealSelectionRequests = 0
     /// Archives from the button, ⌘E or the done card that haven't gone to
     /// the runner yet (the row's still sliding). Undo takes one out of here,
     /// and then it never goes.
@@ -791,6 +798,14 @@ struct ArchivedNote: Equatable, Identifiable {
     let title: String
     /// It was the open thread, so Undo opens it again.
     let wasOpen: Bool
+}
+
+/// What `InboxEndToast` shows.
+struct InboxEndNote: Equatable, Identifiable {
+    let id = UUID()
+    /// The Inbox had nothing in it at all, rather than nothing after the
+    /// open thread.
+    let empty: Bool
 }
 
 /// What `ConnectionBanner` shows.

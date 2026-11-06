@@ -398,6 +398,33 @@ enum Automation {
             guard MouseNavigation.handle(event, in: window, app: app) else { return "error not taken (not the main window?)" }
             let place = app.place
             return "ok \(place.mode) \(place.threadId ?? "new") back=\(app.canGoBack) forward=\(app.canGoForward)"
+        case "menu-key":
+            // A key equivalent through the main menu, as a press of it
+            // would go: {"key": "down", "modifiers": ["cmd", "opt"]}. Says
+            // whether a menu item took it, the open thread and any
+            // end-of-inbox note.
+            guard let key = c["key"] as? String else { return "error key missing" }
+            let named: [String: Int] = ["down": NSDownArrowFunctionKey, "up": NSUpArrowFunctionKey,
+                                        "left": NSLeftArrowFunctionKey, "right": NSRightArrowFunctionKey]
+            let chars = named[key].map { String(Character(UnicodeScalar($0)!)) } ?? key
+            var flags: NSEvent.ModifierFlags = []
+            for m in c["modifiers"] as? [String] ?? [] {
+                switch m {
+                case "cmd": flags.insert(.command)
+                case "opt": flags.insert(.option)
+                case "ctrl": flags.insert(.control)
+                case "shift": flags.insert(.shift)
+                default: return "error modifier is cmd, opt, ctrl or shift"
+                }
+            }
+            if named[key] != nil { flags.formUnion([.numericPad, .function]) }
+            guard let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0,
+                                               windowNumber: window?.windowNumber ?? 0, context: nil, characters: chars,
+                                               charactersIgnoringModifiers: chars, isARepeat: false, keyCode: 0) else { return "error no event" }
+            let taken = NSApp.mainMenu?.performKeyEquivalent(with: event) ?? false
+            try? await Task.sleep(for: .milliseconds(150))
+            let note = app.inboxEndNote.map { $0.empty ? " note=empty" : " note=end" } ?? ""
+            return "ok taken=\(taken) selection=\(app.selection ?? "none")\(note)"
         case "options":
             return options(c, app: app)
         case "review":

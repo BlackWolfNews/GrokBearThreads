@@ -109,7 +109,10 @@ struct DetailView: View {
             .frame(maxWidth: .infinity)
         }
         }
-        .overlay(alignment: .top) { ArchivedToast() }
+        .overlay(alignment: .top) {
+            ArchivedToast()
+            InboxEndToast()
+        }
     }
 }
 
@@ -166,6 +169,60 @@ private struct ArchivedToast: View {
                 .fontWeight(.medium)
                 .tip("Put it back in the inbox")
         }
+        .font(.system(size: TypeScale.label))
+        .padding(.horizontal, zoomed(14))
+        .padding(.vertical, zoomed(7))
+        .background {
+            shape
+                .fill(.regularMaterial)
+                .shadow(color: .black.opacity(dark ? 0.4 : 0.12), radius: zoomed(10), y: zoomed(3))
+        }
+        .overlay(shape.strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5))
+        .onHover { hovering = $0 }
+        .padding(.top, zoomed(10))
+    }
+}
+
+/// Floats where `ArchivedToast` does when Next Inbox Thread (⌥⌘↓) has
+/// nowhere to go: past the Inbox's last thread, or with nothing in it.
+/// A click takes it down; otherwise it goes after a few seconds.
+private struct InboxEndToast: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var hovering = false
+
+    static let shownFor: Duration = .seconds(3)
+
+    var body: some View {
+        ZStack {
+            if let note = app.inboxEndNote {
+                toast(note)
+                    .id(note.id)
+                    .transition(Juice.reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
+                    .task(id: note.id) {
+                        try? await Task.sleep(for: Self.shownFor)
+                        while hovering, !Task.isCancelled { try? await Task.sleep(for: .milliseconds(300)) }
+                        guard !Task.isCancelled else { return }
+                        app.dismissInboxEndNote(note.id)
+                    }
+            }
+        }
+        .animation(Juice.reduceMotion ? .easeOut(duration: 0.15) : .snappy(duration: 0.3), value: app.inboxEndNote?.id)
+    }
+
+    private func toast(_ note: InboxEndNote) -> some View {
+        let dark = colorScheme == .dark
+        let shape = Capsule(style: .continuous)
+        return Button { app.dismissInboxEndNote(note.id) } label: {
+            HStack(spacing: zoomed(7)) {
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                Text(note.empty ? "Inbox clear" : "That's the end of the inbox")
+                Text(note.empty ? "Nothing's waiting on you" : "You're all caught up").foregroundStyle(.secondary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .tip("Dismiss")
         .font(.system(size: TypeScale.label))
         .padding(.horizontal, zoomed(14))
         .padding(.vertical, zoomed(7))

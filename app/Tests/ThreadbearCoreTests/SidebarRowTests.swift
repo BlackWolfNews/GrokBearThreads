@@ -214,6 +214,16 @@ final class SidebarRowTests: XCTestCase {
         XCTAssertEqual(SidebarOrder.neighbour(of: "gone", in: ids, step: -1), "c")
         XCTAssertNil(SidebarOrder.neighbour(of: "a", in: [], step: 1))
     }
+
+    func testNextInInbox() {
+        let inbox = ["a", "b", "c"]
+        XCTAssertEqual(SidebarOrder.nextInInbox(after: "a", inbox: inbox), "b")
+        XCTAssertNil(SidebarOrder.nextInInbox(after: "c", inbox: inbox), "the last one has nothing after it")
+        XCTAssertEqual(SidebarOrder.nextInInbox(after: "running", inbox: inbox), "a", "from another section, the first")
+        XCTAssertEqual(SidebarOrder.nextInInbox(after: nil, inbox: inbox), "a", "nothing open, the first")
+        XCTAssertNil(SidebarOrder.nextInInbox(after: nil, inbox: []), "an empty inbox")
+        XCTAssertNil(SidebarOrder.nextInInbox(after: "running", inbox: []))
+    }
 }
 
 final class ComposerPlacementTests: XCTestCase {

@@ -100,6 +100,9 @@ struct ThreadbearApp: App {
                     Button("Forward", systemImage: "chevron.right") { app.goForward() }
                         .keyboardShortcut("]")
                         .disabled(!app.canGoForward)
+                    Divider()
+                    Button("Next Inbox Thread", systemImage: "chevron.down") { app.nextInboxThread() }
+                        .keyboardShortcut(.downArrow, modifiers: [.command, .option])
                 }
             }
             // Help has no help book to open: the tour is what there is.

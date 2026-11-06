@@ -49,6 +49,29 @@ extension AppModel {
         select(threadId)
     }
 
+    /// Next Inbox Thread (⌥⌘↓): the thread below the open one in the Inbox
+    /// section, or the Inbox's first when the open one is elsewhere (Starred,
+    /// Running, put away, a project, nothing). Past the last one, or with an
+    /// empty Inbox, a note says so instead.
+    func nextInboxThread() {
+        let inbox = sections.inbox.map(\.id)
+        guard let next = SidebarOrder.nextInInbox(after: selection, inbox: inbox) else {
+            archivedNote = nil
+            inboxEndNote = InboxEndNote(empty: inbox.isEmpty)
+            return
+        }
+        inboxEndNote = nil
+        sidebarMode = .inbox
+        // A folded Inbox has no row to show it by.
+        collapsedSections.remove(.inbox)
+        select(next)
+        revealSelectionRequests &+= 1
+    }
+
+    func dismissInboxEndNote(_ id: UUID) {
+        if inboxEndNote?.id == id { inboxEndNote = nil }
+    }
+
     /// Shows a sub-agent's transcript. Its thread becomes the selection.
     func selectSubagent(threadId: String, subagentId: String) {
         let ref = SubagentRef(threadId: threadId, subagentId: subagentId)

@@ -492,6 +492,7 @@ extension AppModel {
         let next = neighbour(of: threadId)
         if let thread = threads[threadId] {
             archivedNote = ArchivedNote(threadId: threadId, title: thread.title, wasOpen: selection == threadId)
+            inboxEndNote = nil
         }
         if selection == threadId {
             flyToArchive(threadId)

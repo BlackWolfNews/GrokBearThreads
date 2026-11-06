@@ -522,6 +522,12 @@ struct ThreadList<Content: View>: View {
                 app.select(next)
                 proxy.scrollTo(scrollID(next))
             }
+            // Next Inbox Thread (⌥⌘↓) picks a row from the menu: bring it
+            // into view as the arrow keys do.
+            .onChange(of: app.revealSelectionRequests) {
+                guard let id = app.selection, order.contains(id) else { return }
+                withAnimation(Juice.selection) { proxy.scrollTo(scrollID(id)) }
+            }
             .onExitCommand {
                 if app.sidebarMode != .inbox { app.sidebarMode = .inbox }
             }
