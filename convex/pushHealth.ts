@@ -31,16 +31,30 @@ export const PUSH_FAILING_FRESH_MS = 3 * 86_400_000;
 // A failure's text is a status and a reason from a fixed set, never free
 // text: a relay (PUSH_RELAY_URL can name anyone's) or a socket error could
 // put a device token, a key or thread text in its message, and this goes
-// in logs, the pushHealth row and the runner's notice. Apple's reasons are
-// single CamelCase words (BadDeviceToken, InvalidProviderToken); a socket
-// error keeps only its code (ECONNREFUSED); the relay's own few are kept
-// as they are; anything else is "other".
+// in logs, the pushHealth row and the runner's notice. Only Apple's own
+// reasons, a socket error's code (ECONNREFUSED) and the relay's own few
+// are kept; anything else is "other".
+// Apple's documented reasons (developer.apple.com, "Handling notification
+// responses from APNs"); keep in step with relay/convex/reasons.ts.
+export const APPLE_REASONS = new Set([
+  'BadCollapseId', 'BadDeviceToken', 'BadExpirationDate', 'BadMessageId', 'BadPriority', 'BadTopic',
+  'DeviceTokenNotForTopic', 'DuplicateHeaders', 'IdleTimeout', 'InvalidPushType', 'MissingDeviceToken', 'MissingTopic',
+  'PayloadEmpty', 'TopicDisallowed', 'BadCertificate', 'BadCertificateEnvironment', 'ExpiredProviderToken', 'Forbidden',
+  'InvalidProviderToken', 'MissingProviderToken', 'UnrelatedKeyIdInToken', 'BadEnvironmentKeyInToken', 'BadPath', 'MethodNotAllowed',
+  'ExpiredToken', 'Unregistered', 'PayloadTooLarge', 'TooManyProviderTokenUpdates', 'TooManyRequests', 'InternalServerError',
+  'ServiceUnavailable', 'Shutdown',
+]);
+// Socket error codes worth telling apart.
+export const SOCKET_CODES = new Set([
+  'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN', 'EPIPE',
+  'EHOSTUNREACH', 'ENETUNREACH', 'ECONNABORTED',
+]);
 const KNOWN_REASONS = new Set(['relay not configured', 'timeout', 'unauthorized', 'rate limited', 'bad request', 'too many new installs today', "couldn't register with the relay", 'send threw', 'fetch failed']);
 export function safeReason(reason: string | undefined): string | undefined {
   if (!reason) return undefined;
   const r = reason.trim();
-  if (/^[A-Z][A-Za-z]{2,39}$/.test(r) || KNOWN_REASONS.has(r)) return r;
-  return r.match(/\bE[A-Z]{2,20}\b/)?.[0] ?? 'other';
+  if (APPLE_REASONS.has(r) || KNOWN_REASONS.has(r)) return r;
+  return r.split(/[^A-Z_]+/).find((w) => SOCKET_CODES.has(w)) ?? 'other';
 }
 export const failureText = (status: number, reason?: string) => {
   const r = safeReason(reason);

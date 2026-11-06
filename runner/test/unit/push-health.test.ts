@@ -32,6 +32,9 @@ test('failure text keeps the status and a known reason, never free text', () => 
   const token = 'ab'.repeat(32);
   assert.equal(failureText(400, `Rejected device token ${token}`), '400 other');
   assert.equal(failureText(400, 'Mike your build finished'), '400 other');
+  assert.equal(failureText(400, 'ConfidentialAcquisition'), '400 other', 'a word that only looks like one of Apple\'s');
+  assert.equal(failureText(0, 'EPRIVATETEXT'), '0 other');
+  assert.equal(failureText(0, 'getaddrinfo EAI_AGAIN x.convex.site'), '0 EAI_AGAIN');
 });
 
 test('tb status says whose key Apple turned down', () => {
@@ -50,4 +53,12 @@ test("the relay tallies a failure's status and reason, never anything longer", a
   assert.equal(reasonKey(500), '500');
   assert.equal(reasonKey(0, 'connect ECONNREFUSED 10.0.0.1:443'), '0 ECONNREFUSED');
   assert.equal(reasonKey(400, `token ${'ab'.repeat(32)}`), '400 other');
+  assert.equal(reasonKey(400, 'ConfidentialAcquisition'), '400 other');
+});
+
+test("the relay and the backend keep the same lists of Apple's reasons and socket codes", async () => {
+  const relay = await import('../../../relay/convex/reasons.ts');
+  const backend = await import('../../../convex/pushHealth.ts');
+  assert.deepEqual([...relay.APPLE].sort(), [...backend.APPLE_REASONS].sort());
+  assert.deepEqual([...relay.SOCKET].sort(), [...backend.SOCKET_CODES].sort());
 });
