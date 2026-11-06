@@ -1,7 +1,7 @@
 import type { HighlightState } from './highlights.ts';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { WaitingForRoom, Ask, AskAnswer, NeedsWho, DesignReview, ReviewDraft, EffortLevel, MessageOrigin, PanelRequest, PermissionMode, ThreadShare, PersistedEvent, Provider, ArchivedBy, ArchiveVerdict, Subagent, ThreadProject, ThreadSchedule, ThreadStartedBy, ThreadStatus, ImageRef } from './protocol.ts';
+import type { WaitingForRoom, Ask, AskAnswer, NeedsWho, DesignReview, ReviewDraft, EffortLevel, MessageOrigin, PanelRequest, PermissionMode, ThreadShare, PersistedEvent, Provider, ArchivedBy, ArchiveVerdict, Subagent, ThreadProject, ThreadSchedule, ThreadStartedBy, ThreadStatus, ImageRef, LooseEnd } from './protocol.ts';
 import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 import { paths } from './config.ts';
 import type { WorktreeRecord } from './worktrees.ts';
@@ -147,6 +147,8 @@ export type ThreadRecord = {
   brief?: { text: string; at: string }; // the librarian's line on where the thread is up to
   // The thread's own git worktree (worktrees.ts), once it's made.
   worktree?: WorktreeRecord;
+  // The done card's loose ends (runner/loose-ends.ts), for the card at seq.
+  looseEnds?: { seq: number; ends: LooseEnd[]; at: string };
   // Made in a repo that asks for worktrees and not told otherwise: the
   // first turn makes one (and runs its setup) before the CLI starts.
   worktreePending?: boolean;

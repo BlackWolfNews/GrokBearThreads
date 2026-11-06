@@ -251,6 +251,7 @@ extension AppModel {
         // The open transcript's "3 sub-agents working in the background"
         // line follows the summary, not the events.
         if previous?.background != thread.background { sessions[thread.id]?.setBackground(thread.background) }
+        if previous?.looseEnds != thread.looseEnds { sessions[thread.id]?.setLooseEnds(thread.looseEnds) }
         // The open sub-agent did something: read its transcript again.
         if let ref = subagentSelection, ref.threadId == thread.id,
            previous?.subagents.first(where: { $0.id == ref.subagentId }) != thread.subagents.first(where: { $0.id == ref.subagentId }) {

@@ -143,6 +143,7 @@ import type { SlashCommand } from './slash-commands.ts';
 import { hibernationPart, type HibernationPart } from './runner/hibernation.ts';
 import { newThreadsPart, type NewThreadsPart } from './runner/new-threads.ts';
 import { labReviewPart, type LabReviewPart } from './runner/lab-review.ts';
+import { looseEndsPart, type LooseEndsPart } from './runner/loose-ends.ts';
 
 export type Notification =
   | { method: 'thread.updated'; params: { thread: ThreadSummary } }
@@ -417,6 +418,10 @@ type Runtime = {
   editing?: boolean;
   // Called when the running turn ends (endTurn), for an edit waiting on it.
   turnEndWaiters?: (() => void)[];
+  // The done card's loose-ends check (runner/loose-ends.ts): which run is
+  // the latest, so an older one finishing late is dropped, and when it began.
+  looseEndsRun?: number;
+  looseEndsAt?: number;
 };
 
 export type ThreadState = { rec: ThreadRecord; rt: Runtime };
@@ -563,12 +568,15 @@ export const UNTIL_RESTART = '9999-12-31T00:00:00.000Z';
 export const NO_WAKE_TIME = UNTIL_RESTART;
 
 // Parts of the Runner that live in runner/ (see each file's top).
-export interface Runner extends LabReviewPart, NewThreadsPart, HibernationPart, TitlesPart, HighlightsPart, PatchesPart, EditingPart, ClisPart, ReviewsPart, ApprovalsPart, ProjectsHostPart, StoppedWorkPart, HandoversPart, PoolsPart, NetworkPart, WorktreesPart, CommandsPart {}
+export interface Runner extends LooseEndsPart, LabReviewPart, NewThreadsPart, HibernationPart, TitlesPart, HighlightsPart, PatchesPart, EditingPart, ClisPart, ReviewsPart, ApprovalsPart, ProjectsHostPart, StoppedWorkPart, HandoversPart, PoolsPart, NetworkPart, WorktreesPart, CommandsPart {}
 export class Runner {
   // While main.ts is still starting up: waking a thread for its waits
   // (reconcileWaits) would start a CLI whose tools aren't ready, so they
   // wait for main.ts's own reconcileWaits once it's listening.
   holdWaits = false;
+  // The schedules that send to a thread (main.ts sets it from the
+  // Scheduler), for the done card's loose ends.
+  schedulesFor?: (threadId: string) => Schedule[];
   // The release this runner runs (none from a source checkout), for
   // threads hibernating until a new one (snoozedUntil "release"). Tests set it.
   release: string | undefined = RELEASE.release;
@@ -2150,6 +2158,11 @@ export class Runner {
       // A job that ended mid-turn: the CLI's turn reading its result is next.
       !rt.taskEndedInTurn && !rt.finished.length;
     this.endTurn(st, ev.seq, outcome === 'failed' ? 'error' : 'idle', outcome, limitHit, netLost);
+    // The done card's loose ends (experiment looseEnds), unless it's going
+    // away now; and the card of the thread that started this one, which
+    // lists this one while it's working.
+    if (outcome === 'completed' && said?.needs === 'nothing' && !archive) void this.checkLooseEnds(st);
+    this.recheckStarter(st);
     // A code change gets another lab's review before it counts as done
     // (experiment labReview, runner/lab-review.ts): the thread waits on
     // the review, so anything waiting on it hears once it's been fixed.
@@ -2653,7 +2666,10 @@ export class Runner {
         stop = true;
       } else delete rec.archivedAt;
     }
-    if (archiving) this.reconcileWaits();
+    if (archiving) {
+      this.reconcileWaits();
+      this.recheckStarter(st);
+    }
     if (params.starred === true) rec.starredAt ??= this.isoNow();
     else if (params.starred === false) delete rec.starredAt;
     if (accountChanged && rt.turn && rt.session && !stop) {
@@ -3059,6 +3075,8 @@ export class Runner {
     // A record from 28 Oct may say "people" (sharing with specific people,
     // since dropped): that's not shared.
     if (rec.share) s.share = { access: rec.share.access === 'link' ? 'link' : 'off', slug: rec.share.slug, updatedAt: rec.share.updatedAt };
+    // Only for the card it was checked for: a new turn's card waits for its own.
+    if (rec.looseEnds && this.looseEndsCard(st) === rec.looseEnds.seq) s.looseEnds = { seq: rec.looseEnds.seq, ends: rec.looseEnds.ends.map((e) => ({ ...e })), at: rec.looseEnds.at };
     return s;
   }
 
@@ -3201,7 +3219,7 @@ export class Runner {
 
 // The Runner's other methods live in parts under runner/, one area each;
 // they go onto its prototype here, as the class's own methods would be.
-for (const part of [labReviewPart, newThreadsPart, hibernationPart, titlesPart, highlightsPart, patchesPart, editingPart, clisPart, reviewsPart, approvalsPart, projectsHostPart, stoppedWorkPart, handoversPart, poolsPart, networkPart, worktreesPart, commandsPart]) {
+for (const part of [looseEndsPart, labReviewPart, newThreadsPart, hibernationPart, titlesPart, highlightsPart, patchesPart, editingPart, clisPart, reviewsPart, approvalsPart, projectsHostPart, stoppedWorkPart, handoversPart, poolsPart, networkPart, worktreesPart, commandsPart]) {
   for (const [key, d] of Object.entries(Object.getOwnPropertyDescriptors(part))) {
     Object.defineProperty(Runner.prototype, key, { ...d, enumerable: false });
   }

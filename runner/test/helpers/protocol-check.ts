@@ -303,12 +303,21 @@ export function checkSummary(t: Obj): string[] {
       Object.keys(s).every((k) => ['access', 'slug', 'updatedAt'].includes(k));
     if (!ok) problems.push('share');
   }
+  if (t.looseEnds !== undefined) {
+    const l = t.looseEnds;
+    const ok = l && Number.isInteger(l.seq) && isIso(l.at) && Array.isArray(l.ends) &&
+      l.ends.every((e: any) => ['unlanded', 'uncommitted', 'thread', 'scheduled'].includes(e.kind) && isStr(e.text) &&
+        (e.threadId === undefined || isStr(e.threadId)) && (e.at === undefined || isIso(e.at)) &&
+        Object.keys(e).every((k) => ['kind', 'text', 'threadId', 'at'].includes(k))) &&
+      Object.keys(l).every((k) => ['seq', 'ends', 'at'].includes(k));
+    if (!ok) problems.push('looseEnds');
+  }
   const allowed = new Set([
     'id', 'title', 'cwd', 'accountId', 'provider', 'model', 'permissionMode', 'status', 'live', 'needsYou', 'createdAt', 'updatedAt',
     'lastActivityAt', 'snoozedUntil', 'snoozedUntilRestart', 'snoozedUntilRelease', 'archivedAt', 'archivedBy', 'archiveVerdict', 'starredAt', 'preview', 'lastSeq', 'lastSeenSeq', 'nativeSessionId', 'contextTokens', 'costUsd',
     'poolId', 'waitingForRoom', 'waitingForNetwork', 'wakeWhen', 'waitingOn',
     'effort', 'modelInUse', 'effortInUse', 'contextWindow', 'panels', 'actions', 'hooks', 'patches', 'background', 'subagents', 'projects', 'worktree',
-    'needs', 'asks', 'asksSeq', 'highlightsAt', 'panelRequest', 'share', 'startedBy', 'asked',
+    'needs', 'asks', 'asksSeq', 'highlightsAt', 'panelRequest', 'share', 'startedBy', 'asked', 'looseEnds',
   ]);
   for (const k of Object.keys(t)) if (!allowed.has(k)) problems.push(`unexpected field ${k}`);
   return problems;

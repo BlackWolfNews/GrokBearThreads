@@ -138,6 +138,7 @@ final class ThreadSession {
                 // What the thread's summary says is running in the
                 // background, for the line at the end.
                 let background = app?.threads[threadId]?.background ?? []
+                let looseEnds = app?.threads[threadId]?.looseEnds
                 // Answers picked on the open card before it was last shown.
                 let picks = app?.askPicks[threadId]
                 let nextPicks = app?.nextPicks[threadId]
@@ -148,6 +149,7 @@ final class ThreadSession {
                         _ = model.setAskNotes(picks.asksSeq, picks.notes)
                     }
                     if let nextPicks { _ = model.setNextPicks(nextPicks.seq, nextPicks.picked, explain: nextPicks.explain) }
+                    _ = model.setLooseEnds(looseEnds)
                     model.load(events: page.events, inProgress: page.inProgress)
                     model.knownStart = page.atStart
                     _ = model.setBackground(background)
@@ -390,6 +392,15 @@ final class ThreadSession {
         guard state == .loaded, !rebuilding else { return }
         let oldStart = displayStart
         let change = feed.setBackground(tasks)
+        guard !change.isEmpty else { return }
+        show(change, oldStart: oldStart)
+    }
+
+    /// The summary's loose-ends check for the done card changed.
+    func setLooseEnds(_ check: LooseEnds?) {
+        guard state == .loaded, !rebuilding else { return }
+        let oldStart = displayStart
+        let change = feed.setLooseEnds(check)
         guard !change.isEmpty else { return }
         show(change, oldStart: oldStart)
     }

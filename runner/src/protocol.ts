@@ -227,7 +227,20 @@ export type ThreadSummary = {
   // keeps the link for when it's shared again.
   share?: ThreadShare;
   sample?: true; // one of the tour's sample threads (threads.samples): made up, never sent to
+  // What's still open on the done card of its last turn (experiment
+  // looseEnds; docs/protocol.md, "Loose ends"): seq is that card's
+  // turn.completed. ends empty: checked, and nothing's left. Absent: not
+  // checked (the experiment's off, the last turn needs Mike, or it's
+  // still being checked).
+  looseEnds?: { seq: number; ends: LooseEnd[]; at: string };
 };
+
+// unlanded: commits on its branch that main lacks. uncommitted: files in
+// its worktree. thread: one it started, still working or waiting on Mike.
+// scheduled: a schedule that will message it again (at: when), which
+// doesn't stop an archive. Clients show any other kind as its text.
+export type LooseEndKind = 'unlanded' | 'uncommitted' | 'thread' | 'scheduled';
+export type LooseEnd = { kind: LooseEndKind; text: string; threadId?: string; at?: string };
 
 export type ShareAccess = 'off' | 'link';
 

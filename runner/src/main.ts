@@ -319,6 +319,8 @@ async function main(): Promise<void> {
     syncOn: Boolean(cfg.sync.enabled && cfg.sync.url && readSyncKey(cfg.home)),
   });
   scheduler.start();
+  // The done card's loose ends list the check-ins booked for a thread.
+  runner.schedulesFor = (id) => scheduler.list(id);
   // Projects need the threads loaded (their counts, and the thread side of
   // membership); the librarian needs both.
   projects.start(runner);

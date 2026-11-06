@@ -1638,17 +1638,30 @@ enum RowRenderer {
             .paragraphStyle: lineStyle, .baselineOffset: titleOffset,
         ]
         output.append(symbol("checkmark", label: "Done", font: title, attributes: titleAttributes, color: .systemGreen))
-        output.append(NSAttributedString(string: " Done\t", attributes: titleAttributes))
+        output.append(NSAttributedString(string: " Done", attributes: titleAttributes))
+        // The runner checked and found nothing left (protocol "Loose
+        // ends"): said beside Done, so Archive reads as safe without
+        // asking the agent first (the nightly retro, 6 Nov).
+        let ends = card.isOpen ? card.looseEnds : nil
+        if let ends, !ends.contains(where: { !$0.isBooked }) {
+            let small = Theme.smallFont
+            output.append(NSAttributedString(string: "\u{00A0}\u{00A0}\u{00A0}Nothing left open", attributes: [
+                .font: small, .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: lineStyle, .baselineOffset: Theme.baselineOffset(height, font: small),
+            ]))
+        }
+        output.append(NSAttributedString(string: "\t", attributes: titleAttributes))
         output.append(NSAttributedString(string: "\u{00A0}\u{00A0}\u{00A0}Archive\u{00A0}\u{00A0}\u{00A0}", attributes: [
             .font: button, .foregroundColor: AskButtonStyle.plain.textColor, .paragraphStyle: lineStyle, .baselineOffset: buttonOffset,
             .tbAction: "archive", .tbButton: AskButtonStyle.plain.rawValue,
         ]))
-        guard card.isOpen, !card.next.isEmpty else { return output }
+        guard card.isOpen else { return output }
         let small = Theme.smallFont
         // The rows and their label sit in by the hover fill's padding, as
         // the text view clips anything drawn left of its text.
         let inset = rowInset
         let (labelStyle, labelOffset) = Theme.lines(TypeScale.scaled(19), font: small, before: zoomed(10), head: inset)
+        if let ends, !ends.isEmpty { output.append(looseEndsText(ends, inset: inset, labelStyle: labelStyle, labelOffset: labelOffset)) }
+        guard !card.next.isEmpty else { return output }
         output.append(NSAttributedString(string: "\nOr carry on", attributes: [
             .font: small, .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: labelStyle, .baselineOffset: labelOffset,
         ]))
@@ -1675,6 +1688,44 @@ enum RowRenderer {
         }
         return output
     }
+
+    /// The done card's loose ends (protocol "Loose ends"): what the runner
+    /// found still open, under "Still open", one line each. A thread one
+    /// links to it; a booked check-in says when it comes back, and alone
+    /// sits under "Coming back", as it doesn't stop an archive. Plain
+    /// lines, not buttons: the Land chip above the composer lands a branch.
+    private static func looseEndsText(_ ends: [LooseEnd], inset: CGFloat, labelStyle: NSParagraphStyle, labelOffset: CGFloat) -> NSAttributedString {
+        let output = NSMutableAttributedString()
+        let small = Theme.smallFont
+        let open = ends.contains { !$0.isBooked }
+        output.append(NSAttributedString(string: open ? "\nStill open" : "\nComing back", attributes: [
+            .font: small, .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: labelStyle, .baselineOffset: labelOffset,
+        ]))
+        let font = Theme.bodyFont
+        let words = inset + ceil(font.pointSize * 1.2) + zoomed(8)
+        let (rowStyle, rowOffset) = Theme.lines(TypeScale.bodyLine, font: font, spacing: zoomed(4), before: zoomed(4), head: words, first: inset)
+        rowStyle.tabStops = [NSTextTab(textAlignment: .left, location: words)]
+        // Open ones first, then the check-ins.
+        for end in ends.filter({ !$0.isBooked }) + ends.filter(\.isBooked) {
+            output.append(NSAttributedString(string: "\n", attributes: [.font: font, .paragraphStyle: rowStyle]))
+            var attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.labelColor, .paragraphStyle: rowStyle, .baselineOffset: rowOffset]
+            output.append(end.isBooked
+                ? symbol("clock", label: "Booked", font: font, attributes: attributes)
+                : symbol("exclamationmark.circle", label: "Still open", font: font, attributes: attributes, color: .systemOrange))
+            var text = end.text
+            if end.isBooked, let when = end.at.flatMap(ISO8601.parse) { text = "\(bookedFormat.string(from: when)): \(text)" }
+            if let id = end.threadId, let url = URL(string: "thread:\(id)") { attributes[.link] = url }
+            output.append(NSAttributedString(string: "\t" + text, attributes: attributes))
+        }
+        return output
+    }
+
+    /// "Fri 13 Nov, 9:30 am", for when a booked check-in comes back.
+    private static let bookedFormat: DateFormatter = {
+        let f = DateFormatter()
+        f.setLocalizedDateFormatFromTemplate("EEE d MMM h:mm a")
+        return f
+    }()
 
     /// How far a follow-up row's words sit in from its hover fill.
     static var rowInset: CGFloat { zoomed(8) }

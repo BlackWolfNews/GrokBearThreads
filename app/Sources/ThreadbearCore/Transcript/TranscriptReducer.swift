@@ -115,6 +115,9 @@ public struct TranscriptModel: Sendable {
     public private(set) var nextPicks: [Int: Set<Int>] = [:]
     /// The follow-ups with their "?" on, by card seq.
     public private(set) var nextExplains: [Int: Set<Int>] = [:]
+    /// The runner's loose-ends check for a done card (protocol "Loose
+    /// ends"), from the thread's summary, kept here for the same reason.
+    public private(set) var looseEnds: LooseEnds?
     /// Each turn's last error row, to learn the turn's `errorKind`.
     private var errorRowForTurn: [String: String] = [:]
     private var turnStarts: [String: Date] = [:]
@@ -430,6 +433,26 @@ public struct TranscriptModel: Sendable {
             }
         }
         return refreshRows()
+    }
+
+    /// The thread's summary has a new loose-ends check (or none): it goes
+    /// on the done card it's for.
+    public mutating func setLooseEnds(_ check: LooseEnds?) -> TranscriptChange {
+        guard check != looseEnds else { return TranscriptChange() }
+        let old = looseEnds
+        looseEnds = check
+        var touched = false
+        for seq in Set([old?.seq, check?.seq].compactMap { $0 }) {
+            guard let cardId = asksRowForSeq[seq] else { continue }
+            update(cardId) { content in
+                if case .asks(var card) = content, card.isDone {
+                    card.looseEnds = check?.seq == seq ? check?.ends : nil
+                    content = .asks(card)
+                }
+            }
+            touched = true
+        }
+        return touched ? refreshRows() : TranscriptChange()
     }
 
     /// Mike ticked (or unticked) follow-ups on the done card from `seq`.
@@ -953,7 +976,7 @@ public struct TranscriptModel: Sendable {
                     // The done card: goes, as an asks card does, once Mike
                     // replies or the next turn ends.
                     let cardId = "ak:\(seq)"
-                    append(TranscriptRow(id: cardId, seq: seq, turnId: turnId ?? completion.turnId, content: .asks(AsksCard(seq: seq, asks: [], next: completion.next, pickedNext: nextPicks[seq] ?? [], explainNext: nextExplains[seq] ?? []))))
+                    append(TranscriptRow(id: cardId, seq: seq, turnId: turnId ?? completion.turnId, content: .asks(AsksCard(seq: seq, asks: [], next: completion.next, pickedNext: nextPicks[seq] ?? [], explainNext: nextExplains[seq] ?? [], looseEnds: looseEnds?.seq == seq ? looseEnds?.ends : nil))))
                     asksRowForSeq[seq] = cardId
                     openAsksRow = cardId
                 }

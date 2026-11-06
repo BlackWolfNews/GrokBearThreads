@@ -968,6 +968,50 @@ public struct PanelRequest: Sendable, Hashable, Codable {
     }
 }
 
+/// What's still open on a thread's done card, as its runner checked it
+/// (protocol "Loose ends", experiment looseEnds): `seq` is the card's
+/// turn.completed, and no ends means it checked and nothing's left.
+public struct LooseEnds: Sendable, Hashable, Codable {
+    public var seq: Int
+    public var ends: [LooseEnd]
+
+    public init(seq: Int, ends: [LooseEnd]) {
+        self.seq = seq
+        self.ends = ends
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        seq = try c.decode(Int.self, forKey: .seq)
+        ends = c.lossyArray(LooseEnd.self, forKey: .ends)
+    }
+
+    enum CodingKeys: String, CodingKey { case seq, ends }
+
+    /// Any that should stop a plain Archive: a booked check-in doesn't, as
+    /// the thread comes back when it runs.
+    public var anyOpen: Bool { ends.contains { !$0.isBooked } }
+}
+
+public struct LooseEnd: Sendable, Hashable, Codable {
+    /// unlanded, uncommitted, thread or scheduled; a later kind shows as its text.
+    public var kind: String
+    public var text: String
+    /// The thread it's about (kind thread).
+    public var threadId: String?
+    /// When a booked check-in runs (kind scheduled), ISO.
+    public var at: String?
+
+    public init(kind: String, text: String, threadId: String? = nil, at: String? = nil) {
+        self.kind = kind
+        self.text = text
+        self.threadId = threadId
+        self.at = at
+    }
+
+    public var isBooked: Bool { kind == "scheduled" }
+}
+
 /// Whether anyone with its link can read a thread on the website
 /// (protocol "Sharing").
 public struct ThreadShare: Sendable, Hashable, Codable {
@@ -1103,6 +1147,10 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     /// Who else can read it on the website. Nil until it's first shared,
     /// and from a runner older than sharing.
     public var share: ThreadShare?
+    /// What's still open on its done card (protocol "Loose ends"). Nil when
+    /// it wasn't checked: the experiment's off, the last turn needs Mike,
+    /// or a runner older than this.
+    public var looseEnds: LooseEnds?
     /// Set by the app for another runner's thread (docs/protocol.md,
     /// "Other runners' threads"): which runner it lives on, so its rows can
     /// say so and its requests go there. Nil for this Mac's own. Never on
@@ -1125,9 +1173,11 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         subagents: [Subagent] = [], projects: [ThreadProject] = [], pendingReviews: Int? = nil, worktree: ThreadWorktree? = nil, needs: String? = nil, asks: [Ask] = [], asksSeq: Int? = nil,
         highlightsAt: Date? = nil,
         schedule: ThreadSchedule? = nil, poolId: String? = nil, waitingForRoom: WaitingForRoom? = nil,
-        panelRequest: PanelRequest? = nil, share: ThreadShare? = nil, startedBy: ThreadStartedBy? = nil
+        panelRequest: PanelRequest? = nil, share: ThreadShare? = nil, startedBy: ThreadStartedBy? = nil,
+        looseEnds: LooseEnds? = nil
     ) {
         self.id = id
+        self.looseEnds = looseEnds
         self.title = title
         self.cwd = cwd
         self.accountId = accountId
@@ -1244,6 +1294,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         asked = (try? c.decodeIfPresent(String.self, forKey: .asked)) ?? nil
         panelRequest = (try? c.decodeIfPresent(PanelRequest.self, forKey: .panelRequest)) ?? nil
         share = (try? c.decodeIfPresent(ThreadShare.self, forKey: .share)) ?? nil
+        looseEnds = (try? c.decodeIfPresent(LooseEnds.self, forKey: .looseEnds)) ?? nil
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -1305,13 +1356,14 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         try c.encodeIfPresent(asked, forKey: .asked)
         try c.encodeIfPresent(panelRequest, forKey: .panelRequest)
         try c.encodeIfPresent(share, forKey: .share)
+        try c.encodeIfPresent(looseEnds, forKey: .looseEnds)
     }
 
     enum CodingKeys: String, CodingKey {
         case id, title, cwd, accountId, provider, model, effort, modelInUse, effortInUse, permissionMode, status, live, needsYou, pendingReviews
         case createdAt, updatedAt, lastActivityAt, snoozedUntil, snoozedUntilRestart, snoozedUntilRelease, wakeWhen, waitingOn, woke, archivedAt, starredAt, onOldRunner, preview
         case lastSeq, lastSeenSeq, nativeSessionId, contextTokens, contextWindow, costUsd, panels, actions, hooks, patches, background, subagents
-        case projects, worktree, needs, asks, asksSeq, highlightsAt, schedule, startedBy, asked, poolId, waitingForRoom, waitingForNetwork, panelRequest, share, sample
+        case projects, worktree, needs, asks, asksSeq, highlightsAt, schedule, startedBy, asked, poolId, waitingForRoom, waitingForNetwork, panelRequest, share, sample, looseEnds
     }
 
     enum NetworkWaitKeys: String, CodingKey { case since }

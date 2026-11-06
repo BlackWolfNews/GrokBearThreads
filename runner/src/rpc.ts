@@ -607,6 +607,9 @@ export class RpcServer {
         const threadId = reqString(p, 'threadId');
         const backlog = r.backlog(threadId, optInt(p, 'afterSeq') ?? 0);
         conn.subs.add(threadId);
+        // Opened: the done card's loose ends may have moved since (a land
+        // from a terminal, another thread's turn).
+        r.recheckLooseEnds(r.threads.get(threadId), true);
         return backlog;
       }
       case 'threads.unsubscribe':

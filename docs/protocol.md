@@ -2520,6 +2520,43 @@ type AskAnswer = { action: string; answer: string } // an ask's action and the a
 type OpenAsk = Ask & { ticked?: true }
 ```
 
+## Loose ends
+
+Experiment `looseEnds` (`runner/src/loose-ends.ts`,
+`runner/src/runner/loose-ends.ts`), off unless `runner.json` has
+`"experiments": { "looseEnds": true }`. On 6 Nov 2026 Mike typed some form
+of "anything else, or should we archive?" 27 times rather than click the
+done card's Archive, which puts a thread away at once: he wanted to know
+nothing was left first. The runner now checks what it can see for itself
+and puts it on the done card, so Archive stays a plain button.
+
+When a turn completes with `needs: "nothing"` (and isn't archiving
+itself), the runner checks:
+
+- `unlanded`: commits on the thread's worktree branch that `main` lacks
+  (`git rev-list --count main..<branch>` in the main checkout);
+- `uncommitted`: files in its worktree, tracked or untracked, that
+  `git status --porcelain` lists (ignored ones don't show);
+- `thread`: a thread it started (`startedBy.threadId`), not archived,
+  that's running or waiting on Mike, with `threadId`;
+- `scheduled`: a schedule that sends to it and will run again (`at`:
+  `nextRunAt`), at most three. It doesn't stop an archive: an archived
+  thread comes back when one runs.
+
+The result goes on `ThreadSummary.looseEnds`: `{ seq, ends, at }`, where
+`seq` is the done card's `turn.completed`. `ends: []` means it checked and
+nothing's left; the field is absent when there's no check for the
+thread's current card (off, a card of asks, a turn running, the first
+check still going). It's checked again, for a card that has one, after an
+action runs on the thread (Land), when a client subscribes to it (at most
+every 5 seconds), and when a thread it started completes a turn or is
+archived. Clients show an unknown `kind` as its `text`.
+
+The Mac app draws "Nothing left open" beside Done when no end other than
+`scheduled` is left, else lists them under "Still open" (a `thread` one
+links `thread:<id>`); `scheduled` ones alone go under "Coming back". The
+phone doesn't show them yet.
+
 ## Secrets
 
 Added 4 Nov 2026, after T3 Code's `request_secret` (its "Asking for a

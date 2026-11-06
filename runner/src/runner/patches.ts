@@ -637,6 +637,8 @@ export const patchesPart = {
       const event = this.emit(st, body, st.rt.turn?.turnId);
       st.rec.lastActivityAt = this.isoNow();
       this.markDirty(st);
+      // Land (or any command) may have moved the branch or the files.
+      this.recheckLooseEnds(st);
       return { ok: outcome.ok, exitCode: outcome.exitCode, durationMs: outcome.durationMs, seq: event.seq };
     } finally {
       running.delete(actionId);
