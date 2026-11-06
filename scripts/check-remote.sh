@@ -223,47 +223,67 @@ drop_copylock() {
   holder="" release=""
 }
 trap drop_copylock EXIT
+# The host that has this run's copy, and how long it took. A run that loses
+# the race for a free host keeps its copy: copying again is what costs, as
+# over a slow uplink a first copy took 22 minutes (6 Nov), and one thread's
+# app check copied, lost, deleted and copied again. After a slow copy it
+# waits in line on that host; after a quick one it chooses again, reusing
+# the copy if that's the same host. THREADBEAR_CHECK_STAY_SECS is for the
+# tests.
+copied_host="" copy_secs=0
+stay_secs="${THREADBEAR_CHECK_STAY_SECS:-60}"
 while :; do
-  if ! choose; then
+  if [ -n "$copied_host" ] && [ "$copy_secs" -ge "$stay_secs" ]; then
+    # HOST, HOST_OS and remote_base are still the copy's.
+    FREE=0
+  elif ! choose; then
+    [ -z "$copied_host" ] || "${SSH[@]}" "$copied_host" "rm -rf '$remote_run'" 2>/dev/null
     rm -f "$files" "$changed"
     echo "None of $HOST_LIST can run this check now." >&2
     exit 255
   fi
-  id="$(date +%H%M%S)-$$-$tries"
-  remote_run="$remote_base/runs/$id"
-  start=$SECONDS
-  # This checkout's mirror on the host: one per Mac and checkout, so two
-  # worktrees never write the same one. Only what changed goes over the
-  # link; the run's copy is made from it there, of exactly this run's files
-  # (a file deleted here stays in the mirror but isn't copied).
-  key="$(printf '%s' "$(hostname -s):$ROOT" | shasum | cut -c1-16)"
-  mirror="$remote_base/mirror/$key"
-  # Two checks from this checkout at once take turns at the mirror, from
-  # the upload until the run's copy is made, so neither copies the other's
-  # files.
-  if ! take_copylock "${TMPDIR:-/tmp}/tb-check-copy-$key-$HOST.lock"; then
-    rm -f "$files" "$changed"
-    # Not 255: running it here instead isn't the answer to a broken lock.
-    echo "Couldn't take the lock on this checkout's copy (${TMPDIR:-/tmp}/tb-check-copy-$key-$HOST.lock)." >&2
-    exit 1
-  fi
-  # By content (-c), not size and time: an edit that keeps both would
-  # otherwise leave the mirror's old copy in the run.
-  if ! "${SSH[@]}" "$HOST" "mkdir -p '$mirror' '$remote_run' && touch '$mirror'" \
-    || ! rsync -azc --from0 --files-from="$files" -e "${SSH[*]}" "$ROOT/" "$HOST:$mirror/" \
-    || ! rsync -a -e "${SSH[*]}" "$files" "$HOST:$remote_run.files" \
-    || ! "${SSH[@]}" "$HOST" "rsync -a --from0 --files-from='$remote_run.files' '$mirror/' '$remote_run/' && rm -f '$remote_run.files'" \
-    || ! rsync -a -e "${SSH[*]}" "$changed" "$HOST:$remote_run/.check-changed"; then
+  if [ "$HOST" = "$copied_host" ]; then
+    echo "Checking on $HOST (its copy is already there)"
+  else
+    [ -z "$copied_host" ] || "${SSH[@]}" "$copied_host" "rm -rf '$remote_run'" 2>/dev/null
+    copied_host=""
+    id="$(date +%H%M%S)-$$-$tries"
+    remote_run="$remote_base/runs/$id"
+    start=$SECONDS
+    # This checkout's mirror on the host: one per Mac and checkout, so two
+    # worktrees never write the same one. Only what changed goes over the
+    # link; the run's copy is made from it there, of exactly this run's files
+    # (a file deleted here stays in the mirror but isn't copied).
+    key="$(printf '%s' "$(hostname -s):$ROOT" | shasum | cut -c1-16)"
+    mirror="$remote_base/mirror/$key"
+    # Two checks from this checkout at once take turns at the mirror, from
+    # the upload until the run's copy is made, so neither copies the other's
+    # files.
+    if ! take_copylock "${TMPDIR:-/tmp}/tb-check-copy-$key-$HOST.lock"; then
+      rm -f "$files" "$changed"
+      # Not 255: running it here instead isn't the answer to a broken lock.
+      echo "Couldn't take the lock on this checkout's copy (${TMPDIR:-/tmp}/tb-check-copy-$key-$HOST.lock)." >&2
+      exit 1
+    fi
+    # By content (-c), not size and time: an edit that keeps both would
+    # otherwise leave the mirror's old copy in the run.
+    if ! "${SSH[@]}" "$HOST" "mkdir -p '$mirror' '$remote_run' && touch '$mirror'" \
+      || ! rsync -azc --from0 --files-from="$files" -e "${SSH[*]}" "$ROOT/" "$HOST:$mirror/" \
+      || ! rsync -a -e "${SSH[*]}" "$files" "$HOST:$remote_run.files" \
+      || ! "${SSH[@]}" "$HOST" "rsync -a --from0 --files-from='$remote_run.files' '$mirror/' '$remote_run/' && rm -f '$remote_run.files'" \
+      || ! rsync -a -e "${SSH[*]}" "$changed" "$HOST:$remote_run/.check-changed"; then
+      drop_copylock
+      "${SSH[@]}" "$HOST" "rm -rf '$remote_run' '$remote_run.files'" 2>/dev/null
+      # The next host that can run it, before this Mac (6 Nov: Tinker Desk
+      # dropped off mid-copy and the check ran on the M5).
+      echo "Couldn't copy this checkout to $HOST; trying the others." >&2
+      SKIP+=" $HOST"
+      continue
+    fi
     drop_copylock
-    "${SSH[@]}" "$HOST" "rm -rf '$remote_run' '$remote_run.files'" 2>/dev/null
-    # The next host that can run it, before this Mac (6 Nov: Tinker Desk
-    # dropped off mid-copy and the check ran on the M5).
-    echo "Couldn't copy this checkout to $HOST; trying the others." >&2
-    SKIP+=" $HOST"
-    continue
+    copied_host="$HOST" copy_secs=$((SECONDS - start))
+    echo "Checking on $HOST (copied in ${copy_secs}s; THREADBEAR_CHECK_HOST= ./check.sh --local runs here)"
   fi
-  drop_copylock
-  echo "Checking on $HOST (copied in $((SECONDS - start))s; THREADBEAR_CHECK_HOST= ./check.sh --local runs here)"
 
   ARGS=(${BASE_ARGS[@]+"${BASE_ARGS[@]}"})
   remote_shots=""
@@ -298,10 +318,10 @@ while :; do
   "${SSH[@]}" "$HOST" "$remote_cmd" 2>&1 | sed -u "s#$remote_base/tmp-$id/threadbear-check\.[A-Za-z0-9]*#$local_logs#g"
   code=${PIPESTATUS[0]}
   if [ "$now" = 1 ] && [ "$code" = 75 ]; then
-    # Never started: its copy goes, and another host is chosen.
-    "${SSH[@]}" "$HOST" "rm -rf '$remote_run'" 2>/dev/null
+    # Never started. Its copy stays for the next go (above).
     rmdir "$local_logs" 2>/dev/null
-    echo "Another check took $HOST first; choosing again."
+    if [ "$copy_secs" -ge "$stay_secs" ]; then echo "Another check took $HOST first; waiting for it there, as the copy took ${copy_secs}s."
+    else echo "Another check took $HOST first; choosing again."; fi
     tries=$((tries + 1))
     continue
   fi
