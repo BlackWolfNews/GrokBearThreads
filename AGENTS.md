@@ -263,7 +263,13 @@ if `tb` isn't found (an older runner, or outside a thread), use
   checkout. Borrow a spare: `./borrow-worktree.sh` in the main checkout
   prints one, detached at main and set up, with warm build caches. Don't
   `git worktree add` a fresh one: its first app build takes 5 to 10
-  minutes. Commit there, merge to main yourself, then
+  minutes. Commit there, then land while holding the same repo lock as
+  `tb land`: `threadbear-land.lock` in `git rev-parse --git-common-dir`.
+  On a Mac, run a script under `/usr/bin/lockf -k <lockfile>` (Linux:
+  `flock -x <lockfile>`). That script must rebase, run the required check
+  on the combined revision, and fast-forward main, all while holding the
+  lock. A plain `git merge` bypasses queued landings and wastes their
+  checks. Don't call a lock-taking `tb land` inside that script. Then run
   `./borrow-worktree.sh --give-back <dir>` so the next thread gets it.
 - The live runner runs a release, a snapshot, so editing `runner/` doesn't
   change it. To try a runner change, start `runner/scripts/dev-runner.sh` in

@@ -147,6 +147,21 @@ With `keep`:
 A thread started outside the repo borrows one by hand with
 `./borrow-worktree.sh` and gives it back with `--give-back <dir>`.
 
+A hand-merge from a borrowed worktree holds the same landing lock. From
+that worktree, on a Mac:
+
+```sh
+/usr/bin/lockf -k "$(git rev-parse --git-common-dir)/threadbear-land.lock" /bin/sh /path/to/landing-script
+```
+
+On Linux use `flock -x` in place of `/usr/bin/lockf -k`. The script must
+rebase on current main, run the required checks on that combined revision,
+and fast-forward main, with the lock held for the whole sequence. Stop on
+any failure. Don't call `tb land` inside the script: it takes the same lock
+and would wait on itself. A plain git merge outside the lock can move main
+under a landing whose check is already running. A check from before a
+rebase cannot validate the new combination, even when files don't overlap.
+
 ## Not in v1
 
 - Repos that aren't on `main`.

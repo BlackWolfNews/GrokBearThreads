@@ -3322,6 +3322,12 @@ The Land command action has an hour for its wait and check, rather than
 the usual ten-minute command limit. The fast-forward names the checked
 commit, so it cannot pick up a later, unchecked branch tip.
 
+Hand-merges from borrowed worktrees also take this same lock before
+rebasing and checking, and keep it through the fast-forward. A plain git
+merge does not take the lock; it can invalidate a queued landing's check.
+Rebased combinations always need validation again, even if the changed
+files do not overlap. See docs/thread-worktrees.md for the command.
+
 `tb land`, in the worktree, refuses with uncommitted changes, rebases on
 main (a conflict aborts and names the files), runs `check`, then
 `git merge --ff-only` in the main checkout (refused, and nothing changed,
