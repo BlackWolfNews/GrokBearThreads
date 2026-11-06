@@ -76,6 +76,11 @@ File references are where to look.
 
 ## What runs in the background
 
+- **Landing work** (`runner/src/worktrees.ts`): `tb land` keeps an empty
+  `threadbear-land.lock` in the repo's common git directory. It runs
+  macOS's `lockf` (Linux's `flock`) with a small Node child to hold an OS
+  lock from before rebasing until the check and fast-forward finish.
+  Another landing waits; exiting, including a crash, releases the lock.
 - **The runner** listens on `127.0.0.1:8797` only, and needs a token
   (`runner/src/config.ts`). It starts the official `claude` and `codex`
   CLIs for your threads.

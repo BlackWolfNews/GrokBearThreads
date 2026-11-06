@@ -390,6 +390,82 @@ test('threads.create takes worktree: false over RPC, and refuses a worktree that
 
 // --------------------------------------------------------------- landing
 
+test('land serializes separate CLIs before rebasing, so each checks the commit it lands once', async () => {
+  const { root, main } = makeRepo(PATCH(`{ check: "./check.sh" }`));
+  commit(main, { 'check.sh': `#!/bin/sh
+echo checked >> '${root}/checks'
+if test -f first.txt && ! test -f second.txt; then
+  touch '${root}/checking'
+  while ! test -f '${root}/release'; do sleep 0.05; done
+fi
+if test -f second.txt; then test -f first.txt && test "$1" = --latest; fi
+` }, 'Add check');
+  sh(main, 'chmod +x check.sh && git add check.sh && git commit -qm executable');
+  const a = makeBranch(main, 'first');
+  const b = makeBranch(main, 'second');
+  commit(a.path, { 'first.txt': 'first\n', '.threadbear/patches/checks.ts': PATCH(`{ check: "./check.sh --latest" }`) }, 'First');
+  commit(b.path, { 'second.txt': 'second\n' }, 'Second');
+  const env = { THREADBEAR_HOME: path.join(root, 'no-runner'), THREADBEAR_THREAD_ID: undefined };
+  const first = runTb(['land'], a.path, env);
+  await until(() => fs.existsSync(path.join(root, 'checking')), 'first check');
+  const second = startTb(['land'], b.path, env);
+  try {
+    await until(() => second.output().includes('Waiting for another landing'), 'second CLI waiting for landing');
+  } finally {
+    write(root, { release: '' });
+  }
+  const [one, two] = await Promise.all([first, second.done]);
+  assert.equal(one.code, 0, one.out);
+  assert.equal(two.code, 0, two.out);
+  assert.match(two.out, /Waiting for another landing/);
+  assert.equal(fs.readFileSync(path.join(root, 'checks'), 'utf8'), 'checked\nchecked\n');
+  assert.equal(sh(main, 'git rev-parse main'), sh(b.path, 'git rev-parse HEAD'));
+  assert.ok(fs.existsSync(path.join(main, 'first.txt')));
+  assert.ok(fs.existsSync(path.join(main, 'second.txt')));
+});
+
+test('land refuses a branch changed by the check instead of merging an unchecked commit', async () => {
+  const { main } = makeRepo();
+  const t = makeBranch(main);
+  commit(t.path, { 'first.txt': 'first\n' }, 'First');
+  const before = sh(main, 'git rev-parse main');
+  const c = capture();
+  assert.equal(await land({ ...t, check: 'echo unchecked > extra.txt && git add extra.txt && git commit -qm unchecked' }, c.opts), 1);
+  assert.match(c.err.join('\n'), /changed while the check ran/);
+  assert.equal(sh(main, 'git rev-parse main'), before);
+});
+
+test('land releases its lock when a CLI is killed during the check', async () => {
+  const { root, main } = makeRepo(PATCH(`{ check: "touch ../checking; sleep 1" }`));
+  const t = makeBranch(main);
+  commit(t.path, { 'first.txt': 'first\n' }, 'First');
+  const env = { THREADBEAR_HOME: path.join(root, 'no-runner'), THREADBEAR_THREAD_ID: undefined };
+  const first = startTb(['land'], t.path, env);
+  try {
+    await until(() => fs.existsSync(path.join(t.path, '../checking')), 'CLI checking');
+  } finally {
+    first.child.kill('SIGKILL');
+    await first.done;
+  }
+  // It must not need stale-file cleanup after SIGKILL. Bypass the check
+  // here; the abandoned check child is just a bounded one-second sleep.
+  assert.equal(await land(t, capture().opts), 0);
+  assert.equal(sh(main, 'git rev-parse main'), sh(t.path, 'git rev-parse HEAD'));
+});
+
+test('land refuses tracked edits made by the check, and releases the lock on failure', async () => {
+  const { main } = makeRepo();
+  const t = makeBranch(main);
+  commit(t.path, { 'first.txt': 'first\n' }, 'First');
+  const before = sh(main, 'git rev-parse main');
+  const c = capture();
+  assert.equal(await land({ ...t, check: 'echo edited > first.txt' }, c.opts), 1);
+  assert.match(c.err.join('\n'), /changed while the check ran/);
+  assert.equal(sh(main, 'git rev-parse main'), before);
+  sh(t.path, 'git restore first.txt');
+  assert.equal(await land(t, capture().opts), 0);
+});
+
 test('land: rebases on main, runs the check in the worktree, fast-forwards main and says what landed', async () => {
   const { main } = makeRepo();
   const t = makeBranch(main);
@@ -532,15 +608,20 @@ test('overwrittenFiles reads both of git\'s refusals', () => {
 });
 
 function runTb(args: string[], cwd: string, env: Record<string, string | undefined>): Promise<{ code: number | null; out: string }> {
-  return new Promise((resolve) => {
-    const full = { ...process.env, ...env };
-    for (const [k, v] of Object.entries(env)) if (v === undefined) delete full[k];
-    const p = spawn(process.execPath, [TB, ...args], { cwd, env: full, stdio: ['ignore', 'pipe', 'pipe'] });
-    let out = '';
-    p.stdout.on('data', (d) => (out += d));
-    p.stderr.on('data', (d) => (out += d));
+  return startTb(args, cwd, env).done;
+}
+
+function startTb(args: string[], cwd: string, env: Record<string, string | undefined>) {
+  const full = { ...process.env, ...env };
+  for (const [k, v] of Object.entries(env)) if (v === undefined) delete full[k];
+  const p = spawn(process.execPath, [TB, ...args], { cwd, env: full, stdio: ['ignore', 'pipe', 'pipe'] });
+  let out = '';
+  p.stdout.on('data', (d) => (out += d));
+  p.stderr.on('data', (d) => (out += d));
+  const done = new Promise<{ code: number | null; out: string }>((resolve) => {
     p.on('exit', (code) => resolve({ code, out }));
   });
+  return { child: p, done, output: () => out };
 }
 
 test('tb land outside a thread goes by git: the thread/ branch, main\'s checkout and the patch\'s check', async () => {

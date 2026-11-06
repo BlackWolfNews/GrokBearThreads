@@ -247,6 +247,9 @@ export type LandOptions = {
   err?: (line: string) => void;
   // How the check runs; tests pass a plain shell.
   shell?: string[];
+  // The CLI reads the patch after rebasing, including changes to the
+  // required check made by a landing it just waited for.
+  readCheck?: () => Promise<string | undefined>;
 };
 
 // How many lines of a failed check's output are shown.
@@ -256,6 +259,57 @@ const CHECK_TAIL_LINES = 40;
 // check, fast-forwards main in its checkout and prints what landed.
 // Returns the exit code. Every refusal leaves main as it was.
 export async function land(t: LandTarget, opts: LandOptions = {}): Promise<number> {
+  const common = await gitOut(t.path, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
+  if (!common) {
+    (opts.err ?? console.error)(`${t.path} isn't a git checkout, so there's nothing to land.`);
+    return 1;
+  }
+  // The remote check queue only serializes checks, after their snapshots
+  // have been copied. Serialize the entire landing before rebasing, across
+  // CLI processes, so waiting for that queue cannot stale another landing.
+  let release: () => Promise<void>;
+  try {
+    release = await lockLanding(path.join(common, 'threadbear-land.lock'), opts.out ?? console.log);
+  } catch (e) {
+    (opts.err ?? console.error)(`Couldn't lock the repo for landing: ${(e as Error).message}`);
+    return 1;
+  }
+  try {
+    return await landLocked(t, opts);
+  } finally {
+    await release();
+  }
+}
+
+// Advisory locks are released by the OS, including when tb crashes. The
+// holder exits when its parent's pipe closes; no PID files to go stale or
+// delete under another waiter. Keep the lock file itself between runs.
+async function lockLanding(file: string, out: (line: string) => void): Promise<() => Promise<void>> {
+  const holder = "process.stdin.resume(); process.stdin.on('end', () => process.exit(0)); process.stdout.write('locked');";
+  const mac = process.platform === 'darwin';
+  const child = spawn(mac ? '/usr/bin/lockf' : 'flock', [mac ? '-k' : '-x', file, process.execPath, '-e', holder], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const closed = new Promise<void>((resolve) => child.once('close', () => resolve()));
+  let errors = '';
+  child.stderr.on('data', (d) => { errors += d; });
+  const waiting = setTimeout(() => out('Waiting for another landing of this repo to finish...'), 100);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      child.once('error', reject);
+      child.once('close', (code) => reject(new Error(errors.trim() || `landing lock exited (${code})`)));
+      child.stdout.once('data', () => resolve());
+    });
+  } finally {
+    clearTimeout(waiting);
+  }
+  return async () => {
+    child.stdin.end();
+    await closed;
+  };
+}
+
+async function landLocked(t: LandTarget, opts: LandOptions): Promise<number> {
   const out = opts.out ?? ((l: string) => process.stdout.write(l + '\n'));
   const err = opts.err ?? ((l: string) => process.stderr.write(l + '\n'));
   const fail = (...lines: string[]): number => {
@@ -325,10 +379,19 @@ export async function land(t: LandTarget, opts: LandOptions = {}): Promise<numbe
     return 0;
   }
 
-  // 3. The repo's check, in the worktree.
-  if (t.check) {
-    out(`Running the check: ${t.check}`);
-    const r = await runCheck(t.check, t.path, opts.shell);
+  // 3. The repo's check, in the worktree. Pin what passed, rather than
+  // merging a branch name that another process could move during checks.
+  const checked = await gitOut(t.path, ['rev-parse', 'HEAD']);
+  if (!checked) return fail(`Couldn't read HEAD in ${t.path}.`);
+  let check: string | undefined;
+  try {
+    check = opts.readCheck ? await opts.readCheck() : t.check;
+  } catch (e) {
+    return fail(`Couldn't read the repo's patches for its check: ${(e as Error).message}`);
+  }
+  if (check) {
+    out(`Running the check: ${check}`);
+    const r = await runCheck(check, t.path, opts.shell);
     if (!r.ok) {
       const tail = r.text.trimEnd().split('\n').slice(-CHECK_TAIL_LINES);
       return fail(
@@ -342,6 +405,13 @@ export async function land(t: LandTarget, opts: LandOptions = {}): Promise<numbe
     out(`The check passed (${Math.round(r.durationMs / 1000)} s).`);
   }
 
+  if ((await gitOut(t.path, ['rev-parse', 'HEAD'])) !== checked ||
+      (await gitOut(t.path, ['rev-parse', t.branch])) !== checked ||
+      (await gitOut(t.path, ['rev-parse', '--abbrev-ref', 'HEAD'])) !== t.branch ||
+      !(await git(t.path, ['diff', '--quiet', 'HEAD', '--'])).ok) {
+    return fail(`The branch or tracked files in ${t.path} changed while the check ran, so nothing landed. Commit the changes and run tb land again.`);
+  }
+
   if (opts.dryRun) {
     out(`Would land on ${MAIN} in ${t.mainCheckout}:`);
     out(commits);
@@ -350,7 +420,7 @@ export async function land(t: LandTarget, opts: LandOptions = {}): Promise<numbe
 
   // 4. Fast-forward main where it's checked out.
   const before = await gitOut(t.mainCheckout, ['rev-parse', MAIN]);
-  const merge = await git(t.mainCheckout, ['merge', '--ff-only', t.branch]);
+  const merge = await git(t.mainCheckout, ['merge', '--ff-only', checked]);
   if (!merge.ok) {
     const text = merge.stderr + merge.stdout;
     const files = overwrittenFiles(text);

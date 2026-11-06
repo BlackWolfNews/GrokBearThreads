@@ -71,6 +71,12 @@ checked, `tb land` puts it on main.
 `tb land`, run in the thread's worktree (an agent's Bash, or Mike's Land
 chip, which is a command action every opted-in thread gets):
 
+It first takes an OS lock in the repo's common git directory
+(`threadbear-land.lock`), held through the check and fast-forward. Other
+landings wait before rebasing, so each checks against the main left by the
+previous landing. The lock releases when the command exits, even on a
+crash; the empty lock file stays. Separate repos do not block one another.
+
 1. Refuses with uncommitted changes in the worktree (says which files).
 2. `git rebase main` in the worktree. A conflict aborts the rebase and
    says which files; the agent sorts it out and runs `tb land` again. A
@@ -79,8 +85,9 @@ chip, which is a command action every opted-in thread gets):
    the merge and rewrite Mike's commits: if main has moved, main is merged
    into it instead, with the same undo-and-name-the-files on a conflict.
 3. Runs `check` in the worktree, if there is one. A failure stops here,
-   with the last lines of its output.
-4. `git -C <mainCheckout> merge --ff-only thread/<id8>`. If main's working
+   with the last lines of its output. Changing the branch or tracked files
+   during the check also stops it.
+4. `git -C <mainCheckout> merge --ff-only <checked commit>`. If main's working
    tree has uncommitted changes in files the merge touches, git refuses;
    `tb land` says so and which files, and leaves everything as it was.
 5. Prints what landed (`git log --oneline main@{1}..main`).

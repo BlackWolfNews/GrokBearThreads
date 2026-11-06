@@ -317,15 +317,12 @@ async function landCommand(cfg: ReturnType<typeof loadConfig>, dryRun: boolean):
     }
     target = found.target;
   }
-  let check: string | undefined;
-  try {
-    // Trusted as it stands: running tb land is asking for this check.
-    check = (await findWorktreePatch(from, undefined, undefined, undefined, TRUST_ALL))?.check;
-  } catch (e) {
-    console.error(`Couldn't read the repo's patches for its check: ${(e as Error).message}`);
-    return 1;
-  }
-  return land({ path: target.path, branch: target.branch, mainCheckout: target.mainCheckout, check }, { dryRun });
+  return land(target, {
+    dryRun,
+    // Read after the landing lock and rebase: main may have changed the
+    // check while we waited. Running tb land asks for this patch's check.
+    readCheck: async () => (await findWorktreePatch(from, undefined, undefined, undefined, TRUST_ALL))?.check,
+  });
 }
 
 // The thread's summary, or undefined when the runner can't be reached or

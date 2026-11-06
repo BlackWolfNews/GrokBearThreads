@@ -1190,7 +1190,9 @@ like different. If a setting or a patch would do it, the agent uses that
 rather than changing Threadbear's own code, so Mike's updates come in
 cleanly later. A thread there gets its own copy of the code to work in, and when
 the change is ready and its checks pass, the agent lands it on your `main`
-branch.
+branch. When several threads are ready together, their landings wait for
+one another before rebasing and checking, so each checks against the latest
+landed work.
 
 The same goes for settings. The Settings window (⌘,) shows what's set and has
 controls for only a few common things, and the ⓘ beside each section says

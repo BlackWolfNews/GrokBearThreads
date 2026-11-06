@@ -3312,6 +3312,14 @@ can't be made (a leftover folder or branch of that name, no checkout on
 `main`), a `system.note` says why and the thread starts in the folder
 asked for. The summary carries `worktree` from then on.
 
+`tb land` takes an OS lock at `threadbear-land.lock` in the repo's common
+git directory before reading or rebasing either branch, and holds it through
+the check and fast-forward. The CLI reads the patch's check after rebasing.
+Other landings of that repo wait, even from
+other CLI processes; exiting releases it. A check that changes the branch
+or tracked files stops the landing. The fast-forward names the checked
+commit, so it cannot pick up a later, unchecked branch tip.
+
 `tb land`, in the worktree, refuses with uncommitted changes, rebases on
 main (a conflict aborts and names the files), runs `check`, then
 `git merge --ff-only` in the main checkout (refused, and nothing changed,
