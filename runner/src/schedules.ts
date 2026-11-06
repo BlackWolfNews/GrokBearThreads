@@ -12,7 +12,7 @@
 // disk for when the backend can't be reached), and sends only its own,
 // each run taken with a claim first so it's sent once.
 import { experimentOn } from './experiments.ts';
-import { type KeptCheck, CHECK_TIMEOUT_MS, checkOutcome, checkRunningElsewhere, clearCheckRunning, dropKeptCheck, keepCheck, markCheckRunning, MAX_CHECK_CHARS, readKeptCheck, runCheck, type CheckResult } from './schedule-check.ts';
+import { type KeptCheck, CHECK_TIMEOUT_MS, checkLimitMs, checkOutcome, checkRunningElsewhere, clearCheckRunning, dropKeptCheck, keepCheck, markCheckRunning, MAX_CHECK_CHARS, MAX_CHECK_TIMEOUT_SECS, readKeptCheck, runCheck, type CheckResult } from './schedule-check.ts';
 import { forbiddenText } from './sync.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -117,6 +117,8 @@ export type CreateScheduleParams = {
   permissionMode?: PermissionMode;
   // A shell command run before each run (schedule-check.ts).
   check?: string;
+  // How long it may take, in seconds; absent, a minute.
+  checkTimeoutSecs?: number;
   paused?: boolean;
   createdBy?: string;
   // Another runner's id or name (runners.list); absent, this one.
@@ -140,6 +142,8 @@ export type UpdateScheduleParams = {
   permissionMode?: PermissionMode;
   // null or "" takes the check off.
   check?: string | null;
+  // null: back to a minute.
+  checkTimeoutSecs?: number | null;
 };
 
 // The Mac sleeps and timers stop with it, so check often rather than
@@ -184,12 +188,13 @@ export class Scheduler {
   // Schedule checks (experiment scheduleChecks, schedule-check.ts).
   private home: string;
   private checksOn: () => boolean;
-  private check: (p: { command: string; cwd: string; home: string; scheduleId: string }) => Promise<CheckResult>;
+  private check: (p: { command: string; cwd: string; home: string; scheduleId: string; timeoutMs?: number }) => Promise<CheckResult>;
   // Local mode's runs waiting on their check, so a tick doesn't start another.
   private checking = new Set<string>();
   // Every check under way, for settled(): the runner waits for them before
   // it exits, so what they print is kept for the next one.
-  private inFlight = new Set<Promise<unknown>>();
+  // Each with its time limit, so a stop waits for the longest.
+  private inFlight = new Map<Promise<unknown>, number>();
   // Kept outputs this process has sent (id, command and when kept), in case the file
   // couldn't be deleted: it isn't sent again.
   private delivered = new Set<string>();
@@ -208,7 +213,7 @@ export class Scheduler {
     self?: SelfRunner;
     syncOn?: boolean;
     checksOn?: () => boolean;
-    runCheck?: (p: { command: string; cwd: string; home: string; scheduleId: string }) => Promise<CheckResult>;
+    runCheck?: (p: { command: string; cwd: string; home: string; scheduleId: string; timeoutMs?: number }) => Promise<CheckResult>;
   }) {
     this.runner = deps.runner;
     this.home = deps.home;
@@ -257,8 +262,8 @@ export class Scheduler {
     this.tick();
   }
 
-  /** Resolves once the checks under way have finished (and kept what they printed), or after limitMs (a check's own time limit). */
-  async settled(limitMs = CHECK_TIMEOUT_MS + 5000): Promise<void> {
+  /** Resolves once the checks under way have finished (and kept what they printed), or after limitMs (by default the longest one's own time limit). */
+  async settled(limitMs = Math.max(CHECK_TIMEOUT_MS, ...this.inFlight.values()) + 5000): Promise<void> {
     if (!this.inFlight.size) {
       this.flushMemKept();
       return;
@@ -267,7 +272,7 @@ export class Scheduler {
     const limit = new Promise<void>((r) => {
       timer = this.clock.setTimeout(r, limitMs);
     });
-    await Promise.race([Promise.allSettled([...this.inFlight]), limit]);
+    await Promise.race([Promise.allSettled([...this.inFlight.keys()]), limit]);
     timer?.cancel();
     this.flushMemKept();
   }
@@ -572,6 +577,7 @@ export class Scheduler {
       if (p.permissionMode) rec.permissionMode = p.permissionMode;
     }
     if (p.check?.trim()) rec.check = checkedCheck(p.check);
+    if (p.checkTimeoutSecs !== undefined) rec.checkTimeoutSecs = checkedTimeout(p.checkTimeoutSecs);
     if (p.createdBy) rec.createdBy = p.createdBy;
     if (this.mode === 'backend') rec.runnerId = runnerId;
     this.plan(rec);
@@ -629,6 +635,11 @@ export class Scheduler {
       // news no thread has seen yet is sent if that check is put back.
       if (p.check === null || !p.check.trim()) delete rec.check;
       else rec.check = checkedCheck(p.check);
+    }
+    if (p.checkTimeoutSecs !== undefined) {
+      // Kept with the check taken off, so putting one back keeps its time.
+      if (p.checkTimeoutSecs === null) delete rec.checkTimeoutSecs;
+      else rec.checkTimeoutSecs = checkedTimeout(p.checkTimeoutSecs);
     }
     if (!rec.threadId) {
       if (p.cwd !== undefined) rec.cwd = away ? p.cwd.trim() || undefined : this.checkedFolder(p.cwd);
@@ -901,15 +912,16 @@ export class Scheduler {
     // than asking again, as a check that keeps state won't print it twice.
     const command = rec.check;
     const id = rec.id;
+    const timeoutMs = checkLimitMs(rec.checkTimeoutSecs);
     const kept = this.keptFor(rec);
     if (kept) return kept;
     if (checkRunningElsewhere(this.home, id, this.clock.now())) return 'later';
     try {
-      markCheckRunning(this.home, id, this.clock.now());
+      markCheckRunning(this.home, id, this.clock.now(), timeoutMs);
     } catch {
       // It still runs; another process just can't see it is.
     }
-    const run = this.check({ command, cwd, home: this.home, scheduleId: id })
+    const run = this.check({ command, cwd, home: this.home, scheduleId: id, timeoutMs })
       .catch((e: unknown) => ({ ok: false as const, output: '', why: String(e) }))
       .then((r) => {
         const out = checkOutcome(r);
@@ -941,7 +953,7 @@ export class Scheduler {
           // Its time limit makes it stale anyway.
         }
       });
-    this.inFlight.add(run);
+    this.inFlight.set(run, timeoutMs);
     this.checkingNow.add(id);
     try {
       return await run;
@@ -1187,6 +1199,11 @@ function firstLine(text: string): string {
   return (text.split('\n').map((l) => l.trim()).find(Boolean) ?? 'Scheduled message').slice(0, 80);
 }
 
+function checkedTimeout(secs: number): number {
+  if (!Number.isInteger(secs) || secs < 1 || secs > MAX_CHECK_TIMEOUT_SECS) throw bad(`checkTimeoutSecs must be a whole number of seconds from 1 to ${MAX_CHECK_TIMEOUT_SECS}`);
+  return secs;
+}
+
 function checkedCheck(command: string): string {
   const c = command.trim();
   if (c.length > MAX_CHECK_CHARS) throw bad(`check must be at most ${MAX_CHECK_CHARS} characters`);
@@ -1219,6 +1236,7 @@ export function scheduleMethods(s: Scheduler): Record<string, (p: Record<string,
         effort: effort(p.effort) ?? undefined,
         permissionMode: mode(p.permissionMode),
         check: str(p, 'check'),
+        checkTimeoutSecs: num(p, 'checkTimeoutSecs'),
         paused: bool(p, 'paused'),
         createdBy: str(p, 'createdBy'),
         runnerId: str(p, 'runnerId'),
@@ -1239,6 +1257,7 @@ export function scheduleMethods(s: Scheduler): Record<string, (p: Record<string,
       if (p.permissionMode !== undefined) upd.permissionMode = mode(p.permissionMode);
       if (p.paused !== undefined) upd.paused = bool(p, 'paused');
       if (p.check !== undefined) upd.check = p.check === null ? null : str(p, 'check');
+      if (p.checkTimeoutSecs !== undefined) upd.checkTimeoutSecs = p.checkTimeoutSecs === null ? null : num(p, 'checkTimeoutSecs');
       return { schedule: await s.update(upd) };
     },
     'schedules.delete': (p) => s.delete(reqStr(p, 'scheduleId')),
@@ -1268,6 +1287,13 @@ function bool(p: Record<string, unknown>, k: string): boolean | undefined {
   const v = p[k];
   if (v === undefined || v === null) return undefined;
   if (typeof v !== 'boolean') throw bad(`${k} must be a boolean`);
+  return v;
+}
+
+function num(p: Record<string, unknown>, k: string): number | undefined {
+  const v = p[k];
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== 'number') throw bad(`${k} must be a number`);
   return v;
 }
 

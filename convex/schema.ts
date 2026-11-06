@@ -664,6 +664,8 @@ export default defineSchema({
     // Since API 51: a shell command its runner runs before each run; a run
     // whose check prints nothing is skipped (docs/protocol.md, Schedules).
     check: v.optional(v.string()),
+    // Since API 55: how long that check may take, in seconds.
+    checkTimeoutSecs: v.optional(v.number()),
     claim: v.optional(v.object({ holder: v.string(), until: v.number() })),
     runRequestedAt: v.optional(v.string()),
     // When what a runner reads last changed (API 48), for sync:schedulesSince.

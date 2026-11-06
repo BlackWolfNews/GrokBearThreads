@@ -246,4 +246,6 @@
 //    other machines' archived threads and can open and unarchive them
 //    (docs/protocol.md, "Other runners' threads"). A runner sends the
 //    archived rows an older backend dropped once, on first hearing 54.
-export const API_VERSION = 54;
+// 55: an owned schedule can carry `checkTimeoutSecs`, how long its check may
+//    take (60 s without). An older runner sends none.
+export const API_VERSION = 55;

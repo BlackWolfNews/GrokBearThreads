@@ -909,7 +909,9 @@ Threadbear, and its switch goes.
   agent starts, so a schedule that looks for new Sentry issues every five
   minutes only uses a login when there's something to look at. What it
   prints is added to the message. If the check itself fails, the run goes
-  ahead with the error, so you hear about it. What a check prints is
+  ahead with the error, so you hear about it. A check has a minute to
+  finish, or up to five if its schedule says so, for one that reads
+  something slow like Slack. What a check prints is
   kept until a run carrying it has been sent, so a runner restart in
   between doesn't lose it. Ask a thread to "only run
   when there's something new" and it writes the check. Run now skips it.

@@ -7,7 +7,7 @@ import path from 'node:path';
 import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
 import { Scheduler } from '../../src/schedules.ts';
 import { nullLogger } from '../../src/log.ts';
-import { checkOutcome, keptCheckFile, runCheck, type CheckResult } from '../../src/schedule-check.ts';
+import { checkOutcome, checkRunningElsewhere, keptCheckFile, markCheckRunning, runCheck, type CheckResult } from '../../src/schedule-check.ts';
 import { buildThreadbearTools } from '../../src/threadbear-mcp.ts';
 import { toOwnedScheduleDoc } from '../../src/sync.ts';
 
@@ -448,4 +448,86 @@ test('scheduleChecks: output kept only in memory is written down before the runn
   sched.stop();
   await sched.settled();
   assert.match(JSON.parse(fs.readFileSync(file, 'utf8')).extra, /the news/);
+});
+
+// A check that needs longer than a minute (6 Nov 2026: the Slack watch's
+// read through `codex exec` took 77 s and failed every hour, schedule
+// 7a3a98d9) says so on its schedule.
+test('scheduleChecks: a schedule sets how long its check may take, 60 s without, at most 300', async () => {
+  const h = makeHarness();
+  const limits: (number | undefined)[] = [];
+  const sched = new Scheduler({ runner: h.runner, home: h.home, clock: h.clock, log: nullLogger, zone: () => 'UTC', checksOn: () => true, runCheck: async (p) => (limits.push(p.timeoutMs), { ok: true, output: '' }) });
+  sched.start();
+  const sc = await sched.create({ text: 'Read Slack', title: 'Slack', cron: '*/5 * * * *', check: 'slack-read', checkTimeoutSecs: 180 });
+  assert.equal(sc.checkTimeoutSecs, 180);
+  h.clock.advance(5 * MIN);
+  await tick(6);
+  assert.deepEqual(limits, [180_000]);
+  assert.equal((await sched.update({ scheduleId: sc.id, checkTimeoutSecs: null })).checkTimeoutSecs, undefined);
+  h.clock.advance(5 * MIN);
+  await tick(6);
+  assert.deepEqual(limits, [180_000, 60_000]);
+  for (const bad of [0, 301, 1.5]) await assert.rejects(sched.update({ scheduleId: sc.id, checkTimeoutSecs: bad }), /from 1 to 300/);
+  await assert.rejects(sched.create({ text: 'x', cron: '@daily', check: 'ls', checkTimeoutSecs: 600 }), /from 1 to 300/);
+  // Taking the check off keeps its time, for when one is put back.
+  await sched.update({ scheduleId: sc.id, checkTimeoutSecs: 120 });
+  assert.equal((await sched.update({ scheduleId: sc.id, check: null })).checkTimeoutSecs, 120);
+  sched.stop();
+});
+
+test('scheduleChecks: a stop waits out the longest check under way, not just a minute', async () => {
+  const h = makeHarness();
+  let finish!: (r: CheckResult) => void;
+  const sched = new Scheduler({ runner: h.runner, home: h.home, clock: h.clock, log: nullLogger, zone: () => 'UTC', checksOn: () => true, runCheck: () => new Promise<CheckResult>((r) => (finish = r)) });
+  sched.start();
+  await sched.create({ text: 'Read Slack', title: 'Slack', cron: '*/5 * * * *', check: 'slack-read', checkTimeoutSecs: 180 });
+  h.clock.advance(5 * MIN);
+  await tick(6);
+  sched.stop();
+  let done = false;
+  const settled = sched.settled().then(() => (done = true));
+  h.clock.advance(90_000);
+  await tick(6);
+  assert.equal(done, false, 'still within its 180 s');
+  finish({ ok: true, output: '' });
+  await settled;
+});
+
+test("scheduleChecks: another process's marker stays live for twice its own check's limit", () => {
+  const h = makeHarness();
+  const dir = path.join(h.home, 'schedule-checks');
+  fs.mkdirSync(dir, { recursive: true });
+  const at = 1_000_000;
+  // The test runner's parent stands in for the other, live process.
+  fs.writeFileSync(path.join(dir, 's1.running.json'), JSON.stringify({ pid: process.ppid, at, limitMs: 180_000 }));
+  assert.equal(checkRunningElsewhere(h.home, 's1', at + 300_000), true);
+  assert.equal(checkRunningElsewhere(h.home, 's1', at + 361_000), false);
+  // An older release's marker has no limit: a minute, as before.
+  fs.writeFileSync(path.join(dir, 's1.running.json'), JSON.stringify({ pid: process.ppid, at }));
+  assert.equal(checkRunningElsewhere(h.home, 's1', at + 121_000), false);
+  // Our own marker carries the limit it was given.
+  markCheckRunning(h.home, 's2', at, 180_000);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 's2.running.json'), 'utf8')).limitMs, 180_000);
+});
+
+test('scheduleChecks: the backend gets checkTimeoutSecs only from API 55, and the tools offer it with check', () => {
+  const s = { id: 'a', runnerId: 'r', title: 't', text: 'x', whenText: 'w', paused: false, createdAt: 'c', updatedAt: 'u', runs: 0, check: 'ls', checkTimeoutSecs: 180 };
+  assert.equal(toOwnedScheduleDoc(s as never, 54).checkTimeoutSecs, undefined);
+  assert.equal(toOwnedScheduleDoc(s as never, 54).check, 'ls');
+  assert.equal(toOwnedScheduleDoc(s as never, 55).checkTimeoutSecs, 180);
+  const { h, sched } = setup();
+  for (const name of ['schedule_message', 'update_schedule']) {
+    const keys = (on: boolean) => {
+      const tools = buildThreadbearTools(h.runner, 'x', Date.now, sched, undefined, undefined, { scheduleChecks: () => on }) as unknown as { name: string; inputSchema: Record<string, unknown> }[];
+      return Object.keys(tools.find((t) => t.name === name)!.inputSchema);
+    };
+    assert.ok(keys(true).includes('checkTimeoutSecs'), name);
+    assert.ok(!keys(false).includes('checkTimeoutSecs'), name);
+  }
+  sched.stop();
+});
+
+test('runCheck: a timeout says how to give the check longer', async () => {
+  const slow = await runCheck({ command: 'sleep 5', cwd: tmpDir(), home: tmpDir(), scheduleId: 'abc', timeoutMs: 200 });
+  assert.match((slow as { why: string }).why, /checkTimeoutSecs can give it up to 300/);
 });

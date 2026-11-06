@@ -24,7 +24,12 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { atomicWriteFileSync } from './fsutil.ts';
 
+// How long a check may run unless its schedule says (checkTimeoutSecs),
+// and the most it can say: a Slack read through `codex exec` took 77 s by
+// 6 Nov 2026 and failed every hour on the fixed minute (schedule 7a3a98d9).
+// The cap keeps a stuck check from holding a runner's stop for long.
 export const CHECK_TIMEOUT_MS = 60_000;
+export const MAX_CHECK_TIMEOUT_SECS = 300;
 export const CHECK_OUTPUT_CHARS = 8000;
 export const MAX_CHECK_CHARS = 2000;
 
@@ -88,8 +93,15 @@ export function runningCheckFile(home: string, scheduleId: string): string {
   return path.join(home, 'schedule-checks', `${scheduleId}.running.json`);
 }
 
-export function markCheckRunning(home: string, scheduleId: string, at: number): void {
-  atomicWriteFileSync(runningCheckFile(home, scheduleId), JSON.stringify({ pid: process.pid, at }));
+// limitMs: its time limit, so another process knows when the marker has
+// gone stale. A marker without one (an older release's) had a minute.
+export function markCheckRunning(home: string, scheduleId: string, at: number, limitMs = CHECK_TIMEOUT_MS): void {
+  atomicWriteFileSync(runningCheckFile(home, scheduleId), JSON.stringify({ pid: process.pid, at, limitMs }));
+}
+
+// A schedule's own time limit for its check, in ms.
+export function checkLimitMs(checkTimeoutSecs: number | undefined): number {
+  return checkTimeoutSecs ? Math.min(checkTimeoutSecs, MAX_CHECK_TIMEOUT_SECS) * 1000 : CHECK_TIMEOUT_MS;
 }
 
 export function clearCheckRunning(home: string, scheduleId: string): void {
@@ -97,14 +109,15 @@ export function clearCheckRunning(home: string, scheduleId: string): void {
 }
 
 export function checkRunningElsewhere(home: string, scheduleId: string, now: number): boolean {
-  let m: { pid?: unknown; at?: unknown };
+  let m: { pid?: unknown; at?: unknown; limitMs?: unknown };
   try {
     m = JSON.parse(fs.readFileSync(runningCheckFile(home, scheduleId), 'utf8'));
   } catch {
     return false;
   }
   if (typeof m?.pid !== 'number' || typeof m.at !== 'number' || m.pid === process.pid) return false;
-  if (now - m.at > CHECK_TIMEOUT_MS * 2) return false;
+  const limit = typeof m.limitMs === 'number' && m.limitMs > 0 ? Math.min(m.limitMs, MAX_CHECK_TIMEOUT_SECS * 1000) : CHECK_TIMEOUT_MS;
+  if (now - m.at > limit * 2) return false;
   try {
     process.kill(m.pid, 0);
     return true;
@@ -149,7 +162,8 @@ export function runCheck(p: { command: string; cwd: string; home: string; schedu
       } catch {
         child.kill('SIGKILL');
       }
-      finish({ ok: false, output: clip(out), why: `it took longer than ${Math.round((p.timeoutMs ?? CHECK_TIMEOUT_MS) / 1000)} seconds` });
+      // Says how to give it longer, for the agent that reads it.
+      finish({ ok: false, output: clip(out), why: `it took longer than ${Math.round((p.timeoutMs ?? CHECK_TIMEOUT_MS) / 1000)} seconds; the schedule's checkTimeoutSecs can give it up to ${MAX_CHECK_TIMEOUT_SECS}` });
     }, p.timeoutMs ?? CHECK_TIMEOUT_MS);
     child.on('error', (e) => finish({ ok: false, output: clip(out), why: e.message }));
     child.on('close', (code, signal) => {

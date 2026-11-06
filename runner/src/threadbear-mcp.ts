@@ -17,6 +17,7 @@ import { usageLine } from './usage.ts';
 import { findPool, poolLine } from './pools.ts';
 import { AGENT_MESSAGE_PREFIX, EFFORT_LEVELS, MOVE_MESSAGE_PREFIX, sentByAgent } from './protocol.ts';
 import type { Scheduler } from './schedules.ts';
+import { MAX_CHECK_TIMEOUT_SECS } from './schedule-check.ts';
 import type { Projects } from './projects.ts';
 import { parseWhen, relativeFuture, relativeTime } from './when.ts';
 import { SAID_MAX } from './wake-when.ts';
@@ -205,6 +206,9 @@ export function buildThreadbearTools(
           check: (update ? z.string().nullable() : z.string())
             .optional()
             .describe(`A shell command run first, in its folder, before each run${update ? ' (null takes it off)' : ''}. If it prints nothing the run is skipped and no agent starts; what it prints is added to the message. For pollers: check for something new cheaply here. $THREADBEAR_CHECK_STATE is a file it can keep state in.`),
+          checkTimeoutSecs: (update ? z.number().int().min(1).max(MAX_CHECK_TIMEOUT_SECS).nullable() : z.number().int().min(1).max(MAX_CHECK_TIMEOUT_SECS))
+            .optional()
+            .describe(`Seconds the check may take before it counts as failed. Default 60${update ? ' (null)' : ''}.`),
         }
       : {};
   const bulletReplies = () => opts.bulletReplies?.() !== false;
@@ -447,7 +451,7 @@ export function buildThreadbearTools(
     const on = [sc.accountId, sc.poolId && `${sc.poolId} pool`, sc.model, sc.effort, sc.permissionMode && sc.permissionMode !== 'full' ? sc.permissionMode : undefined].filter(Boolean).join(', ');
     const target = sc.threadId ? (sc.threadId === selfId ? 'this thread' : `thread ${sc.threadId.slice(0, 8)} ${await titleOf(sc.threadId)}`) : `a new thread in ${sc.cwd ?? 'its default folder'}${on ? ` (${on})` : ''}`;
     const last = sc.lastRun && sc.lastRun.outcome !== 'sent' ? `; last run ${sc.lastRun.outcome}: ${sc.lastRun.note ?? ''}` : '';
-    const checked = sc.check ? `; check: ${sc.check.length > 80 ? sc.check.slice(0, 80) + '…' : sc.check}` : '';
+    const checked = sc.check ? `; check: ${sc.check.length > 80 ? sc.check.slice(0, 80) + '…' : sc.check}${sc.checkTimeoutSecs ? ` (up to ${sc.checkTimeoutSecs} s)` : ''}` : '';
     const where = sc.runnerName ? ` on ${sc.runnerName}` : '';
     return `${sc.id.slice(0, 8)}  ${sc.title}  [${sc.whenText}; ${state}${last}${checked}]  to ${target}${where}`;
   };
@@ -632,7 +636,7 @@ export function buildThreadbearTools(
         ...checkArg(false),
       },
       handle(async ({ text, when, cron, timezone, title, threadId, id: alias, new_thread, folder: f, account: acc, pool: pl, model, effort, permissionMode, runner, ...rest }, extra) => {
-        const check = (rest as { check?: string }).check;
+        const { check, checkTimeoutSecs } = rest as { check?: string; checkTimeoutSecs?: number };
         if ((when === undefined) === (cron === undefined)) throw new Error('Give exactly one of when (once) and cron (repeating).');
         if (runner && !new_thread) throw new Error("runner is for new_thread schedules; one that sends to a thread runs on that thread's runner.");
         if (!new_thread && (f || acc || pl || model || effort || permissionMode)) throw new Error('folder, account, pool, model, effort and permissionMode are for new_thread schedules; a thread keeps its own.');
@@ -661,6 +665,7 @@ export function buildThreadbearTools(
           timezone,
           ...target,
           ...(check?.trim() ? { check } : {}),
+          ...(checkTimeoutSecs !== undefined ? { checkTimeoutSecs } : {}),
           createdBy: selfId,
         });
         return `Scheduled ${sc.id.slice(0, 8)}: ${await scheduleLine(sc)}`;
@@ -696,7 +701,7 @@ export function buildThreadbearTools(
         ...checkArg(true),
       },
       handle(async ({ scheduleId, text, title, when, cron, timezone, paused, folder: f, account: acc, pool: pl, model, effort, permissionMode, ...rest }, extra) => {
-        const check = (rest as { check?: string | null }).check;
+        const { check, checkTimeoutSecs } = rest as { check?: string | null; checkTimeoutSecs?: number | null };
         const s = mustSchedules();
         const current = await s.find(scheduleId);
         // Raising access (above): from a thread not in full mode, raising a
@@ -749,6 +754,7 @@ export function buildThreadbearTools(
           effort,
           permissionMode,
           ...(check !== undefined ? { check } : {}),
+          ...(checkTimeoutSecs !== undefined ? { checkTimeoutSecs } : {}),
         });
         return await scheduleLine(sc);
       }),
