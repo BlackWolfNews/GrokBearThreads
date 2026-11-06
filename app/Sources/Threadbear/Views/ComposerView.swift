@@ -107,7 +107,14 @@ struct ComposerView: View {
         }
         .padding(Self.padding)
         }
-        .background { card(attention: needsYou) }
+        .background {
+            ZStack {
+                card(attention: needsYou)
+                ComposerDropArea(handle: handle)
+            }
+        }
+        // The transcript above is drop space for this box too.
+        .onAppear { controller?.composerHandle = handle }
         }
         // The transcript's reading column: 780 wide at most at 100%,
         // centred, with the same side insets once the window is narrower.
@@ -358,9 +365,110 @@ private struct AsyncThumbnail: View {
 }
 
 /// The composer's text view, for the "+" button and the strip's remove
-/// buttons, which work on the words where the cursor is.
+/// buttons, which work on the words where the cursor is, and for a file
+/// dropped on the thread around it (`ComposerDropView`).
 final class ComposerHandle {
     weak var textView: ComposerTextView?
+}
+
+/// Takes files dragged onto it and hands them to the composer, so the whole
+/// thread is somewhere to drop a picture and not only the box you type in
+/// (Jamie Turner, 6 Nov). It has to be AppKit: the file behind a screenshot's
+/// floating thumbnail only lasts until the drop ends, and SwiftUI's drop
+/// handlers give it back after that (DroppedFiles).
+class ComposerDropView: NSView {
+    /// The composer's, once there is one.
+    var handle: ComposerHandle? { nil }
+    /// Whether to mark the whole view while a file is over it.
+    var marksDrop: Bool { false }
+    private var mark: NSView?
+
+    /// The composer, while it's on screen in this window. A sub-agent's
+    /// transcript has none, and goes back to turning drops away.
+    private var composer: ComposerTextView? {
+        guard let view = handle?.textView, view.window === window, !view.isHiddenOrHasHiddenAncestor else { return nil }
+        return view
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        let takes = composer?.takesDropFromThread(sender) == true
+        showMark(takes)
+        return takes ? .copy : []
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        composer?.takesDropFromThread(sender) == true ? .copy : []
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) { showMark(false) }
+    override func draggingEnded(_ sender: NSDraggingInfo) { showMark(false) }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        showMark(false)
+        return composer?.takeDropFromThread(sender) == true
+    }
+
+    private func showMark(_ show: Bool) {
+        guard marksDrop else { return }
+        guard show else {
+            mark?.removeFromSuperview()
+            mark = nil
+            return
+        }
+        guard mark == nil else { return }
+        // Added now, not kept, so it's above whatever the view holds by then.
+        // Near the edges, clear of the messages' text.
+        let view = DropMark(frame: bounds.insetBy(dx: 8, dy: 8))
+        view.autoresizingMask = [.width, .height]
+        addSubview(view)
+        mark = view
+    }
+}
+
+/// The outline over a thread while a file is dragged over it.
+private final class DropMark: NSView {
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been used") }
+
+    override var wantsUpdateLayer: Bool { true }
+
+    // Colours resolve here, so the mark follows light and dark mode.
+    override func updateLayer() {
+        guard let layer else { return }
+        layer.cornerRadius = zoomed(12)
+        layer.borderWidth = 2
+        layer.borderColor = NSColor.controlAccentColor.cgColor
+        layer.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.06).cgColor
+    }
+
+    /// Only ever a picture: clicks and the drag itself go to what's under it.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+/// The composer's card around the box: its padding and controls row are part
+/// of the same target as the words.
+private struct ComposerDropArea: NSViewRepresentable {
+    let handle: ComposerHandle
+
+    final class Area: ComposerDropView {
+        var composerHandle: ComposerHandle?
+        override var handle: ComposerHandle? { composerHandle }
+    }
+
+    func makeNSView(context: Context) -> Area {
+        let view = Area()
+        view.registerForDraggedTypes(ComposerTextView.droppedTypes)
+        view.composerHandle = handle
+        return view
+    }
+
+    func updateNSView(_ view: Area, context: Context) {
+        view.composerHandle = handle
+    }
 }
 
 /// NSTextView-backed field that grows with its text: two lines at least,
@@ -542,7 +650,7 @@ final class ComposerTextView: NSTextView {
 
     override init(frame frameRect: NSRect, textContainer container: NSTextContainer?) {
         super.init(frame: frameRect, textContainer: container)
-        registerForDraggedTypes([.fileURL, .png, .tiff])
+        registerForDraggedTypes(Self.droppedTypes)
     }
 
     /// Builds its own TextKit 1 stack. `init(frame:textContainer: nil)` makes
@@ -745,6 +853,24 @@ final class ComposerTextView: NSTextView {
         let at = characterIndexForInsertion(at: convert(sender.draggingLocation, from: nil))
         if takeImages(from: sender.draggingPasteboard, at: NSRange(location: at, length: 0)) { return true }
         return super.performDragOperation(sender)
+    }
+
+    static let droppedTypes: [NSPasteboard.PasteboardType] = [.fileURL, .png, .tiff]
+
+    /// Whether a drag over the rest of the thread (`ComposerDropView`) is one
+    /// for this box. A drag that started in this app isn't: it's a file on
+    /// its way out to another app, and letting go of it back over the thread
+    /// shouldn't attach it. The box itself still takes those.
+    func takesDropFromThread(_ sender: NSDraggingInfo) -> Bool {
+        isEditable && sender.draggingSource == nil && hasFiles(sender.draggingPasteboard)
+    }
+
+    /// One let go over the rest of the thread goes where the cursor is, as a
+    /// paste does, and the cursor stays here to carry on writing.
+    func takeDropFromThread(_ sender: NSDraggingInfo) -> Bool {
+        guard takesDropFromThread(sender) else { return false }
+        window?.makeFirstResponder(self)
+        return takeImages(from: sender.draggingPasteboard)
     }
 
     private func fileURLs(_ pasteboard: NSPasteboard) -> [URL] {

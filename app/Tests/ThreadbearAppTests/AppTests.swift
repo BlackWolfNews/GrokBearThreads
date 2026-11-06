@@ -226,6 +226,55 @@ final class ComposerTests: XCTestCase {
         XCTAssertEqual(composer.string, "`\(video.standardizedFileURL.path)` ")
     }
 
+    /// Letting a file go anywhere over the thread gives it to the composer,
+    /// as only the box took it before (Jamie Turner, 6 Nov).
+    @MainActor func testAFileDroppedOnTheTranscriptGoesToTheComposer() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("transcript-drop-\(UUID().uuidString.prefix(6))", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let video = folder.appendingPathComponent("clip.mp4")
+        try Data("not really a movie".utf8).write(to: video)
+        let board = NSPasteboard(name: NSPasteboard.Name("transcript-drop-test-\(UUID().uuidString)"))
+        defer { board.releaseGlobally() }
+        board.clearContents()
+        board.writeObjects([video as NSURL])
+
+        let (window, parent, composer) = composerInWindow()
+        defer { window.close() }
+        let handle = ComposerHandle()
+        let controller = TranscriptController()
+        let host = TranscriptHost(controller: controller, ghost: false)
+        host.frame = parent.bounds
+        parent.addSubview(host)
+        XCTAssertTrue(host.registeredDraggedTypes.contains(.fileURL))
+        let outside = FakeDrag(pasteboard: board, window: window, location: .zero)
+
+        // No composer (a sub-agent's transcript): nowhere for it to go.
+        XCTAssertEqual(host.draggingEntered(outside), [])
+        XCTAssertFalse(host.performDragOperation(outside))
+
+        handle.textView = composer
+        controller.composerHandle = handle
+        // A file being dragged out of the app, let go back over the thread, stays out.
+        let fromThisApp = FakeDrag(pasteboard: board, window: window, location: .zero, source: FileDrag.Source.shared)
+        XCTAssertEqual(host.draggingEntered(fromThisApp), [])
+        XCTAssertFalse(host.performDragOperation(fromThisApp))
+        XCTAssertEqual(composer.string, "")
+
+        XCTAssertEqual(host.draggingEntered(outside), .copy)
+        XCTAssertEqual(host.draggingUpdated(outside), .copy)
+        XCTAssertEqual(host.subviews.count, 2, "the mark shows over the transcript")
+        XCTAssertTrue(host.performDragOperation(outside))
+        XCTAssertEqual(host.subviews.count, 1, "and goes with the drop")
+        XCTAssertEqual(composer.string, "`\(video.standardizedFileURL.path)` ")
+        XCTAssertTrue(window.firstResponder === composer)
+
+        // Words dragged in aren't files, so they aren't for the thread.
+        board.clearContents()
+        board.setString("hello", forType: .string)
+        XCTAssertEqual(host.draggingEntered(outside), [])
+    }
+
     /// A picture dropped from a temp folder goes to the runner as a copy, as
     /// a screenshot thumbnail's file is deleted as the drop ends (issue #2).
     func testAPictureFromATempFolderIsKept() throws {
@@ -794,7 +843,9 @@ private final class FakeDrag: NSObject, NSDraggingInfo {
     let draggingPasteboard: NSPasteboard
     let draggingDestinationWindow: NSWindow?
     let draggingLocation: NSPoint
-    init(pasteboard: NSPasteboard, window: NSWindow, location: NSPoint) {
+    let draggingSource: Any?
+    init(pasteboard: NSPasteboard, window: NSWindow, location: NSPoint, source: Any? = nil) {
+        draggingSource = source
         draggingPasteboard = pasteboard
         draggingDestinationWindow = window
         draggingLocation = location
@@ -802,7 +853,6 @@ private final class FakeDrag: NSObject, NSDraggingInfo {
     var draggingSourceOperationMask: NSDragOperation { .copy }
     var draggedImageLocation: NSPoint { draggingLocation }
     var draggedImage: NSImage? { nil }
-    var draggingSource: Any? { nil }
     var draggingSequenceNumber: Int { 1 }
     func slideDraggedImage(to screenPoint: NSPoint) {}
     var draggingFormation: NSDraggingFormation = .default

@@ -50,6 +50,8 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
     let tableView = TranscriptTableView()
     /// The open card, drawn at the top of the composer.
     weak var composerCard: ComposerCardHost?
+    /// The box drops on this transcript go to (ComposerDropView).
+    weak var composerHandle: ComposerHandle?
     private(set) weak var session: ThreadSession?
     private(set) var width: CGFloat = 0
     private var deferred = Set<String>()
@@ -984,7 +986,7 @@ struct TranscriptView: NSViewRepresentable {
     }
 }
 
-final class TranscriptHost: NSView {
+final class TranscriptHost: ComposerDropView {
     private let controller: TranscriptController
     private let ghost: Bool
 
@@ -1005,11 +1007,20 @@ final class TranscriptHost: NSView {
                 layer?.contentsGravity = .resize
             }
         } else {
+            // Nothing inside the transcript registers for drags (its text is
+            // read-only), so a file over any of it ends up here.
+            registerForDraggedTypes(ComposerTextView.droppedTypes)
             claim()
         }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been used") }
+
+    /// The composer this transcript's drops go to, read at drag time as the
+    /// box can be made after this view.
+    override var handle: ComposerHandle? { controller.composerHandle }
+
+    override var marksDrop: Bool { true }
 
     /// Puts the scroll view in this container, unless this one isn't in a
     /// window yet and the scroll view is: then it stays put until this one is.

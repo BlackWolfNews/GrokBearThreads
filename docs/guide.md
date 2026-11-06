@@ -298,6 +298,8 @@ Shift-Return on an empty item ends the list. You can paste or drop images
 into the composer, or add them with +. Each one goes in where the cursor
 is (or where you drop it) as a small chip, "Picture 1", "Picture 2", with
 its thumbnail, and the agent gets each picture right there in your words.
+You can let go of a file anywhere over the thread, not just on the box: the
+thread's outlined while it'll take it, and the file goes in where the cursor is.
 So "this one [Picture 1] should look like this one [Picture 2]" says which
 is which. The thumbnails show over the text too; the cross on one takes it
 and its chip out. Hover a chip to see its picture, in the composer or once
