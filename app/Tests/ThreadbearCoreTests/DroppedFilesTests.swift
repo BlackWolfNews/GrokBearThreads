@@ -23,6 +23,8 @@ final class DroppedFilesTests: XCTestCase {
         XCTAssertTrue(DroppedFiles.isTransient(URL(fileURLWithPath: "/private/var/folders/rz/abc/T/TemporaryItems/NSIRD_screencaptureui_x/Screenshot.png"), temp: temp))
         XCTAssertTrue(DroppedFiles.isTransient(temp.appendingPathComponent("shot.png"), temp: temp))
         XCTAssertFalse(DroppedFiles.isTransient(URL(fileURLWithPath: "/Users/me/Desktop/Screenshot.png"), temp: temp))
+        // A network share's own TemporaryItems could stall the drop.
+        XCTAssertFalse(DroppedFiles.isTransient(URL(fileURLWithPath: "/Volumes/Share/TemporaryItems/shot.png"), temp: temp))
         // Its own copies aren't copied again.
         XCTAssertFalse(DroppedFiles.isTransient(keep.appendingPathComponent("a/shot.png"), temp: temp, keep: keep))
     }
@@ -61,15 +63,48 @@ final class DroppedFilesTests: XCTestCase {
         XCTAssertNotEqual(again, saved)
     }
 
-    /// A screen recording's floating thumbnail is a temp file too; it goes
-    /// in as a path, which has to outlive the drop.
-    func testATempRecordingIsKeptToo() throws {
-        let mov = temp.appendingPathComponent("Screen Recording.mov")
+    /// A screen recording's floating thumbnail is in the same space; it
+    /// goes in as a path, which has to outlive the drop.
+    func testARecordingThatWouldVanishIsKeptToo() throws {
+        let space = temp.appendingPathComponent("TemporaryItems/NSIRD_screencaptureui_x", isDirectory: true)
+        try FileManager.default.createDirectory(at: space, withIntermediateDirectories: true)
+        let mov = space.appendingPathComponent("Screen Recording.mov")
         try Data(repeating: 7, count: 64).write(to: mov)
-        let out = try XCTUnwrap(DroppedFiles.keepingTransient([mov], temp: temp, into: keep).first)
+        XCTAssertTrue(DroppedFiles.isVanishing(mov))
+
+        let out = try XCTUnwrap(DroppedFiles.keepingVanishing([mov], into: keep).first)
         try FileManager.default.removeItem(at: mov)
         XCTAssertEqual(out.lastPathComponent, "Screen Recording.mov")
         XCTAssertEqual(try Data(contentsOf: out).count, 64)
+    }
+
+    /// A document in an ordinary temp folder stays put, so an agent asked
+    /// to edit it edits that file and not a copy.
+    func testADocumentInAnOrdinaryTempFolderStaysWhereItIs() throws {
+        let doc = temp.appendingPathComponent("config.json")
+        try Data("{}".utf8).write(to: doc)
+        XCTAssertFalse(DroppedFiles.isVanishing(doc))
+        XCTAssertEqual(DroppedFiles.keepingVanishing([doc], into: keep), [doc])
+    }
+
+    /// Copied on the main thread during the drop, so a folder isn't.
+    func testAFolderIsNotCopied() throws {
+        let space = temp.appendingPathComponent("TemporaryItems/big", isDirectory: true)
+        try FileManager.default.createDirectory(at: space, withIntermediateDirectories: true)
+        XCTAssertEqual(DroppedFiles.keepingVanishing([space], into: keep), [space])
+        XCTAssertEqual(DroppedFiles.keepingTransient([space], temp: temp, into: keep), [space])
+    }
+
+    func testASymlinkIsKeptAsTheFileItPointsAt() throws {
+        let target = temp.appendingPathComponent("real.png")
+        try Data([1, 2, 3]).write(to: target)
+        let link = temp.appendingPathComponent("link.png")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+
+        let out = try XCTUnwrap(DroppedFiles.keepingTransient([link], temp: temp, into: keep).first)
+        XCTAssertEqual(out.lastPathComponent, "link.png")
+        try FileManager.default.removeItem(at: target)
+        XCTAssertEqual(try Data(contentsOf: out), Data([1, 2, 3]))
     }
 
     func testAFileThatCannotBeCopiedIsPassedOnAsItWas() {

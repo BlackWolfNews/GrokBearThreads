@@ -19,9 +19,21 @@ public enum DroppedFiles {
     public static func isTransient(_ url: URL, temp: URL = FileManager.default.temporaryDirectory, keep: URL = keepFolder) -> Bool {
         let path = canonical(url.path)
         if path.hasPrefix(canonical(keep.path) + "/") { return false }
+        // By where the path starts, not a folder name within it: the copy
+        // runs on the main thread during the drop, so a TemporaryItems on a
+        // slow network share mustn't match.
         return path.hasPrefix("/var/folders/")
-            || path.contains("/TemporaryItems/")
             || path.hasPrefix(canonical(temp.path) + "/")
+    }
+
+    /// Whether `url` is in the space macOS hands out for one drag and takes
+    /// back as the drop ends, as a screen recording's thumbnail is. Narrower
+    /// than `isTransient`, for files that go in as their path: a document in
+    /// an ordinary temp folder has to stay where it is, or an agent asked to
+    /// edit it would edit a copy.
+    public static func isVanishing(_ url: URL) -> Bool {
+        let path = canonical(url.path)
+        return path.hasPrefix("/var/folders/") && path.contains("/TemporaryItems/")
     }
 
     /// `urls` with each transient one swapped for a copy under `folder` (an
@@ -29,18 +41,31 @@ public enum DroppedFiles {
     /// keeping its name (the runner's messages name the file). One that
     /// can't be copied is passed on as it was, for the runner to explain.
     public static func keepingTransient(_ urls: [URL], temp: URL = FileManager.default.temporaryDirectory, into folder: URL = keepFolder) -> [URL] {
-        urls.map { url in
-            guard isTransient(url, temp: temp, keep: folder) else { return url }
-            let dir = folder.appendingPathComponent(String(UUID().uuidString.prefix(8)), isDirectory: true)
-            let copy = dir.appendingPathComponent(url.lastPathComponent)
-            do {
-                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-                try FileManager.default.copyItem(at: url, to: copy)
-                return copy
-            } catch {
-                try? FileManager.default.removeItem(at: dir)
-                return url
-            }
+        urls.map { isTransient($0, temp: temp, keep: folder) ? kept($0, into: folder) : $0 }
+    }
+
+    /// The same for files that go in as their path, which only move if
+    /// they'd otherwise vanish.
+    public static func keepingVanishing(_ urls: [URL], into folder: URL = keepFolder) -> [URL] {
+        urls.map { isVanishing($0) ? kept($0, into: folder) : $0 }
+    }
+
+    private static func kept(_ url: URL, into folder: URL) -> URL {
+        // copyItem copies a symlink as a link, which would still lean on
+        // the file that's about to go.
+        let source = url.resolvingSymlinksInPath()
+        // Files only: this runs on the main thread during the drop, and a
+        // folder would be walked file by file however cheap the clones are.
+        guard (try? source.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { return url }
+        let dir = folder.appendingPathComponent(String(UUID().uuidString.prefix(8)), isDirectory: true)
+        let copy = dir.appendingPathComponent(url.lastPathComponent)
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try FileManager.default.copyItem(at: source, to: copy)
+            return copy
+        } catch {
+            try? FileManager.default.removeItem(at: dir)
+            return url
         }
     }
 

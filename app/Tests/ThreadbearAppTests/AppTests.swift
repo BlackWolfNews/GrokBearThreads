@@ -193,10 +193,7 @@ final class ComposerTests: XCTestCase {
         board.writeObjects([video as NSURL, folder as NSURL])
 
         XCTAssertTrue(composer.takeImages(from: board))
-        // From a temp folder, each goes in as a kept copy under its own name
-        // (issue #2: a floating thumbnail's file is deleted as the drop ends).
-        let paths = Self.keptPaths(in: composer.string, named: [video.lastPathComponent, folder.lastPathComponent])
-        let expected = "look at " + paths.map { "`\($0)`" }.joined(separator: " ") + " "
+        let expected = "look at `\(video.standardizedFileURL.path)` `\(folder.standardizedFileURL.path)` "
         XCTAssertEqual(composer.string, expected)
         XCTAssertEqual(composer.selectedRange().location, (expected as NSString).length)
 
@@ -226,22 +223,63 @@ final class ComposerTests: XCTestCase {
         XCTAssertEqual(composer.draggingEntered(drag), .copy)
         XCTAssertEqual(composer.draggingUpdated(drag), .copy)
         XCTAssertTrue(composer.performDragOperation(drag))
-        let paths = Self.keptPaths(in: composer.string, named: [video.lastPathComponent])
-        XCTAssertEqual(composer.string, "`\(paths[0])` ")
+        XCTAssertEqual(composer.string, "`\(video.standardizedFileURL.path)` ")
     }
 
-    /// The paths in backticks in `text`, checked to be the composer's kept
-    /// copies of files named `names`, in order; the copies are removed.
-    static func keptPaths(in text: String, named names: [String]) -> [String] {
-        let paths = text.components(separatedBy: "`").enumerated().filter { $0.offset % 2 == 1 }.map(\.element)
-        XCTAssertEqual(paths.map { ($0 as NSString).lastPathComponent }, names)
-        for path in paths {
-            let copy = URL(fileURLWithPath: path)
-            XCTAssertTrue(copy.path.hasPrefix(DroppedFiles.keepFolder.standardizedFileURL.path + "/"), path)
-            XCTAssertTrue(FileManager.default.fileExists(atPath: path), path)
-            try? FileManager.default.removeItem(at: copy.deletingLastPathComponent())
-        }
-        return paths
+    /// A picture dropped from a temp folder goes to the runner as a copy, as
+    /// a screenshot thumbnail's file is deleted as the drop ends (issue #2).
+    func testAPictureFromATempFolderIsKept() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("composer-thumb-\(UUID().uuidString.prefix(6))", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let shot = folder.appendingPathComponent("Screenshot.png")
+        try Data([0x89, 0x50, 0x4E, 0x47]).write(to: shot)
+
+        let composer = ComposerTextView()
+        var delivered: [URL] = []
+        composer.onImages = { delivered = $0 }
+        let board = NSPasteboard(name: NSPasteboard.Name("composer-thumb-test-\(UUID().uuidString)"))
+        defer { board.releaseGlobally() }
+        board.clearContents()
+        board.writeObjects([shot as NSURL])
+
+        XCTAssertTrue(composer.takeImages(from: board))
+        let kept = try XCTUnwrap(delivered.first)
+        defer { try? FileManager.default.removeItem(at: kept.deletingLastPathComponent()) }
+        XCTAssertEqual(kept.lastPathComponent, "Screenshot.png")
+        XCTAssertNotEqual(kept.standardizedFileURL, shot.standardizedFileURL)
+        try FileManager.default.removeItem(at: shot)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: kept.path))
+    }
+
+    /// A photo copied in Photos goes in as its image data, even with another
+    /// file copied alongside it, which goes in as usual.
+    func testAPhotosLibraryPhotoUsesItsImageData() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("composer-photos-\(UUID().uuidString.prefix(6))", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let other = folder.appendingPathComponent("other.png")
+        try Data([0x89, 0x50, 0x4E, 0x47]).write(to: other)
+        let jpeg = Data([0xFF, 0xD8, 0xFF, 0xE0])
+
+        let photo = NSPasteboardItem()
+        photo.setString(URL(fileURLWithPath: "/Users/me/Pictures/Photos Library.photoslibrary/resources/ABC.jpeg").absoluteString, forType: .fileURL)
+        photo.setData(jpeg, forType: NSPasteboard.PasteboardType("public.jpeg"))
+        let plain = NSPasteboardItem()
+        plain.setString(other.absoluteString, forType: .fileURL)
+
+        let composer = ComposerTextView()
+        var delivered: [URL] = []
+        composer.onImages = { delivered = $0 }
+        let board = NSPasteboard(name: NSPasteboard.Name("composer-photos-test-\(UUID().uuidString)"))
+        defer { board.releaseGlobally() }
+        board.clearContents()
+        board.writeObjects([photo, plain])
+
+        XCTAssertTrue(composer.takeImages(from: board))
+        XCTAssertEqual(delivered.map(\.lastPathComponent), ["ABC.jpeg", "other.png"])
+        defer { delivered.forEach { try? FileManager.default.removeItem(at: $0.deletingLastPathComponent()) } }
+        XCTAssertEqual(try Data(contentsOf: delivered[0]), jpeg)
     }
 
     /// The box is two lines tall when empty, grows a line at a time, and
