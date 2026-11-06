@@ -9,6 +9,7 @@
 //   tools that act on other threads, schedules or projects;
 // - ThreadRouter: what the agent tools drive, on either side, so they reach
 //   a thread wherever it is.
+import type { StartRequest } from './cross-runner.ts';
 import type { SecretAnswer, SecretRequest } from './runner/approvals.ts';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
@@ -503,13 +504,25 @@ export function primaryElsewhere(link: PrimaryLink, runner: Pick<Runner, 'has'>)
 
 // What the agent tools drive (threadbear-mcp.ts's ThreadControl): this
 // runner's own threads directly, the rest wherever they are.
+// What main.ts gives the router for other runners: cross-runner.ts's start.
+export type CrossRunnerHooks = { start(threadId: string, req: StartRequest): Promise<string | undefined> };
+
 export class ThreadRouter implements ThreadControl {
   private runner: Runner;
   private elsewhere: () => Elsewhere | undefined;
+  private cross: () => CrossRunnerHooks | undefined;
 
-  constructor(runner: Runner, elsewhere: () => Elsewhere | undefined) {
+  constructor(runner: Runner, elsewhere: () => Elsewhere | undefined, cross: () => CrossRunnerHooks | undefined = () => undefined) {
     this.runner = runner;
     this.elsewhere = elsewhere;
+    this.cross = cross;
+  }
+
+  // Asking another runner (cross-runner.ts). Only a thread's own agent asks,
+  // on the runner that has the thread.
+  async startOn(threadId: string, req: StartRequest): Promise<string | undefined> {
+    const c = this.cross();
+    return c ? c.start(threadId, req) : undefined;
   }
 
   // The Elsewhere for a thread this runner doesn't have, if any.

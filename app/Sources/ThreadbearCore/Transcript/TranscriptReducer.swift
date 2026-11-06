@@ -100,6 +100,9 @@ public struct TranscriptModel: Sendable {
     /// What Mike has written in each card's Something else boxes, by the
     /// card's seq, kept here for the same reason.
     public private(set) var askNotes: [Int: [Int: AskNote]] = [:]
+    /// Other runners' requests for a thread, read by approval id, so a
+    /// rebuild keeps them on their cards.
+    public private(set) var startRequests: [String: StartRequest] = [:]
     /// The follow-ups Mike ticked on each done card, by the card's seq,
     /// kept here for the same reason.
     public private(set) var nextPicks: [Int: Set<Int>] = [:]
@@ -388,6 +391,21 @@ public struct TranscriptModel: Sendable {
             if case .asks(var card) = content {
                 card.picks = picks
                 content = .asks(card)
+            }
+        }
+        return refreshRows()
+    }
+
+    /// Another runner's request was read for the card `approvalId`.
+    public mutating func setStartRequest(_ approvalId: String, _ request: StartRequest) -> TranscriptChange {
+        guard startRequests[approvalId] != request else { return TranscriptChange() }
+        startRequests[approvalId] = request
+        let id = "ap:\(approvalId)"
+        guard itemIndex[id] != nil else { return TranscriptChange() }
+        update(id) { content in
+            if case .approval(var item) = content {
+                item.startRequest = request
+                content = .approval(item)
             }
         }
         return refreshRows()
@@ -768,7 +786,7 @@ public struct TranscriptModel: Sendable {
             let toolId = request.itemId.flatMap { $0.isEmpty ? nil : "t:" + $0 }
             if let toolId { approvalForTool[toolId] = id }
             let shown = toolId.map { itemIndex[$0] != nil } ?? false
-            append(TranscriptRow(id: id, seq: seq, turnId: turnId, content: .approval(ApprovalItem(request: request, root: root, toolShown: shown))))
+            append(TranscriptRow(id: id, seq: seq, turnId: turnId, content: .approval(ApprovalItem(request: request, root: root, toolShown: shown, startRequest: startRequests[request.approvalId]))))
             pendingCards[id] = turnId ?? ""
             tailDirty = true
 

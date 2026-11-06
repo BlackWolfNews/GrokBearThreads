@@ -218,6 +218,12 @@ export const ACCESS: Record<string, Access> = {
   // Full sync (API 52): a runner writes its own threads' tool output, and only
   // the main Mac's runner reads another runner's.
   remoteBody: 'owner',
+  // Asking another runner (relay.ts): a runner key files and reads back its
+  // own requests; only the main Mac's runner reads any and answers them.
+  fileRequest: 'own',
+  runnerRequest: 'own',
+  decideRequest: 'owner',
+  closeRequest: 'own',
   appendBodies: 'own',
   addHeldPicture: 'own',
 };

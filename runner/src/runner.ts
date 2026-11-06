@@ -130,6 +130,7 @@ import { handoversPart, type HandoversPart } from './runner/handovers.ts';
 import { stoppedWorkPart, type StoppedWorkPart } from './runner/stopped-work.ts';
 import { projectsHostPart, type ProjectsHostPart } from './runner/projects-host.ts';
 import { approvalsPart, settleDeclined, type ApprovalsPart, type SecretAnswer } from './runner/approvals.ts';
+import type { RequestAnswer } from './cross-runner.ts';
 import { SecretStore } from './secrets.ts';
 import { reviewsPart, type ReviewsPart } from './runner/reviews.ts';
 import { clisPart, type ClisPart } from './runner/clis.ts';
@@ -239,7 +240,10 @@ export type PendingApproval =
   // An agent's ask_secret (docs/protocol.md, "Secrets"). The value never
   // passes through here: secrets.answer writes the file and hands this the
   // paths.
-  | { approvalId: string; kind: 'secret'; main: boolean; resolve: (a: SecretAnswer) => void };
+  | { approvalId: string; kind: 'secret'; main: boolean; resolve: (a: SecretAnswer) => void }
+  // create_thread asking for a thread on another runner (cross-runner.ts).
+  // check reads the backend's answer, which is the only one it believes.
+  | { approvalId: string; kind: 'request'; main: boolean; check: () => Promise<RequestAnswer>; resolve: (a: RequestAnswer) => void };
 
 export type Turn = {
   turnId: string;

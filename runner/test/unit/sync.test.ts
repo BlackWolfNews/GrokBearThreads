@@ -2470,3 +2470,65 @@ test('pushes failing at the backend are said once per run in tb status and the a
   assert.equal(notices.length, 2, 'a new failing run is said again');
   await sync.stop();
 });
+
+// docs/protocol.md, "Asking another runner" (cross-runner.ts): the card on
+// the asking runner's thread. The phone can't answer it, and an "allow"
+// that the backend's row doesn't back up changes nothing.
+import { START_CARD, type RequestAnswer } from '../../src/cross-runner.ts';
+
+test('asking another runner: the phone gets a card it can only read, and allow needs the backend to say it started', async () => {
+  const f = setupFull({ apiVersion: SECRETS_API_VERSION });
+  const { h, sync, calls, push } = f;
+  const rows = () => calls.filter((c) => c.fn === 'sync:upsertThreads').flatMap((c) => c.args.threads as ThreadDoc[]);
+  sync.start();
+  await sync.flushNow();
+  await tick();
+  const t = h.runner.create({ text: 'go', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  session(h, t.id).init();
+  let row: RequestAnswer | undefined;
+  const answer = h.runner.requestCard(t.id, {
+    approvalId: 'req-0001-abcd',
+    title: 'Start a thread on main?',
+    input: { runner: 'main', text: 'Look at the GPUI build.' },
+    minutes: 60,
+    check: async () => {
+      if (row) return row;
+      throw new Error('Answer this in the Threadbear app on the main Mac: it starts the thread from there.');
+    },
+  });
+  h.clock.advance(SYNC_COALESCE_MS);
+  await tick();
+  const card = rows().filter((d) => d.threadId === t.id).at(-1)!.pendingApproval as { kind: string; name: string; title: string; options: string[]; inputSummary?: string };
+  assert.equal(card.name, START_CARD);
+  assert.deepEqual(card.options, []);
+  assert.match(card.title, /Answer it on the Mac\.$/);
+  assert.equal(card.inputSummary, undefined, 'no part of the brief goes on the row');
+  // An old phone's Allow: refused, and the card stays open.
+  push([{ commandId: 'q1', kind: 'respond', threadId: t.id, args: { approvalId: 'req-0001-abcd', decision: 'allow' }, createdAt: 1 }] as Command[]);
+  await tick(10);
+  const failed = calls.find((c) => c.fn === 'sync:finishCommand' && c.args.commandId === 'q1')!;
+  assert.equal(failed.args.ok, false);
+  assert.match(String(failed.args.note), /main Mac/);
+  assert.equal(h.runner.get(t.id).status, 'waiting');
+  // The main Mac started it and marked the row; its allow goes through.
+  row = { status: 'started', runnerId: 'm5', runnerName: 'M5', threadId: 'new-thread' };
+  push([{ commandId: 'q2', kind: 'respond', threadId: t.id, args: { approvalId: 'req-0001-abcd', decision: 'allow' }, createdAt: 2 }] as Command[]);
+  await tick(10);
+  assert.deepEqual(await answer, row);
+  assert.notEqual(h.runner.get(t.id).status, 'waiting');
+});
+
+test('asking another runner: a deny from anywhere declines it, and no answer in time expires it', async () => {
+  const h = makeHarness();
+  const t = h.runner.create({ text: 'go', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  session(h, t.id).init();
+  const never = async (): Promise<RequestAnswer> => {
+    throw new Error('not yet');
+  };
+  const first = h.runner.requestCard(t.id, { approvalId: 'req-a', title: 'Start?', input: {}, minutes: 60, check: never });
+  await h.runner.respondApproval({ threadId: t.id, approvalId: 'req-a', decision: 'deny' });
+  assert.equal((await first).status, 'declined');
+  const second = h.runner.requestCard(t.id, { approvalId: 'req-b', title: 'Start?', input: {}, minutes: 60, check: never });
+  h.clock.advance(60 * 60_000);
+  assert.equal((await second).status, 'expired');
+});

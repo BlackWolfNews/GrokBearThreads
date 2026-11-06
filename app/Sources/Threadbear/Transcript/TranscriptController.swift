@@ -803,6 +803,10 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         session?.respond(approvalId: approvalId, decision: decision, answers: answers, message: message)
     }
 
+    func loadStartRequest(_ approvalId: String) {
+        session?.loadStartRequest(approvalId)
+    }
+
     func questionDraft(_ approvalId: String) -> [Int: Set<String>] { questionDrafts[approvalId] ?? [:] }
 
     func setQuestionDraft(_ approvalId: String, _ draft: [Int: Set<String>]) { questionDrafts[approvalId] = draft }

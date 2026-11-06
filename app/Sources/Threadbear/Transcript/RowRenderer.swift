@@ -390,7 +390,7 @@ enum RowRenderer {
             let inner = width - RowMetrics.cardPad * 2 - RowMetrics.accentBar
             let title = approvalTitleText(item)
             let titleSize = measurer.measure(title, width: inner)
-            let payload = approvalPayload(item.request)
+            let payload = item.isStartRequest ? startRequestPayload(item.startRequest) : approvalPayload(item.request)
             let payloadSize = measurer.measure(payload, width: inner - RowMetrics.boxPad * 2)
             let height = RowMetrics.cardPad * 2 + titleSize.height + zoomed(10) + payloadSize.height + RowMetrics.boxPad * 2 + zoomed(12) + RowMetrics.buttonHeight
             return RowRender(height: vertical + zoomed(4) + height, text: title, textSize: titleSize, detail: payload, detailSize: payloadSize)
@@ -995,6 +995,7 @@ enum RowRenderer {
     /// "Write release.sh?" and, for a file, its folder after it, dimmed, as
     /// file rows show it. The card's tooltip has the whole path.
     static func approvalTitleText(_ item: ApprovalItem) -> NSAttributedString {
+        if item.isStartRequest { return startRequestTitle(item.startRequest) }
         var attributes = Theme.text(Theme.cardTitleFont, line: TypeScale.scaled(20))
         let output = NSMutableAttributedString(string: ApprovalText.title(item.request), attributes: attributes)
         if let path = ApprovalText.filePath(item.request) {
@@ -1037,6 +1038,46 @@ enum RowRenderer {
         let fields = ToolPresentation.fields(input)
         if fields.isEmpty { return mono(clampLines(request.title, 10), .labelColor) }
         return fieldsText(Array(fields.prefix(8)))
+    }
+
+    /// Another runner asking for a thread (docs/protocol.md, "Asking
+    /// another runner"): who's asking and where it would start, from the
+    /// request as it was filed, never the card's own words.
+    static func startRequestTitle(_ info: StartRequest?) -> NSAttributedString {
+        let titleAttributes = Theme.text(Theme.cardTitleFont, line: TypeScale.scaled(20))
+        let quiet = Theme.text(Theme.detailFont, color: Theme.quietText, line: TypeScale.scaled(19))
+        guard let info else { return NSAttributedString(string: "Another machine wants to start a thread", attributes: titleAttributes) }
+        if let error = info.error {
+            let output = NSMutableAttributedString(string: "Couldn't read this request", attributes: titleAttributes)
+            output.append(NSAttributedString(string: "\n" + error, attributes: quiet))
+            return output
+        }
+        let place = info.startsOn.map { $0.isSelf ? "this Mac" : $0.name } ?? "this Mac"
+        let output = NSMutableAttributedString(string: "\(info.request.runnerName) wants to start a thread on \(place)", attributes: titleAttributes)
+        var notes: [String] = []
+        if info.target == nil { notes.append("It asked for \u{201C}\(info.request.target)\u{201D}, which isn't one of your machines.") }
+        if let why = info.request.why?.trimmingCharacters(in: .whitespacesAndNewlines), !why.isEmpty { notes.append(why) }
+        if !notes.isEmpty { output.append(NSAttributedString(string: "\n" + notes.joined(separator: "\n"), attributes: quiet)) }
+        return output
+    }
+
+    /// The folder, access and model it would start with, then the whole
+    /// brief: what Mike allows is all of it.
+    static func startRequestPayload(_ info: StartRequest?) -> NSAttributedString {
+        let quiet = Theme.text(Theme.detailFont, color: Theme.quietText, line: TypeScale.scaled(19))
+        guard let info, info.error == nil else { return NSAttributedString(string: info == nil ? "Reading the request\u{2026}" : "", attributes: quiet) }
+        let r = info.request
+        let access: String
+        switch r.permissionMode {
+        case "ask": access = "Asks before edits"
+        case "auto": access = "Auto"
+        default: access = "Full access"
+        }
+        var facts = ["Folder: \(r.cwd?.isEmpty == false ? r.cwd! : "the usual one")", "Access: \(access)"]
+        if let model = r.model, !model.isEmpty { facts.append("Model: \(model)\(r.effort.map { ", \($0)" } ?? "")") }
+        let output = NSMutableAttributedString(string: facts.joined(separator: "\n") + "\n\n", attributes: quiet)
+        output.append(NSAttributedString(string: r.text, attributes: Theme.text(Theme.detailFont, color: .labelColor, line: TypeScale.scaled(19))))
+        return output
     }
 
     /// A question's text: card title weight, quieter once it's answered so

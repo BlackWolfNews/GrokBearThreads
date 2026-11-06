@@ -252,6 +252,10 @@ struct ComposerView: View {
         let session = app.session(for: thread.id)
         let pending = session.model.pendingApprovalIds
         guard pending.count == 1, let id = pending.first else { return false }
+        // Another runner asking for a thread is started only by a click on
+        // its card, after reading it: a card that lands as Mike presses
+        // Return in an empty box mustn't start what he never saw.
+        if case .approval(let item)? = session.model.item(id: "ap:" + id)?.content, item.isStartRequest { return false }
         session.respond(approvalId: id, decision: .allow, answers: nil, message: nil)
         return true
     }

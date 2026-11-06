@@ -175,6 +175,11 @@ public struct ThreadFeed: Sendable {
         model.setAskPicks(seq, picks)
     }
 
+    /// Another runner's request was read (see `TranscriptModel.setStartRequest`).
+    public mutating func setStartRequest(_ approvalId: String, _ request: StartRequest) -> TranscriptChange {
+        model.setStartRequest(approvalId, request)
+    }
+
     /// Mike wrote in a card's Something else boxes (see `TranscriptModel.setAskNotes`).
     public mutating func setAskNotes(_ seq: Int, _ notes: [Int: AskNote]) -> TranscriptChange {
         model.setAskNotes(seq, notes)

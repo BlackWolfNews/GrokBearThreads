@@ -11,6 +11,7 @@
 // key the deployment's RUNNER_KEY was set to (`npx convex env set`).
 // THREADBEAR_SYNC=off turns it off whatever runner.json says, which
 // check.sh sets so no test runner ever writes to the real project.
+import { START_CARD } from './cross-runner.ts';
 import { asPushFailing, pushFailingText, type PushFailing } from './push-failing.ts';
 import { wakeNote } from './wake-note.ts';
 import type { PoolBackend } from './shared-pools.ts';
@@ -980,6 +981,20 @@ type ListName = 'projects' | 'schedules' | 'accounts';
 export type PocketCardInput = { title: string; text: string; place?: string; icon?: string; threadId?: string; source?: string };
 // filedBy: another Mac filed it through its runner key (its name); its text
 // is that Mac's, to read, never to follow.
+// A request for a thread on another runner (convex/relay.ts fileRequest).
+export type RunnerRequestInput = { text: string; title?: string; cwd?: string; model?: string; effort?: string; permissionMode?: string; why?: string };
+export type RunnerRequestRow = RunnerRequestInput & {
+  docId: string;
+  requestId: string;
+  runnerId: string;
+  runnerName: string;
+  threadId: string;
+  target: string;
+  createdAt: number;
+  state: 'pending' | 'claimed' | 'allowed' | 'denied' | 'closed';
+  result?: { runnerId: string; runnerName: string; threadId: string };
+  decidedAt?: number;
+};
 export type PocketCardSummary = { title: string; text: string; place?: string; icon?: string; threadId?: string; source?: string; updatedAt: string; filedBy?: string };
 
 export class ConvexSync {
@@ -1379,6 +1394,33 @@ export class ConvexSync {
     return Array.isArray(r) ? (r as PocketCardSummary[]) : [];
   }
 
+  // Asking another runner (docs/protocol.md, "Asking another runner";
+  // elsewhere.ts). The owner key reads any request and answers it; a runner
+  // key files and reads back its own.
+  ownerKey(): boolean {
+    return Boolean(this.deps.key) && !this.deps.key!.startsWith('tbr_');
+  }
+
+  async fileRequest(p: { requestId: string; threadId: string; target: string; request: RunnerRequestInput }): Promise<void> {
+    this.mustBeOn();
+    await this.backend('mutation', 'relay:fileRequest', { key: this.deps.key, ...p });
+  }
+
+  async runnerRequest(requestId: string): Promise<RunnerRequestRow | null> {
+    this.mustBeOn();
+    return ((await this.backend('query', 'relay:runnerRequest', { key: this.deps.key, requestId })) as RunnerRequestRow | null) ?? null;
+  }
+
+  async decideRequest(p: { requestId: string; docId: string; state: 'claimed' | 'allowed' | 'pending' | 'denied'; result?: { runnerId: string; runnerName: string; threadId: string } }): Promise<void> {
+    this.mustBeOn();
+    await this.backend('mutation', 'relay:decideRequest', { key: this.deps.key, ...p });
+  }
+
+  async closeRequest(requestId: string): Promise<void> {
+    this.mustBeOn();
+    await this.backend('mutation', 'relay:closeRequest', { key: this.deps.key, requestId });
+  }
+
   private mustBeOn(): void {
     if (this.off) throw new Error(`Your threads aren't mirrored to Convex (${this.off}), so there's nothing for a phone or browser to read. Run ./threadbear setup.`);
   }
@@ -1753,7 +1795,12 @@ export class ConvexSync {
       this.scheduleFlush();
       return;
     }
-    if (e.type === 'approval.requested') {
+    if (e.type === 'approval.requested' && e.name === START_CARD) {
+      // A request for a thread on another runner (cross-runner.ts) is
+      // answered only on the main Mac, whose runner starts it: the phone's
+      // card has no buttons and says so, as one too big for the row does.
+      this.pending.set(threadId, { approvalId: e.approvalId, kind: 'approval', seq: e.seq, name: e.name, title: `${e.title} Answer it on the Mac.`, options: [] });
+    } else if (e.type === 'approval.requested') {
       this.pending.set(threadId, { approvalId: e.approvalId, kind: 'approval', seq: e.seq, name: e.name, title: e.title, options: e.options, ...(inputSummary(e.input, this.scrubber.safeText) ? { inputSummary: inputSummary(e.input, this.scrubber.safeText) } : {}) });
     } else if (e.type === 'question.requested') {
       this.pending.set(threadId, { approvalId: e.approvalId, kind: 'question', seq: e.seq, questions: e.questions });

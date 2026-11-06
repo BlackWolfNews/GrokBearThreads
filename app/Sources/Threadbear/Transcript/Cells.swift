@@ -9,6 +9,8 @@ protocol RowCellDelegate: AnyObject {
     /// `DiffPreview.allKey`.
     func showAllLines(_ key: String)
     func respond(approvalId: String, decision: ApprovalDecision, answers: [String: String]?, message: String?)
+    /// Another runner's request for a thread: read it for its card.
+    func loadStartRequest(_ approvalId: String)
     func questionDraft(_ approvalId: String) -> [Int: Set<String>]
     func setQuestionDraft(_ approvalId: String, _ draft: [Int: Set<String>])
     /// A secret card (docs/protocol.md, "Secrets"): where its answer is,
@@ -1407,7 +1409,20 @@ final class ApprovalRowCell: RowCellView {
         y = payloadBox.frame.maxY + zoomed(12)
 
         // Allow first and filled; Deny last, on the right of the row.
-        let options = Set(item.request.options)
+        var options = Set(item.request.options)
+        // Another runner asking for a thread: Start it or Don't, once its
+        // request has been read (it may come with no options: the phone's
+        // row has none).
+        let start = item.isStartRequest
+        allow.title = start ? "Start it" : "Allow"
+        allow.shortcut = start ? nil : "⏎"
+        deny.title = start ? "Don't" : "Deny"
+        allow.setTip(start ? "Start this thread with this brief" : "Let it do this once (Return)")
+        deny.setTip(start ? "Don't start it; the asking thread is told no" : "Don't let it do this; the agent is told no")
+        if start {
+            options = item.startRequest.map { $0.error == nil ? [.allow, .deny] : [] } ?? []
+            if pending, item.startRequest == nil { delegate?.loadStartRequest(approvalId) }
+        }
         var buttonX = left
         for (button, option) in [(allow, ApprovalOption.allow), (always, .allowAlways), (deny, .deny)] {
             button.isHidden = !pending || !options.contains(option)

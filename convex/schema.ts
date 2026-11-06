@@ -381,6 +381,36 @@ export default defineSchema({
     // pruneOld: finished ones by when they finished.
     .index('by_state_done', ['state', 'doneAt']),
 
+  // A runner on a runner key asking for a new thread on another runner
+  // (docs/protocol.md, "Asking another runner"). It can't queue work there
+  // itself, so it files the whole request here, where nothing can change it
+  // after, and the main Mac shows Mike exactly this before its runner (the
+  // owner key) starts it. requestId is the card's approvalId.
+  runnerRequests: defineTable({
+    requestId: v.string(),
+    runnerId: v.string(), // who asked, from its key, never from the request
+    threadId: v.string(), // its thread that asked (one of its own)
+    target: v.string(), // the runner asked for, as the agent named it ("main", a name or an id)
+    text: v.string(),
+    title: v.optional(v.string()),
+    cwd: v.optional(v.string()),
+    model: v.optional(v.string()),
+    effort: v.optional(v.string()),
+    permissionMode: v.optional(v.string()),
+    why: v.optional(v.string()),
+    createdAt: v.number(),
+    // claimed: the main Mac's runner is starting it (so a retry can't start
+    // a second); closed: the asking runner gave up on it (its card expired,
+    // or was declined there), so it no longer counts against its cap.
+    state: v.union(v.literal('pending'), v.literal('claimed'), v.literal('allowed'), v.literal('denied'), v.literal('closed')),
+    // Once allowed: where it was started.
+    result: v.optional(v.object({ runnerId: v.string(), runnerName: v.string(), threadId: v.string() })),
+    decidedAt: v.optional(v.number()),
+  })
+    .index('by_requestId', ['requestId'])
+    .index('by_runnerId', ['runnerId'])
+    .index('by_runner_state', ['runnerId', 'state']),
+
   // Full sync (API 52, docs/full-convex.md step 4; sync.full in runner.json).
   // One row per tool call, under the seq of its one-line `messages` row, with
   // its output, input, diffs and the reasoning before it. Convex charges a read

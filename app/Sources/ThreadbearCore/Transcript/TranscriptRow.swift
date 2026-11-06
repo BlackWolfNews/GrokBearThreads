@@ -238,13 +238,19 @@ public struct ApprovalItem: Sendable, Hashable {
     /// opened, "Allowed  Write release.sh" showed the file and the Write
     /// row right under it showed it again.
     public var toolShown: Bool
+    /// Another runner asking for a thread: the request as it was filed,
+    /// once this Mac's runner has read it (nil until then).
+    public var startRequest: StartRequest?
 
-    public init(request: ApprovalRequest, resolution: ApprovalResolution? = nil, root: String? = nil, toolShown: Bool = false) {
+    public init(request: ApprovalRequest, resolution: ApprovalResolution? = nil, root: String? = nil, toolShown: Bool = false, startRequest: StartRequest? = nil) {
         self.request = request
         self.resolution = resolution
         self.root = root
         self.toolShown = toolShown
+        self.startRequest = startRequest
     }
+
+    public var isStartRequest: Bool { request.name == StartRequest.cardName }
 
     /// It shows what it asked: always while it waits (a card then), and
     /// once settled only if its tool call has no row to show it.

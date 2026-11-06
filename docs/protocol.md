@@ -872,6 +872,8 @@ the summary and then the reply.
 | `schedules.delete` | `{ scheduleId }` | `{}` |
 | `schedules.run` | `{ scheduleId }` | `{ schedule: Schedule, threadId?: string, turnId?: string, queued?: boolean }` runs it now, as if it were due, even when paused. A repeating schedule keeps its `nextRunAt`; a one-off is finished. For a schedule on another runner it answers at once with `queued: true` and no thread: that runner runs it when it next hears (`runRequestedAt` is set until then) |
 | `runners.list` | `{}` | `{ runners: RunnerInfo[] }`, this runner first, then the rest by name. Without a backend, just this runner |
+| `requests.get` | `{ threadId, approvalId }` | `{ request, target?, runners }`: another runner's request for a new thread (Asking another runner), exactly as it was filed (`relay:runnerRequest`), the runner it names if this runner can find it (`{ id, name, self }`), and every runner to pick from instead. Main Mac's runner only; `-32602` for no such request on that thread |
+| `requests.answer` | `{ threadId, approvalId, allow: boolean, runnerId?: string }` | `{ thread?: { id, runnerId, runnerName } }`. `allow` starts the filed request (on `runnerId` if given, else the runner it named), marks it allowed and answers its card; otherwise marks it denied and declines the card. `-32602` once the card has closed (answered, expired, declined from the phone) or the request was already answered. Main Mac's runner only |
 | `runners.stats` | `{}` | `{ stats: RunnerMachineStats[] }`: each runner's latest machine figures, `{ runnerId, at, cpuPercent, cores, memUsed, memTotal, diskFree, diskTotal, load1?, uptimeSec, machine?, os? }` (bytes; `uptimeSec` is the machine's). Asking marks them wanted (`sync:watchRunnersFromMac`, at most every 20 s), so every runner reports every 10 s until nobody has asked for 45 s. The Mac app asks only while a runner's details are open in the Runners panel and its window can be seen. Empty with sync off, on an older backend, or on a runner key. A runner older than this answers `-32601` |
 | `remoteThreads.list` | `{}` | `RemoteThreads`: other runners' threads for the sidebar (see "Other runners' threads"). Empty with sync off, or before the backend (API 12) has answered. A runner older than this answers `-32601` |
 | `files.read` | `{ path: string, maxBytes?: number, known?: { size, modifiedAt } }` | `{ path, size, modifiedAt, mediaType, data, truncated }` (`data` base64, at most `maxBytes`, default 16 MB, never over 48 MB; `truncated` when the file is longer), or `{ path, unchanged: true, size, modifiedAt }` when `known` matches the file. A file on this runner's Mac, for a Mac app showing one of its threads from another Mac (see "Other runners' threads"). `-32602` for a relative path, a missing file or a folder |
@@ -3748,6 +3750,69 @@ default).
   sub-agent, ticking an ask, changing its login or model) is `-32000`
   saying to do it on that Mac or turn the direct link on.
 
+## Asking another runner
+
+Added 6 Nov 2026. An agent's `create_thread` takes `runner` (a name, an id,
+or `main` for the main Mac) to start the thread on another of Mike's
+machines, with `folder` a path there (`runner/src/cross-runner.ts`). A
+runner that's this one is the usual create.
+
+- **On the main Mac** (the owner key) it's started straight away, as the
+  app's `threads.create` with a `runnerId` is (Other runners' threads
+  through the backend, "New threads there").
+- **On a runner key** (the cloud, Bruce) the runner may not queue work for
+  another runner (Runner keys), so it asks. It files the whole request with
+  `relay:fileRequest` (text, title, folder, model, effort, permission mode,
+  why; the backend keeps it in `runnerRequests` under the card's id, from
+  a thread of its own whose id is only letters, digits, `-` and `_`, and
+  nothing can change it after), then shows an `approval.requested` in the
+  asking thread named `threadbear.start_thread`, with the request as its
+  `input`, and waits up to an hour, like `ask_secret`. A message from Mike
+  in that thread declines it. Its thread row's card has no `options` and
+  says to answer it on the Mac: the phone can't start it.
+- **The main Mac's app** draws that card from the request as filed
+  (`requests.get` on its own runner), never from the card's words: who's
+  asking, the machine and folder it would start in, its permissions and
+  model, and the whole brief, with Start it and Don't. Return in an empty
+  composer, which allows other cards, never starts one, and Start it does
+  nothing until the request has been read. One naming a machine this Mac
+  doesn't know starts on this Mac, and the card says so. Start it is
+  `requests.answer` with the machine the card showed and the
+  `fingerprint` `requests.get` gave (a hash of the whole filed request and
+  when it was filed), so a request filed again under the same id with
+  other words isn't started on the old card. The runner checks the
+  fingerprint and that the asking thread's row still has that card open,
+  claims the request (`relay:decideRequest` to `claimed`, owner only,
+  naming the row it read by its `docId`, so a retry or second click can't
+  start a second, nor a click delayed past a refile claim the new row),
+  starts the thread from the
+  filed request (here, or as a `create` command for another runner), with
+  a first line of its own saying which thread on which runner asked and
+  that Mike allowed it (the id and name cut to characters that can't end
+  that line), marks it `allowed` with where it started, then answers the
+  card with `allow` through the relay. A start turned down here before
+  anything was made (a folder that isn't one) hands the claim back
+  (`pending`), as does a relay refusal before anything was queued for the
+  other runner (offline, sync off); any other failure keeps it, as the thread may still have
+  been made (another runner answering late, a handover passing it on), and
+  the card says so. A machine the runner list says is offline is said
+  before anything is claimed.
+- **The asking runner believes only the backend.** An `allow` for this
+  card reads `relay:runnerRequest`: allowed with a result, the tool says
+  where the thread started; denied, the user said no; still pending (an
+  old phone's Allow, or anyone's), the answer is refused and the card
+  stays open. `deny` from anywhere declines it. A card that closes without
+  starting (declined, expired, Mike wrote instead) closes its request
+  (`relay:closeRequest`, its own), so it stops counting against the five
+  a runner key may have waiting and can't be started late.
+- **Reporting back.** The started thread is told the asking thread's id.
+  The main Mac's agents can `send_message` to another runner's thread by
+  its full id (through the relay); a runner key's agents can't message the
+  main Mac's threads, so the asking thread hears only from them.
+
+What a tampered runner can do with this is put a card in front of Mike:
+the most it can start is what he read and allowed.
+
 ## Sync
 
 The runner mirrors the phone's view of its threads to Threadbear's Convex
@@ -4366,6 +4431,10 @@ anyone's); "any runner" is any good key. Anything not sorted is owner only.
 | `commandState` | owner only | |
 | `remoteAccounts` | owner only | another runner's logins |
 | `remoteBody` | owner only | one tool's output on another runner's thread (full sync) |
+| `fileRequest` | its own | a request for a thread on another runner, from one of its own threads (Asking another runner); never changed after; at most 5 waiting (one over two hours old doesn't count) and 50 kept, oldest going first, for a week at most |
+| `runnerRequest` | its own | a request its runner filed; the owner reads any |
+| `decideRequest` | owner only | claims a pending request, marks a claimed one allowed (with where it started) or hands it back, or denies a pending one |
+| `closeRequest` | its own | closes a pending request its runner filed, once its card has closed without it starting |
 | `appendBodies` | its own | each body's thread row is the key's runner's; a key's total is capped, oldest going first |
 | `addHeldPicture` | its own | one tool picture tapped on the website, on its own thread, gone after a day |
 

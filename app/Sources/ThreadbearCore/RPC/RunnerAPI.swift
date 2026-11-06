@@ -231,6 +231,21 @@ public extension RPCClient {
         _ = try await call("approvals.respond", .object(params), as: EmptyResult.self)
     }
 
+    /// Another runner's request for a new thread, as it was filed
+    /// (docs/protocol.md, "Asking another runner"). Only this Mac's own
+    /// runner, with the owner key, can read and answer it.
+    func startRequest(threadId: String, approvalId: String) async throws -> StartRequest {
+        try await call("requests.get", .object(["threadId": .string(threadId), "approvalId": .string(approvalId)]), as: StartRequest.self)
+    }
+
+    /// Starts it (on `runnerId`) or says no, then answers its card.
+    func answerStartRequest(threadId: String, approvalId: String, allow: Bool, runnerId: String?, fingerprint: String?) async throws {
+        var params: [String: JSONValue] = ["threadId": .string(threadId), "approvalId": .string(approvalId), "allow": .bool(allow)]
+        if let runnerId { params["runnerId"] = .string(runnerId) }
+        if let fingerprint { params["fingerprint"] = .string(fingerprint) }
+        _ = try await call("requests.answer", .object(params), as: JSONValue.self)
+    }
+
     /// Answers a `secret.requested` card (docs/protocol.md, "Secrets").
     /// The value goes in this one request and nowhere else: not logged,
     /// not kept, not retried.

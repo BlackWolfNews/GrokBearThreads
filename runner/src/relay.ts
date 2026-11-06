@@ -256,6 +256,16 @@ export function mergeTail(rows: Map<number, RelayRow>, tail: Page): { gapAfter?:
   return gap ? { gapAfter: newest } : {};
 }
 
+// Said before anything was queued for the other runner, so nothing can
+// come of it there (cross-runner.ts hands a claim back on these).
+export function notSent(e: unknown): unknown {
+  if (e && typeof e === 'object') (e as { notSent?: boolean }).notSent = true;
+  return e;
+}
+export function wasNotSent(e: unknown): boolean {
+  return Boolean(e && typeof e === 'object' && (e as { notSent?: boolean }).notSent);
+}
+
 export class Relay {
   private deps: RelayDeps;
   private watches = new Map<string, Watch>();
@@ -674,8 +684,13 @@ export class Relay {
   private async command(runnerId: string, threadId: string | undefined, kind: string, args: Record<string, unknown>, opts: { done?: boolean; ms?: number } = {}): Promise<{ state: string; note?: string; threadId?: string; result?: unknown }> {
     const runner = this.runner(runnerId);
     const name = runner?.name ?? 'the other runner';
-    if (runner && !runner.online) throw new RpcError(ErrorCode.other, `${name} is offline, so that can't reach it now.`);
-    const src = this.src();
+    if (runner && !runner.online) throw notSent(new RpcError(ErrorCode.other, `${name} is offline, so that can't reach it now.`));
+    let src: RelaySource;
+    try {
+      src = this.src();
+    } catch (e) {
+      throw notSent(e);
+    }
     let commandId: unknown;
     try {
       commandId = await src.post('mutation', 'relay:queueCommand', { key: src.key, runnerId, ...(threadId ? { threadId } : {}), kind, args });

@@ -2841,7 +2841,7 @@ export const purgeRunner = mutation({
       await dropThread(ctx, t.threadId, t);
       return { done: false };
     }
-    for (const table of ['threadIndex', 'pocketCards', 'schedules', 'projects', 'projectHeads', 'projectNotes', 'accounts'] as const) {
+    for (const table of ['threadIndex', 'pocketCards', 'runnerRequests', 'schedules', 'projects', 'projectHeads', 'projectNotes', 'accounts'] as const) {
       if (left <= 0) break;
       for (const r of await ctx.db.query(table).withIndex('by_runnerId', (q: any) => q.eq('runnerId', runnerId)).take(left)) {
         await ctx.db.delete(r._id);

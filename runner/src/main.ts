@@ -8,7 +8,7 @@ import { startHousekeeping } from './housekeeping.ts';
 import { RELEASE, markGoodLater, onSupervisorGone, ownCheckout, readRelease, readState, requestHandover, supervised, takeRollbackNotice, tellLaunchListening } from './release.ts';
 import { PatchTrust } from './patch-trust.ts';
 import type { RunnerUpdates } from './runner.ts';
-import { Peers, PrimaryLink, ThreadRouter, drainChildrenName, peersElsewhere, phoneCommands, primaryElsewhere, projectRouter, removeDrainInfo, scheduleRouter, writeDrainInfo, type Elsewhere } from './handover.ts';
+import { Peers, PrimaryLink, ThreadRouter, drainChildrenName, peersElsewhere, phoneCommands, primaryElsewhere, projectRouter, removeDrainInfo, scheduleRouter, writeDrainInfo, type CrossRunnerHooks, type Elsewhere } from './handover.ts';
 import { RunnerUpdater, releaseTreeAt } from './update.ts';
 import { SETTLE_MS, Upstream } from './upstream.ts';
 import { BringIn } from './bring-in.ts';
@@ -59,6 +59,8 @@ import { filesMethods } from './files.ts';
 import { devicesMethods } from './devices.ts';
 import { flushSentry, reportException, reportLoggedError, reportLoggedWarning, startSentry } from './sentry.ts';
 import { ALWAYS_ASK_TOOLS, NEVER_ASK_TOOLS, SERVER_NAME, buildThreadbearTools, threadbearMcpServer, type RemoteControl } from './threadbear-mcp.ts';
+import { CrossRunner } from './cross-runner.ts';
+import { EFFORT_LEVELS, type EffortLevel } from './protocol.ts';
 
 // Tells launch.mjs this runner calls its listening() hook (release.ts), so
 // it may stop one that hasn't started listening in time.
@@ -125,7 +127,9 @@ async function main(): Promise<void> {
   // is draining (docs/protocol.md, "Handovers").
   let elsewhere: Elsewhere | undefined;
   let primaryLink: PrimaryLink | undefined;
-  const router = (): ThreadRouter => (routerCache ??= new ThreadRouter(runner, () => elsewhere));
+  const router = (): ThreadRouter => (routerCache ??= new ThreadRouter(runner, () => elsewhere, () => crossHooks));
+  // Other runners (cross-runner.ts), set once the relay is made.
+  let crossHooks: CrossRunnerHooks | undefined;
   let routerCache: ThreadRouter | undefined;
   let updaterReady = false;
   // Set once this runner has handed over and is finishing its kept turns.
@@ -566,6 +570,38 @@ async function main(): Promise<void> {
     clock: realClock,
     log,
   }));
+  // Starting threads on other runners, and a runner key's requests for
+  // that (docs/protocol.md, "Asking another runner").
+  const permission = (m: string | undefined) => (m === 'full' || m === 'ask' || m === 'auto' ? m : undefined);
+  const cross = new CrossRunner({
+    self: () => ({ id: syncRunnerId, name: cfg.sync.name ?? defaultRunnerName() }),
+    backend: () => sync,
+    runners: async () => (await scheduler.runners()).map((r) => ({ id: r.id, name: r.name, self: r.self, online: r.online })),
+    createHere: async (p) => {
+      const mode = permission(p.permissionMode);
+      const r = await router().create({ text: p.text, ...(p.title ? { title: p.title } : {}), ...(p.cwd ? { cwd: p.cwd } : {}), ...(p.model ? { model: p.model } : {}), ...(p.effort && EFFORT_LEVELS.includes(p.effort as EffortLevel) ? { effort: p.effort as EffortLevel } : {}), ...(mode ? { permissionMode: mode } : {}), ...(p.startedBy ? { startedBy: p.startedBy } : {}) });
+      return { id: r.thread.id };
+    },
+    createThere: async (runnerId, p) => {
+      const r = (await relay.create(runnerId, { ...p })) as { thread: { id: string } };
+      return { id: r.thread.id };
+    },
+    card: (threadId, c) => runner.requestCard(threadId, c),
+    openCard: async (threadId) => {
+      const src = sync.relaySource();
+      if (!src) return undefined;
+      const row = (await src.post('query', 'relay:remoteThread', { key: src.key, threadId })) as { pendingApproval?: { approvalId?: string } } | null;
+      return row?.pendingApproval?.approvalId;
+    },
+    respondThere: async (threadId, approvalId, decision, message) => {
+      await relay.call(threadId, 'approvals.respond', { threadId, approvalId, decision, ...(message ? { message } : {}) });
+    },
+  });
+  crossHooks = {
+    start: (threadId, req) => cross.start(threadId, req),
+  };
+  methods['requests.get'] = (p) => cross.get(String(p.threadId ?? ''), String(p.approvalId ?? ''));
+  methods['requests.answer'] = (p) => cross.answer(String(p.threadId ?? ''), String(p.approvalId ?? ''), p.allow === true, typeof p.runnerId === 'string' ? p.runnerId : undefined, typeof p.fingerprint === 'string' ? p.fingerprint : undefined);
   const server = (rpcServer = new RpcServer({
     host: cfg.host,
     port: cfg.port,

@@ -12,6 +12,7 @@ import crypto from 'node:crypto';
 import type { PendingApproval, ThreadState } from '../runner.ts';
 import { matchAnswers } from '../runner.ts';
 import { SECRET_TIMEOUT_DEFAULT_MIN, SECRET_TIMEOUT_MAX_MIN, type SecretFiles } from '../secrets.ts';
+import { START_CARD, type RequestAnswer } from '../cross-runner.ts';
 
 export type SecretRequest = { label: string; reason: string; placeholder?: string; timeoutMinutes?: number; toolUseId?: string; signal?: AbortSignal };
 export type SecretAnswer = ({ status: 'saved' } & SecretFiles) | { status: 'declined' | 'expired'; message?: string };
@@ -21,6 +22,7 @@ export type SecretAnswer = ({ status: 'saved' } & SecretFiles) | { status: 'decl
 export function settleDeclined(p: PendingApproval, decision: 'deny' | 'expired', message?: string): void {
   if (p.kind === 'tool') p.resolve({ decision, message });
   else if (p.kind === 'question') p.resolve({ answers: null, message });
+  else if (p.kind === 'request') p.resolve({ status: decision === 'deny' ? 'declined' : 'expired', ...(message ? { message } : {}) });
   else p.resolve({ status: decision === 'deny' ? 'declined' : 'expired', message });
 }
 
@@ -40,6 +42,21 @@ export const approvalsPart = {
       // Allow/Deny: Deny declines, and Allow can't carry a value.
       if (params.decision === 'deny') return this.answerSecret({ threadId: params.threadId, approvalId: params.approvalId, decline: true });
       throw new RpcError(ErrorCode.badParams, 'A secret is answered with secrets.answer: update the Threadbear app, or answer it on the Mac.');
+    }
+    if (pending.kind === 'request') {
+      if (params.decision === 'deny') {
+        this.resolveApproval(st, pending.approvalId, 'deny', params.message);
+        pending.resolve({ status: 'declined', ...(params.message ? { message: params.message } : {}) });
+        return {};
+      }
+      // Allowed only once the backend says it was started (cross-runner.ts):
+      // the main Mac's runner marks it before it answers.
+      return pending.check().then((a) => {
+        if (st.rt.approvals.get(pending.approvalId) !== pending) return {};
+        this.resolveApproval(st, pending.approvalId, a.status === 'started' ? 'allow' : 'deny', a.status === 'started' ? `Started on ${a.runnerName}` : undefined);
+        pending.resolve(a);
+        return {};
+      }) as unknown as Record<string, never>;
     }
     if (pending.kind === 'question') {
       if (params.decision === 'answered') {
@@ -137,6 +154,22 @@ export const approvalsPart = {
       };
       // The agent's own call: a message from Mike declines it, as with a question.
       this.addApproval(st, { approvalId, kind: 'secret', main: true, resolve: done }, body, req.signal ?? new AbortController().signal);
+    });
+  },
+
+  // create_thread asking another runner (cross-runner.ts): a card that waits
+  // for the main Mac to start the thread, or for Mike to say no.
+  requestCard(this: Runner, threadId: string, c: { approvalId: string; title: string; input: Record<string, unknown>; minutes: number; check: () => Promise<RequestAnswer> }): Promise<RequestAnswer> {
+    const st = this.mustGet(threadId);
+    if (!this.turnForRequest(st, st.rt.generation)) return Promise.resolve({ status: 'expired', message: 'The thread is not running a turn.' });
+    const body: EventBody = { type: 'approval.requested', approvalId: c.approvalId, name: START_CARD, title: c.title, input: c.input, options: ['allow', 'deny'] };
+    return new Promise((resolve) => {
+      const timer = this.clock.setTimeout(() => this.expireApproval(st, c.approvalId, 'No answer in time.'), c.minutes * 60_000);
+      const done = (a: RequestAnswer) => {
+        timer.cancel();
+        resolve(a);
+      };
+      this.addApproval(st, { approvalId: c.approvalId, kind: 'request', main: true, check: c.check, resolve: done }, body, new AbortController().signal);
     });
   },
 

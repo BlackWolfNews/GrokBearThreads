@@ -34,6 +34,7 @@ import type { ConvexSync } from './sync.ts';
 import type { RemoteThread, RemoteThreads } from './thread-index.ts';
 import { POCKET_ICONS } from './pocket-icons.ts';
 import type { SecretAnswer, SecretRequest } from './runner/approvals.ts';
+import type { StartRequest } from './cross-runner.ts';
 import { SECRET_TIMEOUT_DEFAULT_MIN, SECRET_TIMEOUT_MAX_MIN } from './secrets.ts';
 
 // What the tools drive: the Runner itself, or during a handover
@@ -54,6 +55,8 @@ export type ThreadControl = {
   requestAgentApproval?: (threadId: string, req: AgentApprovalRequest) => Promise<ToolApprovalAnswer>;
   // The most access a thread's agent has now (Runner.accessOf).
   accessOf?: (threadId: string) => Aw<PermissionMode>;
+  // cross-runner.ts: a new thread on another runner (undefined: it's this one).
+  startOn?: (threadId: string, req: StartRequest) => Promise<string | undefined>;
 } & Async<Runner, 'list' | 'search' | 'get' | 'events' | 'create' | 'send' | 'update' | 'interrupt' | 'delete'>;
 
 // Messages a thread when the Mac app restarts onto a new build (app-restarts.ts).
@@ -1401,15 +1404,30 @@ export function buildThreadbearTools(
         effort: effortEnum.optional().describe("Reasoning effort (ultra is Codex only). Default: the model's own level."),
         permissionMode: z.enum(['full', 'ask', 'auto']).optional().describe('"full" (default), "ask" before edits and commands, or "auto": a classifier approves or blocks each action and asks only when it can\'t decide, for work on untrusted text (Claude only; on Codex it acts like ask).'),
         why: z.string().optional().describe('A few plain words on why this thread exists, about 6 ("fixing a hook it hit"). The sidebar shows them when the user hovers the mark on its row, as they have none of your context for it.'),
+        runner: z.string().optional().describe('Another of the user\'s machines to start it on: its name, or "main". folder is a path there. Where this machine can\'t, it asks the user first and waits.'),
       },
-      handle(async ({ text, title, folder: f, pool: p, account: acc, model, effort, permissionMode: asked, why }, extra) => {
+      handle(async ({ text, title, folder: f, pool: p, account: acc, model, effort, permissionMode: asked, why, runner }, extra) => {
         // From a thread not in full mode, the new thread gets its mode
         // unless the call says otherwise, and anything above it asks
-        // (raising access, above).
+        // (raising access, above). On another machine too.
         const caller = await restricted();
         const permissionMode = asked ?? caller;
         if (caller && permissionMode && raises(permissionMode, caller)) {
-          await confirm('create_thread', [`Start a thread with ${MODE_NAMES[permissionMode]}${f ? ` in ${f}` : ''}`], { text, folder: f, permissionMode }, extra?.signal);
+          await confirm('create_thread', [`Start a thread with ${MODE_NAMES[permissionMode]}${f ? ` in ${f}` : ''}${runner?.trim() ? ` on ${runner.trim()}` : ''}`], { text, folder: f, permissionMode, ...(runner ? { runner } : {}) }, extra?.signal);
+        }
+        if (runner?.trim() && control.startOn) {
+          const cleanWhy = why?.trim() ? why.replace(/\s+/g, ' ').trim().slice(0, MAX_BYLINE) : undefined;
+          const there = await control.startOn(selfId, {
+            runner: runner.trim(),
+            text,
+            ...(title?.trim() ? { title: title.trim() } : {}),
+            ...(f?.trim() ? { cwd: f.trim() } : {}),
+            ...(model ? { model } : {}),
+            ...(effort ? { effort } : {}),
+            ...(permissionMode ? { permissionMode } : {}),
+            ...(cleanWhy ? { why: cleanWhy } : {}),
+          });
+          if (there !== undefined) return there;
         }
         const r = await control.create({
           text: (await from()) + text,
