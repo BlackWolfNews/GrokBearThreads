@@ -81,4 +81,10 @@ final class SlashCommandsTests: XCTestCase {
         XCTAssertEqual(tiny.list, 120)
         XCTAssertEqual(tiny.categories, 130)
     }
+
+    func testHeightIsAboutHalfTheWindow() {
+        XCTAssertEqual(SlashPalette.height(window: 1000), 500)
+        XCTAssertEqual(SlashPalette.height(window: 400), 300, "never below the least")
+        XCTAssertEqual(SlashPalette.height(window: 1600), 560, "nor above the most")
+    }
 }

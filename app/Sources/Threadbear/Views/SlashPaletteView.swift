@@ -35,7 +35,9 @@ struct SlashPaletteView: View {
     /// runner is another Mac's, whose files aren't here.
     var onOpen: ((String) -> Void)?
 
-    static var height: CGFloat { zoomed(300) }
+    /// SlashPalette.height for the window: about half of it. A fixed 300
+    /// left a big window's palette showing eight rows (Mike, 6 Nov).
+    var height: CGFloat = zoomed(300)
 
     var body: some View {
         let all = commands ?? []
@@ -62,7 +64,7 @@ struct SlashPaletteView: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .frame(height: Self.height)
+        .frame(height: height)
         .background {
             RoundedRectangle(cornerRadius: zoomed(14), style: .continuous)
                 .fill(Color(nsColor: .windowBackgroundColor))
@@ -116,11 +118,13 @@ struct SlashPaletteView: View {
                                 .id(command.name)
                         }
                     }
-                    .padding(.vertical, zoomed(6))
                 }
                 .onChange(of: picked?.name) { _, name in
                     if let name { proxy.scrollTo(name) }
                 }
+                // Outside the scroll view, so a row scrolled up stops short
+                // of the panel's edge rather than half under it.
+                .padding(.vertical, zoomed(6))
             }
         }
     }
@@ -185,13 +189,11 @@ struct SlashPaletteView: View {
             .padding(zoomed(16))
             .frame(maxWidth: .infinity, alignment: .leading)
             }
-                HStack(spacing: zoomed(8)) {
-                    // Return comes through the composer's own keys, so no
-                    // keyboard shortcut here to fight it.
-                    Button("Run") { onRun(command) }
-                        .tip("Send /\(command.name) now (Return)")
-                    Button("Add details") { onFill(command) }
-                        .tip("Put /\(command.name) in the box to type more after it (Tab)")
+                // On one row when they fit, else stacked: squeezed onto one
+                // they read "Add d…" and "Open f…".
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: zoomed(8)) { actions(command) }
+                    VStack(alignment: .leading, spacing: zoomed(6)) { actions(command) }
                 }
                 .controlSize(.small)
                 .padding(.horizontal, zoomed(16))
@@ -202,7 +204,23 @@ struct SlashPaletteView: View {
         }
     }
 
-    /// Where it comes from, and its file with a way to open it.
+    @ViewBuilder
+    private func actions(_ command: SlashCommand) -> some View {
+        // Return comes through the composer's own keys, so no
+        // keyboard shortcut here to fight it.
+        Button("Run") { onRun(command) }
+            .tip("Send /\(command.name) now (Return)")
+        Button("Add details") { onFill(command) }
+            .tip("Put /\(command.name) in the box to type more after it (Tab)")
+        // With the other buttons, so it's always in sight: under
+        // the path it scrolled away in a short palette.
+        if let path = command.path, let onOpen {
+            Button("Open file") { onOpen(path) }
+                .tip("Open \(SlashPalette.shortPath(path)) beside the thread")
+        }
+    }
+
+    /// Where it comes from, and its file.
     private func origin(_ command: SlashCommand) -> some View {
         VStack(alignment: .leading, spacing: zoomed(3)) {
             Text(SlashPalette.origin(of: command, provider: provider))
@@ -216,14 +234,6 @@ struct SlashPaletteView: View {
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
-                HStack(spacing: zoomed(6)) {
-                    if let onOpen {
-                        Button("Open") { onOpen(path) }
-                            .buttonStyle(.link)
-                            .font(.system(size: TypeScale.label))
-                            .tip("Open \(SlashPalette.shortPath(path)) beside the thread")
-                    }
-                }
             }
         }
     }

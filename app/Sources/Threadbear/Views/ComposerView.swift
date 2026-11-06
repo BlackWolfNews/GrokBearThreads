@@ -130,6 +130,7 @@ struct ComposerView: View {
         // The slash command palette, over the transcript just above the box.
         .overlay(alignment: .top) {
             if let thread, let query = paletteQuery(draft.wrappedValue.text) {
+                let height = paletteHeight
                 SlashPaletteView(
                     commands: app.slashCommands[thread.id],
                     query: query,
@@ -143,10 +144,11 @@ struct ComposerView: View {
                     onOpen: app.runnerName(of: thread) == nil ? { path in
                         palette.closedAt = draft.wrappedValue.text
                         app.preview(path: path, in: thread)
-                    } : nil
+                    } : nil,
+                    height: height
                 )
                 // Its height is fixed, so lifting it by that sits it just above.
-                .offset(y: -(SlashPaletteView.height + zoomed(8)))
+                .offset(y: -(height + zoomed(8)))
                 .onAppear { app.loadSlashCommands(thread.id) }
             }
         }
@@ -188,6 +190,13 @@ struct ComposerView: View {
     private func paletteQuery(_ text: String) -> String? {
         guard thread != nil, palette.closedAt != text else { return nil }
         return SlashPalette.query(in: text)
+    }
+
+    /// About half the window: read when the palette draws, which it does
+    /// with each key, so a resized window is caught on the next one.
+    private var paletteHeight: CGFloat {
+        let window = handle.textView?.window?.contentLayoutRect.height ?? NSApp.keyWindow?.contentLayoutRect.height ?? 600
+        return SlashPalette.height(window: window, least: zoomed(300), most: zoomed(560))
     }
 
     /// What /model and /effort would change, as the thread has it now.

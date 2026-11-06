@@ -164,6 +164,12 @@ public enum SlashPalette {
         return (cats, lst)
     }
 
+    /// The palette's height for a window `window` tall: about half of it,
+    /// at least `least` and at most `most`.
+    public static func height(window: Double, least: Double = 300, most: Double = 560) -> Double {
+        min(most, max(least, window * 0.5))
+    }
+
     /// The recently used list after using `name`: newest first, eight kept.
     public static func used(_ name: String, recent: [String]) -> [String] {
         Array(([name] + recent.filter { $0 != name }).prefix(8))
