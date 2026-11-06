@@ -100,8 +100,11 @@ export function markCheckRunning(home: string, scheduleId: string, at: number, l
 }
 
 // A schedule's own time limit for its check, in ms.
-export function checkLimitMs(checkTimeoutSecs: number | undefined): number {
-  return checkTimeoutSecs ? Math.min(checkTimeoutSecs, MAX_CHECK_TIMEOUT_SECS) * 1000 : CHECK_TIMEOUT_MS;
+// A record from the backend hasn't been through checkedTimeout, so anything
+// but a positive number is the default rather than a timer firing at once.
+export function checkLimitMs(checkTimeoutSecs: unknown): number {
+  if (typeof checkTimeoutSecs !== 'number' || !(checkTimeoutSecs > 0)) return CHECK_TIMEOUT_MS;
+  return Math.min(checkTimeoutSecs, MAX_CHECK_TIMEOUT_SECS) * 1000;
 }
 
 export function clearCheckRunning(home: string, scheduleId: string): void {

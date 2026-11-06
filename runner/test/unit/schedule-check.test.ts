@@ -7,7 +7,7 @@ import path from 'node:path';
 import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
 import { Scheduler } from '../../src/schedules.ts';
 import { nullLogger } from '../../src/log.ts';
-import { checkOutcome, checkRunningElsewhere, keptCheckFile, markCheckRunning, runCheck, type CheckResult } from '../../src/schedule-check.ts';
+import { checkLimitMs, checkOutcome, checkRunningElsewhere, keptCheckFile, markCheckRunning, runCheck, type CheckResult } from '../../src/schedule-check.ts';
 import { buildThreadbearTools } from '../../src/threadbear-mcp.ts';
 import { toOwnedScheduleDoc } from '../../src/sync.ts';
 
@@ -530,4 +530,10 @@ test('scheduleChecks: the backend gets checkTimeoutSecs only from API 55, and th
 test('runCheck: a timeout says how to give the check longer', async () => {
   const slow = await runCheck({ command: 'sleep 5', cwd: tmpDir(), home: tmpDir(), scheduleId: 'abc', timeoutMs: 200 });
   assert.match((slow as { why: string }).why, /checkTimeoutSecs can give it up to 300/);
+});
+
+test('checkLimitMs: a value from the backend that is not a positive number is the default, and over 300 is capped', () => {
+  for (const v of [undefined, -1, 0, NaN, '180', null]) assert.equal(checkLimitMs(v), 60_000, String(v));
+  assert.equal(checkLimitMs(180), 180_000);
+  assert.equal(checkLimitMs(9999), 300_000);
 });

@@ -719,12 +719,14 @@ export function buildThreadbearTools(
           const reasons = [
             ...(raised ? [`Switch the schedule "${current.title}" to ${MODE_NAMES[permissionMode!]}`] : changes && raises(will, caller) ? [`Change the schedule "${current.title}", whose runs have ${MODE_NAMES[will]}`] : []),
             ...(changes && current.check && check === undefined ? [`Change the schedule "${current.title}", which runs a shell command as you first`] : []),
+            // Longer to run is more that command can do (Codex review, 6 Nov).
+            ...(checkTimeoutSecs !== undefined && current.check && check === undefined && !changes ? [`Change how long the schedule "${current.title}"'s shell command may run`] : []),
             ...checkReason(check, caller),
           ];
           // Setting the mode it already has is left out, so a write that
           // lands after someone else lowers it can't raise it back.
           if (permissionMode !== undefined && !current.threadId && permissionMode === was) permissionMode = undefined;
-          await confirm('update_schedule', reasons, { scheduleId: current.id, ...Object.fromEntries(Object.entries({ text, when, cron, timezone, paused, folder: f, account: acc, pool: pl, model, effort, permissionMode, check }).filter(([, v]) => v !== undefined)) }, extra?.signal);
+          await confirm('update_schedule', reasons, { scheduleId: current.id, ...Object.fromEntries(Object.entries({ text, when, cron, timezone, paused, folder: f, account: acc, pool: pl, model, effort, permissionMode, check, checkTimeoutSecs }).filter(([, v]) => v !== undefined)) }, extra?.signal);
         }
         // A schedule on another runner checks its account and pool there, so
         // a login or pool this Mac doesn't have goes as given. (In the backend every
