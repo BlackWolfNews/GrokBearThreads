@@ -437,6 +437,16 @@ final class TranscriptTextView: NSTextView {
             perform(action, on: box.cell.block)
             return
         }
+        // A draft's Copy (DraftBlockCell).
+        if let header = draftHeader(at: point), header.cell.isButton(at: point, in: header.frame) {
+            closeChipCard()
+            header.cell.copy()
+            setNeedsDisplay(header.frame)
+            // Back to Copy once Copied has had its moment.
+            let frame = header.frame
+            DispatchQueue.main.asyncAfter(deadline: .now() + DraftBlockCell.copiedFor + 0.05) { [weak self] in self?.setNeedsDisplay(frame) }
+            return
+        }
         // A press on a link (a file, a web page, an asks card's link
         // button) that moves drags it out (FileDrag); let go first and
         // it's a click as before.
@@ -527,6 +537,21 @@ final class TranscriptTextView: NSTextView {
         return frame.contains(point) ? (cell, frame) : nil
     }
 
+    /// The draft header at `point` (DraftBlockCell), and its frame in this
+    /// view's coordinates.
+    func draftHeader(at point: NSPoint) -> (cell: DraftBlockCell, frame: NSRect)? {
+        guard let layoutManager, let textContainer, let storage = textStorage, storage.length > 0,
+              storage.string.utf16.contains(0xFFFC) else { return nil }
+        let origin = textContainerOrigin
+        let local = NSPoint(x: point.x - origin.x, y: point.y - origin.y)
+        let glyph = layoutManager.glyphIndex(for: local, in: textContainer)
+        let index = layoutManager.characterIndexForGlyph(at: glyph)
+        guard index < storage.length, let cell = (storage.attribute(.attachment, at: index, effectiveRange: nil) as? NSTextAttachment)?.attachmentCell as? DraftBlockCell
+        else { return nil }
+        let frame = richFrame(glyph: glyph)
+        return frame.insetBy(dx: 0, dy: -3).contains(point) ? (cell, frame) : nil
+    }
+
     private func richFrame(glyph: Int) -> NSRect {
         guard let layoutManager, let textContainer else { return .zero }
         let box = layoutManager.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: textContainer)
@@ -537,6 +562,7 @@ final class TranscriptTextView: NSTextView {
     }
 
     private func isRichButton(at point: NSPoint) -> Bool {
+        if let header = draftHeader(at: point) { return header.cell.isButton(at: point, in: header.frame) }
         guard let box = richBox(at: point) else { return false }
         return box.cell.action(at: point, in: box.frame) != nil
     }
@@ -561,6 +587,13 @@ final class TranscriptTextView: NSTextView {
               storage.string.utf16.contains(0xFFFC) else { return }
         layoutManager.ensureLayout(for: textContainer)
         storage.enumerateAttribute(.attachment, in: NSRange(location: 0, length: storage.length)) { value, range, _ in
+            if let draft = (value as? NSTextAttachment)?.attachmentCell as? DraftBlockCell {
+                let frame = richFrame(glyph: layoutManager.glyphIndexForCharacter(at: range.location))
+                let anchor = RichTipAnchor(frame: draft.button(in: frame))
+                anchor.text = DraftBlockCell.tip
+                addSubview(anchor)
+                return
+            }
             guard let cell = (value as? NSTextAttachment)?.attachmentCell as? RichBlockCell else { return }
             let frame = richFrame(glyph: layoutManager.glyphIndexForCharacter(at: range.location))
             let layout = cell.layout(in: frame)

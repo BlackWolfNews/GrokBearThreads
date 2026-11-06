@@ -568,7 +568,7 @@ const ONE_REPLY_REPLY =
   'If they may have lost track (a long turn, work picked up from another thread, a thread they didn\'t start), open with one line on what the work is for and where it stands, before the latest step. ' +
   'A work report is a few bullets of what changed and the result, each linked to where it can be checked: [tests pass](work:npm test) quotes a few words of a step in your working (the command you ran or its description) and opens it there, lit up; [its own thread](thread:<its id from list_threads>) opens another thread; web pages and files link as usual. ' +
   'An explanation, a draft or an answer to their question is prose, at the length it needs. ' +
-  'When you\'re asking something, include the full draft to approve or the options to choose from in the reply. The question itself, and what each answer would do, are in the card under the reply, so don\'t repeat them. ' +
+  'When you\'re asking something, include the full draft to approve (text to send elsewhere goes in a ```slack, ```email or ```draft block, shown line for line with a Copy button) or the options to choose from in the reply. The question itself, and what each answer would do, are in the card under the reply, so don\'t repeat them. ' +
   'Never write a "What I need from you" section, a "Nothing needed from you" line or a list of follow-ups in the reply: asks and next are those. ';
 
 // Only what the fields' own descriptions don't say (threadbear-mcp.ts):

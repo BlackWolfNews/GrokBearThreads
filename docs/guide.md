@@ -135,6 +135,16 @@ and it can't open anything, so only its own styles, SVG and `data:`
 pictures appear. Your phone draws them the same way, with the arrows
 opening it full screen.
 
+Text an agent writes for you to send somewhere else (a Slack message, an
+email) comes in a ```` ```slack ````, ```` ```email ```` or
+```` ```draft ```` block. It shows in a box the way it'll go out: every
+line where the agent put it (the rest of a reply joins single lines up,
+as Markdown does), and a Slack draft's `*bold*`, `_italic_`, `~strike~`
+and `<url|label>` links drawn as Slack draws them. Copy, at the box's
+top right, puts it on the clipboard with its links and bold, so it
+pastes into Slack or Mail as it looks. The phone and the website show it
+the same way.
+
 A reply that needs nothing from you ends with a Done card at the top of
 the message box, with an Archive button to put the thread away. When something it talked about is
 still worth doing (a piece it didn't get to, a check that's due), the

@@ -43,6 +43,21 @@ import Testing
         #expect(MarkdownBlock.parse("```\nmermaid\n```") == [.code("mermaid")])
     }
 
+    @Test func slackEmailAndDraftFencesAreDrafts() {
+        // Every line kept, blank ones too: none of it is joined up.
+        #expect(MarkdownBlock.parse("Here it is:\n\n```slack\n*Update*\n• one\n• two\n\nThanks\n```\nSend it?") == [
+            .paragraph("Here it is:"),
+            .draft(DraftBlock(kind: .slack, source: "*Update*\n• one\n• two\n\nThanks")),
+            .paragraph("Send it?"),
+        ])
+        #expect(MarkdownBlock.parse("~~~Email to=x\nHi,\nBye\n~~~") == [.draft(DraftBlock(kind: .email, source: "Hi,\nBye"))])
+        #expect(MarkdownBlock.parse("```draft\nhi\n```") == [.draft(DraftBlock(kind: .draft, source: "hi"))])
+        // Still streaming in, empty, or only starting the same: code.
+        #expect(MarkdownBlock.parse("```slack\n*Update*\n• one") == [.code("*Update*\n• one")])
+        #expect(MarkdownBlock.parse("```slack\n\n```") == [.code("")])
+        #expect(MarkdownBlock.parse("```slackbot\nhi\n```") == [.code("hi")])
+    }
+
     @Test func aFenceStillStreamingInOrTooBigStaysCode() {
         // The reply so far, its fence not closed yet: drawn once it is.
         #expect(MarkdownBlock.parse("```mermaid\nflowchart TD\n  A -->") == [.code("flowchart TD\n  A -->")])

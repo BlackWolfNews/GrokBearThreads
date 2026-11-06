@@ -109,7 +109,7 @@ enum MarkdownRenderer {
         // for the parser, so work: and thread: links are escaped first.
         let document = Document(parsing: WorkLinks.escapeDestinations(block), options: [.disableSmartOpts])
         var builder = Builder()
-        if rich { builder.sourceLines = block.split(separator: "\n", omittingEmptySubsequences: false) }
+        if rich || DraftBlock.mayHold(block) { builder.sourceLines = block.split(separator: "\n", omittingEmptySubsequences: false) }
         for child in document.children {
             builder.block(child, Context())
         }
@@ -298,6 +298,8 @@ enum MarkdownRenderer {
             case let code as CodeBlock:
                 if let rich = richBlock(code) {
                     richBlock(rich, context)
+                } else if let draft = draftBlock(code) {
+                    draftBlock(draft, context)
                 } else {
                     codeBlock(code.code, context)
                 }
@@ -407,12 +409,90 @@ enum MarkdownRenderer {
 
         /// A closed ```mermaid or ```html fence, to draw as what it shows.
         func richBlock(_ code: CodeBlock) -> RichBlock? {
-            guard !sourceLines.isEmpty, let rich = RichBlock.from(language: code.language, code: code.code),
-                  let last = code.range?.upperBound.line, last >= 1, last <= sourceLines.count else { return nil }
+            guard let rich = RichBlock.from(language: code.language, code: code.code), isClosed(code) else { return nil }
+            return rich
+        }
+
+        /// A closed ```slack, ```email or ```draft fence (DraftBlock). One
+        /// still streaming in stays code until it's closed, as above.
+        func draftBlock(_ code: CodeBlock) -> DraftBlock? {
+            guard let draft = DraftBlock.from(language: code.language, code: code.code), isClosed(code) else { return nil }
+            return draft
+        }
+
+        private func isClosed(_ code: CodeBlock) -> Bool {
+            guard !sourceLines.isEmpty, let last = code.range?.upperBound.line, last >= 1, last <= sourceLines.count else { return false }
             // cmark ends an unclosed fence's range on its last line of code.
             let closing = sourceLines[last - 1].trimmingCharacters(in: .whitespaces)
-            guard closing.count >= 3, closing.allSatisfy({ $0 == "`" }) || closing.allSatisfy({ $0 == "~" }) else { return nil }
-            return rich
+            return closing.count >= 3 && (closing.allSatisfy({ $0 == "`" }) || closing.allSatisfy({ $0 == "~" }))
+        }
+
+        /// A draft's box: the header (DraftBlockCell) and then each of the
+        /// draft's lines as a paragraph of its own, kept as the agent wrote
+        /// them, in one rounded box like a code block's.
+        mutating func draftBlock(_ draft: DraftBlock, _ context: Context) {
+            let pad = MarkdownRenderer.codePad
+            // One colour object for the whole box, so it's drawn as one.
+            let fill = Theme.codeBackground
+            let head = context.indent + pad
+            let start = output.length
+
+            let attachment = NSTextAttachment()
+            attachment.attachmentCell = DraftBlockCell(draft: draft)
+            let header = NSMutableAttributedString(attachment: attachment)
+            // A copy of a selection across it gives the draft's words, not
+            // a stray box character.
+            header.addAttribute(.tbCopyText, value: "", range: NSRange(location: 0, length: header.length))
+            output.append(header)
+            append("\n", Context())
+            let (headerStyle, _) = Theme.lines(DraftBlockCell.height, font: Theme.bodyFont, spacing: zoomed(6), before: pad, head: head, tail: -pad)
+            output.addAttribute(.paragraphStyle, value: headerStyle, range: NSRange(location: start, length: output.length - start))
+
+            let lines = draft.lines
+            for (index, line) in lines.enumerated() {
+                let lineStart = output.length
+                var inner = context
+                inner.indent = 0
+                if line.quote {
+                    inner.color = .secondaryLabelColor
+                    var bar = inner
+                    bar.color = .tertiaryLabelColor
+                    append("\u{2502} ", bar)
+                }
+                for span in line.spans {
+                    var look = inner
+                    look.bold = span.bold
+                    look.italic = span.italic
+                    look.strike = span.strike
+                    look.code = span.code
+                    look.link = span.link
+                    append(span.text, look)
+                }
+                if draft.kind != .slack { linkBareURLs(from: lineStart) }
+                let last = index == lines.count - 1
+                let (style, offset) = Theme.lines(Theme.bodyLine, font: Theme.bodyFont, spacing: last ? Self.paragraphGap + pad : 0,
+                                                  before: index == 0 ? zoomed(8) : 0, head: head, tail: -pad)
+                append("\n", Context())
+                let range = NSRange(location: lineStart, length: output.length - lineStart)
+                output.addAttribute(.paragraphStyle, value: style, range: range)
+                output.addAttribute(.baselineOffset, value: offset, range: range)
+                // The line under the header, across the box.
+                if index == 0 { output.addAttribute(.tbRowRule, value: true, range: NSRange(location: lineStart, length: 1)) }
+            }
+            output.addAttribute(.tbBlockBackground, value: fill, range: NSRange(location: start, length: output.length - start))
+        }
+
+        /// Links an email or plain draft's bare web addresses (the reply's
+        /// own pass skips anything in a box).
+        mutating func linkBareURLs(from start: Int) {
+            let range = NSRange(location: start, length: output.length - start)
+            guard range.length > 0, output.mutableString.substring(with: range).contains("://") else { return }
+            for match in MarkdownRenderer.urlDetector.matches(in: output.string, range: range) {
+                let word = output.mutableString.substring(with: match.range).lowercased()
+                guard word.hasPrefix("http://") || word.hasPrefix("https://"), let url = match.url else { continue }
+                output.addAttribute(.link, value: url, range: match.range)
+                output.addAttribute(.foregroundColor, value: NSColor.linkColor, range: match.range)
+            }
         }
 
         /// The box (RichBlockCell): one attachment on a line of its own.

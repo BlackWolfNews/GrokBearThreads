@@ -1,8 +1,8 @@
 import Foundation
 
 /// Assistant text split into the blocks the phone draws: paragraphs,
-/// headings, list items (with their depth), code, quotes, rules, tables and
-/// pictures.
+/// headings, list items (with their depth), code, drafts, quotes, rules,
+/// tables and pictures.
 /// The Mac renders the same text with react-markdown and remark-gfm, so this
 /// follows GitHub's rules for what agents actually write; the phone's own
 /// first parser knew only paragraphs, headings, flat bullets and code, and
@@ -18,6 +18,10 @@ public indirect enum MarkdownBlock: Sendable, Hashable {
     /// A ```mermaid or ```html block, drawn as the diagram or page it
     /// describes, with a switch back to its source (RichBlockView).
     case rich(kind: RichKind, source: String)
+    /// A ```slack, ```email or ```draft block: text for Mike to send
+    /// elsewhere, shown line for line in a box with a Copy button
+    /// (DraftBlockView).
+    case draft(DraftBlock)
     case quote([MarkdownBlock])
     case rule
     case table(header: [String], alignments: [Alignment], rows: [[String]])
@@ -100,8 +104,10 @@ private struct Parser {
                 let (body, closed) = code(fence: fence, indent: indent)
                 // Drawn only once its fence is closed (a reply still
                 // streaming in stays code) and not too big to draw, as on
-                // the Mac (RichBlock.from).
-                if closed, body.count <= MarkdownBlock.maxRichSource,
+                // the Mac (RichBlock.from). A draft is the same: closed only.
+                if closed, let draft = DraftBlock.from(language: info, code: body) {
+                    blocks.append(.draft(draft))
+                } else if closed, body.count <= MarkdownBlock.maxRichSource,
                    !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                    let kind = MarkdownBlock.RichKind(info: info) {
                     blocks.append(.rich(kind: kind, source: body))

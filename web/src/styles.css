@@ -116,6 +116,14 @@ code, pre { font-family: var(--mono); font-size: 13px; }
 .md :not(pre) > code { background: var(--code); border-radius: 5px; padding: 1px 5px; font-size: 0.87em; }
 .md table { border-collapse: collapse; display: block; overflow-x: auto; margin-bottom: 10px; }
 .md th, .md td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; }
+/* A ```slack, ```email or ```draft block (draft.ts): the code block's box,
+   with a header and the draft in the body font, line for line. */
+.md .draft { background: var(--code); border-radius: 8px; margin: 0 0 10px; }
+.md .draft-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 6px 4px 12px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+.md .draft-head .btn { padding: 3px 8px; font-size: 13px; }
+.md .draft-body { padding: 10px 12px; white-space: pre-wrap; }
+.md .draft-body code { background: var(--line); }
+.md .draft-quote { padding-left: 10px; border-left: 3px solid var(--line-strong); color: var(--muted); }
 .md blockquote { margin: 0 0 10px; padding-left: 12px; border-left: 3px solid var(--line-strong); color: var(--muted); }
 .md hr { border: 0; border-top: 1px solid var(--line); }
 .md, .tools li { border-radius: 4px; transition: background-color 0.6s; }
