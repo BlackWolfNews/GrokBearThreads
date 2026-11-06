@@ -255,8 +255,8 @@ private struct NewThreadButton: View {
         .animation(Juice.hover, value: hovering)
         // Over the end of the search, since the sidebar's edge is just
         // right of the button.
-        .shortcutHint("⌘N", .before)
-        .tip("Start a new thread (⌘N)")
+        .shortcutHint(AppShortcuts.shared.display(.newThread), .before)
+        .tip(AppShortcuts.shared.tip("Start a new thread", .newThread))
         .accessibilityLabel("New thread")
     }
 }
@@ -1016,7 +1016,7 @@ private struct RowActions: View {
                         app.archive(thread.id)
                     } label: { Image(systemName: "archivebox") }
                         .buttonStyle(RowIconButtonStyle())
-                        .tip("Archive (⌘E)")
+                        .tip(AppShortcuts.shared.tip("Archive", .archive))
                 case .unsnooze:
                     Button { app.unsnooze(thread.id) } label: { Image(systemName: "arrow.uturn.backward") }
                         .buttonStyle(RowIconButtonStyle())

@@ -802,6 +802,58 @@ while weekly limits come out about the same in most of their tests. Some apps
 change the label the SDK sends to get around it. Threadbear leaves the label
 as it is for now.
 
+## Keyboard shortcuts
+<!-- slug: keyboard -->
+
+Hold ⌘ to see the keys beside the buttons that have them. Settings (⌘,) >
+Keyboard lists every command in the menus that can have a key, and you can
+change any of them there. Click a command's key and press the new one. Esc
+cancels, and Delete removes the key. A command with no key has an Add button,
+and one you've changed has Reset beside it.
+
+A key has to include ⌘ or ⌃, or be a function key, otherwise it would type
+instead. If another command already has the key, it asks whether to give it to
+this one, which leaves the other with no key. Keys that something else needs,
+like ⌘C for Copy or ⌘← for moving the cursor, can't be used.
+
+The keys you've changed are in `shortcuts.json` in Threadbear's data folder, so
+you can ask an agent to change them too, and a change to the file shows straight
+away. It holds only what you've changed, by the names below, and `null` means no
+key:
+
+```
+{
+  "nextInboxThread": "ctrl+j",
+  "archive": null
+}
+```
+
+- New Thread: `newThread`, ⌘N
+- Archive: `archive`, ⌘E
+- Hibernate (opens Pick a time): `hibernate`, no key
+- Stop: `stop`, ⌘.
+- Copy Transcript as Markdown: `copyTranscript`, ⇧⌘C
+- Back: `back`, ⌘[
+- Forward: `forward`, ⌘]
+- Next Inbox Thread: `nextInboxThread`, ⌥⌘↓
+- Show Inbox: `showInbox`, ⌘1
+- Show Scheduled: `showScheduled`, ⌘2
+- Show Projects: `showProjects`, ⌘3
+- Show Librarian: `showLibrarian`, ⌘4
+- Show Hibernating: `showHibernating`, no key
+- Show Archived: `showArchived`, no key
+- Zoom In: `zoomIn`, ⌘=
+- Zoom Out: `zoomOut`, ⌘-
+- Actual Size: `actualSize`, ⌘0
+- Show Threads: `toggleThreads`, ⌃⌘S
+- Show Panels: `togglePanels`, ⌥⌘P
+- Reset Panel Layout: `resetPanelLayout`, no key
+
+In the file, a key is its modifiers and then the key, joined with `+`: `cmd`,
+`ctrl`, `opt` and `shift`, then a character, or `down`, `up`, `left`, `right`,
+`return`, `tab`, `space`, `delete`, `home`, `end`, `pageup`, `pagedown` or `f1`
+to `f20`.
+
 ## Experiments
 <!-- slug: experiments -->
 

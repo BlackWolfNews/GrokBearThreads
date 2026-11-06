@@ -31,26 +31,26 @@ struct ActivityBar: View {
             VStack(spacing: zoomed(4)) {
             // How many threads are in the Inbox section, so Mike can see
             // how far off inbox zero he is from any view (29 Oct).
-            ActivityButton(symbol: "bubble.left.and.bubble.right", title: "Threads", shortcut: "⌘1",
+            ActivityButton(symbol: "bubble.left.and.bubble.right", title: "Threads", shortcut: AppShortcuts.shared.display(.showInbox),
                            badge: app.sections.inbox.count, active: app.sidebarMode == .inbox, slides: true) {
                 app.sidebarMode = .inbox
             }
             // Only once the runner has said it knows about schedules.
             if app.schedulesSupported {
-                ActivityButton(symbol: "clock", title: "Scheduled", shortcut: "⌘2",
+                ActivityButton(symbol: "clock", title: "Scheduled", shortcut: AppShortcuts.shared.display(.showScheduled),
                                badge: app.activeScheduleCount, active: app.sidebarMode == .scheduled, slides: true) {
                     app.showSchedules()
                 }
             }
             // Only once the runner has said it knows about projects.
             if app.projectsSupported {
-                ActivityButton(symbol: "square.stack.3d.up", title: "Projects", shortcut: "⌘3",
+                ActivityButton(symbol: "square.stack.3d.up", title: "Projects", shortcut: AppShortcuts.shared.display(.showProjects),
                                active: app.sidebarMode == .projects, slides: true) {
                     app.showProjects()
                 }
                 // A count while it's looking at a thread or has some
                 // waiting: what it's doing and about to do.
-                ActivityButton(symbol: "books.vertical", title: "Librarian", shortcut: "⌘4",
+                ActivityButton(symbol: "books.vertical", title: "Librarian", shortcut: AppShortcuts.shared.display(.showLibrarian),
                                badge: app.librarian?.pendingCount, active: app.sidebarMode == .librarian, slides: true) {
                     app.showLibrarian()
                 }

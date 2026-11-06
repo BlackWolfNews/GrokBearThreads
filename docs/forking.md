@@ -102,6 +102,7 @@ runner, app and phone; it's usually better to hide its entry point.
 |---|---|
 | The librarian (titles, filing threads into projects, waking hibernating threads by topic) | `runner/src/librarian.ts`, app `Views/LibrarianHome.swift`, `LibrarianView.swift`. Pause it on its page, or set no `models.pool`. |
 | Projects | `runner/src/projects.ts`, `project-icons.ts`; app `Projects.swift`, `Views/Projects*.swift`, `ProjectPage.swift`; the project tools in `threadbear-mcp.ts` |
+| Keyboard shortcuts | Core `Support/Shortcuts.swift` (the commands and their default keys, which a new menu command with a key joins); app `AppShortcuts.swift`, `Views/KeyboardSettings.swift`, and `.shortcut(...)` on the menu items in `ThreadbearApp.swift`; yours in `shortcuts.json` in the data folder |
 | Schedules | `runner/src/schedules.ts`, `cron.ts`; app `Schedules.swift`, `Views/Schedule*.swift`, `ScheduledHome.swift`, `ScheduledList.swift` |
 | Pools and Usage | `runner/src/pools.ts`, `usage*.ts`, `token-tally.ts`, `accounts.ts`; app `PoolsModel.swift`, `Usage.swift`, `Views/UsagePanel.swift` |
 | Claude refusal recovery | App `RefusalRecovery.swift`, `Views/RefusalOffer.swift`, called from `Views/ComposerView.swift`. Offers a user-initiated switch to Codex Sol using the existing provider handoff. Remove the offer from the composer to leave switching to the model picker. |

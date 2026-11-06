@@ -951,10 +951,10 @@ private struct SendButton: View {
                 Image(systemName: "stop.fill").font(.system(size: zoomed(9), weight: .bold))
             }
             .buttonStyle(CircleButtonStyle(filled: true))
-            .shortcutHint("⌘.", .before)
-            .tip("Stop (⌘.)")
+            .shortcutHint(AppShortcuts.shared.display(.stop), .before)
+            .tip(AppShortcuts.shared.tip("Stop", .stop))
             .accessibilityLabel("Stop")
-            .keyboardShortcut(".", modifiers: .command)
+            .shortcut(.stop)
         } else {
             Button(action: onSend) {
                 Image(systemName: "arrow.up").font(.system(size: zoomed(13), weight: .semibold))

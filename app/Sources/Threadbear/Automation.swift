@@ -1212,6 +1212,8 @@ enum Automation {
             return "ok \(window.windowNumber) \(Int(size.width))x\(Int(size.height))"
         case "settings":
             return await settings(c, app: app)
+        case "shortcuts":
+            return await shortcuts(c)
         case "focus":
             // The app acts as if it were in front, so a thread that's open
             // gets marked read the way it does when Mike looks at it. It is

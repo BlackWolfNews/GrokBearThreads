@@ -27,6 +27,9 @@ struct SettingsView: View {
             DevicesSettings()
                 .tabItem { Label("Phone & browser", systemImage: "iphone") }
                 .tag(SettingsTab.devices)
+            KeyboardSettings()
+                .tabItem { Label("Keyboard", systemImage: "keyboard") }
+                .tag(SettingsTab.keyboard)
         }
         .frame(width: 540)
         .background(SettingsWindowFinder())

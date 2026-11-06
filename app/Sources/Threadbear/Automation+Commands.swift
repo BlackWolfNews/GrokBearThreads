@@ -9,6 +9,66 @@ import ThreadbearCore
 extension Automation {
     // MARK: Commands
 
+    /// Settings > Keyboard from a script: `record` starts listening for a
+    /// command, `press` is a key through the recorder ("cmd+e"), `answer` is
+    /// `use` or `cancel`, `reset` is a command or `all`. `post` is a real key
+    /// press, {"keyCode": 14, "characters": "e", "modifiers": ["cmd"]}, sent
+    /// through this app's own event queue, so its monitors and menus see it as
+    /// they would a press while nothing reaches any other app. Says what's
+    /// listening and what's changed.
+    static func shortcuts(_ c: [String: Any]) async -> String {
+        let shortcuts = AppShortcuts.shared
+        let recorder = ShortcutRecorder.shared
+        if let name = c["record"] as? String {
+            guard let command = ShortcutCommand(rawValue: name) else { return "error no command \(name)" }
+            recorder.start(command)
+        }
+        if let text = c["press"] as? String {
+            guard let key = ShortcutKey(string: text) else { return "error not a key: \(text)" }
+            recorder.press(key)
+        }
+        switch c["answer"] as? String {
+        case "use": recorder.useTakenKey()
+        case "cancel": recorder.cancel()
+        case nil: break
+        case let other?: return "error answer is use or cancel, not \(other)"
+        }
+        if let name = c["reset"] as? String {
+            if name == "all" {
+                shortcuts.change { $0.resetAll() }
+            } else if let command = ShortcutCommand(rawValue: name) {
+                shortcuts.change { $0.reset(command) }
+            } else {
+                return "error no command \(name)"
+            }
+        }
+        if let post = c["post"] as? [String: Any] {
+            guard let code = post["keyCode"] as? Int, let characters = post["characters"] as? String else { return "error post needs keyCode and characters" }
+            var flags: NSEvent.ModifierFlags = []
+            for modifier in post["modifiers"] as? [String] ?? [] {
+                switch modifier {
+                case "cmd": flags.insert(.command)
+                case "opt": flags.insert(.option)
+                case "ctrl": flags.insert(.control)
+                case "shift": flags.insert(.shift)
+                default: return "error modifier is cmd, opt, ctrl or shift"
+                }
+            }
+            guard let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0,
+                                               windowNumber: NSApp.mainWindow?.windowNumber ?? NSApp.windows.first?.windowNumber ?? 0,
+                                               context: nil, characters: characters, charactersIgnoringModifiers: characters,
+                                               isARepeat: false, keyCode: UInt16(code)) else { return "error no event" }
+            NSApp.postEvent(event, atStart: false)
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+        let changed = ShortcutCommand.allCases.filter { shortcuts.bindings.isChanged($0) }
+            .map { "\($0.rawValue):\(shortcuts.key($0)?.string ?? "none")" }
+        // A moment for a change to reach the menus, as the next line checks they did.
+        try? await Task.sleep(for: .milliseconds(100))
+        let drift = shortcuts.menusOutOfStep()
+        return "ok listening=\(recorder.command?.rawValue ?? "nothing") outcome=\(recorder.outcome) changed=[\(changed.joined(separator: ","))] menus=\(drift.isEmpty ? "in step" : drift.joined(separator: ","))"
+    }
+
     /// What the new-thread composer's folder, account, model and "Ask
     /// before edits" menus set. Anything else is an error rather than a
     /// silent "ok" (a typo like "models" would leave the account's default
