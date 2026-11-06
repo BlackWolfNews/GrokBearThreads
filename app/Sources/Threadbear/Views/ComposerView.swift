@@ -768,8 +768,19 @@ final class ComposerTextView: NSTextView {
     /// `range` (the selection, for a paste).
     func takeImages(from pasteboard: NSPasteboard, at range: NSRange? = nil) -> Bool {
         let urls = fileURLs(pasteboard)
+        // A photo copied in Photos is a file in the Photos library, which
+        // the runner isn't allowed to read, with the image itself beside it.
+        if !urls.isEmpty, urls.allSatisfy(DroppedFiles.isInPhotosLibrary) {
+            let saved = (pasteboard.pasteboardItems ?? []).compactMap(savedImage)
+            if !saved.isEmpty {
+                deliver(saved, at: range)
+                return true
+            }
+        }
         if !urls.isEmpty {
-            let images = urls.filter(isImage)
+            // A screenshot's floating thumbnail is a temp file macOS deletes
+            // as the drop ends, so copy those now, not when the runner reads them.
+            let images = DroppedFiles.keepingTransient(urls.filter(isImage))
             let others = urls.filter { !isImage($0) }
             var at = range
             if !others.isEmpty { at = insertPaths(others, replacing: range) }
@@ -786,7 +797,7 @@ final class ComposerTextView: NSTextView {
             png = NSBitmapImageRep(data: data)?.representation(using: .png, properties: [:])
         }
         guard let png else { return false }
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("threadbear-paste", isDirectory: true)
+        let folder = DroppedFiles.keepFolder
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let url = folder.appendingPathComponent("pasted-\(UUID().uuidString.prefix(8)).png")
         do {
@@ -796,6 +807,23 @@ final class ComposerTextView: NSTextView {
         } catch {
             return false
         }
+    }
+
+    /// One clipboard item's image data, saved under its file's name. The
+    /// runner takes JPEG, PNG and HEIC as they are; TIFF goes in as PNG.
+    private func savedImage(_ item: NSPasteboardItem) -> URL? {
+        let file = item.string(forType: .fileURL).flatMap(URL.init(string:))
+        let base = file?.deletingPathExtension().lastPathComponent ?? "photo"
+        for (type, ext) in [("public.jpeg", "jpeg"), ("public.heic", "heic"), ("public.png", "png")] {
+            if let data = item.data(forType: NSPasteboard.PasteboardType(type)) {
+                return DroppedFiles.save(data, named: "\(base).\(ext)")
+            }
+        }
+        if let tiff = item.data(forType: .tiff),
+           let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
+            return DroppedFiles.save(png, named: "\(base).png")
+        }
+        return nil
     }
 
     /// What a dropped file that isn't a picture puts in the words: its
