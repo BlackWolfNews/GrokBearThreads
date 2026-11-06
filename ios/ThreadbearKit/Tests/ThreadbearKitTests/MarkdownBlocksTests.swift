@@ -33,6 +33,23 @@ import Testing
         #expect(MarkdownBlock.parse("A [link](/a.png) isn't one") == [.paragraph("A [link](/a.png) isn't one")])
     }
 
+    @Test func mermaidAndHTMLFencesAreRichBlocks() {
+        #expect(MarkdownBlock.parse("```mermaid\nflowchart TD\n  A --> B\n```") == [.rich(kind: .mermaid, source: "flowchart TD\n  A --> B")])
+        #expect(MarkdownBlock.parse("~~~ HTML title=x\n<b>hi</b>\n~~~") == [.rich(kind: .html, source: "<b>hi</b>")])
+        #expect(MarkdownBlock.parse("```Mermaid\npie\n```") == [.rich(kind: .mermaid, source: "pie")])
+        // Anything else, or a word that only starts the same, stays code.
+        #expect(MarkdownBlock.parse("```swift\nlet a = 1\n```") == [.code("let a = 1")])
+        #expect(MarkdownBlock.parse("```htmlx\n<b>\n```") == [.code("<b>")])
+        #expect(MarkdownBlock.parse("```\nmermaid\n```") == [.code("mermaid")])
+    }
+
+    @Test func aRichBlockInAListKeepsItsSource() {
+        #expect(MarkdownBlock.parse("- Steps:\n\n  ```mermaid\n  flowchart LR\n    A --> B\n  ```") == [
+            .listItem(text: "Steps:", marker: "•", depth: 0, task: nil),
+            .rich(kind: .mermaid, source: "flowchart LR\n  A --> B"),
+        ])
+    }
+
     @Test func aPictureInAQuoteStaysInTheQuote() {
         #expect(MarkdownBlock.parse("> ![a](/a.png)") == [.quote([.image(alt: "a", src: "/a.png")])])
     }

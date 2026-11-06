@@ -747,6 +747,8 @@ struct MarkdownText: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+        case let .rich(kind, source):
+            RichBlockView(kind: kind, source: source)
         case let .quote(inner):
             MarkdownText(blocks: inner, seq: seq)
                 .foregroundStyle(.secondary)

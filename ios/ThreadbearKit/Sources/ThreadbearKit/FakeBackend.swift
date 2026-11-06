@@ -22,7 +22,7 @@ public final class FakeBackend: Backend, @unchecked Sendable {
     private let listDelay: Duration
     private var imagesById: [String: [MessageImage]] = [:]
 
-    public init(now: Date = .now, turnDelay: Duration = .seconds(2), runnerOnline: Bool = true, listDelay: Duration = .zero, pictures: Bool = false, long: Bool = false, secret: Bool = false) {
+    public init(now: Date = .now, turnDelay: Duration = .seconds(2), runnerOnline: Bool = true, listDelay: Duration = .zero, pictures: Bool = false, long: Bool = false, secret: Bool = false, diagrams: Bool = false) {
         let sample = Self.sample(now: now)
         threadsById = Dictionary(uniqueKeysWithValues: sample.threads.map { ($0.threadId, $0) })
         messagesById = sample.messages
@@ -38,6 +38,11 @@ public final class FakeBackend: Backend, @unchecked Sendable {
             threadsById[thread.thread.threadId] = thread.thread
             messagesById[thread.thread.threadId] = thread.messages
             imagesById[thread.thread.threadId] = thread.images
+        }
+        if diagrams {
+            let thread = Self.diagramThread(now: now)
+            threadsById[thread.thread.threadId] = thread.thread
+            messagesById[thread.thread.threadId] = thread.messages
         }
         if secret {
             let thread = Self.secretThread(now: now)
@@ -73,6 +78,47 @@ public final class FakeBackend: Backend, @unchecked Sendable {
             PhoneMessage(seq: 1, role: .user, text: "Deploy the docs site when the build's green", at: ago(6)),
             PhoneMessage(seq: 2, role: .tool, text: "Run the docs build", toolKind: "command", at: ago(4)),
             PhoneMessage(seq: 3, role: .assistant, text: "The build's green. I need a deploy token to go on.", at: ago(1)),
+        ]
+        return (thread, messages)
+    }
+
+    // MARK: A thread with a diagram and a page
+
+    /// `-ThreadbearDiagrams`: a reply with a mermaid diagram and an html
+    /// block, drawn as what they show (RichBlockView).
+    private static func diagramThread(now: Date) -> (thread: PhoneThread, messages: [PhoneMessage]) {
+        let ago = { (minutes: Double) in now.addingTimeInterval(-minutes * 60) }
+        let thread = PhoneThread(threadId: "diagrams", title: "Make uploads resume after a crash", cwd: "~/dev/photo-sync",
+                                 preview: "Here's how resuming works now.", lastActivityAt: ago(1))
+        let messages = [
+            PhoneMessage(seq: 1, role: .user, text: "How does resuming work now? Draw it for me", at: ago(4)),
+            PhoneMessage(seq: 2, role: .assistant, text: """
+            Here's how resuming works now. Each chunk saves its offset, so a crash picks up where it left off:
+
+            ```mermaid
+            flowchart TD
+              A[Upload starts] --> B{Saved offset?}
+              B -- yes --> C[Resume from offset]
+              B -- no --> D[Start at zero]
+              C --> E[Send chunk]
+              D --> E
+              E --> F{More chunks?}
+              F -- yes --> E
+              F -- no --> G[Mark done]
+            ```
+
+            And the speed difference from the test run:
+
+            ```html
+            <div style="font:15px -apple-system;padding:14px;background:#fafafa;color:#222;border-radius:8px">
+              <b>Upload time, before and after</b>
+              <div style="margin-top:8px">Before</div>
+              <div style="height:14px;background:#e5e5e5;border-radius:4px"><div style="width:92%;height:100%;background:#3b82f6;border-radius:4px"></div></div>
+              <div style="margin-top:8px">After</div>
+              <div style="height:14px;background:#e5e5e5;border-radius:4px"><div style="width:34%;height:100%;background:#22c55e;border-radius:4px"></div></div>
+            </div>
+            ```
+            """, at: ago(1)),
         ]
         return (thread, messages)
     }

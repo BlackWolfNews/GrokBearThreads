@@ -201,9 +201,10 @@ final class AppModel {
         if args.contains("-ThreadbearFake") {
             // -ThreadbearSlowLoad: the lists answer after a few seconds, to see the loading rows.
             // -ThreadbearPictures: and a thread with pictures, "pics".
+            // -ThreadbearDiagrams: and one with a mermaid diagram and an html block.
             // -ThreadbearLong: and a very long thread, "long".
             // -ThreadbearSecret: and a thread waiting on a secret card, "secret".
-            connect(FakeBackend(listDelay: args.contains("-ThreadbearSlowLoad") ? .seconds(6) : .zero, pictures: args.contains("-ThreadbearPictures"), long: args.contains("-ThreadbearLong"), secret: args.contains("-ThreadbearSecret")), pairing: nil)
+            connect(FakeBackend(listDelay: args.contains("-ThreadbearSlowLoad") ? .seconds(6) : .zero, pictures: args.contains("-ThreadbearPictures"), long: args.contains("-ThreadbearLong"), secret: args.contains("-ThreadbearSecret"), diagrams: args.contains("-ThreadbearDiagrams")), pairing: nil)
         } else if let saved = PairingStore.load() {
             connect(ConvexBackend(deploymentURL: saved.deploymentURL, token: saved.token), pairing: saved)
         }

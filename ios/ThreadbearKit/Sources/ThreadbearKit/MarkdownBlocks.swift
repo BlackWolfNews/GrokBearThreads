@@ -15,6 +15,9 @@ public indirect enum MarkdownBlock: Sendable, Hashable {
     /// `marker` is "•" or "3."; `task` is nil, or whether its box is ticked.
     case listItem(text: String, marker: String, depth: Int, task: Bool?)
     case code(String)
+    /// A ```mermaid or ```html block, drawn as the diagram or page it
+    /// describes, with a switch back to its source (RichBlockView).
+    case rich(kind: RichKind, source: String)
     case quote([MarkdownBlock])
     case rule
     case table(header: [String], alignments: [Alignment], rows: [[String]])
@@ -23,6 +26,16 @@ public indirect enum MarkdownBlock: Sendable, Hashable {
     case image(alt: String, src: String)
 
     public enum Alignment: Sendable, Hashable { case leading, center, trailing }
+
+    public enum RichKind: String, Sendable, Hashable {
+        case mermaid, html
+
+        /// The fence's info string: its first word, in any case.
+        public init?(info: String) {
+            guard let word = info.split(whereSeparator: { $0 == " " || $0 == "\t" || $0 == "{" }).first else { return nil }
+            self.init(rawValue: word.lowercased())
+        }
+    }
 
     public static func parse(_ text: String) -> [MarkdownBlock] {
         var parser = Parser(lines: text.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n"))
@@ -80,7 +93,13 @@ private struct Parser {
 
             if let fence = Self.fence(line) {
                 flush()
-                blocks.append(.code(code(fence: fence, indent: indent)))
+                let info = String(line.dropFirst(fence.count)).trimmingCharacters(in: .whitespaces)
+                let body = code(fence: fence, indent: indent)
+                if let kind = MarkdownBlock.RichKind(info: info) {
+                    blocks.append(.rich(kind: kind, source: body))
+                } else {
+                    blocks.append(.code(body))
+                }
                 continue
             }
             if line.isEmpty {
