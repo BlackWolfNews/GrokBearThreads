@@ -734,11 +734,11 @@ other models, so it never makes a login look full.
 
 Claude threads run through Claude Code's Agent SDK, and Anthropic's 5-hour
 meter seems to count that traffic as more per token than the same work typed
-into `claude` in a terminal. People have measured about 1.6 to 1.7 times as
-much ([anthropics/claude-code#97074](https://github.com/anthropics/claude-code/issues/97074)),
+into `claude` in a terminal. People have measured anywhere from about 1.6 to
+2.9 times as much ([anthropics/claude-code#97074](https://github.com/anthropics/claude-code/issues/97074)),
 while weekly limits come out about the same in most of their tests. Some apps
 change the label the SDK sends to get around it. Threadbear leaves the label
-as it is until Anthropic says whether that's allowed.
+as it is for now.
 
 ## Experiments
 <!-- slug: experiments -->
