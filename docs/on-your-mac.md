@@ -144,6 +144,9 @@ File references are where to look.
   When a project's notes pass 12,000 characters, the librarian sends them
   the same way to be rewritten shorter, and keeps the old notes in the
   data folder's `project-notes/` (the last 5 for each project).
+  Mike's publishing runner also sends commit messages to its configured
+  model once per daily release, to write the plain-language release notes.
+  If that call fails, the signed release still goes out without notes.
 - **Housekeeping** (`runner/src/housekeeping.ts`): trims logs, deletes
   week-old copies of pictures pasted into drafts (a sent message keeps its
   own copy) and deleted threads after 30 days in the trash. Archived

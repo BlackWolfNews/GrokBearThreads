@@ -1261,7 +1261,9 @@ Your copy is a fork of Mike's, and it doesn't change unless you say so.
 About once a day Mike publishes a release. Your runner checks for new ones
 every few hours, and only trusts releases signed with the key setup saved.
 When there's one your copy doesn't have, the Updates icon gets a coloured
-dot, and its From Mike section lists what's new. Bring Them In starts a
+dot, and its From Mike section lists what's new in plain words, grouped by
+release. Older releases without notes show their commit subjects instead.
+Bring Them In starts a
 thread that merges Mike's changes with your own, sorts out any clashes,
 runs the checks and asks you before it lands. Let's Discuss starts one that
 talks the release through first, what's in it and what it means for your
