@@ -20,7 +20,7 @@ import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 import type { Logger } from './log.ts';
 import { RunnerClient, RpcClientError } from './client.ts';
 import { ErrorCode, RpcError } from './protocol.ts';
-import type { ThreadSummary } from './protocol.ts';
+import type { PermissionMode, ThreadSummary } from './protocol.ts';
 import type { Notification, Runner } from './runner.ts';
 import type { UsageReading } from './usage.ts';
 import type { AgentApprovalRequest, ProjectControl, ScheduleControl, ThreadControl } from './threadbear-mcp.ts';
@@ -573,6 +573,12 @@ export class ThreadRouter implements ThreadControl {
   // thread, so this never goes elsewhere.
   requestSecret(threadId: string, req: SecretRequest): Promise<SecretAnswer> {
     return this.runner.requestSecret(threadId, req);
+  }
+
+  // A thread on the other runner counts as having full access: this one
+  // can't see what its turn started with (threadbear-mcp.ts, "Raising access").
+  async accessOf(threadId: string): Promise<PermissionMode> {
+    return this.away(threadId) ? 'full' : this.runner.accessOf(threadId);
   }
 
   // Likewise for a threadbear tool's own card (threadbear-mcp.ts, "Raising access").

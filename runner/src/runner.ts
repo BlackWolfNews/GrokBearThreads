@@ -266,6 +266,9 @@ export type Turn = {
   // sent while it ran, which go straight into the CLI. The turn ends when
   // the CLI has answered them all.
   messages: string[];
+  // The most access the CLI has had in this turn (accessOf): a Codex turn
+  // keeps the mode it started with when the thread is lowered mid-turn.
+  access?: PermissionMode;
   // Files the turn edited, wrote or proposed to (edit.diff paths, Write
   // and Edit calls, denied ones too), for hooks that run only after a
   // change to certain files. Never trusted from: see 'wrote'.
@@ -1484,7 +1487,7 @@ export class Runner {
     }
     rt.idleTimer?.cancel();
     rt.idleTimer = undefined;
-    rt.turn = { turnId: msg.turnId, startedAt: this.clock.now(), interruptRequested: false, messages: [msg.turnId], edited: new Set() };
+    rt.turn = { turnId: msg.turnId, startedAt: this.clock.now(), interruptRequested: false, messages: [msg.turnId], edited: new Set(), access: rec.permissionMode };
     rt.activeAt = this.clock.now();
     rec.turnId = msg.turnId;
     rec.lastActivityAt = this.isoNow();
@@ -2009,7 +2012,7 @@ export class Runner {
     this.emit(st, wokeBy.length ? { type: 'turn.started', turnId, wokeBy } : { type: 'turn.started', turnId }, turnId);
     rt.idleTimer?.cancel();
     rt.idleTimer = undefined;
-    rt.turn = { turnId, startedAt: this.clock.now(), interruptRequested: false, auto: true, messages: [], edited: new Set() };
+    rt.turn = { turnId, startedAt: this.clock.now(), interruptRequested: false, auto: true, messages: [], edited: new Set(), access: rec.permissionMode };
     rt.activeAt = this.clock.now();
     rec.turnId = turnId;
     rec.status = rt.approvals.size ? 'waiting' : 'running';
@@ -2528,6 +2531,10 @@ export class Runner {
     }
     if (params.permissionMode !== undefined && params.permissionMode !== rec.permissionMode) {
       rec.permissionMode = params.permissionMode;
+      // The turn counts as having had the most access it was given: a
+      // Claude CLI takes a raise now, and a lowered Codex turn carries on
+      // as it started.
+      if (rt.turn) rt.turn.access = moreAccess(rt.turn.access, params.permissionMode);
       if (rt.session && !release) {
         rt.session.setPermissionMode(params.permissionMode).catch(() => {
           rt.releaseWhenIdle = true;
@@ -3007,6 +3014,14 @@ export class Runner {
     return hits.length === 1 ? this.summary(hits[0]) : undefined;
   }
 
+  // The most access a thread's agent has now: its mode, or more while a
+  // turn that started with (or was raised to) more is still running.
+  // threadbear-mcp.ts, "Raising access", goes by it for messages.
+  accessOf(threadId: string): PermissionMode {
+    const { rec, rt } = this.mustGet(threadId);
+    return moreAccess(rt.turn?.access, rec.permissionMode);
+  }
+
   mustGet(threadId: string): ThreadState {
     const st = typeof threadId === 'string' ? this.threads.get(threadId) : undefined;
     if (!st) throw new RpcError(ErrorCode.threadNotFound, `Thread not found: ${threadId}`);
@@ -3358,4 +3373,9 @@ function openInBrowser(url: string): Promise<void> {
   return new Promise((resolve, reject) => {
     execFile('/usr/bin/open', [page], (err) => (err ? reject(new RpcError(ErrorCode.other, `Couldn't open ${page}: ${err.message}`)) : resolve()));
   });
+}
+
+const ACCESS_ORDER: PermissionMode[] = ['ask', 'auto', 'full'];
+function moreAccess(a: PermissionMode | undefined, b: PermissionMode): PermissionMode {
+  return a && ACCESS_ORDER.indexOf(a) > ACCESS_ORDER.indexOf(b) ? a : b;
 }

@@ -51,6 +51,8 @@ export type ThreadControl = {
   // A card a threadbear tool puts up itself, with no "Always allow": for a
   // call from a thread not in full mode that would raise access (below).
   requestAgentApproval?: (threadId: string, req: AgentApprovalRequest) => Promise<ToolApprovalAnswer>;
+  // The most access a thread's agent has now (Runner.accessOf).
+  accessOf?: (threadId: string) => Aw<PermissionMode>;
 } & Async<Runner, 'list' | 'search' | 'get' | 'events' | 'create' | 'send' | 'update' | 'interrupt' | 'delete'>;
 
 // Messages a thread when the Mac app restarts onto a new build (app-restarts.ts).
@@ -282,14 +284,25 @@ export function buildThreadbearTools(
     const m = (await control.get(selfId)).permissionMode;
     return m === 'full' ? undefined : (m ?? 'ask');
   };
-  // A thread this runner can't read (gone, or on a runner it can't reach)
-  // counts as full.
+  // A thread's saved mode, for a change to it. A thread this runner can't
+  // read (gone, or on a runner it can't reach) counts as full.
   const modeOf = async (id: string): Promise<{ mode: PermissionMode; title: string }> => {
     try {
       const t = await control.get(id);
       return { mode: t.permissionMode ?? 'full', title: t.title };
     } catch {
       return { mode: 'full', title: id.slice(0, 8) };
+    }
+  };
+  // The access its agent has now, for anything that reaches it (a message,
+  // a move, a project's brief): more than its mode while a turn that had
+  // more is still running, as a Codex turn keeps the mode it started with.
+  const accessOf = async (id: string): Promise<{ mode: PermissionMode; title: string }> => {
+    const t = await modeOf(id);
+    try {
+      return { mode: control.accessOf ? await control.accessOf(id) : 'full', title: t.title };
+    } catch {
+      return { mode: 'full', title: t.title };
     }
   };
   const confirm = async (tool: string, reasons: string[], input: Record<string, unknown>, signal?: AbortSignal): Promise<void> => {
@@ -305,7 +318,7 @@ export function buildThreadbearTools(
   // A message to a thread with more access than the caller.
   const sendReason = async (id: string, caller: PermissionMode | undefined, verb = 'Send a message to'): Promise<string[]> => {
     if (!caller || id === selfId) return [];
-    const t = await modeOf(id);
+    const t = await accessOf(id);
     return raises(t.mode, caller) ? [`${verb} "${t.title}", which has ${MODE_NAMES[t.mode]}`] : [];
   };
   const checkReason = (check: string | null | undefined, caller: PermissionMode | undefined): string[] =>
@@ -624,7 +637,7 @@ export function buildThreadbearTools(
         // Renaming and pausing never do.
         const caller = await restricted();
         if (caller) {
-          const was = current.threadId ? (await modeOf(current.threadId)).mode : (current.permissionMode ?? 'full');
+          const was = current.threadId ? (await accessOf(current.threadId)).mode : (current.permissionMode ?? 'full');
           const raised = !current.threadId && permissionMode !== undefined && raises(permissionMode, was);
           const will = raised ? permissionMode! : was;
           // What it sends, where, or that it runs again; not its title,
@@ -635,6 +648,9 @@ export function buildThreadbearTools(
             ...(changes && current.check && check === undefined ? [`Change the schedule "${current.title}", which runs a shell command as you first`] : []),
             ...checkReason(check, caller),
           ];
+          // Setting the mode it already has is left out, so a write that
+          // lands after someone else lowers it can't raise it back.
+          if (permissionMode !== undefined && !current.threadId && permissionMode === was) permissionMode = undefined;
           await confirm('update_schedule', reasons, { scheduleId: current.id, ...Object.fromEntries(Object.entries({ text, when, cron, timezone, paused, folder: f, account: acc, pool: pl, model, effort, permissionMode, check }).filter(([, v]) => v !== undefined)) }, extra?.signal);
         }
         // A schedule on another runner checks its account and pool there, so
@@ -801,9 +817,25 @@ export function buildThreadbearTools(
             "A Notion page (or database) with the project's task board on it: a database with a Status column (To do, Doing, Waiting, Done), Who, Due and Thread (the thread id working on it). The project page shows the board, read every few minutes. Empty takes it off.",
           ),
       },
-      handle(async ({ project: q, title, mikeAsked, goals, state, notes, appendNote, links, addLinks, removeLinks, addFolders, removeFolders, icon, notion }) => {
+      handle(async ({ project: q, title, mikeAsked, goals, state, notes, appendNote, links, addLinks, removeLinks, addFolders, removeFolders, icon, notion }, extra) => {
         const pc = mustProjects();
         const p = await project(q);
+        // Raising access (above): the brief its threads are told (title,
+        // goals, state, notes) is a message to each of them.
+        const caller = await restricted();
+        if (caller && [title, goals, state, notes, appendNote].some((x) => x !== undefined)) {
+          const { threadIds } = await pc.get(p.id);
+          let above: { mode: PermissionMode; title: string } | undefined;
+          for (const id of threadIds) {
+            if (id === selfId) continue;
+            const t = await accessOf(id);
+            if (raises(t.mode, caller) && (!above || raises(t.mode, above.mode))) above = t;
+          }
+          if (above) {
+            const fields = Object.fromEntries(Object.entries({ title, goals, state, notes, appendNote }).filter(([, v]) => v !== undefined));
+            await confirm('update_project', [`Change the brief of the project "${p.title}", which "${above.title}" (${MODE_NAMES[above.mode]}) is told`], { project: p.id, ...fields }, extra?.signal);
+          }
+        }
         let folders: string[] | undefined;
         if (addFolders?.length || removeFolders?.length) {
           const drop = new Set(await Promise.all((removeFolders ?? []).map(projectFolder)));
@@ -830,9 +862,11 @@ export function buildThreadbearTools(
       'join_project',
       "Puts a thread (this one by default) in a project, so it gets the project's brief and the patches from its folders. Pinned: the librarian won't take it out.",
       { project: z.string().describe('Project id, id prefix or title.'), ...thisOrOther },
-      handle(async ({ project: q, threadId, id: alias }) => {
+      handle(async ({ project: q, threadId, id: alias }, extra) => {
         const id = await resolve(threadId ?? alias);
         const p = await project(q);
+        // Its brief goes to the thread (raising access, above).
+        await confirm('join_project', await sendReason(id, await restricted(), `Put the project "${p.title}" and its brief into`), { project: p.id, threadId: id }, extra?.signal);
         await mustProjects().changeMembership(id, { add: [p.id], by: 'agent' });
         return `${id === selfId ? 'This thread is' : `"${(await control.get(id)).title}" is`} in "${p.title}" now.`;
       }),
@@ -1352,6 +1386,9 @@ export function buildThreadbearTools(
         if (permissionMode !== undefined && (await restricted())) {
           const t = await modeOf(id);
           if (raises(permissionMode, t.mode)) await confirm('update_thread', [`Switch ${threadName(id, t.title)} to ${MODE_NAMES[permissionMode]}`], { threadId: id, permissionMode }, extra?.signal);
+          // The mode it has already is left out, so this write landing after
+          // someone else lowers it (a handover's round trip) can't raise it back.
+          else if (permissionMode === t.mode) delete upd.permissionMode;
         }
         return describe((await control.update(upd)).thread);
       }),
@@ -1367,8 +1404,20 @@ export function buildThreadbearTools(
       },
       handle(async ({ folder: f, threadId, id: alias, account: acc, then }, extra) => {
         const id = await resolve(threadId ?? alias);
-        // `then` is a message to that thread (raising access, above).
-        if (then?.trim()) await confirm('move_thread', await sendReason(id, await restricted()), { threadId: id, folder: f, then }, extra?.signal);
+        // Raising access (above). A thread with more access than this one
+        // reads the new folder's instructions from its next turn, `then` is
+        // a message to it, and a schedule's check that sends to it runs in
+        // its folder.
+        const caller = await restricted();
+        if (caller) {
+          const t = id === selfId ? undefined : await accessOf(id);
+          const checks = schedules ? (await schedules.list(id)).filter((sc) => sc.threadId === id && sc.check?.trim()) : [];
+          const reasons = [
+            ...(t && raises(t.mode, caller) ? [`Move "${t.title}", which has ${MODE_NAMES[t.mode]}, to ${f}${then?.trim() ? ' and send it a message' : ''}`] : []),
+            ...(checks.length ? [`Move ${threadName(id, t?.title ?? '')} to ${f}, where ${checks.length === 1 ? `the schedule "${checks[0].title}" runs its shell check` : `${checks.length} schedules run their shell checks`} as you`] : []),
+          ];
+          await confirm('move_thread', reasons, { threadId: id, folder: f, ...(then ? { then } : {}) }, extra?.signal);
+        }
         const cwd = await folder(f);
         const t = (await control.update({ threadId: id, cwd, accountId: await account(acc) })).thread;
         const self = id === selfId;
