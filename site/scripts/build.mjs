@@ -226,8 +226,9 @@ const FAQ = [
   // A Linux runner still needs a Mac set up first (INSTALL.md, section 6), hence "second".
   ["Is there a Windows or Linux version?",
     "Not of the app, it's Mac only. A Linux server can be a second, always-on machine though (<a href=\"https://github.com/mikecann/threadbear/blob/main/INSTALL.md#6-a-runner-on-linux-optional\">section 6 of INSTALL.md</a> has how), so your threads can run there while you drive them from your Mac, your phone or the website. If you want a proper Windows or Linux version then I thoroughly encourage you to spend some tokens and build it, I'd personally love to see it."],
+  // The 5-hour meter and the Agent SDK: docs/guide.md, "Accounts, pools and Usage".
   ["Does it use my subscription or an API key?",
-    "Your subscription. Threadbear runs the official <code>claude</code> and <code>codex</code> command line tools, logged in as you, the same as running them in a terminal. It never reads or copies your login tokens."],
+    "Your subscription. Threadbear runs the official <code>claude</code> and <code>codex</code> command line tools, logged in as you, and it never reads or copies your login tokens. Claude threads go through Claude Code's Agent SDK though, and Anthropic's 5-hour limit seems to charge that more per token than typing into a terminal (people have measured about 1.6 to 1.7x, while weekly limits look about the same). <a href=\"/docs/accounts\">The docs on accounts</a> have more."],
   // docs/guide.md, "Accounts, pools and Usage".
   ["Can I use more than one Claude or Codex account?",
     "Yes, I've got a few myself. <a href=\"/docs/accounts\">Sign each login in to a folder of its own</a> and Threadbear groups them into pools. A new thread starts on the login whose weekly limit resets soonest, so you use up what would otherwise go to waste. When that login gets close to its limit the thread moves to another one with room and carries on from where it was, and if they're all full it waits and carries on by itself once a limit resets."],
