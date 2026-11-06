@@ -12,7 +12,7 @@ import { actAs, checkRunnerId, forbidden, hasLiveKey, runnerAuth, runnerStatsRow
 import { scrubDoc, scrubEveryString, SCRUB_RULES_VERSION, HELD_BACK } from './redaction';
 import { dropHead, seedHeads, syncHead, syncHeads } from './projectHeads';
 import { dropNotes, putNotes, syncNotes } from './projectNotes';
-import { cutBytes, docBytes, fitUsage, LOGIN_EMAIL, LOGIN_PROVIDER, loginKey, mayClaim, NAME_CHARS, mayFinish, mayTake, mayTouch, mayUseStorage, mayWrite, nameSkeleton, normalName, ownsCard, SCHEDULE_ID, utf8Bytes, type Caller, type UsageDoc } from './runnerAccess';
+import { cutBytes, docBytes, fitUsage, impossibleUsage, LOGIN_EMAIL, LOGIN_PROVIDER, loginKey, mayClaim, NAME_CHARS, mayFinish, mayTake, mayTouch, mayUseStorage, mayWrite, nameSkeleton, normalName, ownsCard, SCHEDULE_ID, utf8Bytes, type Caller, type UsageDoc } from './runnerAccess';
 import { dropWake, seedWakes, syncWake } from './wakes';
 import { pushFailing } from './pushHealth';
 import { issueToken as makeToken, listTokens as allTokens, revokeToken as revokeOne, tokenInfo, tokenKind, MAX_DAYS } from './tokens';
@@ -1878,11 +1878,13 @@ export const sharedUsage = query({
           ...(await ctx.db.query('accounts').withIndex('by_runnerId', (q) => q.gt('runnerId', me)).collect()),
         ]
       : await ctx.db.query('accounts').collect();
+    const now = Date.now();
     const out = [];
     for (const row of rows) {
       if (!row.email || !row.usage) continue;
       if (keyed.has(row.runnerId)) continue;
       if (mine && !mine.has(loginKey(row.provider, row.email))) continue;
+      if (impossibleUsage(row.usage, now)) continue;
       out.push({ ...(caller.owner ? { runnerId: row.runnerId } : {}), provider: row.provider, email: row.email, usage: row.usage, byOwnerKey: true });
     }
     return out;

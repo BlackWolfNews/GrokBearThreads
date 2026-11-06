@@ -4328,8 +4328,11 @@ schedule on it, and mint phone tokens. Now there are two kinds of key, and
   revoked or replaced, starts with none. Then `sync:sharedUsage`: rows
   under a runner id that has never had a key of its own are the owner
   key's (only it can write them) and go to anyone they concern, marked
-  `byOwnerKey`. A runner key gets only those, of its listed logins, with
-  no runner id. Rows under a runner id that has or had a key of its own go
+  `byOwnerKey`, except a reading no honest runner writes (read after now,
+  or a reset further off than its window allows, an hour's slack either
+  way), which a runner from before this took in from a runner key and
+  wrote as its own. A runner key gets only those, of its listed logins,
+  with no runner id. Rows under a runner id that has or had a key of its own go
   to nobody, the owner included: even one window the main Mac hadn't read
   (a 5-hour one at 0%) would keep its pools off a login, and its own rows
   would then pass it on to the other Macs as its word. The main Mac reads

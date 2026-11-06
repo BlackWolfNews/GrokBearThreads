@@ -339,6 +339,21 @@ export function fitUsage(u: UsageDoc, now: number): UsageDoc | undefined {
   return { ...u, windows, readAt: read > now ? new Date(now).toISOString() : u.readAt };
 }
 
+/**
+ * A reading no honest runner writes: read after now, or a window resetting
+ * further off than its kind allows (an hour's slack for clocks either way).
+ * sharedUsage leaves out such a reading even from the owner key's rows: a
+ * runner from before API 53 took a runner key's 2099 reading in as the
+ * newest and wrote it into its own row, where it would otherwise stay the
+ * newest for good (Codex's review of Gautam's F1 fix).
+ */
+export function impossibleUsage(u: UsageDoc, now: number): boolean {
+  const read = Date.parse(u.readAt);
+  if (!Number.isFinite(read) || read > now + SKEW_MS) return true;
+  const fitted = fitUsage(u, now);
+  return !fitted || fitted.windows.length !== u.windows.length || fitted.windows.some((w, i) => w.resetsAt !== u.windows[i]!.resetsAt);
+}
+
 /** The gate at the top of every function. One not in ACCESS is owner-only. */
 export function mayCall(c: Caller, fn: string): boolean {
   return c.owner || ACCESS[fn] === 'own' || ACCESS[fn] === 'shared';

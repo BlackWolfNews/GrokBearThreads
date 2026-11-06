@@ -143,6 +143,16 @@ test('only the owner key lists logins, only for a runner with a live key, and a 
   assert.equal(s.rows('runnerLogins').length, 0);
 });
 
+test("F1: a forged reading an older main Mac copied into its own row before the fix isn't passed on", async () => {
+  const s = await setup();
+  const OLD = 'oldowner0001';
+  const real = usage({ readAt: iso(Date.now() - 60_000), week: 42, resetsAt: iso(Date.now() + DAY) });
+  // An owner-key runner that took a runner key's 2099 reading in and wrote it as its own.
+  await call(s.ctx, sync.setAccounts, { key: OWNER, runnerId: OLD, accounts: [account('claude-main', MINE, FAKE), account('ok', OTHER, real)] });
+  await call(s.ctx, sync.setAccounts, { key: OWNER, runnerId: 'oldowner0002', accounts: [account('a', MINE, usage({ readAt: iso(Date.now() - 60_000), week: 0, resetsAt: '2099-01-01T00:00:00Z' }))] });
+  assert.deepEqual((await shared(s, OWNER, M5)).map((r) => `${r.runnerId}:${r.email}`), [`${OLD}:${OTHER}`]);
+});
+
 test('pools: a runner key sees members named by email and its own runner id, never another runner\'s id', async () => {
   const s = await setup();
   const members = [{ provider: 'claude', email: MINE }, { provider: 'claude', runnerId: M5, accountId: 'claude-x' }, { provider: 'codex', runnerId: BRUCE, accountId: 'codex-main' }];

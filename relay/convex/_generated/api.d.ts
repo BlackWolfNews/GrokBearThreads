@@ -13,6 +13,7 @@ import type * as http from "../http.js";
 import type * as reasons from "../reasons.js";
 import type * as relay from "../relay.js";
 import type * as verify from "../verify.js";
+import type * as versions from "../versions.js";
 
 import type {
   ApiFromModules,
@@ -26,6 +27,7 @@ declare const fullApi: ApiFromModules<{
   reasons: typeof reasons;
   relay: typeof relay;
   verify: typeof verify;
+  versions: typeof versions;
 }>;
 
 /**
