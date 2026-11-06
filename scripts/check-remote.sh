@@ -191,6 +191,9 @@ files="$(mktemp)"
 BASE_ARGS=(${ARGS[@]+"${ARGS[@]}"})
 SKIP=""
 tries=0
+# The copy lock this run holds, if any, goes with it however it ends.
+held=""
+trap '[ -n "$held" ] && rmdir "$held" 2>/dev/null' EXIT
 while :; do
   if ! choose; then
     rm -f "$files" "$changed"
@@ -204,12 +207,24 @@ while :; do
   # worktrees never write the same one. Only what changed goes over the
   # link; the run's copy is made from it there, of exactly this run's files
   # (a file deleted here stays in the mirror but isn't copied).
-  mirror="$remote_base/mirror/$(printf '%s' "$(hostname -s):$ROOT" | shasum | cut -c1-16)"
+  key="$(printf '%s' "$(hostname -s):$ROOT" | shasum | cut -c1-16)"
+  mirror="$remote_base/mirror/$key"
+  # Two checks from this checkout at once take turns at the mirror, from
+  # the upload until the run's copy is made, so neither copies the other's
+  # files. mkdir is the lock; one left by a run killed mid-copy goes after
+  # ten minutes.
+  copylock="${TMPDIR:-/tmp}/tb-check-copy-$key-$HOST"
+  find "$copylock" -maxdepth 0 -mmin +10 -exec rmdir {} \; 2>/dev/null
+  until mkdir "$copylock" 2>/dev/null; do sleep 1; done
+  held="$copylock"
+  # By content (-c), not size and time: an edit that keeps both would
+  # otherwise leave the mirror's old copy in the run.
   if ! "${SSH[@]}" "$HOST" "mkdir -p '$mirror' '$remote_run' && touch '$mirror'" \
-    || ! rsync -az --from0 --files-from="$files" -e "${SSH[*]}" "$ROOT/" "$HOST:$mirror/" \
+    || ! rsync -azc --from0 --files-from="$files" -e "${SSH[*]}" "$ROOT/" "$HOST:$mirror/" \
     || ! rsync -a -e "${SSH[*]}" "$files" "$HOST:$remote_run.files" \
     || ! "${SSH[@]}" "$HOST" "rsync -a --from0 --files-from='$remote_run.files' '$mirror/' '$remote_run/' && rm -f '$remote_run.files'" \
     || ! rsync -a -e "${SSH[*]}" "$changed" "$HOST:$remote_run/.check-changed"; then
+    rmdir "$copylock" 2>/dev/null; held=""
     "${SSH[@]}" "$HOST" "rm -rf '$remote_run' '$remote_run.files'" 2>/dev/null
     # The next host that can run it, before this Mac (6 Nov: Tinker Desk
     # dropped off mid-copy and the check ran on the M5).
@@ -217,6 +232,7 @@ while :; do
     SKIP+=" $HOST"
     continue
   fi
+  rmdir "$copylock" 2>/dev/null; held=""
   echo "Checking on $HOST (copied in $((SECONDS - start))s; THREADBEAR_CHECK_HOST= ./check.sh --local runs here)"
 
   ARGS=(${BASE_ARGS[@]+"${BASE_ARGS[@]}"})
