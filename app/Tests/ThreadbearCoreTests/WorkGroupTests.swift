@@ -594,6 +594,19 @@ final class WorkGroupTests: XCTestCase {
         XCTAssertNil(model.rows.first { $0.kind == .changes })
     }
 
+    /// One reply: the final message is the reply, as the summary was, so
+    /// the turn has no card either (it came back once One reply was on).
+    func testAOneReplyTurnHasNoCard() {
+        let model = TranscriptModel(events: [
+            E.user(1, "Change things"), Self.started(2),
+            Self.edit(3, "c1", path: "/repo/Sources/A.swift", old: "a", new: "b"), E.result(4, "c1"),
+            E.event(5, "assistant.text", ["itemId": "m1", "text": "Changed A.", "final": true], turn: "t1"),
+            E.done(6),
+        ])
+        XCTAssertNotNil(model.row(id: "a:m1"))
+        XCTAssertNil(model.rows.first { $0.kind == .changes })
+    }
+
     /// A sign-off shorter than the bullets loses to them, unless the summary
     /// was written with bullet replies off (docs/protocol.md, "The summary").
     func testASummaryThatGivesWayLosesToAShortMessage() {

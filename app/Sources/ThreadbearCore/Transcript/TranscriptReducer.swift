@@ -122,6 +122,9 @@ public struct TranscriptModel: Sendable {
     private var completedTurns: Set<String> = []
     /// Turns with a summary from end_turn: their other messages are work.
     private var summarizedTurns: Set<String> = []
+    /// Turns with a One reply final message: like a summary, it's the
+    /// reply, so the turn gets no changes card either.
+    private var repliedTurns: Set<String> = []
     /// Edit and Write tool items per turn, in order, for the changes card.
     private var editsByTurn: [String: [String]] = [:]
     /// The seq each tool row's result came at, by row id: a message written
@@ -451,6 +454,7 @@ public struct TranscriptModel: Sendable {
         hidden = Self.hiddenRanges(events)
         completedTurns = []
         summarizedTurns = []
+        repliedTurns = []
         editsByTurn = [:]
         resultSeqs = [:]
         pendingCards = [:]
@@ -606,6 +610,7 @@ public struct TranscriptModel: Sendable {
 
         case .assistantText(let itemId, let text, _, let narration, _, let final):
             streaming[itemId] = nil
+            if final, let turnId { repliedTurns.insert(turnId) }
             let id = "a:\(itemId)"
             let thought = "r:\(itemId)"
             if itemIndex[id] == nil, let i = itemIndex[thought], case .reasoning(let live) = items[i].content, live.isStreaming {
@@ -1379,7 +1384,9 @@ public struct TranscriptModel: Sendable {
                         // A turn that ended with a summary has no changes
                         // card: the summary says what changed, and the
                         // edits are still in the folded work (Mike, 30 Oct).
-                        if !stretch.contains(where: summarizedTurns.contains), let card = changedFiles(turns: stretch) {
+                        // One reply's final message counts too: it replaced
+                        // the summary, and the card came back with it (6 Nov).
+                        if !stretch.contains(where: { summarizedTurns.contains($0) || repliedTurns.contains($0) }), let card = changedFiles(turns: stretch) {
                             out.append(derived("cf:" + card.turnId, seq: row.seq, turnId: row.turnId, .changes(card)))
                             starts.append(turn.lowerBound)
                         }
