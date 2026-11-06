@@ -1855,9 +1855,29 @@ test('projects: the whole list once per start, then only the ones that changed, 
   assert.equal(old.length, 4);
 });
 
+test("projects: notes go up only when they change, and a backend before API 50 always gets them", async () => {
+  const run = async (backend: number) => {
+    const p = setupPictures({ backend });
+    const one = (state: string, notes: string) => [{ id: 'p1', title: 'Threadbear', folders: [], goals: '', state, notes, createdBy: 'mike', archived: false, createdAt: 'c', updatedAt: state, threadCount: 1 }];
+    p.sync.start();
+    await p.sync.flushNow();
+    await tick();
+    for (const [state, notes] of [['a', 'long notes'], ['b', 'long notes'], ['b', 'longer notes'], ['c', 'longer notes']]) {
+      p.h.runner.publish({ method: 'projects.updated', params: { projects: one(state!, notes!) as never } });
+      p.h.clock.advance(SYNC_COALESCE_MS);
+      await tick(20);
+    }
+    await p.sync.stop();
+    return p.calls.filter((c) => c.fn === 'sync:upsertProjects').map((c) => (c.args.projects as { notes?: string }[])[0]!.notes);
+  };
+  // The first list went whole; then a state change, notes edited, a state change.
+  assert.deepEqual(await run(BACKEND_API_VERSION), [undefined, 'longer notes', undefined]);
+  assert.deepEqual(await run(NOTES_APART_API_VERSION - 1), ['long notes', 'longer notes', 'longer notes']);
+});
+
 // docs/protocol.md, "Secrets".
 import { seal } from '../../src/secrets.ts';
-import { SECRETS_API_VERSION } from '../../src/sync.ts';
+import { NOTES_APART_API_VERSION, SECRETS_API_VERSION } from '../../src/sync.ts';
 
 test('secrets: the card goes up with the runner key, and the phone sealed answer is opened here', async () => {
   const f = setupFull({ apiVersion: SECRETS_API_VERSION });

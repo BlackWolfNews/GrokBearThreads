@@ -110,7 +110,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 49;
+export const BACKEND_API_VERSION = 50;
 // From this one the main Mac reads and steers other runners' threads through
 // the backend (convex/relay.ts): commands can be `interrupt` or `call`, and a
 // pending approval carries its event's seq (docs/protocol.md, "Other
@@ -211,6 +211,9 @@ export const INDEX_SINCE_API_VERSION = 29;
 // Only the projects that changed go up (sync:upsertProjects), after the
 // whole list once per start.
 export const PROJECTS_DIFF_API_VERSION = 30;
+// From this one a project's notes go up only when they change (the backend
+// keeps them in a row of their own), so a state update doesn't rewrite them.
+export const NOTES_APART_API_VERSION = 50;
 // Since this API: sync:upsertAccounts, one account's usage moving rewrites
 // that account rather than all of them; a heartbeat says firstSeen.
 export const ACCOUNTS_DIFF_API_VERSION = 37;
@@ -993,9 +996,10 @@ export class ConvexSync {
   private lists: { projects?: Project[]; schedules?: Schedule[]; accounts?: Account[] } = {};
   private dirtyLists = new Set<ListName>();
   // Each project as the backend has it, id -> digest of its doc without
-  // lastActivityAt, and that lastActivityAt, once the whole list has gone up
-  // (API 30). Undefined until then.
-  private projectsSent?: Map<string, [string, string]>;
+  // lastActivityAt or notes, that lastActivityAt, and a digest of its notes,
+  // once the whole list has gone up (API 30). Undefined until then. An entry
+  // cached before notes had their own digest has two, so its notes go once.
+  private projectsSent?: Map<string, [string, string, string?]>;
   private projectActivityAt = -Infinity;
   private projectsTimer?: TimerHandle;
   // Each account as the backend has it, id -> digest without usage.readAt.
@@ -1832,9 +1836,9 @@ export class ConvexSync {
   private async sendProjects(list: Project[], v: number): Promise<void> {
     const key = this.deps.key;
     const docs = list.map(toProjectDoc);
-    const entry = (d: (typeof docs)[number]): [string, string] => {
-      const { lastActivityAt, ...rest } = d;
-      return [digest(JSON.stringify(rest)), lastActivityAt ?? ''];
+    const entry = (d: (typeof docs)[number]): [string, string, string] => {
+      const { lastActivityAt, notes, ...rest } = d;
+      return [digest(JSON.stringify(rest)), lastActivityAt ?? '', digest(notes)];
     };
     if (v < PROJECTS_DIFF_API_VERSION || !this.projectsSent) {
       await this.post('mutation', 'sync:setProjects', { key, runnerId: this.runnerId, projects: docs });
@@ -1849,9 +1853,9 @@ export class ConvexSync {
     const activityDue = now - this.projectActivityAt >= PROJECT_ACTIVITY_MS;
     let activityWaits = false;
     const changed = docs.filter((d) => {
-      const [was, wasAt] = sent.get(d.id) ?? [];
-      const [is, isAt] = entry(d);
-      if (was !== is) return true;
+      const [was, wasAt, wasNotes] = sent.get(d.id) ?? [];
+      const [is, isAt, isNotes] = entry(d);
+      if (was !== is || wasNotes !== isNotes) return true;
       if (wasAt === isAt) return false;
       if (activityDue) return true;
       activityWaits = true;
@@ -1860,7 +1864,15 @@ export class ConvexSync {
     const ids = new Set(docs.map((d) => d.id));
     const removed = [...sent.keys()].filter((id) => !ids.has(id));
     if (changed.length || removed.length) {
-      await this.post('mutation', 'sync:upsertProjects', { key, runnerId: this.runnerId, projects: changed, removed });
+      // Notes the backend already has stay behind: they're most of a
+      // project's bytes, and it would rewrite them.
+      const apart = v >= NOTES_APART_API_VERSION;
+      const projects = changed.map((d) => {
+        if (!apart || sent.get(d.id)?.[2] !== entry(d)[2]) return d;
+        const { notes: _n, ...rest } = d;
+        return rest;
+      });
+      await this.post('mutation', 'sync:upsertProjects', { key, runnerId: this.runnerId, projects, removed });
       for (const d of changed) sent.set(d.id, entry(d));
       for (const id of removed) sent.delete(id);
       if (activityDue) this.projectActivityAt = now;

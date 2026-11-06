@@ -12,6 +12,7 @@ import { API_VERSION } from './version';
 import { imagesFrom, phoneImage, replyImagesFrom } from './share';
 import { runnerName } from './sync';
 import { HEADS_MARK } from './projectHeads';
+import { notesOf } from './projectNotes';
 
 // A runner not heard from for this long is offline, and a command with no
 // runnerId goes to the main one still online (mainRunner).
@@ -380,7 +381,7 @@ export const project = query({
     const p = await ctx.db.query('projects').withIndex('by_runner_id', (q) => q.eq('runnerId', runnerId).eq('id', id)).unique();
     if (!p) return null;
     const { icon: _icon, ...rest } = strip(p);
-    return { ...rest, ...(await iconOf(ctx, p)) };
+    return { ...rest, notes: await notesOf(ctx, p), ...(await iconOf(ctx, p)) };
   },
 });
 

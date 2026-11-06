@@ -14,6 +14,7 @@ import type * as http from "../http.js";
 import type * as lib from "../lib.js";
 import type * as phone from "../phone.js";
 import type * as projectHeads from "../projectHeads.js";
+import type * as projectNotes from "../projectNotes.js";
 import type * as push from "../push.js";
 import type * as pushTargets from "../pushTargets.js";
 import type * as pushText from "../pushText.js";
@@ -39,6 +40,7 @@ declare const fullApi: ApiFromModules<{
   lib: typeof lib;
   phone: typeof phone;
   projectHeads: typeof projectHeads;
+  projectNotes: typeof projectNotes;
   push: typeof push;
   pushTargets: typeof pushTargets;
   pushText: typeof pushText;

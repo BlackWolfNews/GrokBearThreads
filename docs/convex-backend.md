@@ -900,6 +900,16 @@ query every 5 minutes instead of a subscription (each runner's watch re-ran on
 every other runner's login write): 12 runs an hour per runner, about 14 MB a day
 for four runners whatever they write.
 
+Then, API 50 (6 Nov). The daily check's 15-minute samples had
+`sync:upsertProjects` at 55 KB a call, 11 to 16 calls a quarter hour while
+threads were busy: each `update_project` (or a project's thread count moving)
+rewrote the whole row, and 16 KB of the Threadbear project's 17.7 KB is notes,
+so each was about 34 KB read and 17 KB written. Notes now live in
+`projectNotes` (`convex/projectNotes.ts`) and a runner of 50 sends them only
+when they change, so a state update writes the small row alone. An older row's
+notes move out the first time it's written; `phone:project` reads either.
+`phone:projectSearch` and `setProjectIcon` read the smaller rows too.
+
 An estimate for one Mac with the app open, 300 threads, 15 turns and half an
 hour of phone use a day: about 6 MB a day, 185 MB a month, under a fifth of the
 free 1 GB. Heartbeats are 2.4 MB of that and the three-day full write 1.3 MB,

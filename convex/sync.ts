@@ -11,6 +11,7 @@ import { API_VERSION } from './version';
 import { actAs, checkRunnerId, forbidden, hasLiveKey, runnerAuth, runnerStatsRows, sha256, watchRunnersFor } from './lib';
 import { scrubDoc, scrubEveryString, SCRUB_RULES_VERSION, HELD_BACK } from './redaction';
 import { dropHead, seedHeads, syncHead, syncHeads } from './projectHeads';
+import { dropNotes, putNotes, syncNotes } from './projectNotes';
 import { cutBytes, docBytes, mayClaim, NAME_CHARS, mayFinish, mayTake, mayTouch, mayUseStorage, mayWrite, nameSkeleton, normalName, ownsCard, SCHEDULE_ID, utf8Bytes, type Caller } from './runnerAccess';
 import { dropWake, seedWakes, syncWake } from './wakes';
 import { pushFailing } from './pushHealth';
@@ -1203,7 +1204,9 @@ export const setProjects = mutation({
     given = clean(given);
     await actAs(ctx, caller, runnerId);
     const projects = fitProjects(caller, given);
-    await replaceRows(ctx, 'projects', runnerId, projects);
+    // Notes in projectNotes (API 50), the rows without them.
+    await replaceRows(ctx, 'projects', runnerId, projects.map((p) => ({ ...p, notes: '' })));
+    await syncNotes(ctx, runnerId, projects);
     await syncHeads(ctx, runnerId, projects.map((p) => ({ ...p, runnerId })));
     // A picture for a project that's gone, or that has no picture any more,
     // goes with it. One the runner hasn't replaced yet stays, so the phone
@@ -1223,8 +1226,13 @@ export const setProjects = mutation({
 // and setProjects rewrote every project (Mike's, with long notes, about
 // 460 KB a time) for each. The runner still sends the whole list with
 // setProjects once after it starts.
+//
+// API 50: a project's notes are left out when they haven't changed, and live
+// in projectNotes, so the rest of a project changing doesn't rewrite them.
+const projectChange = v.object({ ...projectDoc.fields, notes: v.optional(v.string()) });
+
 export const upsertProjects = mutation({
-  args: { key: v.string(), runnerId: v.string(), projects: v.array(projectDoc), removed: v.array(v.string()) },
+  args: { key: v.string(), runnerId: v.string(), projects: v.array(projectChange), removed: v.array(v.string()) },
   returns: v.null(),
   handler: async (ctx, { key, runnerId, projects: given, removed }) => {
     const caller = await runnerAuth(ctx, key, 'upsertProjects');
@@ -1250,10 +1258,15 @@ export const upsertProjects = mutation({
         return true;
       });
     }
-    for (const p of projects) {
+    for (const { notes, ...p } of projects) {
       const existing = await one(p.id);
-      if (existing) await ctx.db.replace(existing._id, { ...p, runnerId });
-      else await ctx.db.insert('projects', { ...p, runnerId });
+      // Notes left out are as they were: in projectNotes, or still in an
+      // older row, from which they move out now.
+      if (notes !== undefined) await putNotes(ctx, runnerId, p.id, notes);
+      else if (existing?.notes) await putNotes(ctx, runnerId, p.id, existing.notes);
+      const doc = { ...p, notes: '', runnerId };
+      if (existing) await ctx.db.replace(existing._id, doc);
+      else await ctx.db.insert('projects', doc);
       await syncHead(ctx, { ...p, runnerId });
       if (!p.icon?.picture) await dropIcon(p.id);
     }
@@ -1261,6 +1274,7 @@ export const upsertProjects = mutation({
       const existing = await one(id);
       if (existing) await ctx.db.delete(existing._id);
       await dropHead(ctx, runnerId, id);
+      await dropNotes(ctx, runnerId, id);
       await dropIcon(id);
     }
     return null;
@@ -2568,7 +2582,7 @@ export const purgeRunner = mutation({
       await dropThread(ctx, t.threadId, t);
       return { done: false };
     }
-    for (const table of ['threadIndex', 'pocketCards', 'schedules', 'projects', 'projectHeads', 'accounts'] as const) {
+    for (const table of ['threadIndex', 'pocketCards', 'schedules', 'projects', 'projectHeads', 'projectNotes', 'accounts'] as const) {
       if (left <= 0) break;
       for (const r of await ctx.db.query(table).withIndex('by_runnerId', (q: any) => q.eq('runnerId', runnerId)).take(left)) {
         await ctx.db.delete(r._id);
@@ -2607,7 +2621,7 @@ export const purgeRunner = mutation({
 // by hand, dry run unless told otherwise. It says which rows and how many,
 // never what was in them. Nothing changes for a runner: what it remembers
 // sending is unaffected, so it re-sends nothing. The owner key's only.
-const SCRUB_TABLES = ['messages', 'threads', 'threadIndex', 'projects', 'schedules', 'pocketCards', 'accounts', 'commands', 'replyImages', 'shareImages', 'pools', 'runners', 'tokens', 'runnerKeys', 'runnerStats', 'projectIcons', 'projectHeads'] as const;
+const SCRUB_TABLES = ['messages', 'threads', 'threadIndex', 'projects', 'schedules', 'pocketCards', 'accounts', 'commands', 'replyImages', 'shareImages', 'pools', 'runners', 'tokens', 'runnerKeys', 'runnerStats', 'projectIcons', 'projectHeads', 'projectNotes'] as const;
 
 export const scrubStoredBatch = mutation({
   args: {

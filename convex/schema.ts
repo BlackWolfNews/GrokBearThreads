@@ -427,6 +427,20 @@ export default defineSchema({
     // sync:upsertProjects (API 30) finds the one project it changes.
     .index('by_runner_id', ['runnerId', 'id']),
 
+  // A project's notes, apart from its row (API 50, projectNotes.ts). Notes
+  // are most of a project's bytes (16 KB of the Threadbear project's 17.7),
+  // and Convex charges a write for the whole document, so with them in
+  // `projects` every state update or new thread count rewrote them, about
+  // 50 KB a time. `projects.notes` is '' for a row written since; an older
+  // row's notes move here the first time it's written.
+  projectNotes: defineTable({
+    runnerId: v.string(),
+    id: v.string(),
+    notes: v.string(),
+  })
+    .index('by_runnerId', ['runnerId'])
+    .index('by_runner_id', ['runnerId', 'id']),
+
   // One small row per project, what a list shows (API 48, projectHeads.ts):
   // the phone follows the list all the time, and a read costs the whole
   // document, so reading `projects` for it cost every project's notes. Goals,

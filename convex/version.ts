@@ -219,4 +219,10 @@
 // 49: a thread row can carry wakeNote, what a hibernating thread waits for when
 //    it's more than a time ("\"Convex I/O\" finishes", "the runner updates"), for
 //    the phone's and the website's rows. An older runner sends none.
-export const API_VERSION = 49;
+// 50: a project's notes live in projectNotes, apart from its row, and
+//    sync:upsertProjects takes a project without `notes` when they haven't
+//    changed. A Convex write costs the whole document, and notes were most of
+//    a project's, so each state update rewrote them. A runner sends `notes`
+//    only to a backend of 50 or later; an older runner always sends them, as
+//    before. phone:project still returns them whole.
+export const API_VERSION = 50;
