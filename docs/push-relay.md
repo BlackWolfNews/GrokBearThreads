@@ -82,7 +82,12 @@ hosts (self-hosted, a custom domain) can't use this relay: run your own
 - Stats for Mike: `npx convex run relay:stats --prod` in `relay/`. Each
   day's `reasons` tallies the failures as `"<status> <reason>"` (since 6
   Nov 2026), and the relay's own log has a `[send] failed:` line for each
-  (status and reason only).
+  (status and reason only). `versions` counts installs by the version
+  their backend says (`api-52`), which anyone with an install can set:
+  it's stored only if it's a plain word (`/^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$/`,
+  else `unknown`) and counted in a Map, with anything stored before that
+  rule as `other`, since one `$x`, `é` or `toString` broke the query
+  for good (6 Nov 2026).
 - Its Apple key is Poddle's (same team, so it signs for any of Mike's
   apps). Poddle moved to a new key and the old one was revoked, and from
   5 Nov 2026 every send failed with `403 InvalidProviderToken` until 6 Nov,

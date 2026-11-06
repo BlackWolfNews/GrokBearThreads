@@ -138,6 +138,9 @@ const HELP = `tb: talk to the Threadbear runner
                                   as that runner alone, written over ssh into its
                                   secrets/convex-key (or a file); never printed
   tb runner list [--json]         tb runner revoke <runnerId> [--purge]  (--purge: and take out all it wrote)
+  tb runner logins [<runnerId> <provider:email>... | none]
+                                  on the main Mac: which logins a runner key's Mac gets this Mac's
+                                  usage readings of (only your word counts, not what that Mac says)
   tb runner check [--ssh <host>]  whether a Mac with a runner key also has a deploy key or
                                   Convex login (either can do anything to the deployment)
   tb runner rotate-owner [--finish] [--lock-out <runnerId,...>]

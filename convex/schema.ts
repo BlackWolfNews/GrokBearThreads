@@ -192,6 +192,18 @@ export default defineSchema({
     .index('by_runnerId', ['runnerId'])
     .index('by_revokedAt', ['revokedAt']),
 
+  // The logins each runner key's runner shares with the main Mac, by
+  // provider and email (lowercase), written by the owner key alone
+  // (sync:setRunnerLogins, `tb runner logins`). sync:sharedUsage goes by
+  // these, never by the accounts rows a runner key writes for itself, which
+  // say whatever that key likes (docs/protocol.md, "Runner keys").
+  runnerLogins: defineTable({
+    runnerId: v.string(),
+    provider: v.string(),
+    email: v.string(),
+    at: v.number(),
+  }).index('by_runnerId', ['runnerId']),
+
   // Runner ids the main key has named as its own (sync:addRunnerKey's
   // ownerRunnerId), so the audit can flag a runner key made for one.
   ownerRunnerIds: defineTable({

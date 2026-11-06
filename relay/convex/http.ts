@@ -17,6 +17,7 @@ import { httpAction } from './_generated/server';
 import { internal } from './_generated/api';
 import { convexSite, deploymentVouches } from './verify';
 import { reasonKey } from './reasons';
+import { storedVersion } from './versions';
 
 const http = httpRouter();
 
@@ -41,7 +42,8 @@ http.route({
   handler: httpAction(async (ctx, req) => {
     const b = await body(req);
     if (!b) return json({ error: 'bad request' }, 400);
-    const version = str(b.version, 40);
+    // Anything but a plain version word is stored as "unknown" (versions.ts).
+    const version = b.version === undefined ? undefined : storedVersion(b.version);
     // Only a deployment that proves it's the caller gets an install
     // (verify.ts says how). There used to be an unchecked way too, for
     // backends from before 5 Nov 2026, with a shared daily allowance; but
@@ -72,7 +74,8 @@ http.route({
     const environment = b?.environment === 'production' ? 'production' : b?.environment === 'sandbox' ? 'sandbox' : undefined;
     const threadId = str(b?.threadId, 100);
     if (!b || !deviceToken || !/^[0-9a-f]+$/i.test(deviceToken) || !environment || !threadId) return json({ error: 'bad request' }, 400);
-    const version = str(req.headers.get('x-threadbear-version'), 40);
+    const header = req.headers.get('x-threadbear-version');
+    const version = header === null ? undefined : storedVersion(header);
     const admitted = await ctx.runMutation(internal.relay.admit, { installId: auth[1]!, installKey: auth[2]!, ...(version ? { version } : {}) });
     if (admitted === 'auth') return json({ error: 'unauthorized' }, 401);
     if (admitted === 'limited') return json({ error: 'rate limited' }, 429);

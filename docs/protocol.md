@@ -1570,7 +1570,12 @@ thread to another login when the one it's on runs out of room.
   window, and `usage.source` is `"shared"` when another runner's was the
   newest. A shared reading Token Stats called stale is left out, and one
   that says `blocked`, taken after this runner last read the login,
-  blocks it here too until a window at its limit resets.
+  blocks it here too until a window at its limit resets. Only readings
+  marked `byOwnerKey` (backend API 53) count, the ones the main Mac's key
+  wrote; a runner key's go to nobody, and a runner takes no unmarked one
+  (all of them, from an older backend). Which logins a runner key's
+  runner gets them for is the owner's word (Runner keys, "Shared
+  logins").
 - **New threads.** A `threads.create` without `accountId` picks the pool:
   `poolId` if given, else the pool whose `folders` holds `cwd` (the
   longest match), else `defaults.poolId` (`runner.json`'s, the pool last
@@ -4307,6 +4312,38 @@ schedule on it, and mint phone tokens. Now there are two kinds of key, and
 - **Schedules.** A runner key can't take a schedule id any row has under
   another runner, an old mirrored row (before API 9) included, nor adopt
   one.
+- **Shared logins** (backend API 53). Every Mac signed in to a login reads
+  its room (Sync, Accounts, "Shared readings"), but a runner key writes
+  its own `accounts` rows with any provider, email and reading, so those
+  rows can't say which logins it really has: a tampered Mac's key could
+  name the main Mac's logins (`sync:pools` lists every pool's emails) and
+  say they were out of room until 2099, or full when they're spent, and
+  read the main Mac's readings of any email it guessed. So a runner key's
+  readings go to nobody, and the owner says which logins each runner
+  key's runner gets the main Mac's readings of: `tb runner logins
+  <runnerId> claude:you@example.com codex:you@example.com` on the main
+  Mac (`sync:setRunnerLogins`, the `runnerLogins` table; `none` clears),
+  and `tb runner logins` lists each keyed runner's list beside the logins
+  its rows name, which are only what it says it has. A new key, or one
+  revoked or replaced, starts with none. Then `sync:sharedUsage`: rows
+  under a runner id that has never had a key of its own are the owner
+  key's (only it can write them) and go to anyone they concern, marked
+  `byOwnerKey`. A runner key gets only those, of its listed logins, with
+  no runner id. Rows under a runner id that has or had a key of its own go
+  to nobody, the owner included: even one window the main Mac hadn't read
+  (a 5-hour one at 0%) would keep its pools off a login, and its own rows
+  would then pass it on to the other Macs as its word. The main Mac reads
+  its logins itself (Token Stats, its own turns). A runner key's readings
+  are still stored, for the phone to show that Mac's logins: read no later
+  than now, as its threads' activity is, and each window's reset no later
+  than its kind allows from now (5 hours, a day, 7 days, 31 days for a
+  month or anything else, each plus an hour for clocks), not now itself,
+  which would make every real window look reset. Before the owner lists
+  anything for it, a runner key's runner has its own readings only. A
+  runner from before API 53 takes what it's given as before, which is
+  only the main key's readings. `sync:pools` gives a runner key no
+  member named by another runner's id (a login with no email known, which
+  only counts on that runner).
 - **Pocket cards** a runner key files carry its runner id, set by the
   backend, and a thread id only if that thread is its own. The owner's
   `sync:pocketCards` gives them `filedBy` (that runner's id, which its
@@ -4447,10 +4484,12 @@ anyone's); "any runner" is any good key. Anything not sorted is owner only.
 | `projectIcons` | its own | `runnerId` |
 | `setProjectIcon` | its own | `runnerId`, and the file no other runner's row uses |
 | `iconUploadUrl` | any runner | a one-use URL, tied to the key that asked, that records the upload as its runner's; 300 an hour, 10 MB a file, 200 MB an hour |
-| `setAccounts` | its own | `runnerId` |
-| `upsertAccounts` | its own | `runnerId` |
-| `sharedUsage` | its own | readings only for logins its runner has (same provider and email); the owner gets all |
-| `pools` | any runner | the shared pools, which every runner follows |
+| `setAccounts` | its own | `runnerId`; each reading read no later than now, resets no further off than their window allows |
+| `upsertAccounts` | its own | as `setAccounts` |
+| `sharedUsage` | its own | only the main key's readings, and only of the logins the owner has listed for its runner (`setRunnerLogins`), with no runner id; never what its own accounts rows name. Nobody, the owner included, gets a runner key's readings |
+| `setRunnerLogins` | owner only | which logins a runner key's runner shares: its own rows say whatever its key likes |
+| `runnerLogins` | owner only | each keyed runner's listed logins, and the ones its rows name |
+| `pools` | any runner | the shared pools, which every runner follows; a runner key gets no member named by another runner's id |
 | `savePools` | owner only | pools reach the main Mac's logins and folders |
 | `adoptPools` | owner only | as `savePools`; a runner key's runner keeps its own until the main Mac sets them |
 | `setSchedules` | owner only | mirrored rows, for a runner on a pre-API 9 schedules.json: no runner key's runner needs it, and it could shadow another runner's ids (its runner stops mirroring, quietly) |

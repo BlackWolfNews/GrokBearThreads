@@ -233,4 +233,12 @@
 //    phone:requestPicture, phone:heldPicture and a `picture` command: one tool
 //    picture uploaded for a day when it's tapped. An older runner fails a picture
 //    command as unknown, and an older phone never asks for any of it.
-export const API_VERSION = 52;
+// 53: sync:sharedUsage goes by who wrote each reading. A runner key gets only
+//    the owner key's readings, of the logins the owner has listed for its
+//    runner (runnerLogins, sync:setRunnerLogins and sync:runnerLogins, owner
+//    key only), with no runnerId, marked `byOwnerKey`; nobody gets a runner
+//    key's readings, the owner included. A runner key's account readings are
+//    stored read no later than now. sync:pools gives a runner key no member
+//    named by another runner's id. An older runner takes the rows it's given
+//    as before.
+export const API_VERSION = 53;

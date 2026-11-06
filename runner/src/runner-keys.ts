@@ -1,4 +1,4 @@
-// `tb runner add|list|revoke|check|rotate-owner` (docs/protocol.md, "Runner keys"): on the main
+// `tb runner add|list|logins|revoke|check|rotate-owner` (docs/protocol.md, "Runner keys"): on the main
 // Mac, whose secrets/convex-key is the owner key, makes a key for one other
 // runner. That key acts as its runner alone on the backend, so a second Mac
 // no longer holds a copy of the key that can do everything. Straight to the
@@ -272,8 +272,9 @@ export async function runnerKeysCommand(cfg: Pick<Config, 'home' | 'sync'>, args
       return 0;
     }
     if (sub === 'add') return await add(rest[0], f, call, deps.ssh ?? realSsh, print, fail, url, cfg.sync.runnerId);
+    if (sub === 'logins') return await logins(rest, f, call, print, fail);
     // After a rotation, what the old key could have left (auditCommand).
-    return fail('tb runner add <name> --ssh <host> | --out <file> [--id <runnerId>], tb runner list, tb runner revoke <runnerId>, tb runner check [--ssh <host>], or tb runner rotate-owner [--finish].');
+    return fail('tb runner add <name> --ssh <host> | --out <file> [--id <runnerId>], tb runner list, tb runner logins [<runnerId> <provider:email>... | none], tb runner revoke <runnerId>, tb runner check [--ssh <host>], or tb runner rotate-owner [--finish].');
   } catch (e) {
     return fail((e as Error).message);
   }
@@ -348,11 +349,51 @@ async function add(name: string | undefined, f: Flags, call: (kind: 'query' | 'm
       `Made a key for runner ${made.runnerId} (${name.trim()}) and wrote it to ${f.ssh}:~/Library/Application Support/Threadbear/secrets/convex-key.`,
       'Its runner reads the key when it starts: restart it there once no thread is busy (tb restart on that Mac waits for them).',
       `Any runner key ${made.runnerId} had before is revoked, and the main key no longer acts as ${made.runnerId}. A copy of the main key that Mac had still works for everything else until you rotate it: tb runner rotate-owner.`,
+      `It gets no logins' usage readings from this Mac until you say which it's signed in to: tb runner logins ${made.runnerId} <provider:email>... (tb runner logins lists what it says it has once it's running).`,
     ].join('\n'),
   );
   const admin = remoteAdmin(ssh, f.ssh!);
   if (!admin) print(`Couldn't look on ${f.ssh} for a deploy key or Convex login it shouldn't have; run tb runner check --ssh ${f.ssh} once ssh works.`);
   else if (hasAdmin(admin)) print(adminAdvice(admin, f.ssh!, url));
+  return 0;
+}
+
+// `tb runner logins`: which logins each runner with a key of its own
+// gets this Mac's usage readings of (convex/sync.ts sharedUsage).
+// The backend takes only this Mac's word for it, never what that runner's
+// own accounts rows say, as its key writes those as it likes; they're
+// listed beside it as what it says it has, for Mike to check.
+// `tb runner logins <runnerId> claude:a@b codex:a@b` sets exactly those,
+// `none` clears them.
+type LoginRow = { runnerId: string; name: string; live: boolean; shared: { provider: string; email: string }[]; claimed: { provider: string; email: string }[] };
+async function logins(rest: string[], f: Flags, call: (kind: 'query' | 'mutation', fn: string, a: Record<string, unknown>) => Promise<unknown>, print: (s: string) => void, fail: (s: string) => number): Promise<number> {
+  const [id, ...given] = rest;
+  if (id === undefined) {
+    const rows = ((await call('query', 'sync:runnerLogins', {})) ?? []) as LoginRow[];
+    if (f.json) return print(JSON.stringify(rows, null, 2)), 0;
+    if (!rows.length) return print('No runner keys, so nothing to share: every runner on this deployment is on the main key.'), 0;
+    const list = (ls: { provider: string; email: string }[]) => (ls.length ? ls.map((l) => `${clean(l.provider, 40)}:${clean(l.email, 200)}`).join(', ') : 'none');
+    for (const r of rows) {
+      if (!r.live && !r.shared.length) continue;
+      print(`${clean(r.runnerId, 64)}  ${clean(r.name, 60)}${r.live ? '' : ' (revoked)'}`);
+      print(`  shares:      ${list(r.shared)}`);
+      print(`  says it has: ${list(r.claimed)}`);
+    }
+    print('tb runner logins <runnerId> <provider:email>... sets what one shares (none: nothing). Add only logins you know that Mac is signed in to.');
+    return 0;
+  }
+  if (!validRunnerId(id)) return fail(`${JSON.stringify(clean(id, 80))} isn't a runner id: tb runner logins lists them.`);
+  if (!given.length) return fail(`Say which logins ${id} shares, as provider:email (claude:you@example.com), or none.`);
+  const parsed: { provider: string; email: string }[] = [];
+  if (!(given.length === 1 && given[0] === 'none')) {
+    for (const g of given.flatMap((x) => x.split(',')).map((x) => x.trim()).filter(Boolean)) {
+      const at = g.indexOf(':');
+      if (at <= 0) return fail(`${JSON.stringify(clean(g, 80))} isn't provider:email, like claude:you@example.com.`);
+      parsed.push({ provider: g.slice(0, at), email: g.slice(at + 1) });
+    }
+  }
+  const n = (await call('mutation', 'sync:setRunnerLogins', { runnerId: id, logins: parsed })) as number;
+  print(n ? `Runner ${id} gets this Mac's usage readings of ${n} login${n === 1 ? '' : 's'} now.` : `Runner ${id} gets no logins' usage readings from this Mac now.`);
   return 0;
 }
 

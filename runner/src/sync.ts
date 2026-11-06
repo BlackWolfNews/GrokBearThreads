@@ -115,7 +115,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 52;
+export const BACKEND_API_VERSION = 53;
 // From this one the main Mac reads and steers other runners' threads through
 // the backend (convex/relay.ts): commands can be `interrupt` or `call`, and a
 // pending approval carries its event's seq (docs/protocol.md, "Other

@@ -56,6 +56,8 @@ function setup(remoteJson: unknown = { sync: { url: URL_, runnerId: 'cb921b2447e
       if (fn === 'sync:audit') return { ownerKeyPrint: 'aaaaaaaa', rows: audit[args.section as string] ?? [] };
       if (fn === 'sync:auditRemove') return 1;
       if (fn === 'sync:listRunnerKeys') return { keys: [], rotating };
+      if (fn === 'sync:setRunnerLogins') return (args.logins as unknown[]).length;
+      if (fn === 'sync:runnerLogins') return [{ runnerId: 'cb921b2447ea', name: 'bruce\u001b[2J', live: true, shared: [{ provider: 'claude', email: 'mike@example.com' }], claimed: [{ provider: 'claude', email: 'mike@example.com' }, { provider: 'claude', email: 'guess@\u001b]0;x' }] }];
       return [];
     },
     ssh: (host: string, command: string, input?: string) => {
@@ -528,4 +530,26 @@ test("rotate-owner doesn't count a runner whose key was revoked and hasn't been 
   const said = s.printed.join('\n');
   assert.doesNotMatch(said, /revoked00001/, 'last seen before its key was revoked');
   assert.match(said, /revoked00002/, 'seen an hour after its key was revoked: on the main key');
+});
+
+// Gautam's 6 Nov 2026 convex scan, F1 and F3: which logins a runner key's
+// runner shares is the main Mac's word, set here, never its own rows'.
+test('tb runner logins sets exactly the logins given, or none, and lists what each says beside what it shares', async () => {
+  const s = setup();
+  assert.equal(await runnerKeysCommand(s.cfg, ['logins', 'cb921b2447ea', 'claude:mike@example.com,codex:mike@example.com'], {}, s.deps), 0);
+  assert.deepEqual(s.calls.at(-1), { fn: 'sync:setRunnerLogins', args: { key: 'owner-key', runnerId: 'cb921b2447ea', logins: [{ provider: 'claude', email: 'mike@example.com' }, { provider: 'codex', email: 'mike@example.com' }] } });
+  assert.equal(await runnerKeysCommand(s.cfg, ['logins', 'cb921b2447ea', 'none'], {}, s.deps), 0);
+  assert.deepEqual(s.calls.at(-1)?.args.logins, []);
+  // Nothing given, or not provider:email: refused before asking.
+  const before = s.calls.length;
+  assert.equal(await runnerKeysCommand(s.cfg, ['logins', 'cb921b2447ea'], {}, s.deps), 1);
+  assert.equal(await runnerKeysCommand(s.cfg, ['logins', 'cb921b2447ea', 'mike@example.com'], {}, s.deps), 1);
+  assert.equal(await runnerKeysCommand(s.cfg, ['logins', 'any', 'claude:mike@example.com'], {}, s.deps), 1);
+  assert.equal(s.calls.length, before);
+  s.printed.length = 0;
+  assert.equal(await runnerKeysCommand(s.cfg, ['logins'], {}, s.deps), 0);
+  const out = s.printed.join('\n');
+  assert.match(out, /shares: +claude:mike@example\.com/);
+  assert.match(out, /says it has: claude:mike@example\.com, claude:guess@/);
+  assert.equal(out.includes('\u001b'), false, 'what that Mac wrote prints with no escapes');
 });

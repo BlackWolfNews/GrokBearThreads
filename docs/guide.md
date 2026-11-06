@@ -757,8 +757,12 @@ email, and each machine uses the ones it's signed in to: a pool of three
 Claude logins is just one on a server signed in to one of them, and a pool
 none of its logins are in doesn't show there. A login signed in on several
 machines is one subscription, so each machine shows the newest reading of
-its room from any of them, and one that hit its limit on one machine waits
-on the others too.
+its room from your first Mac, and one that hit its limit there waits on
+the others too. A Mac with a key of its own gets your first Mac's readings of only the
+logins you list for it there: `tb runner logins` shows each one's list
+beside the logins it says it has, and `tb runner logins <runnerId>
+claude:you@example.com` sets it. Your first Mac goes by its own readings,
+never that Mac's.
 
 Usage, near the bottom of the left-hand rail, shows how much room each login
 has left before it hits its limits: the weekly one, and the 5-hour one for

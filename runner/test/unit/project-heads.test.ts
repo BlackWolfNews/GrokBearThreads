@@ -119,19 +119,23 @@ test("one runner's list doesn't touch another's", async () => {
   assert.deepEqual(s.rows('projectHeads').map((h) => h.runnerId), [M5]);
 });
 
-const account = (id: string, email: string) => ({ id, provider: 'claude', title: id, email, usage: { windows: [], readAt: 'now', source: 'live' } });
+const account = (id: string, email: string) => ({ id, provider: 'claude', title: id, email, usage: { windows: [], readAt: '2026-11-06T00:00:00.000Z', source: 'live' } });
 
 test("sync:sharedUsage with the caller's runner id leaves its own rows out, and without one tells everyone's", async () => {
   const s = await setup();
   await call(s.ctx, sync.setAccounts, { key: OWNER, runnerId: M5, accounts: [account('a', 'one@x.com')] });
   await call(s.ctx, sync.setAccounts, { key: BRUCE_KEY, runnerId: BRUCE, accounts: [account('b', 'one@x.com'), account('c', 'other@x.com')] });
-  const of = (rows: unknown) => (rows as { runnerId: string; email: string }[]).map((r) => `${r.runnerId}:${r.email}`).sort();
-  assert.deepEqual(of(await call(s.ctx, sync.sharedUsage, { key: OWNER, runnerId: M5 })), [`${BRUCE}:one@x.com`, `${BRUCE}:other@x.com`]);
-  // A runner from before sends none.
-  assert.equal(of(await call(s.ctx, sync.sharedUsage, { key: OWNER })).length, 3);
-  // A runner key: never its own, whatever it sends, and only its own logins' readings.
-  assert.deepEqual(of(await call(s.ctx, sync.sharedUsage, { key: BRUCE_KEY, runnerId: M5 })), [`${M5}:one@x.com`]);
-  assert.deepEqual(of(await call(s.ctx, sync.sharedUsage, { key: BRUCE_KEY })), [`${M5}:one@x.com`]);
+  // Which of Bruce's logins count is the owner's word (shared-usage-trust.test.ts).
+  await call(s.ctx, sync.setRunnerLogins, { key: OWNER, runnerId: BRUCE, logins: [{ provider: 'claude', email: 'one@x.com' }, { provider: 'claude', email: 'other@x.com' }] });
+  const of = (rows: unknown) => (rows as { runnerId?: string; email: string }[]).map((r) => `${r.runnerId ?? '?'}:${r.email}`).sort();
+  // The owner: a runner key's rows are nobody's word (shared-usage-trust.test.ts).
+  assert.deepEqual(of(await call(s.ctx, sync.sharedUsage, { key: OWNER, runnerId: M5 })), []);
+  // A runner from before sends none, and is told about its own.
+  assert.deepEqual(of(await call(s.ctx, sync.sharedUsage, { key: OWNER })), [`${M5}:one@x.com`]);
+  // A runner key: never its own, whatever it sends, only the owner's readings of
+  // its listed logins, and not whose they are.
+  assert.deepEqual(of(await call(s.ctx, sync.sharedUsage, { key: BRUCE_KEY, runnerId: M5 })), ['?:one@x.com']);
+  assert.deepEqual(of(await call(s.ctx, sync.sharedUsage, { key: BRUCE_KEY })), ['?:one@x.com']);
 });
 
 test('a runner sends its id only to a backend that takes it', () => {

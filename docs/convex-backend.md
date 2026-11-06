@@ -342,7 +342,7 @@ dashboard panel.
 
 - `convex/schema.ts`: `runners`, `threads`, `messages`, `commands`,
   `projects`, `schedules`, `accounts`, `tokens`, `devices`, `runnerKeys`,
-  `threadTombstones` (docs/protocol.md, "Runner keys").
+  `threadTombstones`, `runnerLogins` (docs/protocol.md, "Runner keys").
 - `convex/sync.ts`: the runner's mutations (`upsertThreads`,
   `removeThreads`, `prune`, `heartbeat`, `bye`, `appendMessages`,
   `setProjects`, `upsertProjects`, `setSchedules`, `setAccounts`, `takeCommand`,

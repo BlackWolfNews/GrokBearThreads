@@ -12,7 +12,7 @@ import { actAs, checkRunnerId, forbidden, hasLiveKey, runnerAuth, runnerStatsRow
 import { scrubDoc, scrubEveryString, SCRUB_RULES_VERSION, HELD_BACK } from './redaction';
 import { dropHead, seedHeads, syncHead, syncHeads } from './projectHeads';
 import { dropNotes, putNotes, syncNotes } from './projectNotes';
-import { cutBytes, docBytes, mayClaim, NAME_CHARS, mayFinish, mayTake, mayTouch, mayUseStorage, mayWrite, nameSkeleton, normalName, ownsCard, SCHEDULE_ID, utf8Bytes, type Caller } from './runnerAccess';
+import { cutBytes, docBytes, fitUsage, LOGIN_EMAIL, LOGIN_PROVIDER, loginKey, mayClaim, NAME_CHARS, mayFinish, mayTake, mayTouch, mayUseStorage, mayWrite, nameSkeleton, normalName, ownsCard, SCHEDULE_ID, utf8Bytes, type Caller, type UsageDoc } from './runnerAccess';
 import { dropWake, seedWakes, syncWake } from './wakes';
 import { pushFailing } from './pushHealth';
 import { issueToken as makeToken, listTokens as allTokens, revokeToken as revokeOne, tokenInfo, tokenKind, MAX_DAYS } from './tokens';
@@ -1773,10 +1773,14 @@ export const pools = query({
   args: { key: v.string() },
   returns: v.array(sharedPoolDoc),
   handler: async (ctx, { key }) => {
-    await runnerAuth(ctx, key, 'pools');
+    const caller = await runnerAuth(ctx, key, 'pools');
     const rows = await ctx.db.query('pools').collect();
     rows.sort((a, b) => a.order - b.order);
-    return rows.map(({ id, title, members, folders, icon }) => ({ id, title, members, ...(folders ? { folders } : {}), ...(icon ? { icon } : {}) }));
+    // A member named by runner id (a login with no email known) only counts
+    // on that runner, so a runner key has no use for another runner's, and
+    // its id is the owner's to know (runnersList).
+    const seen = (m: { runnerId?: string }) => caller.owner || m.runnerId === undefined || m.runnerId === caller.runnerId;
+    return rows.map(({ id, title, members, folders, icon }) => ({ id, title, members: members.filter(seen), ...(folders ? { folders } : {}), ...(icon ? { icon } : {}) }));
   },
 });
 
@@ -1833,25 +1837,40 @@ async function writePools(ctx: { db: MutationCtx['db'] }, runnerId: string, pool
 // Every runner's latest usage reading of each login it knows the email of
 // (API 39): the same subscription signed in on several machines is one
 // limit, so each runner takes the newest reading from any of them.
+//
+// Who wrote a row decides what it's good for (API 53). A runner id that has
+// never had a runner key is the owner key's: only that key can write its
+// rows (runnerAccess.ts actAs), so they're the main Mac's word and go to
+// anyone they concern, marked `byOwnerKey`. Any other runner's rows are its
+// key's, which writes what it likes under its own id (any provider, email
+// and reading), so they go to nobody: a reading from a tampered Mac's key,
+// even of one window nothing else had read, could keep the main Mac's pools
+// off a login or send them to a spent one (Gautam's 6 Nov convex scan, F1),
+// and once the main Mac took it in, its own rows would pass it on as its
+// word. The main Mac's own Token Stats and turns read its logins anyway.
+// Which logins a runner key gets the main Mac's readings of is the owner's
+// word too, never what that key's rows name (F3): `runnerLogins`, which
+// only the owner key writes. It gets no runner id (runnersList is the
+// owner's alone).
 export const sharedUsage = query({
   args: { key: v.string(), runnerId: v.optional(v.string()) },
-  returns: v.array(v.object({ runnerId: v.string(), provider: v.string(), email: v.string(), usage: v.any() })),
+  returns: v.array(v.object({ runnerId: v.optional(v.string()), provider: v.string(), email: v.string(), usage: v.any(), byOwnerKey: v.optional(v.boolean()) })),
   handler: async (ctx, { key, runnerId }) => {
     const caller = await runnerAuth(ctx, key, 'sharedUsage');
-    // A runner key gets readings only for logins its own runner has (by
-    // email and provider): that's all it needs to show the newest reading
-    // of each, and other Macs' logins (their emails and how much room they
-    // have) aren't its business. The owner gets every one.
-    let mine: Set<string> | undefined;
-    if (!caller.owner) {
-      mine = new Set();
-      for (const a of await ctx.db.query('accounts').withIndex('by_runnerId', (q) => q.eq('runnerId', caller.runnerId)).take(CAP.accounts + 1)) if (a.email) mine.add(`${a.provider}:${a.email.toLowerCase()}`);
-    }
+    // Every runner id that has had a key of its own, live or revoked: its
+    // rows are (or were) that key's. Key rows are never deleted, only revoked.
+    const keyed = new Set<string>();
+    for (const k of await ctx.db.query('runnerKeys').collect()) keyed.add(k.runnerId);
+    const sharesOf = async (id: string) => new Set((await ctx.db.query('runnerLogins').withIndex('by_runnerId', (q) => q.eq('runnerId', id)).take(CAP.accounts)).map((l) => loginKey(l.provider, l.email)));
+    const mine = caller.owner ? undefined : await sharesOf(caller.runnerId);
+    // A runner key the owner hasn't said shares anything gets nothing, and
+    // reads nothing more to find that out.
+    if (mine && mine.size === 0) return [];
     // Only other runners' rows (API 45): a runner has no use for its own, and
     // reading them re-ran this for each of its own writes. Two ranges of the
     // index, so a write to the caller's rows isn't in what this read. A runner
-    // key's own logins, just above, still are. A runner sending no runnerId
-    // (from before 45) is told about everyone's, and leaves out its own.
+    // sending no runnerId (from before 45) is told about everyone's, and leaves
+    // out its own.
     const me = caller.owner ? runnerId : caller.runnerId;
     const rows = me
       ? [
@@ -1862,12 +1881,24 @@ export const sharedUsage = query({
     const out = [];
     for (const row of rows) {
       if (!row.email || !row.usage) continue;
-      if (mine && !mine.has(`${row.provider}:${row.email.toLowerCase()}`)) continue;
-      out.push({ runnerId: row.runnerId, provider: row.provider, email: row.email, usage: row.usage });
+      if (keyed.has(row.runnerId)) continue;
+      if (mine && !mine.has(loginKey(row.provider, row.email))) continue;
+      out.push({ ...(caller.owner ? { runnerId: row.runnerId } : {}), provider: row.provider, email: row.email, usage: row.usage, byOwnerKey: true });
     }
     return out;
   },
 });
+
+// A runner key's accounts as they may be stored: each reading fitted
+// (fitUsage), too big ones left out, at most CAP.accounts.
+function fitAccount<T extends { usage?: UsageDoc }>(a: T, now: number): T | undefined {
+  if (docBytes(a) > CAP.accountDoc) return undefined;
+  if (!a.usage) return a;
+  const usage = fitUsage(a.usage, now);
+  if (usage) return { ...a, usage };
+  const { usage: _gone, ...rest } = a;
+  return rest as T;
+}
 
 export const setAccounts = mutation({
   args: { key: v.string(), runnerId: v.string(), accounts: v.array(accountDoc) },
@@ -1876,8 +1907,9 @@ export const setAccounts = mutation({
     const caller = await runnerAuth(ctx, key, 'setAccounts');
     accounts = clean(accounts);
     await actAs(ctx, caller, runnerId);
-    // A runner key's: ones too big left out, and at most CAP.accounts.
-    const fitting = caller.owner ? accounts : accounts.filter((a) => docBytes(a) <= CAP.accountDoc).slice(0, CAP.accounts);
+    // A runner key's: fitted (fitAccount), ones too big left out, and at most CAP.accounts.
+    const now = Date.now();
+    const fitting = caller.owner ? accounts : accounts.flatMap((a) => fitAccount(a, now) ?? []).slice(0, CAP.accounts);
     await replaceRows(ctx, 'accounts', runnerId, fitting);
     return null;
   },
@@ -1895,10 +1927,12 @@ export const upsertAccounts = mutation({
     accounts = clean(accounts);
     await actAs(ctx, caller, runnerId);
     const one = (id: string) => ctx.db.query('accounts').withIndex('by_runner_id', (q) => q.eq('runnerId', runnerId).eq('id', id)).unique();
-    // A runner key's, as setAccounts: ones too big left out, at most CAP.accounts.
+    // A runner key's, as setAccounts: fitted, ones too big left out, at most CAP.accounts.
     let count = caller.owner ? 0 : (await ctx.db.query('accounts').withIndex('by_runnerId', (q) => q.eq('runnerId', runnerId)).take(CAP.accounts + 1)).length;
-    for (const a of accounts) {
-      if (!caller.owner && docBytes(a) > CAP.accountDoc) continue;
+    const now = Date.now();
+    for (const given of accounts) {
+      const a = caller.owner ? given : fitAccount(given, now);
+      if (!a) continue;
       const existing = await one(a.id);
       if (existing) await ctx.db.replace(existing._id, { ...a, runnerId });
       else if (caller.owner || count < CAP.accounts) {
@@ -2621,6 +2655,9 @@ async function makeRunnerKey(ctx: MutationCtx, runnerId: string, name: string, o
   for await (const row of ctx.db.query('runnerKeys').withIndex('by_runnerId', (q) => q.eq('runnerId', runnerId))) {
     if (!row.revokedAt) await ctx.db.patch(row._id, { revokedAt: now });
   }
+  // A new key shares no logins until the owner says (tb runner logins), as
+  // it may be a different Mac under the same id.
+  await dropRunnerLogins(ctx, runnerId);
   await ctx.db.insert('runnerKeys', { runnerId, keyHash: await sha256(key), name: label, createdAt: now });
   // It's no longer the main key's runner: off the phone's default at once,
   // not when it next heartbeats (phone.ts mainRunner).
@@ -2666,7 +2703,71 @@ export const revokeRunnerKey = mutation({
       await ctx.db.patch(row._id, { revokedAt: Date.now() });
       n++;
     }
+    // What it shared goes with it (dropRunnerLogins).
+    await dropRunnerLogins(ctx, runnerId);
     return n;
+  },
+});
+
+// ------------------------------------------------------------ shared logins (API 53)
+// Which logins a runner key's runner shares with the main Mac, as the owner
+// says (`tb runner logins`): sharedUsage goes by these alone.
+
+const loginDoc = v.object({ provider: v.string(), email: v.string() });
+
+async function dropRunnerLogins(ctx: { db: MutationCtx['db'] }, runnerId: string): Promise<void> {
+  for (const l of await ctx.db.query('runnerLogins').withIndex('by_runnerId', (q) => q.eq('runnerId', runnerId)).collect()) await ctx.db.delete(l._id);
+}
+
+// Replaces that runner's list; an empty one stops it sharing. Only for a
+// runner with a live key of its own: one on the main key is the main Mac's
+// word already. Revoking or replacing its key empties the list.
+export const setRunnerLogins = mutation({
+  args: { key: v.string(), runnerId: v.string(), logins: v.array(loginDoc) },
+  returns: v.number(),
+  handler: async (ctx, { key, runnerId, logins }) => {
+    await runnerAuth(ctx, key, 'setRunnerLogins');
+    checkRunnerId(runnerId);
+    if (!(await hasLiveKey(ctx, runnerId))) throw new ConvexError({ kind: 'badArgs', message: `Runner ${runnerId} has no live key of its own (tb runner list shows them): a runner on the main key needs no list.` });
+    const seen = new Set<string>();
+    const rows: { provider: string; email: string }[] = [];
+    for (const l of logins) {
+      const provider = l.provider.trim().toLowerCase();
+      const email = l.email.trim().toLowerCase();
+      if (!LOGIN_PROVIDER.test(provider) || !LOGIN_EMAIL.test(email)) throw new ConvexError({ kind: 'badArgs', message: `Not a login: give each as provider:email, like claude:you@example.com.` });
+      if (seen.has(loginKey(provider, email))) continue;
+      seen.add(loginKey(provider, email));
+      rows.push({ provider, email });
+    }
+    if (rows.length > CAP.accounts) throw tooMany('shared logins for one runner', CAP.accounts);
+    await dropRunnerLogins(ctx, runnerId);
+    const at = Date.now();
+    for (const r of rows) await ctx.db.insert('runnerLogins', { runnerId, ...r, at });
+    return rows.length;
+  },
+});
+
+// Each runner with a key of its own: the logins it shares (the owner's
+// list), and the ones its own accounts rows name, which are only what that
+// runner says it has, for Mike to check before adding them.
+export const runnerLogins = query({
+  args: { key: v.string() },
+  returns: v.array(v.object({ runnerId: v.string(), name: v.string(), live: v.boolean(), shared: v.array(loginDoc), claimed: v.array(loginDoc) })),
+  handler: async (ctx, { key }) => {
+    await runnerAuth(ctx, key, 'runnerLogins');
+    // Named as its newest key is.
+    const byRunner = new Map<string, { name: string; live: boolean }>();
+    for (const k of (await ctx.db.query('runnerKeys').collect()).sort((a, b) => a.createdAt - b.createdAt)) byRunner.set(k.runnerId, { name: k.name, live: Boolean(byRunner.get(k.runnerId)?.live) || !k.revokedAt });
+    const out = [];
+    for (const [runnerId, { name, live }] of byRunner) {
+      const shared = (await ctx.db.query('runnerLogins').withIndex('by_runnerId', (q) => q.eq('runnerId', runnerId)).take(CAP.accounts)).map(({ provider, email }) => ({ provider, email }));
+      const claimed: { provider: string; email: string }[] = [];
+      for (const a of await ctx.db.query('accounts').withIndex('by_runnerId', (q) => q.eq('runnerId', runnerId)).take(CAP.accounts)) {
+        if (a.email && !claimed.some((c) => loginKey(c.provider, c.email) === loginKey(a.provider, a.email!))) claimed.push({ provider: cutBytes(a.provider, 40), email: cutBytes(a.email, 200) });
+      }
+      out.push({ runnerId, name, live, shared, claimed });
+    }
+    return out;
   },
 });
 
@@ -2786,6 +2887,7 @@ export const auditRemove = mutation({
           if (await revokeOne(ctx, r.id)) n++;
         } else if (r.kind === 'key') {
           await ctx.db.patch(row._id, { revokedAt: Date.now() });
+          await dropRunnerLogins(ctx, row.runnerId);
           n++;
         } else {
           await ctx.db.delete(row._id);
@@ -2841,7 +2943,7 @@ export const purgeRunner = mutation({
       await dropThread(ctx, t.threadId, t);
       return { done: false };
     }
-    for (const table of ['threadIndex', 'pocketCards', 'runnerRequests', 'schedules', 'projects', 'projectHeads', 'projectNotes', 'accounts'] as const) {
+    for (const table of ['threadIndex', 'pocketCards', 'runnerRequests', 'schedules', 'projects', 'projectHeads', 'projectNotes', 'accounts', 'runnerLogins'] as const) {
       if (left <= 0) break;
       for (const r of await ctx.db.query(table).withIndex('by_runnerId', (q: any) => q.eq('runnerId', runnerId)).take(left)) {
         await ctx.db.delete(r._id);
