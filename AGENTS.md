@@ -133,6 +133,17 @@ static site with its own `package.json`; its comments say how to build it.
   `show_panel`: it opens the panel, or brings it forward where he has it,
   once he's looking at the thread (docs/protocol.md, "Showing panels").
 
+## Tests that need the real screen
+
+A real drag, or anything else needing the pointer or a window in front, doesn't
+run on the Mac Mike's working on: it takes his pointer and pulls windows forward,
+and a stray drop lands in whatever's on top (6 Nov). Debug apps are kept behind
+everything for that reason, so stick to `dev-app.sh`'s automation commands there.
+For the real thing, use Tinker Desk's desktop from a throwaway copy, through
+`ssh tinker-desk '~/.local/bin/desk "<cmd>"'`, and remove the copy after. A
+scripted drag does start from a window of your own. It doesn't start from a
+screenshot's floating thumbnail, so that one still takes a person.
+
 ## Other people's PRs
 
 The repo's public, so people send fixes. Before starting on a GitHub issue, run
