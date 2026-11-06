@@ -483,7 +483,15 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         if let id = WorkLinks.threadId(of: url)?.lowercased() {
             let app = AppModel.shared
             let matches = app.threads.keys.filter { $0 == id || $0.hasPrefix(id) }
-            if matches.count == 1 { app.openThread(matches[0]) } else { NSSound.beep() }
+            if matches.count == 1 { app.openThread(matches[0]); return }
+            // A beep alone left Mike clicking a link to a thread archived on bruce
+            // (another machine's archived threads aren't listed here) and
+            // wondering why nothing opened (6 Nov): say why.
+            AppLog.write("transcript", "thread link \(url.absoluteString): \(matches.count) matches")
+            NSSound.beep()
+            app.errorMessage = matches.isEmpty
+                ? "That thread isn't in your sidebar, so it can't open here. It was deleted, or it's archived on another machine, and those aren't listed on this Mac."
+                : "That link matches \(matches.count) threads, so none was opened."
             return
         }
         guard let quote = WorkLinks.quote(of: url), let index = session.displayIndex(of: rowId), let turn = row(at: index)?.turnId,
