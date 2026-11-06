@@ -2956,8 +2956,11 @@ for patches that load without trust (home's, Threadbear's own checkout's)
 what each is a link to, imports and names, absolute or `~/` paths in it,
 and what each of its strings reaches as a command from the thread's
 folder, where its commands run; one of those whose code can't all be
-followed (apart from a script that isn't there yet, which is guarded
-itself) makes every edit ask. What such a hook runs by name (`npm test`, a tool on PATH)
+followed (a script that isn't there yet included, as the follow stops
+there) makes every edit ask. A settings hook that can't be followed all
+the way doesn't: those are the user's own hooks, so what they load by a
+name worked out as they run, or from outside the repo they're followed
+in, isn't guarded. What such a hook runs by name (`npm test`, a tool on PATH)
 is the folder's own code, run as its owner set it up, and isn't followed.
 Names are matched as written and as the disk has them (through symlinks,
 a link to a file not there yet included, and without case, as macOS names

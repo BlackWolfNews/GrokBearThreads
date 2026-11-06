@@ -348,6 +348,10 @@ export const patchesPart = {
         // Each command as a shell runs it, from where hooks run (the
         // thread's folder) and the login's: the script it names, quoted
         // names with spaces too, and what that imports or runs in turn.
+        // What it can't follow doesn't make every edit ask, unlike an
+        // unhashed patch's: these are the user's own hooks, and on 6 Nov
+        // eight of Mike's thirty didn't follow all the way (a decision
+        // for him, in the fix's report).
         for (const command of settingsCommands(s.file)) {
           const text = command.replace(/\$\{?CLAUDE_CONFIG_DIR\}?/g, s.dir).replace(/\$\{?CLAUDE_PROJECT_DIR\}?/g, cwd);
           for (const from of new Set([cwd, s.dir])) if (commandFiles(text, from).files.some(same)) return true;

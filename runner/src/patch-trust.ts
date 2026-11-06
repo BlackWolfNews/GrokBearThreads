@@ -821,13 +821,12 @@ export function unhashedFiles(command: string, folder: string, files: string[]):
 // follows a patch's commands (script-trust.ts): the scripts it runs, what
 // they import, run and source, there or not. For code-writes, which asks
 // before an edit of any of them. `problem`: something it runs that can't
-// be followed, other than a script that isn't there yet (in `files`: an
-// edit that makes it is what's guarded).
+// be followed, a script that isn't there yet included, as the follow
+// stops at the first: what came after it wasn't seen.
 export function commandFiles(command: string, folder: string): { files: string[]; problem?: string } {
   const real = realpath(folder);
   const reach = reachOfCommand(command, 'the command', { folder: real, top: repoTop(real), scanJs: scriptScan, resolveImport: resolveHelper, namedPaths });
-  const problem = reach.problem && !reach.missing.length ? reach.problem : undefined;
-  return { files: [...reach.files, ...reach.missing], ...(problem ? { problem } : {}) };
+  return { files: [...reach.files, ...reach.missing], ...(reach.problem ? { problem: reach.problem } : {}) };
 }
 
 // The top of the git checkout (or worktree) `dir` is in, else `dir`.

@@ -425,6 +425,7 @@ test("Codex review, round 2: the runner's data dir, a link to a patch not there 
   // thread's folder, and one naming an absolute script that isn't there.
   const missing = path.join(tmpDir(), 'on-end.sh');
   put(path.join(root, '.threadbear', 'patches', 'mine.ts'), `export default { hooks: [{ title: 'Lint', on: 'turn.end', run: "sh ./scripts/lint.sh" }, { title: 'End', on: 'turn.end', run: ${JSON.stringify(missing)} }] };\n`);
+  put(path.join(project, 'scripts', 'lint.sh'), '#!/bin/sh\ntrue\n');
   const h = makeHarness(home, {}, {
     panelsRoot: root,
     accounts: new FakeAccounts([...ACCOUNTS, { id: 'claude-9', provider: 'claude', title: 'nine', configDir: login }]),
@@ -510,6 +511,15 @@ test("Codex review, round 4: what a settings hook's script imports, a quoted scr
   await settle(h, thread.id);
   runsAsCode = h.adapter.last.opts.runsAsCode!;
   assert.ok(runsAsCode(path.join(project, 'scripts', 'payload.mjs')), 'fails closed');
+  // One whose hook names a script that isn't there: the follow stops
+  // there, so what comes after it wasn't seen, and every edit asks.
+  fs.rmSync(path.join(root, '.threadbear', 'patches', 'end.ts'));
+  put(path.join(project, 'scripts', 'after2.mjs'), `console.log('x');\n`);
+  put(path.join(root, '.threadbear', 'patches', 'opt.ts'), `export default { hooks: [{ title: 'Opt', on: 'turn.end', run: "if [ -f scripts/optional.sh ]; then sh scripts/optional.sh; fi; node scripts/after2.mjs" }] };\n`);
+  h = make();
+  ({ thread } = h.runner.create({ text: 'hi', accountId: 'claude-3', cwd: project, permissionMode: 'ask' }));
+  await settle(h, thread.id);
+  assert.ok(h.adapter.last.opts.runsAsCode!(path.join(project, 'scripts', 'after2.mjs')));
 });
 
 test('Codex review, round 2: on Full access an Edit of a patch that is a link into the folder carries it on', async () => {
