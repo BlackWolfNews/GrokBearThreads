@@ -339,16 +339,16 @@ test("a subagent's approval is asked at once, with no itemId and no diff", async
 
 // In "Ask before edits" end_turn stopped for an Allow card, so every turn
 // waited on Mike with no reply written yet (6 Nov 2026, thread c3e52aa6).
-test('the threadbear tools that only read, end the turn or show Mike something never ask, in any mode; the rest still do', async () => {
+test('the threadbear tools that only read or end the turn never ask, in any mode; the rest still do', async () => {
   for (const mode of ['ask', 'auto'] as const) {
     const { state, approvals } = start(['Read'], { permissionMode: mode }, { neverAsk: NEVER_ASK_TOOLS, alwaysAsk: ALWAYS_ASK_TOOLS });
     const call = (name: string) => state.options.canUseTool(name, {}, { signal: new AbortController().signal, toolUseID: `toolu_${name}`, agentID: 'a' });
-    for (const name of ['mcp__threadbear__end_turn', 'mcp__threadbear__read_thread', 'mcp__threadbear__pin']) {
+    for (const name of ['mcp__threadbear__end_turn', 'mcp__threadbear__read_thread', 'mcp__threadbear__unpin']) {
       assert.equal((await call(name)).behavior, 'allow', `${name} in ${mode}`);
     }
     assert.equal(approvals.length, 0, `nothing asked in ${mode}`);
-    for (const name of ['mcp__threadbear__send_message', 'mcp__threadbear__update_thread', 'mcp__threadbear__create_thread', 'mcp__threadbear__schedule_message', 'mcp__threadbear__delete_thread']) await call(name);
-    assert.deepEqual(approvals.map((a) => a.name.split('__').at(-1)), ['send_message', 'update_thread', 'create_thread', 'schedule_message', 'delete_thread']);
+    for (const name of ['mcp__threadbear__send_message', 'mcp__threadbear__update_thread', 'mcp__threadbear__create_thread', 'mcp__threadbear__schedule_message', 'mcp__threadbear__delete_thread', 'mcp__threadbear__pin', 'mcp__threadbear__show_panel', 'mcp__threadbear__show_options', 'mcp__threadbear__pocket', 'mcp__threadbear__wait_for_app_restart']) await call(name);
+    assert.deepEqual(approvals.map((a) => a.name.split('__').at(-1)), ['send_message', 'update_thread', 'create_thread', 'schedule_message', 'delete_thread', 'pin', 'show_panel', 'show_options', 'pocket', 'wait_for_app_restart']);
     // And as allow rules, so the CLI lets them through before its own checks.
     assert.ok(state.options.allowedTools.includes('Read'));
     assert.ok(state.options.allowedTools.includes('mcp__threadbear__end_turn'));

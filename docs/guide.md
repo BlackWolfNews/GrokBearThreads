@@ -242,9 +242,9 @@ shown on the composer (the box you type in) and changed by clicking it.
   Deny. Always allow only lasts for that thread. A Codex thread in this mode
   can read files but not change them unless you agree. It also asks before
   it does anything to Threadbear itself: messaging or starting another
-  thread, changing this one, schedules and projects. Reading threads,
-  ending its turn and showing you something (a pin, a panel, options, a
-  question) never ask.
+  thread, changing this one, schedules, projects, pins, panels and the
+  Pocket. Reading threads, asking you for a secret and ending its turn
+  never ask.
 - **Auto** (Claude threads only): a separate safety check approves or blocks
   each action, and a card shows only when it can't decide. It's for work on
   text you didn't write, like an error report or a web page. It catches a lot

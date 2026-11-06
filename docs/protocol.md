@@ -4446,10 +4446,11 @@ runner doesn't take either kind for Mike's: they leave reviews open and
 don't stop a turn for a waiting login switch, and `read_thread` and the
 handoff note label them as the agent's. `delete_thread` always asks for approval,
 even in a thread with full access. Outside full access the tools that
-change something or act elsewhere ask too, and the ones that only read,
-end the turn or show Mike something (`NEVER_ASK_TOOLS`: `end_turn`, the
-list and read tools, `pin`, `show_panel`, `show_options`, `ask_secret`,
-`pocket`, `wait_for_app_restart`) never do, in any mode. No tool can delete, interrupt, snooze
+change something or act elsewhere ask too (`pin`, `show_options` and
+`show_panel` among them, as they can open a URL or a panel that runs
+commands), and the ones that only read or end the turn
+(`NEVER_ASK_TOOLS`: `end_turn`, the list and read tools, `unpin`,
+`ask_secret`) never do, in any mode. No tool can delete, interrupt, snooze
 or archive the thread that's calling it; `tb` inside a thread refuses the
 same. There's no tool for restarting the runner: that's `runner.restart`.
 
