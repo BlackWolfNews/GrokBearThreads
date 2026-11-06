@@ -63,12 +63,18 @@ export type ThreadRecord = {
   // work since), been archived or been deleted.
   // `until`: waits for something in particular, which the librarian
   // judges from its looks at that thread (met), not for any finish.
-  waitingOn?: { threadId: string; title: string; until?: string; done?: { at: string; how: 'finished' | 'met' | 'archived' | 'deleted'; reply?: string; why?: string } }[];
+  // `review`: the thread is a review of this one's change (runner/lab-review.ts).
+  waitingOn?: { threadId: string; title: string; until?: string; review?: true; done?: { at: string; how: 'finished' | 'met' | 'archived' | 'deleted'; reply?: string; why?: string } }[];
   // Its last finished turn (nothing needed, nothing left running) and that
   // turn's reply, for threads waiting on it, including on a runner it
   // moves to (runner/hibernation.ts, reconcileWaits). Cleared by any new
   // work (a message, a turn its CLI opens), so no clock is compared.
   finished?: { at: string; reply?: string };
+  // Review by another lab (runner/lab-review.ts): reviewOf is set on a
+  // review thread (the thread whose change it checks), which never gets a
+  // review of its own; labReviews counts the reviews since Mike last wrote.
+  reviewOf?: string;
+  labReviews?: number;
   snoozedAt?: string; // when it was last put away, for how long it slept; may be stale once awake
   woke?: { at: string; since?: string }; // woke by itself and not looked at yet (since = snoozedAt)
   archivedAt?: string;

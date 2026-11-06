@@ -698,6 +698,36 @@ long before the reset; in green, how much of the week will go unused, so
 it's worth leaning on that login; otherwise that it's on track, or when it
 resets. Hover a window for its rate.
 
+## Experiments
+<!-- slug: experiments -->
+
+Some new features start as experiments: off unless you turn them on, while
+they're tried out. Each has a switch under `experiments` in `runner.json`
+in Threadbear's data folder, read at every turn, so there's nothing to
+restart:
+
+```json
+"experiments": { "labReview": true }
+```
+
+Once an experiment has proved itself it's turned on for everyone, and the
+switch then turns it off.
+
+- **Review by another lab** (`labReview`, since 6 Nov 2026). When a turn
+  that changed code (five lines or more, not counting docs) finishes with
+  nothing for you to do, Threadbear starts a review thread in the same
+  folder on your other provider: Codex reviews a Claude thread's change,
+  and Claude a Codex one's. It's told to try to break the change and not
+  to edit anything. The thread says who is reviewing, and hibernates
+  until the review finishes. Then it wakes with the findings, fixes what
+  holds up, and says in its reply what was found and what it did. The
+  review thread is archived when it's done, so it stays out of your
+  inbox; the link in the note opens it. A thread gets at most two
+  reviews between your messages. With no login of another provider, a
+  fresh session of the same one reviews, and the note says it isn't
+  another lab. A folder a pool is kept for (Accounts, pools and Usage, above) is only ever
+  reviewed on that pool's logins.
+
 ## Connectors
 <!-- slug: connectors -->
 

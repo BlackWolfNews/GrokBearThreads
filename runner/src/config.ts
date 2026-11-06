@@ -157,6 +157,8 @@ export type RunnerJson = {
   // (docs/on-your-mac.md).
   sync?: { enabled?: boolean; url?: string; name?: string; runnerId?: string; icon?: string; rpcUrl?: string; pastedPictures?: boolean };
   secretCheck?: { enabled?: boolean };
+  // Features still being tried out, each off unless it says (experiments.ts).
+  experiments?: Record<string, boolean>;
   // The gateway, when it isn't the `connectors` MCP server in
   // ~/.claude.json; url "" or enabled: false turns the panel's polling off.
   connectors?: { url?: string; enabled?: boolean; headersHelper?: string };

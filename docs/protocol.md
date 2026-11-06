@@ -2102,6 +2102,29 @@ the thread if a sub-agent stalls, so an ask can't stay hidden for good.
   time by which that should have happened. On 5 Nov 2026 a thread
   waiting on another thread's report ended as done in Mike's inbox,
   as the description then allowed it only when he asked.
+- **Review by another lab** (experiment `labReview`, off unless
+  `runner.json` has `"experiments": { "labReview": true }`;
+  `runner/src/runner/lab-review.ts`). A turn that would count as finished
+  (as for Waiting on threads, below) and whose `edit.diff` events change
+  at least 5 lines outside `.md`/`.txt` files, in a thread that isn't
+  itself a review, with fewer than 2 reviews since Mike's last message
+  (`labReviews` in thread.json; any message not from the runner resets
+  it), isn't marked finished. Instead the runner creates a thread in the
+  same folder (no worktree of its own), on Full access and effort high,
+  with `startedBy: { kind: "thread", label: "Review" }`, `reviewOf` set
+  to the first thread in thread.json, and a brief: the latest user
+  message, the reply, the files and the diff (up to 40,000 characters).
+  Its login is the other provider's (`pickInPool` over the pools with no
+  folders), else a fresh session of the same provider. For a folder a
+  pool is kept for, only that pool's logins are used, and a kept pool's
+  logins never review anything outside it. The first thread gets a
+  `system.note` saying who reviews and whether it's another lab, then
+  waits on the review as `waitFor` would (`waitingOn` entry with
+  `review: true` in thread.json). The review's reply (up to 12,000
+  characters) comes back as an `origin: "runner"` message asking it to
+  fix what holds up, naming any files the review edited, and the review
+  thread is archived (`archivedBy: "threadbear"`). With no login to
+  review on, a note says so, once until the next message.
 - **Waiting on threads.** `end_turn` also takes `waitFor?: string[]`, up
   to 5 thread ids (or unique prefixes) on this runner, with `needs:
   "nothing"`. Once the turn is over it hibernates on the same terms as

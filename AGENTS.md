@@ -128,6 +128,26 @@ static site with its own `package.json`; its comments say how to build it.
   `show_panel`: it opens the panel, or brings it forward where he has it,
   once he's looking at the thread (docs/protocol.md, "Showing panels").
 
+## Experiments
+
+Other people run Threadbear since the repo went public (5 Nov 2026), so a
+new feature Mike is still trying out lands as an experiment: off by
+default, on for him (Mike asked 6 Nov).
+
+- Add it to `EXPERIMENTS` in `runner/src/experiments.ts` (id, title,
+  `added` date, `on: false`) and check `experimentOn(home, id)` where it
+  starts. Put `"experiments": { "<id>": true }` in Mike's `runner.json`
+  (`~/Library/Application Support/Threadbear/runner.json`) so it's on
+  for him.
+- Book the check-in when it lands: `schedule_message` with `new_thread`
+  in this repo, about four days out, telling that thread to look at how
+  the experiment has gone and ask Mike whether to turn it on for
+  everyone, keep trying it, or take it out. Its id is the entry's
+  `reminder`; `experiments.test.ts` fails without one.
+- Say it in `docs/guide.md` ("Experiments") and in the forking table.
+  When Mike says to turn it on for everyone, flip `on` to true and
+  update the guide.
+
 ## Working on Threadbear from inside Threadbear
 
 Mike may be running this thread in Threadbear itself, through the installed
