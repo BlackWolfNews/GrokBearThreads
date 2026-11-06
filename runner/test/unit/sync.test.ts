@@ -641,6 +641,28 @@ test('commands: a create from the phone can name its model and effort; an effort
   assert.deepEqual(applied, ['create one phone haiku high', 'create two phone']);
 });
 
+test('an archive command an agent sent (by: "agent") says an agent archived it; one without, the user', async () => {
+  const { h, sync, push } = setupFull();
+  sync.start();
+  await sync.flushNow();
+  const a = h.runner.create({ text: 'one', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  const b = h.runner.create({ text: 'two', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  for (const id of [a.id, b.id]) {
+    const s = session(h, id);
+    s.init();
+    s.result('completed');
+  }
+  await tick();
+  push([
+    { commandId: 'ag1', kind: 'update', threadId: a.id, args: { archive: true, by: 'agent' }, createdAt: 1 },
+    { commandId: 'ag2', kind: 'update', threadId: b.id, args: { archive: true }, createdAt: 2 },
+  ]);
+  await tick(10);
+  assert.equal(h.runner.get(a.id).archivedBy, 'agent');
+  assert.notEqual(h.runner.get(b.id).archivedBy, 'agent');
+  assert.ok(h.runner.get(b.id).archivedAt);
+});
+
 test('commands: each pending one is taken once, applied through the runner as from the phone, and finished', async () => {
   const { h, sync, calls, push, applied } = setupFull();
   sync.start();
