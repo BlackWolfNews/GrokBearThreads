@@ -527,6 +527,10 @@ const RATE_LIMIT_WINDOWS: Record<string, { kind: UsageWindow['kind']; title: str
   seven_day: { kind: 'weekly', title: 'Weekly' },
   seven_day_opus: { kind: 'weekly_model', title: 'Weekly Opus' },
   seven_day_sonnet: { kind: 'weekly_model', title: 'Weekly Sonnet' },
+  // Fable's own week. The CLI calls it the "overage-included" window and
+  // names it "Fable limit" (Claude Code 2.1.318); titled as Token Stats
+  // titles it, so the two readings merge into one window.
+  seven_day_overage_included: { kind: 'weekly_model', title: 'Weekly Fable' },
 };
 
 function usageWindow(type: string, utilization: unknown, resetsAt: unknown): UsageWindow | undefined {
@@ -540,7 +544,8 @@ function usageWindow(type: string, utilization: unknown, resetsAt: unknown): Usa
 }
 
 // A rate_limit_event's rate_limit_info as a reading. The CLI sends
-// unifiedWindows (five_hour and seven_day) though sdk.d.ts doesn't list
+// unifiedWindows (five_hour, seven_day and, for logins that have it,
+// seven_day_overage_included) though sdk.d.ts doesn't list
 // it; without it, the documented single rateLimitType and utilization.
 export function rateLimitReading(info: AnyMsg | undefined): { windows: UsageWindow[]; blocked: boolean } | undefined {
   if (!info || typeof info !== 'object') return undefined;

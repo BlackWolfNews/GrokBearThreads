@@ -107,7 +107,8 @@ let accounts = [
   },
   {
     id: 'claude-2', provider: 'claude', title: 'work@example.com', configDir: `${tokenStatsAccounts}/claude-2`,
-    defaultModel: 'claude-fable-5-1', models, email: 'work@example.com', plan: 'Team', note: 'Convex work only', usage: usage(95, 90, { notice: couldntCheck }),
+    defaultModel: 'claude-fable-5-1', models, email: 'work@example.com', plan: 'Team', note: 'Convex work only',
+    usage: usage(95, 90, { notice: couldntCheck, more: [{ kind: 'weekly_model', title: 'Weekly Fable', remainingPercent: 97, resetsAt: hoursFromNow(70) }] }),
   },
   {
     id: 'claude-3', provider: 'claude', title: 'mike+3@example.com', configDir: `${tokenStatsAccounts}/claude-3`,
@@ -173,10 +174,13 @@ function mockUsageStats(days) {
       hours.push([h, total - cacheRead - cacheWrite - output, output, cacheRead, cacheWrite]);
     }
     tokens.push({ accountId: a.id, hours });
-    for (const kind of ['weekly', 'five_hour']) {
-      const w = a.usage?.windows?.find((x) => x.kind === kind);
+    // A model's own week ("Weekly Fable") is charted too, under its title.
+    const charted = (a.usage?.windows ?? []).filter((x) => ['weekly', 'five_hour', 'weekly_model'].includes(x.kind));
+    for (const w of charted) {
+      const kind = w.kind;
       if (!w?.resetsAt) continue;
-      const length = (kind === 'weekly' ? 168 : 5) * HOUR;
+      const week = kind !== 'five_hour';
+      const length = (week ? 168 : 5) * HOUR;
       const reset = Date.parse(w.resetsAt);
       // Walk back from now, one window at a time: each goes from 100 down
       // to where it ended, the current one to what it says now.
@@ -185,7 +189,7 @@ function mockUsageStats(days) {
       let endPct = w.remainingPercent;
       for (let start = reset - length; end > since; start -= length) {
         const from = Math.max(start, since);
-        const steps = Math.max(2, Math.round((end - from) / (kind === 'weekly' ? 3 * HOUR : 20 * 60_000)));
+        const steps = Math.max(2, Math.round((end - from) / (week ? 3 * HOUR : 20 * 60_000)));
         const run = [];
         for (let k = 0; k <= steps; k++) {
           const t = from + ((end - from) * k) / steps;
@@ -194,11 +198,11 @@ function mockUsageStats(days) {
         }
         samples.unshift(...run);
         end = start - 1;
-        endPct = kind === 'weekly' ? 20 + rand() * 40 : 10 + rand() * 60;
+        endPct = week ? 20 + rand() * 40 : 10 + rand() * 60;
         // Only today's 5-hour windows: older ones say nothing more.
         if (kind === 'five_hour' && end < now - 15 * HOUR) break;
       }
-      limits.push({ accountId: a.id, kind, samples });
+      limits.push({ accountId: a.id, kind, ...(kind === 'weekly_model' ? { title: w.title } : {}), samples });
     }
   }
   return { generatedAt: iso(), ready: true, tokens, limits };

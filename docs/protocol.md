@@ -1448,8 +1448,12 @@ type UsageStats = {
   // Per login, readings of its 5-hour and weekly windows over time, oldest
   // first: [atMs, remainingPercent]. A sample is kept when a window moves
   // by half a point or more, at a reset, and at least every 30 minutes
-  // while readings keep coming, so a flat line still has points.
-  limits: { accountId: string, kind: "five_hour" | "weekly", samples: [number, number][] }[]
+  // while readings keep coming, so a flat line still has points. A model's
+  // own week ("Weekly Fable") is kept too, as `weekly_model` with the
+  // window's `title`, one entry per title, after the main two. An app
+  // matches it to the window by kind and title, and skips kinds it
+  // doesn't know.
+  limits: { accountId: string, kind: "five_hour" | "weekly" | "weekly_model", title?: string, samples: [number, number][] }[]
 }
 ```
 

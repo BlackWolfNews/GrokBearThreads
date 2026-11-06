@@ -704,6 +704,11 @@ long before the reset; in green, how much of the week will go unused, so
 it's worth leaning on that login; otherwise that it's on track, or when it
 resets. Hover a window for its rate.
 
+A Claude login with a limit of its own on Fable shows that week too,
+"Weekly Fable", with its own chart beside the others, as Claude Code's
+`/usage` does. Running out of it only stops Fable: the login can still run
+other models, so it never makes a login look full.
+
 ## Experiments
 <!-- slug: experiments -->
 

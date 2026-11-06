@@ -32,8 +32,10 @@ public struct UsageStats: Sendable, Equatable, Decodable {
         tokens.first { $0.accountId == accountId }?.hours ?? []
     }
 
-    public func samples(_ accountId: String, kind: String) -> [LimitSample] {
-        limits.first { $0.accountId == accountId && $0.kind == kind }?.samples ?? []
+    /// A window's readings. A model's own week ("Weekly Fable") is told
+    /// apart from the others by its title.
+    public func samples(_ accountId: String, kind: String, title: String? = nil) -> [LimitSample] {
+        limits.first { $0.accountId == accountId && $0.kind == kind && (kind != "weekly_model" || $0.title == title) }?.samples ?? []
     }
 }
 
@@ -86,11 +88,14 @@ public struct TokenHour: Sendable, Equatable {
 public struct LimitHistory: Sendable, Equatable, Decodable {
     public var accountId: String
     public var kind: String
+    /// A model's own week's title ("Weekly Fable"); nil for the main two.
+    public var title: String?
     public var samples: [LimitSample]
 
-    public init(accountId: String, kind: String, samples: [LimitSample]) {
+    public init(accountId: String, kind: String, title: String? = nil, samples: [LimitSample]) {
         self.accountId = accountId
         self.kind = kind
+        self.title = title
         self.samples = samples
     }
 
@@ -98,6 +103,7 @@ public struct LimitHistory: Sendable, Equatable, Decodable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         accountId = try c.decode(String.self, forKey: .accountId)
         kind = try c.decode(String.self, forKey: .kind)
+        title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? nil
         let rows = (try? c.decodeIfPresent([[Double]].self, forKey: .samples)) ?? []
         samples = rows.compactMap { row in
             guard row.count >= 2, row[0].isFinite, row[1].isFinite else { return nil }
@@ -105,7 +111,7 @@ public struct LimitHistory: Sendable, Equatable, Decodable {
         }.sorted { $0.at < $1.at }
     }
 
-    enum CodingKeys: String, CodingKey { case accountId, kind, samples }
+    enum CodingKeys: String, CodingKey { case accountId, kind, title, samples }
 }
 
 public struct LimitSample: Sendable, Equatable {
@@ -258,13 +264,15 @@ public struct LimitPace: Sendable, Equatable {
         let span: TimeInterval
         switch window.kind {
         case "five_hour": span = 5 * 3600
-        case "weekly": span = 7 * 86400
+        // A model's own week ("Weekly Fable") goes like the main one.
+        case "weekly", "weekly_model": span = 7 * 86400
         default: return nil
         }
+        let week = span > 86400
         let start = reset.addingTimeInterval(-span)
         let left = window.remainingPercent
         var perHour: Double?
-        if window.kind == "weekly" {
+        if week {
             // The readings of the last day, within this window: the oldest
             // one to now. Only with at least half a day of them.
             let since = max(start, now.addingTimeInterval(-86400))
@@ -275,11 +283,11 @@ public struct LimitPace: Sendable, Equatable {
         if perHour == nil {
             let elapsed = now.timeIntervalSince(start) / 3600
             // Too early in the window to say anything.
-            guard elapsed >= (window.kind == "weekly" ? 2 : 0.25) else { return nil }
+            guard elapsed >= (week ? 2 : 0.25) else { return nil }
             perHour = max(0, 100 - left) / elapsed
         }
         guard let perHour else { return nil }
-        let unit: Double = window.kind == "weekly" ? 24 : 1
+        let unit: Double = week ? 24 : 1
         var pace = LimitPace(rate: perHour * unit, runsOutAt: nil, leftAtReset: nil)
         let toReset = reset.timeIntervalSince(now) / 3600
         if perHour > 0, left / perHour < toReset {
@@ -358,6 +366,6 @@ public struct LimitPace: Sendable, Equatable {
     /// "9% a day", "12% an hour".
     public func rateText(kind: String) -> String {
         let value = rate < 1 ? String(format: "%.1f", rate) : String(Int(rate.rounded()))
-        return value + (kind == "weekly" ? "% a day" : "% an hour")
+        return value + (kind == "five_hour" ? "% an hour" : "% a day")
     }
 }
