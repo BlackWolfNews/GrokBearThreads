@@ -53,12 +53,13 @@ export const labReviewPart = {
     if ((rec.labReviews ?? 0) >= LAB_REVIEW_ROUNDS) return undefined;
     const change = this.turnChange(st, turnId);
     if (!change || change.codeLines < LAB_REVIEW_MIN_LINES) return undefined;
-    // A runner handing over to a new release, or stopping, makes no
-    // threads (new-threads.ts), and the turn that just ended is often the
-    // one that landed the release (THREADBEAR-14, 6 Nov 2026). The review
-    // is owed instead, and the runner that has the thread next starts it
-    // (startOwedReview). The caller doesn't mark it finished meanwhile.
-    if (this.draining || this.stopping) {
+    // A runner handing over to a new release, restarting or stopping
+    // makes no threads (new-threads.ts), and the turn that just ended is
+    // often the one that landed the release (THREADBEAR-14, 6 Nov 2026).
+    // The review is owed instead, and the runner that has the thread next
+    // starts it (startOwedReview). The caller doesn't mark it finished
+    // meanwhile.
+    if (this.draining || this.refusing || this.stopping) {
       rec.labReviewOwed = { turnId, ...(reply ? { reply } : {}) };
       this.markDirty(st);
       this.log.info('lab review owed to the next runner', { threadId: rec.id });

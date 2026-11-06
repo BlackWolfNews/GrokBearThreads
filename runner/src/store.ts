@@ -75,8 +75,8 @@ export type ThreadRecord = {
   // review of its own; labReviews counts the reviews since Mike last wrote.
   reviewOf?: string;
   labReviews?: number;
-  // A review a draining or stopping runner couldn't start (it makes no
-  // threads), for the runner that adopts or loads this one to start.
+  // A review a draining, restarting or stopping runner couldn't start (it
+  // makes no threads), for the runner that adopts or loads this one to start.
   labReviewOwed?: { turnId: string; reply?: string };
   snoozedAt?: string; // when it was last put away, for how long it slept; may be stale once awake
   woke?: { at: string; since?: string }; // woke by itself and not looked at yet (since = snoozedAt)

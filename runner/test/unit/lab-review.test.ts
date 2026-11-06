@@ -316,3 +316,14 @@ test('labReview: a review owed from a handover starts when the next runner loads
   assert.equal(w?.length, 1);
   assert.equal(b.get(w![0].threadId).provider, 'codex');
 });
+
+test('labReview: a turn that ends while a plain restart refuses new threads owes its review too', () => {
+  const h = setup();
+  const id = start(h);
+  h.runner.refuseNewTurns('The runner is restarting; send again in a moment.');
+  turn(h, id, { diffs: [codeDiff()] });
+  assert.equal(h.codex.sessions.length, 0);
+  assert.ok(h.runner.threads.get(id)!.rec.labReviewOwed);
+  assert.equal(h.runner.threads.get(id)!.rec.finished, undefined);
+  assert.ok(!h.events(id).some((e) => e.type === 'system.note' && /^Not reviewed/.test(e.text)));
+});
