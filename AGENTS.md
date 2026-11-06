@@ -145,8 +145,17 @@ default, on for him (Mike asked 6 Nov).
   everyone, keep trying it, or take it out. Its id is the entry's
   `reminder`; `experiments.test.ts` fails without one.
 - Say it in `docs/guide.md` ("Experiments") and in the forking table.
-  When Mike says to turn it on for everyone, flip `on` to true and
-  update the guide.
+- When Mike says to make it standard, take the flag out entirely: its
+  entry in `experiments.ts`, the `experimentOn` check, its key in his
+  runner.json files (the M5, `ssh bruce`, `ssh cloud`), and its place
+  in the guide's "Experiments" section (its text moves to where the
+  feature belongs). Don't leave a default-on switch behind: every flag
+  left in is another path through the code to keep working. If people
+  might really want it off, make it a normal setting instead. When he
+  says take it out, delete the feature with its flag.
+- Not everything needs one: bug fixes and polish go straight in. An
+  experiment is for new behaviour that changes what threads do, what
+  they cost, or what the runner does to the machine.
 
 ## Working on Threadbear from inside Threadbear
 

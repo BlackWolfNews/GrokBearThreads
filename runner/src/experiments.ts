@@ -1,7 +1,8 @@
 // Experiments: new features that start off for everyone, with a switch
 // in runner.json (`"experiments": { "<id>": true }`) so Mike can run one
-// on his own copy first. Once he's happy with it, its `on` default flips
-// to true and, later, the switch goes.
+// on his own copy first. Once he's happy with it, the experiment and its
+// switch are taken out and the feature just runs (AGENTS.md, "Experiments"),
+// rather than its default flipping and the switch staying.
 //
 // Since the repo went public (5 Nov 2026) other people run Threadbear, so
 // Mike asked on 6 Nov that features he's still trying out land here

@@ -716,8 +716,8 @@ restart:
 "experiments": { "labReview": true }
 ```
 
-Once an experiment has proved itself it's turned on for everyone, and the
-switch then turns it off.
+Once an experiment has proved itself it becomes a standard part of
+Threadbear, and its switch goes.
 
 - **Review by another lab** (`labReview`, since 6 Nov 2026). When a turn
   that changed code (five lines or more, not counting docs) finishes with
