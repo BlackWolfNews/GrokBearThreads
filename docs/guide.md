@@ -462,6 +462,10 @@ From the top, and only when there's something to show:
   change it.
 - **Sub-agents**: helpers the agent started, with how each is getting on.
   Click one to read what it did.
+- **Threads it started**: other threads its agent started, and any it's
+  waiting on, each with where it's up to: the ones that need you first,
+  then failed, working, hibernating, done and archived. Click one to open
+  it. Their questions still come to your inbox like any thread's.
 - **Pinned**: what the agent pinned for you (below).
 - **Files**: documents, pages, pictures and videos the thread wrote, opened
   or mentioned.

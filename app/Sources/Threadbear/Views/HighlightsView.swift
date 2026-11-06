@@ -19,6 +19,7 @@ struct HighlightsView: View {
     @State private var allLinks = false
     @State private var allCommits = false
     @State private var allSubagents = false
+    @State private var allStarted = false
 
     var body: some View {
         if app.highlightsUnsupported {
@@ -26,7 +27,7 @@ struct HighlightsView: View {
         } else if let fetched = app.highlights[thread.id] {
             let sections = HighlightSections.build(fetched)
             let projects = HighlightProjects.build(thread: thread, project: app.project)
-            if sections.isEmpty && openAsks == nil && projects.isEmpty && toolPanels.isEmpty && schedules.isEmpty && thread.subagents.isEmpty {
+            if sections.isEmpty && openAsks == nil && projects.isEmpty && toolPanels.isEmpty && schedules.isEmpty && thread.subagents.isEmpty && startedThreads.isEmpty {
                 PaneNote(text: "Nothing here yet. Files, links and commits from this thread show up here as it works.")
             } else {
                 ScrollView {
@@ -130,6 +131,17 @@ struct HighlightsView: View {
                 if subagents.more > 0 { showAll(all.count) { allSubagents = true } }
             }
         }
+        // The threads it handed work to, or is waiting on, with where each
+        // is up to (StartedThreadRows says why it's here).
+        let started = startedThreads
+        if !started.isEmpty {
+            SectionHeading(title: "Threads it started", icon: "pawprint", fold: fold(HighlightFold.startedThreads, count: started.count))
+            if !isFolded(HighlightFold.startedThreads) {
+                let shown = HighlightSections.capped(started, limit: HighlightSections.subagentLimit, showAll: allStarted)
+                ForEach(shown.shown) { startedRow($0) }
+                if shown.more > 0 { showAll(started.count) { allStarted = true } }
+            }
+        }
         if !sections.pinned.isEmpty {
             SectionHeading(title: "Pinned", icon: "pin", fold: fold(HighlightFold.pinned, count: sections.pinned.count))
             if !isFolded(HighlightFold.pinned) {
@@ -205,6 +217,29 @@ struct HighlightsView: View {
             app.selectSubagent(threadId: thread.id, subagentId: subagent.id)
         }
         .tip("\(SubagentRows.statusText(subagent)). Click to read its transcript.")
+    }
+
+    private var startedThreads: [StartedThreadRows.Row] {
+        StartedThreadRows.rows(for: thread, in: app.threads, now: app.now)
+    }
+
+    /// Opens the thread itself, as a thread chip in a reply does.
+    private func startedRow(_ row: StartedThreadRows.Row) -> some View {
+        let color: Color? = switch row.state {
+        case .needsYou: Color.accentColor
+        case .failed: Color(nsColor: Theme.failed)
+        default: nil
+        }
+        return PaneRow(icon: StartedThreadRows.icon(row.state), iconColor: color, title: row.thread.title,
+                       detail: StartedThreadRows.detail(row, now: app.now),
+                       titleTruncation: .tail, detailTruncation: .tail) {
+            app.openThread(row.thread.id)
+        }
+        .tip("Open this thread")
+        .iconContextMenu {
+            Button("Open", systemImage: "arrow.up.forward") { app.openThread(row.thread.id) }
+            Button("Open in New Panel", systemImage: "rectangle.split.2x1") { app.openThreadInPanel(row.thread.id) }
+        }
     }
 
     /// The open card's seq, when the thread has asks on it.
