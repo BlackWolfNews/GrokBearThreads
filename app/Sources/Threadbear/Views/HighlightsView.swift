@@ -610,6 +610,7 @@ struct PreviewBody: View {
         switch preview.target {
         case .page(let url) where url.isFileURL:
             LocalPagePreview(url: url, opened: preview.opened)
+                .id(url)
         case .page(let url):
             WebPanel(url: url)
         case .remote(_, let failed):
@@ -649,6 +650,7 @@ struct PreviewBody: View {
             PaneNote(text: "This file isn't there any more.")
         } else if PreviewRules.viewer(forPath: path) == .web {
             LocalPagePreview(url: URL(fileURLWithPath: path), opened: preview.opened)
+                .id(path)
         } else if TextFileView.shows(path) {
             TextFileView(url: URL(fileURLWithPath: path), opened: preview.opened, editing: preview.editing)
                 .id(path)
@@ -667,14 +669,22 @@ struct PreviewBody: View {
 struct LocalPagePreview: View {
     let url: URL
     let opened: Int
-    @State private var scan: (scripts: Bool, digest: String)?
-    @State private var allowed = false
+    /// What the scan found, for the file it was of: the pane keeps this
+    /// view (and its state) when another file opens in it, so nothing here
+    /// counts unless it's this file's (Codex review: a page allowed first
+    /// handed its digest to the next file with the same bytes).
+    @State private var scan: (path: String, scripts: Bool, digest: String, allowed: Bool)?
+
+    private var current: (scripts: Bool, digest: String, allowed: Bool)? {
+        guard let scan, scan.path == url.path else { return nil }
+        return (scan.scripts, scan.digest, scan.allowed)
+    }
 
     static let explanation = "Pages open here with their scripts off, as a script could read the files the page names. Run them turns them on for this version of the page, still with no network and nothing read but what it names. If the file changes, you'll be asked again."
 
     var body: some View {
         VStack(spacing: 0) {
-            if let scan, scan.scripts, !allowed {
+            if let scan = current, scan.scripts, !scan.allowed {
                 HStack(spacing: zoomed(6)) {
                     Text("This page has scripts")
                         .font(.system(size: TypeScale.small))
@@ -683,7 +693,7 @@ struct LocalPagePreview: View {
                     Spacer(minLength: 0)
                     Button("Run them") {
                         PreviewScriptConsent().allow(path: url.path, digest: scan.digest)
-                        allowed = true
+                        self.scan?.allowed = true
                     }
                     .controlSize(.small)
                     .tip("Reload this page with its scripts on")
@@ -692,7 +702,7 @@ struct LocalPagePreview: View {
                 .padding(.vertical, zoomed(6))
                 Divider()
             }
-            WebPanel(url: url, scriptsFor: allowed ? scan?.digest : nil)
+            WebPanel(url: url, scriptsFor: current.flatMap { $0.allowed ? $0.digest : nil })
         }
         .task(id: "\(url) \(opened)") {
             let path = url.path
@@ -701,8 +711,7 @@ struct LocalPagePreview: View {
             }.value
             // A scan for the page before can finish after this one's.
             if Task.isCancelled { return }
-            scan = found
-            allowed = found.map { $0.scripts && PreviewScriptConsent().allows(path: path, digest: $0.digest) } ?? false
+            scan = found.map { (path, $0.scripts, $0.digest, $0.scripts && PreviewScriptConsent().allows(path: path, digest: $0.digest)) }
         }
     }
 }

@@ -52,6 +52,27 @@ final class LocalPreviewSchemeHandler: NSObject, WKURLSchemeHandler {
     })();
     """
 
+    /// In a view running the page's scripts, in every frame, first and in a
+    /// world of its own (so the page can't reach these listeners): nothing
+    /// is dragged or copied out of the page. A script there can read the
+    /// assets the page names and could hand them to a drag or a copy, which
+    /// go through the OS rather than the network (Codex review, 6 Nov 2026).
+    static let scriptsGuard = """
+    (() => {
+      for (const type of ['dragstart', 'copy', 'cut']) {
+        addEventListener(type, (e) => { e.preventDefault(); e.stopImmediatePropagation(); }, true);
+      }
+    })();
+    """
+    /// The same view, in the page's world: no async Clipboard API, which a
+    /// script could write to on any click in the page.
+    static let clipboardGuard = """
+    (() => {
+      try { delete Navigator.prototype.clipboard; } catch (_) {}
+      try { Object.defineProperty(Navigator.prototype, 'clipboard', { get: () => undefined, configurable: false }); } catch (_) {}
+    })();
+    """
+
     /// Everything blocked but this scheme's own loads.
     static let ruleList = """
     [{"trigger":{"url-filter":".*"},"action":{"type":"block"}},

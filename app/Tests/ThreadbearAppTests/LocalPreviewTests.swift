@@ -286,6 +286,20 @@ final class LocalPreviewTests: XCTestCase {
         XCTAssertTrue(sink.requests.allSatisfy { $0.hasPrefix("CONNECT ") }, "\(sink.requests)")
         XCTAssertEqual(view.url?.scheme, LocalPreviewSchemeHandler.scheme)
 
+        // No way out through the OS either: no async clipboard, here or in a
+        // frame the script makes, and its copy and drag handlers never run.
+        let osRoutes = try await run("""
+        const seen = [];
+        addEventListener('copy', (e) => { seen.push('copy'); e.clipboardData.setData('text/plain', 'secret'); e.preventDefault(); }, true);
+        document.addEventListener('dragstart', () => seen.push('drag'));
+        document.dispatchEvent(new ClipboardEvent('copy', { bubbles: true, cancelable: true, clipboardData: new DataTransfer() }));
+        document.body.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true }));
+        const f = document.createElement('iframe'); document.body.appendChild(f);
+        await new Promise((r) => setTimeout(r, 200));
+        return [typeof navigator.clipboard, typeof f.contentWindow.navigator.clipboard, seen.join(',')];
+        """, in: view) as? [String]
+        XCTAssertEqual(osRoutes, ["undefined", "undefined", ""], "\(osRoutes ?? [])")
+
         // Rewritten after Run them: a reload gets nothing, so the new script never runs.
         try write("index.html", Data(html.replacingOccurrences(of: "script ran", with: "rewritten ran").utf8))
         view.reload()

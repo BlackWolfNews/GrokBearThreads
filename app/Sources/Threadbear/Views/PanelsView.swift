@@ -849,6 +849,13 @@ final class WebPanelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUI
             // on: a script can then read what the page names, and the
             // guards here and in LocalPreviewSchemeHandler keep it in the pane.
             config.defaultWebpagePreferences.allowsContentJavaScript = digest != nil
+            if digest != nil {
+                config.userContentController.addUserScript(WKUserScript(
+                    source: LocalPreviewSchemeHandler.scriptsGuard, injectionTime: .atDocumentStart, forMainFrameOnly: false,
+                    in: .world(name: "threadbear-preview-guard")))
+                config.userContentController.addUserScript(WKUserScript(
+                    source: LocalPreviewSchemeHandler.clipboardGuard, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+            }
             // WebRTC goes round proxies and content rules alike. WebKit only
             // offers the switch privately; KVC finds `_setPeerConnectionEnabled:`.
             if config.preferences.responds(to: NSSelectorFromString("_setPeerConnectionEnabled:")) {
