@@ -135,18 +135,18 @@ export const labReviewPart = {
     const { rec, rt } = st;
     const owed = rec.labReviewOwed;
     if (!owed || rt.deleted) return;
-    // Busy (a resume, a queued message): the next turn to finish gives it
-    // (completeTurn), as its own change if it made one.
+    // Busy (a resume, a queued message): the next turn to complete settles
+    // it (completeTurn).
     if (rt.turn || rec.queue.length) return;
     if (rec.archivedAt) {
       delete rec.labReviewOwed;
       this.markDirty(st);
       return;
     }
-    // Put to sleep since (by Mike, a schedule, or a later turn's own
-    // snooze or waitFor): a review would wake it early, so its next turn
-    // to finish gives it. Not marked finished meanwhile, as it hasn't
-    // been reviewed (and a later turn may be waiting on something).
+    // Put to sleep since (by Mike or a schedule while the handover
+    // waited): a review would wake it early, so its next turn to complete
+    // settles it. Not marked finished meanwhile, as it hasn't been
+    // reviewed.
     if (this.bucket(rec) === 'snoozed') return;
     delete rec.labReviewOwed;
     this.markDirty(st);

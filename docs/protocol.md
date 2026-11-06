@@ -2267,8 +2267,10 @@ the thread if a sub-agent stalls, so an ask can't stay hidden for good.
   resume the restart asked for, and not before it's listening) or next
   starts (once listening) starts the review then. A thread busy or
   hibernating by then (a resume, a queued message, a snooze or `waitFor`)
-  keeps it for its next finished turn, which reviews its own change if
-  it made one worth it, else the owed one; an archived one drops it.
+  keeps it for its next completed turn: one that finishes reviews its own
+  change if it made one worth it, else the owed one, and one that
+  doesn't (it needs Mike, or waits) drops it. An archived thread, or an
+  edit that cuts the owed turn, drops it too.
 - **Waiting on threads.** `end_turn` also takes `waitFor?: string[]`, up
   to 5 thread ids (or unique prefixes) on this runner, with `needs:
   "nothing"`. Once the turn is over it hibernates on the same terms as

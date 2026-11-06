@@ -93,6 +93,9 @@ export const editingPart = {
       const ev = this.emit(st, { type: 'thread.rewound', fromSeq: seq, toSeq, files });
       // What the cut turns left open or found goes with them (pins stay).
       if (rec.needs && rec.needs.seq >= seq) delete rec.needs;
+      // A review owed for a turn that's cut (runner/lab-review.ts) goes too:
+      // its change was undone.
+      if (rec.labReviewOwed && (rec.labReviewOwed.seq ?? Infinity) >= seq) delete rec.labReviewOwed;
       if (rec.highlights?.items.some((h) => h.seq >= seq && h.how !== 'pinned')) {
         rec.highlights.items = rec.highlights.items.filter((h) => h.seq < seq || h.how === 'pinned');
         this.highlightsChanged(st);

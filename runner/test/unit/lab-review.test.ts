@@ -403,3 +403,64 @@ test('labReview: a thread adopted while the new runner is still starting gets it
   assert.equal(b.get(id).waitingOn?.length, 1);
   assert.equal(codex.sessions.length, 1);
 });
+
+// From Codex's third review: the debt is the next completed turn's to
+// settle, so it never outlives a turn that needs Mike (a later restart
+// would review the old turn and put his question to sleep).
+test('labReview: an owed review is dropped by a next turn that needs Mike', async () => {
+  const h = setup();
+  const id = start(h);
+  await h.runner.beginDrain([id], { onHandedOver: () => {} });
+  turn(h, id, { diffs: [codeDiff()] });
+  await tick();
+  const file = path.join(h.home, 'threads', id, 'thread.json');
+  const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+  saved.queue = [{ turnId: 'q1', text: 'Check the new release', images: [], origin: 'runner' }];
+  fs.writeFileSync(file, JSON.stringify(saved));
+  const claude = new FakeAdapter();
+  const codex = new FakeAdapter('codex', { ...CODEX_FLAGS, archives: true });
+  const b = new Runner({
+    config: testConfig(h.home), store: new ThreadStore(h.home),
+    adapters: { claude, codex }, accounts: new FakeAccounts(withCodex()),
+    clock: new FakeClock(), log: nullLogger, defer: (fn) => fn(), copyTranscript: () => false,
+    subagentTranscript: () => null, reachable: async () => true, backgroundJobs: false,
+  });
+  b.start({ skip: new Set([id]) });
+  b.adopt(id);
+  b.startOwedReviews(id);
+  const s = claude.sessions.filter((x) => x.opts.threadId === id).at(-1)!;
+  s.init();
+  s.out({ kind: 'event', event: { type: 'tool.call', itemId: 'e1', name: END_TURN, kind: 'mcp', title: 'end_turn', input: { needs: 'you', asks: [{ question: 'Deploy it?' }] } } });
+  s.text('m1', 'Should I deploy?');
+  s.result();
+  assert.equal(b.threads.get(id)!.rec.labReviewOwed, undefined);
+  b.startOwedReviews();
+  assert.equal(codex.sessions.length, 0);
+  assert.equal(b.get(id).snoozedUntil, undefined, 'his question stays in the inbox');
+});
+
+test('labReview: an edit that cuts the owed turn drops its review', async () => {
+  const h = setup();
+  const id = start(h);
+  await h.runner.beginDrain([id], { onHandedOver: () => {} });
+  turn(h, id, { diffs: [codeDiff()] });
+  await tick();
+  const codex = new FakeAdapter('codex', { ...CODEX_FLAGS, archives: true });
+  const claude = new FakeAdapter();
+  claude.rewind = async () => ({ resumeAt: 'entry-1' });
+  const b = new Runner({
+    config: testConfig(h.home), store: new ThreadStore(h.home),
+    adapters: { claude, codex }, accounts: new FakeAccounts(withCodex()),
+    clock: new FakeClock(), log: nullLogger, defer: (fn) => fn(), copyTranscript: () => false,
+    subagentTranscript: () => null, reachable: async () => true, backgroundJobs: false,
+  });
+  // Hibernated, so the review isn't started as it comes across.
+  b.start({ skip: new Set([id]) });
+  b.adopt(id);
+  b.update({ threadId: id, snoozedUntil: new Date(Date.parse('2026-10-27T12:00:00Z')).toISOString() });
+  assert.ok(b.threads.get(id)!.rec.labReviewOwed);
+  const log = h.store.log(id);
+  const first = log.read(1, log.lastSeq).find((e) => e.type === 'user.message')!;
+  await b.editMessage(id, first.seq, 'Just explain the login bug');
+  assert.equal(b.threads.get(id)!.rec.labReviewOwed, undefined);
+});

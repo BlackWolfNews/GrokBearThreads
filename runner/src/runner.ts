@@ -2116,15 +2116,17 @@ export class Runner {
     // A code change gets another lab's review before it counts as done
     // (experiment labReview, runner/lab-review.ts): the thread waits on
     // the review, so anything waiting on it hears once it's been fixed.
-    // One the last runner owed (a handover) is this finish's to give: this
-    // turn's change if it made one worth it, else that earlier one.
-    const owed = finished && !rt.turn ? rec.labReviewOwed : undefined;
+    // One the last runner owed (a handover) is settled by the next turn to
+    // complete: a finish gives this turn's change if it made one worth it,
+    // else that earlier one; a turn that needs Mike, or waits, drops it,
+    // as it would have stopped that review from starting too.
+    const owed = outcome === 'completed' ? rec.labReviewOwed : undefined;
     if (owed) {
       delete rec.labReviewOwed;
       this.markDirty(st);
     }
     let review = finished && !rt.turn ? this.startLabReview(st, turn.turnId, turn.lastText) : undefined;
-    if (!review && owed && !rec.labReviewOwed) review = this.startLabReview(st, owed.turnId, owed.reply, owed.seq);
+    if (!review && owed && finished && !rt.turn && !rec.labReviewOwed) review = this.startLabReview(st, owed.turnId, owed.reply, owed.seq);
     if (review) this.waitOnReview(st, review);
     // Owed to the next runner (a handover): finished once it's reviewed.
     else if (finished && !rec.labReviewOwed) this.markFinished(st, turn.lastText);
