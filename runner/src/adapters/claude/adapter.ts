@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { sandboxSpawner, type SandboxConfig } from '../../sandbox.ts';
 import os from 'node:os';
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import type { HookInput, McpServerConfig, ModelInfo, Options, PermissionResult, Query, SDKUserMessage, PermissionUpdate } from '@anthropic-ai/claude-agent-sdk';
@@ -118,6 +119,10 @@ export type ClaudeAdapterDeps = {
   neverAsk?: Set<string>;
   // One reply (needs.ts), read when a session starts, as its end_turn is.
   oneReply?: () => boolean;
+  // The container a thread in this folder runs its CLI in, if any
+  // (sandbox.ts). Only a thread's own session; the model and command
+  // probes run as before.
+  sandboxFor?: (cwd: string) => SandboxConfig | undefined;
 };
 
 export class ClaudeAdapter implements AgentAdapter {
@@ -387,7 +392,10 @@ class ClaudeSession implements AgentSession {
         SessionStart: [{ hooks: [async (input) => this.onCompact(input)] }],
       },
       abortController: this.abort,
-      spawnClaudeCodeProcess: groupSpawner(deps.registry, deps.log, (line) => this.stderr(line), opts.threadId),
+      spawnClaudeCodeProcess: ((spawn, sb) => (sb ? sandboxSpawner(spawn, sb, opts.threadId) : spawn))(
+        groupSpawner(deps.registry, deps.log, (line) => this.stderr(line), opts.threadId),
+        deps.sandboxFor?.(opts.cwd),
+      ),
     };
     const servers = deps.mcpServersFor?.(opts.threadId);
     if (servers && Object.keys(servers).length) options.mcpServers = servers;

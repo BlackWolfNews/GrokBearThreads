@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { readSandbox, type SandboxConfig } from './sandbox.ts';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -85,6 +86,8 @@ export type Config = {
   tokenTally?: boolean;
   accountNotes: Record<string, string>;
   poolFolders?: Record<string, string[]>;
+  // Folders whose threads run their CLI in a container (sandbox.ts).
+  sandbox?: SandboxConfig;
   // runner.json's pools as written (pools.ts readPools checks each);
   // absent means the built-in ones. pools.save replaces it.
   pools?: unknown[];
@@ -145,6 +148,7 @@ export type RunnerJson = {
   cliUpdates?: Partial<CliUpdatesConfig>;
   accountNotes?: Record<string, string>;
   poolFolders?: Record<string, string[]>;
+  sandbox?: unknown;
   pools?: unknown[];
   followMain?: boolean;
   // An ssh host that ./check.sh sends the repo's checks to, so suites and
@@ -273,6 +277,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     tokenTally: env.THREADBEAR_TOKEN_TALLY !== 'off',
     accountNotes: stringMap(json.accountNotes) ?? { ...DEFAULT_ACCOUNT_NOTES },
     poolFolders: folderMap(json.poolFolders) ?? { ...DEFAULT_POOL_FOLDERS },
+    ...((sb) => (sb ? { sandbox: sb } : {}))(readSandbox(json.sandbox, expandHome)),
     ...(Array.isArray(json.pools) && json.pools.length ? { pools: json.pools } : {}),
     sync: syncConfig(json.sync, env),
     secretCheck: json.secretCheck?.enabled === true,
