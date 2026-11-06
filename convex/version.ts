@@ -225,4 +225,6 @@
 //    a project's, so each state update rewrote them. A runner sends `notes`
 //    only to a backend of 50 or later; an older runner always sends them, as
 //    before. phone:project still returns them whole.
-export const API_VERSION = 50;
+// 51: an owned schedule can carry `check`, a shell command its runner runs
+//    before each run (experiment scheduleChecks). An older runner sends none.
+export const API_VERSION = 51;

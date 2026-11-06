@@ -733,6 +733,14 @@ Threadbear, and its switch goes.
   fresh session of the same one reviews, and the note says it isn't
   another lab. A folder a pool is kept for (Accounts, pools and Usage, above) is only ever
   reviewed on that pool's logins.
+- **Schedule checks** (`scheduleChecks`, since 6 Nov 2026). A schedule
+  can have a check: a shell command that runs first, in its folder, each
+  time it's due. If the check prints nothing, that run is skipped and no
+  agent starts, so a schedule that looks for new Sentry issues every five
+  minutes only uses a login when there's something to look at. What it
+  prints is added to the message. If the check itself fails, the run goes
+  ahead with the error, so you hear about it. Ask a thread to "only run
+  when there's something new" and it writes the check. Run now skips it.
 - **Keep the Mac awake** (`keepAwake`, since 6 Nov 2026). While any
   thread is working, and for three minutes after, your Mac won't go to
   sleep on its own, so a long turn, or one you started from your phone,

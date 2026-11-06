@@ -138,9 +138,22 @@ export function buildThreadbearTools(
     pocket?: () => PocketControl | undefined;
     gateway?: () => string | undefined;
     gatewayHealth?: () => Promise<ConnectorService[] | undefined>;
+    // The scheduleChecks experiment (schedule-check.ts): the schedule
+    // tools take a `check` only while it's on, so agents elsewhere aren't
+    // handed an argument that does nothing.
+    scheduleChecks?: () => boolean;
   } = {},
 ) {
   const codex = opts.provider === 'codex';
+  const checks = opts.scheduleChecks?.() === true;
+  const checkArg = (update: boolean): Record<string, z.ZodOptional<z.ZodTypeAny>> =>
+    checks
+      ? {
+          check: (update ? z.string().nullable() : z.string())
+            .optional()
+            .describe(`A shell command run first, in its folder, before each run${update ? ' (null takes it off)' : ''}. If it prints nothing the run is skipped and no agent starts; what it prints is added to the message. For pollers: check for something new cheaply here. $THREADBEAR_CHECK_STATE is a file it can keep state in.`),
+        }
+      : {};
   const bulletReplies = () => opts.bulletReplies?.() !== false;
   const oneReply = opts.oneReply?.() === true;
   const all = async (): Promise<ThreadSummary[]> => control.list(['inbox', 'snoozed', 'archived']);
@@ -276,8 +289,9 @@ export function buildThreadbearTools(
     const on = [sc.accountId, sc.poolId && `${sc.poolId} pool`, sc.model, sc.effort, sc.permissionMode && sc.permissionMode !== 'full' ? sc.permissionMode : undefined].filter(Boolean).join(', ');
     const target = sc.threadId ? (sc.threadId === selfId ? 'this thread' : `thread ${sc.threadId.slice(0, 8)} ${await titleOf(sc.threadId)}`) : `a new thread in ${sc.cwd ?? 'its default folder'}${on ? ` (${on})` : ''}`;
     const last = sc.lastRun && sc.lastRun.outcome !== 'sent' ? `; last run ${sc.lastRun.outcome}: ${sc.lastRun.note ?? ''}` : '';
+    const checked = sc.check ? `; check: ${sc.check.length > 80 ? sc.check.slice(0, 80) + '…' : sc.check}` : '';
     const where = sc.runnerName ? ` on ${sc.runnerName}` : '';
-    return `${sc.id.slice(0, 8)}  ${sc.title}  [${sc.whenText}; ${state}${last}]  to ${target}${where}`;
+    return `${sc.id.slice(0, 8)}  ${sc.title}  [${sc.whenText}; ${state}${last}${checked}]  to ${target}${where}`;
   };
 
   const mustSchedules = (): ScheduleControl => {
@@ -453,8 +467,10 @@ export function buildThreadbearTools(
           .string()
           .optional()
           .describe("With new_thread: the runner (machine) it runs on, by name, e.g. studio-mac. Default: this thread's runner. Only when the user asks for another machine; the folder and account are then that machine's (a path there, or left out for its default)."),
+        ...checkArg(false),
       },
-      handle(async ({ text, when, cron, timezone, title, threadId, id: alias, new_thread, folder: f, account: acc, pool: pl, model, effort, permissionMode, runner }) => {
+      handle(async ({ text, when, cron, timezone, title, threadId, id: alias, new_thread, folder: f, account: acc, pool: pl, model, effort, permissionMode, runner, ...rest }) => {
+        const check = (rest as { check?: string }).check;
         if ((when === undefined) === (cron === undefined)) throw new Error('Give exactly one of when (once) and cron (repeating).');
         if (runner && !new_thread) throw new Error("runner is for new_thread schedules; one that sends to a thread runs on that thread's runner.");
         // On another runner the folder and account are that machine's, so
@@ -471,6 +487,7 @@ export function buildThreadbearTools(
           ...(when !== undefined ? { at: parseWhen(when, now()) } : { cron }),
           timezone,
           ...target,
+          ...(check?.trim() ? { check } : {}),
           createdBy: selfId,
         });
         return `Scheduled ${sc.id.slice(0, 8)}: ${await scheduleLine(sc)}`;
@@ -503,8 +520,10 @@ export function buildThreadbearTools(
         model: z.string().nullable().optional(),
         effort: effortEnum.nullable().optional(),
         permissionMode: z.enum(['full', 'ask', 'auto']).optional(),
+        ...checkArg(true),
       },
-      handle(async ({ scheduleId, text, title, when, cron, timezone, paused, folder: f, account: acc, pool: pl, model, effort, permissionMode }) => {
+      handle(async ({ scheduleId, text, title, when, cron, timezone, paused, folder: f, account: acc, pool: pl, model, effort, permissionMode, ...rest }) => {
+        const check = (rest as { check?: string | null }).check;
         const s = mustSchedules();
         const current = await s.find(scheduleId);
         // A schedule on another runner checks its account and pool there, so
@@ -534,6 +553,7 @@ export function buildThreadbearTools(
           model,
           effort,
           permissionMode,
+          ...(check !== undefined ? { check } : {}),
         });
         return await scheduleLine(sc);
       }),
@@ -1360,13 +1380,13 @@ export function serverInstructions(selfId: string, o: { one: boolean; bulletRepl
   );
 }
 
-export function threadbearMcpServer(control: ThreadControl, selfId: string, schedules?: ScheduleControl, projects?: ProjectControl, appRestarts?: AppRestartControl, bulletReplies: () => boolean = () => true, pocket?: () => PocketControl | undefined, oneReply: () => boolean = () => false, gateway?: () => string | undefined, gatewayHealth?: () => Promise<ConnectorService[] | undefined>): McpSdkServerConfigWithInstance {
+export function threadbearMcpServer(control: ThreadControl, selfId: string, schedules?: ScheduleControl, projects?: ProjectControl, appRestarts?: AppRestartControl, bulletReplies: () => boolean = () => true, pocket?: () => PocketControl | undefined, oneReply: () => boolean = () => false, gateway?: () => string | undefined, gatewayHealth?: () => Promise<ConnectorService[] | undefined>, scheduleChecks?: () => boolean): McpSdkServerConfigWithInstance {
   const one = oneReply();
   const server = createSdkMcpServer({
     name: SERVER_NAME,
     version: RUNNER_VERSION,
     instructions: serverInstructions(selfId, { one, bulletReplies: bulletReplies(), pocket: Boolean(pocket?.()), projects: Boolean(projects) }),
-    tools: buildThreadbearTools(control, selfId, Date.now, schedules, projects, appRestarts, { bulletReplies, pocket, oneReply: () => one, gateway, gatewayHealth }),
+    tools: buildThreadbearTools(control, selfId, Date.now, schedules, projects, appRestarts, { bulletReplies, pocket, oneReply: () => one, gateway, gatewayHealth, scheduleChecks }),
   });
   server.tools = [...ALWAYS_ASK_TOOLS].map((name) => ({ name: name.split('__').at(-1)!, permission_policy: 'always_ask' as const }));
   return server;

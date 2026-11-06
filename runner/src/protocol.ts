@@ -775,6 +775,9 @@ export type Schedule = {
   model?: string;
   effort?: EffortLevel;
   permissionMode?: PermissionMode;
+  // A shell command run first, in its folder; a run whose check prints
+  // nothing is skipped (experiment scheduleChecks, schedule-check.ts).
+  check?: string;
   paused: boolean;
   createdAt: string;
   updatedAt: string;

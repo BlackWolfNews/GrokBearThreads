@@ -40,9 +40,16 @@ export const EXPERIMENTS: readonly Experiment[] = [
     on: false,
     reminder: '12503e21',
   },
+  {
+    id: 'scheduleChecks',
+    title: 'Schedule checks: a shell command runs before each scheduled run, and a run whose check prints nothing is skipped',
+    added: '2026-11-06',
+    on: false,
+    reminder: '6328eeda',
+  },
 ];
 
-export type ExperimentId = 'labReview' | 'keepAwake';
+export type ExperimentId = 'labReview' | 'keepAwake' | 'scheduleChecks';
 
 // Read from runner.json each time, so turning one on or off takes effect
 // at the next turn, with no restart.

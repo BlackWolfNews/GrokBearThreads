@@ -11,6 +11,8 @@
 // its own file up once, keeps a live copy of the whole table (and a copy on
 // disk for when the backend can't be reached), and sends only its own,
 // each run taken with a claim first so it's sent once.
+import { experimentOn } from './experiments.ts';
+import { checkOutcome, MAX_CHECK_CHARS, runCheck, type CheckResult } from './schedule-check.ts';
 import { forbiddenText } from './sync.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -109,6 +111,8 @@ export type CreateScheduleParams = {
   model?: string;
   effort?: EffortLevel;
   permissionMode?: PermissionMode;
+  // A shell command run before each run (schedule-check.ts).
+  check?: string;
   paused?: boolean;
   createdBy?: string;
   // Another runner's id or name (runners.list); absent, this one.
@@ -130,6 +134,8 @@ export type UpdateScheduleParams = {
   model?: string | null;
   effort?: EffortLevel | null;
   permissionMode?: PermissionMode;
+  // null or "" takes the check off.
+  check?: string | null;
 };
 
 // The Mac sleeps and timers stop with it, so check often rather than
@@ -171,6 +177,12 @@ export class Scheduler {
   // Threads a draining runner still has (docs/protocol.md, "Handovers"):
   // they're real threads, just not loaded here yet.
   private elsewhere: (threadId: string) => boolean;
+  // Schedule checks (experiment scheduleChecks, schedule-check.ts).
+  private home: string;
+  private checksOn: () => boolean;
+  private check: (p: { command: string; cwd: string; home: string; scheduleId: string }) => Promise<CheckResult>;
+  // Local mode's runs waiting on their check, so a tick doesn't start another.
+  private checking = new Set<string>();
 
   constructor(deps: {
     runner: ScheduleRunner;
@@ -181,8 +193,13 @@ export class Scheduler {
     elsewhere?: (threadId: string) => boolean;
     self?: SelfRunner;
     syncOn?: boolean;
+    checksOn?: () => boolean;
+    runCheck?: (p: { command: string; cwd: string; home: string; scheduleId: string }) => Promise<CheckResult>;
   }) {
     this.runner = deps.runner;
+    this.home = deps.home;
+    this.checksOn = deps.checksOn ?? (() => experimentOn(deps.home, 'scheduleChecks'));
+    this.check = deps.runCheck ?? runCheck;
     this.self = deps.self ?? { id: 'runner', name: 'this Mac' };
     this.syncOn = deps.syncOn ?? false;
     this.elsewhere = deps.elsewhere ?? (() => false);
@@ -511,6 +528,7 @@ export class Scheduler {
       if (p.effort) rec.effort = p.effort;
       if (p.permissionMode) rec.permissionMode = p.permissionMode;
     }
+    if (p.check?.trim()) rec.check = checkedCheck(p.check);
     if (p.createdBy) rec.createdBy = p.createdBy;
     if (this.mode === 'backend') rec.runnerId = runnerId;
     this.plan(rec);
@@ -551,6 +569,10 @@ export class Scheduler {
     if (p.paused !== undefined && p.paused !== rec.paused) {
       rec.paused = p.paused;
       replan = true;
+    }
+    if (p.check !== undefined) {
+      if (p.check === null || !p.check.trim()) delete rec.check;
+      else rec.check = checkedCheck(p.check);
     }
     if (!rec.threadId) {
       if (p.cwd !== undefined) rec.cwd = away ? p.cwd.trim() || undefined : this.checkedFolder(p.cwd);
@@ -651,6 +673,21 @@ export class Scheduler {
     let changed = this.prune(now);
     for (const rec of [...this.items.values()]) {
       if (rec.paused || !rec.nextRunAt || Date.parse(rec.nextRunAt) > now) continue;
+      if (this.checking.has(rec.id)) continue;
+      if (rec.check && this.checksOn()) {
+        // Its check first, then the run (or a skip) as below.
+        this.checking.add(rec.id);
+        void this.checked(rec).then((checked) => {
+          this.checking.delete(rec.id);
+          if (this.stopped || !this.items.has(rec.id)) return;
+          const res = this.send(rec, false, checked);
+          if (res.outcome === 'retry') return;
+          if (rec.at) this.finish(rec);
+          else this.plan(rec);
+          this.changed();
+        });
+        continue;
+      }
       const res = this.send(rec, false);
       // The runner is restarting: leave it due for the next runner.
       if (res.outcome === 'retry') continue;
@@ -701,7 +738,9 @@ export class Scheduler {
           return false;
         });
         if (!claimed || this.stopped) continue;
-        const res = this.send(rec, false);
+        const checked = await this.checked(rec);
+        if (this.stopped) continue;
+        const res = this.send(rec, false, checked);
         if (res.outcome === 'retry') {
           await backend.release(rec.id).catch(() => {});
           continue;
@@ -752,14 +791,34 @@ export class Scheduler {
     await this.recordRun(rec, res.outcome === 'sent', request);
   }
 
-  private send(rec: ScheduleRecord, manual: boolean): { outcome: 'sent' | 'skipped' | 'failed' | 'retry'; threadId?: string; turnId?: string; note?: string } {
+  // Its check, when it has one and checks are on (schedule-check.ts):
+  // undefined to run as usual.
+  private async checked(rec: ScheduleRecord): Promise<{ skip: string } | { extra: string } | undefined> {
+    if (!rec.check || !this.checksOn()) return undefined;
+    let cwd = rec.cwd ? path.resolve(expandHome(rec.cwd)) : this.home;
+    if (rec.threadId) {
+      try {
+        cwd = this.runner.get(rec.threadId).cwd;
+      } catch {
+        // A thread that's gone: send says so.
+      }
+    }
+    const r = await this.check({ command: rec.check, cwd, home: this.home, scheduleId: rec.id }).catch((e: unknown) => ({ ok: false as const, output: '', why: String(e) }));
+    return checkOutcome(r);
+  }
+
+  private send(rec: ScheduleRecord, manual: boolean, checked?: { skip: string } | { extra: string }): { outcome: 'sent' | 'skipped' | 'failed' | 'retry'; threadId?: string; turnId?: string; note?: string } {
     const at = this.iso();
-    const text = `[Scheduled: "${rec.title}", ${this.whenText(rec)}]\n\n${rec.text}`;
+    const text = `[Scheduled: "${rec.title}", ${this.whenText(rec)}]\n\n${rec.text}${checked && 'extra' in checked ? checked.extra : ''}`;
     const record = (outcome: 'sent' | 'skipped' | 'failed', threadId?: string, note?: string) => {
       rec.lastRun = { at, outcome, ...(threadId ? { threadId } : {}), ...(note ? { note } : {}) };
       if (outcome === 'sent') rec.runs += 1;
       this.log.info('schedule ran', { scheduleId: rec.id, outcome, threadId, note });
     };
+    if (checked && 'skip' in checked) {
+      record('skipped', undefined, checked.skip);
+      return { outcome: 'skipped', note: checked.skip };
+    }
     // Its thread is busy on a draining runner: it's sent once the thread
     // has come across, like a busy thread's queue.
     if (rec.threadId && this.elsewhere(rec.threadId)) {
@@ -946,6 +1005,12 @@ function firstLine(text: string): string {
   return (text.split('\n').map((l) => l.trim()).find(Boolean) ?? 'Scheduled message').slice(0, 80);
 }
 
+function checkedCheck(command: string): string {
+  const c = command.trim();
+  if (c.length > MAX_CHECK_CHARS) throw bad(`check must be at most ${MAX_CHECK_CHARS} characters`);
+  return c;
+}
+
 function setOrDelete<K extends 'model' | 'effort'>(rec: ScheduleRecord, key: K, v: ScheduleRecord[K] | null): void {
   if (v === null || v === undefined || v === '') delete rec[key];
   else rec[key] = v;
@@ -971,6 +1036,7 @@ export function scheduleMethods(s: Scheduler): Record<string, (p: Record<string,
         model: str(p, 'model'),
         effort: effort(p.effort) ?? undefined,
         permissionMode: mode(p.permissionMode),
+        check: str(p, 'check'),
         paused: bool(p, 'paused'),
         createdBy: str(p, 'createdBy'),
         runnerId: str(p, 'runnerId'),
@@ -990,6 +1056,7 @@ export function scheduleMethods(s: Scheduler): Record<string, (p: Record<string,
       if (p.effort !== undefined) upd.effort = effort(p.effort);
       if (p.permissionMode !== undefined) upd.permissionMode = mode(p.permissionMode);
       if (p.paused !== undefined) upd.paused = bool(p, 'paused');
+      if (p.check !== undefined) upd.check = p.check === null ? null : str(p, 'check');
       return { schedule: await s.update(upd) };
     },
     'schedules.delete': (p) => s.delete(reqStr(p, 'scheduleId')),
