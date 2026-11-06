@@ -737,6 +737,8 @@ enum MarkdownRenderer {
                 var inner = context
                 inner.code = true
                 if inner.link == nil, FilePathRefs.looksLikePath(code.code) { inner.link = FilePathRefs.url(for: code.code) }
+                // A web address in code (`github.com/owner/repo`) is a link too, kept looking like code.
+                else if inner.link == nil, let web = CodeWebAddress.url(code.code) { inner.link = web }
                 // BackgroundLayoutManager draws the pill `pillPad` past the
                 // glyphs on each side, which ate most of the word space
                 // around it. Kerning the characters either side reserves
