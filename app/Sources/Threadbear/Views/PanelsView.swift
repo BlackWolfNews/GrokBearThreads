@@ -864,7 +864,7 @@ final class WebPanelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUI
         } else {
             config.websiteDataStore = .default()
         }
-        let view = makeView(config)
+        let view = makeView(config, sealed: digest != nil)
         keep(view, as: slot)
         if url.isFileURL {
             // No load until the rule list blocking the network is on it.
@@ -963,9 +963,10 @@ final class WebPanelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUI
     /// The pool's key for a page's scripts-on view, one per digest: not a
     /// page anyone loads, and not the static view's key, so reloading that
     /// (reloadIfLoaded) never reaches this one.
+    private static let scriptsScheme = "threadbear-scripts"
     private static func scriptsSlot(_ url: URL, _ digest: String) -> URL {
         var c = URLComponents()
-        c.scheme = "threadbear-scripts"
+        c.scheme = scriptsScheme
         c.host = digest
         c.path = url.standardizedFileURL.path
         return c.url!
@@ -994,8 +995,8 @@ final class WebPanelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUI
         pendingRenewals.remove(deployment) != nil
     }
 
-    private func makeView(_ config: WKWebViewConfiguration) -> WKWebView {
-        let view = FirstClickWebView(frame: .zero, configuration: config)
+    private func makeView(_ config: WKWebViewConfiguration, sealed: Bool = false) -> WKWebView {
+        let view = sealed ? SealedPreviewWebView(frame: .zero, configuration: config) : FirstClickWebView(frame: .zero, configuration: config)
         view.navigationDelegate = self
         view.uiDelegate = self
         view.allowsBackForwardNavigationGestures = true
@@ -1042,8 +1043,13 @@ final class WebPanelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUI
     /// A page kept from an earlier look, read again: a mockup the agent
     /// has rewritten, a dev server that has rebuilt.
     func reloadIfLoaded(_ url: URL) {
-        guard let view = views[url] else { return }
-        load(url, in: view)
+        if let view = views[url] { load(url, in: view) }
+        // And its scripts-on views, so a changed stylesheet or picture shows
+        // (Codex review). A changed page itself isn't served to them.
+        guard url.isFileURL else { return }
+        for (slot, view) in views where slot.scheme == Self.scriptsScheme && slot.path == url.standardizedFileURL.path {
+            load(url, in: view, scriptsFor: slot.host)
+        }
     }
 
     /// A local file (a mockup in the pane's preview) may read itself and the

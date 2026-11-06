@@ -300,12 +300,34 @@ final class LocalPreviewTests: XCTestCase {
         """, in: view) as? [String]
         XCTAssertEqual(osRoutes, ["undefined", "undefined", ""], "\(osRoutes ?? [])")
 
+        // Natively too: what a script can't be stopped at in the page (Copy
+        // Link in the menu, Copy, Services, a drag) does nothing in this view.
+        let sealed = try XCTUnwrap(view as? SealedPreviewWebView)
+        XCTAssertNil(sealed.menu(for: NSEvent()))
+        XCTAssertNil(sealed.validRequestor(forSendType: .string, returnType: nil))
+        XCTAssertFalse(sealed.writeSelection(to: NSPasteboard(name: .init("LocalPreviewTests")), types: [.string]))
+        _ = try await run("document.body.append('selected'); getSelection().selectAllChildren(document.body)", in: view)
+        let pasteboard = NSPasteboard.general.changeCount
+        sealed.copy(nil)
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(NSPasteboard.general.changeCount, pasteboard, "Copy wrote to the pasteboard")
+        XCTAssertFalse(staticView is SealedPreviewWebView)
+
         // Rewritten after Run them: a reload gets nothing, so the new script never runs.
         try write("index.html", Data(html.replacingOccurrences(of: "script ran", with: "rewritten ran").utf8))
         view.reload()
         try await Task.sleep(for: .seconds(1))
         let after = try? await view.evaluateJavaScript("document.title") as? String
         XCTAssertNotEqual(after, "rewritten ran")
+    }
+
+
+    /// SealedPreviewWebView replaces these by selector: if WebKit renamed
+    /// one, the override would quietly do nothing.
+    func testTheSelectorsSealedPreviewWebViewReplacesExist() {
+        for name in ["draggingSession:sourceOperationMaskForDraggingContext:", "writeSelectionToPasteboard:types:", "copy:", "cut:"] {
+            XCTAssertTrue(WKWebView.instancesRespond(to: NSSelectorFromString(name)), name)
+        }
     }
 
 }
