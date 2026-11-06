@@ -331,6 +331,8 @@ final class AppModel {
     var modelPickerRequest = 0
     /// The same for the account picker.
     var accountPickerRequest = 0
+    /// The same for the composer's context ring.
+    var contextMeterRequest = 0
     /// Every schedule, in the runner's order (soonest first, then the
     /// paused and finished ones). Replaced whole by `schedules.updated`.
     var schedules: [Schedule] = [] {

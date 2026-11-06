@@ -257,6 +257,7 @@ type ThreadSummary = {
   nativeSessionId?: string
   contextTokens?: number
   contextWindow?: number // the model's context window, when the CLI reports it
+                        // (Claude: its result's modelUsage, for the session's model)
   costUsd?: number      // total for the thread so far, if known (Codex reports none)
   panels?: Panel[]      // from the folder's patches (see Patches); absent when there are none
   actions?: Action[]    // likewise

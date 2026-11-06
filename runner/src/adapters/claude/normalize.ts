@@ -55,6 +55,8 @@ export class ClaudeNormalizer {
   private authFailed = false; // this turn's login was refused (signed out, or its session ran out)
   private afterCompact = false;
   private agentTasks = new Set<string>(); // task ids that are sub-agents
+  private model?: string; // the session's model, from init
+  private contextNow?: number; // tokens in the context at the last model call
 
   constructor(ctx: NormalizerContext) {
     this.ctx = ctx;
@@ -136,6 +138,7 @@ export class ClaudeNormalizer {
     if (typeof msg.subtype === 'string' && msg.subtype.startsWith('task_')) this.subagentTask(msg, out);
     if (msg.subtype === 'init' && typeof msg.session_id === 'string') {
       out.push({ kind: 'session', nativeSessionId: msg.session_id, model: msg.model });
+      if (typeof msg.model === 'string') this.model = msg.model;
       // The version of the CLI running this session, so CLI updates know
       // which versions are in use (the runner notes a change).
       if (typeof msg.claude_code_version === 'string' && msg.claude_code_version) out.push({ kind: 'cliVersion', version: msg.claude_code_version });
@@ -244,7 +247,10 @@ export class ClaudeNormalizer {
       }
       case 'message_delta': {
         const tokens = contextTokens(ev.usage);
-        if (tokens !== undefined) out.push({ kind: 'context', contextTokens: tokens });
+        if (tokens !== undefined) {
+          this.contextNow = tokens;
+          out.push({ kind: 'context', contextTokens: tokens });
+        }
         break;
       }
       default:
@@ -500,6 +506,10 @@ export class ClaudeNormalizer {
     }
     this.limitRejected = false;
     this.authFailed = false;
+    // Only the result says how big the model's window is (modelUsage), so
+    // a client can show how full the context is.
+    const window = contextWindowOf(msg.modelUsage, this.model);
+    if (window !== undefined && this.contextNow !== undefined) out.push({ kind: 'context', contextTokens: this.contextNow, contextWindow: window });
     out.push({ kind: 'result', result });
   }
 }
@@ -564,6 +574,19 @@ export function rateLimitReading(info: AnyMsg | undefined): { windows: UsageWind
   const blocked = info.status === 'rejected';
   if (!windows.length && typeof info.status !== 'string') return undefined;
   return { windows, blocked };
+}
+
+// The session model's window from a result's modelUsage, keyed by model
+// name. Other models the turn used (a sub-agent, a title) have entries
+// too, so it's the session model's entry, matched without a "[1m]"-style
+// suffix on either side, or the only entry there is.
+function contextWindowOf(modelUsage: unknown, model: string | undefined): number | undefined {
+  if (!modelUsage || typeof modelUsage !== 'object') return undefined;
+  const entries = Object.entries(modelUsage as Record<string, AnyMsg>).filter(([, u]) => typeof u?.contextWindow === 'number' && u.contextWindow > 0);
+  const bare = (name: string) => name.replace(/\[.*\]$/, '');
+  const own = model ? entries.find(([k]) => k === model) ?? entries.find(([k]) => bare(k) === bare(model)) : undefined;
+  if (own) return own[1].contextWindow as number;
+  return entries.length === 1 ? (entries[0][1].contextWindow as number) : undefined;
 }
 
 function contextTokens(usage: AnyMsg | undefined): number | undefined {

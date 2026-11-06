@@ -672,6 +672,13 @@ reads their passwords or tokens. The account and model a thread runs on are
 small menus on the composer. Whatever you picked last is what the next
 thread starts on.
 
+Once a thread has run a turn, a small ring beside the send button shows
+how full its context is: how much of the model's window the conversation
+takes up. It turns orange when it's nearly full, as Claude and Codex
+compact the conversation by themselves soon after. Click it for the
+tokens used out of the window, the model and login the thread really ran
+on, and what it has cost so far.
+
 To add another login, such as a second Claude subscription, give it a
 folder of its own under `accounts` in Threadbear's data folder, named
 `claude-1` (then `claude-2` and so on, or `codex-1` for Codex), and sign in

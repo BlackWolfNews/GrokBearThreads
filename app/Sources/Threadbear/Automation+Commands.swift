@@ -431,6 +431,11 @@ extension Automation {
             }
             if c["show"] as? Bool == true { return show { app.modelPickerRequest += 1 } }
             return "ok " + json(settings.pickerLines())
+        case "context":
+            // The context ring's popover; only on a thread that has one.
+            guard let thread = app.selectedThread, let meter = ContextMeter(thread) else { return "error no context meter on this thread" }
+            if c["show"] as? Bool == true { return show { app.contextMeterRequest += 1 } }
+            return "ok " + json([meter.amount, "\(meter.percent)%"])
         case "account":
             // An account by its email (as the picker shows it) or its id.
             if let title = c["click"] as? String {

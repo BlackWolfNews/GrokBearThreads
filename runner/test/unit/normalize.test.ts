@@ -84,6 +84,12 @@ test('plain text reply: session, deltas, one assistant.text, result', () => {
   assert.ok(textIdx > lastDelta);
   const ctxOut = outs.find((o) => o.kind === 'context');
   assert.ok(ctxOut && ctxOut.kind === 'context' && ctxOut.contextTokens > 1000);
+  // The result's modelUsage says how big the model's window is, so a client
+  // can show how full the context is.
+  const last = outs.findLast((o) => o.kind === 'context');
+  assert.ok(last && last.kind === 'context');
+  assert.equal(last.contextWindow, 1_000_000);
+  assert.equal(last.contextTokens, ctxOut.contextTokens);
   const result = outs.at(-1)!;
   assert.equal(result.kind, 'result');
   assert.equal(result.kind === 'result' && result.result.outcome, 'completed');
@@ -606,4 +612,22 @@ test('a narration block cut off after its signature streamed is kept as text', (
     { type: 'result', subtype: 'error_during_execution', is_error: true, terminal_reason: 'aborted_streaming', duration_ms: 5, errors: ['[ede_diagnostic] x'] },
   ].flatMap((m) => n.handle(m));
   assert.deepEqual(events(outs), [{ type: 'assistant.text', itemId: 'm1:0', text: 'All done.', narration: true }]);
+});
+
+test("the context window is the session model's, not a sub-agent's", () => {
+  const window = (modelUsage: Record<string, unknown>, model = 'claude-opus-5-5[1m]') => {
+    const m = new ClaudeNormalizer(ctx());
+    m.sent();
+    m.handle({ type: 'system', subtype: 'init', session_id: 's1', model });
+    m.handle({ type: 'stream_event', event: { type: 'message_delta', usage: { input_tokens: 10, cache_read_input_tokens: 5000, output_tokens: 20 } } });
+    const outs = m.handle({ type: 'result', subtype: 'success', is_error: false, duration_ms: 1, modelUsage });
+    const ctxOut = outs.find((o) => o.kind === 'context');
+    return ctxOut && ctxOut.kind === 'context' ? [ctxOut.contextTokens, ctxOut.contextWindow] : undefined;
+  };
+  // The session's model, matched without its "[1m]" suffix, beats a
+  // sub-agent's bigger window.
+  assert.deepEqual(window({ 'claude-haiku-5-5': { contextWindow: 1_000_000 }, 'claude-opus-5-5': { contextWindow: 200_000 } }), [5030, 200_000]);
+  // Only another model listed: can't tell, so no window.
+  assert.equal(window({ 'claude-haiku-5-5': { contextWindow: 1_000_000 }, 'claude-sonnet-5-5': { contextWindow: 1_000_000 } }), undefined);
+  assert.deepEqual(window({ 'claude-opus-5-5': { contextWindow: 1_000_000 } }, 'opus'), [5030, 1_000_000]);
 });
