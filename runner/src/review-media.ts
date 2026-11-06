@@ -41,7 +41,7 @@ function copyPage(dir: string, src: string): ImageRef {
   const into = path.join(dir, crypto.randomUUID());
   fs.mkdirSync(into, { recursive: true });
   const page = path.join(into, path.basename(src));
-  fs.copyFileSync(src, page);
+  fs.writeFileSync(page, withCharset(fs.readFileSync(src)));
   const queue = [...namedFiles(fs.readFileSync(src, 'utf8'), root, root)];
   const seen = new Set<string>();
   const realRoot = fs.realpathSync(root);
@@ -67,6 +67,27 @@ function copyPage(dir: string, src: string): ImageRef {
     if (/\.css$/i.test(file)) queue.push(...namedFiles(fs.readFileSync(file, 'utf8'), path.dirname(file), root));
   }
   return { path: page, mediaType: 'text/html' };
+}
+
+// A page with no charset of its own is read as Latin-1, by WebKit and by
+// Quick Look making its still, so an agent's UTF-8 mockup showed ✓ as "âœ“"
+// (Mike, 7 Nov). Agents write UTF-8 and rarely declare it, so a page that
+// is valid UTF-8 and doesn't say otherwise gets the declaration added in
+// its copy: after the doctype, which must come first or the page drops
+// into quirks mode.
+export function withCharset(bytes: Buffer): Buffer {
+  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) return bytes; // a BOM says it already
+  let text: string;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return bytes; // some other encoding: leave it to the page
+  }
+  // Browsers look for the declaration in the first 1024 bytes.
+  if (/<meta[^>]+charset/i.test(text.slice(0, 1024))) return bytes;
+  const meta = '<meta charset="utf-8">';
+  const doctype = /^\s*<!doctype[^>]*>/i.exec(text);
+  return Buffer.from(doctype ? doctype[0] + meta + text.slice(doctype[0].length) : meta + text, 'utf8');
 }
 
 // Local files named in markup or CSS, resolved from `base`, kept only when

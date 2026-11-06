@@ -50,7 +50,7 @@ final class LocalPreviewSiteTests: XCTestCase {
 
     private func site() throws -> LocalPreviewSite {
         let site = try XCTUnwrap(LocalPreviewSite(file: dir.appendingPathComponent("index.html")))
-        XCTAssertEqual(site.serve("/index.html")?.mimeType, "text/html")
+        XCTAssertEqual(site.serve("/index.html")?.mimeType, "text/html; charset=utf-8")
         return site
     }
 
@@ -73,7 +73,7 @@ final class LocalPreviewSiteTests: XCTestCase {
     /// pictures included, and what its stylesheet and script name too.
     func testNamedStylesAndPicturesLoad() throws {
         let site = try site()
-        XCTAssertEqual(site.serve("/style.css")?.mimeType, "text/css")
+        XCTAssertEqual(site.serve("/style.css")?.mimeType, "text/css; charset=utf-8")
         XCTAssertEqual(site.serve("/pic.png")?.mimeType, "image/png")
         XCTAssertNotNil(site.serve("/assets/pic@2x.png"), "from srcset")
         XCTAssertNotNil(site.serve("/assets/bg.png"), "named by the stylesheet")

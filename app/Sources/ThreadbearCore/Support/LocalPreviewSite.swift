@@ -91,12 +91,17 @@ public final class LocalPreviewSite: @unchecked Sendable {
         guard relative == page || Self.assetExtensions.contains(ext) && lock.withLock({ allowed.contains(relative) }) else { return nil }
         guard let data = Self.read(parts, under: rootFD, maxBytes: Self.maxBytes) else { return nil }
         if relative == page, let pageDigest, Self.digest(data) != pageDigest { return nil }
-        if Self.scannedExtensions.contains(ext), let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) {
+        let utf8 = Self.scannedExtensions.contains(ext) ? String(data: data, encoding: .utf8) : nil
+        if Self.scannedExtensions.contains(ext), let text = utf8 ?? String(data: data, encoding: .isoLatin1) {
             let dir = (relative as NSString).deletingLastPathComponent
             let found = (ext == "css" ? Self.cssReferences(in: text) : Self.htmlReferences(in: text)).compactMap { Self.resolve($0, from: dir) }
             lock.withLock { allowed.formUnion(found) }
         }
-        let mime = UTType(filenameExtension: ext)?.preferredMIMEType ?? "application/octet-stream"
+        var mime = UTType(filenameExtension: ext)?.preferredMIMEType ?? "application/octet-stream"
+        // With no charset in the response or the page, WebKit reads it as
+        // Latin-1 and a UTF-8 page's ✓ shows as "âœ“" (Mike, 7 Nov). A page
+        // or stylesheet that is valid UTF-8 is served as that.
+        if utf8 != nil { mime += "; charset=utf-8" }
         return (data, mime)
     }
 
