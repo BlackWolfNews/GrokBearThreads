@@ -35,7 +35,7 @@ const KNOWN: Record<string, { everywhere: true } | { linux: string; files: strin
   '/usr/bin/sandbox-exec': { linux: "a failed sample counts as not stuck", files: ['frozen-cli.ts'] },
   '/usr/bin/sample': { linux: "a failed sample counts as not stuck", files: ['frozen-cli.ts'] },
   '/usr/bin/open': { linux: "rejects with Couldn't open", files: ['runner.ts'] },
-  '/usr/sbin/taskpolicy': { linux: 'behind a darwin check: the secret check is Mac only', files: ['secret-check.ts'] },
+  '/usr/sbin/taskpolicy': { linux: 'behind a darwin check: the secret check is Mac only, and inBackground skips it off a Mac', files: ['secret-check.ts', 'background.ts'] },
   '/usr/bin/xcrun': { linux: 'behind a darwin check: the secret check is Mac only', files: ['secret-check.ts'] },
   '/usr/bin/pmset': { linux: 'behind a darwin check: the secret check is Mac only', files: ['secret-check.ts'] },
 };
