@@ -668,15 +668,19 @@ test("a busy runner key's newest threads and sidebar rows show, and nothing of t
   const token = 'phone-token';
   await s.ctx.db.insert('tokens', { hash: await sha256(token), name: 'phone', expiresAt: Date.now() + 100_000, createdAt: 1 });
   assert.equal((await call(s.ctx, phone.threadRow, { token, threadId: 'I0' })).view, 'inbox');
-  // Sidebar: tombstones give way before any live row; archived threads aren't listed.
-  const rows = Array.from({ length: CAP.indexRows }, (_, i) => indexRow(`S${i}`));
+  // Sidebar: tombstones give way first, then an old archived row, before
+  // any live one; archived threads are listed (API 53).
+  const rows = Array.from({ length: CAP.indexRows }, (_, i) => (i === 5 ? { ...indexRow(`S${i}`), archivedAt: 'x' } : indexRow(`S${i}`)));
   for (let i = 0; i < rows.length; i += 100) await call(s.ctx, sync.setThreadIndex, { key: BRUCE_KEY, runnerId: BRUCE, rows: rows.slice(i, i + 100), removed: [] });
   await call(s.ctx, sync.setThreadIndex, { key: BRUCE_KEY, runnerId: BRUCE, rows: [], removed: ['S0', 'S1'] });
   await call(s.ctx, sync.setThreadIndex, { key: BRUCE_KEY, runnerId: BRUCE, rows: [indexRow('NEW1'), indexRow('NEW2'), { ...indexRow('A1'), archivedAt: 'x' }], removed: [] });
   const all = s.rows('threadIndex').filter((r) => r.runnerId === BRUCE);
   assert.ok(all.length <= CAP.indexRows, String(all.length));
-  assert.equal(all.filter((r) => !r.deleted).length, CAP.indexRows, 'every live row kept, the two new ones in');
-  assert.ok(!all.some((r) => r.threadId === 'A1' && !r.deleted), 'archived not listed');
+  const listed = new Set(all.filter((r) => !r.deleted).map((r) => r.threadId));
+  assert.equal(listed.size, CAP.indexRows);
+  for (const id of ['NEW1', 'NEW2', 'A1']) assert.ok(listed.has(id), `${id} listed`);
+  assert.ok(!listed.has('S5'), 'the old archived row gave way');
+  assert.ok(listed.has('S2'), 'not a live one');
 });
 
 test("a waiting question keeps exactly what its answer is matched on; one too big to fit says to answer on the Mac", async () => {
