@@ -448,6 +448,8 @@ export function formatStatus(s: RunnerStatus, threads: ThreadSummary[], now: num
   const u = s.update;
   if (u) lines.push(formatUpdate(u, now));
   if (s.upstream && (s.upstream.state !== 'off' || s.upstream.published)) lines.push(formatUpstream(s.upstream, now).split('\n')[0]);
+  // A held release is the one thing here that wants doing something about.
+  if (s.upstream?.held) lines.push(heldLine(s.upstream.held));
   if (s.sync) lines.push(formatSync(s.sync, now));
   if (s.sync?.scrub) lines.push(...formatSecrets(s.sync.scrub, s.secretCheck, now, s.sync.full));
   // Releases never touch the LaunchAgent (launch.mjs, the plist, Threadbear
@@ -520,11 +522,17 @@ function formatUpdate(u: NonNullable<RunnerStatus['update']>, now: number): stri
   }
 }
 
+// Mike's runner, when GitHub's checks keep main's tip from being today's
+// release (upstream.ts ciVerdict).
+function heldLine(h: { commit: string; why: string }): string {
+  return `Today's release is waiting: ${h.why} (${h.commit.slice(0, 8)})`;
+}
+
 // Mike's releases (src/upstream.ts): a line, then what's in a release
 // main doesn't have yet.
 export function formatUpstream(u: UpstreamStatus, now: number): string {
   const checked = u.checkedAt ? `, checked ${duration(now - Date.parse(u.checkedAt))} ago` : '';
-  const published = u.published ? `\nLast release tagged here: ${u.published.tag}` : '';
+  const published = (u.published ? `\nLast release tagged here: ${u.published.tag}` : '') + (u.held ? `\n${heldLine(u.held)}` : '');
   const r = u.release;
   switch (u.state) {
     case 'off':

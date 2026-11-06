@@ -117,7 +117,10 @@ changing someone's Threadbear uses the lowest layer that does the job:
 **Releases, not Mike's main.** Mike's `main` moves dozens of times a day. Once a day,
 Mike's own runner tags the newest commit it has been running as its last good release
 for at least six hours, as `release/YYYY-MM-DD`, if anything changed since the last tag.
-The tag is signed with Mike's SSH signing key and pushed to GitHub. The tag's message
+It also waits until GitHub's checks (the Xcode 26 builds) have passed on that exact
+commit, as the runner staying up says nothing about the apps building. A release held
+back says why in `tb status` and the Updates panel, and goes out on the next hourly look
+once the checks are green. The tag is signed with Mike's SSH signing key and pushed to GitHub. The tag's message
 lists the changes since the last tag, which is what the app shows.
 
 **Signed, because it's code that runs as you.** Setup pins Mike's public key

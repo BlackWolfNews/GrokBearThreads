@@ -131,6 +131,9 @@ final class UpdatesTextTests: XCTestCase {
         let mikes = try JSONDecoder().decode(RunnerUpdates.self, from: Data(#"{"state":"idle","upstream":{"state":"off","reason":"upstream is this repo","published":{"tag":"release/2026-10-30","at":"x"}}}"#.utf8))
         XCTAssertEqual(UpdatesText.upstreamLine(mikes.upstream), "Your last release for everyone else is release/2026-10-30.")
         XCTAssertFalse(UpdatesText.needsYou(app: Side(), runner: mikes))
+        // Unless GitHub's checks are holding today's back: then it says why.
+        let held = try JSONDecoder().decode(RunnerUpdates.self, from: Data(#"{"state":"idle","upstream":{"state":"off","published":{"tag":"release/2026-10-30","at":"x"},"held":{"commit":"abc","why":"\"Builds on Xcode 26\" didn't pass on it","at":"x"}}}"#.utf8))
+        XCTAssertEqual(UpdatesText.upstreamLine(held.upstream), #"Your next release for everyone else is waiting: "Builds on Xcode 26" didn't pass on it."#)
         XCTAssertNil(UpdatesText.upstreamLine(nil))
     }
 }

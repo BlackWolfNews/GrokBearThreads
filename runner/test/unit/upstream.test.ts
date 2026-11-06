@@ -6,7 +6,7 @@ import path from 'node:path';
 import { tmpDir } from '../helpers/fakes.ts';
 import { FakeClock } from '../../src/clock.ts';
 import { nullLogger } from '../../src/log.ts';
-import { FETCH_INTERVAL_MS, FIRST_LOOK_MS, SETTLE_MS, Upstream, parseImportant, repoKey, signersPath, splitSignedTag, tagFor } from '../../src/upstream.ts';
+import { type CiRun, FETCH_INTERVAL_MS, FIRST_LOOK_MS, SETTLE_MS, Upstream, ciVerdict, parseImportant, repoKey, signersPath, splitSignedTag, tagFor } from '../../src/upstream.ts';
 import { PATIENCE_MS } from '../helpers/patience.ts';
 
 // Commits and tags in the throwaway repos need a name, and must not pick
@@ -214,6 +214,72 @@ test("Mike's runner tags main once a day, signed, once it has settled", async ()
   assert.equal(await up.publishOnce(), undefined);
   clock.advance(24 * 60 * 60_000);
   assert.equal(await up.publishOnce(), undefined);
+});
+
+test("ciVerdict: every workflow's latest attempt has to pass", () => {
+  const run = (workflow: string, status: string, conclusion: string | null, attempt = 1): CiRun => ({ workflow, name: `wf ${workflow}`, status, conclusion, attempt });
+  assert.equal(ciVerdict([run('1', 'completed', 'success'), run('2', 'completed', 'skipped')]), undefined);
+  assert.match(ciVerdict([])!, /hasn't run/);
+  assert.match(ciVerdict([run('1', 'completed', 'success'), run('2', 'in_progress', null)])!, /still running/);
+  assert.equal(ciVerdict([run('1', 'completed', 'failure'), run('2', 'completed', 'cancelled')]), '"wf 1", "wf 2" didn\'t pass on it');
+  // A red run re-run green passes; a green one re-run red doesn't.
+  assert.equal(ciVerdict([run('1', 'completed', 'failure', 1), run('1', 'completed', 'success', 2)]), undefined);
+  assert.match(ciVerdict([run('1', 'completed', 'success', 1), run('1', 'completed', 'failure', 2)])!, /didn't pass/);
+});
+
+test("Mike's runner holds a release until GitHub's checks pass on that commit", async () => {
+  const w = world();
+  // origin as GitHub, still pushing to the bare repo (the runner reads the
+  // configured URL, git fetches through the insteadOf).
+  git(w.mike, 'config', 'remote.origin.url', 'https://github.com/mikecann/threadbear.git');
+  git(w.mike, 'config', `url.${path.join(w.root, 'mike.git')}.insteadOf`, 'https://github.com/mikecann/threadbear.git');
+  fs.mkdirSync(path.join(w.mike, '.github', 'workflows'), { recursive: true });
+  const tip = commit(w.mike, '.github/workflows/build.yml', 'Build on GitHub');
+  git(w.mike, 'push', '-q', 'origin', 'main');
+  const committed = Number(git(w.mike, 'log', '-1', '--format=%ct')) * 1000;
+  const clock = new FakeClock(committed + 2 * SETTLE_MS);
+  let runs: CiRun[] | Error = [{ workflow: '7', name: 'Builds on Xcode 26', status: 'completed', conclusion: 'failure', attempt: 1 }];
+  const asked: string[] = [];
+  const up = upstreamFor(w.mike, w.home, clock, {
+    publish: { publish: true, signingKey: w.mikeKey.priv },
+    runningMainSettled: () => true,
+    ciRuns: async (repo: string, sha: string) => {
+      asked.push(`${repo} ${sha}`);
+      if (runs instanceof Error) throw runs;
+      return runs;
+    },
+  });
+
+  assert.equal(await up.publishOnce(), undefined, 'a red build holds it');
+  assert.deepEqual(asked, [`mikecann/threadbear ${tip}`]);
+  assert.equal(up.status().held?.commit, tip);
+  assert.match(up.status().held!.why, /"Builds on Xcode 26" didn't pass/);
+  assert.equal(git(w.mike, 'tag', '--list', 'release/2026-12*'), '');
+  // A check of upstream in between leaves it saying so.
+  await up.check();
+  assert.ok(up.status().held);
+
+  runs = new Error('offline');
+  assert.equal(await up.publishOnce(), undefined, "checks it can't read hold it too");
+  assert.match(up.status().held!.why, /couldn't read GitHub's checks/);
+
+  runs = [{ workflow: '7', name: 'Builds on Xcode 26', status: 'completed', conclusion: 'success', attempt: 2 }];
+  const tag = await up.publishOnce();
+  assert.equal(tag, tagFor(new Date(clock.now())));
+  assert.equal(git(w.mike, 'rev-parse', `${tag}^{commit}`), tip);
+  assert.equal(up.status().held, undefined);
+  assert.equal(up.status().published?.tag, tag);
+});
+
+test("a main whose origin isn't GitHub can't show its checks, so it waits", async () => {
+  const w = world();
+  fs.mkdirSync(path.join(w.mike, '.github', 'workflows'), { recursive: true });
+  commit(w.mike, '.github/workflows/build.yml', 'Build on GitHub');
+  git(w.mike, 'push', '-q', 'origin', 'main');
+  const committed = Number(git(w.mike, 'log', '-1', '--format=%ct')) * 1000;
+  const up = upstreamFor(w.mike, w.home, new FakeClock(committed + 2 * SETTLE_MS), { publish: { publish: true, signingKey: w.mikeKey.priv }, runningMainSettled: () => true, ciRuns: async () => assert.fail('not asked') });
+  assert.equal(await up.publishOnce(), undefined);
+  assert.match(up.status().held!.why, /isn't on GitHub/);
 });
 
 test('publishing needs a signing key', async () => {

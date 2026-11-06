@@ -1590,13 +1590,16 @@ public struct RunnerUpdates: Sendable, Hashable, Decodable {
         public var release: Release?
         /// Mike's own runner: the last release tag it made.
         public var publishedTag: String?
+        /// Mike's own runner: why today's release is waiting on GitHub's checks.
+        public var heldWhy: String?
 
-        public init(state: String, reason: String? = nil, checkout: String? = nil, release: Release? = nil, publishedTag: String? = nil) {
+        public init(state: String, reason: String? = nil, checkout: String? = nil, release: Release? = nil, publishedTag: String? = nil, heldWhy: String? = nil) {
             self.state = state
             self.reason = reason
             self.checkout = checkout
             self.release = release
             self.publishedTag = publishedTag
+            self.heldWhy = heldWhy
         }
 
         public init(from decoder: Decoder) throws {
@@ -1606,10 +1609,12 @@ public struct RunnerUpdates: Sendable, Hashable, Decodable {
             checkout = (try? c.decodeIfPresent(String.self, forKey: .checkout)) ?? nil
             release = (try? c.decodeIfPresent(Release.self, forKey: .release)) ?? nil
             publishedTag = ((try? c.decodeIfPresent(Published.self, forKey: .published)) ?? nil)?.tag
+            heldWhy = ((try? c.decodeIfPresent(Held.self, forKey: .held)) ?? nil)?.why
         }
 
         private struct Published: Decodable { var tag: String }
-        enum CodingKeys: String, CodingKey { case state, reason, checkout, release, published }
+        private struct Held: Decodable { var why: String }
+        enum CodingKeys: String, CodingKey { case state, reason, checkout, release, published, held }
 
         /// A newer release than main has, to bring in.
         public var available: Bool { state == "available" && (release?.changes ?? 0) > 0 }

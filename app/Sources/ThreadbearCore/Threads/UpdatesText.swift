@@ -76,6 +76,9 @@ public enum UpdatesText {
     /// why it can't tell. Nil when there's nothing to say (no upstream).
     public static func upstreamLine(_ u: RunnerUpdates.Upstream?) -> String? {
         guard let u else { return nil }
+        // Held comes first: it's the one that wants something doing (a red
+        // build on main), and the last tag is still in tb status.
+        if let why = u.heldWhy, u.state == "off" { return "Your next release for everyone else is waiting: \(why)." }
         if let tag = u.publishedTag, u.state == "off" { return "Your last release for everyone else is \(tag)." }
         switch u.state {
         case "available":

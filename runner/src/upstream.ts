@@ -29,6 +29,10 @@
 // hand on: the runner it's running is main's, has been marked good and up
 // for an hour, and main's tip is an hour old, so a commit that crashes
 // the runner or is about to be followed by its fix isn't what goes out.
+// And GitHub's checks have passed on that exact commit (ciVerdict): the
+// runner staying up says nothing about the apps building. release/2026-11-04
+// to -06 went out not building on Xcode 26.6, and people installing it
+// found out before Mike did (PR #1, Maroš's fork).
 import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
@@ -98,7 +102,13 @@ export type UpstreamStatus = {
   release?: UpstreamRelease;
   // Mike's runner: the last release tag it made, and when it next looks.
   published?: { tag: string; at: string };
+  // Mike's runner: why main's tip isn't today's release yet, when it's
+  // only GitHub's checks in the way (ciVerdict). Gone once it's tagged.
+  held?: { commit: string; why: string; at: string };
 };
+
+// One GitHub Actions run of a workflow on a commit, as ciVerdict needs it.
+export type CiRun = { workflow: string; name: string; status: string; conclusion: string | null; attempt: number };
 
 export type PublishConfig = { publish: boolean; signingKey?: string };
 
@@ -119,7 +129,40 @@ export type UpstreamDeps = {
   // Replaced in tests.
   git?: (cwd: string, args: string[]) => Promise<string>;
   gitBytes?: (cwd: string, args: string[]) => Promise<Buffer>;
+  // The Actions runs on a commit, from GitHub (githubRuns). Replaced in tests.
+  ciRuns?: (repo: string, commit: string) => Promise<CiRun[]>;
 };
+
+// The push runs on one commit of a public GitHub repo ("owner/name"). No
+// token: the repo's public, and an hourly look is far inside the 60 an
+// hour GitHub allows without one.
+export async function githubRuns(repo: string, commit: string): Promise<CiRun[]> {
+  const res = await fetch(`https://api.github.com/repos/${repo}/actions/runs?head_sha=${commit}&event=push&per_page=100`, {
+    headers: { accept: 'application/vnd.github+json', 'user-agent': 'threadbear-runner' },
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!res.ok) throw new Error(`GitHub answered ${res.status}`);
+  const body = (await res.json()) as { workflow_runs?: { workflow_id: number; name: string; status: string; conclusion: string | null; run_attempt?: number }[] };
+  return (body.workflow_runs ?? []).map((r) => ({ workflow: String(r.workflow_id), name: r.name, status: r.status, conclusion: r.conclusion, attempt: r.run_attempt ?? 1 }));
+}
+
+// Whether a commit's checks let it be a release: undefined when they do,
+// or why not. Each workflow counts by its latest attempt, so a red run
+// that's been re-run green passes. None at all holds it too: GitHub hasn't
+// started them yet, or the commit isn't on GitHub.
+export function ciVerdict(runs: CiRun[]): string | undefined {
+  const latest = new Map<string, CiRun>();
+  for (const r of runs) {
+    const had = latest.get(r.workflow);
+    if (!had || r.attempt > had.attempt) latest.set(r.workflow, r);
+  }
+  if (!latest.size) return "GitHub hasn't run its checks yet";
+  const runsOf = [...latest.values()];
+  const failed = runsOf.filter((r) => r.status === 'completed' && !['success', 'neutral', 'skipped'].includes(r.conclusion ?? ''));
+  if (failed.length) return `${failed.map((r) => `"${r.name}"`).join(', ')} didn't pass on it`;
+  if (runsOf.some((r) => r.status !== 'completed')) return "GitHub's checks are still running on it";
+  return undefined;
+}
 
 export function signersPath(home: string): string {
   return path.join(home, 'upstream-signers');
@@ -403,9 +446,15 @@ export class Upstream {
     await this.git(checkout, ['fetch', '-q', '--no-tags', 'origin', `+refs/tags/${TAG_PREFIX}*:refs/tags/${TAG_PREFIX}*`]);
     const tag = tagFor(new Date(now));
     const tags = (await this.git(checkout, ['tag', '--list', '--sort=-refname', `${TAG_PREFIX}*`])).split('\n').filter(Boolean);
-    if (tags.includes(tag)) return undefined;
+    if (tags.includes(tag)) return this.hold(undefined);
     const last = tags[0];
-    if (last && (await this.isAncestor(checkout, tip, last))) return undefined;
+    if (last && (await this.isAncestor(checkout, tip, last))) return this.hold(undefined);
+    const why = await this.checksSay(checkout, tip);
+    if (why) {
+      this.hold({ commit: tip, why, at: new Date(now).toISOString() });
+      return undefined;
+    }
+    this.hold(undefined);
     const subjects = (await this.git(checkout, ['log', '--no-merges', '--format=- %s', last ? `${last}..${tip}` : tip, '--max-count=200'])).trim();
     // Important commits lead the message, so the release says so wherever
     // it's read (forks find them from the commits' trailers themselves).
@@ -428,6 +477,33 @@ export class Upstream {
     return tag;
   }
 
+  // Why GitHub's checks hold this commit back, or undefined when they
+  // don't. A main with no workflows has nothing to wait for. One that has
+  // them waits for them, and is held when they can't be read: a release
+  // that can wait a day is better than one that doesn't build.
+  private async checksSay(checkout: string, tip: string): Promise<string | undefined> {
+    const workflows = (await this.git(checkout, ['ls-tree', '--name-only', tip, '.github/workflows/'])).split('\n').filter((f) => /\.ya?ml$/.test(f));
+    if (!workflows.length) return undefined;
+    // The URL as configured, not as an insteadOf rewrites it for fetching.
+    const key = repoKey(await this.git(checkout, ['config', '--get', 'remote.origin.url']).catch(() => ''));
+    if (!key.startsWith('github.com/')) return "origin isn't on GitHub, so its checks can't be read";
+    try {
+      return ciVerdict(await (this.deps.ciRuns ?? githubRuns)(key.slice('github.com/'.length), tip));
+    } catch (e) {
+      return `couldn't read GitHub's checks (${String(e)})`;
+    }
+  }
+
+  // Says (or stops saying) why today's release is waiting, logging only a
+  // change, as this runs every hour.
+  private hold(held: UpstreamStatus['held']): undefined {
+    const was = this.st.held;
+    if (held && (was?.commit !== held.commit || was.why !== held.why)) this.deps.log.info('holding back a release', { commit: held.commit, why: held.why });
+    if (!held && !was) return undefined;
+    this.set({ ...this.st, held });
+    return undefined;
+  }
+
   private async isAncestor(checkout: string, a: string, b: string): Promise<boolean> {
     try {
       await this.git(checkout, ['merge-base', '--is-ancestor', a, b]);
@@ -438,7 +514,13 @@ export class Upstream {
   }
 
   private set(next: UpstreamStatus): UpstreamStatus {
-    const keep = { ...(this.deps.checkout ? { checkout: this.deps.checkout } : {}), ...(this.st.published && !next.published ? { published: this.st.published } : {}) };
+    // published and held belong to publishOnce: a check's state leaves them
+    // be (held goes only when publishOnce sets it, to undefined).
+    const keep = {
+      ...(this.deps.checkout ? { checkout: this.deps.checkout } : {}),
+      ...(this.st.published && !next.published ? { published: this.st.published } : {}),
+      ...(this.st.held && !('held' in next) ? { held: this.st.held } : {}),
+    };
     // A failed or in-progress check keeps the last release it knew of.
     const release = next.release ?? (next.state === 'checking' || next.state === 'failed' ? this.st.release : undefined);
     const st: UpstreamStatus = { ...next, ...keep, ...(release ? { release } : {}) };
