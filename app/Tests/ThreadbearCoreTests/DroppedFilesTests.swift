@@ -61,6 +61,17 @@ final class DroppedFilesTests: XCTestCase {
         XCTAssertNotEqual(again, saved)
     }
 
+    /// A screen recording's floating thumbnail is a temp file too; it goes
+    /// in as a path, which has to outlive the drop.
+    func testATempRecordingIsKeptToo() throws {
+        let mov = temp.appendingPathComponent("Screen Recording.mov")
+        try Data(repeating: 7, count: 64).write(to: mov)
+        let out = try XCTUnwrap(DroppedFiles.keepingTransient([mov], temp: temp, into: keep).first)
+        try FileManager.default.removeItem(at: mov)
+        XCTAssertEqual(out.lastPathComponent, "Screen Recording.mov")
+        XCTAssertEqual(try Data(contentsOf: out).count, 64)
+    }
+
     func testAFileThatCannotBeCopiedIsPassedOnAsItWas() {
         let gone = temp.appendingPathComponent("gone.png")
         XCTAssertEqual(DroppedFiles.keepingTransient([gone], temp: temp, into: keep), [gone])

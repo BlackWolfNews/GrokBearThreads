@@ -764,24 +764,26 @@ final class ComposerTextView: NSTextView {
     /// raw image data (a screenshot on the clipboard) is written to a temp
     /// PNG first. Any other file (a video, a PDF, a folder) goes in as its
     /// full path, for the agent to open where it is: nothing's copied, so
-    /// a big one costs nothing. In the composer they go in place of
-    /// `range` (the selection, for a paste).
+    /// a big one costs nothing, except from a temp folder macOS may clear
+    /// (a floating thumbnail's), where an APFS clone keeps it for free.
+    /// In the composer they go in place of `range` (the selection, for a paste).
     func takeImages(from pasteboard: NSPasteboard, at range: NSRange? = nil) -> Bool {
-        let urls = fileURLs(pasteboard)
+        var urls = fileURLs(pasteboard)
         // A photo copied in Photos is a file in the Photos library, which
         // the runner isn't allowed to read, with the image itself beside it.
+        // Each item goes in as its saved image, or its file if it has none.
         if !urls.isEmpty, urls.allSatisfy(DroppedFiles.isInPhotosLibrary) {
-            let saved = (pasteboard.pasteboardItems ?? []).compactMap(savedImage)
-            if !saved.isEmpty {
-                deliver(saved, at: range)
-                return true
+            urls = (pasteboard.pasteboardItems ?? []).compactMap { item in
+                savedImage(item) ?? item.string(forType: .fileURL).flatMap(URL.init(string:))
             }
         }
         if !urls.isEmpty {
-            // A screenshot's floating thumbnail is a temp file macOS deletes
-            // as the drop ends, so copy those now, not when the runner reads them.
-            let images = DroppedFiles.keepingTransient(urls.filter(isImage))
-            let others = urls.filter { !isImage($0) }
+            // A screenshot's or screen recording's floating thumbnail is a
+            // temp file macOS deletes as the drop ends, so copy those now,
+            // not when the runner (or the agent) reads them.
+            let kept = DroppedFiles.keepingTransient(urls)
+            let images = kept.filter(isImage)
+            let others = kept.filter { !isImage($0) }
             var at = range
             if !others.isEmpty { at = insertPaths(others, replacing: range) }
             if !images.isEmpty { deliver(images, at: at) }

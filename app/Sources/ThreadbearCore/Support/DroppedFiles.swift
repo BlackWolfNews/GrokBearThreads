@@ -1,6 +1,6 @@
 import Foundation
 
-/// Pictures dropped from a temp folder, copied somewhere they'll stay.
+/// Files dropped from a temp folder, copied somewhere they'll stay.
 ///
 /// Dragging a screenshot's floating thumbnail hands over a file in
 /// `.../T/TemporaryItems/NSIRD_screencaptureui_*`, and macOS deletes it as
@@ -24,7 +24,8 @@ public enum DroppedFiles {
             || path.hasPrefix(canonical(temp.path) + "/")
     }
 
-    /// `urls` with each transient one swapped for a copy under `folder`,
+    /// `urls` with each transient one swapped for a copy under `folder` (an
+    /// APFS clone, so a big recording costs nothing),
     /// keeping its name (the runner's messages name the file). One that
     /// can't be copied is passed on as it was, for the runner to explain.
     public static func keepingTransient(_ urls: [URL], temp: URL = FileManager.default.temporaryDirectory, into folder: URL = keepFolder) -> [URL] {
