@@ -19,6 +19,12 @@ export type SlashCommand = {
   description?: string;
   argumentHint?: string;
   source: SlashCommandSource;
+  aliases?: string[];
+  // Where it was defined (docs/protocol.md, "Slash commands"): user,
+  // project, plugin (with `plugin`), claude.ai or system.
+  scope?: string;
+  plugin?: string;
+  path?: string; // its file on this machine, when found
 };
 
 export type ParsedCommand = { name: string; args: string };

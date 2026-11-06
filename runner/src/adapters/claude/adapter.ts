@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { sandboxSpawner, type SandboxConfig } from '../../sandbox.ts';
 import os from 'node:os';
+import path from 'node:path';
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import type { HookInput, McpServerConfig, ModelInfo, Options, PermissionResult, Query, SDKUserMessage, PermissionUpdate } from '@anthropic-ai/claude-agent-sdk';
 import type { Account, EffortLevel, ModelChoice, PermissionMode, Question } from '../../protocol.ts';
@@ -191,7 +192,7 @@ export class ClaudeAdapter implements AgentAdapter {
     const queryFn = deps.queryFn ?? sdkQuery;
     const q = queryFn({ prompt: never, options });
     try {
-      return claudeCommands(await q.supportedCommands());
+      return claudeCommands(await q.supportedCommands(), { cwd, configDir: account.configDir });
     } finally {
       try {
         q.close();
@@ -701,7 +702,7 @@ class ClaudeSession implements AgentSession {
 
   async commands(): Promise<SlashCommand[]> {
     if (this.exited) return [];
-    return claudeCommands(await this.q.supportedCommands());
+    return claudeCommands(await this.q.supportedCommands(), { cwd: this.opts.cwd, configDir: this.opts.account.configDir });
   }
 
   async setModel(model: string | undefined): Promise<void> {
@@ -758,18 +759,51 @@ class ClaudeSession implements AgentSession {
 // The SDK's list, as the picker's. Claude Code's own are marked builtin;
 // the rest are Mike's or the folder's commands and skills. Rows can share
 // a name, and a builtin one is what /name runs, so that one is kept.
-export function claudeCommands(list: { name: string; description?: string; argumentHint?: string; builtin?: boolean }[]): SlashCommand[] {
+export function claudeCommands(
+  list: { name: string; description?: string; argumentHint?: string; builtin?: boolean; aliases?: string[] }[],
+  where?: { cwd: string; configDir: string },
+): SlashCommand[] {
   const byName = new Map<string, SlashCommand>();
   for (const c of list) {
     if (typeof c?.name !== 'string' || !c.name) continue;
     const name = c.name.replace(/^\//, '');
     if (byName.get(name)?.source === 'cli') continue;
     const out: SlashCommand = { name, source: c.builtin ? 'cli' : 'skill' };
-    if (c.description) out.description = c.description;
+    const { text, scope, plugin } = c.builtin ? { text: c.description, scope: 'system', plugin: undefined } : commandScope(c.description);
+    if (text) out.description = text;
     if (c.argumentHint) out.argumentHint = c.argumentHint;
+    const aliases = (c.aliases ?? []).filter((a) => typeof a === 'string' && a && a !== name);
+    if (aliases.length) out.aliases = aliases;
+    if (scope) out.scope = scope;
+    if (plugin) out.plugin = plugin;
+    const file = where && (scope === 'user' || scope === 'project') ? commandFile(name, scope === 'user' ? where.configDir : path.join(where.cwd, '.claude')) : undefined;
+    if (file) out.path = file;
     byName.set(name, out);
   }
   return [...byName.values()];
+}
+
+// The CLI says where a command came from only as a tag at the end of its
+// description: "(user)", "(project)", "(claude.ai sync)", or a plugin's
+// name. The tag comes off the description, as the palette says it itself.
+export function commandScope(description: string | undefined): { text?: string; scope?: string; plugin?: string } {
+  const m = description ? /^([\s\S]*?)\s*\(([^()]+)\)\s*$/.exec(description) : null;
+  if (!m) return { text: description };
+  const tag = m[2].trim();
+  const text = m[1] || undefined;
+  if (tag === 'user' || tag === 'project') return { text, scope: tag };
+  if (/^claude\.ai/.test(tag)) return { text, scope: 'claude.ai' };
+  // A plugin's commands are tagged with its name, which never has a space;
+  // words in brackets that end a sentence ("(see below)") stay put.
+  if (/^[\w.@-]+(:[\w.@-]+)?$/.test(tag)) return { text, scope: 'plugin', plugin: tag.replace(/^plugin:/, '') };
+  return { text: description };
+}
+
+// A user or project command's file: its skill, else its command (a ":"
+// in the name is a folder, as the CLI reads them).
+export function commandFile(name: string, base: string): string | undefined {
+  const tries = [path.join(base, 'skills', name, 'SKILL.md'), path.join(base, 'commands', ...name.split(':')) + '.md'];
+  return tries.find((f) => fs.existsSync(f));
 }
 
 // "Always allow" keeps the CLI's suggested allow rules for this thread

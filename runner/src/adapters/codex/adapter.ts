@@ -315,7 +315,9 @@ export function codexSkillCommands(r: SkillsListResponse | undefined): SlashComm
     if (seen.has(s.name!)) continue;
     seen.add(s.name!);
     const description = s.shortDescription || s.description;
-    out.push({ name: s.name!, source: 'skill', ...(description ? { description } : {}) });
+    // Codex's "repo" is the folder's, as Claude's "project".
+    const scope = s.scope === 'repo' ? 'project' : s.scope;
+    out.push({ name: s.name!, source: 'skill', ...(description ? { description } : {}), ...(scope ? { scope } : {}), path: s.path! });
   }
   return out;
 }

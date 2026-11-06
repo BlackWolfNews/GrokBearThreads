@@ -1759,8 +1759,23 @@ type SlashCommand = {
   description?: string;
   argumentHint?: string;     // "[model]", "<file>"
   source: 'threadbear' | 'cli' | 'skill';  // the CLI's own, or Mike's or the folder's
+  aliases?: string[];        // other names that run it ("cost", "stats" for /usage)
+  // Where it was defined: 'user' (the login's own), 'project' (the
+  // folder's), 'plugin' (with `plugin` naming it), 'claude.ai' (synced
+  // from claude.ai), 'system' (the CLI's bundled ones). Absent: unknown.
+  scope?: string;
+  plugin?: string;
+  path?: string;             // its file on the runner's machine, when found
 };
 ```
+
+Claude's CLI says where a command came from only as a tag at the end of
+its description ("(user)", "(project)", "(claude.ai sync)", or a plugin's
+name); the runner takes the tag off the description, sets `scope`, and
+looks for the file: `skills/<name>/SKILL.md`, then `commands/<name>.md`
+(a `:` in the name is a folder), under the login's config folder for
+`user` and the thread's folder's `.claude` for `project`. Codex's
+`skills/list` gives the path and scope itself (`repo` is `project`).
 
 ## Editing a message
 

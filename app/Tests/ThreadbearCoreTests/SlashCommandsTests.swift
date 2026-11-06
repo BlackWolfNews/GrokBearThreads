@@ -54,4 +54,15 @@ final class SlashCommandsTests: XCTestCase {
         XCTAssertEqual(list.commands[1].argumentHint, "<f>")
         XCTAssertEqual(SlashPalette.Category.cli.title(provider: "codex"), "Codex")
     }
+
+    func testOriginSaysWhereItCameFrom() {
+        func origin(_ c: SlashCommand) -> String { SlashPalette.origin(of: c, provider: "claude") }
+        XCTAssertEqual(origin(SlashCommand(name: "v", source: "skill", scope: "user", path: "/u/.claude/skills/v/SKILL.md")), "Your skill")
+        XCTAssertEqual(origin(SlashCommand(name: "d", source: "skill", scope: "project", path: "/r/.claude/commands/d.md")), "This folder's command")
+        XCTAssertEqual(origin(SlashCommand(name: "p", source: "skill", scope: "plugin", plugin: "ship-tools")), "From the ship-tools plugin")
+        XCTAssertEqual(origin(SlashCommand(name: "x", source: "skill", scope: "claude.ai")), "Synced from claude.ai")
+        XCTAssertEqual(origin(SlashCommand(name: "c", source: "cli", scope: "system")), "Claude Code's own")
+        XCTAssertEqual(SlashPalette.shortPath("/Users/m/.claude/skills/v/SKILL.md", home: "/Users/m"), "~/.claude/skills/v/SKILL.md")
+        XCTAssertEqual(SlashPalette.shortPath("/opt/x", home: "/Users/m"), "/opt/x")
+    }
 }

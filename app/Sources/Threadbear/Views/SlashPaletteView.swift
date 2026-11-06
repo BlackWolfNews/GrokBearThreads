@@ -26,8 +26,14 @@ struct SlashPaletteView: View {
     let provider: String
     let recent: [String]
     @Binding var state: PaletteState
+    /// What a Threadbear command would change, as it is now, by name
+    /// ("model": "Fable 5.1").
+    var current: [String: String] = [:]
     var onFill: (SlashCommand) -> Void
     var onRun: (SlashCommand) -> Void
+    /// Opens a command's file in the side pane; nil when the thread's
+    /// runner is another Mac's, whose files aren't here.
+    var onOpen: ((String) -> Void)?
 
     static var height: CGFloat { zoomed(300) }
 
@@ -43,10 +49,12 @@ struct SlashPaletteView: View {
                 .frame(width: zoomed(132))
             Divider()
             list(matches, picked: picked)
-                .frame(minWidth: zoomed(130), idealWidth: zoomed(200), maxWidth: zoomed(200))
+                .frame(minWidth: zoomed(110), idealWidth: zoomed(190), maxWidth: zoomed(190))
             Divider()
             detail(picked)
                 .frame(minWidth: 0, maxWidth: .infinity, alignment: .topLeading)
+                // Narrow, the description is what matters; names fit short.
+                .layoutPriority(1)
         }
         .frame(maxWidth: .infinity)
         .frame(height: Self.height)
@@ -123,14 +131,24 @@ struct SlashPaletteView: View {
             .padding(.vertical, zoomed(6))
             .background(on ? Color(nsColor: .controlAccentColor).opacity(0.75) : .clear)
             .contentShape(Rectangle())
-            .onTapGesture(count: 2) { onRun(command) }
-            .onTapGesture { state.selected = command.name }
+            // Picked on the first click, at once: a double-tap gesture
+            // beside a single one makes SwiftUI hold every click until the
+            // double-click time has passed (half a second, Mike, 6 Nov).
+            // A second click is read from the click itself instead.
+            .onTapGesture {
+                if NSApp.currentEvent?.clickCount ?? 1 >= 2, state.selected == command.name { onRun(command) }
+                else { state.selected = command.name }
+            }
             .tip(command.description.map { "\($0) (double-click to run)" } ?? "Double-click to run it")
     }
 
     @ViewBuilder
     private func detail(_ command: SlashCommand?) -> some View {
         if let command {
+            // The words scroll; the buttons stay at the bottom. A long skill
+            // description in a narrow window clipped the usage line before.
+            VStack(alignment: .leading, spacing: 0) {
+            ScrollView {
             VStack(alignment: .leading, spacing: zoomed(10)) {
                 Text("/\(command.name)")
                     .font(.system(size: TypeScale.cardTitle + 3, weight: .semibold))
@@ -142,15 +160,26 @@ struct SlashPaletteView: View {
                 }
                 Text(command.usage)
                     .font(.system(size: TypeScale.code, design: .monospaced))
+                    .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, zoomed(10))
                     .padding(.vertical, zoomed(8))
                     .background(RoundedRectangle(cornerRadius: zoomed(7)).fill(Color.primary.opacity(0.06)))
-                Text(SlashPalette.origin(of: command, provider: provider))
-                    .font(.system(size: TypeScale.label))
-                    .foregroundStyle(.tertiary)
-                Spacer(minLength: 0)
+                if let now = current[command.name] {
+                    Text("Now: \(now)")
+                        .font(.system(size: TypeScale.label + 1))
+                }
+                if let aliases = command.aliases, !aliases.isEmpty {
+                    Text("Also " + aliases.map { "/\($0)" }.joined(separator: ", "))
+                        .font(.system(size: TypeScale.label))
+                        .foregroundStyle(.secondary)
+                }
+                origin(command)
+            }
+            .padding(zoomed(16))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            }
                 HStack(spacing: zoomed(8)) {
                     // Return comes through the composer's own keys, so no
                     // keyboard shortcut here to fight it.
@@ -160,10 +189,37 @@ struct SlashPaletteView: View {
                         .tip("Put /\(command.name) in the box to type more after it (Tab)")
                 }
                 .controlSize(.small)
+                .padding(.horizontal, zoomed(16))
+                .padding(.vertical, zoomed(12))
             }
-            .padding(zoomed(16))
         } else {
             Color.clear
+        }
+    }
+
+    /// Where it comes from, and its file with a way to open it.
+    private func origin(_ command: SlashCommand) -> some View {
+        VStack(alignment: .leading, spacing: zoomed(3)) {
+            Text(SlashPalette.origin(of: command, provider: provider))
+                .font(.system(size: TypeScale.label))
+                .foregroundStyle(.tertiary)
+            if let path = command.path {
+                // On lines of its own, wrapped: cut short in the middle it
+                // showed only "~/.cl…ILL.md".
+                Text(SlashPalette.shortPath(path))
+                    .font(.system(size: TypeScale.label - 1, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                HStack(spacing: zoomed(6)) {
+                    if let onOpen {
+                        Button("Open") { onOpen(path) }
+                            .buttonStyle(.link)
+                            .font(.system(size: TypeScale.label))
+                            .tip("Open \(SlashPalette.shortPath(path)) beside the thread")
+                    }
+                }
+            }
         }
     }
 

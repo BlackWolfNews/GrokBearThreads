@@ -60,7 +60,7 @@ export type UserInputItem =
   | { type: 'skill'; name: string; path: string };
 
 // skills/list (only the fields the runner reads).
-export type SkillsListResponse = { data?: { cwd?: string; skills?: { name?: string; description?: string; shortDescription?: string; path?: string; enabled?: boolean }[] }[] };
+export type SkillsListResponse = { data?: { cwd?: string; skills?: { name?: string; description?: string; shortDescription?: string; path?: string; scope?: string; enabled?: boolean }[] }[] };
 
 export type DynamicToolFunctionSpec = { type: 'function'; name: string; description: string; inputSchema: unknown };
 export type DynamicToolSpec = { type: 'namespace'; name: string; description: string; tools: DynamicToolFunctionSpec[] };

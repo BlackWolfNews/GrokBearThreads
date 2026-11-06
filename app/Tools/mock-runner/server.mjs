@@ -20,6 +20,7 @@
 import { WebSocketServer } from 'ws';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 // The tour's sample threads, the runner's own (it runs TypeScript as it is).
 import { SAMPLE_THREADS } from '../../../runner/src/samples.ts';
@@ -1002,16 +1003,16 @@ async function dispatch(client, method, p) {
             { name: 'clear', description: 'Clear conversation history and free up context', source: 'cli' },
             { name: 'compact', description: 'Clear conversation history but keep a summary in context', argumentHint: '<optional custom summarization instructions>', source: 'cli' },
             { name: 'context', description: 'Show current context usage', source: 'cli' },
-            { name: 'cost', description: 'Show the total cost and duration of the current session', source: 'cli' },
+            { name: 'cost', description: 'Show the total cost and duration of the current session', source: 'cli', scope: 'system', aliases: ['usage', 'stats'] },
             { name: 'config', description: 'Open config panel', source: 'cli' },
             { name: 'init', description: 'Initialize a new CLAUDE.md file with codebase documentation', source: 'cli' },
           ];
       const skills = [
-        { name: 'code-review', description: 'Review the current diff, or a PR number, branch or path, for correctness bugs, at the effort level given first.', argumentHint: '[low|medium|high] [target]', source: 'skill' },
+        { name: 'code-review', description: 'Review the current diff, or a PR number, branch or path, for correctness bugs, at the effort level given first.', argumentHint: '[low|medium|high] [target]', source: 'skill', scope: 'user', path: `${os.homedir()}/.claude/skills/code-review/SKILL.md` },
         { name: 'computercub', description: "Drive Mac apps and the parts of Chrome extensions can't reach.", source: 'skill' },
         { name: 'cloudflare', description: 'Cloudflare platform: Workers, Pages, KV, D1, R2 and the rest.', source: 'skill' },
         { name: 'claude-api', description: 'Model ids, pricing, params and the Anthropic SDK.', source: 'skill' },
-        { name: 'deslop', description: 'A second-pass cleanup over AI-written code using the repo style guide.', source: 'skill' },
+        { name: 'deslop', description: 'A second-pass cleanup over AI-written code using the repo style guide.', source: 'skill', scope: 'project', path: `${t.summary.cwd}/.claude/skills/deslop/SKILL.md` },
         { name: 'delegate', description: 'Get answers from other labs and models, and run consensus panels.', source: 'skill' },
         { name: 'ship', description: 'Drive a branch to merge-ready: PR, checks, bot comments.', source: 'skill' },
       ];

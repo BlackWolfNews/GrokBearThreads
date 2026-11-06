@@ -7,7 +7,10 @@ import assert from 'node:assert/strict';
 import { FakeAccounts, makeHarness, tick, withCodex } from '../helpers/fakes.ts';
 import { commandList, parseCommand, planCommand } from '../../src/slash-commands.ts';
 import { pickModel } from '../../src/runner/commands.ts';
-import { claudeCommands } from '../../src/adapters/claude/adapter.ts';
+import { claudeCommands, commandScope } from '../../src/adapters/claude/adapter.ts';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { codexSkillCommands, skillMap } from '../../src/adapters/codex/adapter.ts';
 
 const notes = (h: { events(id: string): any[] }, id: string): string[] => h.events(id).filter((e) => e.type === 'system.note').map((e) => e.text);
@@ -67,7 +70,7 @@ test('claudeCommands keeps the builtin row of a shared name and marks the rest s
     { name: 'deslop', description: 'clean', argumentHint: '' },
   ]);
   assert.deepEqual(out, [
-    { name: 'review', source: 'cli', description: 'theirs', argumentHint: '<pr>' },
+    { name: 'review', source: 'cli', description: 'theirs', argumentHint: '<pr>', scope: 'system' },
     { name: 'deslop', source: 'skill', description: 'clean' },
   ]);
 });
@@ -77,7 +80,7 @@ test('Codex skills become picker rows and a name-to-path map, without disabled o
     { name: 'deslop', description: 'long', shortDescription: 'short', path: '/s/deslop/SKILL.md', enabled: true },
     { name: 'off', description: 'x', path: '/s/off/SKILL.md', enabled: false },
   ] }] };
-  assert.deepEqual(codexSkillCommands(r), [{ name: 'deslop', source: 'skill', description: 'short' }]);
+  assert.deepEqual(codexSkillCommands(r), [{ name: 'deslop', source: 'skill', description: 'short', path: '/s/deslop/SKILL.md' }]);
   assert.deepEqual([...skillMap(r)], [['deslop', '/s/deslop/SKILL.md']]);
 });
 
@@ -307,4 +310,33 @@ test('words go into a skill\'s turn, as into any other', async () => {
   h.runner.send(thread.id, 'only runner/src/foo.ts');
   await tick();
   assert.equal(s.sent.length, 2);
+});
+
+test('commandScope takes the CLI\'s tag off a description and says where it came from', () => {
+  assert.deepEqual(commandScope('Mike voice. (user)'), { text: 'Mike voice.', scope: 'user' });
+  assert.deepEqual(commandScope('Docs (claude.ai sync)'), { text: 'Docs', scope: 'claude.ai' });
+  assert.deepEqual(commandScope('Ship it (ship-tools)'), { text: 'Ship it', scope: 'plugin', plugin: 'ship-tools' });
+  assert.deepEqual(commandScope('Read it (see below)'), { text: 'Read it (see below)' }, 'words in brackets stay');
+  assert.deepEqual(commandScope('Plain'), { text: 'Plain' });
+});
+
+test('claudeCommands finds a user skill\'s file and a project command\'s, and keeps aliases', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tb-cmds-'));
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'tb-cmds-cwd-'));
+  fs.mkdirSync(path.join(home, 'skills', 'voice'), { recursive: true });
+  fs.writeFileSync(path.join(home, 'skills', 'voice', 'SKILL.md'), 'x');
+  fs.mkdirSync(path.join(cwd, '.claude', 'commands', 'ops'), { recursive: true });
+  fs.writeFileSync(path.join(cwd, '.claude', 'commands', 'ops', 'deploy.md'), 'x');
+  const out = claudeCommands([
+    { name: 'usage', description: 'Usage', argumentHint: '', builtin: true, aliases: ['cost', 'stats'] },
+    { name: 'voice', description: 'Write as Mike (user)', argumentHint: '' },
+    { name: 'ops:deploy', description: 'Deploy (project)', argumentHint: '' },
+    { name: 'gone', description: 'Missing (user)', argumentHint: '' },
+  ], { cwd, configDir: home });
+  assert.deepEqual(out[0], { name: 'usage', source: 'cli', description: 'Usage', aliases: ['cost', 'stats'], scope: 'system' });
+  assert.deepEqual(out[1], { name: 'voice', source: 'skill', description: 'Write as Mike', scope: 'user', path: path.join(home, 'skills', 'voice', 'SKILL.md') });
+  assert.equal(out[2].path, path.join(cwd, '.claude', 'commands', 'ops', 'deploy.md'));
+  assert.equal(out[3].path, undefined);
+  fs.rmSync(home, { recursive: true, force: true });
+  fs.rmSync(cwd, { recursive: true, force: true });
 });

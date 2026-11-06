@@ -8,14 +8,27 @@ public struct SlashCommand: Sendable, Hashable, Codable, Identifiable {
     public var argumentHint: String?
     /// "threadbear", "cli" or "skill"; anything newer counts as the CLI's.
     public var source: String
+    /// Other names that run it (/usage is /cost and /stats too).
+    public var aliases: [String]?
+    /// Where it was defined: "user", "project", "plugin" (with `plugin`),
+    /// "claude.ai", "system", or one this app doesn't know.
+    public var scope: String?
+    public var plugin: String?
+    /// Its file on the runner's machine, when the runner found it.
+    public var path: String?
 
     public var id: String { name }
 
-    public init(name: String, description: String? = nil, argumentHint: String? = nil, source: String) {
+    public init(name: String, description: String? = nil, argumentHint: String? = nil, source: String,
+                aliases: [String]? = nil, scope: String? = nil, plugin: String? = nil, path: String? = nil) {
         self.name = name
         self.description = description
         self.argumentHint = argumentHint
         self.source = source
+        self.aliases = aliases
+        self.scope = scope
+        self.plugin = plugin
+        self.path = path
     }
 
     /// What to type, with its arguments: "/code-review [low|medium|high] [target]".
@@ -67,11 +80,22 @@ public enum SlashPalette {
 
     /// Where a command came from, for the detail pane.
     public static func origin(of command: SlashCommand, provider: String) -> String {
-        switch command.source {
-        case "threadbear": "Threadbear's own: it changes this thread's settings"
-        case "skill": "A skill, yours or this folder's"
-        default: "\(cliName(provider))'s own"
+        if command.isThreadbear { return "Threadbear's own: it changes this thread's settings" }
+        let kind = command.path.map { $0.hasSuffix("/SKILL.md") ? "skill" : "command" } ?? (command.isSkill ? "skill" : "command")
+        switch command.scope {
+        case "user": return "Your \(kind)"
+        case "project", "repo": return "This folder's \(kind)"
+        case "plugin": return command.plugin.map { "From the \($0) plugin" } ?? "From a plugin"
+        case "claude.ai": return "Synced from claude.ai"
+        case "admin": return "Set up by your organisation"
+        case "system": return "\(cliName(provider))'s own"
+        default: return command.isSkill ? "A skill" : "\(cliName(provider))'s own"
         }
+    }
+
+    /// A path to show: the home folder as ~.
+    public static func shortPath(_ path: String, home: String = NSHomeDirectory()) -> String {
+        path == home || path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
     }
 
     public static func inCategory(_ command: SlashCommand, _ category: Category, recent: [String]) -> Bool {

@@ -130,8 +130,14 @@ struct ComposerView: View {
                     provider: thread.provider,
                     recent: app.recentSlashCommands,
                     state: $palette,
+                    current: paletteCurrent(thread),
                     onFill: { pick($0, run: false) },
-                    onRun: { pick($0, run: true) }
+                    onRun: { pick($0, run: true) },
+                    // Another Mac's runner found the file there, not here.
+                    onOpen: app.runnerName(of: thread) == nil ? { path in
+                        palette.closedAt = draft.wrappedValue.text
+                        app.preview(path: path, in: thread)
+                    } : nil
                 )
                 // Its height is fixed, so lifting it by that sits it just above.
                 .offset(y: -(SlashPaletteView.height + zoomed(8)))
@@ -176,6 +182,19 @@ struct ComposerView: View {
     private func paletteQuery(_ text: String) -> String? {
         guard thread != nil, palette.closedAt != text else { return nil }
         return SlashPalette.query(in: text)
+    }
+
+    /// What /model and /effort would change, as the thread has it now.
+    private func paletteCurrent(_ thread: ThreadSummary) -> [String: String] {
+        var out: [String: String] = [:]
+        let account = app.logins(for: thread)?.account(thread.accountId)
+        if let model = thread.model ?? thread.modelInUse ?? account?.defaultModel {
+            out["model"] = ComposerChips.modelTitle(model, choices: account?.models ?? []) + (thread.model == nil ? ", the default" : "")
+        }
+        if let level = thread.effort ?? thread.effortInUse {
+            out["effort"] = ComposerChips.effortTitle(level) + (thread.effort == nil ? ", the model's own" : "")
+        }
+        return out
     }
 
     /// Arrows, Tab, Return and Esc while the palette is open. False lets
