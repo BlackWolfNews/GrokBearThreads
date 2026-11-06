@@ -61,6 +61,9 @@ final class DraftBlockRenderTests: XCTestCase {
         XCTAssertNotNil(header(MarkdownRenderer.render("- ```slack\n  hello\n  ```").string))
         XCTAssertNotNil(header(MarkdownRenderer.render("```slack\none\u{2028}two\n```").string))
         XCTAssertNotNil(header(MarkdownRenderer.render("> - ```slack\n>   héllo\n>   ```").string))
+        XCTAssertNotNil(header(MarkdownRenderer.render("  ```slack\n  hello\n```").string))
+        XCTAssertNotNil(header(MarkdownRenderer.render("1. ```slack\n   hello\n   ```").string))
+        XCTAssertNotNil(header(MarkdownRenderer.render(">```slack\n>hello\n>```").string))
     }
 
     func testCopyPutsPlainTextAndHTMLOnTheClipboardAndSaysCopied() throws {

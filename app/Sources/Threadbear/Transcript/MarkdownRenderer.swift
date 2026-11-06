@@ -441,14 +441,26 @@ enum MarkdownRenderer {
             guard let mark = opening.first, mark == "`" || mark == "~" else { return false }
             let width = opening.prefix(while: { $0 == mark }).count
             guard width >= 3 else { return false }
-            // The closing line has the same container in front: the quote's
-            // markers, or as many spaces as the list item's indent.
-            let closingLine = sourceLines[range.upperBound.line - 1].utf8
-            let prefix = closingLine.prefix(container)
-            guard prefix.count == container, prefix.allSatisfy({ $0 == UInt8(ascii: " ") || $0 == UInt8(ascii: ">") || $0 == UInt8(ascii: "\t") }) else { return false }
-            var closing = Substring(closingLine.dropFirst(container))
+            // The closing line has the same quote markers in front, then
+            // at most three spaces past where the container's text starts:
+            // a list item's marker and the spaces after it count as
+            // container, spaces alone in front of the fence don't (a fence
+            // opened two spaces in closes at the margin).
+            let before = Array(openingLine.prefix(container))
+            let quotes = before.filter { $0 == UInt8(ascii: ">") }.count
+            var tail = before.suffix(before.lastIndex(of: UInt8(ascii: ">")).map { before.count - $0 - 1 } ?? before.count)
+            // The one space after a quote's ">" belongs to the quote.
+            if quotes > 0, tail.first == UInt8(ascii: " ") { tail = tail.dropFirst() }
+            let listIndent = tail.contains(where: { $0 != UInt8(ascii: " ") && $0 != UInt8(ascii: "\t") }) ? tail.count : 0
+            var closing = Substring(sourceLines[range.upperBound.line - 1])
+            for _ in 0..<quotes {
+                closing = closing.drop(while: { $0 == " " || $0 == "\t" })
+                guard closing.first == ">" else { return false }
+                closing = closing.dropFirst()
+            }
+            if quotes > 0, closing.first == " " { closing = closing.dropFirst() }
             let indent = closing.prefix(while: { $0 == " " }).count
-            guard indent <= 3 else { return false }
+            guard indent <= listIndent + 3, indent >= listIndent else { return false }
             closing = closing.dropFirst(indent)
             let fence = closing.trimmingCharacters(in: .whitespaces)
             return fence.count >= width && fence.allSatisfy({ $0 == mark })

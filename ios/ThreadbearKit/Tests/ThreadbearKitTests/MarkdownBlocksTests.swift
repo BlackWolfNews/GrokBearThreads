@@ -80,6 +80,54 @@ import Testing
         #expect(MarkdownBlock.parse("```slack\n\(big)\n```") == [.code(big)])
     }
 
+    // Cross-lab review, round three (6 Nov).
+    @Test func backticksAfterABacktickFenceMakeItWords() {
+        #expect(MarkdownBlock.parse("- ```literal```\n- next") == [
+            .listItem(text: "```literal```", marker: "•", depth: 0, task: nil),
+            .listItem(text: "next", marker: "•", depth: 0, task: nil),
+        ])
+        #expect(MarkdownBlock.parse("```a``` b\nnext") == [.paragraph("```a``` b next")])
+        // A tilde fence's info string may have backticks.
+        #expect(MarkdownBlock.parse("~~~slack `x`\nhi\n~~~") == [.draft(DraftBlock(kind: .slack, source: "hi"))])
+    }
+
+    @Test func aClosingFenceIsMeasuredFromItsContainer() {
+        // At the margin, at most three spaces in, wherever the opener was.
+        #expect(MarkdownBlock.parse("   ```slack\n   hello\n    ```") == [.code("hello\n ```")])
+        #expect(MarkdownBlock.parse("  ```slack\n  hello\n```") == [.draft(DraftBlock(kind: .slack, source: "hello"))])
+        // In a list item, from where the item's words start.
+        #expect(MarkdownBlock.parse("- ```slack\n  hello\n```") == [.code("hello\n```")])
+        #expect(MarkdownBlock.parse("- ```slack\n  hello\n     ```") == [.draft(DraftBlock(kind: .slack, source: "hello"))])
+        #expect(MarkdownBlock.parse("- Steps:\n\n  ```slack\n  hello\n  ```") == [
+            .listItem(text: "Steps:", marker: "•", depth: 0, task: nil),
+            .draft(DraftBlock(kind: .slack, source: "hello")),
+        ])
+        #expect(MarkdownBlock.parse("- a\n  - b\n\n    ```\n    code\n    ```") == [
+            .listItem(text: "a", marker: "•", depth: 0, task: nil),
+            .listItem(text: "b", marker: "•", depth: 1, task: nil),
+            .code("code"),
+        ])
+    }
+
+    @Test func aFencedItemKeepsTheListsDepths() {
+        #expect(MarkdownBlock.parse("- ```sh\n  echo hi\n  ```\n  - child\n- sibling") == [
+            .code("echo hi"),
+            .listItem(text: "child", marker: "•", depth: 1, task: nil),
+            .listItem(text: "sibling", marker: "•", depth: 0, task: nil),
+        ])
+    }
+
+    @Test func ordinaryListsAndCodeAreAsBefore() {
+        #expect(MarkdownBlock.parse("- one\n  - two\n- three") == [
+            .listItem(text: "one", marker: "•", depth: 0, task: nil),
+            .listItem(text: "two", marker: "•", depth: 1, task: nil),
+            .listItem(text: "three", marker: "•", depth: 0, task: nil),
+        ])
+        #expect(MarkdownBlock.parse("```swift\nlet a = 1\n```\nafter") == [.code("let a = 1"), .paragraph("after")])
+        #expect(MarkdownBlock.parse("````\n```\ninner\n```\n````") == [.code("```\ninner\n```")])
+        #expect(MarkdownBlock.parse("Use `a` and ``b``") == [.paragraph("Use `a` and ``b``")])
+    }
+
     @Test func aFenceStillStreamingInOrTooBigStaysCode() {
         // The reply so far, its fence not closed yet: drawn once it is.
         #expect(MarkdownBlock.parse("```mermaid\nflowchart TD\n  A -->") == [.code("flowchart TD\n  A -->")])

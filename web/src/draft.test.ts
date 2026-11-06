@@ -142,6 +142,10 @@ test('only a closed fence makes a draft', () => {
   assert.ok(closed('> ```slack\n> hello\n> ```'));
   assert.ok(closed('1. a\n\n   > ```slack\n   > hi\n   > ```'));
   assert.ok(closed('```slack\nhello\n   ```'));
+  assert.ok(closed('  ```slack\n  hello\n```'));
+  assert.ok(closed('1. ```slack\n   hello\n   ```'));
+  assert.ok(closed('>```slack\n>hello\n>```'));
+  assert.ok(closed('> - ```slack\n>   hello\n>   ```'));
   assert.ok(!closed('```slack\nhello\n> ```'));
   assert.ok(!closed('```slack\nhello\n    ```'));
   assert.ok(!closed('> ```slack\n> hello\n```'));
