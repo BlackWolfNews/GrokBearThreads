@@ -1,9 +1,10 @@
 import SwiftUI
 import ThreadbearCore
 
-/// Voice mode's avatar: Threadbear's own bear (Bear.swift's face, its
-/// head, ears, eyes and nose on the same 24-point grid), drawn big and
-/// moving with the conversation. It blinks and its ears perk while it
+/// Voice mode's avatar: Threadbear's mascot as in its sprites
+/// (docs/threadbear-design/sprites): tan fur, cream ears and muzzle, a
+/// patch with a button eye, a stitched seam, drawn in code so it can move
+/// with the conversation. It blinks and its ears perk while it
 /// listens, nods along as Mike talks, looks up with thought dots while the
 /// agent works, and opens its mouth in time with its own voice.
 struct VoiceBear: View {
@@ -14,6 +15,9 @@ struct VoiceBear: View {
     let level: CGFloat
 
     @State private var smoothed: CGFloat = 0
+    /// How open the mouth is, how much it nods: the smoothed level, or the
+    /// level itself before it has changed.
+    private var amount: CGFloat { max(smoothed, level * 0.8) }
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1 / 30)) { context in
@@ -39,89 +43,135 @@ struct VoiceBear: View {
         }
     }
 
+    // The mascot's colours (docs/threadbear-design/sprites).
+    static let fur = Color(red: 0.84, green: 0.58, blue: 0.33)
+    static let furEdge = Color(red: 0.66, green: 0.42, blue: 0.21)
+    static let cream = Color(red: 0.96, green: 0.84, blue: 0.67)
+    static let patch = Color(red: 0.45, green: 0.31, blue: 0.21)
+    static let button = Color(red: 0.42, green: 0.27, blue: 0.18)
+    static let buttonRim = Color(red: 0.30, green: 0.19, blue: 0.12)
+    static let thread = Color(red: 0.55, green: 0.36, blue: 0.19)
+    static let dark = Color(red: 0.20, green: 0.12, blue: 0.08)
+
     private func draw(in ctx: inout GraphicsContext, size: CGSize, t: Double) {
         let scale = min(size.width, size.height) / 24
         ctx.scaleBy(x: scale, y: scale)
-        let ink = GraphicsContext.Shading.color(.primary)
-        let line: CGFloat = 1.3
 
         // How the head moves: a nod as he talks, a bob as it talks, a slow
         // sway while it thinks, a tilt of interest while it listens.
         var tilt = 0.0, dy = 0.0
         switch mood {
-        case .waking: tilt = -6 * (1 - min(1, (t.truncatingRemainder(dividingBy: 2)) / 2))
+        case .waking: tilt = -6 * (1 - min(1, t.truncatingRemainder(dividingBy: 2) / 2))
         case .listening: tilt = 4 * sin(t * 0.8)
-        case .hearing: dy = Double(smoothed) * 0.8 * sin(t * 9); tilt = 6
+        case .hearing: dy = Double(amount) * 0.8 * sin(t * 9); tilt = 6
         case .thinking: tilt = 6 * sin(t * 1.3)
-        case .speaking: dy = Double(smoothed) * 0.6 * sin(t * 14)
+        case .speaking: dy = Double(amount) * 0.6 * sin(t * 14)
         }
-        let c = CGPoint(x: 12, y: 13.5 + dy)
-        let r: CGFloat = 7.6
+        let c = CGPoint(x: 11.4, y: 13.6 + dy)
+        let rx: CGFloat = 8.3, ry: CGFloat = 7.5
         var head = ctx
         head.translateBy(x: c.x, y: c.y)
         head.rotate(by: .degrees(tilt))
         head.translateBy(x: -c.x, y: -c.y)
+        let edge: CGFloat = 0.45
 
-        // Ears, behind the head: perk up while listening.
-        let perk: CGFloat = (mood == .listening || mood == .hearing) ? 0.6 + 0.3 * CGFloat(sin(t * 3)) * (mood == .hearing ? 1 : 0.3) : 0
-        let earR: CGFloat = 2.8
+        // Ears, behind the head: round, cream inside, perking up to listen.
+        let perk: CGFloat = (mood == .listening || mood == .hearing) ? 0.5 + 0.3 * CGFloat(sin(t * 3)) * (mood == .hearing ? 1 : 0.3) : 0
         for sign in [-1.0, 1.0] {
-            let ear = CGPoint(x: c.x + sign * r * 0.72, y: c.y - r * 0.72 - perk)
-            let earPath = Path(ellipseIn: CGRect(x: ear.x - earR, y: ear.y - earR, width: 2 * earR, height: 2 * earR))
-            head.fill(earPath, with: .color(Color(nsColor: .windowBackgroundColor)))
-            head.stroke(earPath, with: ink, lineWidth: line)
-            let inner = Path(ellipseIn: CGRect(x: ear.x - earR * 0.45, y: ear.y - earR * 0.45, width: earR * 0.9, height: earR * 0.9))
-            head.fill(inner, with: .color(.primary.opacity(0.18)))
+            let e = CGPoint(x: c.x + sign * rx * 0.78, y: c.y - ry * 0.78 - perk)
+            let r: CGFloat = 3.0
+            let ear = Path(ellipseIn: CGRect(x: e.x - r, y: e.y - r, width: 2 * r, height: 2 * r))
+            head.fill(ear, with: .color(Self.fur))
+            head.stroke(ear, with: .color(Self.furEdge), lineWidth: edge)
+            let ir: CGFloat = 1.7
+            head.fill(Path(ellipseIn: CGRect(x: e.x - ir + sign * 0.2, y: e.y - ir + 0.3, width: 2 * ir, height: 2 * ir)), with: .color(Self.cream))
         }
-        let face = Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r))
-        head.fill(face, with: .color(Color(nsColor: .windowBackgroundColor)))
-        head.stroke(face, with: ink, lineWidth: line)
 
-        // Eyes: blink every few seconds; look up and aside while thinking.
+        // The head, a little wider than tall.
+        let face = Path(ellipseIn: CGRect(x: c.x - rx, y: c.y - ry, width: 2 * rx, height: 2 * ry))
+        head.fill(face, with: .color(Self.fur))
+        head.stroke(face, with: .color(Self.furEdge), lineWidth: edge)
+
+        // The patch over his right eye (our left), stitched round its edge.
+        var patch = Path()
+        patch.move(to: CGPoint(x: c.x - rx * 0.95, y: c.y - ry * 0.55))
+        patch.addLine(to: CGPoint(x: c.x - rx * 0.32, y: c.y - ry * 0.78))
+        patch.addLine(to: CGPoint(x: c.x - rx * 0.12, y: c.y - ry * 0.12))
+        patch.addLine(to: CGPoint(x: c.x - rx * 0.70, y: c.y + ry * 0.12))
+        patch.closeSubpath()
+        var clipped = head
+        clipped.clip(to: face)
+        clipped.fill(patch, with: .color(Self.patch))
+        clipped.stroke(patch, with: .color(Self.cream.opacity(0.8)), style: StrokeStyle(lineWidth: 0.28, lineCap: .round, dash: [0.55, 0.45]))
+
+        // The seam down the forehead, with cross-stitches.
+        var seam = Path()
+        seam.move(to: CGPoint(x: c.x + 0.4, y: c.y - ry))
+        seam.addQuadCurve(to: CGPoint(x: c.x + 0.2, y: c.y - ry * 0.18), control: CGPoint(x: c.x + 0.9, y: c.y - ry * 0.6))
+        head.stroke(seam, with: .color(Self.thread), style: StrokeStyle(lineWidth: 0.3, lineCap: .round))
+        for f in [0.25, 0.55, 0.82] as [CGFloat] {
+            let y = c.y - ry + (ry * 0.82) * f
+            let x = c.x + 0.4 + 0.35 * sin(f * .pi)
+            var cross = Path()
+            cross.move(to: CGPoint(x: x - 0.45, y: y - 0.35)); cross.addLine(to: CGPoint(x: x + 0.45, y: y + 0.35))
+            cross.move(to: CGPoint(x: x + 0.45, y: y - 0.35)); cross.addLine(to: CGPoint(x: x - 0.45, y: y + 0.35))
+            head.stroke(cross, with: .color(Self.thread), style: StrokeStyle(lineWidth: 0.28, lineCap: .round))
+        }
+
+        // The button eye, on the patch: four holes and a cross of thread.
+        let look: CGPoint = mood == .thinking ? CGPoint(x: 0.6, y: -0.7) : .zero
+        let eyeY = c.y - ry * 0.12
+        let bc = CGPoint(x: c.x - rx * 0.42, y: eyeY + 0.45)
+        let br: CGFloat = 2.15
+        head.fill(Path(ellipseIn: CGRect(x: bc.x - br, y: bc.y - br, width: 2 * br, height: 2 * br)), with: .color(Self.button))
+        head.stroke(Path(ellipseIn: CGRect(x: bc.x - br * 0.78, y: bc.y - br * 0.78, width: br * 1.56, height: br * 1.56)), with: .color(Self.buttonRim), lineWidth: 0.25)
+        for (dx, dy) in [(-0.55, -0.55), (0.55, -0.55), (-0.55, 0.55), (0.55, 0.55)] as [(CGFloat, CGFloat)] {
+            head.fill(Path(ellipseIn: CGRect(x: bc.x + dx - 0.2, y: bc.y + dy - 0.2, width: 0.4, height: 0.4)), with: .color(Self.dark))
+        }
+        var x = Path()
+        x.move(to: CGPoint(x: bc.x - 0.55, y: bc.y - 0.55)); x.addLine(to: CGPoint(x: bc.x + 0.55, y: bc.y + 0.55))
+        x.move(to: CGPoint(x: bc.x + 0.55, y: bc.y - 0.55)); x.addLine(to: CGPoint(x: bc.x - 0.55, y: bc.y + 0.55))
+        head.stroke(x, with: .color(Self.cream), style: StrokeStyle(lineWidth: 0.22, lineCap: .round))
+
+        // The real eye: shiny, blinking every few seconds, looking up and
+        // aside while it thinks, wider while he talks.
         let blink = Self.blink(t)
-        let look: CGPoint = mood == .thinking ? CGPoint(x: 0.9, y: -0.9) : .zero
-        let eyeY = c.y - r * 0.12 + look.y
-        for sign in [-1.0, 1.0] {
-            let x = c.x + sign * r * 0.4 + look.x
-            if mood == .waking || blink < 0.15 {
-                var shut = Path()
-                shut.move(to: CGPoint(x: x - r * 0.18, y: eyeY))
-                shut.addQuadCurve(to: CGPoint(x: x + r * 0.18, y: eyeY), control: CGPoint(x: x, y: eyeY + r * 0.14))
-                head.stroke(shut, with: ink, style: StrokeStyle(lineWidth: line * 0.9, lineCap: .round))
-            } else {
-                let dot = r * (mood == .hearing ? 0.16 : 0.14)
-                head.fill(Path(ellipseIn: CGRect(x: x - dot, y: eyeY - dot * blink, width: 2 * dot, height: 2 * dot * blink)), with: ink)
-                // A glint, so it looks alive.
-                let glint = dot * 0.4
-                head.fill(Path(ellipseIn: CGRect(x: x + dot * 0.2, y: eyeY - dot * 0.6 * blink, width: glint, height: glint * blink)), with: .color(Color(nsColor: .windowBackgroundColor)))
-            }
+        let ec = CGPoint(x: c.x + rx * 0.45 + look.x, y: eyeY + look.y)
+        if mood == .waking || blink < 0.15 {
+            var shut = Path()
+            shut.move(to: CGPoint(x: ec.x - 0.9, y: ec.y))
+            shut.addQuadCurve(to: CGPoint(x: ec.x + 0.9, y: ec.y), control: CGPoint(x: ec.x, y: ec.y + 0.8))
+            head.stroke(shut, with: .color(Self.dark), style: StrokeStyle(lineWidth: 0.45, lineCap: .round))
+        } else {
+            let ew: CGFloat = mood == .hearing ? 1.05 : 0.95, eh: CGFloat = (mood == .hearing ? 1.35 : 1.25) * blink
+            head.fill(Path(ellipseIn: CGRect(x: ec.x - ew, y: ec.y - eh, width: 2 * ew, height: 2 * eh)), with: .color(Self.dark))
+            head.fill(Path(ellipseIn: CGRect(x: ec.x - 0.05, y: ec.y - eh * 0.7, width: 0.6, height: 0.6 * blink)), with: .color(.white))
         }
 
-        // Muzzle and nose.
-        let muzzle = CGRect(x: c.x - r * 0.42, y: c.y + r * 0.12, width: r * 0.84, height: r * 0.62)
-        head.fill(Path(ellipseIn: muzzle), with: .color(.primary.opacity(0.08)))
-        let noseW = r * 0.34, noseH = r * 0.24
-        let noseY = c.y + r * 0.3
-        head.fill(Path(ellipseIn: CGRect(x: c.x - noseW / 2, y: noseY - noseH / 2, width: noseW, height: noseH)), with: ink)
-
-        // Mouth: opens with its voice; a small smile otherwise.
-        let mouthY = noseY + noseH / 2 + r * 0.12
+        // Muzzle, nose and mouth.
+        let mc = CGPoint(x: c.x + 0.2, y: c.y + ry * 0.42)
+        head.fill(Path(ellipseIn: CGRect(x: mc.x - 2.9, y: mc.y - 2.1, width: 5.8, height: 4.2)), with: .color(Self.cream))
+        let nose = CGPoint(x: mc.x, y: mc.y - 0.9)
+        var n = Path()
+        n.move(to: CGPoint(x: nose.x - 0.95, y: nose.y - 0.4))
+        n.addQuadCurve(to: CGPoint(x: nose.x + 0.95, y: nose.y - 0.4), control: CGPoint(x: nose.x, y: nose.y - 0.9))
+        n.addQuadCurve(to: CGPoint(x: nose.x - 0.95, y: nose.y - 0.4), control: CGPoint(x: nose.x, y: nose.y + 1.0))
+        head.fill(n, with: .color(Self.dark))
+        let mouthY = nose.y + 0.45
         if mood == .speaking {
-            let open = max(0.08, min(1, smoothed)) * r * 0.34
-            let mouth = Path(roundedRect: CGRect(x: c.x - r * 0.16, y: mouthY, width: r * 0.32, height: open), cornerRadius: r * 0.16)
-            head.fill(mouth, with: ink)
+            let open = max(0.25, min(1, amount)) * 2.3
+            let mouth = Path(roundedRect: CGRect(x: mc.x - 0.95, y: mouthY + 0.1, width: 1.9, height: open), cornerRadius: 0.9)
+            head.fill(mouth, with: .color(Self.dark))
+            head.fill(Path(ellipseIn: CGRect(x: mc.x - 0.6, y: mouthY + 0.1 + open * 0.5, width: 1.2, height: open * 0.5)), with: .color(Color(red: 0.85, green: 0.45, blue: 0.45)))
         } else {
             var smile = Path()
-            smile.move(to: CGPoint(x: c.x - r * 0.2, y: mouthY))
-            smile.addQuadCurve(to: CGPoint(x: c.x + r * 0.2, y: mouthY), control: CGPoint(x: c.x, y: mouthY + r * 0.2))
-            head.stroke(smile, with: ink, style: StrokeStyle(lineWidth: line * 0.8, lineCap: .round))
+            smile.move(to: CGPoint(x: mc.x, y: mouthY - 0.1))
+            smile.addLine(to: CGPoint(x: mc.x, y: mouthY + 0.35))
+            smile.move(to: CGPoint(x: mc.x - 1.1, y: mouthY + 0.1))
+            smile.addQuadCurve(to: CGPoint(x: mc.x, y: mouthY + 0.35), control: CGPoint(x: mc.x - 0.6, y: mouthY + 0.9))
+            smile.addQuadCurve(to: CGPoint(x: mc.x + 1.1, y: mouthY + 0.1), control: CGPoint(x: mc.x + 0.6, y: mouthY + 0.9))
+            head.stroke(smile, with: .color(Self.dark), style: StrokeStyle(lineWidth: 0.35, lineCap: .round))
         }
-
-        // The stitches: a seam across the top of the head.
-        var seam = Path()
-        seam.move(to: CGPoint(x: c.x - r * 0.3, y: c.y - r * 0.72))
-        seam.addLine(to: CGPoint(x: c.x + r * 0.3, y: c.y - r * 0.66))
-        head.stroke(seam, with: .color(.primary.opacity(0.5)), style: StrokeStyle(lineWidth: line * 0.6, lineCap: .round))
 
         // Thought dots while it works, rising one after another.
         if mood == .thinking {
@@ -129,8 +179,9 @@ struct VoiceBear: View {
                 let phase = (t * 1.5 - Double(i) * 0.35).truncatingRemainder(dividingBy: 1.5) / 1.5
                 let alpha = max(0, sin(phase * .pi))
                 let d = 0.6 + Double(i) * 0.35
-                let p = CGPoint(x: 19.2 + Double(i) * 1.3, y: 6.2 - Double(i) * 1.4)
-                ctx.fill(Path(ellipseIn: CGRect(x: p.x - d, y: p.y - d, width: 2 * d, height: 2 * d)), with: .color(.primary.opacity(alpha * 0.7)))
+                let p = CGPoint(x: 19.6 + Double(i) * 1.2, y: 5.6 - Double(i) * 1.5)
+                ctx.fill(Path(ellipseIn: CGRect(x: p.x - d, y: p.y - d, width: 2 * d, height: 2 * d)), with: .color(Self.cream.opacity(alpha)))
+                ctx.stroke(Path(ellipseIn: CGRect(x: p.x - d, y: p.y - d, width: 2 * d, height: 2 * d)), with: .color(Self.furEdge.opacity(alpha)), lineWidth: 0.25)
             }
         }
     }
@@ -167,7 +218,7 @@ struct VoiceStage: View {
                     .tip(caption)
             }
             VoiceBear(mood: mood, level: CGFloat(voice.level))
-                .frame(width: 64, height: 64)
+                .frame(width: 84, height: 84)
         }
         .padding(.horizontal, 12)
         .padding(.bottom, 6)
