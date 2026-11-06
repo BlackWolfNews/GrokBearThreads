@@ -317,6 +317,7 @@ final class ComposerTests: XCTestCase {
     /// NSImageView) did.
     @MainActor func testTranscriptRowsLeaveDropsToTheTranscript() {
         XCTAssertTrue(Symbols.makeView().registeredDraggedTypes.isEmpty, "a row's icon")
+        XCTAssertTrue(BackgroundRowCell(frame: .zero).bear.registeredDraggedTypes.isEmpty, "the background-work bear")
         let text = TranscriptTextView()
         text.isEditable = false
         XCTAssertTrue(text.registeredDraggedTypes.isEmpty, "a row's words")

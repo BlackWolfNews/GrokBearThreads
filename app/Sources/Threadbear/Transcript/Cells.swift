@@ -1050,7 +1050,7 @@ final class WorkingRowCell: RowCellView {
 /// bear sits (a cub when sub-agents are out) rather than waves, nothing
 /// ticks, and the words say what's running.
 final class BackgroundRowCell: RowCellView {
-    let bear = NSImageView()
+    let bear: NSImageView = FirstClickImageView()
     let label = makeLabel()
 
     override init(frame frameRect: NSRect) {
