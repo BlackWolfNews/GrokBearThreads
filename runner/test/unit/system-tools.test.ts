@@ -26,7 +26,7 @@ const KNOWN: Record<string, { everywhere: true } | { linux: string; files: strin
   '/usr/sbin/lsof': { linux: "lsofPath's Mac place", files: ['handover.ts'] },
   '/usr/bin/lsof': { linux: "lsofPath's Linux place", files: ['handover.ts'] },
   '/usr/bin/sips': { linux: 'behind MAC; ImageMagick on Linux', files: ['images.ts'] },
-  '/usr/bin/qlmanage': { linux: 'behind MAC; rsvg-convert on Linux', files: ['images.ts'] },
+  '/usr/bin/qlmanage': { linux: 'behind MAC; rsvg-convert on Linux, or ffmpeg for a review clip', files: ['images.ts', 'review-media.ts'] },
   '/usr/sbin/system_profiler': { linux: 'behind a darwin check', files: ['machine.ts'] },
   '/usr/bin/vm_stat': { linux: 'behind a darwin check; /proc/meminfo on Linux', files: ['runner-stats.ts'] },
   '/usr/bin/sw_vers': { linux: 'behind a darwin check; /etc/os-release on Linux', files: ['runner-stats.ts'] },
