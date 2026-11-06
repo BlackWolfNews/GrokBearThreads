@@ -26,7 +26,7 @@ and ask the user what they use instead, rather than trying to reach them.
   file or test you're on: `node --test test/unit/<name>.test.ts` in
   `runner/`, `swift test --filter <Tests>` in `app/`. Whole suites go
   through `./check.sh`, which runs them on a check host (Tinker Desk, or
-  the cloud box for a `--quick` run, `checkHost` in runner.json), not on his Mac: three threads' suites
+  the cloud box for a `--quick` run, `checkHosts` in runner.json), not on his Mac: three threads' suites
   at once took it to a load of 75, and a test window came up over his
   browser (6 Nov). A hook blocks `npm test` and `check.sh --local` here.
 - Changing a threadbear tool's arguments: keep taking the old ones. A resumed
