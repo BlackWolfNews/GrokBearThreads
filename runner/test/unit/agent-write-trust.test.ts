@@ -8,7 +8,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
+import { ACCOUNTS, FakeAccounts, makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
 import { loadPatchSet } from '../../src/patches.ts';
 import { PatchTrust } from '../../src/patch-trust.ts';
 import { ClaudeAdapter } from '../../src/adapters/claude/adapter.ts';
@@ -411,6 +411,58 @@ test('what counts as code by name, and what the runner adds: files a hashed patc
   assert.ok(runsAsCode(path.join(elsewhere, 'tools.ts')), 'what it points at');
   assert.ok(runsAsCode(path.join(elsewhere, 'lib.ts')), 'what that imports');
   assert.ok(runsAsCodeByName(path.join(root, '.threadbear', 'patches', 'tools.ts'), tmpDir()), 'a patch by the name as written, though it resolves elsewhere');
+});
+
+test("Codex review, round 2: the runner's data dir, a link to a patch not there yet, other logins' settings, and what home patches run from the thread's folder", async () => {
+  const root = tmpDir();
+  const home = tmpDir();
+  const project = path.join(root, 'app');
+  fs.mkdirSync(project, { recursive: true });
+  // A second Claude login, its user settings with a hook naming a script.
+  const login = tmpDir();
+  put(path.join(login, 'settings.json'), JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'sh $CLAUDE_CONFIG_DIR/hooks/start.sh && ~/bin/x.sh' }] }] } }));
+  // A home patch (root is home here) whose hook runs a script from the
+  // thread's folder, and one naming an absolute script that isn't there.
+  const missing = path.join(tmpDir(), 'on-end.sh');
+  put(path.join(root, '.threadbear', 'patches', 'mine.ts'), `export default { hooks: [{ title: 'Lint', on: 'turn.end', run: "sh ./scripts/lint.sh" }, { title: 'End', on: 'turn.end', run: ${JSON.stringify(missing)} }] };\n`);
+  const h = makeHarness(home, {}, {
+    panelsRoot: root,
+    accounts: new FakeAccounts([...ACCOUNTS, { id: 'claude-9', provider: 'claude', title: 'nine', configDir: login }]),
+    patchTrust: new PatchTrust({ file: path.join(home, 'patch-trust.json'), claudeHome: root }),
+  });
+  const { thread } = h.runner.create({ text: 'hi', accountId: 'claude-3', cwd: project, permissionMode: 'ask' });
+  await settle(h, thread.id);
+  const runsAsCode = h.adapter.last.opts.runsAsCode!;
+  assert.ok(runsAsCode(path.join(home, 'patch-trust.json')), 'the trust store');
+  assert.ok(runsAsCode(path.join(home, 'runner.json')), "the runner's own settings");
+  assert.ok(runsAsCode(path.join(login, 'settings.json')), "another login's user settings");
+  assert.ok(runsAsCode(path.join(login, 'hooks', 'start.sh')), 'a script they run');
+  assert.ok(runsAsCode(path.join(os.homedir(), 'bin', 'x.sh')), 'from ~ too');
+  assert.ok(runsAsCode(path.join(project, 'scripts', 'lint.sh')), "a home hook's script, from the thread's folder");
+  assert.ok(runsAsCode(missing), 'a script a home patch names that a write would make');
+  assert.ok(!runsAsCode(path.join(project, 'README.md')));
+  // A link to a home patch that isn't there yet: a Write through it makes the patch.
+  const link = path.join(project, 'notes.txt');
+  fs.symlinkSync(path.join(root, '.threadbear', 'patches', 'p.ts'), link);
+  assert.ok(runsAsCodeByName(link, tmpDir()));
+  assert.ok(runsAsCode(link));
+});
+
+test('Codex review, round 2: on Full access an Edit of a patch that is a link into the folder carries it on', async () => {
+  const root = tmpDir();
+  const folder = path.join(root, 'repo');
+  const real = path.join(folder, 'src', 'p.ts');
+  put(real, `export default { actions: [{ title: 'Go', run: 'true' }] };\n`);
+  const link = path.join(folder, '.threadbear', 'patches', 'p.ts');
+  fs.mkdirSync(path.dirname(link), { recursive: true });
+  fs.symlinkSync(real, link);
+  const trust = new PatchTrust();
+  trust.trustCurrent([link]);
+  const before = fs.readFileSync(real, 'utf8');
+  const after = before.replace("'Go'", "'Go faster'");
+  put(real, after);
+  assert.deepEqual(trust.trustAgentWrite(link, shaOf(after), shaOf(before), folder), [link]);
+  assert.equal((await loadPatchSet(folder, root, new Map(), [], [], undefined, trust)).patches[0].untrusted, undefined);
 });
 
 // F21: an Edit vouches for what it changed, not for the rest of the file.

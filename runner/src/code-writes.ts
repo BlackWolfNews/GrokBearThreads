@@ -46,20 +46,26 @@ export function runsAsCodeByName(file: string, home: string = os.homedir()): boo
 }
 
 // `file` with the symlinks on its way resolved and each name as the disk
-// spells it, as far as it exists; the rest as given.
-export function canonicalPath(file: string): string {
-  let head = path.resolve(file);
-  const rest: string[] = [];
-  for (;;) {
-    try {
-      return path.join(fs.realpathSync.native(head), ...rest);
-    } catch {
-      const up = path.dirname(head);
-      if (up === head) return path.resolve(file);
-      rest.unshift(path.basename(head));
-      head = up;
-    }
+// spells it, as far as it exists; the rest as given. A link to something
+// not there yet is followed too: a Write through it makes its target, so
+// `notes.txt -> ~/.threadbear/patches/p.ts` is a patch (Codex review).
+export function canonicalPath(file: string, depth = 0): string {
+  const abs = path.resolve(file);
+  try {
+    return fs.realpathSync.native(abs);
+  } catch {
+    // missing, or a link to something missing
   }
+  const up = path.dirname(abs);
+  if (up === abs || depth > 40) return abs;
+  const parent = canonicalPath(up, depth + 1);
+  const here = path.join(parent, path.basename(abs));
+  try {
+    if (fs.lstatSync(here).isSymbolicLink()) return canonicalPath(path.resolve(parent, fs.readlinkSync(here)), depth + 1);
+  } catch {
+    // not there at all
+  }
+  return here;
 }
 
 function isInside(file: string, dir: string): boolean {

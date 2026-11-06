@@ -10,9 +10,9 @@ import { ErrorCode, RpcError } from '../protocol.ts';
 import { Projects } from '../projects.ts';
 import { threadEnv } from '../restart.ts';
 import { paths } from '../config.ts';
-import { isPatchFile, patchHash, type ClaudeVerdict } from '../patch-trust.ts';
+import { isPatchFile, namedPaths, patchHash, type ClaudeVerdict } from '../patch-trust.ts';
 import type { AgentWrite } from '../adapters/types.ts';
-import { CLAUDE_PATCH_ID, claudeCommands } from '../claude-trust.ts';
+import { CLAUDE_PATCH_ID, claudeCommands, settingsNamedPaths } from '../claude-trust.ts';
 import { canonicalPath, runsAsCodeByName } from '../code-writes.ts';
 import type { PatchInfo } from '../protocol.ts';
 import { automaticTrust, EMPTY_PATCH_SET, PATCH_EXTENSIONS, patchDirs, hookApplies, loadPatchSet, applyLive, hasLive, projectPanels, renderListPanel, renderPanel, runCommand, type CommandOutcome, type PanelRender, type PatchSet, type ProjectFolder, projectPatchFiles } from '../patches.ts';
@@ -20,6 +20,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { ThreadState, Turn } from '../runner.ts';
+import type { ThreadRecord } from '../store.ts';
 import { FOLDER_CACHE_MS, HOOK_TELL_CHARS, HOOK_TELL_LIMIT, LIVE_POLL_MS, LIVE_SHARE_MS, PATCHES_TTL_MS } from '../runner.ts';
 
 export const patchesPart = {
@@ -265,19 +266,44 @@ export const patchesPart = {
   // the runner runs by itself, beyond what code-writes.ts knows by name: a
   // file a patch it has hashed covers, or a script the folder's Claude
   // Code settings name. Outside Full access such an edit always asks.
-  writeRunsAsCode(this: Runner, cwd: string, file: string): boolean {
+  //
+  // Also the runner's own data dir (patch-trust.json is the trust itself,
+  // runner.json names the CLIs it runs), every Claude login's user
+  // settings and what their commands name (they run in every session on
+  // that login), and the patches that load without trust (home's, and
+  // Threadbear's own checkout's): what one is a link to, imports, names
+  // or names that isn't there yet, and its `./` paths from the thread's
+  // folder, where its commands run (Codex review). What a home hook runs
+  // by name (`npm test`, a tool on PATH) is the repo's own code, run as
+  // Mike set it up, and isn't followed.
+  writeRunsAsCode(this: Runner, rec: ThreadRecord, file: string): boolean {
+    const cwd = rec.cwd;
     const home = this.panelsRoot ?? os.homedir();
     const real = canonicalPath(file);
     if (runsAsCodeByName(file, home) || this.patchTrust.covers(real)) return true;
     const same = (f: string) => canonicalPath(f).toLowerCase() === real.toLowerCase();
+    const under = (dir: string) => {
+      const d = canonicalPath(dir).toLowerCase();
+      const rel = path.relative(d, real.toLowerCase());
+      return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+    };
     try {
-      // Home patches load without trust, so they're never hashed for
-      // covers(): what one is a link to, and what it imports or names, is
-      // looked at here.
-      for (const d of patchDirs(cwd, home)) {
-        if (d.source !== 'home') continue;
-        for (const name of fs.readdirSync(d.dir)) {
-          const p = path.join(d.dir, name);
+      if (under(this.cfg.home)) return true;
+      const configDirs = new Set([path.join(os.homedir(), '.claude'), ...this.accounts.list().filter((a) => a.provider === 'claude' && a.configDir).map((a) => a.configDir!)]);
+      if (same(path.join(os.homedir(), '.claude.json'))) return true;
+      for (const dir of configDirs) {
+        if (path.dirname(real).toLowerCase() === canonicalPath(dir).toLowerCase() && /^(settings(\..*)?\.json|\.claude\.json)$/i.test(path.basename(real))) return true;
+        for (const f of fs.existsSync(dir) ? fs.readdirSync(dir) : []) {
+          if (/^settings(\..*)?\.json$/i.test(f) && settingsNamedPaths(path.join(dir, f), dir, os.homedir()).some(same)) return true;
+        }
+      }
+      // Every patch folder the thread reads, its projects' too. Hashed
+      // ones are covered already; reading them again only costs time.
+      const dirs = new Set<string>();
+      for (const folder of [cwd, ...(this.projects?.foldersFor(rec) ?? []).map((f) => f.folder)]) for (const d of patchDirs(folder, home)) dirs.add(d.dir);
+      for (const dir of dirs) {
+        for (const name of fs.readdirSync(dir)) {
+          const p = path.join(dir, name);
           if (!PATCH_EXTENSIONS.includes(path.extname(name))) continue;
           if (same(p)) return true;
           let h: ReturnType<typeof patchHash> | undefined;
@@ -286,7 +312,16 @@ export const patchesPart = {
           } catch {
             continue;
           }
-          if (same(h.root) || h.deps.some((x) => same(x.path))) return true;
+          if (same(h.root) || h.deps.some((x) => same(x.path)) || h.unnamed.some(same)) return true;
+          // Its own text's paths: `./` ones from the thread's folder, where
+          // its commands run, and absolute or `~/` ones, there yet or not.
+          for (const bytes of h.code.values()) {
+            const text = bytes.toString('utf8');
+            if (namedPaths(text).some((n) => same(path.resolve(cwd, n)))) return true;
+            for (const word of text.split(/[\s'"`;&|()<>=,[\]{}]+/)) {
+              if (word.startsWith('/') && word.length > 1 ? same(word) : word.startsWith('~/') && same(path.join(os.homedir(), word.slice(2)))) return true;
+            }
+          }
         }
       }
       const found = claudeCommands(cwd, home);

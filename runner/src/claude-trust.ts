@@ -219,6 +219,34 @@ function namedScripts(parts: unknown, dir: string): string[] {
   return [...out];
 }
 
+// Every path a Claude Code user settings file's commands name (hooks, a
+// status line, a key helper and the rest): absolute, from `~`, `$HOME` or
+// `$CLAUDE_CONFIG_DIR` (`dir`), or relative to `dir`; there or not. They
+// run unasked in every session on that login, so an edit of one outside
+// Full access asks (code-writes.ts). A file that isn't plain JSON names
+// nothing it can tell, so its own name (code-writes.ts) is what's guarded.
+export function settingsNamedPaths(file: string, dir: string, home: string = os.homedir()): string[] {
+  const read = readJson(file);
+  if (!read?.ok) return [];
+  const strings: string[] = [];
+  const walk = (v: unknown) => {
+    if (typeof v === 'string') strings.push(v);
+    else if (Array.isArray(v)) v.forEach(walk);
+    else if (isObject(v)) Object.values(v).forEach(walk);
+  };
+  walk(commandParts(read.value));
+  const out = new Set<string>();
+  for (const s of strings) {
+    const text = s.replace(/\$\{?CLAUDE_CONFIG_DIR\}?/g, dir).replace(/\$\{?HOME\}?/g, home);
+    for (const raw of text.split(/[\s'"`;&|()<>=]+/)) {
+      if (!raw.includes('/') || raw.includes('$')) continue;
+      out.add(raw.startsWith('~/') ? path.join(home, raw.slice(2)) : path.resolve(dir, raw));
+      if (out.size >= MAX_NAMED) return [...out];
+    }
+  }
+  return [...out];
+}
+
 function readJson(file: string): { ok: true; value: unknown; sha256: string } | { ok: false; text: string; sha256: string } | undefined {
   let bytes: Buffer;
   try {

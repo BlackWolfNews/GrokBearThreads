@@ -299,7 +299,9 @@ export class PatchTrust implements PatchTrustStore {
     // And only the folder's own patches, from its own `.threadbear/`: in a
     // thread in a parent folder (~, ~/dev), every repo under it is inside,
     // but their patches aren't this thread's.
-    const own = (f: string) => path.dirname(path.dirname(path.dirname(realpath(path.resolve(f))))) === within;
+    // By where its patches folder is, not the file: a patch that's a link
+    // to `src/p.ts` is still the folder's own.
+    const own = (f: string) => path.dirname(path.dirname(realpath(path.dirname(path.resolve(f))))) === within;
     const files = isPatchFile(file) && own(file) ? [file] : [];
     for (const [f, h] of this.hashes) if (!files.includes(f) && own(f) && h.deps.some((d) => d.path === target)) files.push(f);
     // The edited file as the edit left it (the bytes hashed now are its),
@@ -315,7 +317,8 @@ export class PatchTrust implements PatchTrustStore {
   covers(file: string): boolean {
     const target = realpath(path.resolve(file)).toLowerCase();
     const same = (p: string) => p.toLowerCase() === target;
-    for (const h of this.hashes.values()) if (same(h.root) || h.deps.some((d) => same(d.path))) return true;
+    // `unnamed`: a script it names that isn't there yet, which a write makes.
+    for (const h of this.hashes.values()) if (same(h.root) || h.deps.some((d) => same(d.path)) || h.unnamed.some(same)) return true;
     return false;
   }
 

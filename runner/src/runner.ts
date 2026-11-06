@@ -1710,7 +1710,7 @@ export class Runner {
         ...this.briefFor(rec, resume),
         ...(rt.claudeSkipped ? { untrustedProjectSettings: claudeSettingsWithoutCommands(rec.cwd) } : {}),
         // Read at each call, from the thread's folder then.
-        runsAsCode: (file) => this.writeRunsAsCode(rec.cwd, file),
+        runsAsCode: (file) => this.writeRunsAsCode(rec, file),
       },
       sink,
     );

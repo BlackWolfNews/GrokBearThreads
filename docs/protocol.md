@@ -2943,9 +2943,18 @@ MultiEdit or Write by a Claude thread in Ask or Auto, or a Codex patch
 outside Full access, of a file Threadbear runs by itself always asks: a patch file anywhere (`.threadbear/patches`,
 home's included, which is trusted whatever it holds), anything under
 `~/.threadbear`, a file a patch the runner has hashed covers (a helper, a
-script it names), `.claude/settings*.json` (home's too), an `.mcp.json`,
-and a script the thread folder's Claude settings name. Names are matched
-as the disk has them (through symlinks, and without case, as macOS names
+script it names, one it names that isn't there yet), `.claude/settings*.json`
+(home's too), an `.mcp.json`, a script the thread folder's Claude settings
+name, the runner's own data dir (`patch-trust.json` is the trust itself),
+every Claude login's user settings (`settings*.json` and `.claude.json` in
+its config folder, and `~/.claude.json`) and the paths their commands name,
+and for patches that load without trust (home's, Threadbear's own
+checkout's) what each is a link to, imports and names, absolute or `~/`
+paths in it, and its `./` paths from the thread's folder, where its
+commands run. What such a hook runs by name (`npm test`, a tool on PATH)
+is the folder's own code, run as its owner set it up, and isn't followed.
+Names are matched as written and as the disk has them (through symlinks,
+a link to a file not there yet included, and without case, as macOS names
 a file either way). The runner's PreToolUse hook answers `ask` for these,
 which reaches the approval card whatever an "Always allow" rule, the
 user's own allow rules or Auto's classifier would have said. The card's
