@@ -360,16 +360,18 @@ test('file changes to a file that runs as code ask every time, past an "Always a
   h.answerWith(async () => ({ decision: 'allowAlways' }));
   h.a.handle(0, 'item/fileChange/requestApproval', { threadId: 't', turnId: 'u', itemId: 'fc-p', reason: null, grantRoot: null }, { fromChild: false });
   h.a.handle(1, 'applyPatchApproval', { conversationId: 't', callId: 'c', fileChanges: { '/home/me/.threadbear/patches/mine.ts': {} }, reason: null }, { fromChild: false });
+  // A legacy rename into a home patch: the destination counts.
+  h.a.handle(3, 'applyPatchApproval', { conversationId: 't', callId: 'c2', fileChanges: { '/work/proj/notes.ts': { type: 'update', unified_diff: '', move_path: '/home/me/.threadbear/patches/notes.ts' } }, reason: null }, { fromChild: false });
   // Paths it never saw: asked, as it can't tell.
   h.a.handle(2, 'item/fileChange/requestApproval', { threadId: 't', turnId: 'u', itemId: 'unseen', reason: null, grantRoot: null }, { fromChild: false });
   await flush();
-  assert.equal(h.asked.length, 3);
-  for (const card of h.asked.slice(0, 2)) {
+  assert.equal(h.asked.length, 4);
+  for (const card of h.asked.slice(0, 3)) {
     assert.equal(card.canAlwaysAllow, false);
     assert.match(card.title, /\(Threadbear runs this file as code\)$/);
   }
   assert.deepEqual(h.added, [[FILE_CHANGE_RULE]], 'only the unseen one, an ordinary card, could add the rule');
-  assert.deepEqual(h.replies.map((r) => r.result), [{ decision: 'accept' }, { decision: 'approved' }, { decision: 'accept' }]);
+  assert.deepEqual(h.replies.map((r) => r.result), [{ decision: 'accept' }, { decision: 'approved' }, { decision: 'approved' }, { decision: 'accept' }]);
 });
 
 test('permissions: a turn or a session grant, or nothing', async () => {

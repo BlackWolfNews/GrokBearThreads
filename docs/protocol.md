@@ -2658,8 +2658,10 @@ panels or hooks, no live functions, and no worktree for new threads.
   other, and the edit asks first (below, "Agent writes that run as
   code"). The mode is the one the call went through on, recorded with
   it, not the thread's when the result comes, so switching to Full access
-  after approving an edit in Ask doesn't trust it. A file outside the
-  thread's folder (another project's patch, a tool patch) waits too.
+  after approving an edit in Ask doesn't trust it. Only the thread
+  folder's own patches (its `.threadbear/patches`) and files inside that
+  folder count: another project's patch, a tool patch, or a repo's under
+  a thread in a folder above it (`~`, `~/dev`) waits too.
   Only an edit the CLI says it made counts, when its
   successful result comes in, never the diff shown to approve one, so a
   denied or failed edit trusts nothing. And only the bytes it wrote: the

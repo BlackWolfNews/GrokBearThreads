@@ -118,8 +118,9 @@ export interface PatchTrustStore extends PatchGate {
   // still has those bytes and every other file in the patch's hash is
   // bytes trusted before or another such edit's: one edit doesn't vouch
   // for files it didn't write, nor an Edit for the rest of a file that
-  // wasn't trusted before it. Only files inside `folder` count, and only
-  // patches already looked at are known as importing it.
+  // wasn't trusted before it. Only files inside `folder` count, only
+  // patches in `folder`'s own `.threadbear/patches`, and only patches
+  // already looked at are known as importing it.
   trustAgentWrite(file: string, sha256: string, base: string | null, folder: string): string[];
   // Whether `file` is part of a patch this has hashed (the patch file, a
   // helper, a script it names): an edit to it changes code that runs.
@@ -295,8 +296,12 @@ export class PatchTrust implements PatchTrustStore {
     // file would trust all of it (Gautam's scan, F21).
     if (base !== null && !this.isApproved(target, base)) return [];
     this.approve(target, sha256);
-    const files = isPatchFile(file) ? [file] : [];
-    for (const [f, h] of this.hashes) if (!files.includes(f) && isInside(realpath(f), within) && h.deps.some((d) => d.path === target)) files.push(f);
+    // And only the folder's own patches, from its own `.threadbear/`: in a
+    // thread in a parent folder (~, ~/dev), every repo under it is inside,
+    // but their patches aren't this thread's.
+    const own = (f: string) => path.dirname(path.dirname(path.dirname(realpath(path.resolve(f))))) === within;
+    const files = isPatchFile(file) && own(file) ? [file] : [];
+    for (const [f, h] of this.hashes) if (!files.includes(f) && own(f) && h.deps.some((d) => d.path === target)) files.push(f);
     // The edited file as the edit left it (the bytes hashed now are its),
     // and every other file trusted bytes or another verified edit's.
     return this.trustWhere(files, (entry) => {

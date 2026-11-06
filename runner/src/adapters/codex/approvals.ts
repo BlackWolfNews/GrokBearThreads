@@ -532,8 +532,11 @@ export class CodexApprovals {
   }
 
   private legacyPatch(id: RequestId, p: ApplyPatchApprovalParams, fromChild: boolean): void {
-    const paths = Object.keys(p.fileChanges ?? {});
-    const code = this.runsAsCode(paths);
+    // Each file and, for a rename, where it goes (`move_path`).
+    const changes = Object.entries(p.fileChanges ?? {});
+    const paths = changes.map(([f]) => f);
+    const moves = changes.flatMap(([, c]) => [(c as { move_path?: unknown })?.move_path, (c as { kind?: { move_path?: unknown } })?.kind?.move_path]).filter((x): x is string => typeof x === 'string' && x !== '');
+    const code = this.runsAsCode([...paths, ...moves]);
     if (!code && hasRule(this.deps.rules(), FILE_CHANGE_RULE)) {
       this.deps.reply(id, { decision: 'approved' });
       return;

@@ -27,16 +27,22 @@ export const RUNS_AS_CODE_REASON = `${RUNS_AS_CODE}, so it always asks outside F
 // included) and an `.mcp.json`. The runner adds the files a patch it has
 // hashed covers, and the scripts the thread folder's Claude settings name.
 export function runsAsCodeByName(file: string, home: string = os.homedir()): boolean {
-  // As the disk has it, and without case: on macOS `.Threadbear/Patches/x.ts`
-  // is the same file as `.threadbear/patches/x.ts`, and a symlink to one
-  // writes the file it points at.
-  const abs = canonicalPath(file).toLowerCase();
-  const dir = path.dirname(abs);
-  if (path.basename(dir) === 'patches' && path.basename(path.dirname(dir)) === '.threadbear' && ['.ts', '.js', '.mjs'].includes(path.extname(abs))) return true;
-  if (isInside(abs, canonicalPath(path.join(path.resolve(home), '.threadbear')).toLowerCase())) return true;
-  const name = path.basename(abs);
-  if (name === '.mcp.json') return true;
-  return path.basename(dir) === '.claude' && /^settings(\..*)?\.json$/.test(name);
+  // By the name as written and as the disk has it, without case: on macOS
+  // `.Threadbear/Patches/x.ts` is the same file as `.threadbear/patches/x.ts`;
+  // a symlink to a patch writes the patch, and a patch that is a symlink
+  // (`~/.threadbear/patches/x.ts` to `~/src/x.ts`) runs what its name says.
+  // The runner adds what such a link points at (writeRunsAsCode).
+  const homeDir = path.join(path.resolve(home), '.threadbear');
+  const homes = [homeDir.toLowerCase(), canonicalPath(homeDir).toLowerCase()];
+  return [path.resolve(file), canonicalPath(file)].some((p) => {
+    const abs = p.toLowerCase();
+    const dir = path.dirname(abs);
+    if (path.basename(dir) === 'patches' && path.basename(path.dirname(dir)) === '.threadbear' && ['.ts', '.js', '.mjs'].includes(path.extname(abs))) return true;
+    if (homes.some((h) => isInside(abs, h))) return true;
+    const name = path.basename(abs);
+    if (name === '.mcp.json') return true;
+    return path.basename(dir) === '.claude' && /^settings(\..*)?\.json$/.test(name);
+  });
 }
 
 // `file` with the symlinks on its way resolved and each name as the disk

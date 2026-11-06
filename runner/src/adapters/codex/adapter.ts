@@ -727,13 +727,15 @@ export class CodexSession implements AgentSession {
   // (for the approval card's title).
   private trackItem(method: string, p: Record<string, unknown>): void {
     if (method !== 'item/started' && method !== 'item/completed') return;
-    const item = p.item as { type?: string; id?: string; changes?: { path?: unknown }[] } | undefined;
+    const item = p.item as { type?: string; id?: string; changes?: { path?: unknown; kind?: { move_path?: unknown } }[] } | undefined;
     if (!item || typeof item.id !== 'string') return;
     if (item.type === 'commandExecution') {
       if (method === 'item/started') this.turn?.openCommands.add(item.id);
       else this.turn?.openCommands.delete(item.id);
     } else if (item.type === 'fileChange' && method === 'item/started' && Array.isArray(item.changes)) {
-      this.itemPaths.set(item.id, item.changes.map((c) => c?.path).filter((x): x is string => typeof x === 'string'));
+      // A rename's new name too: a file moved to .threadbear/patches is
+      // written there (code-writes.ts).
+      this.itemPaths.set(item.id, item.changes.flatMap((c) => [c?.path, c?.kind?.move_path]).filter((x): x is string => typeof x === 'string' && x !== ''));
       if (this.itemPaths.size > 200) this.itemPaths.delete(this.itemPaths.keys().next().value!);
     }
   }

@@ -711,11 +711,15 @@ class ClaudeSession implements AgentSession {
 
   // Leaving Full access counts at once and coming to it only once the CLI
   // has, so between the two the stricter mode is the one in force here.
+  // Only the newest switch's ending sets it: a switch to Full finishing
+  // after a later one away from it would bring Full back (Codex review).
+  private modeSwitch = 0;
   async setPermissionMode(mode: PermissionMode): Promise<void> {
     if (this.exited) return;
+    const n = ++this.modeSwitch;
     if (mode !== 'full') this.mode = mode;
     await this.q.setPermissionMode(sdkPermissionMode(mode));
-    this.mode = mode;
+    if (n === this.modeSwitch) this.mode = mode;
   }
 
   async end(opts: { hard?: boolean } = {}): Promise<void> {

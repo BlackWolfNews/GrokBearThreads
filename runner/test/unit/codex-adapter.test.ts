@@ -10,6 +10,7 @@ import { z } from 'zod';
 import { tool } from '@anthropic-ai/claude-agent-sdk';
 import { CodexAdapter, CodexSession, codexModelChoices, type CodexAdapterDeps } from '../../src/adapters/codex/adapter.ts';
 import { OVERSIZED_LINE } from '../../src/adapters/codex/appserver.ts';
+import { FILE_CHANGE_RULE } from '../../src/adapters/codex/approvals.ts';
 import { TOOL_GUIDANCE } from '../../src/adapters/codex/tools.ts';
 import type { CodexNormalizerLike } from '../../src/adapters/codex/types.ts';
 import { CodexNormalizer } from '../../src/adapters/codex/normalize.ts';
@@ -687,6 +688,23 @@ test('subagents: traffic is marked with the child id, approvals reach this sink 
   const own = h.conn.serverRequest('item/fileChange/requestApproval', { threadId: 'th-1', turnId: 'u1', itemId: 'fc-1', reason: null, grantRoot: null });
   await own;
   assert.equal(h.rec.approvals[1].toolUseId, 'fc-1');
+  await h.session.end();
+});
+
+test("a file change that renames a file into .threadbear/patches asks, past the thread's file-change rule, with no Always allow", async () => {
+  const h = await open({ permissionMode: 'ask', allowRules: [FILE_CHANGE_RULE] });
+  await started(h);
+  h.session.send({ id: 'm1', text: 'tidy up', images: [] });
+  await turnStarts(h, 'u1');
+  const cwd = h.opts.cwd;
+  const change = { path: path.join(cwd, 'notes.ts'), kind: { type: 'update', move_path: path.join(cwd, '.threadbear', 'patches', 'notes.ts') }, diff: '' };
+  h.conn.notify('item/started', { threadId: 'th-1', turnId: 'u1', item: { type: 'fileChange', id: 'fc-m', changes: [change], status: 'inProgress' } });
+  await sleep(30);
+  const asked = h.conn.serverRequest('item/fileChange/requestApproval', { threadId: 'th-1', turnId: 'u1', itemId: 'fc-m', reason: null, grantRoot: null });
+  await waitFor(() => h.rec.approvals.length === 1);
+  assert.equal(h.rec.approvals[0].canAlwaysAllow, false);
+  assert.match(h.rec.approvals[0].title, /Threadbear runs this file as code/);
+  await asked;
   await h.session.end();
 });
 

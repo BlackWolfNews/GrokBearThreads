@@ -174,6 +174,13 @@ test("F1, F4: even on Full access, a write outside the thread's own folder trust
   const t = await settle(h, there.id);
   assert.equal(t.patches?.find((p) => p.id === 'tool')?.untrusted, 'new');
   assert.equal(fs.existsSync(mark), false);
+  // From a thread in a folder above it (~, ~/dev): inside, but that repo's
+  // patches aren't this thread's own.
+  const unit = new PatchTrust();
+  const nested = path.join(other, '.threadbear', 'patches', 'nested.ts');
+  put(nested, payload(path.join(marks, 'nested.ran'), 'Nested'));
+  assert.deepEqual(unit.trustAgentWrite(nested, sha(nested), null, root), []);
+  assert.deepEqual(unit.trustAgentWrite(nested, sha(nested), null, other), [nested]);
 });
 
 test("F1: in Ask or Auto, the agent's write of the folder's Claude settings doesn't trust their hooks (trustClaudeEdit's gate)", async () => {
@@ -200,7 +207,7 @@ test("F1: in Ask or Auto, the agent's write of the folder's Claude settings does
 // The adapter: records the mode with each call (PreToolUse), and makes an
 // edit of a file that runs as code ask, every time, outside Full access.
 function fakeQuery() {
-  const state: { options?: any; frame?: (f: unknown) => Promise<void>; close?: () => void; modes: string[] } = { modes: [] };
+  const state: { options?: any; frame?: (f: unknown) => Promise<void>; close?: () => void; modes: string[]; hold?: boolean; held: (() => void)[] } = { modes: [], held: [] };
   const fn = ((args: { prompt: AsyncIterable<any>; options: any }) => {
     state.options = args.options;
     const frames: unknown[] = [];
@@ -226,8 +233,10 @@ function fakeQuery() {
         }
       },
       interrupt: async () => undefined,
+      // Held until the test lets it finish, when it asks to (state.hold).
       setPermissionMode: async (m: string) => {
         state.modes.push(m);
+        if (state.hold) await new Promise<void>((r) => state.held.push(r));
       },
       close: () => state.close!(),
     };
@@ -300,6 +309,19 @@ test("F1: the adapter sends each write with the mode it went through on, recorde
   assert.equal((await a.wrote('w4', file))?.mode, 'auto');
   // No hook seen for a call: no mode, which the runner trusts nothing for.
   assert.equal((await a.wrote('w5', file))?.mode, undefined);
+  // Overlapping switches: Full asked for, then Ask before Full's has
+  // finished. Full's finishing mustn't bring it back (Codex review).
+  a.state.hold = true;
+  const toFull = a.s.setPermissionMode('full');
+  const toAsk = a.s.setPermissionMode('ask');
+  a.state.held.shift()!();
+  await toFull;
+  const patch = path.join(a.dir, '.threadbear', 'patches', 'p.ts');
+  const out = await a.hook('w6', patch, 'bypassPermissions');
+  assert.equal(out.hookSpecificOutput?.permissionDecision, 'ask', 'still Ask: the code write asks');
+  a.state.held.shift()!();
+  await toAsk;
+  assert.equal((await a.wrote('w6', patch))?.mode, 'ask');
   a.state.close!();
 });
 
@@ -376,6 +398,19 @@ test('what counts as code by name, and what the runner adds: files a hashed patc
   assert.ok(runsAsCode(path.join(project, 'scripts', 'go.sh')), 'a script it names');
   assert.ok(runsAsCode(path.join(project, '.claude', 'hooks', 'stop.sh')), 'a script the settings run');
   assert.ok(!runsAsCode(path.join(project, 'README.md')));
+
+  // A home patch that's a link to a file elsewhere: home patches load
+  // unasked, so the file it points at, and what that imports, are code
+  // too, by either name (Codex review).
+  const elsewhere = path.join(root, 'src');
+  put(path.join(elsewhere, 'tools.ts'), `import { x } from './lib.ts';\nexport default { actions: [{ title: x, run: "true" }] };\n`);
+  put(path.join(elsewhere, 'lib.ts'), `export const x = 'X';\n`);
+  fs.mkdirSync(path.join(root, '.threadbear', 'patches'), { recursive: true });
+  fs.symlinkSync(path.join(elsewhere, 'tools.ts'), path.join(root, '.threadbear', 'patches', 'tools.ts'));
+  assert.ok(runsAsCode(path.join(root, '.threadbear', 'patches', 'tools.ts')), 'the link by its own name');
+  assert.ok(runsAsCode(path.join(elsewhere, 'tools.ts')), 'what it points at');
+  assert.ok(runsAsCode(path.join(elsewhere, 'lib.ts')), 'what that imports');
+  assert.ok(runsAsCodeByName(path.join(root, '.threadbear', 'patches', 'tools.ts'), tmpDir()), 'a patch by the name as written, though it resolves elsewhere');
 });
 
 // F21: an Edit vouches for what it changed, not for the rest of the file.

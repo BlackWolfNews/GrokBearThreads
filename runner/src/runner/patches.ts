@@ -10,12 +10,13 @@ import { ErrorCode, RpcError } from '../protocol.ts';
 import { Projects } from '../projects.ts';
 import { threadEnv } from '../restart.ts';
 import { paths } from '../config.ts';
-import { isPatchFile, type ClaudeVerdict } from '../patch-trust.ts';
+import { isPatchFile, patchHash, type ClaudeVerdict } from '../patch-trust.ts';
 import type { AgentWrite } from '../adapters/types.ts';
 import { CLAUDE_PATCH_ID, claudeCommands } from '../claude-trust.ts';
 import { canonicalPath, runsAsCodeByName } from '../code-writes.ts';
 import type { PatchInfo } from '../protocol.ts';
-import { automaticTrust, EMPTY_PATCH_SET, hookApplies, loadPatchSet, applyLive, hasLive, projectPanels, renderListPanel, renderPanel, runCommand, type CommandOutcome, type PanelRender, type PatchSet, type ProjectFolder, projectPatchFiles } from '../patches.ts';
+import { automaticTrust, EMPTY_PATCH_SET, PATCH_EXTENSIONS, patchDirs, hookApplies, loadPatchSet, applyLive, hasLive, projectPanels, renderListPanel, renderPanel, runCommand, type CommandOutcome, type PanelRender, type PatchSet, type ProjectFolder, projectPatchFiles } from '../patches.ts';
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { ThreadState, Turn } from '../runner.ts';
@@ -265,14 +266,33 @@ export const patchesPart = {
   // file a patch it has hashed covers, or a script the folder's Claude
   // Code settings name. Outside Full access such an edit always asks.
   writeRunsAsCode(this: Runner, cwd: string, file: string): boolean {
+    const home = this.panelsRoot ?? os.homedir();
     const real = canonicalPath(file);
-    if (runsAsCodeByName(real, this.panelsRoot ?? os.homedir()) || this.patchTrust.covers(real)) return true;
+    if (runsAsCodeByName(file, home) || this.patchTrust.covers(real)) return true;
+    const same = (f: string) => canonicalPath(f).toLowerCase() === real.toLowerCase();
     try {
-      const found = claudeCommands(cwd, this.panelsRoot ?? os.homedir());
-      const same = (f: string) => canonicalPath(f).toLowerCase() === real.toLowerCase();
+      // Home patches load without trust, so they're never hashed for
+      // covers(): what one is a link to, and what it imports or names, is
+      // looked at here.
+      for (const d of patchDirs(cwd, home)) {
+        if (d.source !== 'home') continue;
+        for (const name of fs.readdirSync(d.dir)) {
+          const p = path.join(d.dir, name);
+          if (!PATCH_EXTENSIONS.includes(path.extname(name))) continue;
+          if (same(p)) return true;
+          let h: ReturnType<typeof patchHash> | undefined;
+          try {
+            h = patchHash(p);
+          } catch {
+            continue;
+          }
+          if (same(h.root) || h.deps.some((x) => same(x.path))) return true;
+        }
+      }
+      const found = claudeCommands(cwd, home);
       return !!found && [...found.files, ...found.named].some(same);
     } catch {
-      // Settings it can't read: the edit asks.
+      // Something it can't read: the edit asks.
       return true;
     }
   },
