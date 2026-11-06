@@ -73,6 +73,9 @@ test('runner: a turn hook runs at background priority unless the runner is told 
     return (runs()[0] as { text?: string } | undefined)?.text?.trim();
   };
   assert.equal(await pri(true), '4');
-  // Off, it runs as the runner does (20, or 4 if this suite is itself under taskpolicy -b).
-  assert.match((await pri(false)) ?? '', /^(4|20)$/);
+  // Off, it runs as the runner does: at this suite's own priority, which
+  // depends on how it was started (20 under a GUI login, 31 over ssh, as
+  // when ./check.sh sends it to a check host, 4 under taskpolicy -b).
+  const own = execFileSync('/bin/ps', ['-o', 'pri=', '-p', String(process.pid)], { encoding: 'utf8' }).trim();
+  assert.equal((await pri(false)) ?? '', own);
 });

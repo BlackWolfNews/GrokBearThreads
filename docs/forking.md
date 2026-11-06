@@ -63,7 +63,9 @@ gone from your fork, not just quiet.
   empty it in the dashboard first.
 - Update `docs/guide.md` (what the user sees) and `docs/on-your-mac.md`
   (what it installs, reads and talks to).
-- Then `./check.sh` (`--app` when you touched `app/`).
+- Then `./check.sh` (`--app` when you touched `app/`). To run it on
+  another Mac over ssh, put `"checkHost": "<ssh host>"` in your
+  runner.json (Mike's is `tinker-desk`); without it, it runs on yours.
 
 ### Optional, with a switch
 

@@ -3,7 +3,15 @@
 # what failed and the end of the log for each step that failed, and a
 # nonzero exit if any did.
 #
-#   ./check.sh [--quick | --app] [--all] [--e2e] [--shots DIR]
+#   ./check.sh [--quick | --app] [--all] [--e2e] [--shots DIR] [--local]
+#
+# With a check host set (THREADBEAR_CHECK_HOST, or "checkHost" in the
+# runner's runner.json, an ssh host such as "tinker-desk"), the checks run
+# on that Mac instead (scripts/check-remote.sh), so test suites and the
+# app's test windows stay off this one. If it can't be reached they run
+# here. --e2e always runs here, as it needs this Mac's claude login.
+#   --local       run here even with a check host set (narrow it down too:
+#                 one test file, or swift test --filter)
 #
 #   (no options)  runner typecheck, unit tests and deploy tests, then the
 #                 app's swift build and swift test, and BearDock's tests
@@ -40,6 +48,8 @@ APP_ONLY=0
 ALL=0
 E2E=0
 SHOTS=""
+LOCAL=0
+ARGS=("$@")
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -47,6 +57,7 @@ while [ $# -gt 0 ]; do
     --app) APP_ONLY=1 ;;
     --all) ALL=1 ;;
     --e2e) E2E=1 ;;
+    --local) LOCAL=1 ;;
     --shots)
       [ $# -ge 2 ] || { echo "--shots needs a folder" >&2; exit 2; }
       case "$2" in /*) SHOTS="$2" ;; *) SHOTS="$PWD/$2" ;; esac
@@ -60,6 +71,27 @@ done
 if [ "$QUICK" = 1 ] && [ "$APP_ONLY" = 1 ]; then
   echo "--quick is the runner's checks and --app the app's; pick one (or neither for both)." >&2
   exit 2
+fi
+
+# The check host: THREADBEAR_CHECK_HOST (set and empty means none), or
+# runner.json's checkHost. Read before the THREADBEAR_* names go below.
+if [ "$LOCAL" = 0 ] && [ "$E2E" = 0 ]; then
+  if [ -n "${THREADBEAR_CHECK_HOST+set}" ]; then
+    CHECK_HOST="$THREADBEAR_CHECK_HOST"
+  else
+    RUNNER_JSON="${THREADBEAR_HOME:-$HOME/Library/Application Support/Threadbear}/runner.json"
+    CHECK_HOST="$( [ -x "$NODE" ] && [ -f "$RUNNER_JSON" ] && "$NODE" -e '
+      try { const h = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).checkHost; if (typeof h === "string") console.log(h) } catch {}' "$RUNNER_JSON")"
+  fi
+  if [ -n "$CHECK_HOST" ]; then
+    "$ROOT/scripts/check-remote.sh" "$CHECK_HOST" ${ARGS[@]+"${ARGS[@]}"}
+    code=$?
+    [ "$code" = 255 ] || exit "$code"
+    echo "So the checks run on this Mac instead, at low priority."
+    exec taskpolicy -b "$0" --local ${ARGS[@]+"${ARGS[@]}"}
+  fi
+elif [ "$E2E" = 1 ] && [ "$LOCAL" = 0 ]; then
+  echo "--e2e runs on this Mac, which has the claude login it needs."
 fi
 
 if [ ! -x "$NODE" ]; then
@@ -82,10 +114,16 @@ export THREADBEAR_SYNC=off
 
 # What this checkout changes from main: committed since they parted, plus
 # anything uncommitted or untracked. Empty on main itself.
+if [ -n "${THREADBEAR_CHECK_CHANGED_FILE:-}" ]; then
+  # On a check host: worked out on the Mac that sent the copy, which has
+  # no .git (scripts/check-remote.sh).
+  CHANGED="$(cat "$THREADBEAR_CHECK_CHANGED_FILE")"
+else
 CHANGED="$( {
   base="$(git -C "$ROOT" merge-base HEAD main 2>/dev/null)" && git -C "$ROOT" diff --name-only "$base"
   git -C "$ROOT" ls-files --others --exclude-standard
 } 2>/dev/null | sort -u)"
+fi
 
 # needed <regex>: whether a step whose inputs match it should run.
 needed() {

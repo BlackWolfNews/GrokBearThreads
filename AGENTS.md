@@ -17,8 +17,13 @@ static site with its own `package.json`; its comments say how to build it.
 
 ## Rules
 
-- Test first for anything non-trivial. Runner: `npm test` in `runner/`.
-  App: `swift test` in `app/`.
+- Test first for anything non-trivial. While you work, run the one test
+  file or test you're on: `node --test test/unit/<name>.test.ts` in
+  `runner/`, `swift test --filter <Tests>` in `app/`. Whole suites go
+  through `./check.sh`, which runs them on the check host (Tinker Desk for
+  Mike, `checkHost` in runner.json), not on his Mac: three threads' suites
+  at once took it to a load of 75, and a test window came up over his
+  browser (6 Nov). A hook blocks `npm test` and `check.sh --local` here.
 - Changing a threadbear tool's arguments: keep taking the old ones. A resumed
   Claude session keeps a tool's definition from when it first loaded it, and
   ToolSearch shows that one too, so it goes on calling the old form
@@ -195,7 +200,11 @@ if `tb` isn't found (an older runner, or outside a thread), use
 
 - `./check.sh` runs every check (`--quick`: the runner's typecheck and
   unit tests, about a minute; `--app`: the app's build and tests, for a
-  change outside `runner/`). It skips the deploy tests and BearDock's
+  change outside `runner/`). With a check host set it copies the checkout
+  there, runs it, brings back failed steps' logs and deletes the copy
+  (`scripts/check-remote.sh`); one run at a time, so it may say it's
+  waiting for another thread's. If the host can't be reached it runs here
+  at low priority. `--e2e` always runs here, as it needs the claude login. It skips the deploy tests and BearDock's
   unless something they cover changed from main (`--all` runs them
   anyway). The app's part is under a minute with a warm `app/.build` and
   5 to 10 minutes in a folder that has never built, so run it in the
