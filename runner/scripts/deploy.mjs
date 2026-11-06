@@ -10,7 +10,7 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { pointCurrent, readCurrentLink, readState, releaseExists, writeState } from '../launch.mjs';
 import { connectRpc } from './rpc-client.mjs';
-import { Fail, step, unitTests } from './deploy-steps.mjs';
+import { Fail, smokeTimedOut, step, unitTests } from './deploy-steps.mjs';
 // THREADBARE_* was the old name for these variables (config.ts, adoptOldNames).
 for (const [k, v] of Object.entries(process.env)) {
   const name = k.startsWith('THREADBARE_') ? 'THREADBEAR_' + k.slice(11) : undefined;
@@ -810,8 +810,10 @@ async function smoke(c, id) {
     let port = null;
     while (!port) {
       if (exited) throw new Error(`it exited (${exited.code ?? exited.signal}) before listening`);
-      // Long enough for a busy Mac: at 30 s, load kept every release from going out for hours.
-      if (Date.now() - started > 90_000) throw new Error('it was not listening after 90 s');
+      // Long enough for a busy Mac: at 30 s, load kept every release from
+      // going out for hours, and longer still while it's overloaded.
+      const waited = Date.now() - started;
+      if (smokeTimedOut(waited, os.loadavg()[0] / os.cpus().length)) throw new Error(`it was not listening after ${Math.round(waited / 1000)} s`);
       port = /listening on (\d+)/.exec(fs.readFileSync(out, 'utf8'))?.[1];
       if (!port) await sleep(100);
     }
