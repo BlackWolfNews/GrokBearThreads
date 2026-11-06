@@ -48,4 +48,46 @@ struct AgentBrowserTests {
         #expect(tab.bridge == true && tab.targetId == nil)
         #expect(tab.profile == "personal-id" && tab.profileTitle == "Personal · me@example.com")
     }
+
+    /// Frames come in many reads, several lines can share one, and a reply
+    /// can follow a frame in the same read: every line comes out whole, in order.
+    @Test func thePipeSplitsLinesAcrossAndWithinReads() async throws {
+        let path = "/tmp/tb-pipe-\(getpid())-\(UInt32.random(in: 0...UInt32.max)).sock"
+        unlink(path)
+        defer { unlink(path) }
+        let server = socket(AF_UNIX, SOCK_STREAM, 0)
+        var addr = sockaddr_un()
+        addr.sun_family = sa_family_t(AF_UNIX)
+        withUnsafeMutableBytes(of: &addr.sun_path) { buf in _ = path.withCString { strcpy(buf.baseAddress!.assumingMemoryBound(to: CChar.self), $0) } }
+        let bound = withUnsafePointer(to: &addr) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(server, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) } }
+        #expect(bound == 0)
+        listen(server, 1)
+        let big = String(repeating: "x", count: 700_000)
+        let text = #"{"method":"a","params":{"data":"\#(big)"}}"# + "\n" + #"{"method":"b"}"# + "\n" + #"{"method":"c","params":{"data":"\#(big)"}}"# + "\n"
+        let bytes = Array(text.utf8)
+        Thread.detachNewThread {
+            let client = accept(server, nil, nil)
+            var i = 0
+            // Uneven pieces, a little apart, so lines straddle reads.
+            for size in [5, 300_000, 400_036, 7, 650_000] + [Int](repeating: 100_000, count: 10) where i < bytes.count {
+                let end = min(bytes.count, i + size)
+                bytes[i..<end].withUnsafeBytes { _ = write(client, $0.baseAddress, $0.count) }
+                i = end
+                usleep(2_000)
+            }
+            usleep(500_000)
+            close(client)
+            close(server)
+        }
+        let pipe = BrowserBearPipe(path: path)
+        let got = try await withCheckedThrowingContinuation { (done: CheckedContinuation<[String], Error>) in
+            var seen: [String] = []
+            pipe.onEvent = { m in
+                seen.append("\(m["method"] ?? "")\(((m["params"] as? [String: Any])?["data"] as? String)?.count ?? 0)")
+                if seen.count == 3 { done.resume(returning: seen) }
+            }
+        }
+        pipe.close()
+        #expect(got == ["a700000", "b0", "c700000"])
+    }
 }
