@@ -238,6 +238,9 @@ struct AgentBrowserPanel: View {
     @State private var address = ""
     @StateObject private var surface = AgentSurfaceHandle()
     @FocusState private var addressFocused: Bool
+    /// The profile an address typed with no page open goes to. Picking a
+    /// profile from the menu makes it the default, starred there.
+    @AppStorage("browserPanelProfile") private var defaultProfile = ""
 
     private var tabs: [AgentTab] { model.tabs(for: thread.id) }
 
@@ -288,7 +291,7 @@ struct AgentBrowserPanel: View {
                         }
                     }
             } else {
-                PaneNote(text: model.error ?? (model.profiles.isEmpty ? "Connect BrowserBear in a Chrome profile to use its pages here." : "Choose a Chrome profile to open a page with its existing sign-ins."))
+                PaneNote(text: model.error ?? (model.profiles.isEmpty ? "Connect BrowserBear in a Chrome profile to use its pages here." : "Type an address, or choose a Chrome profile, to open a page with its existing sign-ins."))
             }
             if let tab, tab.state == "working", let action = tab.action { working(action) }
             if tab != nil, let error = model.error { Text(error).font(.system(size: TypeScale.label)).foregroundStyle(.secondary).padding(zoomed(6)) }
@@ -317,13 +320,26 @@ struct AgentBrowserPanel: View {
 
     private static func shown(_ url: String) -> String { url == "about:blank" ? "" : url }
 
+    /// The default profile, else the first connected one.
+    private var newPageProfile: BrowserProfile? {
+        model.profiles.first { $0.id == defaultProfile } ?? model.profiles.first
+    }
+
+    /// The panel's page can take an address itself; otherwise one typed opens
+    /// a new page (no page yet, one that's in Chrome's window, waiting for
+    /// Show this tab here, or disconnected).
+    private var pageTakesAddress: Bool {
+        guard let tab else { return false }
+        return tab.inChrome != true && tab.requiresConsent != true && tab.suspended != true && surface.error == nil
+    }
+
     private var toolbar: some View {
         HStack(spacing: zoomed(2)) {
             PaneHeaderButton(symbol: "chevron.left", help: "Back") { surface.evaluate("history.back()") }
             PaneHeaderButton(symbol: "chevron.right", help: "Forward") { surface.evaluate("history.forward()") }
             PaneHeaderButton(symbol: "arrow.clockwise", help: "Reload") { surface.send("Page.reload") }
             TextField("Address", text: $address)
-                .disabled(tab == nil || tab?.inChrome == true || tab?.requiresConsent == true)
+                .disabled(!pageTakesAddress && tab?.profile == nil && newPageProfile == nil)
                 .textFieldStyle(.plain)
                 .font(.system(size: TypeScale.label))
                 .focused($addressFocused)
@@ -345,9 +361,11 @@ struct AgentBrowserPanel: View {
         var text = address.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         if !text.contains("://") { text = (text.contains(".") && !text.contains(" ") ? "https://" : "https://www.google.com/search?q=") + text }
-        if let tab {
-            if tab.suspended == true || surface.error != nil, let profile = tab.profile { model.open(text, thread: thread.id, profile: profile) }
-            else { surface.send("Page.navigate", ["url": text]) }
+        if pageTakesAddress { surface.send("Page.navigate", ["url": text]) }
+        else if let profile = tab?.profile ?? newPageProfile?.id {
+            chosen = nil
+            model.select(nil, in: thread.id)
+            model.open(text, thread: thread.id, profile: profile)
         }
         addressFocused = false
     }
@@ -356,12 +374,13 @@ struct AgentBrowserPanel: View {
         HStack {
             IconMenu {
                 ForEach(model.profiles) { profile in
-                    Button("New page in \(profile.title)", systemImage: "person.crop.circle") {
+                    Button("New page in \(profile.title)", systemImage: profile.id == newPageProfile?.id ? "star.fill" : "person.crop.circle") {
+                        defaultProfile = profile.id
                         chosen = nil
                         model.select(nil, in: thread.id)
                         model.open("about:blank", thread: thread.id, profile: profile.id)
                     }
-                    .tip("Open a new page in \(profile.title)")
+                    .tip(profile.id == newPageProfile?.id ? "Open a new page in \(profile.title), the default for addresses typed with no page open" : "Open a new page in \(profile.title) and make it the default")
                 }
             } label: {
                 Label(tab.map { $0.profileTitle.isEmpty ? ($0.bridge == true ? "Chrome profile" : "Separate agent Chrome") : $0.profileTitle } ?? "Choose Chrome profile", systemImage: "person.crop.circle")

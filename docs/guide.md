@@ -180,7 +180,9 @@ The Browser panel, the globe on a thread's right-hand rail, can show the pages
 an agent opens through [BrowserBear](https://github.com/mikecann/browserbear) in
 an existing Chrome profile. You can click and type in the same page. The profile's
 name and email appear below the address, and its sign-ins stay in Chrome; nothing
-is imported. The profile menu opens a new page in the profile you choose. BrowserBear
+is imported. The profile menu opens a new page in the profile you choose, and makes
+it the default (starred). An address typed with no page showing opens a new page in
+the default profile. BrowserBear
 and its extension must be connected to that profile.
 
 When the agent needs you to do something in a page, handoff opens this thread's
