@@ -2864,6 +2864,11 @@ export class ConvexSync {
     }
   }
 
+  /** Whether remoteThreads has heard from the backend (ThreadIndex.heard); true with sync off, as there's nothing to wait for. */
+  remoteHeard(): boolean {
+    return this.index?.heard() ?? true;
+  }
+
   /** remoteThreads.list: other runners' threads, empty with sync off. */
   remoteThreads(): RemoteThreads {
     return this.index?.list() ?? { runners: [], threads: [] };

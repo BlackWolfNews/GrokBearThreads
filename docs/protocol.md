@@ -3670,7 +3670,9 @@ default).
   than leave a hole. `runner.status` has `relay: { watching, held, reads, bytes }`:
   threads watched now, rows held, and since start the reads (and live
   updates) and the JSON bytes they brought back, to measure what it costs.
-- **Acting.** `threads.send` (text and `answers`; pictures are `-32000`),
+- **Acting.** `threads.send` (text and `answers`; pictures are `-32000`;
+  the answer has `queued: true` when that runner hasn't taken it in the 20
+  seconds),
   `threads.interrupt`, `approvals.respond`, `secrets.answer` (sealed to the
   other runner's key from its row, as the phone seals it, so the value
   never reaches the backend in the clear), `threads.markSeen` (only when
@@ -4482,14 +4484,18 @@ backend"), so only on the owner key: `list_threads` lists and searches them
 with this runner's (the same lists and the same word match on title and
 preview), each row's flags ending `on <runner name>`; `read_thread` reads
 one's messages from `threads.events` in relay seqs (its settings say the
-runner, and tool output stays there); `send_message` sends with
-`threads.send`. A thread id or prefix is looked for in both, and one that
+runner, and tool output stays there; like the app's view, it still has
+messages an edit there took out, as `thread.rewound` isn't mirrored);
+`send_message` sends with `threads.send`, and says the message is queued
+rather than sent when that runner hasn't taken it (`queued`). A thread id or prefix is looked for in both, and one that
 fits threads in both is refused like any other. The tools that change a
 thread here (`update_thread`, `move_thread`, `interrupt_thread`,
 `delete_thread`) say it's on that runner rather than that it's missing. A
 runner that hasn't heard the list yet (no app connected since it started)
-starts the watch and waits up to 3 seconds for it. With sync off, a runner
-key, or the backend failing, they see this runner's threads only.
+starts the watch and waits up to 3 seconds for its first answer (or a
+refusal), never after. With sync off, a runner key, the backend failing, or
+on a draining runner (its sync has stopped), they see this runner's threads
+only.
 
 | Variable | Value |
 |---|---|

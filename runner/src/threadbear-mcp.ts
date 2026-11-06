@@ -253,6 +253,8 @@ export function buildThreadbearTools(
   // here or on another runner. `other` is set for another runner's thread.
   const find = async (id: string): Promise<{ id: string; other?: { t: RemoteThread; runner: string } }> => {
     const hits = (await all()).filter((t) => t.id === id || t.id.startsWith(id));
+    // A whole id here needs nothing from the backend.
+    if (hits.some((t) => t.id === id)) return { id };
     const rt = await others();
     const far = rt.threads.filter((t) => (t.threadId === id || t.threadId.startsWith(id)) && !hits.some((h) => h.id === t.threadId));
     if (hits.length + far.length > 1) throw new Error(`${id} matches ${hits.length + far.length} threads; use more of the id.`);
@@ -1444,7 +1446,8 @@ export function buildThreadbearTools(
         const remote = opts.remote?.();
         if (hit.other && remote) {
           // A send command for that runner, as the Mac app's (relay.ts).
-          await remote.call(id, 'threads.send', { threadId: id, text: (await from()) + text });
+          const r = (await remote.call(id, 'threads.send', { threadId: id, text: (await from()) + text })) as { queued?: boolean } | undefined;
+          if (r?.queued) return `Queued for ${id.slice(0, 8)} "${hit.other.t.title}" on ${hit.other.runner}, which hasn't picked it up yet (it may be busy restarting or asleep). It gets it when it next checks in.`;
           return `Sent to ${id.slice(0, 8)} "${hit.other.t.title}" on ${hit.other.runner}.`;
         }
         await control.send(id, (await from()) + text);

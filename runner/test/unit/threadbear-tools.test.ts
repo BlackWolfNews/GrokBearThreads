@@ -1414,7 +1414,7 @@ test("one reply: a reply that ends in a What I need from you section gives the c
 // reads its messages, send_message queues a send for that runner. On 6 Nov
 // an M5 thread was told there was no "Rust port" thread when Mike's sidebar
 // showed it on the cloud runner.
-function farRelay() {
+function farRelay(opts: { takes?: boolean } = {}) {
   const at = (s: number) => new Date(Date.parse('2026-10-26T11:00:00Z') + s * 1000).toISOString();
   const FAR = 'ba5bb5ec-15bf-4382-9812-2b0fe15f4087';
   const rows: RelayRow[] = [
@@ -1423,6 +1423,7 @@ function farRelay() {
     { seq: 9, role: 'assistant', text: 'The Linux build runs.', turn: 't1', at: at(10) },
   ];
   const calls: { fn: string; args: Record<string, unknown> }[] = [];
+  const clock = new FakeClock();
   const remote: RemoteThreads = {
     runners: [{ id: 'cloud', name: 'Cloud', online: true, lastSeenAt: at(0) }],
     threads: [
@@ -1438,18 +1439,22 @@ function farRelay() {
         if (fn === 'relay:remoteThread') return { runnerId: 'cloud', status: 'idle', needs: 'nothing' };
         if (fn === 'relay:remoteMessages') return { messages: args.beforeSeq ? [] : rows, hasMore: false };
         if (fn === 'relay:queueCommand') return 'cmd1';
-        if (fn === 'relay:commandState') return { state: 'taken' };
         return null;
+      },
+      // That runner takes the command at once, or (takes: false) never answers.
+      subscribe: (fn, _args, onUpdate) => {
+        if (fn === 'relay:commandState' && opts.takes !== false) queueMicrotask(() => onUpdate({ state: 'taken' }));
+        return () => undefined;
       },
     }),
     remote: () => remote,
     subscribed: () => false,
     publish: () => undefined,
-    clock: new FakeClock(),
+    clock,
     log: nullLogger,
   });
   const control: RemoteControl = { list: async () => remote, call: (id, method, p) => relay.call(id, method, { threadId: id, ...p }) };
-  return { FAR, calls, control, relay };
+  return { FAR, calls, control, relay, clock };
 }
 
 function toolsWith(h: ReturnType<typeof makeHarness>, selfId: string, remote?: RemoteControl) {
@@ -1497,6 +1502,19 @@ test("another runner's threads: listed with their runner, searched, read and mes
   const moved = await call('update_thread', { threadId: 'ba5bb5ec', title: 'x' });
   assert.equal(moved.error, true);
   assert.match(moved.text, /runs on Cloud/);
+});
+
+test("a message another runner hasn't taken yet is said to be queued, not sent", async () => {
+  const h = makeHarness();
+  const { thread: me } = start(h, 'Asker');
+  const f = farRelay({ takes: false });
+  const call = toolsWith(h, me.id, f.control);
+  const sending = call('send_message', { threadId: 'ba5bb5ec', text: 'Hello?' });
+  await tick();
+  f.clock.advance(20_000);
+  const r = await sending;
+  assert.equal(r.error, false, r.text);
+  assert.match(r.text, /^Queued for ba5bb5ec .* on Cloud, which hasn't picked it up yet/);
 });
 
 test("without the backend (sync off, or a runner key) the tools list only this runner's threads", async () => {

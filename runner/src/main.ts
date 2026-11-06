@@ -157,15 +157,17 @@ async function main(): Promise<void> {
   // Other runners' threads for the agent tools (threadbear-mcp.ts
   // RemoteControl), through the relay made further down, as the Mac app
   // reaches them. With nothing heard yet (no app connected since the
-  // runner started) the list starts the watch and waits a moment for the
-  // backend's first answer.
+  // runner started) the list starts the watch and waits up to 3 seconds
+  // for the backend's first answer; after that it never waits.
   const remoteControl = (): RemoteControl | undefined => {
     const relay = relayRef;
-    if (!relay || !sync.relaySource()) return undefined;
+    // A draining runner has stopped its sync, so its list would go stale:
+    // its last turns see this runner's and the primary's threads only.
+    if (!relay || draining || !sync.relaySource()) return undefined;
     return {
       list: async () => {
         let r = sync.remoteThreads();
-        for (let waited = 0; !r.runners.length && waited < 3000; waited += 200) {
+        for (let waited = 0; !sync.remoteHeard() && waited < 3000; waited += 200) {
           await new Promise((res) => setTimeout(res, 200));
           r = sync.remoteNow();
         }

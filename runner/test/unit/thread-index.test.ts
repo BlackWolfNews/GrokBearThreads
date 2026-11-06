@@ -237,7 +237,10 @@ test('with API 29 a re-run reads only the rows that changed, and hears deletions
     takesSince: () => true,
   });
   index.start();
+  // The agent tools wait on this, until the rows have come.
+  assert.equal(index.heard(), false);
   for (let i = 0; i < 5; i++) await tick();
+  assert.equal(index.heard(), true);
   assert.deepEqual(b.live().sort(), ['sync:otherRunnersList', 'sync:threadIndexSince']);
   assert.equal(heard.at(-1)!.threads.length, 100);
   assert.equal(heard.at(-1)!.runners[0]!.name, 'bruce');
@@ -292,6 +295,7 @@ test('a runner key that may not read the other runners’ threads stops watching
   index.start();
   await tick();
   assert.equal(subscriptions, 1);
+  assert.equal(index.heard(), true, 'a refusal is an answer: nothing to wait for');
   // The periodic check and an app asking again don't try once more.
   h.clock.advance(5 * 60_000);
   await tick();

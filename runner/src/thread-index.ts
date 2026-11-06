@@ -143,6 +143,9 @@ export class ThreadIndex {
   private remote: RemoteThreads = { runners: [], threads: [] };
   // The backend said this runner's key can't read other runners' threads.
   private refused = false;
+  // Whether the list has had the backend's answer since starting (or been
+  // refused), so the agent tools wait for it only until then.
+  private answered = false;
   private watchTimer?: TimerHandle;
   private appGoneAt?: number;
   // Watching only what changed (API 29): the other runners, their rows by
@@ -211,6 +214,11 @@ export class ThreadIndex {
     return this.withTokens(this.remote);
   }
 
+  /** Whether the list has had an answer (or a refusal) to give, for a caller that can wait a moment for one. */
+  heard(): boolean {
+    return this.answered || !this.running;
+  }
+
   /** What was last heard, without starting the watch or looking for token files (relay.ts asks on every request). */
   current(): RemoteThreads {
     return this.remote;
@@ -244,6 +252,7 @@ export class ThreadIndex {
 
   private onRunners(v: unknown): void {
     this.runnersHeard = Array.isArray(v) ? (v as RawRunner[]) : [];
+    if (!this.runnersHeard.length) this.answered = true;
     const ids = new Set(this.runnersHeard.map((r) => r.runnerId));
     for (const id of [...this.rows.keys()]) if (!ids.has(id)) this.rows.delete(id);
     for (const id of [...this.since.keys()]) if (!ids.has(id)) this.since.delete(id);
@@ -285,10 +294,12 @@ export class ThreadIndex {
     }
     if (!this.refused) this.deps.log.info('not watching the other runners’ threads: this runner has a runner key, and only the main Mac’s key reads them', { error: refused });
     this.refused = true;
+    this.answered = true;
     this.unwatch();
   }
 
   private onRows(v: unknown, asked: { runnerId: string; since?: number }[]): void {
+    this.answered = true;
     const got = Array.isArray(v) ? (v as SinceRow[]) : [];
     for (const a of asked) {
       const mine = got.filter((r) => r.runnerId === a.runnerId);
@@ -422,6 +433,7 @@ export class ThreadIndex {
   }
 
   private onRemote(v: unknown): void {
+    this.answered = true;
     const value = v as { runners?: RawRunner[]; threads?: RemoteThread[] } | null;
     const now = this.deps.clock.now();
     this.remote = {
