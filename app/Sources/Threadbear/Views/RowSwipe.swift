@@ -99,7 +99,7 @@ final class RowSwipeController {
         guard event.hasPreciseScrollingDeltas, !event.phase.isEmpty else { return false }
         if event.phase.contains(.began) {
             guard hovered, !leaving else { return false }
-            swipe.begin()
+            swipe.begin(rightTaken: SwipeNavigation.shared.takesBack)
             eatingMomentum = false
         }
         if event.phase.contains(.changed) || event.phase.contains(.began) {
@@ -195,7 +195,9 @@ enum RowSwipeEvents {
 
     /// `dx` is the fingers' way, left negative, whichever way the
     /// system's scrolling runs.
-    static func event(dx: Double, phase: Phase) -> NSEvent? {
+    /// `middle`: over the middle of the window (a page swipe), rather
+    /// than the sidebar's rows.
+    static func event(dx: Double, phase: Phase, middle: Bool = false) -> NSEvent? {
         guard let cg = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: 0, wheel2: 0, wheel3: 0) else { return nil }
         cg.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
         cg.setIntegerValueField(.scrollWheelEventScrollPhase, value: phase.rawValue)
@@ -204,7 +206,9 @@ enum RowSwipeEvents {
         cg.setDoubleValueField(.scrollWheelEventPointDeltaAxis2, value: delta)
         cg.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis2, value: delta)
         if let window = NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain }) {
-            cg.location = CGPoint(x: window.frame.minX + 100, y: (NSScreen.screens.first?.frame.height ?? 0) - window.frame.maxY + 200)
+            let x = middle ? window.frame.midX : window.frame.minX + 100
+            let down = middle ? window.frame.height / 2 : 200
+            cg.location = CGPoint(x: x, y: (NSScreen.screens.first?.frame.height ?? 0) - window.frame.maxY + down)
         }
         return NSEvent(cgEvent: cg)
     }

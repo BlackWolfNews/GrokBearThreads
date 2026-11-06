@@ -1069,6 +1069,8 @@ enum Automation {
             return "ok editing seq \(edit.seq)"
         case "swipe":
             return await swipe(c, app: app)
+        case "page-swipe":
+            return await pageSwipe(c, app: app)
         case "decide":
             return decide(c, app: app)
         case "hints":

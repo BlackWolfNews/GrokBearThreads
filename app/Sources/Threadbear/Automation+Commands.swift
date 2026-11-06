@@ -355,6 +355,35 @@ extension Automation {
         return "ok \(along), let go: \(app.threads[id]?.isArchived == true ? "archived" : "not archived")"
     }
 
+    /// Two fingers across the middle of the window (`{"dx": 150}`, right
+    /// positive, so Back), through the handler SwipeNavigation's monitor
+    /// calls. A made-up event has no window of its own, so, as for
+    /// `mouse-button`, it's handed the main one. `"lift": false` leaves the fingers down, for a shot of
+    /// the arrow. Says how far along it got and where the window is after.
+    static func pageSwipe(_ c: [String: Any], app: AppModel) async -> String {
+        let dx = number(c["dx"]) ?? 0
+        let steps = max(1, Int(number(c["steps"]) ?? 8))
+        let fresh = SwipeNavigation.shared.swipe.phase == .idle
+        if fresh { page(RowSwipeEvents.event(dx: 0, phase: .began, middle: true)) }
+        for _ in 0..<steps {
+            page(RowSwipeEvents.event(dx: dx / Double(steps), phase: .changed, middle: true))
+            try? await Task.sleep(for: .milliseconds(16))
+        }
+        try? await Task.sleep(for: .milliseconds(50))
+        let swipe = SwipeNavigation.shared.swipe
+        let along = "\(swipe.direction.map { "\($0)" } ?? "no swipe") progress \(String(format: "%.2f", swipe.progress)) armed \(swipe.armed)"
+        guard c["lift"] as? Bool ?? true else { return "ok \(along)" }
+        page(RowSwipeEvents.event(dx: 0, phase: .ended, middle: true))
+        try? await Task.sleep(for: .milliseconds(300))
+        return "ok \(along), let go: \(app.selection ?? "new") back=\(app.canGoBack) forward=\(app.canGoForward)"
+    }
+
+    /// A page swipe's event, to the main window's handler.
+    private static func page(_ event: NSEvent?) {
+        guard let event else { return }
+        _ = SwipeNavigation.shared.handle(event, in: MainWindowFrame.window)
+    }
+
     static func post(_ event: NSEvent?) {
         guard let event else { return }
         NSApp.postEvent(event, atStart: false)

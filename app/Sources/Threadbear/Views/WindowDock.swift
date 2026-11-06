@@ -250,6 +250,8 @@ struct RootView: View {
         }
         // The tour's frames are in this space, and its overlay covers it.
         .coordinateSpace(.named(Tour.space))
+        // Back and forward's arrow while a trackpad swipe is under way.
+        .overlay { SwipeNavigationArrow() }
         .overlay { TourOverlay().animation(.easeOut(duration: 0.2), value: Tour.shared.step == nil) }
         // Up under where the title bar was: the panels' bars take its place.
         .ignoresSafeArea(.container, edges: .top)

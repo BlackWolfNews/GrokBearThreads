@@ -102,4 +102,17 @@ final class RowSwipeTests: XCTestCase {
         XCTAssertFalse(swipe.end())
         XCTAssertEqual(swipe.offset, 0)
     }
+
+    /// While a swipe right goes Back, it isn't the row's: the row lets it
+    /// go, and still takes a swipe left to archive.
+    func testASwipeRightIsLeftToBackWhenItsTaken() {
+        var right = RowSwipe()
+        right.begin(rightTaken: true)
+        XCTAssertFalse(right.move(dx: 8, dy: 0))
+        XCTAssertEqual(right.phase, .ignoring)
+        var left = RowSwipe()
+        left.begin(rightTaken: true)
+        XCTAssertTrue(left.move(dx: -8, dy: 0))
+        XCTAssertTrue(left.isSwiping)
+    }
 }

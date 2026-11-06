@@ -92,7 +92,7 @@ struct ThreadbearApp: App {
             }
             // Back and forward through the threads and views, as Safari
             // and Finder have them. The mouse's side buttons do the same
-            // (MouseNavigation).
+            // (MouseNavigation), and so do trackpad swipes (SwipeNavigation).
             CommandMenu("Go") {
                 IconMenuItems {
                     Button("Back", systemImage: "chevron.left") { app.goBack() }
@@ -233,6 +233,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             }
             app.start()
             MouseNavigation.install(app: app)
+            SwipeNavigation.shared.install(app: app)
             // Records nothing unless it's switched on in Settings.
             ActivityRecorder.shared.install(app: app)
             MenuWatch.install()
