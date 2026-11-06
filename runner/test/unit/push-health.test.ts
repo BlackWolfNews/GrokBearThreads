@@ -1,0 +1,48 @@
+// Whether pushes get through (convex/pushHealth.ts), what tb status says
+// about it (src/push-failing.ts), and the relay's tally of why sends fail
+// (relay/convex/relay.ts reasonKey).
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { failureText, nextHealth, pushFailing, PUSH_FAILING_FRESH_MS } from '../../../convex/pushHealth.ts';
+import { asPushFailing, pushFailingText } from '../../src/push-failing.ts';
+
+test('a failing run starts, counts and clears on the first push that gets through', () => {
+  let h = nextHealth({}, { sent: 0, failed: 2, failure: '403 InvalidProviderToken', via: 'relay' }, 1000);
+  h = nextHealth(h, { sent: 0, failed: 1, failure: '0 timeout', via: 'relay' }, 2000);
+  assert.deepEqual(pushFailing(h, 3000), { failure: '0 timeout', since: 1000, failed: 3, via: 'relay' });
+  assert.equal(nextHealth(h, { sent: 0, failed: 0, via: 'relay' }, 2500), h, 'nothing sent changes nothing');
+  h = nextHealth(h, { sent: 1, failed: 1, via: 'apple' }, 4000);
+  assert.equal(pushFailing(h, 4000), null);
+  assert.equal(h.lastOkAt, 4000);
+});
+
+test('an old failure stops being news', () => {
+  const h = nextHealth({}, { sent: 0, failed: 1, failure: '500', via: 'apple' }, 0);
+  assert.ok(pushFailing(h, PUSH_FAILING_FRESH_MS));
+  assert.equal(pushFailing(h, PUSH_FAILING_FRESH_MS + 1), null);
+  assert.equal(pushFailing(null, 0), null);
+});
+
+test('failure text keeps the status and reason and nothing odd', () => {
+  assert.equal(failureText(403, 'InvalidProviderToken'), '403 InvalidProviderToken');
+  assert.equal(failureText(0), '0');
+  assert.equal(failureText(0, 'a<b>"c"\n'), '0 abc');
+  assert.ok(failureText(0, 'x'.repeat(500)).length <= 122);
+});
+
+test('tb status says whose key Apple turned down', () => {
+  const since = Date.parse('2026-11-05T02:00:00Z');
+  assert.match(pushFailingText({ failure: '403 InvalidProviderToken', since, failed: 52, via: 'relay' }), /52 failed since 2026-11-05 02:00 UTC.*push relay's key.*github/);
+  assert.match(pushFailingText({ failure: '403 InvalidProviderToken', since, failed: 1, via: 'apple' }), /APNS_KEY_P8/);
+  assert.doesNotMatch(pushFailingText({ failure: '0 timeout', since, failed: 1, via: 'relay' }), /turned down/);
+  assert.equal(asPushFailing({ failure: 1 }), undefined);
+  assert.equal(asPushFailing({ failure: 'x', since: 1, failed: 1, via: 'odd' })?.via, 'relay');
+});
+
+test("the relay tallies a failure's status and reason, never anything longer", async () => {
+  const { reasonKey } = await import('../../../relay/convex/reasons.ts');
+  assert.equal(reasonKey(403, 'InvalidProviderToken'), '403 InvalidProviderToken');
+  assert.equal(reasonKey(0, 'relay not configured'), '0 relay not configured');
+  assert.equal(reasonKey(500), '500');
+  assert.ok(reasonKey(0, `$${'y'.repeat(99)}`).length <= 42);
+});

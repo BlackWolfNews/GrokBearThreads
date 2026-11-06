@@ -9,6 +9,7 @@ import path from 'node:path';
 import { defaultHome, readToken, runnerUrl, type Config } from './config.ts';
 import { RunnerClient, RpcClientError } from './client.ts';
 import { ErrorCode, type Account, type ImageRef, type PersistedEvent, type RunnerDefaults, type ThreadSummary } from './protocol.ts';
+import { pushFailingText } from './push-failing.ts';
 import type { RestartResult, RunnerStatus } from './restart.ts';
 import type { UpstreamStatus } from './upstream.ts';
 
@@ -465,7 +466,8 @@ function formatSync(y: NonNullable<RunnerStatus['sync']>, now: number): string {
   const behind = y.backend && y.backend.apiVersion < y.backend.expected ? `; its backend is older than this runner (API ${y.backend.apiVersion}, wants ${y.backend.expected}): deploy it with runner/scripts/deploy-backend.mjs` : '';
   const held = y.schedulesHeld ? `; ${y.schedulesHeld} schedule${y.schedulesHeld === 1 ? '' : 's'} too big (or taken) for this runner's key, so its schedules stay in schedules.json on this Mac (tb logs says which)` : '';
   const rotating = y.ownerKeyRotating ? '; RUNNER_KEY_NEXT is still set, so two main keys work: finish with tb runner rotate-owner --finish' : '';
-  return `Convex mirror: on${where} as ${y.name ?? y.runnerId ?? 'this runner'}${last}${pending}${behind}${held}${rotating}`;
+  const push = y.pushFailing ? `\n${pushFailingText(y.pushFailing)}` : '';
+  return `Convex mirror: on${where} as ${y.name ?? y.runnerId ?? 'this runner'}${last}${pending}${behind}${held}${rotating}${push}`;
 }
 
 // What stands between this runner's threads and the Convex deployment

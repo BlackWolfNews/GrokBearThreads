@@ -83,7 +83,10 @@ http.route({
       ...(encrypted ? { encrypted } : { ...(str(b.title, 200) ? { title: str(b.title, 200) } : {}), ...(str(b.body, 1000) ? { body: str(b.body, 1000) } : {}) }),
     });
     const ok = r.status === 200;
-    await ctx.runMutation(internal.relay.counted, { ok });
+    // The status and Apple's reason only (no token, no install), so the
+    // relay's own logs say why sends fail; relay:stats tallies the same.
+    if (!ok) console.warn(`[send] failed: ${r.status} ${r.reason ?? ''}`);
+    await ctx.runMutation(internal.relay.counted, { ok, status: r.status, ...(r.reason ? { reason: r.reason } : {}) });
     const gone = r.status === 410 || r.reason === 'BadDeviceToken' || r.reason === 'Unregistered';
     return json({ ok, status: r.status, ...(r.reason ? { reason: r.reason } : {}), ...(gone ? { gone: true } : {}) });
   }),

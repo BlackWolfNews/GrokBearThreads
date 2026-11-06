@@ -2329,3 +2329,32 @@ test("other runners' usage readings are read now, then every five minutes, witho
   await tick(20);
   assert.equal(reads().length, 2, 'nothing after stop');
 });
+
+// 5 and 6 Nov 2026: Apple turned the push relay's key down and every push
+// through it failed for two days with nothing said anywhere but the
+// backend's logs. The owner's heartbeat now carries it (convex/pushHealth.ts).
+test('pushes failing at the backend are said once per run in tb status and the app, and clear when one gets through', async () => {
+  const notices: { level: string; message: string }[] = [];
+  let failing: unknown = { failure: '403 InvalidProviderToken', since: Date.parse('2026-11-05T02:00:00Z'), failed: 52, via: 'relay' };
+  const { h, sync } = setup({
+    answer: (fn) => (fn === 'sync:heartbeat' ? { apiVersion: BACKEND_API_VERSION, ...(failing ? { pushFailing: failing } : {}) } : null),
+    extra: { notice: (level, message) => void notices.push({ level, message }) },
+  });
+  sync.start();
+  await tick();
+  h.clock.advance(HEARTBEAT_MS);
+  await tick();
+  assert.equal(sync.status().pushFailing?.failure, '403 InvalidProviderToken');
+  assert.equal(notices.length, 1, 'said once, not every minute');
+  assert.equal(notices[0]!.level, 'warning');
+  assert.match(notices[0]!.message, /push relay's key/);
+  failing = undefined;
+  h.clock.advance(HEARTBEAT_MS);
+  await tick();
+  assert.equal(sync.status().pushFailing, undefined);
+  failing = { failure: '0 timeout', since: Date.parse('2026-11-06T02:00:00Z'), failed: 1, via: 'apple' };
+  h.clock.advance(HEARTBEAT_MS);
+  await tick();
+  assert.equal(notices.length, 2, 'a new failing run is said again');
+  await sync.stop();
+});

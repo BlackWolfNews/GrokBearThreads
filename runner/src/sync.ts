@@ -11,6 +11,7 @@
 // key the deployment's RUNNER_KEY was set to (`npx convex env set`).
 // THREADBEAR_SYNC=off turns it off whatever runner.json says, which
 // check.sh sets so no test runner ever writes to the real project.
+import { asPushFailing, pushFailingText, type PushFailing } from './push-failing.ts';
 import { wakeNote } from './wake-note.ts';
 import type { PoolBackend } from './shared-pools.ts';
 import type { SharedPool } from './pools.ts';
@@ -272,6 +273,10 @@ export type SyncStatus = {
   // key rotated out from under it, or a runner key revoked. lastError says
   // what to do.
   keyRejected?: boolean;
+  // The backend's pushes to phones haven't got through lately (owner key
+  // only; convex/pushHealth.ts): the latest "<status> <reason>", since
+  // when, how many, and whether they went to Apple or the push relay.
+  pushFailing?: PushFailing;
   // What this runner does about secrets (src/scrub.ts), and whether its
   // backend checks again.
   scrub?: ScrubStatus & { backendChecks?: boolean };
@@ -1051,6 +1056,7 @@ export class ConvexSync {
   private restartAsked = false;
   private picturesPausedUntil?: number;
   private ownerKeyRotating = false;
+  private pushFailing: PushFailing | undefined;
   private schedulesRefused = false;
   private scrubber: Scrubber;
   // Tool calls on a file of secrets that haven't finished.
@@ -1237,6 +1243,7 @@ export class ConvexSync {
     if (this.retryAt !== undefined) s.retryAt = new Date(this.retryAt).toISOString();
     if (this.backendApiVersion !== undefined) s.backend = { apiVersion: this.backendApiVersion, expected: BACKEND_API_VERSION };
     if (this.ownerKeyRotating) s.ownerKeyRotating = true;
+    if (this.pushFailing) s.pushFailing = this.pushFailing;
     if (this.keyRejected) {
       s.state = 'error';
       s.lastError = KEY_REJECTED;
@@ -2456,6 +2463,7 @@ export class ConvexSync {
         this.sawBackend(r);
         this.keyRejected = false;
         this.ownerKeyRotating = (r as { ownerKeyRotating?: unknown } | null)?.ownerKeyRotating === true;
+        this.notePushFailing(asPushFailing((r as { pushFailing?: unknown } | null)?.pushFailing));
         this.lookForReplyImages();
         if ((this.backendApiVersion ?? 0) >= SCHEDULES_API_VERSION && this.running) void this.deps.schedules?.attach(this.scheduleBackend());
         if ((this.backendApiVersion ?? 0) >= SHARED_POOLS_API_VERSION && this.running) this.deps.pools?.attach(this.poolBackend());
@@ -2498,6 +2506,18 @@ export class ConvexSync {
       this.deps.log.error('convex turned down this runner\'s key', { runnerId: this.runnerId });
       this.deps.notice?.('error', KEY_REJECTED);
     }
+  }
+
+  // Said once per failing run (a new `since`), as a warning in the log and
+  // a notice for the app, not every minute's heartbeat; and once when it
+  // clears.
+  private notePushFailing(p: PushFailing | undefined): void {
+    const was = this.pushFailing;
+    this.pushFailing = p;
+    if (p && p.since !== was?.since) {
+      this.deps.log.warn('phone notifications are failing', { failure: p.failure, failed: p.failed, via: p.via });
+      this.deps.notice?.('warning', pushFailingText(p));
+    } else if (!p && was) this.deps.log.info('phone notifications are getting through again');
   }
 
   private restartIfNewKey(): void {

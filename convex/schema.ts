@@ -721,6 +721,17 @@ export default defineSchema({
     createdAt: v.number(),
   }),
 
+  // Whether pushes are getting through (pushHealth.ts): one row, written
+  // by push.ts after each send, read by the owner runner's heartbeat.
+  pushHealth: defineTable({
+    lastOkAt: v.optional(v.number()),
+    failingSince: v.optional(v.number()),
+    lastFailAt: v.optional(v.number()),
+    failed: v.optional(v.number()),
+    lastFailure: v.optional(v.string()),
+    via: v.optional(v.union(v.literal('apple'), v.literal('relay'))),
+  }),
+
   // A registration with the push relay in progress (push.ts relayInstall):
   // the nonce sent with it, which the relay posts back to /relay/verify
   // (http.ts) to check the request came from this deployment. Used once,

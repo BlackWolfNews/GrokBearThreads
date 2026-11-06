@@ -13,6 +13,7 @@ import { scrubDoc, scrubEveryString, SCRUB_RULES_VERSION, HELD_BACK } from './re
 import { dropHead, seedHeads, syncHead, syncHeads } from './projectHeads';
 import { cutBytes, docBytes, mayClaim, NAME_CHARS, mayFinish, mayTake, mayTouch, mayUseStorage, mayWrite, nameSkeleton, normalName, ownsCard, SCHEDULE_ID, utf8Bytes, type Caller } from './runnerAccess';
 import { dropWake, seedWakes, syncWake } from './wakes';
+import { pushFailing } from './pushHealth';
 import { issueToken as makeToken, listTokens as allTokens, revokeToken as revokeOne, tokenInfo, tokenKind, MAX_DAYS } from './tokens';
 
 // The second pass on anything a runner sends (docs/convex-backend.md, "Secret
@@ -778,7 +779,14 @@ export const heartbeat = mutation({
   // written everything (sync-cache.ts) knows to write it again.
   // ownerKeyRotating (owner key only): RUNNER_KEY_NEXT is still set, which
   // tb status says, as it should only last while tb runner rotate-owner runs.
-  returns: v.object({ apiVersion: v.number(), firstSeen: v.optional(v.boolean()), ownerKeyRotating: v.optional(v.boolean()) }),
+  // pushFailing (owner key only): pushes from this backend haven't got
+  // through lately, and why (pushHealth.ts), for tb status and the app.
+  returns: v.object({
+    apiVersion: v.number(),
+    firstSeen: v.optional(v.boolean()),
+    ownerKeyRotating: v.optional(v.boolean()),
+    pushFailing: v.optional(v.object({ failure: v.string(), since: v.number(), failed: v.number(), via: v.union(v.literal('apple'), v.literal('relay')) })),
+  }),
   handler: async (ctx, { key, runner }) => {
     const caller = await runnerAuth(ctx, key, 'heartbeat');
     runner = clean(runner);
@@ -811,7 +819,8 @@ export const heartbeat = mutation({
     }
     // API 48: every project from before projectHeads, once.
     await seedHeads(ctx);
-    return { apiVersion: API_VERSION, ...(existing ? {} : { firstSeen: true }), ...(caller.owner && process.env.RUNNER_KEY_NEXT ? { ownerKeyRotating: true } : {}) };
+    const failing = caller.owner ? pushFailing(await ctx.db.query('pushHealth').first(), Date.now()) : null;
+    return { apiVersion: API_VERSION, ...(existing ? {} : { firstSeen: true }), ...(caller.owner && process.env.RUNNER_KEY_NEXT ? { ownerKeyRotating: true } : {}), ...(failing ? { pushFailing: failing } : {}) };
   },
 });
 

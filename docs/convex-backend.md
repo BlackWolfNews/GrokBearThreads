@@ -380,8 +380,11 @@ dashboard panel.
   through the push relay (`docs/push-relay.md`), and registers with it
   once, proving it's this deployment through `/relay/verify` in
   `convex/http.ts` and the `relayChecks` table. Env on both deployments: `APNS_KEY_P8`, `APNS_KEY_ID`,
-  `APNS_TEAM_ID` (Poddle's, copied 28 Oct) and `APNS_TOPIC`
-  (`com.mikecann.threadbear`). `npx convex run push:test '{"body":"hi"}'
+  `APNS_TEAM_ID` (Poddle's key, copied 28 Oct and again on 6 Nov 2026
+  after Poddle's old key was revoked) and `APNS_TOPIC`
+  (`com.mikecann.threadbear`). Each send's outcome goes in the
+  `pushHealth` row (`convex/pushHealth.ts`); while none get through, the
+  owner runner's heartbeat answers `pushFailing` and `tb status` says so. `npx convex run push:test '{"body":"hi"}'
   --prod` sends a test; `npx convex run devices:list --prod` shows the
   phones.
 - `convex/tokens.ts`: the token helpers, and `issue`, `revoke`, `list` to

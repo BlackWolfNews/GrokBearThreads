@@ -3856,6 +3856,12 @@ schedule on it, and mint phone tokens. Now there are two kinds of key, and
   removes `RUNNER_KEY_NEXT`, and every copy of the old key is dead. While
   `RUNNER_KEY_NEXT` is set the owner's heartbeat answers
   `ownerKeyRotating: true`, and `tb status` and `tb runner list` say so.
+  The owner's heartbeat also answers `pushFailing: { failure, since,
+  failed, via: "apple" | "relay" }` while pushes to phones haven't got
+  through (no send has since `since`, the latest failure in the last three
+  days; `convex/pushHealth.ts`). The runner puts it in `runner.status`'s
+  `sync.pushFailing`, `tb status` says what's wrong and whose key it is,
+  and it sends one `runner.notice` at warning level per failing run.
   Both steps refuse, changing nothing, while another runner is still on
   the main key: one `sync:runnersList` has seen in the last 30 days with
   no live runner key (the main key can't act as a runner that has one, so
