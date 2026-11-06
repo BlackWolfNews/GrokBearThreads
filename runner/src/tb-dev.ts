@@ -268,8 +268,10 @@ export async function runDev(client: RunnerClient, cmd: string, args: string[], 
       // The same guards tb approve, delete and interrupt apply: a thread's
       // own cards are Mike's to answer, and it can't stop itself.
       const own = env.THREADBEAR_THREAD_ID && (params as { threadId?: unknown }).threadId === env.THREADBEAR_THREAD_ID;
-      if (own && ['approvals.respond', 'threads.delete', 'threads.interrupt'].includes(args[0])) {
-        console.error(args[0] === 'approvals.respond' ? "That's this thread's own card; the user answers it." : `Not on the thread this runs in (${args[0]}).`);
+      // A plan's Go ahead is one of its cards too: approving its own plan
+      // would take the thread out of Plan first by itself.
+      if (own && ['approvals.respond', 'plans.approve', 'threads.delete', 'threads.interrupt'].includes(args[0])) {
+        console.error(args[0] === 'approvals.respond' || args[0] === 'plans.approve' ? "That's this thread's own card; the user answers it." : `Not on the thread this runs in (${args[0]}).`);
         return 1;
       }
       // Snoozing or archiving releases the CLI, ending this turn: tb snooze
@@ -545,7 +547,7 @@ export function formatUpstream(u: UpstreamStatus, now: number): string {
 }
 
 function access(t: ThreadSummary): string {
-  return t.permissionMode === 'ask' ? 'asks before edits' : t.permissionMode === 'auto' ? 'auto' : 'full access';
+  return t.permissionMode === 'ask' ? 'asks before edits' : t.permissionMode === 'auto' ? 'auto' : t.permissionMode === 'plan' ? 'plan first' : 'full access';
 }
 
 // tb models: one row per model, the default starred, with its effort
@@ -707,6 +709,13 @@ export function formatThread(t: ThreadSummary, events: PersistedEvent[], opts: {
       case 'plan.updated':
         lines.push('  Plan:');
         for (const x of e.entries) lines.push(`    [${x.status === 'completed' ? 'x' : x.status === 'in_progress' ? '>' : ' '}] ${x.text}`);
+        break;
+      case 'plan.proposed':
+        lines.push('  Plan, waiting for approval:');
+        for (const l of e.text.split('\n')) lines.push(`    ${l}`);
+        break;
+      case 'plan.resolved':
+        lines.push(e.decision === 'go' ? '  (plan approved)' : '  (plan sent back)');
         break;
       case 'turn.started':
         break;

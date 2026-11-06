@@ -238,7 +238,7 @@ Copy Image.
 ## Full access or Ask before edits
 <!-- slug: full-access -->
 
-Read this before your first thread. Every thread runs in one of three modes,
+Read this before your first thread. Every thread runs in one of four modes,
 shown on the composer (the box you type in) and changed by clicking it.
 
 - **Full access** (the default): the agent edits files and runs commands
@@ -257,6 +257,11 @@ shown on the composer (the box you type in) and changed by clicking it.
   each action, and a card shows only when it can't decide. It's for work on
   text you didn't write, like an error report or a web page. It catches a lot
   but it's no guarantee, and on a Codex thread it behaves like Ask before edits.
+- **Plan first**: the agent looks around and writes a plan, but changes
+  nothing yet. The plan shows as a card with Go ahead and Send back. Go
+  ahead (or Return in an empty message box) lets it start, back in the mode
+  the thread had before. Send back, or just writing what you'd change, has
+  it plan again. Once it's working, the same card ticks off its steps.
 
 In Ask before edits and Auto, an edit to a file Threadbear runs by itself
 (a patch, a file a patch uses, or Claude Code's settings) always asks, with

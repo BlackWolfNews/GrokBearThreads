@@ -39,8 +39,9 @@ export const MAPPED_ITEM_TYPES = [
   'exitedReviewMode',
   'contextCompaction',
   'sleep',
+  'plan',
 ] as const;
-export const IGNORED_ITEM_TYPES = ['userMessage', 'hookPrompt', 'functionCallOutput', 'plan'] as const;
+export const IGNORED_ITEM_TYPES = ['userMessage', 'hookPrompt', 'functionCallOutput'] as const;
 
 // Notification methods this handles, and the ones it ignores on purpose.
 // Any other method is ignored too, logged once at debug level.
@@ -600,6 +601,13 @@ export class CodexNormalizer {
       case 'contextCompaction':
         this.compacted(out);
         return;
+      // Plan mode's proposed plan ("Plan first"), a card for Mike to approve.
+      // A subagent's plan isn't his to approve.
+      case 'plan': {
+        const text = typeof item.text === 'string' ? item.text.trim() : '';
+        if (text && !prefix) out.push({ kind: 'planProposed', itemId: id, text });
+        return;
+      }
       case 'enteredReviewMode':
       case 'exitedReviewMode':
         if (!this.hidden.has(id)) {

@@ -235,7 +235,8 @@ export type BinaryReporter = { binariesInUse?(): string[] };
 // and reads nothing else until it's answered. A background subagent's card
 // (no tool call of the agent's to point at) holds up only that subagent.
 export type PendingApproval =
-  | { approvalId: string; kind: 'tool'; main: boolean; resolve: (a: ToolApprovalAnswer) => void }
+  // plan: the "Plan first" plan (its itemId) this approval is Claude's ExitPlanMode for.
+  | { approvalId: string; kind: 'tool'; main: boolean; plan?: string; resolve: (a: ToolApprovalAnswer) => void }
   | { approvalId: string; kind: 'question'; main: boolean; questions: Question[]; resolve: (a: QuestionAnswer) => void }
   // An agent's ask_secret (docs/protocol.md, "Secrets"). The value never
   // passes through here: secrets.answer writes the file and hands this the
@@ -1372,6 +1373,14 @@ export class Runner {
       this.interrupt(rec.id);
       return turnId;
     }
+    // A message from Mike while a plan waits (and isn't Claude's approval,
+    // which the card-declining below sends back): he's answering it in
+    // words, so it goes back for another go.
+    if (rec.openPlan && fromMike(text, opts) && ![...rt.approvals.values()].some((p) => p.kind === 'tool' && p.plan === rec.openPlan)) {
+      this.emit(st, { type: 'plan.resolved', itemId: rec.openPlan, decision: 'revise' }, rt.turn?.turnId);
+      delete rec.openPlan;
+      this.markDirty(st);
+    }
     if (rt.turn && rt.approvals.size && fromMike(text, opts)) {
       // He wrote instead of using the card. The CLI is parked on the card's
       // answer and won't read anything else until it has one, so a message
@@ -1952,6 +1961,14 @@ export class Runner {
           rec.cwd,
           true,
         );
+        break;
+      case 'planProposed':
+        // A newer plan replaces one still waiting (Codex can propose
+        // again in plan mode); the old card just stops offering Go ahead.
+        if (rec.openPlan && rec.openPlan !== o.itemId) this.emit(st, { type: 'plan.resolved', itemId: rec.openPlan, decision: 'revise' }, rt.turn?.turnId);
+        rec.openPlan = o.itemId;
+        this.emit(st, { type: 'plan.proposed', itemId: o.itemId, text: o.text }, rt.turn?.turnId);
+        this.markDirty(st);
         break;
       case 'allowRules': {
         const rules = new Set(rec.allowRules ?? []);
@@ -2553,6 +2570,9 @@ export class Runner {
       }
     }
     if (params.permissionMode !== undefined && params.permissionMode !== rec.permissionMode) {
+      // What approving a plan goes back to.
+      if (params.permissionMode === 'plan') rec.modeBeforePlan = rec.permissionMode;
+      else delete rec.modeBeforePlan;
       rec.permissionMode = params.permissionMode;
       // The turn counts as having had the most access it was given: a
       // Claude CLI takes a raise now, and a lowered Codex turn carries on
@@ -2563,7 +2583,7 @@ export class Runner {
           rt.releaseWhenIdle = true;
           if (!rt.turn) this.releaseSession(st);
         });
-        if (sayNextTurn()) nextTurn.push(params.permissionMode === 'ask' ? 'Ask before edits' : params.permissionMode === 'auto' ? 'Auto' : 'Full access');
+        if (sayNextTurn()) nextTurn.push(params.permissionMode === 'ask' ? 'Ask before edits' : params.permissionMode === 'auto' ? 'Auto' : params.permissionMode === 'plan' ? 'Plan first' : 'Full access');
       }
     }
     if (nextTurn.length) {

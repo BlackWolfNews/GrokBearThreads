@@ -292,6 +292,7 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         case .background: return "background"
         case .gap: return "gap"
         case .changes: return "changes"
+        case .planCard: return "planCard"
         }
     }
 
@@ -312,6 +313,7 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         case "background": cell = BackgroundRowCell(frame: .zero)
         case "gap": cell = GapRowCell(frame: .zero)
         case "changes": cell = ChangesRowCell(frame: .zero)
+        case "planCard": cell = PlanCardCell(frame: .zero)
         default: cell = QuestionRowCell(frame: .zero)
         }
         cell.identifier = id
@@ -815,6 +817,15 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
 
     func loadStartRequest(_ approvalId: String) {
         session?.loadStartRequest(approvalId)
+    }
+
+    func approvePlan(itemId: String) {
+        session?.approvePlan(itemId: itemId)
+    }
+
+    func sendBackPlan() {
+        guard let session else { return }
+        session.app?.focusComposer(session.threadId)
     }
 
     func questionDraft(_ approvalId: String) -> [Int: Set<String>] { questionDrafts[approvalId] ?? [:] }

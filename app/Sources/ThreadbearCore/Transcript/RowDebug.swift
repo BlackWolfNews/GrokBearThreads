@@ -43,6 +43,9 @@ public enum RowDebug {
             return "\(review.title) · \(review.options.count) images · \(review.status)"
         case .plan(let entries):
             return entries.map(\.text).joined(separator: "; ")
+        case .planCard(let card):
+            let state = switch card.state { case .waiting: "waiting"; case .approved: "approved"; case .sentBack: "sent back" }
+            return "plan (\(state))" + (card.entries.isEmpty ? ": " + PlanCardText.summary(card.text) : ", " + card.entries.map(\.text).joined(separator: "; "))
         case .asks(let card):
             if card.isDone { return "\(card.isOpen ? "open" : "closed"), nothing needed" + (card.next.isEmpty ? "" : ", next: " + card.next.enumerated().map { (card.pickedNext.contains($0.offset) ? "[x] " : "") + $0.element }.joined(separator: "; ")) }
             return "\(card.isOpen ? "open" : "closed"), \(card.tickedCount) of \(card.asks.count) ticked: " + card.asks.map(\.action).joined(separator: "; ")
@@ -170,6 +173,7 @@ extension TranscriptModel {
         case .secretRequested(let request): return ["s:" + request.approvalId]
         case .reviewUpdated(let review): return ["review:" + review.id]
         case .approvalResolved(let resolution): return ["ap:" + resolution.approvalId, "q:" + resolution.approvalId, "s:" + resolution.approvalId]
+        case .planProposed(let itemId, _), .planResolved(let itemId, _): return ["pl:" + itemId]
         case .planUpdated:
             let key = event.turnId ?? "seq\(seq)"
             let id = planRows[key] ?? "p:\(seq)"

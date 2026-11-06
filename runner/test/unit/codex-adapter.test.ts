@@ -818,6 +818,28 @@ test('folder, model, effort and mode changes go on the next turn/start', async (
   await h.session.end();
 });
 
+test('Plan first: plan mode goes on turn/start as the plan collaboration mode, and default goes once after', async () => {
+  const h = await open({ permissionMode: 'plan' });
+  await started(h);
+  h.session.send({ id: 'm1', text: 'a', images: [] });
+  let req = await turnStarts(h, 'u1');
+  assert.equal(req.params.approvalPolicy, 'on-request');
+  assert.deepEqual(req.params.collaborationMode, { mode: 'plan', settings: { model: 'gpt-6-luna', reasoning_effort: null, developer_instructions: null } });
+  complete(h, 'u1');
+  await waitFor(() => h.rec.results().length === 1);
+  await h.session.setPermissionMode('full');
+  h.session.send({ id: 'm2', text: 'Go ahead with the plan.', images: [] });
+  req = await turnStarts(h, 'u2');
+  assert.equal((req.params.collaborationMode as { mode: string }).mode, 'default');
+  assert.equal(req.params.approvalPolicy, 'never');
+  complete(h, 'u2');
+  await waitFor(() => h.rec.results().length === 2);
+  h.session.send({ id: 'm3', text: 'c', images: [] });
+  req = await turnStarts(h, 'u3');
+  assert.equal(req.params.collaborationMode, undefined, 'only sent while it matters');
+  await h.session.end();
+});
+
 // ---- Tools
 
 test('threadbear tools: a known one runs, an unknown one says so, delete_thread asks first', async () => {

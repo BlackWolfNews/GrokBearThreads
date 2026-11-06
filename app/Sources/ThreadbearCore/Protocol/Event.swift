@@ -496,6 +496,10 @@ public enum EventPayload: Sendable, Hashable {
     case reviewUpdated(DesignReview)
     case approvalResolved(ApprovalResolution)
     case planUpdated([PlanEntry])
+    /// "Plan first": the agent's plan, waiting for Mike, and what became of
+    /// it (`go` approved, `revise` sent back).
+    case planProposed(itemId: String, text: String)
+    case planResolved(itemId: String, go: Bool)
     /// `wokeBy`: what finished and started a turn the agent began by itself.
     case turnStarted(wokeBy: [BackgroundTask] = [])
     case turnCompleted(TurnCompletion)
@@ -583,6 +587,12 @@ public struct Event: Sendable, Hashable, Decodable {
         enum CodingKeys: String, CodingKey { case itemId, text, images, message, origin, answers, editOf, reviewId, reviewResponse, summary, narration, givesWay, final }
     }
 
+    private struct PlanCardFields: Decodable {
+        var itemId: String
+        var text: String?
+        var decision: String?
+    }
+
     private struct PlanFields: Decodable {
         var entries: [PlanEntry]
 
@@ -648,6 +658,12 @@ public struct Event: Sendable, Hashable, Decodable {
             return .approvalResolved(try ApprovalResolution(from: decoder))
         case "plan.updated":
             return .planUpdated(try PlanFields(from: decoder).entries)
+        case "plan.proposed":
+            let fields = try PlanCardFields(from: decoder)
+            return .planProposed(itemId: fields.itemId, text: fields.text ?? "")
+        case "plan.resolved":
+            let fields = try PlanCardFields(from: decoder)
+            return .planResolved(itemId: fields.itemId, go: fields.decision == "go")
         case "turn.started":
             let c = try decoder.container(keyedBy: TurnStartedFields.self)
             return .turnStarted(wokeBy: (try? c.decodeIfPresent([BackgroundTask].self, forKey: .wokeBy)) ?? [])

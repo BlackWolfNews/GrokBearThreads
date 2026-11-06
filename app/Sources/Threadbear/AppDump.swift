@@ -75,6 +75,8 @@ struct AppDump: Encodable {
         /// The model, or "default (...)" saying whose default.
         var model: String
         var ask: Bool
+        /// Its permission mode as the composer says it, past "asks".
+        var mode: PermissionMode = .full
         /// The effort level, or "default" for the model's own.
         var effort: String = "default"
         /// The pool that picks its login; nil when it's pinned to
@@ -91,6 +93,7 @@ struct AppDump: Encodable {
         var account: String
         var model: String
         var ask: Bool
+        var mode: PermissionMode = .full
         var effort: String = "default"
         var pool: String? = nil
     }
@@ -106,6 +109,16 @@ struct AppDump: Encodable {
         var status: String?
     }
 
+    /// A thread's permission mode as the dump says it.
+    static func modeText(_ mode: PermissionMode) -> String {
+        switch mode {
+        case .ask: "asks before edits"
+        case .auto: "auto"
+        case .plan: "plan first"
+        case .full: "full access"
+        }
+    }
+
     /// What a new thread sent from the composer would get, as the
     /// composer's menus show it (`ThreadSettings` in ComposerControls).
     @MainActor
@@ -113,7 +126,7 @@ struct AppDump: Encodable {
         let account = app.newThreadAccountId
         return Settings(cwd: app.newThreadCwd ?? app.draftLogins.defaults.cwd, account: account,
                         model: app.newThreadModel ?? defaultModel(app, account: account), ask: app.newThreadPermission == .ask,
-                        effort: app.newThreadEffort ?? "default", pool: app.newThreadPoolId)
+                        mode: app.newThreadPermission, effort: app.newThreadEffort ?? "default", pool: app.newThreadPoolId)
     }
 
     /// Whose default a new thread gets, and which model that is when known.
@@ -469,7 +482,7 @@ struct AppDump: Encodable {
             // or the account's default.
             let model = thread.model ?? thread.modelInUse.map { "default (the account's, \($0))" } ?? defaultModel(app, account: thread.accountId)
             settings = Settings(cwd: thread.cwd, account: thread.accountId, model: model, ask: thread.permissionMode == .ask,
-                                effort: thread.effort ?? thread.effortInUse.map { "default (\($0))" } ?? "default",
+                                mode: thread.permissionMode, effort: thread.effort ?? thread.effortInUse.map { "default (\($0))" } ?? "default",
                                 pool: app.usesPools ? thread.poolId : nil)
         } else {
             settings = newThreadSettings(app)
@@ -477,7 +490,7 @@ struct AppDump: Encodable {
         // Chips as the [Picture N] markers they'll go as, not invisible marks.
         return Composer(draft: key, text: InlinePictures.messageText(app.drafts[key]?.normalized.text ?? ""), images: app.drafts[key]?.images.count ?? 0,
                         editing: app.editing[key]?.seq,
-                        cwd: settings.cwd, account: settings.account, model: settings.model, ask: settings.ask, effort: settings.effort,
+                        cwd: settings.cwd, account: settings.account, model: settings.model, ask: settings.ask, mode: settings.mode, effort: settings.effort,
                         pool: settings.pool, chip: ThreadSettings(app: app, thread: app.selectedThread).modelChipTitle,
                         runner: app.selectedThread.flatMap(app.runnerName(of:)) ?? (app.selectedThread == nil ? app.newThreadRunner?.name : nil))
     }
@@ -570,7 +583,7 @@ struct AppDump: Encodable {
             + (composer.editing.map { ", editing the message at seq \($0)" } ?? ""))
         let on = composer.pool.map { "pool \($0) (now \(composer.account))" } ?? (pools.isEmpty || composer.runner != nil ? composer.account : "\(composer.account), pinned")
         lines.append("  \(composer.draft == "new" ? "starts" : "runs") in \(composer.cwd)\(composer.runner.map { " on \($0)" } ?? "") on \(on), model \(composer.model), "
-            + (composer.effort == "default" ? "" : "effort \(composer.effort), ") + (composer.ask ? "asks before edits" : "full access"))
+            + (composer.effort == "default" ? "" : "effort \(composer.effort), ") + Self.modeText(composer.mode))
         lines.append("  model chip: \(composer.chip)")
         lines.append("dock: \(dock)")
         if !pools.isEmpty {

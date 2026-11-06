@@ -748,6 +748,20 @@ final class ThreadSession {
         }
     }
 
+    /// Go ahead on a "Plan first" plan card (docs/protocol.md).
+    func approvePlan(itemId: String) {
+        guard let client = app?.client(for: threadId) else { return }
+        let threadId = threadId
+        ActivityRecorder.shared.answered(threadId: threadId, decision: .allow)
+        Task {
+            do {
+                try await client.approvePlan(threadId: threadId, itemId: itemId)
+            } catch {
+                app?.show(error)
+            }
+        }
+    }
+
     /// Sends a secret card's answer (docs/protocol.md, "Secrets") to the
     /// thread's own runner, this Mac's or another's. Nil once it's gone,
     /// else what to say under the field. The value is in this call only:

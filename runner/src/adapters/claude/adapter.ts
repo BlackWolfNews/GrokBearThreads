@@ -69,8 +69,8 @@ export function terminalMcpTools(base: string | undefined, oneReply = false): st
   return names.join(',');
 }
 
-export function sdkPermissionMode(mode: PermissionMode): 'bypassPermissions' | 'default' | 'auto' {
-  if (mode === 'auto') return 'auto';
+export function sdkPermissionMode(mode: PermissionMode): 'bypassPermissions' | 'default' | 'auto' | 'plan' {
+  if (mode === 'auto' || mode === 'plan') return mode;
   return mode === 'full' ? 'bypassPermissions' : 'default';
 }
 
@@ -620,6 +620,11 @@ class ClaudeSession implements AgentSession {
     }
     if (this.deps.neverAsk?.has(name) && !this.deps.alwaysAsk?.has(name)) return { behavior: 'allow', updatedInput: input, toolUseID: o.toolUseID };
     if (this.mode === 'full' && !this.deps.alwaysAsk?.has(name)) return { behavior: 'allow', updatedInput: input, toolUseID: o.toolUseID };
+    // "Plan first": the plan goes to Mike as a plan card, and this call
+    // waits on it like any approval. Approving it answers with the mode to
+    // leave plan mode for (setMode below), as the CLI's own prompt does.
+    const plan = name === 'ExitPlanMode' && this.mode === 'plan' && !sub;
+    if (plan) this.sink.output({ kind: 'planProposed', itemId: o.toolUseID, text: typeof input.plan === 'string' ? input.plan : '' });
     // Approved outside Full access, whatever the hook saw.
     if (EDIT_TOOLS.has(name)) this.noteWriteMode(o.toolUseID, this.mode);
     // An edit that writes code Threadbear runs: asked about every time, and
@@ -634,13 +639,23 @@ class ClaudeSession implements AgentSession {
       title: code ? `${title} (${RUNS_AS_CODE})` : title,
       input: truncateInput(input),
       // "Always allow" would defeat a tool that's meant to ask every time.
-      canAlwaysAllow: !code && !o.suppressAlwaysAllowRule && !this.deps.alwaysAsk?.has(name),
+      canAlwaysAllow: !plan && !code && !o.suppressAlwaysAllowRule && !this.deps.alwaysAsk?.has(name),
       signal: o.signal,
     });
     // A client that offers it anyway gets this once, never a rule.
     const decision = code && ans.decision === 'allowAlways' ? 'allow' : ans.decision;
     switch (decision) {
       case 'allow':
+        if (plan && ans.mode) {
+          this.mode = ans.mode;
+          return {
+            behavior: 'allow',
+            updatedInput: input,
+            updatedPermissions: [{ type: 'setMode', mode: sdkPermissionMode(ans.mode), destination: 'session' }],
+            toolUseID: o.toolUseID,
+            decisionClassification: 'user_temporary',
+          };
+        }
         return { behavior: 'allow', updatedInput: input, toolUseID: o.toolUseID, decisionClassification: 'user_temporary' };
       case 'allowAlways': {
         const { updates, rules } = alwaysAllow(name, o.suggestions);

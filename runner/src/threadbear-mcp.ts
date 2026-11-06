@@ -88,8 +88,10 @@ export const SERVER_NAME = 'threadbear';
 export type AgentApprovalRequest = { name: string; title: string; input: Record<string, unknown>; signal?: AbortSignal };
 
 // Permission modes by how much an agent may do in them without asking.
-const ACCESS: Record<PermissionMode, number> = { ask: 0, auto: 1, full: 2 };
-const MODE_NAMES: Record<PermissionMode, string> = { full: 'Full access', auto: 'Auto', ask: 'Ask before edits' };
+// Plan first ranks with ask: its agent changes nothing, and only Mike's
+// approval takes it out of plan mode.
+const ACCESS: Record<PermissionMode, number> = { ask: 0, plan: 0, auto: 1, full: 2 };
+const MODE_NAMES: Record<PermissionMode, string> = { full: 'Full access', auto: 'Auto', ask: 'Ask before edits', plan: 'Plan first' };
 export const raises = (to: PermissionMode, from: PermissionMode): boolean => ACCESS[to] > ACCESS[from];
 // Asked about every time, even in a thread with full access: deleting is
 // the one thing here that's hard to take back.
@@ -417,7 +419,7 @@ export function buildThreadbearTools(
       t.waitingForRoom ? `waiting for room until: ${t.waitingForRoom.until}` : '',
       `model: ${t.model ?? 'default'}${t.modelInUse ? ` (running as ${t.modelInUse})` : ''}`,
       `effort: ${t.effort ?? 'default'}${t.effortInUse ? ` (${t.effortInUse} last turn)` : ''}`,
-      `permissions: ${t.permissionMode === 'full' ? 'full access' : t.permissionMode === 'auto' ? 'auto (a classifier checks each action)' : 'ask before edits'}`,
+      `permissions: ${t.permissionMode === 'full' ? 'full access' : t.permissionMode === 'auto' ? 'auto (a classifier checks each action)' : t.permissionMode === 'plan' ? 'plan first (changes nothing until Mike approves its plan)' : 'ask before edits'}`,
       t.snoozedUntil ? `snoozed until: ${snoozeEnd(t)}` : '',
       t.archivedAt ? `archived: ${t.archivedAt}${archivedHow(t)}` : '',
       `last activity: ${relativeTime(t.lastActivityAt, now())}`,

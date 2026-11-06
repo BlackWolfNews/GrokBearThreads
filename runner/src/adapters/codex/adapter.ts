@@ -413,6 +413,11 @@ export class CodexSession implements AgentSession {
   private mode: PermissionMode;
   private cwd: string;
   private sentCwd: string;
+  // The model Codex said it runs, and whether the thread is in Codex's plan
+  // mode: it keeps a collaboration mode for the turns after, so leaving
+  // "Plan first" has to send default once.
+  private liveModel?: string;
+  private inPlan = false;
 
   constructor(opts: StartSessionOptions, sink: SessionSink, deps: CodexAdapterDeps, hooks: SessionHooks) {
     this.opts = opts;
@@ -532,6 +537,8 @@ export class CodexSession implements AgentSession {
     this.threadId = thread.id;
     this.sentCwd = opts.cwd;
     this.normalizer.setThread?.(thread.id, typeof res.model === 'string' ? res.model : undefined);
+    if (typeof res.model === 'string') this.liveModel = res.model;
+    this.inPlan = res.collaborationMode?.mode === 'plan';
     this.sink.output({ kind: 'session', nativeSessionId: thread.id, ...(typeof res.model === 'string' ? { model: res.model } : {}) });
     if (this.proc.version) this.sink.output({ kind: 'cliVersion', version: this.proc.version });
     if (isEffortLevel(res.reasoningEffort)) this.sink.output({ kind: 'effort', level: res.reasoningEffort });
@@ -839,6 +846,14 @@ export class CodexSession implements AgentSession {
     if (model) params.model = model;
     const effort = this.effort ?? (this.effortChanged ? this.ownEffort(model) : undefined);
     if (effort) params.effort = effort;
+    // "Plan first" is Codex's plan collaboration mode (with the read-only
+    // sandbox turnPolicy gives it); its settings need a model by name.
+    const plan = this.mode === 'plan';
+    const collabModel = model ?? this.liveModel ?? this.opts.account.defaultModel;
+    if ((plan || this.inPlan) && collabModel) {
+      params.collaborationMode = { mode: plan ? 'plan' : 'default', settings: { model: collabModel, reasoning_effort: effort ?? null, developer_instructions: null } };
+      this.inPlan = plan;
+    }
     return params;
   }
 

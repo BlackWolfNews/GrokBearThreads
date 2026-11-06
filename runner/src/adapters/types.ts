@@ -115,6 +115,9 @@ export type AdapterOutput =
   | { kind: 'subagent'; update: SubagentUpdate }
   // "Always allow" rules to keep for this thread.
   | { kind: 'allowRules'; rules: string[] }
+  // "Plan first": the agent put its plan to Mike (Claude's ExitPlanMode,
+  // Codex's plan item). The runner shows it as plan.proposed.
+  | { kind: 'planProposed'; itemId: string; text: string }
   // Files an Edit or Write call left, sent only for one the CLI says it
   // made, just before its successful tool.result. Never for a preview (an
   // edit.diff before approval) or a denied or failed edit: the runner
@@ -162,7 +165,9 @@ export type ToolApprovalRequest = {
   signal: AbortSignal;
 };
 
-export type ToolApprovalAnswer = { decision: 'allow' | 'allowAlways' | 'deny' | 'expired'; message?: string };
+// mode: the permission mode to switch to as the call goes ahead (approving
+// a "Plan first" plan takes the thread out of plan mode).
+export type ToolApprovalAnswer = { decision: 'allow' | 'allowAlways' | 'deny' | 'expired'; message?: string; mode?: PermissionMode };
 
 export type QuestionRequest = {
   toolUseId?: string;

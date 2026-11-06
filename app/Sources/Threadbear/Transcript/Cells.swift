@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import ThreadbearCore
 
 @MainActor
@@ -40,6 +41,10 @@ protocol RowCellDelegate: AnyObject {
     /// A work:, thread: or review: link in row `rowId`'s text (WorkLinks): open the
     /// step in that turn's working, or the other thread.
     func openThreadLink(_ url: URL, fromRow rowId: String)
+    /// A "Plan first" plan card: Go ahead approves it (plans.approve); Send
+    /// back puts Mike in the composer, as anything he writes sends it back.
+    func approvePlan(itemId: String)
+    func sendBackPlan()
     /// For a thread on another runner ("bruce"): its pictures are files
     /// on that Mac, fetched through this. Nil for this Mac's own.
     var remoteImages: RemoteImages? { get }
@@ -59,6 +64,8 @@ extension RowCellDelegate {
     func openReview(_ review: DesignReview) {}
     func editMessage(rowId: String) {}
     func openThreadLink(_ url: URL, fromRow rowId: String) {}
+    func approvePlan(itemId: String) {}
+    func sendBackPlan() {}
 }
 
 /// Base for transcript cells: flipped, so layout reads top-down.
@@ -1476,6 +1483,120 @@ final class ApprovalRowCell: RowCellView {
     @objc private func allowClicked() { delegate?.respond(approvalId: approvalId, decision: .allow, answers: nil, message: nil) }
     @objc private func alwaysClicked() { delegate?.respond(approvalId: approvalId, decision: .allowAlways, answers: nil, message: nil) }
     @objc private func denyClicked() { delegate?.respond(approvalId: approvalId, decision: .deny, answers: nil, message: nil) }
+}
+
+// MARK: - Plan card
+
+/// What the plan card has under its text: its buttons while it waits, and
+/// the toggle for a plan longer than its preview or behind its checklist.
+enum PlanCardLayout {
+    static func hasFooter(_ card: PlanCard) -> Bool {
+        card.state == .waiting || !card.entries.isEmpty || PlanCardText.preview(PlanCardText.split(card.text).body).clipped
+    }
+}
+
+/// "Plan first" (docs/protocol.md): the agent's plan for Mike to approve,
+/// which then becomes its checklist. Mike picked this from mockups (6 Nov):
+/// the plan in a card with Go ahead and Send back, the details behind the ⓘ.
+final class PlanCardCell: RowCellView {
+    static let info = "Plan first: the agent reads and plans, and changes nothing until you approve. "
+        + "Go ahead lets it start, in the permission mode the thread had before. "
+        + "Send back, or anything you write, asks it for another go."
+
+    let card = FillView()
+    let titleView = TranscriptTextView()
+    let status = NSTextField(labelWithString: "")
+    let info = NSHostingView(rootView: InfoTip(PlanCardCell.info))
+    let bodyView = TranscriptTextView()
+    /// Return in an empty composer approves it too, as Claude's plan is an
+    /// approval waiting (ComposerView).
+    let goAhead = PillButton(pill: "Go ahead", prominent: true)
+    let sendBack = PillButton(pill: "Send back…")
+    let toggle = PointerButton()
+    private var itemId = ""
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        goAhead.target = self
+        goAhead.action = #selector(goAheadClicked)
+        sendBack.target = self
+        sendBack.action = #selector(sendBackClicked)
+        toggle.isBordered = false
+        toggle.target = self
+        toggle.action = #selector(toggleClicked)
+        status.textColor = .secondaryLabelColor
+        status.alignment = .right
+        status.lineBreakMode = .byTruncatingTail
+        [card, titleView, status, info, bodyView, goAhead, sendBack, toggle].forEach(addSubview)
+        goAhead.setTip("Approve the plan and let it start")
+        sendBack.setTip("Tell it what to change; it plans again")
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func configure(row: TranscriptRow, render: RowRender, tableWidth: CGFloat, expanded: Bool) {
+        super.configure(row: row, render: render, tableWidth: tableWidth, expanded: expanded)
+        guard case .planCard(let plan) = row.content else { return }
+        itemId = plan.itemId
+        let (x, width) = RowMetrics.column(for: row, tableWidth: tableWidth)
+        let pad = RowMetrics.cardPad
+        let top = RowMetrics.rowTop + zoomed(2)
+        card.frame = NSRect(x: x, y: top, width: width, height: render.height - top - RowMetrics.rowBottom - zoomed(2))
+        card.set(fill: Theme.cardBackground, stroke: Theme.cardBorder, radius: RowMetrics.cardRadius)
+        let left = x + pad
+        let inner = width - pad * 2
+        var y = card.frame.minY + pad
+        titleView.place(NSRect(x: left, y: y, width: render.textSize.width + zoomed(4), height: render.textSize.height))
+        titleView.show(render.text ?? NSAttributedString(), width: render.textSize.width + zoomed(4))
+        let side = zoomed(19)
+        // Level with the title's first line: a long heading wraps.
+        let line = min(render.textSize.height, ceil(Theme.changesTitleFont.ascender - Theme.changesTitleFont.descender + Theme.changesTitleFont.leading))
+        info.frame = NSRect(x: titleView.frame.maxX + zoomed(4), y: y + (line - side) / 2, width: side, height: side)
+        status.stringValue = switch plan.state {
+        case .waiting: "Waiting for you"
+        case .sentBack: "Sent back"
+        case .approved: plan.entries.isEmpty ? "Approved" : ""
+        }
+        status.font = .systemFont(ofSize: TypeScale.label)
+        let statusWidth = ceil(status.attributedStringValue.size().width) + zoomed(4)
+        status.frame = NSRect(x: left + inner - statusWidth, y: y + (line - zoomed(17)) / 2, width: statusWidth, height: zoomed(17))
+        y += render.textSize.height + zoomed(8)
+        bodyView.place(NSRect(x: left, y: y, width: inner, height: render.detailSize.height))
+        bodyView.show(render.detail ?? NSAttributedString(), width: inner)
+        y += render.detailSize.height + zoomed(12)
+
+        let waiting = plan.state == .waiting
+        var buttonX = left
+        for button in [goAhead, sendBack] {
+            button.isHidden = !waiting
+            guard waiting else { continue }
+            button.frame = NSRect(x: buttonX, y: y, width: max(zoomed(76), button.fittingWidth), height: RowMetrics.buttonHeight)
+            buttonX = button.frame.maxX + zoomed(8)
+        }
+        let clipped = PlanCardText.preview(PlanCardText.split(plan.text).body).clipped
+        let title: String? = !plan.entries.isEmpty ? (expanded ? "Hide plan" : "Show plan") : clipped ? (expanded ? "Show less" : "Show full plan") : nil
+        toggle.isHidden = title == nil
+        if let title {
+            toggle.attributedTitle = NSAttributedString(string: title, attributes: [.font: NSFont.systemFont(ofSize: TypeScale.label), .foregroundColor: NSColor.secondaryLabelColor])
+            let w = ceil(toggle.attributedTitle.size().width) + zoomed(8)
+            toggle.frame = NSRect(x: buttonX + (waiting ? zoomed(2) : -zoomed(4)), y: y, width: w, height: RowMetrics.buttonHeight)
+            toggle.setTip(expanded ? "Show less of it" : "Show the whole plan")
+        }
+    }
+
+    override func releaseContent() {
+        titleView.park()
+        bodyView.park()
+    }
+
+    override func updateSlices(force: Bool = false) {
+        titleView.updateSlice(force: force)
+        bodyView.updateSlice(force: force)
+    }
+
+    @objc private func goAheadClicked() { delegate?.approvePlan(itemId: itemId) }
+    @objc private func sendBackClicked() { delegate?.sendBackPlan() }
+    @objc private func toggleClicked() { delegate?.toggleExpanded(rowId: rowId) }
 }
 
 // MARK: - Question card

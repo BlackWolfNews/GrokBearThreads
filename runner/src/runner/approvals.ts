@@ -4,7 +4,7 @@
 // is the Runner; runner.ts puts them on its prototype.
 import type { Runner } from '../runner.ts';
 import type { RunnerPart } from './part.ts';
-import type { ApprovalDecision, EventBody } from '../protocol.ts';
+import type { ApprovalDecision, EventBody, PermissionMode } from '../protocol.ts';
 import { ErrorCode, RpcError } from '../protocol.ts';
 import type { QuestionAnswer, QuestionRequest, ToolApprovalAnswer, ToolApprovalRequest } from '../adapters/types.ts';
 import { approvalTitle, type AgentApprovalRequest } from '../threadbear-mcp.ts';
@@ -25,6 +25,9 @@ export function settleDeclined(p: PendingApproval, decision: 'deny' | 'expired',
   else if (p.kind === 'request') p.resolve({ status: decision === 'deny' ? 'declined' : 'expired', ...(message ? { message } : {}) });
   else p.resolve({ status: decision === 'deny' ? 'declined' : 'expired', message });
 }
+
+// What Go ahead says to an agent whose plan isn't waiting on a call.
+export const PLAN_GO_AHEAD = 'Go ahead with the plan.';
 
 export const approvalsPart = {
   respondApproval(this: Runner, params: {
@@ -75,9 +78,43 @@ export const approvalsPart = {
         throw new RpcError(ErrorCode.badParams, 'An approval takes "allow", "allowAlways" or "deny".');
       }
       this.resolveApproval(st, pending.approvalId, params.decision, params.message);
-      pending.resolve({ decision: params.decision, message: params.message });
+      // An approved plan goes ahead in the mode resolveApproval just left plan mode for.
+      const mode = pending.plan && params.decision !== 'deny' ? st.rec.permissionMode : undefined;
+      pending.resolve({ decision: params.decision, message: params.message, ...(mode ? { mode } : {}) });
     }
     return {};
+  },
+
+  // plans.approve (docs/protocol.md, "Plan first"): Go ahead on a plan card.
+  // Claude's plan is an ExitPlanMode call waiting on its approval, which
+  // this allows. Otherwise (Codex, whose plan ends its turn, or Claude's
+  // after a restart dropped the call) the thread leaves plan mode and Mike
+  // tells it to go ahead.
+  approvePlan(this: Runner, params: { threadId: string; itemId: string }): Record<string, never> {
+    const st = this.mustGet(params.threadId);
+    const { rec, rt } = st;
+    if (!rec.openPlan || rec.openPlan !== params.itemId) throw new RpcError(ErrorCode.badParams, 'That plan is no longer waiting.');
+    const call = [...rt.approvals.values()].find((p) => p.kind === 'tool' && p.plan === params.itemId);
+    if (call) return this.respondApproval({ threadId: params.threadId, approvalId: call.approvalId, decision: 'allow' });
+    const mode = this.leavePlan(st);
+    rt.session?.setPermissionMode(mode).catch(() => {
+      rt.releaseWhenIdle = true;
+    });
+    this.send(params.threadId, PLAN_GO_AHEAD);
+    return {};
+  },
+
+  // Approving the plan: back to the mode the thread had before plan mode.
+  // Returns that mode; the caller tells the CLI.
+  leavePlan(this: Runner, st: ThreadState): PermissionMode {
+    const { rec, rt } = st;
+    const mode = rec.modeBeforePlan && rec.modeBeforePlan !== 'plan' ? rec.modeBeforePlan : 'full';
+    if (rec.openPlan) this.emit(st, { type: 'plan.resolved', itemId: rec.openPlan, decision: 'go' }, rt.turn?.turnId);
+    delete rec.openPlan;
+    delete rec.modeBeforePlan;
+    if (rec.permissionMode === 'plan') rec.permissionMode = mode;
+    this.markDirty(st);
+    return rec.permissionMode;
   },
 
   // A request can come with no turn running: a background subagent keeps
@@ -102,11 +139,12 @@ export const approvalsPart = {
       options: req.canAlwaysAllow ? ['allow', 'allowAlways', 'deny'] : ['allow', 'deny'],
     };
     if (req.toolUseId) body.itemId = req.toolUseId;
+    const plan = req.name === 'ExitPlanMode' && req.toolUseId && req.toolUseId === st.rec.openPlan ? req.toolUseId : undefined;
     return new Promise((resolve) => {
       // A card offered without "Always allow" never answers with it, even
       // if a client sends it: it would save a rule Mike was never offered.
       const answer = req.canAlwaysAllow ? resolve : (a: ToolApprovalAnswer) => resolve(a.decision === 'allowAlways' ? { ...a, decision: 'allow' } : a);
-      this.addApproval(st, { approvalId, kind: 'tool', main: Boolean(req.toolUseId), resolve: answer }, body, req.signal);
+      this.addApproval(st, { approvalId, kind: 'tool', main: Boolean(req.toolUseId), ...(plan ? { plan } : {}), resolve: answer }, body, req.signal);
     });
   },
 
@@ -213,11 +251,23 @@ export const approvalsPart = {
 
   resolveApproval(this: Runner, st: ThreadState, approvalId: string, decision: ApprovalDecision, message?: string): void {
     const { rec, rt } = st;
+    const pending = rt.approvals.get(approvalId);
     rt.approvals.delete(approvalId);
     rec.pendingApprovals = rec.pendingApprovals.filter((x) => x !== approvalId);
     const body: EventBody = { type: 'approval.resolved', approvalId, decision };
     if (message) body.message = message;
     this.emit(st, body, rt.turn?.turnId);
+    // A plan's approval, however it was answered (the card, Return in the
+    // composer, the phone): allowed, it goes ahead; declined, it goes back
+    // for another go. Expired (a restart, Stop) leaves the plan waiting, and
+    // Go ahead then sends it on in words.
+    if (pending?.kind === 'tool' && pending.plan && pending.plan === rec.openPlan) {
+      if (decision === 'allow' || decision === 'allowAlways') this.leavePlan(st);
+      else if (decision === 'deny') {
+        this.emit(st, { type: 'plan.resolved', itemId: pending.plan, decision: 'revise' }, rt.turn?.turnId);
+        delete rec.openPlan;
+      }
+    }
     if (rec.status === 'waiting' && rt.approvals.size === 0) rec.status = rt.turn ? 'running' : 'idle';
     this.markDirty(st);
   },

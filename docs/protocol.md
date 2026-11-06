@@ -205,7 +205,7 @@ type ThreadSummary = {
   effort?: EffortLevel  // undefined means the model's own level
   modelInUse?: string   // full id the CLI ran the last turn on, once one has run
   effortInUse?: EffortLevel // the level the CLI reported for the last turn
-  permissionMode: "full" | "ask"
+  permissionMode: "full" | "ask" | "auto" | "plan"  // "plan": Plan first
   status: ThreadStatus
   live: boolean         // a CLI process is attached right now
   needsYou: boolean     // waiting, or a turn finished after lastSeenSeq
@@ -786,6 +786,8 @@ Persisted event types (stored in `events.ndjson`, returned by `threads.events`):
 | `secret.requested` | `approvalId`, `itemId?`, `label`, `reason`, `placeholder?`: an agent's `ask_secret` (Secrets). Answered with `secrets.answer`, never `approvals.respond` |
 | `approval.resolved` | `approvalId`, `decision` (`allow` \| `allowAlways` \| `deny` \| `answered` \| `expired`), `message?` |
 | `plan.updated` | `entries: {text, status: "pending" \| "in_progress" \| "completed"}[]` |
+| `plan.proposed` | `itemId`, `text` (Markdown): a "Plan first" plan waiting for Mike (see "Plan first") |
+| `plan.resolved` | `itemId`, `decision` (`go` \| `revise`): it was approved, or sent back for another go |
 | `turn.started` | `turnId`, `wokeBy?: {kind, description}[]`. A turn the agent starts by itself (a background task finished, or a background subagent needs an approval) has no `user.message` before it. `wokeBy` is on such a turn when background work finishing started it: each task that had finished since the last turn, `kind` as in `BackgroundTask` (`agent` \| `shell` \| `monitor` \| `other`), its `description` possibly empty. Clients mark the time between that turn and the one before it in the transcript (a "6 min later" divider, Mike 3 Nov). A `user.message` after `turn.started` was sent while the turn ran and went into it |
 | `turn.completed` | `turnId`, `outcome` (`completed` \| `interrupted` \| `failed`), `durationMs`, `costUsd?` (Codex turns have none), `usage?` (Claude: `{inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens}`; Codex: `{inputTokens, cachedInputTokens, cacheWriteTokens?, outputTokens, reasoningTokens}`), `error?`, `errorKind?` (`usageLimit` \| `contextWindow` \| `auth` \| `network`, when a failed turn's cause is known, so a client can offer the fix without reading `error`), `needs?` (`you` \| `nothing`), `asks?: Ask[]`, `next?: string[]` (with `nothing`: suggested follow-ups), `needsFrom?` (`tool` \| `text`): what a completed turn said it needs from Mike (Needs you) |
 | `asks.ticked` | `asksSeq`, `ticked: number[]` (indexes into that turn's `asks`, the whole set now ticked). Outside any turn. The latest one for an `asksSeq` is that card's ticks |
@@ -851,6 +853,7 @@ the summary and then the reply.
 | `threads.tickAsk` | `{ threadId, asksSeq, index, ticked: boolean }` | `{ thread: ThreadSummary }`. Ticks or unticks one of the open card's asks (Needs you), with an `asks.ticked` event. Sends nothing to the agent. `-32602` when `asksSeq` isn't the open card's or `index` is out of range |
 | `threads.share` | `{ threadId, access: "off" \| "link", newLink?: boolean }` | `{ thread: ThreadSummary }`. Whether anyone with the link can read the thread on the website (see Sharing). `newLink` makes a fresh slug, which stops the old link. Another access is `-32602` |
 | `approvals.respond` | `{ threadId, approvalId, decision: "allow" \| "allowAlways" \| "deny" \| "answered", message?: string, answers?: Record<string, string> }` | `{}`. `allowAlways` on a card that didn't offer it counts as `allow`. `allowAlways` allows matching requests for the rest of this thread only; it never changes the thread's permission mode or saves anything in the project. With `answered`, the app sends the chosen answers in one line as `message` too: the runner keeps it in `approval.resolved` (only `answers` goes to the CLI), so the transcript can show what was chosen |
+| `plans.approve` | `{ threadId, itemId }` | `{}`. Go ahead on a waiting plan (see "Plan first"); `-32602` if that plan isn't waiting |
 | `secrets.answer` | `{ threadId, approvalId, secret?: string, decline?: true }` | `{}`. Answers a `secret.requested` card (Secrets). The runner never logs, emits or mirrors `secret` |
 | `media.import` | `{ path: string }` | `{ image: ImageRef }` copies a file into `inbox/` and reads its size; HEIC becomes JPEG and TIFF or BMP becomes PNG |
 | `patches.trust` | `{ threadId, files: { file, hash }[] }` | `{ trusted: string[] }`. Trusts those versions of the thread's waiting patch files (each a `file` its `patches` lists with `untrusted`, and the `hash` given there), then every thread's patches are read again, so the answer comes once they have been. The `claude` entry's file trusts the folder's Claude Code settings the same way. `-32602` for a file the thread isn't waiting on, or one whose hash has moved on since (look again). See "Trusting a folder's patches" |
@@ -1710,6 +1713,42 @@ order.
 
 An older runner hands the agent the markers as words, with every picture
 before them; an older app shows them as words.
+
+## Plan first
+
+`permissionMode: "plan"` ("Plan first" in the composer's permission menu)
+has the agent read and plan, and change nothing until Mike approves its
+plan. Mike picked a plan card in the transcript from mockups (6 Nov), for
+Ayush's "Plan View UI".
+
+- **The mode.** Claude runs in the CLI's own plan mode. Codex gets the
+  plan collaboration mode on `turn/start` (experimental API) with the
+  read-only sandbox, and `default` once on the turn after it leaves.
+  Choosing `plan` in `threads.update` remembers the mode the thread had
+  (`modeBeforePlan`); approving the plan goes back to it (`full` if none).
+- **The plan.** `plan.proposed { itemId, text }` when the agent puts its
+  plan: Claude's `ExitPlanMode` call (its `itemId`, and an
+  `approval.requested` with that `itemId` follows, with `allow` and `deny`
+  only), or Codex's `plan` item, which ends its turn. A newer plan sends
+  one still waiting back.
+- **Go ahead.** `plans.approve`, or `allow` on Claude's approval from
+  anywhere (Return in an empty composer, the phone): the thread leaves plan
+  mode and `plan.resolved` says `go`. Claude's call goes ahead in the same
+  turn, its answer switching the CLI's mode. With no call waiting (Codex,
+  or Claude's after a restart expired it) the runner switches the mode and
+  sends "Go ahead with the plan." as Mike.
+- **Send back.** Anything Mike writes while a plan waits, or `deny` on its
+  approval: `plan.resolved` says `revise`, the thread stays in plan mode,
+  and the agent gets his words (Claude's call is declined first, as any
+  card is when he writes). The app's Send back just puts him in the
+  composer.
+- **The card.** The Mac app draws the plan as one card with Go ahead and
+  Send back, and no separate approval card. Once approved, the steps the
+  agent then works through (`plan.updated`, in the turn that goes ahead)
+  fill that same card as its checklist, the plan behind Show plan. Clients
+  that don't know these events still see Claude's approval as an ordinary
+  one ("Finish the plan"). A thread on another Mac (Other runners'
+  threads) can't take `plans.approve` yet; writing to it still works.
 
 ## Slash commands
 

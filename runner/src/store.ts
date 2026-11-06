@@ -50,6 +50,10 @@ export type ThreadRecord = {
   modelInUse?: string; // full id the CLI ran the last turn on
   effortInUse?: EffortLevel; // the level the CLI reported for the last turn
   permissionMode: PermissionMode;
+  // "Plan first": the mode approving the plan goes back to, and the plan
+  // waiting for Mike (its plan.proposed itemId).
+  modeBeforePlan?: PermissionMode;
+  openPlan?: string;
   status: ThreadStatus;
   createdAt: string;
   updatedAt: string;

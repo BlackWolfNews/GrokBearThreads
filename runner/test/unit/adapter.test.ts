@@ -365,3 +365,34 @@ test('each permission mode maps to the SDK mode that enforces it', () => {
   // classifier or prompts for everything.
   assert.equal(sdkPermissionMode('auto'), 'auto');
 });
+
+test('Plan first: ExitPlanMode becomes a plan card, and approving it switches the CLI out of plan mode', async () => {
+  assert.equal(sdkPermissionMode('plan'), 'plan');
+  const { fn, state } = fakeQuery();
+  const outputs: AdapterOutput[] = [];
+  const approvals: ToolApprovalRequest[] = [];
+  const sink: SessionSink = {
+    output: (o) => outputs.push(o),
+    requestApproval: async (req) => {
+      approvals.push(req);
+      return { decision: 'allow', mode: 'full' };
+    },
+    requestQuestion: async () => ({ answers: null }),
+    exited: () => {},
+  };
+  const adapter = new ClaudeAdapter({ claudePath: '/nonexistent', registry: new ProcessRegistry(tmpDir(), nullLogger), log: nullLogger, queryFn: fn });
+  const dir = tmpDir();
+  const opts = { cwd: dir, account: { id: 'claude-3', provider: 'claude' as const, title: 'x', configDir: dir }, sessionId: '00000000-0000-0000-0000-000000000002', resume: false, mediaDir: dir, blobsDir: dir, tmpDir: dir };
+  adapter.start({ ...opts, threadId: 't-plan', permissionMode: 'plan' }, sink);
+  assert.equal(state.options.permissionMode, 'plan');
+  const res = await state.options.canUseTool('ExitPlanMode', { plan: '1. Do it' }, { signal: new AbortController().signal, toolUseID: 'toolu_plan' });
+  assert.deepEqual(outputs.find((o) => o.kind === 'planProposed'), { kind: 'planProposed', itemId: 'toolu_plan', text: '1. Do it' });
+  assert.equal(approvals[0].canAlwaysAllow, false);
+  assert.equal(res.behavior, 'allow');
+  assert.deepEqual(res.updatedPermissions, [{ type: 'setMode', mode: 'bypassPermissions', destination: 'session' }]);
+  // Out of plan mode, a later ExitPlanMode is just a tool call.
+  outputs.length = 0;
+  await state.options.canUseTool('ExitPlanMode', { plan: 'again' }, { signal: new AbortController().signal, toolUseID: 'toolu_2' });
+  assert.equal(outputs.filter((o) => o.kind === 'planProposed').length, 0);
+  state.close!();
+});

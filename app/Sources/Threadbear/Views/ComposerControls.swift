@@ -641,7 +641,7 @@ struct ThreadSettings {
         let menu = NSMenu()
         // Auto is Claude Code's; Codex has nothing like it, so it's only offered
         // for Claude (or if a thread is somehow on it already).
-        let modes: [PermissionMode] = provider == "claude" || permissionMode == .auto ? [.full, .auto, .ask] : [.full, .ask]
+        let modes: [PermissionMode] = provider == "claude" || permissionMode == .auto ? [.full, .auto, .ask, .plan] : [.full, .ask, .plan]
         for mode in modes {
             let item = ActionMenuItem(mode.composerTitle, symbol: mode.composerIcon, checked: permissionMode == mode) { setPermission(mode) }
             item.subtitle = mode.composerHelp
@@ -697,6 +697,7 @@ private extension PermissionMode {
         case .full: "Full access"
         case .ask: "Ask before edits"
         case .auto: "Auto"
+        case .plan: "Plan first"
         }
     }
 
@@ -705,6 +706,7 @@ private extension PermissionMode {
         case .full: "lock.open"
         case .ask: "lock"
         case .auto: "lock.shield"
+        case .plan: "list.bullet.clipboard"
         }
     }
 
@@ -713,6 +715,7 @@ private extension PermissionMode {
         case .full: "Edits files and runs commands without asking"
         case .ask: "Asks before editing files or running commands"
         case .auto: "A safety check approves or blocks each action, and asks only when unsure"
+        case .plan: "Reads and plans, and changes nothing until you approve its plan"
         }
     }
 }

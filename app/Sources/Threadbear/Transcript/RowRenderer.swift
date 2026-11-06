@@ -443,6 +443,17 @@ enum RowRenderer {
         case .review:
             return RowRender(height: vertical + RowMetrics.cardPad * 2 + zoomed(22 + 4 + 20 + 10) + RowMetrics.buttonHeight)
 
+        case .planCard(let card):
+            let inner = width - RowMetrics.cardPad * 2
+            let title = planCardTitle(card)
+            // Room left for the ⓘ and "Waiting for you" beside it.
+            let titleSize = measurer.measure(title, width: inner - zoomed(150))
+            let body = planCardBody(card, expanded: expanded)
+            let bodySize = measurer.measure(body, width: inner)
+            var height = RowMetrics.cardPad * 2 + titleSize.height + zoomed(8) + bodySize.height
+            if PlanCardLayout.hasFooter(card) { height += zoomed(12) + RowMetrics.buttonHeight }
+            return RowRender(height: vertical + zoomed(4) + height, text: title, textSize: titleSize, detail: body, detailSize: bodySize)
+
         case .plan(let entries):
             let text = planText(entries)
             let size = measurer.measure(text, width: width - RowMetrics.cardPad * 2)
@@ -1149,15 +1160,42 @@ enum RowRenderer {
     /// "2 of 5 steps done", then the steps. Every card starts with a
     /// one-line title; without one the plan read as an orphaned box of
     /// struck-through lines.
+    /// The plan card's title: "Plan", or how far along its steps are.
+    static func planCardTitle(_ card: PlanCard) -> NSAttributedString {
+        let title = card.entries.isEmpty ? PlanCardText.split(card.text).title ?? "Plan" : PlanSummary.title(card.entries)
+        return NSAttributedString(string: title, attributes: [.font: Theme.changesTitleFont, .foregroundColor: NSColor.labelColor])
+    }
+
+    /// What the plan card shows: the plan (its start, until it's opened),
+    /// or once approved its checklist, with the plan under it when opened.
+    static func planCardBody(_ card: PlanCard, expanded: Bool) -> NSAttributedString {
+        let text = PlanCardText.split(card.text).body
+        let plan = MarkdownRenderer.render(expanded ? text : PlanCardText.preview(text).text).string
+        guard !card.entries.isEmpty else { return plan }
+        let out = NSMutableAttributedString(attributedString: planSteps(card.entries))
+        if expanded {
+            out.append(NSAttributedString(string: "\n\n", attributes: [.font: Theme.bodyFont]))
+            out.append(plan)
+        }
+        return out
+    }
+
     static func planText(_ entries: [PlanEntry]) -> NSAttributedString {
         let (titleStyle, titleOffset) = Theme.lines(TypeScale.workLine, font: Theme.changesTitleFont, spacing: zoomed(8))
         let output = NSMutableAttributedString(string: PlanSummary.title(entries), attributes: [
             .font: Theme.changesTitleFont, .foregroundColor: NSColor.labelColor, .paragraphStyle: titleStyle, .baselineOffset: titleOffset,
         ])
+        output.append(NSAttributedString(string: "\n", attributes: [.font: Theme.changesTitleFont, .paragraphStyle: titleStyle]))
+        output.append(planSteps(entries))
+        return output
+    }
+
+    /// A plan's steps, each ticked, under way or still to do.
+    static func planSteps(_ entries: [PlanEntry]) -> NSAttributedString {
+        let output = NSMutableAttributedString()
         let font = Theme.bodyFont
         let (style, offset) = Theme.lines(TypeScale.scaled(22), font: font, spacing: zoomed(4), head: zoomed(24), first: 0)
         style.tabStops = [NSTextTab(textAlignment: .left, location: zoomed(24))]
-        output.append(NSAttributedString(string: "\n", attributes: [.font: Theme.changesTitleFont, .paragraphStyle: titleStyle]))
         for (index, entry) in entries.enumerated() {
             if index > 0 { output.append(NSAttributedString(string: "\n", attributes: [.font: font, .paragraphStyle: style, .baselineOffset: offset])) }
             let (mark, color, textColor): (String, NSColor, NSColor) = switch entry.status {

@@ -38,6 +38,9 @@ public enum RowKind: String, Sendable, Hashable, CaseIterable {
     case group, working, background, changes
     /// The time between a turn and the one the agent started by itself after it.
     case gap
+    /// "Plan first": the agent's plan, to approve or send back, which then
+    /// turns into its checklist.
+    case planCard
 }
 
 public struct TextItem: Sendable, Hashable {
@@ -228,6 +231,25 @@ public struct ToolItem: Sendable, Hashable {
     }
 }
 
+/// "Plan first" (docs/protocol.md): the plan the agent put to Mike. Waiting,
+/// it offers Go ahead and Send back; approved, the steps it then works
+/// through (plan.updated) show here as its checklist, the plan behind
+/// "Show plan".
+public struct PlanCard: Sendable, Hashable {
+    public enum State: Sendable, Hashable { case waiting, approved, sentBack }
+    public var itemId: String
+    public var text: String
+    public var state: State
+    public var entries: [PlanEntry]
+
+    public init(itemId: String, text: String, state: State = .waiting, entries: [PlanEntry] = []) {
+        self.itemId = itemId
+        self.text = text
+        self.state = state
+        self.entries = entries
+    }
+}
+
 public struct ApprovalItem: Sendable, Hashable {
     public var request: ApprovalRequest
     public var resolution: ApprovalResolution?
@@ -309,6 +331,7 @@ public enum RowContent: Sendable, Hashable {
     case secret(SecretItem)
     case review(DesignReview)
     case plan([PlanEntry])
+    case planCard(PlanCard)
     case footer(TurnCompletion)
     /// The asks a finished turn left for Mike, under its footer.
     case asks(AsksCard)
@@ -337,6 +360,7 @@ public enum RowContent: Sendable, Hashable {
         case .secret: return .secret
         case .review: return .review
         case .plan: return .plan
+        case .planCard: return .planCard
         case .footer: return .footer
         case .asks: return .asks
         case .note: return .note

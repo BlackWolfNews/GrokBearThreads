@@ -72,6 +72,7 @@ const THREAD_METHODS = new Set([
   'threads.tickAsk',
   'threads.share',
   'approvals.respond',
+  'plans.approve',
   'secrets.answer',
   'panels.render',
   'panels.convexKey',
@@ -665,6 +666,8 @@ export class RpcServer {
           answers,
         });
       }
+      case 'plans.approve':
+        return r.approvePlan({ threadId: reqString(p, 'threadId'), itemId: reqString(p, 'itemId') });
       case 'secrets.answer': {
         // docs/protocol.md, "Secrets". Nothing here logs params, and the
         // errors below never quote them.
@@ -815,7 +818,7 @@ function optStartedBy(p: Record<string, unknown>): { startedBy?: ThreadStartedBy
 function optMode(p: Record<string, unknown>): PermissionMode | undefined {
   const v = p.permissionMode;
   if (v === undefined || v === null) return undefined;
-  if (v !== 'full' && v !== 'ask' && v !== 'auto') throw bad('permissionMode must be "full", "ask" or "auto"');
+  if (v !== 'full' && v !== 'ask' && v !== 'auto' && v !== 'plan') throw bad('permissionMode must be "full", "ask", "auto" or "plan"');
   return v;
 }
 

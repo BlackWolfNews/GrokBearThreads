@@ -246,6 +246,11 @@ public extension RPCClient {
         _ = try await call("requests.answer", .object(params), as: JSONValue.self)
     }
 
+    /// Go ahead on a "Plan first" plan (docs/protocol.md, "Plan first").
+    func approvePlan(threadId: String, itemId: String) async throws {
+        _ = try await call("plans.approve", .object(["threadId": .string(threadId), "itemId": .string(itemId)]), as: EmptyResult.self)
+    }
+
     /// Answers a `secret.requested` card (docs/protocol.md, "Secrets").
     /// The value goes in this one request and nowhere else: not logged,
     /// not kept, not retried.

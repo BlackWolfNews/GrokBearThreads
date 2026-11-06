@@ -330,7 +330,9 @@ public enum ThreadStatus: String, Sendable, Hashable, Codable {
 }
 
 public enum PermissionMode: String, Sendable, Hashable, Codable {
-    case full, ask, auto
+    /// plan is "Plan first": the agent reads and plans but changes nothing
+    /// until Mike approves its plan (docs/protocol.md, "Plan first").
+    case full, ask, auto, plan
 
     public init(from decoder: Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
