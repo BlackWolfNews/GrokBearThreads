@@ -1594,6 +1594,17 @@ export class Runner {
     return ok;
   }
 
+  // Threads working now: a turn, a background job or a sub-agent going,
+  // for keeping the Mac awake (keep-awake.ts).
+  workingThreads(): number {
+    let n = 0;
+    for (const { rec, rt } of this.threads.values()) {
+      if (rt.deleted) continue;
+      if (rt.turn || rt.tasks.length || rec.subagents?.some((a) => a.status === 'running')) n++;
+    }
+    return n;
+  }
+
   makeRoomForCli(starting: ThreadState): void {
     const live = [...this.threads.values()].filter((t) => t !== starting && t.rt.session && !t.rt.closing);
     if (live.length < this.cfg.maxLive) return;

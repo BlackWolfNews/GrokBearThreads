@@ -16,6 +16,8 @@ import { AppRestarts } from './app-restarts.ts';
 import { Scheduler, scheduleMethods } from './schedules.ts';
 import { StuckJobs } from './stuck-jobs.ts';
 import { FrozenClis } from './frozen-cli.ts';
+import { KeepAwake } from './keep-awake.ts';
+import { experimentOn } from './experiments.ts';
 import { MacScreen } from './mac-screen.ts';
 import { Projects, drainProjectMethods, projectMethods } from './projects.ts';
 import { Librarian, librarianMethods } from './librarian.ts';
@@ -286,6 +288,10 @@ async function main(): Promise<void> {
   // A CLI frozen on something only a person can answer says so in its thread.
   const frozenClis = new FrozenClis({ host: runner, clock: realClock, log, machine: cfg.sync.name ?? defaultRunnerName() });
   frozenClis.start();
+  // Keeps the Mac out of idle sleep while threads work (experiment
+  // keepAwake, read each sweep so runner.json's switch needs no restart).
+  const keepAwake = new KeepAwake({ busy: () => runner.workingThreads(), on: () => experimentOn(cfg.home, 'keepAwake'), clock: realClock, log });
+  keepAwake.start();
   // A dialog waiting on this Mac's screen says so, from the installed runner
   // only: a dev runner's Mac is the one you're sat at, and a throwaway data
   // dir shouldn't get a thread about it. THREADBEAR_MAC_SCREEN=on to try it
@@ -594,6 +600,7 @@ async function main(): Promise<void> {
     stuckJobs.stop();
     frozenClis.stop();
     macScreen?.stop();
+    keepAwake.stop();
     connectors.stop();
     projects.stop();
     usage.stop();
@@ -641,6 +648,7 @@ async function main(): Promise<void> {
       // at this runner's threads, so the primary's check doesn't cover them.
       frozenClis.stop();
       macScreen?.stop();
+    keepAwake.stop();
       connectors.stop();
       projects.freeze();
       updates.stop();

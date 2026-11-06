@@ -733,6 +733,12 @@ Threadbear, and its switch goes.
   fresh session of the same one reviews, and the note says it isn't
   another lab. A folder a pool is kept for (Accounts, pools and Usage, above) is only ever
   reviewed on that pool's logins.
+- **Keep the Mac awake** (`keepAwake`, since 6 Nov 2026). While any
+  thread is working, and for three minutes after, your Mac won't go to
+  sleep on its own, so a long turn, or one you started from your phone,
+  isn't cut off halfway. The screen still dims and locks as usual. It
+  stops below 15% battery when you're not plugged in, and closing the lid
+  on battery still puts the Mac to sleep.
 
 ## Connectors
 <!-- slug: connectors -->

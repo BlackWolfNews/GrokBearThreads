@@ -33,9 +33,16 @@ export const EXPERIMENTS: readonly Experiment[] = [
     on: false,
     reminder: '16b56f61',
   },
+  {
+    id: 'keepAwake',
+    title: "Keep the Mac awake: macOS's caffeinate stops idle sleep while a thread is working",
+    added: '2026-11-06',
+    on: false,
+    reminder: '12503e21',
+  },
 ];
 
-export type ExperimentId = 'labReview';
+export type ExperimentId = 'labReview' | 'keepAwake';
 
 // Read from runner.json each time, so turning one on or off takes effect
 // at the next turn, with no restart.

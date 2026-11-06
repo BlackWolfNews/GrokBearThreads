@@ -94,6 +94,12 @@ File references are where to look.
   signature check; only Mike's release tags are signed (below). Turn it
   off for both with `followMain: false` in `runner.json` (ask any thread
   to; it left Settings on 2 Nov).
+- **Keeping the Mac awake** (`runner/src/keep-awake.ts`, experiment
+  `keepAwake`, off by default): while a thread is working and for 3
+  minutes after, the runner runs macOS's `/usr/bin/caffeinate -i -w
+  <runner pid>`, which stops idle sleep only (the display still sleeps
+  and the screen still locks). While it does, it reads `pmset -g batt`
+  every 2 minutes and lets go on battery below 15%.
 - **Mike's releases** (`runner/src/upstream.ts`): every 6 hours it fetches
   `upstream`'s signed `release/*` tags. It only tells you about them; it
   never changes your code.
