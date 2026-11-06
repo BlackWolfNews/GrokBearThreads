@@ -40,18 +40,34 @@ export function draftFrom(language: string | null | undefined, code: string): Dr
 
 // Whether the fenced code block written at source[start..<end] (the hast
 // node's position in the exact text handed to Markdown) has its closing
-// fence: the last line all the opening fence's character, at least as wide,
-// once a quote's ">" and the indent are taken off each. While a reply
-// streams, an unclosed fence runs to the end of the text, and it stays
-// plain code until it's done, as on the Mac and the phone.
+// fence, the way the Mac's MarkdownRenderer isClosed checks it. The node
+// starts at the fence itself, so what's before it on its line is the
+// container (a quote's ">", a list item's indent). The closing line must
+// start with as many characters, all spaces, tabs or ">", then at most 3
+// spaces, then the opening's fence character at least as wide, then only
+// whitespace. While a reply streams, an unclosed fence runs to the end of
+// the text, and it stays plain code until it's done, as on the Mac and the
+// phone.
 export function fenceClosed(source: string, start: number, end: number): boolean {
-  const lines = source.slice(start, end).split(/\r?\n/);
-  if (lines.length < 2) return false;
-  const strip = (line: string) => line.replace(/^[ \t>]*/, '');
-  const open = /^(`{3,}|~{3,})/.exec(strip(lines[0]!))?.[1];
-  if (!open) return false;
-  const last = strip(lines[lines.length - 1]!).replace(/[ \t]+$/, '');
-  return last.length >= open.length && [...last].every((c) => c === open[0]);
+  const openingStart = source.lastIndexOf('\n', start - 1) + 1;
+  const closingStart = source.lastIndexOf('\n', end - 1) + 1;
+  if (closingStart <= start) return false;
+  const container = start - openingStart;
+  const opening = source.slice(start, source.indexOf('\n', start) < 0 ? source.length : source.indexOf('\n', start));
+  const mark = opening[0];
+  if (mark !== '`' && mark !== '~') return false;
+  const width = /^(`+|~+)/.exec(opening)![1]!.length;
+  if (width < 3) return false;
+  // The closing line has the same container in front: the quote's markers,
+  // or as many spaces as the list item's indent.
+  const closingLine = source.slice(closingStart, end).replace(/\r$/, '');
+  const prefix = closingLine.slice(0, container);
+  if (prefix.length !== container || !/^[ \t>]*$/.test(prefix)) return false;
+  const rest = closingLine.slice(container);
+  const indent = /^ */.exec(rest)![0].length;
+  if (indent > 3) return false;
+  const fence = rest.slice(indent).trim();
+  return fence.length >= width && [...fence].every((c) => c === mark);
 }
 
 // What the box's header calls it.
@@ -81,13 +97,21 @@ export function draftPlainText(draft: Draft): string {
   return draft.source
     .split('\n')
     .map((line) => {
+      const { marked: text, tokens } = marked(line);
+      if (!tokens) return decode(line);
+      const chars = Array.from(text);
+      // A token in `code` is copied as typed, as it's shown.
+      const code = codeSpans(chars);
       let out = '';
-      scanTokens(line, (piece) => {
-        if (piece.kind === 'text') out += decode(piece.text);
-        else if (piece.token.kind === 'mention') out += piece.token.text;
-        else out += piece.token.label === piece.token.url || piece.token.label === '' ? piece.token.url : `${piece.token.label} (${piece.token.url})`;
+      chars.forEach((c, offset) => {
+        const index = placeholderIndex(c);
+        const found = index !== undefined && index < tokens.length ? tokens[index]! : undefined;
+        if (!found) out += c;
+        else if (code.some(([from, to]) => offset >= from && offset < to)) out += found.raw;
+        else if (found.token.kind === 'mention') out += found.token.text;
+        else out += found.token.label === found.token.url || found.token.label === '' ? found.token.url : `${found.token.label} (${found.token.url})`;
       });
-      return out;
+      return decode(out);
     })
     .join('\n');
 }
@@ -255,24 +279,58 @@ export const maxFormattedLine = 2_000;
 // area).
 const placeholderBase = 0xe000;
 
+type Marked = { marked: string; tokens?: { token: Token; raw: string }[] };
+
+// The line with each <...> token as one placeholder character, and the
+// tokens; no tokens for a line that's too long, or that has placeholder
+// characters of its own, which is shown as written.
+function marked(line: string): Marked {
+  if (Array.from(line).length > maxFormattedLine || /[\u{E000}-\u{F8FF}]/u.test(line)) return { marked: line };
+  let out = '';
+  const tokens: { token: Token; raw: string }[] = [];
+  scanTokens(line, (piece) => {
+    if (piece.kind === 'text') {
+      out += piece.text;
+    } else {
+      out += String.fromCodePoint(placeholderBase + tokens.length);
+      tokens.push({ token: piece.token, raw: piece.raw });
+    }
+  });
+  return { marked: out, tokens };
+}
+
+// The token number a placeholder character stands for (c is one code point).
+function placeholderIndex(c: string): number | undefined {
+  const index = c.codePointAt(0)! - placeholderBase;
+  return index >= 0 && index <= 0xf8ff - 0xe000 ? index : undefined;
+}
+
+// Where a line's `code` is, as [from, to) code point offsets, found the way
+// `emphasis` finds it.
+function codeSpans(chars: string[]): [number, number][] {
+  const spans: [number, number][] = [];
+  let i = 0;
+  while (i < chars.length) {
+    const end = chars[i] === '`' && opens(chars, i) ? closing(chars, i, '`') : undefined;
+    if (end !== undefined) {
+      spans.push([i, end + 1]);
+      i = end + 1;
+    } else {
+      i += 1;
+    }
+  }
+  return spans;
+}
+
 // A Slack line's spans: *bold*, _italic_, ~strike~, `code`, links and
 // mentions. Each <...> token stands in the line as one placeholder character
 // while the emphasis is worked out, so a link can be bold (*see <url|docs>*)
 // and a token inside `code` stays as written.
 export function slackSpans(line: string): Span[] {
-  if (Array.from(line).length > maxFormattedLine || /[\u{E000}-\u{F8FF}]/u.test(line)) return [{ text: decode(line) }];
-  let marked = '';
-  const tokens: { token: Token; raw: string }[] = [];
-  scanTokens(line, (piece) => {
-    if (piece.kind === 'text') {
-      marked += piece.text;
-    } else {
-      marked += String.fromCodePoint(placeholderBase + tokens.length);
-      tokens.push({ token: piece.token, raw: piece.raw });
-    }
-  });
+  const { marked: text, tokens } = marked(line);
+  if (!tokens) return [{ text: decode(line) }];
   const spans: Span[] = [];
-  for (const span of emphasis(marked)) {
+  for (const span of emphasis(text)) {
     let words = '';
     const flush = () => {
       if (!words) return;
@@ -280,8 +338,8 @@ export function slackSpans(line: string): Span[] {
       words = '';
     };
     for (const c of span.text) {
-      const index = c.codePointAt(0)! - placeholderBase;
-      const found = index >= 0 && index < tokens.length ? tokens[index]! : undefined;
+      const index = placeholderIndex(c);
+      const found = index !== undefined && index < tokens.length ? tokens[index]! : undefined;
       if (!found) {
         words += c;
         continue;

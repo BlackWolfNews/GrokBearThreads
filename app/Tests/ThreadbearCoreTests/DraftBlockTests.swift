@@ -71,6 +71,9 @@ final class DraftBlockTests: XCTestCase {
         let url = URL(string: "https://x.dev")!
         XCTAssertEqual(DraftBlock.slackSpans("*See <https://x.dev|docs>*"), [.init("See ", bold: true), .init("docs", bold: true, link: url)])
         XCTAssertEqual(DraftBlock.slackSpans("<https://x.dev|a>_b_"), [.init("a", link: url), .init("b", italic: true)])
+        // Copied as plain text, code keeps its tokens as typed too.
+        XCTAssertEqual(DraftBlock(kind: .slack, source: "`<@U1>` <@U1> `<https://x.dev|docs>` <https://x.dev|docs>").plainText,
+                       "`<@U1>` @U1 `<https://x.dev|docs>` docs (https://x.dev)")
     }
 
     func testHostileLinesStayQuick() {

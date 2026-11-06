@@ -59,6 +59,16 @@ import Testing
     }
 
     @Test func aDraftNeedsItsOwnClosingFence() {
+        // Only a fence on its own closes it, indented less than four spaces
+        // past the opening one; anything else is part of the draft.
+        #expect(MarkdownBlock.parse("```slack\nhello\n> ```") == [.code("hello\n> ```")])
+        #expect(MarkdownBlock.parse("```slack\nhello\n    ```") == [.code("hello\n    ```")])
+        #expect(MarkdownBlock.parse("```slack\nhello\n   ```") == [.draft(DraftBlock(kind: .slack, source: "hello"))])
+        // A fence opening on a list item's own line: the block, in the item.
+        #expect(MarkdownBlock.parse("- ```slack\n  hello\n  ```") == [.draft(DraftBlock(kind: .slack, source: "hello"))])
+        #expect(MarkdownBlock.parse("- Run:\n1. ```sh\n   tb land\n   ```") == [
+            .listItem(text: "Run:", marker: "•", depth: 0, task: nil), .code("tb land"),
+        ])
         // A different fence character, or a shorter run, doesn't close it.
         #expect(MarkdownBlock.parse("```slack\nhello\n~~~") == [.code("hello\n~~~")])
         #expect(MarkdownBlock.parse("````slack\nhello\n```") == [.code("hello\n```")])

@@ -109,8 +109,11 @@ enum MarkdownRenderer {
         // for the parser, so work: and thread: links are escaped first.
         let document = Document(parsing: WorkLinks.escapeDestinations(block), options: [.disableSmartOpts])
         var builder = Builder()
-        // Split as cmark counts lines: "\r\n" is one Character, and one line end.
-        if rich || DraftBlock.mayHold(block) { builder.sourceLines = block.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline) }
+        // Split where cmark ends lines: "\n", "\r" and "\r\n" (one
+        // Character), not U+2028 and the other separators Swift counts.
+        if rich || DraftBlock.mayHold(block) {
+            builder.sourceLines = block.split(omittingEmptySubsequences: false, whereSeparator: { $0 == "\n" || $0 == "\r\n" || $0 == "\r" })
+        }
         for child in document.children {
             builder.block(child, Context())
         }
@@ -422,18 +425,33 @@ enum MarkdownRenderer {
         }
 
         /// Whether the fence has its closing line: the same character as
-        /// it opened with, at least as many. cmark ends an unclosed fence's
-        /// range on its last line of code. A fence in a quote or a list has
-        /// the quote's ">" and the indent in front of both.
+        /// it opened with, at least as many, after whatever the fence sits
+        /// in (a quote's ">", a list item's indent) and at most three
+        /// spaces. cmark ends an unclosed fence's range on its last line of
+        /// code, so a line of code that only looks like a fence ("> ```"
+        /// in a fence that isn't in a quote) doesn't count.
         private func isClosed(_ code: CodeBlock) -> Bool {
-            guard !sourceLines.isEmpty, let first = code.range?.lowerBound.line, let last = code.range?.upperBound.line,
-                  first >= 1, last > first, last <= sourceLines.count else { return false }
-            func fence(_ line: Substring) -> Substring { line.drop(while: { $0 == " " || $0 == "\t" || $0 == ">" }) }
-            let opening = fence(sourceLines[first - 1])
+            guard !sourceLines.isEmpty, let range = code.range, range.lowerBound.line >= 1,
+                  range.upperBound.line > range.lowerBound.line, range.upperBound.line <= sourceLines.count else { return false }
+            let openingLine = sourceLines[range.lowerBound.line - 1].utf8
+            // cmark's columns count UTF-8 bytes, from 1.
+            let container = range.lowerBound.column - 1
+            guard container >= 0, container <= openingLine.count else { return false }
+            let opening = Substring(openingLine.dropFirst(container))
             guard let mark = opening.first, mark == "`" || mark == "~" else { return false }
             let width = opening.prefix(while: { $0 == mark }).count
-            let closing = fence(sourceLines[last - 1]).trimmingCharacters(in: .whitespaces)
-            return width >= 3 && closing.count >= width && closing.allSatisfy({ $0 == mark })
+            guard width >= 3 else { return false }
+            // The closing line has the same container in front: the quote's
+            // markers, or as many spaces as the list item's indent.
+            let closingLine = sourceLines[range.upperBound.line - 1].utf8
+            let prefix = closingLine.prefix(container)
+            guard prefix.count == container, prefix.allSatisfy({ $0 == UInt8(ascii: " ") || $0 == UInt8(ascii: ">") || $0 == UInt8(ascii: "\t") }) else { return false }
+            var closing = Substring(closingLine.dropFirst(container))
+            let indent = closing.prefix(while: { $0 == " " }).count
+            guard indent <= 3 else { return false }
+            closing = closing.dropFirst(indent)
+            let fence = closing.trimmingCharacters(in: .whitespaces)
+            return fence.count >= width && fence.allSatisfy({ $0 == mark })
         }
 
         /// A draft's box: the header (DraftBlockCell) and then each of the

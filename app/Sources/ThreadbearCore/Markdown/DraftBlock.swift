@@ -100,15 +100,29 @@ public struct DraftBlock: Hashable, Sendable {
     public var plainText: String {
         guard kind == .slack else { return source }
         return source.split(separator: "\n", omittingEmptySubsequences: false).map { line in
+            let (marked, tokens) = Self.marked(String(line))
+            guard let tokens else { return Self.decode(String(line)) }
+            // A token in `code` is copied as typed, as it's shown.
+            let code = Self.codeSpans(Array(marked))
             var out = ""
-            Self.scanTokens(String(line)) { piece in
-                switch piece {
-                case let .text(text): out += Self.decode(text)
-                case let .token(.link(url, label), _): out += label == url.absoluteString || label.isEmpty ? url.absoluteString : "\(label) (\(url.absoluteString))"
-                case let .token(.mention(text), _): out += text
+            for (offset, c) in marked.enumerated() {
+                // By scalar: a combining mark after a token joins its Character.
+                for scalar in c.unicodeScalars {
+                    guard let index = Self.placeholderIndex(scalar), index < tokens.count else {
+                        out.unicodeScalars.append(scalar)
+                        continue
+                    }
+                    if code.contains(where: { $0.contains(offset) }) {
+                        out += tokens[index].raw
+                        continue
+                    }
+                    switch tokens[index].token {
+                    case let .link(url, label): out += label == url.absoluteString || label.isEmpty ? url.absoluteString : "\(label) (\(url.absoluteString))"
+                    case let .mention(text): out += text
+                    }
                 }
             }
-            return out
+            return Self.decode(out)
         }.joined(separator: "\n")
     }
 
@@ -244,13 +258,12 @@ public struct DraftBlock: Hashable, Sendable {
     /// use area).
     private static let placeholderBase: UInt32 = 0xE000
 
-    /// A Slack line's spans: *bold*, _italic_, ~strike~, `code`, links and
-    /// mentions. Each <...> token stands in the line as one placeholder
-    /// character while the emphasis is worked out, so a link can be bold
-    /// (*see <url|docs>*) and a token inside `code` stays as written.
-    static func slackSpans(_ line: String) -> [Span] {
+    /// The line with each <...> token as one placeholder character, and
+    /// the tokens; no tokens for a line that's too long, or that has
+    /// placeholder characters of its own, which is shown as written.
+    static func marked(_ line: String) -> (String, [(token: Token, raw: String)]?) {
         guard line.count <= maxFormattedLine,
-              !line.unicodeScalars.contains(where: { (0xE000...0xF8FF).contains($0.value) }) else { return [Span(decode(line))] }
+              !line.unicodeScalars.contains(where: { (0xE000...0xF8FF).contains($0.value) }) else { return (line, nil) }
         var marked = ""
         var tokens: [(token: Token, raw: String)] = []
         scanTokens(line) { piece in
@@ -261,6 +274,37 @@ public struct DraftBlock: Hashable, Sendable {
                 tokens.append((token, raw))
             }
         }
+        return (marked, tokens)
+    }
+
+    static func placeholderIndex(_ scalar: Unicode.Scalar) -> Int? {
+        let index = Int(scalar.value) - Int(placeholderBase)
+        return index >= 0 && index <= 0xF8FF - 0xE000 ? index : nil
+    }
+
+    /// Where a line's `code` is, by Character offset, found the way
+    /// `emphasis` finds it.
+    static func codeSpans(_ chars: [Character]) -> [Range<Int>] {
+        var spans: [Range<Int>] = []
+        var i = 0
+        while i < chars.count {
+            if chars[i] == "`", opens(chars, i), let end = closing(chars, from: i, marker: "`") {
+                spans.append(i..<(end + 1))
+                i = end + 1
+            } else {
+                i += 1
+            }
+        }
+        return spans
+    }
+
+    /// A Slack line's spans: *bold*, _italic_, ~strike~, `code`, links and
+    /// mentions. Each <...> token stands in the line as one placeholder
+    /// character while the emphasis is worked out, so a link can be bold
+    /// (*see <url|docs>*) and a token inside `code` stays as written.
+    static func slackSpans(_ line: String) -> [Span] {
+        let (marked, found) = marked(line)
+        guard let tokens = found else { return [Span(decode(line))] }
         var spans: [Span] = []
         for span in emphasis(marked) {
             var words = ""
@@ -272,8 +316,7 @@ public struct DraftBlock: Hashable, Sendable {
                 words = ""
             }
             for scalar in span.text.unicodeScalars {
-                let index = Int(scalar.value) - Int(placeholderBase)
-                guard index >= 0, index < tokens.count else { words.unicodeScalars.append(scalar); continue }
+                guard let index = placeholderIndex(scalar), index < tokens.count else { words.unicodeScalars.append(scalar); continue }
                 if span.code {
                     // Code shows what was typed.
                     words += tokens[index].raw

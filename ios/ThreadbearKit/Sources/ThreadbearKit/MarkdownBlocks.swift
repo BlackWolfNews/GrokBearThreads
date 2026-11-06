@@ -79,7 +79,9 @@ enum InlineImages {
 }
 
 private struct Parser {
-    let lines: [String]
+    /// Not a let: a fence opening on a list item's line is put back as
+    /// the fence alone (run()).
+    var lines: [String]
     var i = 0
     var blocks: [MarkdownBlock] = []
     /// Raw lines, so `flush` can see a hard break's two trailing spaces.
@@ -149,6 +151,14 @@ private struct Parser {
             }
             if let match = line.firstMatch(of: /^([-*+]|\d{1,9}[.)])\s+(.*)$/) {
                 flush()
+                // "- ```slack": the item is the fenced block. Its line goes
+                // back as the fence alone, indented as the item's words are,
+                // and is read again as a fence (no bullet beside the box).
+                if Self.fence(String(match.2)) != nil {
+                    lines[i] = String(repeating: " ", count: indent + line.count - match.2.count) + match.2
+                    lastWasListItem = false
+                    continue
+                }
                 var text = String(match.2)
                 var task: Bool?
                 if let box = text.firstMatch(of: /^\[([ xX])\]\s+/) {
@@ -240,7 +250,9 @@ private struct Parser {
             let raw = lines[i]
             i += 1
             let line = raw.trimmingCharacters(in: .whitespaces)
-            if line.hasPrefix(fence), line.allSatisfy({ $0 == fence.first }) { closed = true; break }
+            // Only a fence on its own closes it, and less than four spaces
+            // further in than the opening one (four more is code, as on GitHub).
+            if Self.indent(of: raw) - indent < 4, line.hasPrefix(fence), line.allSatisfy({ $0 == fence.first }) { closed = true; break }
             // Code fenced inside a list item is indented with it; take that off.
             var drop = min(indent, Self.indent(of: raw))
             var trimmed = Substring(raw)

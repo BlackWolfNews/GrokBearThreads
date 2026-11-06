@@ -100,6 +100,11 @@ test('tokens inside code stay as written, and a link can be bold', () => {
   assert.deepEqual(slackSpans('`<@U123>` and `a < b`'), [{ text: '<@U123>', code: true }, { text: ' and ' }, { text: 'a < b', code: true }]);
   assert.deepEqual(slackSpans('*See <https://x.dev|docs>*'), [{ text: 'See ', bold: true }, { text: 'docs', bold: true, link: 'https://x.dev' }]);
   assert.deepEqual(slackSpans('<https://x.dev|a>_b_'), [{ text: 'a', link: 'https://x.dev' }, { text: 'b', italic: true }]);
+  // Copied as plain text, code keeps its tokens as typed too.
+  assert.equal(
+    draftPlainText({ kind: 'slack', source: '`<@U1>` <@U1> `<https://x.dev|docs>` <https://x.dev|docs>' }),
+    '`<@U1>` @U1 `<https://x.dev|docs>` docs (https://x.dev)',
+  );
 });
 
 test('hostile lines stay quick', () => {
@@ -123,13 +128,23 @@ test('copied html keeps indents and lined up spaces', () => {
 });
 
 test('only a closed fence makes a draft', () => {
-  const closed = (text: string) => fenceClosed(text, 0, text.length);
+  // The node starts at the fence, after any container (react-markdown's
+  // position for a fence in a list or a quote).
+  const closed = (text: string) => {
+    const start = text.search(/[`~]{3}/);
+    return fenceClosed(text, start, text.length);
+  };
   assert.ok(closed('```slack\nhello\n```'));
   assert.ok(closed('````slack\nhello\n`````'));
   assert.ok(closed('~~~email\nhi\n~~~  '));
   assert.ok(closed('```slack\r\nhello\r\n```'));
-  // In a quote the node starts at the fence, and later lines keep their ">".
-  assert.ok(closed('```slack\n> hello\n> ```'));
+  assert.ok(closed('- ```slack\n  hello\n  ```'));
+  assert.ok(closed('> ```slack\n> hello\n> ```'));
+  assert.ok(closed('1. a\n\n   > ```slack\n   > hi\n   > ```'));
+  assert.ok(closed('```slack\nhello\n   ```'));
+  assert.ok(!closed('```slack\nhello\n> ```'));
+  assert.ok(!closed('```slack\nhello\n    ```'));
+  assert.ok(!closed('> ```slack\n> hello\n```'));
   assert.ok(!closed('```slack\n*unfinished'));
   assert.ok(!closed('```slack\nhello\n~~~'));
   assert.ok(!closed('````slack\nhello\n```'));

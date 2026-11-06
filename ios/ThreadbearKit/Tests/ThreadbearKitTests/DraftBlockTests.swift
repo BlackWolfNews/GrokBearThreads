@@ -76,6 +76,9 @@ import Testing
         let url = URL(string: "https://x.dev")!
         #expect(DraftBlock.slackSpans("*See <https://x.dev|docs>*") == [.init("See ", bold: true), .init("docs", bold: true, link: url)])
         #expect(DraftBlock.slackSpans("<https://x.dev|a>_b_") == [.init("a", link: url), .init("b", italic: true)])
+        // Copied as plain text, code keeps its tokens as typed too.
+        #expect(DraftBlock(kind: .slack, source: "`<@U1>` <@U1> `<https://x.dev|docs>` <https://x.dev|docs>").plainText
+            == "`<@U1>` @U1 `<https://x.dev|docs>` docs (https://x.dev)")
     }
 
     @Test func hostileLinesStayQuick() {
