@@ -1308,6 +1308,7 @@ export class Runner {
     if (rec.snoozedUntil || rec.archivedAt) {
       delete rec.snoozedUntil;
       delete rec.snoozedUntilRestart;
+      delete rec.untilRelease;
       delete rec.wakeWhen;
       delete rec.waitingOn;
       delete rec.archivedAt;

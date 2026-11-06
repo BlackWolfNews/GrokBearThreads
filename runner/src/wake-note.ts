@@ -6,7 +6,16 @@
 // nothing, as each client says a time in its own way.
 import type { ThreadSummary } from './protocol.ts';
 
-export function wakeNote(t: Pick<ThreadSummary, 'waitingOn' | 'wakeWhen' | 'snoozedUntil' | 'snoozedUntilRestart' | 'snoozedUntilRelease'>): string | undefined {
+// Short enough for a row, and to keep a thread's synced row well under the
+// backend's size cap however long the titles and conditions it names.
+export const WAKE_NOTE_MAX = 160;
+
+export function wakeNote(t: Parameters<typeof longNote>[0]): string | undefined {
+  const note = longNote(t);
+  return note && note.length > WAKE_NOTE_MAX ? note.slice(0, WAKE_NOTE_MAX - 1).trimEnd() + '…' : note;
+}
+
+function longNote(t: Pick<ThreadSummary, 'waitingOn' | 'wakeWhen' | 'snoozedUntil' | 'snoozedUntilRestart' | 'snoozedUntilRelease'>): string | undefined {
   if (!t.snoozedUntil) return undefined;
   const left = (t.waitingOn ?? []).filter((w) => !w.done);
   if (left.length) {

@@ -61,3 +61,13 @@ test('the row carries the wake note, and an older backend gets it without', asyn
   assert.equal(forBackend(doc, WAKE_NOTE_API_VERSION, Date.now()).wakeNote, 'the runner updates');
   assert.equal(forBackend(doc, WAKE_NOTE_API_VERSION - 1, Date.now()).wakeNote, undefined);
 });
+
+test('a long note is cut to fit; waking clears the release marker', () => {
+  const long = 'x'.repeat(300);
+  const n = wakeNote({ snoozedUntil: '2026-11-06T00:00:00Z', waitingOn: [{ threadId: 'a', title: long, until: long }] })!;
+  assert.ok(n.length <= 160 && n.endsWith('…'));
+  const { h, id } = asleepOn('r1');
+  h.runner.send(id, 'wake up');
+  // The marker itself, as an older runner would keep it into a later restart wait.
+  assert.equal((h.runner as any).threads.get(id).rec.untilRelease, undefined);
+});

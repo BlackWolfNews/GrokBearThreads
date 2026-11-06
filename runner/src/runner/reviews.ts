@@ -130,6 +130,7 @@ export const reviewsPart = {
     if (wake) {
       delete next.snoozedUntil;
       delete next.snoozedUntilRestart;
+      delete next.untilRelease;
       delete next.wakeWhen;
       delete next.waitingOn;
       delete next.archivedAt;
@@ -138,6 +139,7 @@ export const reviewsPart = {
     if (wake) {
       delete st.rec.snoozedUntil;
       delete st.rec.snoozedUntilRestart;
+      delete st.rec.untilRelease;
       delete st.rec.wakeWhen;
       delete st.rec.waitingOn;
       delete st.rec.archivedAt;

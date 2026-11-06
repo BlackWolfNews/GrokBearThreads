@@ -302,6 +302,7 @@ export const hibernationPart = {
     delete rec.snoozedAt;
     delete st.rec.snoozedUntil;
     delete st.rec.snoozedUntilRestart;
+    delete st.rec.untilRelease;
     delete st.rec.wakeWhen;
     delete st.rec.waitingOn;
     st.rec.forceUnread = true;
