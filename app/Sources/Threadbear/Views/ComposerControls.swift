@@ -169,6 +169,11 @@ struct ComposerControls: View {
                     NSHostingController(rootView: ContextPopover(threadId: thread.id).environment(app))
                 }
             }
+            // Voice is for a thread that exists: what he says is its message.
+            if let thread, !draftAway {
+                VoiceButton(threadId: thread.id, size: SendButton.size)
+                    .layoutPriority(1)
+            }
             SendButton(running: running, canSend: canSend, sending: sending, stopping: thread.map { app.isBusy(BusyKey.stop($0.id)) } ?? false, onSend: onSend, onStop: { app.interrupt(thread?.id) })
                 .layoutPriority(1)
                 // Right-click send for later, as Mail and Slack do. Not on

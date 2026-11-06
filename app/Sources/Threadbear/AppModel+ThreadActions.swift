@@ -292,6 +292,19 @@ extension AppModel {
         }
     }
 
+    /// What Mike said in Voice mode, sent as his message without touching
+    /// whatever is typed in the composer (VoiceMode).
+    func sendSpoken(threadId: String, text: String) {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        guard let client = client(for: threadId), isRemote(threadId) || connection == .connected else {
+            showConnectionError(notConnectedText(threadId, "that wasn't sent"))
+            return
+        }
+        ActivityRecorder.shared.sent(threadId: threadId, images: 0, answers: 0)
+        post(threadId: threadId, text: text, images: [], answers: [], client: client)
+    }
+
     /// Sends a message to a thread, shown dimmed at the end of the
     /// transcript until the runner shows it. `failed` puts back whatever
     /// the send took from the composer, if the runner doesn't take it.

@@ -342,6 +342,7 @@ final class ThreadSession {
 
     func receive(_ event: Event) {
         guard state == .loaded else { return }
+        if subagentId == nil { VoiceMode.shared.receive(event) }
         handle(feed.receive(event))
     }
 

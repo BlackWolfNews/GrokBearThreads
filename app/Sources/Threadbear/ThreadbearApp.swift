@@ -275,6 +275,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated {
             ActivityRecorder.shared.quit()
+            VoiceMode.shared.stop()
+            VoiceServer.shared.stop()
             AppUpdater.shared.applyAtQuit()
         }
     }
