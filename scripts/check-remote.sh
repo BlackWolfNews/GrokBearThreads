@@ -191,9 +191,30 @@ files="$(mktemp)"
 BASE_ARGS=(${ARGS[@]+"${ARGS[@]}"})
 SKIP=""
 tries=0
-# The copy lock this run holds, if any, goes with it however it ends.
-held=""
-trap '[ -n "$held" ] && rmdir "$held" 2>/dev/null' EXIT
+# The copy lock: a kernel lock (lockf, or flock on Linux) held by a small
+# helper until this run lets go or ends, so one a killed run held frees
+# itself. The helper looks every second for its release file and for
+# this script.
+holder="" release=""
+take_copylock() {
+  local ready
+  ready="$(mktemp -u "${TMPDIR:-/tmp}/tb-check-ready.XXXXXX")"
+  release="$(mktemp -u "${TMPDIR:-/tmp}/tb-check-release.XXXXXX")"
+  local hold=': >"$1"; while kill -0 "$2" 2>/dev/null && [ ! -e "$3" ]; do sleep 1; done'
+  if command -v flock >/dev/null 2>&1; then flock "$1" /bin/sh -c "$hold" sh "$ready" "$$" "$release" &
+  else /usr/bin/lockf -k "$1" /bin/sh -c "$hold" sh "$ready" "$$" "$release" & fi
+  holder=$!
+  until [ -e "$ready" ] || ! kill -0 "$holder" 2>/dev/null; do sleep 0.2; done
+  rm -f "$ready"
+}
+drop_copylock() {
+  [ -n "$holder" ] || return 0
+  : >"$release"
+  wait "$holder" 2>/dev/null
+  rm -f "$release"
+  holder="" release=""
+}
+trap drop_copylock EXIT
 while :; do
   if ! choose; then
     rm -f "$files" "$changed"
@@ -211,12 +232,8 @@ while :; do
   mirror="$remote_base/mirror/$key"
   # Two checks from this checkout at once take turns at the mirror, from
   # the upload until the run's copy is made, so neither copies the other's
-  # files. mkdir is the lock; one left by a run killed mid-copy goes after
-  # ten minutes.
-  copylock="${TMPDIR:-/tmp}/tb-check-copy-$key-$HOST"
-  find "$copylock" -maxdepth 0 -mmin +10 -exec rmdir {} \; 2>/dev/null
-  until mkdir "$copylock" 2>/dev/null; do sleep 1; done
-  held="$copylock"
+  # files.
+  take_copylock "${TMPDIR:-/tmp}/tb-check-copy-$key-$HOST.lock"
   # By content (-c), not size and time: an edit that keeps both would
   # otherwise leave the mirror's old copy in the run.
   if ! "${SSH[@]}" "$HOST" "mkdir -p '$mirror' '$remote_run' && touch '$mirror'" \
@@ -224,7 +241,7 @@ while :; do
     || ! rsync -a -e "${SSH[*]}" "$files" "$HOST:$remote_run.files" \
     || ! "${SSH[@]}" "$HOST" "rsync -a --from0 --files-from='$remote_run.files' '$mirror/' '$remote_run/' && rm -f '$remote_run.files'" \
     || ! rsync -a -e "${SSH[*]}" "$changed" "$HOST:$remote_run/.check-changed"; then
-    rmdir "$copylock" 2>/dev/null; held=""
+    drop_copylock
     "${SSH[@]}" "$HOST" "rm -rf '$remote_run' '$remote_run.files'" 2>/dev/null
     # The next host that can run it, before this Mac (6 Nov: Tinker Desk
     # dropped off mid-copy and the check ran on the M5).
@@ -232,7 +249,7 @@ while :; do
     SKIP+=" $HOST"
     continue
   fi
-  rmdir "$copylock" 2>/dev/null; held=""
+  drop_copylock
   echo "Checking on $HOST (copied in $((SECONDS - start))s; THREADBEAR_CHECK_HOST= ./check.sh --local runs here)"
 
   ARGS=(${BASE_ARGS[@]+"${BASE_ARGS[@]}"})
