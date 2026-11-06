@@ -506,13 +506,18 @@ export async function landTargetFromGit(cwd: string): Promise<{ target?: Omit<La
 // landed branch, if it was still there, went.
 export type Cleanup = { removed: true; spare?: boolean; taken?: boolean } | { removed: false; reason: string };
 
-// Whether a worktree the record still has is gone: its folder and its
-// branch both. Reads only, for records that missed hearing it went.
-export async function worktreeGone(w: WorktreeRecord): Promise<boolean> {
-  if (isDir(w.path)) return false;
+// Whether a worktree the record still has is gone: its branch has, and its
+// folder either has too ('gone') or is another checkout's now ('taken', a
+// reused slot). Reads only, for records that missed hearing it went.
+export async function worktreeGone(w: WorktreeRecord): Promise<false | 'gone' | 'taken'> {
   const branch = await git(w.mainCheckout, ['rev-parse', '--verify', '--quiet', `refs/heads/${w.branch}`]);
   // 1 is "no such ref"; anything else (no repo there) proves nothing.
-  return !branch.ok && branch.code === 1;
+  if (branch.ok || branch.code !== 1) return false;
+  if (!isDir(w.path)) return 'gone';
+  const checkouts = await listCheckouts(w.mainCheckout);
+  if (!checkouts) return false;
+  const here = realpath(w.path);
+  return checkouts.some((c) => realpath(c.path) === here && c.branch === w.branch) ? false : 'taken';
 }
 
 // When its thread is archived or deleted: a worktree whose branch is all

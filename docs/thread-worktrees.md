@@ -116,9 +116,11 @@ its next turn in the main checkout, with a note.
 The folder is only removed while it's still a checkout of the thread's own
 branch: slot folders are reused, and a record can miss hearing its worktree
 went (THREADBEAR-16, 6 Nov: a handover saved it while the cleanup ran; a
-handover now waits for that cleanup). A folder that's another checkout's now
-is left alone and the thread treats it as a spare's. At start, an archived
-thread whose folder and branch are both gone is marked removed.
+handover now waits for that cleanup, for up to a minute). A folder that's
+another checkout's now is left alone and the thread treats it as a spare's.
+At start, an archived thread whose branch is gone, and whose folder is gone
+or another checkout's, is marked removed. A message sent while the cleanup
+runs waits for it, so the turn never starts in a folder being removed.
 
 ## Reusing worktrees
 

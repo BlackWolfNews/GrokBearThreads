@@ -1542,6 +1542,10 @@ export class Runner {
     else if (rt.session && rec.provider === 'claude' && Boolean(rt.claudeSkipped) === this.patchTrust.checkClaude(rec.cwd).trusted) this.releaseSession(st);
     // Never two live CLIs on one session: wait for a releasing one to exit.
     while (rt.closing) await rt.closing;
+    // An archive's worktree cleanup still running: where this turn starts
+    // depends on whether it removed the folder (leaveRemovedWorktree), and
+    // a CLI started there meanwhile would have the folder taken from under it.
+    while (rt.cleaning) await rt.cleaning;
     if (rt.turn?.turnId !== msg.turnId) return; // interrupted while waiting
     const local = this.runLocalCommand(st, msg);
     if (local === true || (local !== false && (await local))) return;

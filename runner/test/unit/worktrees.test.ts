@@ -952,3 +952,60 @@ test("at start, an archived thread whose worktree and branch went unrecorded is 
   assert.equal(threads.get(kept.id).rec.worktree.removedAt, undefined);
   assert.equal(notes(h, lost.id).filter((n) => n.includes('worktree')).length, 1, 'quietly: only the note from when it was made');
 });
+
+test('a message sent while the archive cleanup runs waits for it, then starts in the main checkout', async () => {
+  const { main } = makeRepo();
+  const h = harness();
+  const { id, w } = await threadWithWorktree(h, main);
+  h.runner.update({ threadId: id, archived: true });
+  const rt = (h.runner as any).threads.get(id).rt;
+  await until(() => rt.archivePending === false, 'the cleanup to start');
+  assert.ok(fs.existsSync(w.path), 'still removing');
+  h.runner.send(id, 'More please');
+  await until(() => h.adapter.sessions.length === 2, 'a new CLI');
+  assert.equal(h.adapter.last.opts.cwd, path.join(main, 'runner'), 'not the folder being removed');
+  assert.ok(!fs.existsSync(w.path));
+});
+
+test('a thread deleted while a handover waits for its cleanup stays deleted', async () => {
+  const { main } = makeRepo();
+  const h = harness();
+  const { id } = await threadWithWorktree(h, main);
+  h.runner.update({ threadId: id, archived: true });
+  const rt = (h.runner as any).threads.get(id).rt;
+  await until(() => rt.archivePending === false, 'the cleanup to start');
+  const drained = h.runner.beginDrain([], { onHandedOver: () => undefined });
+  h.runner.delete(id);
+  await drained;
+  assert.ok(!fs.existsSync(path.join(h.home, 'threads', id)), 'not saved back');
+});
+
+test("a handover doesn't wait forever on a cleanup that never finishes", async () => {
+  const h = harness();
+  const { thread } = h.runner.create({ text: 'Go', accountId: 'claude-3' });
+  h.adapter.last.init();
+  h.adapter.last.result();
+  const rt = (h.runner as any).threads.get(thread.id).rt;
+  rt.cleaning = new Promise(() => undefined);
+  let done = false;
+  const drained = h.runner.beginDrain([], { onHandedOver: () => undefined }).then(() => (done = true));
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(done, false, 'waits a while');
+  h.clock.advance(5 * 60_000);
+  await drained;
+  assert.equal(h.runner.has(thread.id), false);
+});
+
+test('at start, an archived thread whose slot folder another thread has since taken is marked as handed on', async () => {
+  const { main } = makeRepo();
+  const h = harness();
+  const { id, w } = await threadWithWorktree(h, main);
+  sh(main, `git worktree remove --force ${w.path} && git branch -D ${w.branch}`);
+  sh(main, `git worktree add -q -b thread/yyyy0000 ${w.path} main`);
+  const rec = (h.runner as any).threads.get(id).rec;
+  rec.archivedAt = new Date(h.clock.now()).toISOString();
+  await h.runner.settleLostCleanups();
+  assert.ok(rec.worktree.removedAt);
+  assert.equal(rec.worktree.spare, true, 'so it never carries on in the other thread\'s folder');
+  assert.ok(fs.existsSync(w.path));
+});

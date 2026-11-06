@@ -187,8 +187,8 @@ export const worktreesPart = {
     return land ? [...set.actions, land] : set.actions;
   },
 
-  // At start: an archived thread whose worktree and branch have gone but
-  // whose record never said so (a handover saved it mid-cleanup before
+  // At start: an archived thread whose worktree and branch have gone (or
+  // whose folder another thread has taken) but whose record never said so (a handover saved it mid-cleanup before
   // 6 Nov, THREADBEAR-16, or the runner stopped there) is told now, so it
   // shows no Land chip and, brought back, leaves the missing folder.
   async settleLostCleanups(this: Runner): Promise<void> {
@@ -203,6 +203,7 @@ export const worktreesPart = {
       }
       if (!gone || st.rt.deleted || w.removedAt) continue;
       w.removedAt = this.isoNow();
+      if (gone === 'taken') w.spare = true;
       this.markDirty(st);
       this.log.info("recorded a worktree's removal the record missed", { threadId: st.rec.id, path: w.path });
     }

@@ -8,6 +8,9 @@ import type { ThreadSummary } from '../protocol.ts';
 import type { Drain, ThreadState } from '../runner.ts';
 import { DRAIN_AGENT_MS, DRAIN_BACKGROUND_MS, DRAIN_CHECK_MS, DRAIN_MAX_OLD_MS, DRAIN_SETTLE_MS, newRuntime } from '../runner.ts';
 
+// How long a handover waits for an archive's worktree cleanup (letGo).
+const CLEANUP_WAIT_MS = 60_000;
+
 export const handoversPart = {
   // This runner is handing over to a new release. `keep` are the busy
   // threads it goes on running; every other thread is let go now (an idle
@@ -128,8 +131,20 @@ export const handoversPart = {
     }
     if (rt.closing) await rt.closing;
     // An archive's worktree cleanup, started as the CLI went: its removedAt
-    // and note belong in the record saved below (THREADBEAR-16).
-    if (rt.cleaning) await rt.cleaning;
+    // and note belong in the record saved below (THREADBEAR-16). Not for
+    // ever, as git can hang (a hook) and the new runner waits on this: past
+    // the limit the record goes as it is, and the next start settles it
+    // (settleLostCleanups).
+    if (rt.cleaning) {
+      let timer: { cancel(): void } | undefined;
+      const late = new Promise<void>((resolve) => (timer = this.clock.setTimeout(resolve, CLEANUP_WAIT_MS)));
+      const finished = await Promise.race([rt.cleaning.then(() => true), late.then(() => false)]);
+      timer?.cancel();
+      if (!finished) this.log.warn('handed a thread over before its worktree cleanup finished', { threadId: rec.id });
+    }
+    // Deleted while it waited: its folder has gone to trash, and saving
+    // would bring it back.
+    if (rt.deleted) return;
     rt.deltaTimer?.cancel();
     rt.wakeTimer?.cancel();
     rt.generation++;
