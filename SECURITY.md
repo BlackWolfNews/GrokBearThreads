@@ -21,6 +21,7 @@ The agents themselves have whatever access you give them. New threads start with
 - **Secrets you type on your phone.** They're sealed to the Mac named in your pairing code, so the backend and other Macs can't read them.
 - **Your phone and browser logins.** Tokens are stored only as hashes, expire, and can be revoked, which also stops that phone's notifications.
 - **Shared threads.** A share link is a public, read-only bearer link. It shows only that thread, and only pictures from the thread's own media folder.
+- **Approvals you chose, through a review.** A review by another lab (an experiment) runs with the reviewed thread's own permissions, never more, and is told the change and replies it's handed are data, not instructions.
 - **Another Mac's address.** The Mac app only sends a runner's token to the host you pinned for it, never one the backend suggests.
 
 ## What it assumes

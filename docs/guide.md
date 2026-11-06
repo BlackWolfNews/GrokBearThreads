@@ -796,7 +796,10 @@ Threadbear, and its switch goes.
   nothing for you to do, Threadbear starts a review thread in the same
   folder on your other provider: Codex reviews a Claude thread's change,
   and Claude a Codex one's. It's told to try to break the change and not
-  to edit anything. The thread says who is reviewing, and hibernates
+  to edit anything. It runs with the same permissions as the thread it
+  reviews: a Full access thread's review has full access, and one in Ask
+  before edits or Auto asks or checks the same way, so a change made from
+  text you don't trust can't get its tests run with no card. The thread says who is reviewing, and hibernates
   until the review finishes. Then it wakes with the findings, fixes what
   holds up, and says in its reply what was found and what it did. The
   review thread is archived when it's done, so it stays out of your

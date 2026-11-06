@@ -2220,10 +2220,14 @@ the thread if a sub-agent stalls, so an ask can't stay hidden for good.
   itself a review, with fewer than 2 reviews since Mike's last message
   (`labReviews` in thread.json; any message not from the runner resets
   it), isn't marked finished. Instead the runner creates a thread in the
-  same folder (no worktree of its own), on Full access and effort high,
+  same folder (no worktree of its own), with the first thread's
+  `permissionMode` (never more access than it has: Full stays Full, Ask
+  and Auto stay as they are) and effort high,
   with `startedBy: { kind: "thread", label: "Review" }`, `reviewOf` set
   to the first thread in thread.json, and a brief: the latest user
-  message, the reply, the files and the diff (up to 40,000 characters).
+  message, the reply, the files and the diff (up to 40,000 characters),
+  each in a fence one backtick longer than any run in it, so nothing in
+  them can close it, and marked as data to review, not instructions.
   Its login is the other provider's (`pickInPool` over the pools with no
   folders), else a fresh session of the same provider. For a folder a
   pool is kept for, only that pool's logins are used, and a kept pool's
