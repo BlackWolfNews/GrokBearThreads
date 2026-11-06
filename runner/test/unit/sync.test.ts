@@ -1117,7 +1117,7 @@ test('project pictures: a picture that cannot be read is skipped, not retried un
   fs.writeFileSync(fixed, Buffer.from('OK'));
   change({ icon: { image: { path: fixed, mediaType: 'image/png' }, by: 'librarian', updatedAt: '2026-10-28T00:00:00.000Z' } });
   h.clock.advance(SYNC_COALESCE_MS);
-  await tick(20);
+  for (let i = 0; i < 200 && uploads.length < 1; i++) await tick(5);
   assert.equal(uploads.length, 1);
   await sync.stop();
 });
