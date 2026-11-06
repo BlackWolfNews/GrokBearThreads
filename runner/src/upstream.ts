@@ -589,6 +589,21 @@ export class Upstream {
     return lines;
   }
 
+  // GitHub only runs its checks on a main that's been pushed, and nothing
+  // else pushes it: tb land never does, and on 7 Nov the first gated
+  // release sat behind a main three commits ahead of GitHub's. So a main
+  // that has settled here goes up first (fast-forward only), and its
+  // checks are looked at on the next hourly look. Returns why it's held.
+  private async pushMain(checkout: string, tip: string): Promise<string | undefined> {
+    await this.git(checkout, ['fetch', '-q', '--no-tags', 'origin', '+refs/heads/main:refs/remotes/origin/main']);
+    const theirs = await this.git(checkout, ['rev-parse', 'refs/remotes/origin/main']).catch(() => '');
+    if (theirs === tip || (theirs && (await this.isAncestor(checkout, tip, theirs)))) return undefined;
+    if (theirs && !(await this.isAncestor(checkout, theirs, tip))) return "main here and GitHub's main have gone different ways";
+    await this.git(checkout, ['push', '-q', 'origin', `${tip}:refs/heads/main`]);
+    this.deps.log.info('pushed main for its checks', { commit: tip });
+    return 'just pushed main to GitHub, so its checks have only started';
+  }
+
   // Why GitHub's checks hold this commit back, or undefined when they
   // don't. A main with no workflows has nothing to wait for. One that has
   // them waits for them, and is held when they can't be read: a release
@@ -599,6 +614,8 @@ export class Upstream {
     // The URL as configured, not as an insteadOf rewrites it for fetching.
     const key = repoKey(await this.git(checkout, ['config', '--get', 'remote.origin.url']).catch(() => ''));
     if (!key.startsWith('github.com/')) return "origin isn't on GitHub, so its checks can't be read";
+    const pushed = await this.pushMain(checkout, tip);
+    if (pushed) return pushed;
     try {
       return ciVerdict(await (this.deps.ciRuns ?? githubRuns)(key.slice('github.com/'.length), tip));
     } catch (e) {

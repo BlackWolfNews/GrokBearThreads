@@ -71,6 +71,13 @@ function world() {
 // today (and a couple of days' slack) isn't looked at.
 const LATER = Date.parse('2026-12-31T00:00:00Z');
 
+// origin as GitHub, still fetching from and pushing to the bare repo: the
+// runner reads the configured URL, git goes through the insteadOf.
+function asGitHub(repo: string, root: string): void {
+  git(repo, 'config', 'remote.origin.url', 'https://github.com/mikecann/threadbear.git');
+  git(repo, 'config', `url.${path.join(root, 'mike.git')}.insteadOf`, 'https://github.com/mikecann/threadbear.git');
+}
+
 function upstreamFor(checkout: string, home: string, clock = new FakeClock(LATER), extra = {}) {
   return new Upstream({ home, checkout, clock, log: nullLogger, ...extra });
 }
@@ -295,10 +302,7 @@ test("ciVerdict: every workflow's latest attempt has to pass", () => {
 
 test("Mike's runner holds a release until GitHub's checks pass on that commit", async () => {
   const w = world();
-  // origin as GitHub, still pushing to the bare repo (the runner reads the
-  // configured URL, git fetches through the insteadOf).
-  git(w.mike, 'config', 'remote.origin.url', 'https://github.com/mikecann/threadbear.git');
-  git(w.mike, 'config', `url.${path.join(w.root, 'mike.git')}.insteadOf`, 'https://github.com/mikecann/threadbear.git');
+  asGitHub(w.mike, w.root);
   fs.mkdirSync(path.join(w.mike, '.github', 'workflows'), { recursive: true });
   const tip = commit(w.mike, '.github/workflows/build.yml', 'Build on GitHub');
   git(w.mike, 'push', '-q', 'origin', 'main');
@@ -340,6 +344,36 @@ test("Mike's runner holds a release until GitHub's checks pass on that commit", 
   assert.equal(up.status().published?.tag, tag);
   assert.equal(notesCalls, 1);
   assert.match(git(w.mike, "cat-file", "tag", tag!), /What's new:\n- Checks keep releases buildable/);
+});
+
+test("Mike's runner pushes a settled main GitHub doesn't have, then waits for its checks", async () => {
+  const w = world();
+  asGitHub(w.mike, w.root);
+  fs.mkdirSync(path.join(w.mike, '.github', 'workflows'), { recursive: true });
+  const tip = commit(w.mike, '.github/workflows/build.yml', 'Build on GitHub');
+  // Landed here, never pushed.
+  assert.notEqual(git(w.mike, 'ls-remote', 'origin', 'refs/heads/main').split('\t')[0], tip);
+  const committed = Number(git(w.mike, 'log', '-1', '--format=%ct')) * 1000;
+  const up = upstreamFor(w.mike, w.home, new FakeClock(committed + 2 * SETTLE_MS), { publish: { publish: true, signingKey: w.mikeKey.priv }, runningMainSettled: () => true, ciRuns: async () => assert.fail('not asked yet') });
+  assert.equal(await up.publishOnce(), undefined);
+  assert.equal(git(w.mike, 'ls-remote', 'origin', 'refs/heads/main').split('\t')[0], tip, 'pushed');
+  assert.match(up.status().held!.why, /just pushed main/);
+
+  // A main that's gone a different way from GitHub's isn't pushed over it.
+  const w2 = world();
+  asGitHub(w2.mike, w2.root);
+  commit(w2.mike, 'x.txt', 'Mine');
+  const other = path.join(w2.root, 'other');
+  git(w2.root, 'clone', '-q', path.join(w2.root, 'mike.git'), other);
+  commit(other, 'y.txt', 'Theirs');
+  git(other, 'push', '-q', 'origin', 'HEAD:main');
+  fs.mkdirSync(path.join(w2.mike, '.github', 'workflows'), { recursive: true });
+  commit(w2.mike, '.github/workflows/build.yml', 'Build on GitHub');
+  const at = Number(git(w2.mike, 'log', '-1', '--format=%ct')) * 1000;
+  const up2 = upstreamFor(w2.mike, w2.home, new FakeClock(at + 2 * SETTLE_MS), { publish: { publish: true, signingKey: w2.mikeKey.priv }, runningMainSettled: () => true });
+  assert.equal(await up2.publishOnce(), undefined);
+  assert.match(up2.status().held!.why, /different ways/);
+  assert.match(git(other, 'log', '-1', '--format=%s', 'origin/main'), /Theirs/);
 });
 
 test("a main whose origin isn't GitHub can't show its checks, so it waits", async () => {

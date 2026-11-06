@@ -118,7 +118,8 @@ changing someone's Threadbear uses the lowest layer that does the job:
 Mike's own runner tags the newest commit it has been running as its last good release
 for at least six hours, as `release/YYYY-MM-DD`, if anything changed since the last tag.
 It also waits until GitHub's checks (the Xcode 26 builds) have passed on that exact
-commit, as the runner staying up says nothing about the apps building. A release held
+commit, as the runner staying up says nothing about the apps building. Nothing else
+pushes main, so the runner pushes a settled main to GitHub first if it isn't there yet. A release held
 back says why in `tb status` and the Updates panel, and goes out on the next hourly look
 once the checks are green. The tag is signed with Mike's SSH signing key and pushed to GitHub. The tag's message
 starts with plain-words notes ("What's new:", a few lines Opus writes from the commits
