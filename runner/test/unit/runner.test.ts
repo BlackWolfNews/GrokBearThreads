@@ -1736,6 +1736,30 @@ test('live state: a when chip comes and goes by itself on the poll, with its bad
   assert.equal(h.runner.get(thread.id).actions, undefined);
 });
 
+test('live state: a command action that changes what its chips ask swaps them straight away, without waiting for the poll', async () => {
+  const root = tmpDir();
+  const project = path.join(root, 'app');
+  fs.mkdirSync(path.join(project, '.threadbear/patches'), { recursive: true });
+  fs.writeFileSync(path.join(project, '.threadbear/patches/server.ts'), `
+    import fs from "node:fs";
+    const on = async ({ cwd }) => fs.existsSync(cwd + "/running");
+    export default { actions: [
+      { title: "Start", run: "touch running", when: async (c) => !(await on(c)) },
+      { title: "Stop", run: "rm running", when: on },
+    ] };`);
+  const h = makeHarness(undefined, {}, { panelsRoot: root, actionShell: ['/bin/sh', '-c'], actionTimeoutMs: 5000 });
+  const { thread } = create(h, { cwd: project });
+  const titles = () => h.runner.get(thread.id).actions?.map((a) => a.title);
+  await until(() => titles()?.length === 1, 'the patch to load');
+  assert.deepEqual(titles(), ['Start']);
+  await h.runner.runAction(thread.id, 'server.start');
+  await h.runner.patchesIdle();
+  assert.deepEqual(titles(), ['Stop'], 'no clock advanced: read again because the action ran');
+  await h.runner.runAction(thread.id, 'server.stop');
+  await h.runner.patchesIdle();
+  assert.deepEqual(titles(), ['Start']);
+});
+
 test('a turn.end hook runs after a turn that edited a matching file, and a failure is told to the agent twice at most', async () => {
   const root = tmpDir();
   const project = path.join(root, 'app');
