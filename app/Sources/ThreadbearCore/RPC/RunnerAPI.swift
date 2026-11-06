@@ -153,9 +153,11 @@ public extension RPCClient {
     }
 
     /// Runs an action from the thread's patches. A command action answers
-    /// when the command has finished (the runner stops it after 10 minutes).
+    /// when the command has finished. Land has an hour for queueing and
+    /// checking; other commands have ten minutes. Allow a minute for the reply.
     func runAction(threadId: String, actionId: String) async throws -> ActionRunResult {
-        try await call("actions.run", .object(["threadId": .string(threadId), "actionId": .string(actionId)]), as: ActionRunResult.self, timeout: .seconds(11 * 60))
+        let minutes = actionId == "worktree.land" ? 61 : 11
+        return try await call("actions.run", .object(["threadId": .string(threadId), "actionId": .string(actionId)]), as: ActionRunResult.self, timeout: .seconds(minutes * 60))
     }
 
     /// Trusts the versions of the thread's waiting patch files that were
