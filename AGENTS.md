@@ -128,6 +128,15 @@ static site with its own `package.json`; its comments say how to build it.
   `show_panel`: it opens the panel, or brings it forward where he has it,
   once he's looking at the thread (docs/protocol.md, "Showing panels").
 
+## Other people's PRs
+
+The repo's public, so people send fixes. Before starting on a GitHub issue, run
+`gh pr list -R mikecann/threadbear` again: someone may have opened a PR for it
+since you last looked, as Tyler did for #2 while a thread was writing its own
+fix (6 Nov). Their hand test may know more than you can find out. Merge with
+`gh pr merge --rebase` so it shows as merged and stays theirs, and put anything
+of your own in a commit on top. A comment to them goes past Mike first.
+
 ## Experiments
 
 Other people run Threadbear since the repo went public (5 Nov 2026), so a
