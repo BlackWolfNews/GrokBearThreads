@@ -493,7 +493,7 @@ export function buildThreadbearTools(
           'pocket',
           "Keeps a short card in the Pocket on the user's iPhone, a deck that opens instantly and works with no signal, for when they're out. File one when they say they're heading somewhere or will need a fact away from their Mac: the address to write on a parcel and what to bring, booking codes for a trip. Write what they'd read at a counter, not an explanation. The same title replaces a card; when it's done with, remove it. With no title, lists the cards.",
           {
-            title: z.string().trim().min(1).max(60).optional().describe('Short name for the card, like "Post to Corby".'),
+            title: z.string().trim().min(1).max(60).optional().describe('Short name for the card, like "Parcel for Mum".'),
             text: z.string().trim().min(1).max(2000).optional().describe('What goes on the card, plain text, with line breaks where it should break.'),
             place: z.string().trim().min(1).max(100).optional().describe('Where it applies, as you would search a map: "post office", "Bunnings". The phone marks the card "here" and brings it to the front there.'),
             icon: z.enum(POCKET_ICONS).optional().describe("The picture and colour on the card, so they can spot it in the deck. Choose the closest; leave it out if none fits. Filing a card again without one keeps its icon."),
@@ -1008,7 +1008,7 @@ export function buildThreadbearTools(
         asks: z
           .array(
             z.object({
-              question: z.string().min(1).describe('One sentence, at most 160 characters: the question, or the step for them to take, naming the thing ("Deploy the walkies-api fix to production?"). It shows right under your reply, so no background.'),
+              question: z.string().min(1).describe('One sentence, at most 160 characters: the question, or the step for them to take, naming the thing ("Deploy the billing-api fix to production?"). It shows right under your reply, so no background.'),
               options: z
                 .array(
                   z.object({
@@ -1123,7 +1123,7 @@ export function buildThreadbearTools(
                 )
                 .max(3)
                 .optional()
-                .describe('Where to go to do it or judge it: the page, the Slack message\'s permalink, the PR, the preview, the file or screenshot, or the project to open (a path opens in its own app, e.g. a .tandem file in Tandem). Give one whenever there is somewhere to go.'),
+                .describe('Where to go to do it or judge it: the page, the Slack message\'s permalink, the PR, the preview, the file or screenshot, or the project to open (a path opens in its own app, e.g. a .key file in Keynote). Give one whenever there is somewhere to go.'),
             }),
           )
           .max(10)
