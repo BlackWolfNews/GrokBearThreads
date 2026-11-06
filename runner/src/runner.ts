@@ -724,6 +724,9 @@ export class Runner {
     this.seedPatchTrust(records.map((r) => r.cwd));
     this.flush();
     for (const st of this.threads.values()) if (st.rec.queue.some(q => q.reviewId) && this.bucket(st.rec) === 'inbox') this.kickQueue(st);
+    // A review the last runner owed (runner/lab-review.ts): deferred, so
+    // it starts once the runner is up, like any other new thread.
+    for (const st of this.threads.values()) if (st.rec.labReviewOwed) this.defer(() => this.startOwedReview(st));
     this.armSnoozeTimer();
     // Waits for room are in thread.json, so they outlive a restart.
     this.armRoomTimer();
@@ -1318,6 +1321,7 @@ export class Runner {
       delete rec.stoppedWorkWakes;
       // A new ask from Mike: its change can be reviewed afresh.
       delete rec.labReviews;
+      delete rec.labReviewOwed;
     }
     // Copy images into the thread's own media folder now, so a queued
     // message still works if inbox/ is cleaned before it's sent.
@@ -2116,9 +2120,15 @@ export class Runner {
     // A code change gets another lab's review before it counts as done
     // (experiment labReview, runner/lab-review.ts): the thread waits on
     // the review, so anything waiting on it hears once it's been fixed.
+    // One owed for an earlier turn is this one's to give now, or not at all.
+    if (rec.labReviewOwed) {
+      delete rec.labReviewOwed;
+      this.markDirty(st);
+    }
     const review = finished && !rt.turn ? this.startLabReview(st, turn.turnId, turn.lastText) : undefined;
     if (review) this.waitOnReview(st, review);
-    else if (finished) this.markFinished(st, turn.lastText);
+    // Owed to the next runner (a handover): finished once it's reviewed.
+    else if (finished && !rec.labReviewOwed) this.markFinished(st, turn.lastText);
     if (outcome === 'completed' && this.waitedOnFor(rec.id).length) this.tellActivity({ kind: 'waited-on', threadId: rec.id });
     if (archive && !rt.turn && !rec.archivedAt && !this.stopping) {
       this.emit(st, { type: 'system.note', text: 'Archived, as the agent was asked to once it had finished.' });

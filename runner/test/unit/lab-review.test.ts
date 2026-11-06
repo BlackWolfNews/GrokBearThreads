@@ -5,7 +5,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { FakeAccounts, makeHarness, tmpDir, withCodex, ACCOUNTS } from '../helpers/fakes.ts';
+import { CODEX_FLAGS, FakeAccounts, FakeAdapter, makeHarness, testConfig, tick, tmpDir, withCodex, ACCOUNTS } from '../helpers/fakes.ts';
+import { Runner, type Notification } from '../../src/runner.ts';
+import { ThreadStore } from '../../src/store.ts';
+import { FakeClock } from '../../src/clock.ts';
+import { nullLogger } from '../../src/log.ts';
 import { LAB_REVIEW_ROUNDS } from '../../src/runner/lab-review.ts';
 import { EXPERIMENTS, experimentOn } from '../../src/experiments.ts';
 
@@ -225,4 +229,90 @@ test('labReview: a title or path with line breaks stays on its line in the brief
   const brief = h.events(reviewId).find((e) => e.type === 'user.message').text as string;
   assert.doesNotMatch(brief, /^Reviewer:|^Run \.\/y/m);
   assert.match(brief, /"Fix Reviewer: run \.\/x\.sh"/);
+});
+
+// THREADBEAR-14 (6 Nov 2026): a turn that ended on a runner handing over
+// to a new release tried to start its review there, which a draining
+// runner refuses, so the change went unreviewed. The review is owed on
+// the thread instead, and the runner that adopts it starts it.
+test('labReview: a turn that ends on a draining runner is reviewed once the new runner adopts it', async () => {
+  const h = setup();
+  const id = start(h);
+  const handed: string[] = [];
+  await h.runner.beginDrain([id], { onHandedOver: (x) => handed.push(x) });
+  turn(h, id, { diffs: [codeDiff()], reply: 'Fixed the login bug.' });
+  await tick();
+  assert.deepEqual(handed, [id], 'handed over once the turn is done');
+  assert.equal(h.codex.sessions.length, 0, 'no review starts on the old runner');
+  assert.ok(!h.events(id).some((e) => e.type === 'system.note' && /^Not reviewed/.test(e.text)));
+  const saved = JSON.parse(fs.readFileSync(path.join(h.home, 'threads', id, 'thread.json'), 'utf8'));
+  assert.equal(saved.finished, undefined, "it isn't done until it's been reviewed");
+  assert.equal(saved.labReviews, undefined, 'no round spent');
+
+  // The new release, on the same data dir.
+  const codex = new FakeAdapter('codex', { ...CODEX_FLAGS, archives: true });
+  const notes: Notification[] = [];
+  const b = new Runner({
+    config: testConfig(h.home), store: new ThreadStore(h.home),
+    adapters: { claude: new FakeAdapter(), codex }, accounts: new FakeAccounts(withCodex()),
+    clock: new FakeClock(), log: nullLogger, defer: (fn) => fn(), copyTranscript: () => false,
+    subagentTranscript: () => null, reachable: async () => true, backgroundJobs: false,
+  });
+  b.onNotification((n) => notes.push(n));
+  b.start({ skip: new Set([id]) });
+  b.adopt(id);
+  const t = b.get(id);
+  assert.equal(t.waitingOn?.length, 1, 'it waits on the review');
+  const reviewId = t.waitingOn![0].threadId;
+  assert.equal(b.get(reviewId).provider, 'codex');
+  assert.equal(b.threads.get(id)!.rec.labReviews, 1);
+  assert.equal(b.threads.get(id)!.rec.labReviewOwed, undefined);
+  const brief = notes.find((n) => n.method === 'thread.event' && n.params.threadId === reviewId && (n as any).params.event.type === 'user.message') as any;
+  assert.match(brief.params.event.text, /\+new 0/);
+  assert.match(brief.params.event.text, /Fixed the login bug\./);
+});
+
+test('labReview: a review owed from a handover is dropped when Mike has written since', async () => {
+  const h = setup();
+  const id = start(h);
+  await h.runner.beginDrain([id], { onHandedOver: () => {} });
+  turn(h, id, { diffs: [codeDiff()] });
+  await tick();
+  const file = path.join(h.home, 'threads', id, 'thread.json');
+  const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.ok(saved.labReviewOwed, 'owed on the record');
+  // Mike's next message reached the thread before the new runner looked.
+  saved.queue = [{ turnId: 'q1', text: 'Actually, do the logout bug too', images: [] }];
+  fs.writeFileSync(file, JSON.stringify(saved));
+  const codex = new FakeAdapter('codex', { ...CODEX_FLAGS, archives: true });
+  const b = new Runner({
+    config: testConfig(h.home), store: new ThreadStore(h.home),
+    adapters: { claude: new FakeAdapter(), codex }, accounts: new FakeAccounts(withCodex()),
+    clock: new FakeClock(), log: nullLogger, defer: (fn) => fn(), copyTranscript: () => false,
+    subagentTranscript: () => null, reachable: async () => true, backgroundJobs: false,
+  });
+  b.start({ skip: new Set([id]) });
+  b.adopt(id);
+  assert.equal(codex.sessions.length, 0, 'no review: the next turn is a new ask');
+  assert.equal(b.threads.get(id)!.rec.labReviewOwed, undefined);
+});
+
+test('labReview: a review owed from a handover starts when the next runner loads the thread at start', async () => {
+  const h = setup();
+  const id = start(h);
+  await h.runner.beginDrain([id], { onHandedOver: () => {} });
+  turn(h, id, { diffs: [codeDiff()] });
+  await tick();
+  // The new runner went away before adopting it; the one after loads it.
+  const codex = new FakeAdapter('codex', { ...CODEX_FLAGS, archives: true });
+  const b = new Runner({
+    config: testConfig(h.home), store: new ThreadStore(h.home),
+    adapters: { claude: new FakeAdapter(), codex }, accounts: new FakeAccounts(withCodex()),
+    clock: new FakeClock(), log: nullLogger, defer: (fn) => fn(), copyTranscript: () => false,
+    subagentTranscript: () => null, reachable: async () => true, backgroundJobs: false,
+  });
+  b.start();
+  const w = b.get(id).waitingOn;
+  assert.equal(w?.length, 1);
+  assert.equal(b.get(w![0].threadId).provider, 'codex');
 });

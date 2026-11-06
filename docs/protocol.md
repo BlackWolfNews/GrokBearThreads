@@ -2259,7 +2259,12 @@ the thread if a sub-agent stalls, so an ask can't stay hidden for good.
   characters) comes back as an `origin: "runner"` message asking it to
   fix what holds up, naming any files the review edited, and the review
   thread is archived (`archivedBy: "threadbear"`). With no login to
-  review on, a note says so, once until the next message.
+  review on, a note says so, once until the next message. A runner that
+  is draining (Handovers) or stopping makes no threads, so it records
+  `labReviewOwed: { turnId, reply? }` in thread.json instead, and the
+  thread isn't marked finished; the runner that adopts or next loads it
+  starts the review then, or, with a message queued or the thread
+  archived, drops it. A new message from Mike drops it too.
 - **Waiting on threads.** `end_turn` also takes `waitFor?: string[]`, up
   to 5 thread ids (or unique prefixes) on this runner, with `needs:
   "nothing"`. Once the turn is over it hibernates on the same terms as

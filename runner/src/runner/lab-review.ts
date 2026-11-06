@@ -48,11 +48,22 @@ export const labReviewPart = {
   // waits on it), or undefined when there's none to do.
   startLabReview(this: Runner, st: ThreadState, turnId: string, reply: string | undefined): string | undefined {
     const { rec } = st;
-    if (this.stopping || rec.reviewOf || rec.archivedAt) return undefined;
+    if (rec.reviewOf || rec.archivedAt) return undefined;
     if (!experimentOn(this.cfg.home, 'labReview')) return undefined;
     if ((rec.labReviews ?? 0) >= LAB_REVIEW_ROUNDS) return undefined;
     const change = this.turnChange(st, turnId);
     if (!change || change.codeLines < LAB_REVIEW_MIN_LINES) return undefined;
+    // A runner handing over to a new release, or stopping, makes no
+    // threads (new-threads.ts), and the turn that just ended is often the
+    // one that landed the release (THREADBEAR-14, 6 Nov 2026). The review
+    // is owed instead, and the runner that has the thread next starts it
+    // (startOwedReview). The caller doesn't mark it finished meanwhile.
+    if (this.draining || this.stopping) {
+      rec.labReviewOwed = { turnId, ...(reply ? { reply } : {}) };
+      this.markDirty(st);
+      this.log.info('lab review owed to the next runner', { threadId: rec.id });
+      return undefined;
+    }
     const login = this.reviewLogin(rec);
     if (!login) {
       this.emit(st, { type: 'system.note', text: 'Not reviewed: there is no other login on this runner to review the change with.' });
@@ -102,6 +113,24 @@ export const labReviewPart = {
     this.emit(st, { type: 'system.note', text });
     this.log.info('lab review started', { threadId: rec.id, reviewer: threadId, account: login.account.id, round });
     return threadId;
+  },
+
+  // A review the last runner owed this thread (startLabReview), now it's
+  // here: adopted from a draining runner, or loaded at start. The thread
+  // then waits on it, or is finished as it would have been. Not with a
+  // message queued (Mike has moved on; that turn can get its own) or once
+  // archived.
+  startOwedReview(this: Runner, st: ThreadState): void {
+    const { rec, rt } = st;
+    const owed = rec.labReviewOwed;
+    if (!owed) return;
+    delete rec.labReviewOwed;
+    this.markDirty(st);
+    if (rt.deleted || rt.turn || rec.queue.length || rec.archivedAt) return;
+    const review = this.startLabReview(st, owed.turnId, owed.reply);
+    if (review) this.waitOnReview(st, review);
+    // Owed again if this runner is handing over too.
+    else if (!rec.labReviewOwed) this.markFinished(st, owed.reply);
   },
 
   // What the turn changed, from its edit.diff events (the CLI's own edits;
