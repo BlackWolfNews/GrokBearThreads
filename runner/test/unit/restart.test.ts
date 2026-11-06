@@ -928,7 +928,9 @@ test('runner.restart and runner.status over the WebSocket, with the pending noti
   const url = `ws://127.0.0.1:${port}/rpc`;
   const { thread } = create(h);
   h.adapter.last.init();
-  const c = await RunnerClient.connect(url, 'tok');
+  // Not the 5 s a real client allows: with the Mac's load near 100 (6 Nov)
+  // the handshake took longer and failed every tb land's check.
+  const c = await RunnerClient.connect(url, 'tok', { authTimeoutMs: 30_000 });
   try {
     assert.deepEqual((await c.call('runner.status')).running, [thread.id]);
     assert.deepEqual(await c.call('runner.restart', { resume: { threadId: thread.id, text: 'go on' } }), { scheduled: true, waitingFor: [thread.id] });
