@@ -72,6 +72,9 @@ static site with its own `package.json`; its comments say how to build it.
   feature, moves one, or adds anything of Mike's to the code; anything
   of his that only his setup needs belongs in his runner.json, not in
   the code.
+  This repo's own patches (`.threadbear/patches`) show in every fork:
+  `test/unit/fork-view.test.ts` lists what a stranger's copy shows, so a
+  chip for one of Mike's accounts needs a `when` that only his Mac passes.
 - The first-run tour (app/Sources/Threadbear/Views/Tour.swift), its sample
   threads (`threads.samples`) or anything a step points at: run
   `node app/Tools/tour-e2e.mjs` before landing. It plays the whole tour
