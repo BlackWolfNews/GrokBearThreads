@@ -264,13 +264,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     // The completion-handler forms, not `async`: Swift calls an async
     // delegate method's handler from a background thread when its task
-    // ends, which crashed the iPhone app on every tapped push
+    // ends, which crashed the iPhone app on a tapped push
     // (THREADBEAR-12). Each handler is called on the main actor.
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping @Sendable () -> Void) {
         let threadId = response.notification.request.content.userInfo["threadId"] as? String
         Task { @MainActor in
             NSApp.activate()
-            if let threadId { show(threadId: threadId) }
+            // A tap that started the app waits for the thread list, as a link does.
+            if let threadId {
+                if AppModel.shared.threadsLoaded { show(threadId: threadId) } else { linkedThread = threadId }
+            }
             completionHandler()
         }
     }

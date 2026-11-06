@@ -20,6 +20,7 @@ struct ThreadbearApp: App {
                 .environment(quick)
                 .onAppear {
                     delegate.model = model
+                    delegate.pushTaps.open = { [model] threadId in model.openThreadId = threadId }
                     quick.keep = { [model] record in try await model.keepQuickAsk(record) }
                     quick.sendFollowUp = { [model] threadId, text in
                         guard let backend = model.backend else { throw TransportError.server("Not paired with a Mac.") }
@@ -134,6 +135,8 @@ struct RootView: View {
 /// opens the thread a notification is about.
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     weak var model: AppModel?
+    /// Opens a tapped push's thread, once `model` is there to open it.
+    let pushTaps = PushTaps()
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         // First, to catch a crash at launch. App Store builds only.
@@ -176,8 +179,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 
     // The completion-handler forms, not `async`: Swift calls an async
     // delegate method's handler from a background thread when its task
-    // ends, and UIKit asserts it's on main, which crashed every tapped
-    // push (THREADBEAR-12). Each handler is called on the main actor.
+    // ends, and UIKit asserts it's on main, which crashed the app on a
+    // tapped push (THREADBEAR-12). Each handler is called on the main actor.
 
     /// Banners show while the app's open too, since the push is usually
     /// about a thread other than the one on screen.
@@ -187,9 +190,6 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping @Sendable () -> Void) {
         let threadId = response.notification.request.content.userInfo["threadId"] as? String
-        Task { @MainActor in
-            if let threadId { model?.openThreadId = threadId }
-            completionHandler()
-        }
+        pushTaps.tapped(threadId: threadId, done: completionHandler)
     }
 }
