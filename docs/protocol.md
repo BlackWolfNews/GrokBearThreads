@@ -2258,7 +2258,15 @@ the thread if a sub-agent stalls, so an ask can't stay hidden for good.
   and the last 8,000 characters of stdout and stderr under the message.
   Anything else (a non-zero exit, a timeout): the run goes ahead with
   "Its check failed (…)" and the output, so a broken check isn't silent.
-  A backend run is claimed before its check, and recorded after. With
+  Output (either kind) is kept in `<home>/schedule-checks/<id>.kept.json`,
+  with the command that printed it, until a run carrying it is sent: a
+  run refused by a restart or handover, a runner stopped mid-check, a
+  failed send or a skip because the last run's thread is still going
+  leaves it, and the next due run sends it without running the check
+  again (a check that keeps state won't print the same news twice; 6
+  Nov 2026, a report lost in a handover). A changed `check` doesn't use
+  the old one's; Run now neither runs the check nor uses it up; deleting
+  the schedule drops it. A backend run is claimed before its check, and recorded after. With
   the experiment off a `check` is kept but not run. Owned rows carry
   `check` from API 51; the agent tools take a `check` only while the
   experiment is on.

@@ -129,3 +129,135 @@ test('runCheck: runs in the folder with a state file, keeps what it prints, and 
   assert.match((slow as { why: string }).why, /longer than/);
   assert.deepEqual(checkOutcome({ ok: true, output: '' }), { skip: 'Its check found nothing new.' });
 });
+
+// A check that keeps state reports each thing once, so what it printed has
+// to reach a thread even when a restart lands between the check and the
+// send (6 Nov 2026: schedule 54f11e8a's report was lost in a handover, and
+// the next runner's check found "nothing new").
+
+// A check like the fork watch: prints what it hasn't printed before.
+function onceCheck(news: string) {
+  let told = false;
+  return () => {
+    if (told) return { ok: true as const, output: '' };
+    told = true;
+    return { ok: true as const, output: news };
+  };
+}
+
+function schedulerOn(h: ReturnType<typeof makeHarness>, result: () => CheckResult | Promise<CheckResult>, seen: string[] = []) {
+  const sched = new Scheduler({
+    runner: h.runner,
+    home: h.home,
+    clock: h.clock,
+    log: nullLogger,
+    zone: () => 'UTC',
+    checksOn: () => true,
+    runCheck: async (p) => {
+      seen.push(p.command);
+      return result();
+    },
+  });
+  sched.start();
+  return sched;
+}
+
+const sentText = (h: ReturnType<typeof makeHarness>) => newThreads(h).map((t) => h.events(t.id).find((e) => e.type === 'user.message').text as string);
+
+test('scheduleChecks: what a check printed survives a restart that refuses the send', async () => {
+  const h = makeHarness();
+  const seen: string[] = [];
+  const result = onceCheck('fork: someone/threadbear 3 new commits');
+  const old = schedulerOn(h, result, seen);
+  const sc = await old.create({ text: 'Look at the forks', title: 'Watch Sentry', at: new Date(h.clock.now() + MIN).toISOString(), check: 'fork-watch' });
+  h.runner.refuseNewTurns('The runner is restarting; send again in a moment.');
+  h.clock.advance(MIN);
+  await tick(6);
+  assert.equal(seen.length, 1, 'the check ran');
+  assert.equal(newThreads(h).length, 0, 'the send was refused');
+  assert.equal(old.find(sc.id).lastRun, undefined, 'still due');
+  old.stop();
+
+  // The next runner sends what the check printed, without running it again.
+  h.runner.refusing = undefined;
+  const next = schedulerOn(h, result, seen);
+  h.clock.advance(MIN);
+  await tick(6);
+  assert.equal(seen.length, 1, 'not run again');
+  const [msg] = sentText(h);
+  assert.match(msg ?? '', /3 new commits/);
+  assert.equal(next.find(sc.id).lastRun?.outcome, 'sent');
+  next.stop();
+});
+
+test('scheduleChecks: what a check printed survives the runner stopping mid-check', async () => {
+  const h = makeHarness();
+  const seen: string[] = [];
+  let finish!: (r: CheckResult) => void;
+  const old = schedulerOn(h, () => new Promise<CheckResult>((r) => (finish = r)), seen);
+  const sc = await old.create({ text: 'Look at the forks', title: 'Watch Sentry', cron: '*/5 * * * *', check: 'fork-watch' });
+  h.clock.advance(5 * MIN);
+  await tick(6);
+  assert.equal(seen.length, 1, 'the check started');
+  old.stop();
+  finish({ ok: true, output: 'fork: someone/threadbear 3 new commits' });
+  await tick(6);
+  assert.equal(newThreads(h).length, 0);
+
+  const next = schedulerOn(h, () => ({ ok: true, output: '' }), seen);
+  h.clock.advance(MIN);
+  await tick(6);
+  assert.equal(seen.length, 1, 'not run again');
+  assert.match(sentText(h)[0] ?? '', /3 new commits/);
+  assert.equal(next.find(sc.id).runs, 1);
+  // Once sent it's gone: the next run asks the check again.
+  h.clock.advance(5 * MIN);
+  await tick(6);
+  assert.equal(seen.length, 2);
+  assert.equal(next.find(sc.id).lastRun?.outcome, 'skipped');
+  assert.equal(newThreads(h).length, 1);
+  next.stop();
+});
+
+test('scheduleChecks: kept output is for that check only, and Run now leaves it', async () => {
+  const h = makeHarness();
+  const seen: string[] = [];
+  const old = schedulerOn(h, onceCheck('old news'), seen);
+  const sc = await old.create({ text: 'Look', title: 'Watch Sentry', cron: '*/5 * * * *', check: 'fork-watch' });
+  h.runner.refuseNewTurns('The runner is restarting; send again in a moment.');
+  h.clock.advance(5 * MIN);
+  await tick(6);
+  h.runner.refusing = undefined;
+  // Run now doesn't run the check, so it doesn't use up what was kept.
+  await old.runNow(sc.id);
+  assert.doesNotMatch(sentText(h)[0], /old news/);
+  // While that thread is going the due run is skipped, and still keeps it.
+  h.clock.advance(MIN);
+  await tick(6);
+  assert.equal(newThreads(h).length, 1);
+  assert.equal(old.find(sc.id).lastRun?.outcome, 'skipped');
+  h.adapter.last.init();
+  h.adapter.last.result('completed');
+  h.clock.advance(5 * MIN);
+  await tick(6);
+  assert.equal(seen.length, 1);
+  assert.equal(sentText(h).filter((m) => /old news/.test(m)).length, 1);
+
+  // A changed check doesn't send what the old one printed.
+  h.runner.refuseNewTurns('The runner is restarting; send again in a moment.');
+  const again = schedulerOn(h, onceCheck('news from the old check'), seen);
+  old.stop();
+  h.clock.advance(5 * MIN);
+  await tick(6);
+  await again.update({ scheduleId: sc.id, check: 'fork-watch --all' });
+  again.stop();
+  h.runner.refusing = undefined;
+  const last = schedulerOn(h, () => ({ ok: true, output: 'from the new check' }), seen);
+  // The update planned it afresh, for its next five minutes.
+  h.clock.advance(5 * MIN);
+  await tick(6);
+  assert.equal(seen.at(-1), 'fork-watch --all');
+  assert.ok(sentText(h).some((m) => /from the new check/.test(m)));
+  assert.ok(!sentText(h).some((m) => /news from the old check/.test(m)));
+  last.stop();
+});

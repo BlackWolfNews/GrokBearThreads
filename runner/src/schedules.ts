@@ -12,7 +12,7 @@
 // disk for when the backend can't be reached), and sends only its own,
 // each run taken with a claim first so it's sent once.
 import { experimentOn } from './experiments.ts';
-import { checkOutcome, MAX_CHECK_CHARS, runCheck, type CheckResult } from './schedule-check.ts';
+import { checkOutcome, dropKeptCheck, keepCheck, MAX_CHECK_CHARS, readKeptCheck, runCheck, type CheckResult } from './schedule-check.ts';
 import { forbiddenText } from './sync.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -233,6 +233,7 @@ export class Scheduler {
       for (const s of [...this.items.values()]) {
         if (s.threadId !== n.params.threadId || !this.mine(s)) continue;
         this.items.delete(s.id);
+        this.dropKept(s.id);
         gone = true;
         if (this.mode === 'backend') void this.backend?.remove(s.id).catch((e) => this.log.warn('could not delete a schedule from the backend', { scheduleId: s.id, error: String(e) }));
       }
@@ -624,6 +625,7 @@ export class Scheduler {
       }
     }
     this.items.delete(rec.id);
+    this.dropKept(rec.id);
     this.changed();
     return {};
   }
@@ -690,7 +692,12 @@ export class Scheduler {
         this.checking.add(rec.id);
         void this.checked(rec).then((checked) => {
           this.checking.delete(rec.id);
-          if (this.stopped || !this.items.has(rec.id)) return;
+          // Stopped: what it printed is kept (checked), for the next runner.
+          if (this.stopped) return;
+          if (!this.items.has(rec.id)) {
+            this.dropKept(rec.id);
+            return;
+          }
           const res = this.send(rec, false, checked);
           if (res.outcome === 'retry') return;
           if (rec.at) this.finish(rec);
@@ -814,8 +821,31 @@ export class Scheduler {
         // A thread that's gone: send says so.
       }
     }
-    const r = await this.check({ command: rec.check, cwd, home: this.home, scheduleId: rec.id }).catch((e: unknown) => ({ ok: false as const, output: '', why: String(e) }));
-    return checkOutcome(r);
+    // What it printed last time and no run has carried yet (a restart
+    // refused the send, or the runner stopped mid-check): send that rather
+    // than asking again, as a check that keeps state won't print it twice.
+    const command = rec.check;
+    const kept = readKeptCheck(this.home, rec.id, command);
+    if (kept) return { extra: kept.extra };
+    const r = await this.check({ command, cwd, home: this.home, scheduleId: rec.id }).catch((e: unknown) => ({ ok: false as const, output: '', why: String(e) }));
+    const out = checkOutcome(r);
+    if ('extra' in out) {
+      try {
+        keepCheck(this.home, rec.id, { check: command, at: this.iso(), extra: out.extra });
+      } catch (e) {
+        this.log.warn("could not keep a schedule check's output", { scheduleId: rec.id, error: String(e) });
+      }
+    }
+    return out;
+  }
+
+  // A run carrying a check's output was sent, so it needn't be kept.
+  private dropKept(scheduleId: string): void {
+    try {
+      dropKeptCheck(this.home, scheduleId);
+    } catch (e) {
+      this.log.warn("could not clear a schedule check's kept output", { scheduleId, error: String(e) });
+    }
   }
 
   private send(rec: ScheduleRecord, manual: boolean, checked?: { skip: string } | { extra: string }): { outcome: 'sent' | 'skipped' | 'failed' | 'retry'; threadId?: string; turnId?: string; note?: string } {
@@ -824,6 +854,9 @@ export class Scheduler {
     const record = (outcome: 'sent' | 'skipped' | 'failed', threadId?: string, note?: string) => {
       rec.lastRun = { at, outcome, ...(threadId ? { threadId } : {}), ...(note ? { note } : {}) };
       if (outcome === 'sent') rec.runs += 1;
+      // Only a sent run has carried it. A skip (the last thread still
+      // going), a failure or a refused send keeps it for the next run.
+      if (outcome === 'sent' && checked && 'extra' in checked) this.dropKept(rec.id);
       this.log.info('schedule ran', { scheduleId: rec.id, outcome, threadId, note });
     };
     if (checked && 'skip' in checked) {

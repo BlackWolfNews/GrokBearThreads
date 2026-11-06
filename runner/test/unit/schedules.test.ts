@@ -541,6 +541,50 @@ test('a due run is claimed, so two runner processes under one id send it once', 
   now.stop();
 });
 
+test('a check\'s output survives a handover in the backend too, and is sent once by the next runner', async () => {
+  const h = makeHarness();
+  const b = fakeBackend(h.clock, [M5]);
+  // A check that keeps state: prints its news once.
+  const seen: string[] = [];
+  let told = false;
+  const runCheck = async (p: { command: string }) => {
+    seen.push(p.command);
+    if (told) return { ok: true as const, output: '' };
+    told = true;
+    return { ok: true as const, output: 'fork: 3 new commits' };
+  };
+  // Both releases share the runner's data dir, as in a real handover.
+  const make = () => {
+    const s = new Scheduler({ runner: h.runner, home: h.home, clock: h.clock, log: nullLogger, zone: () => 'UTC', self: M5, syncOn: true, checksOn: () => true, runCheck });
+    s.start();
+    return s;
+  };
+  const old = make();
+  await old.attach(b.for('m5-old', M5.id));
+  const sc = await old.create({ text: 'Look at the forks', title: 'Fork watch', at: iso(h.clock.now() + MIN), check: 'fork-watch' });
+  await tick();
+  h.runner.refuseNewTurns('The runner is restarting; send again in a moment.');
+  h.clock.advance(MIN);
+  for (let i = 0; i < 5; i++) await tick();
+  assert.equal(seen.length, 1, 'the check ran');
+  assert.equal(b.rows.get(sc.id)?.claim, undefined, 'the refused run let its claim go');
+  assert.equal(b.rows.get(sc.id)?.runs, 0);
+  old.stop();
+
+  h.runner.refusing = undefined;
+  const next = make();
+  await next.attach(b.for('m5-new', M5.id));
+  for (let i = 0; i < 5; i++) await tick();
+  h.clock.advance(MIN);
+  for (let i = 0; i < 5; i++) await tick();
+  assert.equal(seen.length, 1, 'not run again');
+  const t = h.runner.list(['inbox', 'snoozed', 'archived']).find((x) => x.title === 'Fork watch');
+  assert.ok(t, 'sent');
+  assert.match(h.events(t.id).find((e) => e.type === 'user.message').text, /3 new commits/);
+  assert.equal(b.rows.get(sc.id)?.runs, 1);
+  next.stop();
+});
+
 test('runners.list gives each runner\'s version, start and whether it\'s updating, for the Runners panel', async () => {
   const h = makeHarness();
   const bruce = { ...BRUCE, version: '0.4.0', release: 'r-abc', startedAt: '2026-11-05T01:00:00.000Z', draining: true };
