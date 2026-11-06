@@ -338,7 +338,7 @@ test('the poster speaks the deployment HTTP API and reports its errors', async (
 
 import { MESSAGE_CHARS, toMessageDoc, toolLine, inputSummary, WokeRows, WOKE_BY_API_VERSION, type Command, type MessageDoc } from '../../src/sync.ts';
 
-type Fake = { h: ReturnType<typeof makeHarness>; sync: ConvexSync; calls: Call[]; push: (value: unknown) => void; applied: string[] };
+type Fake = { h: ReturnType<typeof makeHarness>; sync: ConvexSync; calls: Call[]; push: (value: unknown) => void; applied: string[]; landed: Call[] };
 
 // A harness whose sync has lists, commands and a fake subscription; the
 // fake post answers messageHeads and takeCommand the way the deployment
@@ -346,12 +346,17 @@ type Fake = { h: ReturnType<typeof makeHarness>; sync: ConvexSync; calls: Call[]
 // What the fake deployment's photos were fetched from, across setupFull calls in a test.
 const downloads: string[] = [];
 
-function setupFull(opts: { heads?: { threadId: string; lastSeq: number }[]; taken?: Set<string>; failApply?: boolean | 'async'; log?: Logger; apiVersion?: number } = {}): Fake {
+function setupFull(opts: { heads?: { threadId: string; lastSeq: number }[]; taken?: Set<string>; failApply?: boolean | 'async'; log?: Logger; apiVersion?: number; hold?: (fn: string, args: Record<string, unknown>) => Promise<void> | undefined } = {}): Fake {
   const h = makeHarness();
   const calls: Call[] = [];
+  // In the order they finish, with hold() keeping some back.
+  const landed: Call[] = [];
   const taken = opts.taken ?? new Set<string>();
   const post = async (kind: 'mutation' | 'query', fn: string, args: Record<string, unknown>) => {
     calls.push({ kind, fn, args });
+    const held = opts.hold?.(fn, args);
+    if (held) await held;
+    landed.push({ kind, fn, args });
     if (fn === 'sync:messageHeads') return opts.heads ?? [];
     if (fn === 'sync:heartbeat' && opts.apiVersion !== undefined) return { apiVersion: opts.apiVersion };
     if (fn === 'sync:takeCommand') {
@@ -439,7 +444,7 @@ function setupFull(opts: { heads?: { threadId: string; lastSeq: number }[]; take
     subscriber,
     secretBox: h.runner.secrets,
   });
-  return { h, sync, calls, push: (v) => onUpdate?.(v), applied };
+  return { h, sync, calls, push: (v) => onUpdate?.(v), applied, landed };
 }
 
 const messagesSent = (calls: Call[]): MessageDoc[] => calls.filter((c) => c.fn === 'sync:appendMessages').flatMap((c) => c.args.messages as MessageDoc[]);
@@ -666,12 +671,98 @@ test('commands: each pending one is taken once, applied through the runner as fr
   const finishAt = calls.findIndex((c) => c.fn === 'sync:finishCommand' && c.args.commandId === 'c3');
   const rowAt = calls.findIndex((c) => c.fn === 'sync:upsertThreads' && (c.args.threads as { threadId: string }[]).some((r) => r.threadId === finished[2]!.resultThreadId));
   assert.ok(rowAt >= 0 && rowAt < finishAt, 'the new row is written before the command finishes');
+  // A share's row too (with its link, on a backend that takes one): the
+  // Mac that asked through the relay reads the link from it once it's done.
+  const shareTaken = calls.findIndex((c) => c.fn === 'sync:takeCommand' && c.args.commandId === 'c4');
+  const shareDone = calls.findIndex((c) => c.fn === 'sync:finishCommand' && c.args.commandId === 'c4');
+  const sharedRow = calls.findIndex((c, i) => i > shareTaken && c.fn === 'sync:upsertThreads' && (c.args.threads as { threadId: string }[]).some((r) => r.threadId === t.id));
+  assert.ok(sharedRow > shareTaken && sharedRow < shareDone, 'the shared row is written before the share finishes');
   // The message the phone sent is in the transcript, marked as from the phone.
   const ev = h.events(t.id).find((e: { type: string; text?: string }) => e.type === 'user.message' && e.text === 'from my phone') as { origin?: string };
   assert.equal(ev?.origin, 'phone');
   assert.equal(h.runner.get(t.id).archivedAt !== undefined, true);
   assert.equal(h.runner.get(t.id).share?.access, 'link');
   assert.deepEqual(sync.status().commands, { state: 'on', applied: 4, failed: 0 });
+});
+
+test("commands: a share's row waits for a flush under way, which took the row before it and would undo it", async () => {
+  // Stopping sharing wrote "off" at once while a flush held the row from
+  // before it ("link"), which landed after and made the link public again.
+  let release: (() => void) | undefined;
+  let holding = false;
+  const { h, sync, push, landed } = setupFull({
+    apiVersion: BACKEND_API_VERSION,
+    hold: (fn) => (holding && fn === 'sync:upsertThreads' && !release ? new Promise<void>((r) => (release = r)) : undefined),
+  });
+  sync.start();
+  await sync.flushNow();
+  const t = h.runner.create({ text: 'hello', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  h.runner.share(t.id, { access: 'link' });
+  await sync.flushNow();
+  holding = true;
+  h.runner.update({ threadId: t.id, title: 'Renamed' });
+  const flushing = sync.flushNow();
+  await tick();
+  assert.ok(release, 'the flush is writing the row as it was, still shared');
+  push([{ commandId: 'off', kind: 'share', threadId: t.id, args: { access: 'off' }, createdAt: 1 }]);
+  await tick(10);
+  release!();
+  await flushing;
+  await tick(10);
+  const rows = landed.filter((c) => c.fn === 'sync:upsertThreads').flatMap((c) => c.args.threads as { threadId: string; share?: { access: string } }[]).filter((r) => r.threadId === t.id);
+  assert.equal(rows.at(-1)?.share?.access, 'off', 'the last row written for it says off');
+});
+
+test("commands: two shares' rows written at once land in the order they were done", async () => {
+  // Sharing from one place, stopping from another: the first row stalled
+  // and landed after the second, leaving the link public.
+  let release: (() => void) | undefined;
+  let holding = false;
+  const { h, sync, push, landed } = setupFull({
+    apiVersion: BACKEND_API_VERSION,
+    hold: (fn) => (holding && fn === 'sync:upsertThreads' && !release ? new Promise<void>((r) => (release = r)) : undefined),
+  });
+  sync.start();
+  await sync.flushNow();
+  const t = h.runner.create({ text: 'hello', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  await sync.flushNow();
+  holding = true;
+  push([{ commandId: 'on', kind: 'share', threadId: t.id, args: { access: 'link' }, createdAt: 1 }]);
+  await tick(10);
+  assert.ok(release, "the share's row is on its way");
+  push([{ commandId: 'off', kind: 'share', threadId: t.id, args: { access: 'off' }, createdAt: 2 }]);
+  await tick(10);
+  release!();
+  await tick(10);
+  const rows = landed.filter((c) => c.fn === 'sync:upsertThreads').flatMap((c) => c.args.threads as { threadId: string; share?: { access: string } }[]).filter((r) => r.threadId === t.id);
+  assert.equal(rows.at(-1)?.share?.access, 'off');
+});
+
+test("commands: a share stopped while its row is on its way isn't lost", async () => {
+  // Off was the row sent before, so the stop looked like nothing new and
+  // was dropped; the shared row then landed and stayed.
+  let release: (() => void) | undefined;
+  let holding = false;
+  const { h, sync, push, landed } = setupFull({
+    apiVersion: BACKEND_API_VERSION,
+    hold: (fn) => (holding && fn === 'sync:upsertThreads' && !release ? new Promise<void>((r) => (release = r)) : undefined),
+  });
+  sync.start();
+  await sync.flushNow();
+  const t = h.runner.create({ text: 'hello', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  h.runner.share(t.id, { access: 'link' });
+  h.runner.share(t.id, { access: 'off' });
+  await sync.flushNow();
+  holding = true;
+  push([{ commandId: 'on', kind: 'share', threadId: t.id, args: { access: 'link' }, createdAt: 1 }]);
+  await tick(10);
+  assert.ok(release, "the share's row is on its way");
+  h.runner.share(t.id, { access: 'off' });
+  release!();
+  await tick(10);
+  await sync.flushNow();
+  const rows = landed.filter((c) => c.fn === 'sync:upsertThreads').flatMap((c) => c.args.threads as { threadId: string; share?: { access: string } }[]).filter((r) => r.threadId === t.id);
+  assert.equal(rows.at(-1)?.share?.access, 'off');
 });
 
 test('commands: the website pauses, resumes and runs a schedule, and nonsense fails with a note', async () => {

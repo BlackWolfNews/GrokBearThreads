@@ -1035,6 +1035,11 @@ export class ConvexSync {
   private backendApiVersion?: number;
   private lastFlushAt = -Infinity;
   private flushing = false;
+  // Threads rows are written one writer at a time (rowTurn): a flush's
+  // batches, taken before a change, landing after writeRowNow had written
+  // it, or two writeRowNows crossing, left the older row in Convex: a
+  // stopped share's link public again.
+  private rowQueue: Promise<void> = Promise.resolve();
   private full = true; // the first write after start covers everything, then prunes and backfills
   private backoffMs = 0;
   private retryAt?: number;
@@ -1728,18 +1733,35 @@ export class ConvexSync {
   // row still waiting for the next flush (SYNC_COALESCE_MS) reads to it as
   // a deleted thread. If this write fails, the next flush tries again.
   private async writeRowNow(threadId: string): Promise<void> {
+    const done = await this.rowTurn();
     try {
       this.mark(this.deps.runner.get(threadId), true);
       const doc = this.dirty.get(threadId);
       if (!doc) return;
       const row = forBackend(doc, this.backendApiVersion ?? 0, this.deps.clock.now());
+      // As a flush's batch is: a change while it's on its way is weighed
+      // against this row, not the one before, or one back to that (a share
+      // stopped again at once) was dropped as nothing new.
+      this.writing.set(threadId, digest(JSON.stringify(row)));
       await this.post('mutation', 'sync:upsertThreads', { key: this.deps.key, threads: [row] });
       this.recordSent(row);
       if (this.dirty.get(threadId) === doc) this.dirty.delete(threadId);
       this.written++;
     } catch (e) {
       this.deps.log.debug('new thread row not written yet', { threadId, error: String(e) });
+    } finally {
+      this.writing.delete(threadId);
+      done();
     }
+  }
+
+  /** Waits for the threads-row writer before this one; call what it returns when done (twice is fine). */
+  private async rowTurn(): Promise<() => void> {
+    const before = this.rowQueue;
+    let done!: () => void;
+    this.rowQueue = new Promise<void>((r) => (done = r));
+    await before;
+    return done;
   }
 
   // A thread just shared has its pictures looked for; one no longer shared
@@ -1931,6 +1953,8 @@ export class ConvexSync {
   private async flush(): Promise<void> {
     if (this.flushing || !this.running) return;
     this.flushing = true;
+    // Before taking the rows, so none is older than one writeRowNow wrote.
+    const rowsDone = await this.rowTurn();
     this.lastFlushAt = this.deps.clock.now();
     const docs = [...this.dirty.values()];
     // Not while settling: a thread the file says went may yet come across.
@@ -1963,6 +1987,7 @@ export class ConvexSync {
         }
         this.written += batch.length;
       }
+      rowsDone();
       if (this.removing.size) {
         const removed = [...this.removing];
         await this.post('mutation', 'sync:removeThreads', { key, threadIds: removed });
@@ -2058,6 +2083,7 @@ export class ConvexSync {
       }
     } finally {
       this.flushing = false;
+      rowsDone();
     }
     this.scheduleFlush();
   }
@@ -2968,6 +2994,9 @@ export class ConvexSync {
         // The website's Stop sharing, Share again and New link (API 8).
         if (a.access !== 'off' && a.access !== 'link') throw new Error('access is "off" or "link"');
         await host.share(needThread(), { access: a.access, ...(a.newLink === true ? { newLink: true } : {}) });
+        // Its row now, not with the next batch: the Mac that asked through
+        // the relay reads the link from it as soon as this is done.
+        await this.writeRowNow(needThread());
         return undefined;
       }
       case 'page': {

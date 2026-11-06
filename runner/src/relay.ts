@@ -42,6 +42,10 @@ const TAIL = 15;
 // How long a change made from here outranks the other runner's row in
 // replies (Relay.changed): the row catches up within seconds.
 const CHANGED_MS = 60_000;
+// Reading a shared thread's link from its row: an older runner writes the
+// row with its next batch rather than at once.
+const SHARE_READS = 5;
+const SHARE_READ_MS = 1000;
 // Hibernating until that runner restarts (runner.ts's UNTIL_RESTART, not
 // imported so this module doesn't load the whole runner).
 const UNTIL_RESTART = '9999-12-31T00:00:00.000Z';
@@ -81,6 +85,8 @@ export type RelayThreadRow = {
   asksSeq?: number;
   next?: string[];
   lastActivityAt?: string;
+  // Whether it's shared (the threads row's `share`; the sidebar's table has none).
+  share?: { access?: string; slug?: unknown };
 };
 
 // slot: the request's relay seq; the answer goes at slot + 1.
@@ -108,6 +114,8 @@ type Watch = {
   settleTimer?: TimerHandle;
   // When it was last read whole (load or refresh), so an events-then-subscribe doesn't read twice.
   readAt?: number;
+  // The share the app was last told of (noteRow), as JSON.
+  shareSaid?: string;
 };
 
 export type RelayEvent = { seq: number; ts: string; threadId: string; turnId?: string; type: string; [k: string]: unknown };
@@ -268,15 +276,7 @@ export class Relay {
    * the row, so an unread one is lastSeq 1 and lastSeenSeq 0.
    */
   private summary(threadId: string): Record<string, unknown> {
-    const now = this.deps.clock.now();
-    const row = this.find(threadId);
-    const t: Partial<RemoteThread> = { ...row };
-    const kept = this.changed.get(threadId);
-    for (const [k, c] of kept ?? []) {
-      if (now - c.at >= CHANGED_MS || (row && shows(k, row[k], c.value))) kept!.delete(k);
-      else (t as Record<string, unknown>)[k] = c.value;
-    }
-    if (kept && !kept.size) this.changed.delete(threadId);
+    const t = this.withChanges(threadId, this.find(threadId));
     const thread: Record<string, unknown> = {
       id: threadId,
       title: t.title ?? '',
@@ -296,6 +296,77 @@ export class Relay {
     if (t.lastActivityAt) thread.updatedAt = t.lastActivityAt;
     if (t.snoozedUntil === UNTIL_RESTART) thread.snoozedUntilRestart = true;
     return thread;
+  }
+
+  /** The row with the changes made from here that it doesn't show yet (`changed`). */
+  private withChanges<T extends Partial<RemoteThread>>(threadId: string, row: T | undefined): T {
+    const kept = this.changed.get(threadId);
+    if (!kept) return { ...row } as T;
+    const now = this.deps.clock.now();
+    const t: Record<string, unknown> = { ...row };
+    for (const [k, c] of kept) {
+      if (now - c.at >= CHANGED_MS || (row && shows(k, row[k], c.value))) kept.delete(k);
+      else t[k] = c.value;
+    }
+    if (!kept.size) this.changed.delete(threadId);
+    return t as T;
+  }
+
+  /**
+   * The sidebar's list of other runners' threads (remoteThreads.list and
+   * .updated) with the changes made from here on it, as the replies have
+   * them: a list sent because some other thread changed, before this one's
+   * row had caught up, put a thread just archived here back in the inbox.
+   */
+  overlay(remote: RemoteThreads): RemoteThreads {
+    if (!this.changed.size) return remote;
+    return { ...remote, threads: remote.threads.map((t) => (this.changed.has(t.threadId) ? this.withChanges(t.threadId, t) : t)) };
+  }
+
+  /** The thread's share as that runner's backend row has it: "people" (API 7) reads as off. */
+  private async shareOf(threadId: string): Promise<Share | undefined> {
+    const row = (await this.read('relay:remoteThread', { threadId })) as Pick<RelayThreadRow, 'share'> | null;
+    return toShare(row?.share);
+  }
+
+  /**
+   * A watched thread's share, said to the app as it changes there (the
+   * website's Stop sharing or New link), and on first reading the row if
+   * it's shared: the app keeps the last share it heard of through the
+   * sidebar's rows, which never have one, so without this it showed a
+   * dead link.
+   */
+  private noteShare(w: Watch): void {
+    if (!w.row) return;
+    const share = toShare(w.row.share);
+    const said = JSON.stringify(share ?? null);
+    if (said === w.shareSaid) return;
+    const first = w.shareSaid === undefined;
+    w.shareSaid = said;
+    if (first && !share) return;
+    this.deps.publish({ method: 'thread.updated', params: { thread: { ...this.summary(w.threadId), ...(share ? { share } : {}) } } } as unknown as Notification);
+  }
+
+  /** The share once the row shows it as asked, read a few times while the row catches up. */
+  private async sharedAs(w: Watch, access: 'off' | 'link', notSlug?: string): Promise<Share | undefined> {
+    for (let i = 0; ; i++) {
+      const share = await this.shareOf(w.threadId);
+      if (share && share.access === access && share.slug !== notSlug) {
+        // Said in this reply, so not again when the watch sees the row.
+        w.shareSaid = JSON.stringify(share);
+        return share;
+      }
+      // Off with no link ever made: nothing to show, and nothing to wait for.
+      if (access === 'off' && !share) return undefined;
+      if (i >= SHARE_READS - 1) break;
+      await new Promise<void>((r) => this.deps.clock.setTimeout(() => r(), SHARE_READ_MS));
+    }
+    // Not "done" without it: the app keeps the share it had, so an off it
+    // can't confirm would still show the link as on.
+    const name = this.runnerName(w.runnerId);
+    throw new RpcError(ErrorCode.other, access === 'link'
+      ? `${name} has shared it, but its link hasn't reached Convex yet. Open Share again in a moment.`
+      : `${name} has stopped sharing it, but Convex doesn't show that yet. Open Share again in a moment.`);
   }
 
   /** A change the other runner has done, for replies until its row shows it (`changed`). */
@@ -345,6 +416,7 @@ export class Relay {
   private noteRow(w: Watch, row: RelayThreadRow | null, live = false): void {
     const wasRunning = w.row ? RUNNING.has(w.row.status) : true;
     w.row = row;
+    this.noteShare(w);
     const running = row ? RUNNING.has(row.status) : true;
     // Ends its turn once its last messages have had a moment to arrive.
     if (!running && wasRunning && live) this.settle(w);
@@ -614,6 +686,7 @@ export class Relay {
       case 'threads.events':
         return this.page(w, { afterSeq: num(p.afterSeq), beforeSeq: num(p.beforeSeq), limit: num(p.limit) });
       case 'threads.subscribe': {
+        const said = w.shareSaid;
         await this.load(w);
         const after = num(p.afterSeq) ?? 0;
         // What's past the app's last seq, and anything that can come late
@@ -626,6 +699,13 @@ export class Relay {
         for (const e of events) w.given.add(e.seq);
         if (!w.given.size) w.given.add(after);
         this.live(w);
+        // An app subscribing may be new (relaunched) and not know the share
+        // the watch said before: said again, if it's shared (unless reading
+        // the row just now said it).
+        if (w.shareSaid === said) {
+          w.shareSaid = undefined;
+          this.noteShare(w);
+        }
         return { events, inProgress: [] };
       }
       case 'threads.send': {
@@ -705,12 +785,17 @@ export class Relay {
         return { thread: this.summary(threadId) };
       }
       case 'threads.share': {
-        // Turning a link on needs the link back, which the command doesn't
-        // give: it shared the thread, then the app said it had failed.
-        // Turning it off needs nothing back.
-        if (p.access !== 'off' || p.newLink === true) return this.unsupported(w, 'Sharing a link');
-        await this.command(w.runnerId, threadId, 'share', { access: 'off' }, { done: true });
-        return { thread: this.summary(threadId) };
+        const access = p.access;
+        if (access !== 'off' && access !== 'link') throw new RpcError(ErrorCode.badParams, 'access must be "off" or "link"');
+        const newLink = p.newLink === true;
+        // A new link is one whose slug isn't the old one.
+        const old = newLink ? (await this.shareOf(threadId))?.slug : undefined;
+        await this.command(w.runnerId, threadId, 'share', { access, ...(newLink ? { newLink: true } : {}) }, { done: true });
+        // The command says nothing back, and the app shows the link from
+        // the reply, so it's read from that runner's row, which it writes
+        // as soon as it has shared (sync.ts, the share command).
+        const share = await this.sharedAs(w, access, old);
+        return { thread: { ...this.summary(threadId), ...(share ? { share } : {}) } };
       }
       case 'threads.subagent':
         return this.unsupported(w, "Reading a sub-agent's work");
@@ -780,6 +865,14 @@ export class Relay {
     const recent = this.deps.remote().threads.filter((t) => t.runnerId === runnerId).sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt))[0];
     return { accounts, pools: [], defaults: { cwd: recent?.cwd ?? '', accountId: recent?.accountId ?? accounts[0]?.id ?? '', models: {}, efforts: {} } };
   }
+}
+
+type Share = { access: 'off' | 'link'; slug: string };
+
+// A threads row's share as the app takes it: "people" (API 7) reads as off.
+function toShare(s: RelayThreadRow['share']): Share | undefined {
+  if (!s || typeof s.slug !== 'string') return undefined;
+  return { access: s.access === 'link' ? 'link' : 'off', slug: s.slug };
 }
 
 // Whether the other runner's row already shows a change made from here:

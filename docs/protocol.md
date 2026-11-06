@@ -3578,8 +3578,21 @@ default).
   does: the thread's row, with each change made from here on it until the
   row shows it or for a minute at most (without them a markSeen answered
   after an archive would bring the thread back), seqs as the app makes them
-  for a row. `threads.share` only turns a link off (and answers `{ thread }`);
-  making one is `-32000`, as its command gives back no link to show. A runner the
+  for a row. `remoteThreads.list` and `remoteThreads.updated` carry those
+  same changes, so a list sent for another thread's change before this
+  row caught up doesn't bring an archived thread back. `threads.share`
+  answers `{ thread }` with its `share` read from that runner's row
+  (`relay:remoteThread`), which the runner writes as soon as a `share`
+  command is done; a new link is one whose slug isn't the old one. The row
+  is read up to five times a second apart, and a share (or an off) that
+  hasn't reached it by then is `-32000`. A runner writes its threads rows
+  one writer at a time (a flush's batches, taken before a change, or another
+  immediate write would otherwise land the old share over it). The table has
+  no `share`, so the app keeps a remote thread's last known one through its
+  rows, and the relay sends `thread.updated` (that summary, with `share`)
+  when a watched thread's row's share changes there, and on each
+  `threads.subscribe` if it's shared. The app ignores those with the direct
+  link on. A runner the
   list says is offline is `-32000` at once. Commands from here carry `from:
   "mac"`, so the other runner gives the message no `origin`.
 - **New threads there.** `threads.create` with `runnerId` is a `create`

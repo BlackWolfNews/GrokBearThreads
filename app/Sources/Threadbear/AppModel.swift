@@ -153,6 +153,14 @@ final class AppModel {
             for (id, thread) in threads where thread.runnerId == nil {
                 if let runnerId = oldValue[id]?.runnerId { threads[id]?.runnerId = runnerId }
             }
+            // Nor does the sidebar's table say if another runner's thread is
+            // shared (thread-index.ts leaves it out), so a link made here
+            // (the relay's threads.share reply) stays until a reply says
+            // otherwise. Once made, a share never goes back to none: off
+            // keeps its slug.
+            for (id, thread) in threads where thread.share == nil && thread.runnerId != nil {
+                if let share = oldValue[id]?.share { threads[id]?.share = share }
+            }
             // A thread read through Convex keeps the asks of the card it
             // shows, whatever summary is stored over it (the table's row,
             // a reply's): none of those carry them (withRelayCard).

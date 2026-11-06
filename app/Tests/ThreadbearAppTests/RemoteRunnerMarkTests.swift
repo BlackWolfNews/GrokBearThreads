@@ -29,6 +29,36 @@ final class RemoteRunnerMarkTests: XCTestCase {
         app.threads["t1"] = nil
         XCTAssertNil(app.threads["t1"])
     }
+
+    /// The sidebar's table never says if another runner's thread is shared,
+    /// so the link a share made from here stays through its refreshes
+    /// (and through replies that come without one, markSeen's, a rename's).
+    func testALinkMadeHereOutlivesTheTablesRowsAndReplies() {
+        let app = AppModel()
+        var remote = ThreadSummary(id: "t1", title: "On bruce", status: .idle)
+        remote.runnerId = "r-bruce"
+        remote.share = ThreadShare(access: .link, slug: "abc")
+        app.threads["t1"] = remote
+
+        var row = ThreadSummary(id: "t1", title: "On bruce", status: .running)
+        row.runnerId = "r-bruce"
+        app.threads["t1"] = row
+        XCTAssertEqual(app.threads["t1"]?.share, ThreadShare(access: .link, slug: "abc"))
+        XCTAssertEqual(app.threads["t1"]?.status, .running)
+
+        // A reply that says it's off now is taken.
+        var off = row
+        off.share = ThreadShare(access: .off, slug: "abc")
+        app.threads["t1"] = off
+        XCTAssertEqual(app.threads["t1"]?.share?.access, .off)
+
+        // This Mac's own threads go by what their runner says.
+        var local = ThreadSummary(id: "local", title: "Here", status: .idle)
+        local.share = ThreadShare(access: .link, slug: "xyz")
+        app.threads["local"] = local
+        app.threads["local"] = ThreadSummary(id: "local", title: "Here", status: .idle)
+        XCTAssertNil(app.threads["local"]?.share)
+    }
 }
 
 /// The composer's pickers on another runner's thread offer that runner's

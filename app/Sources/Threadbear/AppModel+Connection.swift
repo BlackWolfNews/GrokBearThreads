@@ -125,6 +125,11 @@ extension AppModel {
         for await notification in client.notifications {
             switch notification {
             case .threadUpdated(let thread):
+                // Another runner's thread from this Mac's runner is the
+                // relay's (a share changing there), a summary from the
+                // sidebar's table: on the direct link its own runner's
+                // fuller one is what counts, card and seqs and all.
+                if directRemoteLink, threads[thread.id]?.isRemote == true { break }
                 receive(thread)
             case .threadEvent(let threadId, let event):
                 sessions[threadId]?.receive(event)

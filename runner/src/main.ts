@@ -336,6 +336,8 @@ async function main(): Promise<void> {
   }
   const scrubber = new Scrubber({ secretsDir: paths.secrets(cfg.home), log });
   runner.secrets.onWritten = (value) => scrubber.known.add(value);
+  // Set once the relay is made, further down; sync's list goes through it.
+  let relayRef: Relay | undefined;
   const sync = new ConvexSync({
     config: { ...cfg.sync, runnerId: syncRunnerId, icon: runnerIcon },
     key: syncKey,
@@ -365,7 +367,9 @@ async function main(): Promise<void> {
     schedules: scheduler,
     pools: sharedPools,
     sharedUsage: usage,
-    publish: (n) => runner.publish(n),
+    // The sidebar's list carries what the relay has changed that the
+    // backend's rows don't show yet (relay.ts overlay); made below.
+    publish: (n) => runner.publish(n.method === 'remoteThreads.updated' && relayRef ? { ...n, params: relayRef.overlay(n.params) } : n),
     home: cfg.home,
     // A key the backend turns down (sync.ts KEY_REJECTED): said in the app,
     // and once tb runner add has written a new one, a restart onto it.
@@ -481,7 +485,7 @@ async function main(): Promise<void> {
   // tb updates (docs/protocol.md, "Mike's releases").
   methods['upstream.status'] = () => ({ upstream: upstream.status() });
   // Other runners' threads, for the Mac app's sidebar (step 6 part 2).
-  methods['remoteThreads.list'] = () => sync.remoteThreads();
+  methods['remoteThreads.list'] = () => relayRef?.overlay(sync.remoteThreads()) ?? sync.remoteThreads();
   // Every runner's machine figures, for the Mac app's Runners panel.
   methods['runners.stats'] = async () => ({ stats: await sync.runnerStats() });
   // A file here, for a Mac app showing one of this runner's threads from
@@ -491,14 +495,14 @@ async function main(): Promise<void> {
   const codexWarning = missingCodex(updates.codexBinary(), cfg);
   if (codexWarning) log.warn('codex CLI not found', { path: updates.codexBinary() });
   // Other runners' threads through the backend, for the Mac app (relay.ts).
-  const relay = new Relay({
+  const relay = (relayRef = new Relay({
     source: () => sync.relaySource(),
     remote: () => sync.remoteNow(),
     subscribed: (threadId) => rpcServer?.isSubscribed(threadId) ?? false,
     publish: (n) => rpcServer?.notifyClients(n),
     clock: realClock,
     log,
-  });
+  }));
   const server = (rpcServer = new RpcServer({
     host: cfg.host,
     port: cfg.port,
