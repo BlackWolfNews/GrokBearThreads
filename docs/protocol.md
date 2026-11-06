@@ -853,6 +853,7 @@ the summary and then the reply.
 | `panels.convexDeployments` | `{ threadId, panelId, refresh?: boolean }` | `{ deployments: { deployment, deploymentUrl, label }[], note?: string }`. The configured cloud deployment and the project's Development and Production deployments, resolved through the runner's own Convex CLI, run in the project's folder, with read-only queries of `process.env.CONVEX_CLOUD_URL`. Duplicate names are combined; `note` explains unavailable choices. Cached for one minute; `refresh` bypasses the cache. Makes no deploy keys and changes no project settings. `-32602` for a missing or non-cloud panel |
 | `panels.convexKey` | `{ threadId, panelId, deployment?: string, renew?: boolean }` | `{ deployment, deploymentUrl, adminKey }`, a deploy key for a panel with `convex`, for Convex's embedded dashboard. `deployment` defaults to the panel's configured deployment; any other name must be one returned by `panels.convexDeployments` for this panel's project. The runner makes it the first time (`convex deployment token create` in the project's folder, with the runner's own Convex CLI, so an older `convex` package in the project doesn't matter, on Mike's Convex CLI login) and keeps it in `secrets/convex-panels/<deployment>.json`; `renew` deletes that one from Convex and makes a fresh one. A kept key is first checked with the deployment's `/api/check_admin_key` (only at its own `<name>[.<region>].convex.cloud` address), and one Convex says no to (revoked) is replaced the same way; an unclear answer keeps it. Slow the first time. `-32602` for a panel the thread doesn't have or one without `convex`; `-32040` when the runner's Convex CLI isn't signed in (or its login expired), `-32041` when its login can't reach the deployment, otherwise `-32000` with the CLI's message, each in plain words |
 | `panels.convexLogin` | `{ threadId, panelId, check?: boolean, force?: boolean }` | `{ state: "idle" \| "waiting" \| "done" \| "failed", url?, code?, message? }`. Signs the runner's Convex CLI in (`convex login --no-open --login-flow poll`), for a panel that got `-32040` (or `-32041`, with `force`, to switch accounts). Answers once the CLI prints its device page: `url` to open in the browser on the Mac the person is at (any browser can approve it, so a remote runner's sign-in works from here), `code` what that page shows. A call while one is waiting joins it. `check` only reports: poll it until `done` (then the deployment list is fetched afresh) or `failed` (`message` says why, or that it wasn't approved within the code's five minutes) |
+| `threads.commands` | `{ threadId }` | `{ commands: SlashCommand[] }`: what the composer's picker offers for the thread (see Slash commands) |
 | `threads.highlights` | `{ threadId }` | `ThreadHighlights` (see Highlights): what the thread has made, shared and pinned, read from its events since the last call and kept with the thread |
 | `threads.explain` | `{ threadId, selection: string, message?: string, question?: string, earlier?: { question?: string, answer: string }[] }` | `{ answer: string, model: string }`. Explains words Mike selected in the transcript, on the small model (see Explain). `message` is the whole message they came from, as the app shows it; `earlier` and `question` are a follow-up. Writes nothing to the thread. `-32000` with the reason when no model answers |
 | `threads.hibernateWhen` | `{ threadId, said: string }` (at most 300 characters) | `{ thread: ThreadSummary, until?: string, topic?: string, why: string }`. Hibernates the thread until when Mike said, in his own words (see Hibernate in words). It's away at once, with `wakeWhen.pending`, and the answer comes once the model has worked out when. `-32000` with the reason when it can't say, and the thread is back in the inbox |
@@ -1629,6 +1630,57 @@ order.
 
 An older runner hands the agent the markers as words, with every picture
 before them; an older app shows them as words.
+
+## Slash commands
+
+A message whose text starts with `/<name>` (a letter, then letters,
+digits, `.`, `_`, `:` or `-`, then a space, a line break or nothing) is a
+slash command; `/Users/mike` isn't one. The text in `user.message` is what
+was typed, and the runner decides (`runner/src/slash-commands.ts`):
+
+- **Threadbear's own, both providers.** `/model [model]` and `/effort
+  [level|default]` are `threads.update` of the thread's model or effort,
+  so the change outlives the CLI. A model is matched by picker id, full
+  id or title (and for Claude, its aliases). With no argument, or one that
+  doesn't match, a `system.note` says what the thread is on and the
+  choices.
+- **Claude.** Everything else goes to the CLI as typed, which runs its own
+  commands and skills and answers the ones it can't ("isn't available in
+  this environment"). `/help`, `/rewind`, `/resume`, `/login`, `/logout`,
+  `/permissions`, `/exit` and `/quit` get a note on Threadbear's way
+  instead. `/clear` gets a note too; the CLI's new session id comes in its
+  next `init` and the runner follows it.
+- **Codex.** `/compact` is `thread/compact/start` and `/review [text]` is
+  `review/start` (`uncommittedChanges`, or `custom` with the text), each
+  a turn Codex reports as usual. `/<skill>` adds `{ type: "skill", name,
+  path }` (from `skills/list`) before the text. The runner answers
+  `/clear` and `/new` (a fresh native session from the next message),
+  `/status`, `/context`, `/cost` and `/usage` (model, effort, context and
+  the login's limits), and its terminal app's other commands (`/mcp`,
+  `/init`, `/diff`, ...) with a note. Others go to the model as words.
+
+A command the runner answers is a turn of its own with no CLI turn:
+`turn.started`, the `system.note`, `turn.completed` (outcome `completed`,
+no needs). Settings it changes don't get "applies from the next turn". A
+command sent during a turn waits in the queue rather than steering into
+it, and nothing goes in front of its text (the phone's line, project news
+wait for the next message).
+
+`threads.commands` lists what the picker shows: Threadbear's (`/model`,
+`/effort`, and Codex's mapped ones), then the CLI's for the thread's login
+and folder, with Claude's terminal-only ones left out. Claude's come from
+the live session's `supportedCommands()`, or a CLI started with no prompt
+in the folder (a second or two); Codex's are its `skills/list`. Cached for
+ten minutes per login and folder.
+
+```ts
+type SlashCommand = {
+  name: string;              // without the slash: "compact", "code-review"
+  description?: string;
+  argumentHint?: string;     // "[model]", "<file>"
+  source: 'threadbear' | 'cli' | 'skill';  // the CLI's own, or Mike's or the folder's
+};
+```
 
 ## Editing a message
 

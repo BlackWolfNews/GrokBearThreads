@@ -1041,3 +1041,58 @@ test('auto on Codex is as careful as ask, as Codex has no classifier', async () 
   assert.equal(req.params.sandbox, 'read-only');
   h.conn.respond(req.id, threadResult('th-1'));
 });
+
+// Slash commands (docs/protocol.md, "Slash commands"): the ones Codex's
+// terminal app runs become the app-server calls that do them.
+test('/compact is thread/compact/start, and its turn (id from turn/started) answers the message', async () => {
+  const h = await open();
+  await started(h);
+  h.session.send({ id: 'm1', text: '/compact', images: [] });
+  const req = await h.conn.request('thread/compact/start');
+  assert.deepEqual(req.params, { threadId: 'th-1' });
+  // Codex answers first, with no turn, then starts one.
+  h.conn.respond(req.id, {});
+  await sleep(20);
+  h.conn.notify('turn/started', { threadId: 'th-1', turn: { id: 'c1', rootTurnId: 'c1', status: 'inProgress' } });
+  await sleep(20);
+  complete(h, 'c1');
+  await waitFor(() => h.rec.results().length === 1);
+  assert.equal(h.rec.kinds().includes('cliTurn'), false);
+  assert.equal(h.rec.results()[0].answers, 'm1');
+  await h.session.end();
+});
+
+test('/review is review/start: the uncommitted changes, or what it says', async () => {
+  const h = await open();
+  await started(h);
+  h.session.send({ id: 'm1', text: '/review', images: [] });
+  let req = await h.conn.request('review/start');
+  assert.deepEqual(req.params, { threadId: 'th-1', target: { type: 'uncommittedChanges' }, delivery: 'inline' });
+  h.conn.respond(req.id, { turn: { id: 'r1', status: 'inProgress' }, reviewThreadId: 'th-1' });
+  h.conn.notify('turn/started', { threadId: 'th-1', turn: { id: 'r1', rootTurnId: 'r1', status: 'inProgress' } });
+  complete(h, 'r1');
+  await waitFor(() => h.rec.results().length === 1);
+  h.session.send({ id: 'm2', text: '/review the auth change', images: [] });
+  req = await h.conn.request('review/start');
+  assert.deepEqual(req.params.target, { type: 'custom', instructions: 'the auth change' });
+  await h.session.end();
+});
+
+test('/<skill> adds the skill to the turn; other commands and paths go as words', async () => {
+  const h = await open();
+  await started(h);
+  h.session.send({ id: 'm1', text: '/deslop the runner', images: [] });
+  const sk = await h.conn.request('skills/list');
+  h.conn.respond(sk.id, { data: [{ cwd: h.home, skills: [{ name: 'deslop', description: 'd', path: '/s/deslop/SKILL.md', enabled: true }] }] });
+  const req = await turnStarts(h, 'u1');
+  assert.deepEqual(req.params.input, [
+    { type: 'skill', name: 'deslop', path: '/s/deslop/SKILL.md' },
+    { type: 'text', text: '/deslop the runner', text_elements: [] },
+  ]);
+  complete(h, 'u1');
+  await waitFor(() => h.rec.results().length === 1);
+  h.session.send({ id: 'm2', text: '/Users/mike/x.md looks off', images: [] });
+  const words = await h.conn.request('turn/start');
+  assert.deepEqual(words.params.input, [{ type: 'text', text: '/Users/mike/x.md looks off', text_elements: [] }]);
+  await h.session.end();
+});

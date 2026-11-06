@@ -29,6 +29,7 @@ import { CodexApprovals } from './approvals.ts';
 import { CodexTools, dynamicToolSpecs, toolGuidance, type ToolDefinition } from './tools.ts';
 import { CodexNormalizer, limitsFromAccount } from './normalize.ts';
 import { placePictures } from '../../pictures.ts';
+import { parseCommand, type SlashCommand } from '../../slash-commands.ts';
 import type {
   CodexNormalizerLike,
   GetAccountRateLimitsResponse,
@@ -36,6 +37,7 @@ import type {
   ModelListResponse,
   RequestId,
   SandboxPolicy,
+  SkillsListResponse,
   ThreadResumeParams,
   ThreadStartParams,
   ThreadStartResponse,
@@ -144,6 +146,16 @@ export class CodexAdapter implements AgentAdapter {
       maxLineBytes: deps.maxLineBytes,
       timings: deps.timings,
     };
+  }
+
+  // The folder's skills, as the picker's commands (Codex's own commands
+  // are slash-commands.ts's list).
+  async commands(account: Account, cwd: string): Promise<SlashCommand[]> {
+    return withShortLivedProcess(
+      { ...this.shortLived(account, `commands:${account.id}`), cwd },
+      async (p) => codexSkillCommands(await p.request<SkillsListResponse>('skills/list', { cwds: [cwd] })),
+      (p, live) => this.track(p, live),
+    );
   }
 
   // model/list without hidden models, in Codex's order. With no thread
@@ -285,6 +297,26 @@ export function threadConfig(threadId: string): Record<string, unknown> {
     // chronicle..." (Mike has chronicle on).
     suppress_unstable_features_warning: true,
   };
+}
+
+function enabledSkills(r: SkillsListResponse | undefined) {
+  return (r?.data ?? []).flatMap((e) => e.skills ?? []).filter((s) => s.enabled !== false && typeof s.name === 'string' && s.name && typeof s.path === 'string');
+}
+
+export function skillMap(r: SkillsListResponse | undefined): Map<string, string> {
+  return new Map(enabledSkills(r).map((s) => [s.name!, s.path!]));
+}
+
+export function codexSkillCommands(r: SkillsListResponse | undefined): SlashCommand[] {
+  const seen = new Set<string>();
+  const out: SlashCommand[] = [];
+  for (const s of enabledSkills(r)) {
+    if (seen.has(s.name!)) continue;
+    seen.add(s.name!);
+    const description = s.shortDescription || s.description;
+    out.push({ name: s.name!, source: 'skill', ...(description ? { description } : {}) });
+  }
+  return out;
 }
 
 function inputItems(input: UserInput): UserInputItem[] {
@@ -821,9 +853,50 @@ export class CodexSession implements AgentSession {
     const params = this.turnParams(input);
     if (params.cwd) this.sentCwd = params.cwd;
     this.normalizer.startingTurn?.(input.id);
-    this.turnStart(params)
+    this.commandOrTurn(input, params)
       .then((res) => this.enqueue(() => this.turnStartAnswered(turn, res)))
       .catch((e: unknown) => this.enqueue(() => this.turnStartFailed(turn, e)));
+  }
+
+  // A slash command Codex's terminal app would run, as the app-server call
+  // that does it (docs/protocol.md, "Slash commands"). Each still runs as a
+  // turn: Codex sends turn/started and turn/completed for it. Anything else
+  // is a turn/start, with the skill a /<skill> names added to it.
+  private async commandOrTurn(input: UserInput, params: TurnStartParams): Promise<TurnStartResponse> {
+    const cmd = parseCommand(input.text);
+    if (!cmd || !this.threadId) return this.turnStart(params);
+    const name = cmd.name.toLowerCase();
+    if (name === 'compact') {
+      await this.proc.request('thread/compact/start', { threadId: this.threadId });
+      // No turn in the answer; turn/started brings its id (turnStarted).
+      return {} as TurnStartResponse;
+    }
+    if (name === 'review') {
+      const target = cmd.args ? { type: 'custom', instructions: cmd.args } : { type: 'uncommittedChanges' };
+      return this.proc.request<TurnStartResponse>('review/start', { threadId: this.threadId, target, delivery: 'inline' });
+    }
+    const skill = (await this.skillPaths()).get(cmd.name);
+    if (skill) params.input = [{ type: 'skill', name: cmd.name, path: skill }, ...params.input];
+    return this.turnStart(params);
+  }
+
+  // The folder's skills by name, asked for once per folder.
+  private skills?: { cwd: string; paths: Promise<Map<string, string>> };
+  private skillPaths(): Promise<Map<string, string>> {
+    if (this.skills?.cwd !== this.cwd) {
+      const paths = this.proc
+        .request<SkillsListResponse>('skills/list', { cwds: [this.cwd] }, 10_000)
+        .then((r) => skillMap(r))
+        .catch(() => new Map<string, string>());
+      this.skills = { cwd: this.cwd, paths };
+    }
+    return this.skills.paths;
+  }
+
+  async commands(): Promise<SlashCommand[]> {
+    if (this.state === 'closing' || this.state === 'closed') return [];
+    const r = await this.proc.request<SkillsListResponse>('skills/list', { cwds: [this.cwd] }, 10_000);
+    return codexSkillCommands(r);
   }
 
   // turn/start, retried on "is closing" (defensive, as for resume).
@@ -890,6 +963,10 @@ export class CodexSession implements AgentSession {
         // Our turn/start hasn't answered yet, but this is its turn.
         turn.codexTurnId = id;
         this.activate(turn);
+      } else if (turn && !turn.own && !turn.codexTurnId) {
+        // A /compact's: thread/compact/start answers with no turn id, and
+        // that answer comes first.
+        turn.codexTurnId = id;
       } else if (!turn) {
         // Codex started a turn by itself (a goal, background work).
         this.turn = this.newTurn({ ids: [], own: true, codexTurnId: id });

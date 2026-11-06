@@ -137,6 +137,8 @@ import { editingPart, type EditingPart } from './runner/editing.ts';
 import { patchesPart, type PatchesPart } from './runner/patches.ts';
 import { highlightsPart, type HighlightsPart } from './runner/highlights.ts';
 import { titlesPart, type TitlesPart } from './runner/titles.ts';
+import { commandsPart, type CommandsPart } from './runner/commands.ts';
+import type { SlashCommand } from './slash-commands.ts';
 import { hibernationPart, type HibernationPart } from './runner/hibernation.ts';
 import { newThreadsPart, type NewThreadsPart } from './runner/new-threads.ts';
 import { labReviewPart, type LabReviewPart } from './runner/lab-review.ts';
@@ -243,6 +245,13 @@ export type Turn = {
   turnId: string;
   startedAt: number;
   interruptRequested: boolean;
+  // A slash command the runner answered itself (runner/commands.ts): no
+  // CLI turn, and settings it changed apply from the next one.
+  local?: boolean;
+  // Started by a slash command the CLI runs. Its output (/cost's table,
+  // /model's usage line) isn't a reply asking anything: without an
+  // end_turn the turn leaves no card.
+  command?: boolean;
   // Opened by the runner for work the CLI started itself (a background
   // shell or async subagent finished, or a background subagent asked for
   // approval). There's no user.message.
@@ -537,7 +546,7 @@ export const UNTIL_RESTART = '9999-12-31T00:00:00.000Z';
 export const NO_WAKE_TIME = UNTIL_RESTART;
 
 // Parts of the Runner that live in runner/ (see each file's top).
-export interface Runner extends LabReviewPart, NewThreadsPart, HibernationPart, TitlesPart, HighlightsPart, PatchesPart, EditingPart, ClisPart, ReviewsPart, ApprovalsPart, ProjectsHostPart, StoppedWorkPart, HandoversPart, PoolsPart, NetworkPart, WorktreesPart {}
+export interface Runner extends LabReviewPart, NewThreadsPart, HibernationPart, TitlesPart, HighlightsPart, PatchesPart, EditingPart, ClisPart, ReviewsPart, ApprovalsPart, ProjectsHostPart, StoppedWorkPart, HandoversPart, PoolsPart, NetworkPart, WorktreesPart, CommandsPart {}
 export class Runner {
   // While main.ts is still starting up: waking a thread for its waits
   // (reconcileWaits) would start a CLI whose tools aren't ready, so they
@@ -551,6 +560,8 @@ export class Runner {
   adapters: Record<string, AgentAdapter>;
   accounts: AccountSource;
   usage?: UsageSink;
+  // Each login and folder's slash commands, for the picker (runner/commands.ts).
+  commandCache = new Map<string, { at: number; commands: SlashCommand[] }>();
   pickAccount: AccountPicker;
   clis?: CliControl;
   clock: Clock;
@@ -1362,7 +1373,10 @@ export class Runner {
         settleDeclined(pending, 'deny', WROTE_INSTEAD);
       }
     }
-    if (rt.turn && !opts.queue && this.canSteer(st)) {
+    // A slash command waits for the turn to end rather than going into it:
+    // a CLI runs one only as a message of its own, and the runner's own
+    // change settings for the next turn.
+    if (rt.turn && !opts.queue && this.canSteer(st) && !this.commandPlan(st, text)) {
       // Sent while a turn runs: it goes into that turn now, as typing into
       // the CLI would. The CLI takes it at its next step, or straight after
       // its reply if that was already finishing; either way the thread's
@@ -1504,7 +1518,17 @@ export class Runner {
     // Never two live CLIs on one session: wait for a releasing one to exit.
     while (rt.closing) await rt.closing;
     if (rt.turn?.turnId !== msg.turnId) return; // interrupted while waiting
-    let text = this.forAgent(msg);
+    if (this.runLocalCommand(st, msg)) return;
+    // A slash command reaches the CLI as typed: anything put in front of it
+    // (the phone's line, project news) would make it words to the model.
+    const command = this.commandPlan(st, msg.text);
+    if (command && rt.turn) rt.turn.command = true;
+    let text = command ? msg.text : this.forAgent(msg);
+    // Claude's CLI starts a new session for /clear, which the runner follows
+    // (its next init), but says nothing.
+    if (command && rec.provider === 'claude' && /^\/clear\b/i.test(msg.text.trim())) {
+      this.emit(st, { type: 'system.note', text: 'Cleared the conversation. The agent starts fresh from your next message; the transcript above stays here for you.' }, msg.turnId);
+    }
     if (!rt.session && rec.worktreePending) {
       await this.prepareWorktree(st, msg.turnId);
       if (rt.turn?.turnId !== msg.turnId) return; // interrupted during setup
@@ -1547,7 +1571,8 @@ export class Runner {
     }
     // Projects the session hasn't been told about: one it was put in while
     // live, or since it last ran. A fresh session got them as instructions.
-    const news = this.projectNews(rec);
+    // Kept for the next message when this one is a command.
+    const news = command ? undefined : this.projectNews(rec);
     if (news) text = `${news}\n\n${text}`;
     if (rec.moved) {
       // A CLI that moves folders itself: the live session got setCwd, or a
@@ -2409,7 +2434,7 @@ export class Runner {
     // Changes a CLI that applies settings from its next turn only (Codex)
     // can't take into a turn that's running; the thread says so.
     const nextTurn: string[] = [];
-    const sayNextTurn = () => Boolean(rt.turn) && Boolean(adapter?.settingsApplyNextTurn) && !release;
+    const sayNextTurn = () => Boolean(rt.turn) && !rt.turn?.local && Boolean(adapter?.settingsApplyNextTurn) && !release;
     if (cwdChanged && !accountChanged && !rec.handoff && adapter?.movesFolders) {
       // Same account on a CLI that moves folders itself: the same session
       // carries on in the new folder from its next turn, with no
@@ -3076,7 +3101,7 @@ export class Runner {
 
 // The Runner's other methods live in parts under runner/, one area each;
 // they go onto its prototype here, as the class's own methods would be.
-for (const part of [labReviewPart, newThreadsPart, hibernationPart, titlesPart, highlightsPart, patchesPart, editingPart, clisPart, reviewsPart, approvalsPart, projectsHostPart, stoppedWorkPart, handoversPart, poolsPart, networkPart, worktreesPart]) {
+for (const part of [labReviewPart, newThreadsPart, hibernationPart, titlesPart, highlightsPart, patchesPart, editingPart, clisPart, reviewsPart, approvalsPart, projectsHostPart, stoppedWorkPart, handoversPart, poolsPart, networkPart, worktreesPart, commandsPart]) {
   for (const [key, d] of Object.entries(Object.getOwnPropertyDescriptors(part))) {
     Object.defineProperty(Runner.prototype, key, { ...d, enumerable: false });
   }
@@ -3228,6 +3253,7 @@ function turnNeeds(turn: Turn): (Needs & { from: 'tool' | 'text' }) | undefined 
   const tool = turn.endTurn && needsFromTool(turn.endTurn);
   if (turn.replyNeeds) return { ...turn.replyNeeds, from: 'text' };
   if (tool) return { ...tool, from: 'tool' };
+  if (turn.command) return undefined;
   const text = turn.lastText && needsFromText(turn.lastText);
   return text ? { ...text, from: 'text' } : undefined;
 }

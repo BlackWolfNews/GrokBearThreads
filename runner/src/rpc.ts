@@ -61,6 +61,7 @@ const THREAD_METHODS = new Set([
   'threads.subscribe',
   'threads.markSeen',
   'threads.highlights',
+  'threads.commands',
   'threads.explain',
   'threads.hibernateWhen',
   'threads.removeHighlight',
@@ -623,6 +624,8 @@ export class RpcServer {
         }
         return r.explain({ threadId: reqString(p, 'threadId'), selection, message: p.message === undefined ? undefined : reqString(p, 'message'), question, earlier });
       }
+      case 'threads.commands':
+        return r.threadCommands(reqString(p, 'threadId'));
       case 'threads.hibernateWhen':
         return r.hibernateWhen({ threadId: reqString(p, 'threadId'), said: reqString(p, 'said') });
       case 'threads.removeHighlight':

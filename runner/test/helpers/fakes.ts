@@ -101,6 +101,8 @@ export class FakeAdapter implements AgentAdapter {
   slowExit = false;
   // Set by a test that wants the runner's model probe to find something.
   models?: (account: Account) => Promise<ModelChoice[]>;
+  // Set by a test of the composer's command picker.
+  commands?: (account: Account, cwd: string) => Promise<import('../../src/slash-commands.ts').SlashCommand[]>;
   archived: { accountId: string; nativeSessionId: string }[] = [];
   archive?: (account: Account, nativeSessionId: string) => Promise<void>;
   // Set by a test of editing a message; `rewound` keeps what it was asked.

@@ -2,6 +2,7 @@
 // turns, persistence and the protocol; an adapter only drives one CLI
 // process per live thread and reports normalised output. Claude and Codex
 // are the two implementations of AgentAdapter.
+import type { SlashCommand } from '../slash-commands.ts';
 import type {
   Account,
   BackgroundKind,
@@ -191,6 +192,9 @@ export interface AgentSession {
   // Moves the session to another folder from its next turn, in the same
   // native session. Only on adapters with movesFolders.
   setCwd?(cwd: string): Promise<void>;
+  // The slash commands this session's CLI offers (skills included), for
+  // the composer's picker.
+  commands?(): Promise<SlashCommand[]>;
   // Ends the input so the CLI finishes and exits. Resolves once it has.
   // With hard set it stops the CLI straight away instead (background work
   // it is waiting for would otherwise keep it alive).
@@ -236,6 +240,9 @@ export interface AgentAdapter {
   // What the account's CLI offers as models, without starting a turn.
   // Optional: a provider without a picker leaves it out.
   models?(account: Account): Promise<ModelChoice[]>;
+  // The slash commands the account's CLI offers in a folder (skills
+  // included), without starting a turn, for the composer's picker.
+  commands?(account: Account, cwd: string): Promise<SlashCommand[]>;
   // A same-account folder change calls setCwd on a live session, or passes
   // the folder to the next start or resume, instead of copying the
   // transcript and adding a handoff (Codex).

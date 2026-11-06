@@ -56,7 +56,11 @@ export type Turn = {
 
 export type UserInputItem =
   | { type: 'text'; text: string; text_elements: unknown[] }
-  | { type: 'localImage'; path: string };
+  | { type: 'localImage'; path: string }
+  | { type: 'skill'; name: string; path: string };
+
+// skills/list (only the fields the runner reads).
+export type SkillsListResponse = { data?: { cwd?: string; skills?: { name?: string; description?: string; shortDescription?: string; path?: string; enabled?: boolean }[] }[] };
 
 export type DynamicToolFunctionSpec = { type: 'function'; name: string; description: string; inputSchema: unknown };
 export type DynamicToolSpec = { type: 'namespace'; name: string; description: string; tools: DynamicToolFunctionSpec[] };

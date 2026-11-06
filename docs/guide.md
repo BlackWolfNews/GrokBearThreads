@@ -340,6 +340,26 @@ of its files yourself since, that file may be left as it is, and the line
 says so. A message you sent while the agent was working went into that
 turn, so edit the message that started it instead.
 
+### Slash commands
+
+A message that starts with a command, like `/compact`, runs it rather
+than going to the agent as words. In a Claude thread Claude Code runs its
+own commands and your skills (`/compact`, `/context`, `/cost`, `/clear`,
+`/code-review`). A Codex thread runs `/compact`, `/review` (the
+uncommitted changes, or what you write after it), `/clear` or `/new`,
+`/status`, and `/` with the name of one of your Codex skills.
+
+Two are Threadbear's own, on both: `/model` and `/effort` change the
+thread's model and effort level, the same as the menus under the message
+box, so the change sticks. On their own they say what the thread is on and
+what you can pick. `/clear` starts the agent on a fresh session; the
+transcript above stays for you to read.
+
+A command waits for a running turn to finish rather than going into it.
+Commands that only make sense in a CLI's terminal (`/resume`, `/rewind`,
+`/login`) get a line saying how to do that here. Anything else starting
+with a slash, such as a file path, goes to the agent as words.
+
 ## Hibernate and archive
 <!-- slug: hibernate-and-archive -->
 

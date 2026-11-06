@@ -7,6 +7,7 @@ import { isEffortLevel } from '../../protocol.ts';
 import fs from 'node:fs';
 import type { AgentAdapter, AgentSession, RewindRequest, RewindResult, SessionSink, StartSessionOptions, UserInput } from '../types.ts';
 import { RewindRefusedError } from '../types.ts';
+import type { SlashCommand } from '../../slash-commands.ts';
 import { cutPointBefore, sessionTranscriptPath } from '../../transcripts.ts';
 import type { Logger } from '../../log.ts';
 import { ClaudeNormalizer, fileContext } from './normalize.ts';
@@ -150,6 +151,36 @@ export class ClaudeAdapter implements AgentAdapter {
     try {
       const init = await q.initializationResult();
       return modelChoices(init.models ?? []);
+    } finally {
+      try {
+        q.close();
+      } catch {
+        // already closed
+      }
+      abort.abort();
+    }
+  }
+
+  // The slash commands the CLI offers in a folder (its built-in ones, the
+  // folder's and Mike's commands and skills), for the picker. Like
+  // models(): a CLI with no prompt answers initialize without a turn.
+  async commands(account: Account, cwd: string): Promise<SlashCommand[]> {
+    const { deps } = this;
+    const never = { async *[Symbol.asyncIterator]() { await new Promise<never>(() => {}); } } as AsyncIterable<SDKUserMessage>;
+    const abort = new AbortController();
+    const options: Options = {
+      cwd,
+      pathToClaudeCodeExecutable: deps.claudePath,
+      env: cliEnv(account),
+      settingSources: ['user', 'project', 'local'],
+      tools: [],
+      abortController: abort,
+      spawnClaudeCodeProcess: groupSpawner(deps.registry, deps.log, () => {}, `commands:${account.id}`),
+    };
+    const queryFn = deps.queryFn ?? sdkQuery;
+    const q = queryFn({ prompt: never, options });
+    try {
+      return claudeCommands(await q.supportedCommands());
     } finally {
       try {
         q.close();
@@ -579,6 +610,11 @@ class ClaudeSession implements AgentSession {
     await (this.q.interrupt as (opts?: { cancelQueued?: boolean }) => Promise<unknown>)({ cancelQueued: true });
   }
 
+  async commands(): Promise<SlashCommand[]> {
+    if (this.exited) return [];
+    return claudeCommands(await this.q.supportedCommands());
+  }
+
   async setModel(model: string | undefined): Promise<void> {
     if (this.exited) return;
     await this.q.setModel(model);
@@ -621,6 +657,23 @@ class ClaudeSession implements AgentSession {
     }
     this.abort.abort();
   }
+}
+
+// The SDK's list, as the picker's. Claude Code's own are marked builtin;
+// the rest are Mike's or the folder's commands and skills. Rows can share
+// a name, and a builtin one is what /name runs, so that one is kept.
+export function claudeCommands(list: { name: string; description?: string; argumentHint?: string; builtin?: boolean }[]): SlashCommand[] {
+  const byName = new Map<string, SlashCommand>();
+  for (const c of list) {
+    if (typeof c?.name !== 'string' || !c.name) continue;
+    const name = c.name.replace(/^\//, '');
+    if (byName.get(name)?.source === 'cli') continue;
+    const out: SlashCommand = { name, source: c.builtin ? 'cli' : 'skill' };
+    if (c.description) out.description = c.description;
+    if (c.argumentHint) out.argumentHint = c.argumentHint;
+    byName.set(name, out);
+  }
+  return [...byName.values()];
 }
 
 // "Always allow" keeps the CLI's suggested allow rules for this thread
