@@ -31,6 +31,7 @@ import type { PanelPlace } from './protocol.ts';
 import { readRelease, type ReleaseJson } from './release.ts';
 import { userLine } from './user-name.ts';
 import type { ConvexSync } from './sync.ts';
+import type { RemoteThread, RemoteThreads } from './thread-index.ts';
 import { POCKET_ICONS } from './pocket-icons.ts';
 import type { SecretAnswer, SecretRequest } from './runner/approvals.ts';
 import { SECRET_TIMEOUT_DEFAULT_MIN, SECRET_TIMEOUT_MAX_MIN } from './secrets.ts';
@@ -60,6 +61,17 @@ export type AppRestartControl = Pick<AppRestarts, 'watch' | 'isWatching'>;
 
 // The phone's Pocket, in the Convex backend (sync.ts).
 export type PocketControl = Pick<ConvexSync, 'savePocketCard' | 'removePocketCard' | 'pocketCards'>;
+
+// Other runners' threads, through the backend (relay.ts, docs/protocol.md
+// "Other runners' threads through the backend"): the Mac's sidebar lists
+// them, so an agent's list_threads, read_thread and send_message reach them
+// too. `list` is the sidebar's list (empty on a runner key, which the
+// backend won't show the others' threads); `call` is a thread method
+// answered from the backend, as the app's are.
+export type RemoteControl = {
+  list: () => Promise<RemoteThreads>;
+  call: (threadId: string, method: string, params: Record<string, unknown>) => Promise<unknown>;
+};
 
 export type ScheduleControl = Async<Scheduler, 'create' | 'list' | 'find' | 'update' | 'delete'>;
 
@@ -177,6 +189,7 @@ export function buildThreadbearTools(
     // tools take a `check` only while it's on, so agents elsewhere aren't
     // handed an argument that does nothing.
     scheduleChecks?: () => boolean;
+    remote?: () => RemoteControl | undefined;
   } = {},
 ) {
   const codex = opts.provider === 'codex';
@@ -223,13 +236,38 @@ export function buildThreadbearTools(
     return r.landed ? r : { landed: false, replied: true };
   };
 
-  // Full ids, or any unique prefix of one (the list shows 8 characters).
+  // Other runners' threads, as the sidebar has them (RemoteControl). A
+  // failure there leaves them out rather than failing the local list.
+  const others = async (): Promise<RemoteThreads> => {
+    const r = opts.remote?.();
+    if (!r) return { runners: [], threads: [] };
+    try {
+      return await r.list();
+    } catch {
+      return { runners: [], threads: [] };
+    }
+  };
+  const runnerName = (rt: RemoteThreads, id: string): string => rt.runners.find((r) => r.id === id)?.name ?? 'another runner';
+
+  // Full ids, or any unique prefix of one (the list shows 8 characters),
+  // here or on another runner. `other` is set for another runner's thread.
+  const find = async (id: string): Promise<{ id: string; other?: { t: RemoteThread; runner: string } }> => {
+    const hits = (await all()).filter((t) => t.id === id || t.id.startsWith(id));
+    const rt = await others();
+    const far = rt.threads.filter((t) => (t.threadId === id || t.threadId.startsWith(id)) && !hits.some((h) => h.id === t.threadId));
+    if (hits.length + far.length > 1) throw new Error(`${id} matches ${hits.length + far.length} threads; use more of the id.`);
+    if (hits.length === 1) return { id: hits[0].id };
+    if (far.length === 1) return { id: far[0].threadId, other: { t: far[0], runner: runnerName(rt, far[0].runnerId) } };
+    throw new Error(`No thread with id ${id}. list_threads shows them.`);
+  };
+
+  // This runner's threads only: the tools that change a thread's settings,
+  // folder or account can't reach another runner's.
   const resolve = async (id: string | undefined): Promise<string> => {
     if (!id) return selfId;
-    const hits = (await all()).filter((t) => t.id === id || t.id.startsWith(id));
-    if (hits.length === 1) return hits[0].id;
-    if (hits.length === 0) throw new Error(`No thread with id ${id}. list_threads shows them.`);
-    throw new Error(`${id} matches ${hits.length} threads; use more of the id.`);
+    const hit = await find(id);
+    if (hit.other) throw new Error(`"${hit.other.t.title}" runs on ${hit.other.runner}, so this can't change it from here. read_thread and send_message reach it; do the rest in a thread on ${hit.other.runner}.`);
+    return hit.id;
   };
 
   const resolveOther = async (id: string | undefined): Promise<string> => {
@@ -339,6 +377,29 @@ export function buildThreadbearTools(
     const flags = [t.status, where, t.needsYou ? 'needs the user' : '', t.id === selfId ? 'this thread' : ''].filter(Boolean).join(', ');
     return `${t.id.slice(0, 8)}  ${t.title}  [${flags}]  ${t.cwd}  ${t.accountId}  ${relativeTime(t.lastActivityAt, now())}`;
   };
+
+  const remoteWhere = (t: RemoteThread): string =>
+    t.archivedAt ? 'archived' : t.snoozedUntil && Date.parse(t.snoozedUntil) > now() ? 'snoozed' : 'inbox';
+  const remoteLine = (t: RemoteThread, runner: string): string => {
+    const where = remoteWhere(t) === 'snoozed' ? `snoozed until ${t.snoozedUntil}` : remoteWhere(t);
+    const flags = [t.status, where, t.needsYou ? 'needs the user' : '', `on ${runner}`].filter(Boolean).join(', ');
+    return `${t.threadId.slice(0, 8)}  ${t.title}  [${flags}]  ${t.cwd}  ${t.accountId}  ${relativeTime(t.lastActivityAt, now())}`;
+  };
+  const describeRemote = (t: RemoteThread, runner: string): string =>
+    [
+      `id: ${t.threadId}`,
+      `title: ${t.title}`,
+      `runner: ${runner} (read through Convex: messages and one line per tool call; tool output stays on that runner)`,
+      `status: ${t.status}${t.needsYou ? ' (needs the user)' : ''}`,
+      `folder: ${t.cwd} (on ${runner})`,
+      `account: ${t.accountId} (${t.provider === 'codex' ? 'Codex' : 'Claude'})`,
+      `model: ${t.model ?? 'default'}`,
+      t.snoozedUntil ? `snoozed until: ${t.snoozedUntil}` : '',
+      t.archivedAt ? `archived: ${t.archivedAt}` : '',
+      `last activity: ${relativeTime(t.lastActivityAt, now())}`,
+    ]
+      .filter(Boolean)
+      .join('\n');
 
   const describe = (t: ThreadSummary): string =>
     [
@@ -1221,15 +1282,29 @@ export function buildThreadbearTools(
     ...(projects ? projectTools : []),
     tool(
       'list_threads',
-      "Lists Threadbear threads, newest activity first: short id, title, status, folder, account. By default the inbox; include snoozed and archived ones to see everything. With a query, searches titles and previews across all threads.",
+      "Lists Threadbear threads, newest activity first: short id, title, status, folder, account; another runner's say which. By default the inbox; include snoozed and archived ones to see everything. With a query, searches titles and previews across all threads.",
       {
         include: z.array(z.enum(['inbox', 'snoozed', 'archived'])).optional().describe('Which lists to include. Default ["inbox"].'),
         query: z.string().optional().describe('Words to search for in titles and previews, across every list.'),
         limit: z.number().int().min(1).max(200).optional().describe('Most threads to return. Default 30.'),
       },
       handle(async ({ include, query, limit }) => {
-        const threads = query ? await control.search(query, limit ?? 30) : (await control.list(include ?? ['inbox'])).slice(0, limit ?? 30);
-        return threads.length ? threads.map(line).join('\n') : 'No threads.';
+        const max = limit ?? 30;
+        const here = query ? await control.search(query, max) : await control.list(include ?? ['inbox']);
+        // Another runner's, matched as the runner's own search and lists
+        // match (runner.ts search, bucket), merged in by last activity.
+        const rt = await others();
+        const words = (query ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+        const want = new Set(include ?? ['inbox']);
+        const known = new Set(here.map((t) => t.id));
+        const far = rt.threads.filter((t) => !known.has(t.threadId) && (query ? words.every((w) => `${t.title}\n${t.preview}`.toLowerCase().includes(w)) : want.has(remoteWhere(t))));
+        const rows = [
+          ...here.map((t) => ({ at: t.lastActivityAt, text: line(t) })),
+          ...far.map((t) => ({ at: t.lastActivityAt, text: remoteLine(t, runnerName(rt, t.runnerId)) })),
+        ]
+          .sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0))
+          .slice(0, max);
+        return rows.length ? rows.map((r) => r.text).join('\n') : 'No threads.';
       }),
     ),
     tool(
@@ -1240,8 +1315,22 @@ export function buildThreadbearTools(
         messages: z.number().int().min(1).max(100).optional().describe('How many recent messages. Default 10.'),
       },
       handle(async ({ threadId, id: alias, messages }) => {
-        const id = await resolve(threadId ?? alias);
-        const t = await control.get(id);
+        const asked = threadId ?? alias;
+        const hit = asked ? await find(asked) : { id: selfId };
+        const id = hit.id;
+        const far = hit.other;
+        const remote = opts.remote?.();
+        // Another runner's thread pages through the backend, in relay seqs
+        // (relay.ts), and says when there's nothing older.
+        const pageOf = async (beforeSeq: number | undefined): Promise<{ events: PersistedEvent[]; firstSeq: number; atStart: boolean }> => {
+          if (far && remote) {
+            const p = (await remote.call(id, 'threads.events', { ...(beforeSeq !== undefined ? { beforeSeq } : {}), limit: 500 })) as { events: PersistedEvent[]; firstSeq: number; relay?: { atStart?: boolean } };
+            return { events: p.events, firstSeq: p.firstSeq, atStart: p.relay?.atStart === true };
+          }
+          const p = await control.events(id, { beforeSeq, limit: 500 });
+          return { events: p.events as PersistedEvent[], firstSeq: p.firstSeq, atStart: p.firstSeq <= 1 };
+        };
+        const head = far ? describeRemote(far.t, far.runner) : describe(await control.get(id));
         const want = messages ?? 10;
         const picked: string[] = [];
         // What edits cut out (docs/protocol.md, "Editing a message"). Each
@@ -1254,8 +1343,8 @@ export function buildThreadbearTools(
         const texts = new Set<string>();
         // Walk back a page at a time until there are enough messages.
         for (let pages = 0; pages < 20 && picked.length < want; pages++) {
-          const page = await control.events(id, { beforeSeq: before, limit: 500 });
-          const evs = page.events as PersistedEvent[];
+          const page = await pageOf(before);
+          const evs = page.events;
           for (const e of [...evs].reverse()) {
             if (picked.length >= want) break;
             if (e.type === 'thread.rewound') cuts.push({ from: e.fromSeq, to: e.toSeq });
@@ -1269,10 +1358,10 @@ export function buildThreadbearTools(
               picked.push(`Agent (${e.ts}):\n${clip(e.text)}`);
             }
           }
-          if (!evs.length || page.firstSeq <= 1) break;
+          if (!evs.length || page.atStart || (before !== undefined && page.firstSeq >= before)) break;
           before = page.firstSeq;
         }
-        return `${describe(t)}\n\n${picked.reverse().join('\n\n') || '(no messages yet)'}`;
+        return `${head}\n\n${picked.reverse().join('\n\n') || '(no messages yet)'}`;
       }),
       { annotations: { readOnlyHint: true } },
     ),
@@ -1344,9 +1433,20 @@ export function buildThreadbearTools(
         text: z.string().min(1),
       },
       handle(async ({ threadId, id: alias, text }, extra) => {
-        const id = await resolveOther(threadId ?? alias);
+        const asked = threadId ?? alias;
+        if (!asked) throw new Error('threadId is required. list_threads shows the ids.');
+        const hit = await find(asked);
+        const id = hit.id;
         if (id === selfId) throw new Error("That's this thread. Just carry on here.");
+        // Another runner's thread counts as full access (modeOf), so a
+        // restricted caller is asked first there too.
         await confirm('send_message', await sendReason(id, await restricted()), { threadId: id, text }, extra?.signal);
+        const remote = opts.remote?.();
+        if (hit.other && remote) {
+          // A send command for that runner, as the Mac app's (relay.ts).
+          await remote.call(id, 'threads.send', { threadId: id, text: (await from()) + text });
+          return `Sent to ${id.slice(0, 8)} "${hit.other.t.title}" on ${hit.other.runner}.`;
+        }
         await control.send(id, (await from()) + text);
         return `Sent to ${id.slice(0, 8)} "${(await control.get(id)).title}".`;
       }),
@@ -1561,13 +1661,13 @@ export function serverInstructions(selfId: string, o: { one: boolean; bulletRepl
   );
 }
 
-export function threadbearMcpServer(control: ThreadControl, selfId: string, schedules?: ScheduleControl, projects?: ProjectControl, appRestarts?: AppRestartControl, bulletReplies: () => boolean = () => true, pocket?: () => PocketControl | undefined, oneReply: () => boolean = () => false, gateway?: () => string | undefined, gatewayHealth?: () => Promise<ConnectorService[] | undefined>, scheduleChecks?: () => boolean): McpSdkServerConfigWithInstance {
+export function threadbearMcpServer(control: ThreadControl, selfId: string, schedules?: ScheduleControl, projects?: ProjectControl, appRestarts?: AppRestartControl, bulletReplies: () => boolean = () => true, pocket?: () => PocketControl | undefined, oneReply: () => boolean = () => false, gateway?: () => string | undefined, gatewayHealth?: () => Promise<ConnectorService[] | undefined>, scheduleChecks?: () => boolean, remote?: () => RemoteControl | undefined): McpSdkServerConfigWithInstance {
   const one = oneReply();
   const server = createSdkMcpServer({
     name: SERVER_NAME,
     version: RUNNER_VERSION,
     instructions: serverInstructions(selfId, { one, bulletReplies: bulletReplies(), pocket: Boolean(pocket?.()), projects: Boolean(projects) }),
-    tools: buildThreadbearTools(control, selfId, Date.now, schedules, projects, appRestarts, { bulletReplies, pocket, oneReply: () => one, gateway, gatewayHealth, scheduleChecks }),
+    tools: buildThreadbearTools(control, selfId, Date.now, schedules, projects, appRestarts, { bulletReplies, pocket, oneReply: () => one, gateway, gatewayHealth, scheduleChecks, remote }),
   });
   server.tools = [...ALWAYS_ASK_TOOLS].map((name) => ({ name: name.split('__').at(-1)!, permission_policy: 'always_ask' as const }));
   return server;

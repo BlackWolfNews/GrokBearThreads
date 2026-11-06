@@ -4476,6 +4476,21 @@ caller starts or schedules gets the caller's mode, not `full`. Denied or
 expired, nothing changes and the tool says so; a message from Mike declines
 it. Lowering a mode never asks, and a `full` thread is never asked. There's no tool for restarting the runner: that's `runner.restart`.
 
+Other runners' threads, as the Mac's sidebar has them (`remoteThreads.list`),
+reach the tools through the relay (see "Other runners' threads through the
+backend"), so only on the owner key: `list_threads` lists and searches them
+with this runner's (the same lists and the same word match on title and
+preview), each row's flags ending `on <runner name>`; `read_thread` reads
+one's messages from `threads.events` in relay seqs (its settings say the
+runner, and tool output stays there); `send_message` sends with
+`threads.send`. A thread id or prefix is looked for in both, and one that
+fits threads in both is refused like any other. The tools that change a
+thread here (`update_thread`, `move_thread`, `interrupt_thread`,
+`delete_thread`) say it's on that runner rather than that it's missing. A
+runner that hasn't heard the list yet (no app connected since it started)
+starts the watch and waits up to 3 seconds for it. With sync off, a runner
+key, or the backend failing, they see this runner's threads only.
+
 | Variable | Value |
 |---|---|
 | `THREADBEAR_THREAD_ID` | the id of the thread the CLI belongs to |
