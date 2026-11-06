@@ -673,10 +673,10 @@ struct LocalPagePreview: View {
         VStack(spacing: 0) {
             if scripted == true {
                 HStack(spacing: zoomed(8)) {
-                    Text("Scripts are off in this preview, so parts of the page may be empty.")
+                    Text("Scripts don't run here, so parts may be blank.")
                         .font(.system(size: TypeScale.small))
                         .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 0)
                     Button("Open in Browser") { app.openExternally(url) }
                         .controlSize(.small)
@@ -691,10 +691,7 @@ struct LocalPagePreview: View {
         .task(id: "\(url) \(opened)") {
             let path = url.path
             scripted = await Task.detached(priority: .utility) {
-                let handle = FileHandle(forReadingAtPath: path)
-                defer { try? handle?.close() }
-                let data = (try? handle?.read(upToCount: LocalPreviewSite.scriptScanBytes)) ?? nil
-                return data.map(LocalPreviewSite.hasScripts) ?? false
+                LocalPreviewSite.fileHasScripts(atPath: path)
             }.value
         }
     }

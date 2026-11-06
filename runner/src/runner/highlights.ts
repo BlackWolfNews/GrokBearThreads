@@ -135,17 +135,19 @@ export type HighlightsPart = RunnerPart<typeof highlightsPart>;
 
 // A local page the Mac app previews runs none of its own scripts (Daybreak
 // finding 6), so a page that draws itself shows as empty boxes there. `pin`
-// tells the agent, so it can serve the folder on localhost and pin that
-// instead (6 Nov 2026). The app's note over the page uses the same test
-// (LocalPreviewSite.hasScripts).
+// tells the agent (6 Nov 2026). The app's note over the page uses the same
+// test (LocalPreviewSite.hasScripts): a `<script`, an `on...=` handler or a
+// `javascript:` link. Opened without blocking and checked on the open file,
+// so a FIFO swapped in after pin's stat can't hang the runner (Codex review).
 export function pageHasScripts(file: string): boolean {
   if (!/\.html?$/i.test(file)) return false;
   let fd: number | undefined;
   try {
-    fd = fs.openSync(file, 'r');
+    fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
+    if (!fs.fstatSync(fd).isFile()) return false;
     const buf = Buffer.alloc(4 * 1024 * 1024);
     const n = fs.readSync(fd, buf, 0, buf.length, 0);
-    return /<script/i.test(buf.subarray(0, n).toString('utf8'));
+    return /<script|\son[a-z]+=|javascript:/i.test(buf.subarray(0, n).toString('utf8'));
   } catch {
     return false;
   } finally {

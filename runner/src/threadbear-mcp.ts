@@ -413,7 +413,7 @@ export function buildThreadbearTools(
         const pinned = `Pinned (${id})${input.show ? ', and shown in the side pane' : ''}.`;
         // Older runners (a handover) don't say; then nothing's added.
         return scriptsOff
-          ? `${pinned} The side pane shows local pages with their scripts off, so anything this page draws with JavaScript will be blank there. If it needs them, serve its folder on 127.0.0.1 (python3 -m http.server --bind 127.0.0.1) and pin that URL as well.`
+          ? `${pinned} The side pane shows local pages with their scripts off, so anything this page draws with JavaScript will be blank there. If it needs them, copy the page and only the files it uses into a new empty folder, serve that on 127.0.0.1 and pin the URL. Never serve the folder it's in: its scripts could then read anything there, like a .env.`
           : pinned;
       }),
     ),

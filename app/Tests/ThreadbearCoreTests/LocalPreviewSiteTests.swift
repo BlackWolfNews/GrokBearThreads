@@ -191,5 +191,17 @@ final class LocalPreviewSiteTests: XCTestCase {
         XCTAssertTrue(LocalPreviewSite.hasScripts(Data("<SCRIPT src=app.js></SCRIPT>".utf8)))
         XCTAssertFalse(LocalPreviewSite.hasScripts(Data("<p>A script-free mockup</p>".utf8)))
         XCTAssertFalse(LocalPreviewSite.hasScripts(Data()))
+        XCTAssertTrue(LocalPreviewSite.hasScripts(Data("<body onload=\"draw()\">".utf8)))
+        XCTAssertTrue(LocalPreviewSite.hasScripts(Data("<a href=\"javascript:go()\">go</a>".utf8)))
+    }
+
+    func testFileHasScriptsNeverBlocksOnAFifo() throws {
+        let page = dir.appendingPathComponent("drawn.html")
+        try Data("<script>draw()</script>".utf8).write(to: page)
+        XCTAssertTrue(LocalPreviewSite.fileHasScripts(atPath: page.path))
+        let fifo = dir.appendingPathComponent("pipe.html").path
+        XCTAssertEqual(mkfifo(fifo, 0o600), 0)
+        XCTAssertFalse(LocalPreviewSite.fileHasScripts(atPath: fifo), "returns at once, with no writer")
+        XCTAssertFalse(LocalPreviewSite.fileHasScripts(atPath: dir.appendingPathComponent("gone.html").path))
     }
 }

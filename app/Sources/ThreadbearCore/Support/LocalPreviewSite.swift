@@ -202,10 +202,27 @@ public final class LocalPreviewSite: @unchecked Sendable {
     /// the pane says so (with a way to open it in the browser) rather than
     /// showing a page that draws itself as blank boxes (6 Nov 2026). The
     /// runner's `pin` tool tells the agent the same (runner/src/runner/highlights.ts).
-    /// A `<script` anywhere counts, even in a comment: saying so wrongly
-    /// costs a line, missing one looks broken.
+    /// A `<script`, an `on...=` handler or a `javascript:` link anywhere
+    /// counts, even in a comment: saying so wrongly costs a line, missing
+    /// one looks broken. The runner's test is the same pattern.
     public static func hasScripts(_ html: Data) -> Bool {
-        String(decoding: html.prefix(scriptScanBytes), as: UTF8.self).range(of: "<script", options: .caseInsensitive) != nil
+        String(decoding: html.prefix(scriptScanBytes), as: UTF8.self)
+            .range(of: scriptPattern, options: [.regularExpression, .caseInsensitive]) != nil
+    }
+
+    static let scriptPattern = #"<script|\son[a-z]+=|javascript:"#
+
+    /// `hasScripts` for a file: false for anything but a regular file.
+    /// Opened without blocking and checked on the open file, so a FIFO
+    /// named `.html` (or one swapped in) can't hang the caller (Codex review).
+    public static func fileHasScripts(atPath path: String) -> Bool {
+        let fd = open(path, O_RDONLY | O_NONBLOCK)
+        guard fd >= 0 else { return false }
+        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        var info = stat()
+        guard fstat(fd, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG,
+              let data = try? handle.read(upToCount: scriptScanBytes) else { return false }
+        return hasScripts(data)
     }
 
     /// How much of a page `hasScripts` reads.
