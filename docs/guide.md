@@ -1394,7 +1394,11 @@ twenty more), how fast it talks, the language, and the microphone. Play
 a Sample tries a voice. The first time you use Voice, Threadbear
 downloads its voice engine (Kyutai's pocket-tts) and a voice model of
 about 240 MB, and macOS asks to let it use the microphone. Listening is
-done on your Mac by macOS; nothing you say is recorded.
+done on your Mac by macOS; nothing you say is recorded. On headphones
+(AirPods and the like) you can talk over it any time. On the Mac's
+speakers you can too, as long as macOS's echo cancellation starts; when
+it won't, Voice stops listening while it speaks, so it doesn't hear
+itself.
 
 ### The activity log
 

@@ -10,9 +10,13 @@ import ThreadbearCore
 /// says comes from pocket-tts as 24 kHz 16-bit WAV, a sentence at a time.
 @MainActor
 final class VoiceAudio {
-    private let engine = AVAudioEngine()
-    private let player = AVAudioPlayerNode()
-    private let pitch = AVAudioUnitTimePitch()
+    private var engine = AVAudioEngine()
+    private var player = AVAudioPlayerNode()
+    private var pitch = AVAudioUnitTimePitch()
+    /// The Mac's echo cancellation is on. Some microphone and speaker
+    /// pairs refuse it (Core Audio's -10875); then Voice runs without it
+    /// and doesn't listen while it speaks, so it can't hear itself.
+    private(set) var echoCancels = false
     private let speechFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 24_000, channels: 1, interleaved: false)!
 
     private var analyzer: SpeechAnalyzer?
@@ -61,30 +65,59 @@ final class VoiceAudio {
                     self?.onResult?(r)
                 }
             } catch {
-                AppLog.write("voice", "recogniser stopped: \(error.localizedDescription)")
+                VoiceLog.write("recogniser stopped: \(Self.describe(error))")
             }
         }
         try await analyzer.start(inputSequence: stream)
 
+        do {
+            try startEngine(voiceProcessing: true, microphone: microphone, analyzerFormat: analyzerFormat, feed: continuation)
+            echoCancels = true
+        } catch {
+            VoiceLog.write("echo cancellation wouldn't start (\(Self.describe(error))); trying without it")
+            resetEngine()
+            do {
+                try startEngine(voiceProcessing: false, microphone: microphone, analyzerFormat: analyzerFormat, feed: continuation)
+            } catch {
+                VoiceLog.write("the microphone wouldn't start: \(Self.describe(error))")
+                resetEngine()
+                throw VoiceError("The microphone wouldn't start (Core Audio error \((error as NSError).code)). Try another microphone in Settings > Voice.")
+            }
+            echoCancels = false
+        }
+        VoiceLog.write("listening on \(Self.describeInput(engine)), echo cancellation \(echoCancels ? "on" : "off")\(Self.outputIsHeadphones() ? ", headphones" : "")")
+    }
+
+    /// A fresh engine: one that failed to start keeps its broken state.
+    private func resetEngine() {
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        engine = AVAudioEngine()
+        player = AVAudioPlayerNode()
+        pitch = AVAudioUnitTimePitch()
+    }
+
+    private func startEngine(voiceProcessing: Bool, microphone: AudioDeviceID?, analyzerFormat: AVAudioFormat, feed: AsyncStream<AnalyzerInput>.Continuation) throws {
+        // Voice processing first, before anything asks the engine for a format.
+        if voiceProcessing {
+            try engine.inputNode.setVoiceProcessingEnabled(true)
+            // Its ducking of other audio is for calls; a reply shouldn't hush music any more than it must.
+            engine.inputNode.voiceProcessingOtherAudioDuckingConfiguration = .init(enableAdvancedDucking: false, duckingLevel: .min)
+        }
         if let microphone { Self.use(microphone, on: engine.inputNode) }
-        try engine.inputNode.setVoiceProcessingEnabled(true)
-        // Its ducking of other audio is for calls; a reply shouldn't hush music any more than it must.
-        engine.inputNode.voiceProcessingOtherAudioDuckingConfiguration = .init(enableAdvancedDucking: false, duckingLevel: .min)
 
         engine.attach(player)
         engine.attach(pitch)
         engine.connect(player, to: pitch, format: speechFormat)
         engine.connect(pitch, to: engine.mainMixerNode, format: speechFormat)
 
-        let inputFormat = engine.inputNode.outputFormat(forBus: 0)
-        // Made here and captured, as the tap runs on the audio thread.
-        guard let converter = AVAudioConverter(from: inputFormat, to: analyzerFormat) else {
-            throw VoiceError("The microphone's audio can't be read for speech recognition.")
-        }
-        let feed = continuation
-        engine.inputNode.installTap(onBus: 0, bufferSize: 2048, format: inputFormat) { [weak self] buffer, _ in
+        // No format for the tap: whatever the microphone gives (voice
+        // processing's can differ from what the node reports beforehand).
+        // The converter is made from the first buffer, on the audio thread.
+        let converter = ConverterBox(to: analyzerFormat)
+        engine.inputNode.installTap(onBus: 0, bufferSize: 2048, format: nil) { [weak self] buffer, _ in
             let level = Self.level(buffer)
-            if let converted = Self.convert(buffer, with: converter, to: analyzerFormat) {
+            if let converted = converter.convert(buffer) {
                 feed.yield(AnalyzerInput(buffer: converted))
             }
             Task { @MainActor in self?.onInputLevel?(level) }
@@ -92,6 +125,39 @@ final class VoiceAudio {
         engine.prepare()
         try engine.start()
         player.play()
+    }
+
+    /// Sound goes to headphones (Bluetooth, or the headphone jack), so
+    /// the microphone doesn't hear the agent even without echo cancellation.
+    static func outputIsHeadphones() -> Bool {
+        var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultOutputDevice, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var device = AudioDeviceID(0)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &device) == noErr else { return false }
+        var transport: UInt32 = 0
+        size = UInt32(MemoryLayout<UInt32>.size)
+        address.mSelector = kAudioDevicePropertyTransportType
+        if AudioObjectGetPropertyData(device, &address, 0, nil, &size, &transport) == noErr,
+           transport == kAudioDeviceTransportTypeBluetooth || transport == kAudioDeviceTransportTypeBluetoothLE {
+            return true
+        }
+        var source: UInt32 = 0
+        address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyDataSource, mScope: kAudioDevicePropertyScopeOutput, mElement: kAudioObjectPropertyElementMain)
+        size = UInt32(MemoryLayout<UInt32>.size)
+        if AudioObjectGetPropertyData(device, &address, 0, nil, &size, &source) == noErr, source == 0x6864_706E /* 'hdpn' */ {
+            return true
+        }
+        return false
+    }
+
+    static func describe(_ error: Error) -> String {
+        let e = error as NSError
+        return "\(e.domain) \(e.code)"
+    }
+
+    static func describeInput(_ engine: AVAudioEngine) -> String {
+        let f = engine.inputNode.outputFormat(forBus: 0)
+        return "\(Int(f.sampleRate)) Hz, \(f.channelCount) ch"
     }
 
     func stop() {
@@ -105,21 +171,6 @@ final class VoiceAudio {
         let analyzer = analyzer
         self.analyzer = nil
         Task { await analyzer?.cancelAndFinishNow() }
-    }
-
-    nonisolated private static func convert(_ buffer: AVAudioPCMBuffer, with converter: AVAudioConverter, to format: AVAudioFormat) -> AVAudioPCMBuffer? {
-        let ratio = format.sampleRate / buffer.format.sampleRate
-        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio + 16)
-        guard let out = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity) else { return nil }
-        var fed = false
-        var error: NSError?
-        converter.convert(to: out, error: &error) { _, status in
-            if fed { status.pointee = .noDataNow; return nil }
-            fed = true
-            status.pointee = .haveData
-            return buffer
-        }
-        return error == nil && out.frameLength > 0 ? out : nil
     }
 
     // MARK: Speaking
@@ -138,7 +189,7 @@ final class VoiceAudio {
                 do {
                     try await self.stream(sentence, voice: voice, base: base)
                 } catch {
-                    if !Task.isCancelled { AppLog.write("voice", "couldn't speak: \(error.localizedDescription)") }
+                    if !Task.isCancelled { VoiceLog.write("couldn't speak: \(error.localizedDescription)") }
                     break
                 }
             }
@@ -295,7 +346,64 @@ final class VoiceAudio {
         guard let unit = input.audioUnit else { return }
         var device = device
         let status = AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &device, UInt32(MemoryLayout<AudioDeviceID>.size))
-        if status != noErr { AppLog.write("voice", "couldn't pick that microphone (\(status)); using the default") }
+        if status != noErr { VoiceLog.write("couldn't pick that microphone (\(status)); using the default") }
+    }
+}
+
+/// Makes the converter from the microphone's first buffer and converts
+/// each one to what speech recognition wants. Only the audio thread uses it.
+final class ConverterBox: @unchecked Sendable {
+    private let format: AVAudioFormat
+    private var converter: AVAudioConverter?
+    private var failed = false
+
+    init(to format: AVAudioFormat) { self.format = format }
+
+    func convert(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+        if converter == nil, !failed {
+            converter = AVAudioConverter(from: buffer.format, to: format)
+            // More channels than one (voice processing can give several): the first.
+            if buffer.format.channelCount > format.channelCount { converter?.channelMap = [0] }
+            if converter == nil {
+                failed = true
+                VoiceLog.write("can't convert \(buffer.format) for speech recognition")
+            }
+        }
+        guard let converter else { return nil }
+        let ratio = format.sampleRate / buffer.format.sampleRate
+        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio + 16)
+        guard let out = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity) else { return nil }
+        var fed = false
+        var error: NSError?
+        converter.convert(to: out, error: &error) { _, status in
+            if fed { status.pointee = .noDataNow; return nil }
+            fed = true
+            status.pointee = .haveData
+            return buffer
+        }
+        return error == nil && out.frameLength > 0 ? out : nil
+    }
+}
+
+/// Voice's own log, ~/Library/Logs/Threadbear/voice.log, so what went
+/// wrong can be read afterwards. Kept under 256 KB. Never what was said.
+enum VoiceLog {
+    static let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Threadbear/voice.log")
+    private static let queue = DispatchQueue(label: "voice-log")
+
+    static func write(_ line: String) {
+        AppLog.write("voice", line)
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        queue.async {
+            let fm = FileManager.default
+            try? fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if let size = (try? fm.attributesOfItem(atPath: url.path))?[.size] as? Int, size > 256_000 { try? fm.removeItem(at: url) }
+            if !fm.fileExists(atPath: url.path) { fm.createFile(atPath: url.path, contents: nil) }
+            guard let handle = try? FileHandle(forWritingTo: url) else { return }
+            handle.seekToEndOfFile()
+            handle.write(Data("\(stamp) \(line)\n".utf8))
+            try? handle.close()
+        }
     }
 }
 

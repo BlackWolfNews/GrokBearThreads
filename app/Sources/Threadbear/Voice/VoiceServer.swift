@@ -108,7 +108,7 @@ final class VoiceServer {
                 throw Failure.start(tail.isEmpty ? "it stopped" : tail)
             }
             if let (_, response) = try? await URLSession.shared.data(from: base), (response as? HTTPURLResponse)?.statusCode == 200 {
-                AppLog.write("voice", "pocket-tts \(Self.release) up on \(port) (\(language))")
+                VoiceLog.write("pocket-tts \(Self.release) up on \(port) (\(language))")
                 return base
             }
             try await Task.sleep(for: .milliseconds(500))
@@ -144,7 +144,7 @@ final class VoiceServer {
         try? FileManager.default.removeItem(at: dest)
         try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
         try FileManager.default.moveItem(at: inner, to: dest)
-        AppLog.write("voice", "installed pocket-tts \(Self.release)")
+        VoiceLog.write("installed pocket-tts \(Self.release)")
     }
 
     /// A port nothing's listening on, from the kernel.

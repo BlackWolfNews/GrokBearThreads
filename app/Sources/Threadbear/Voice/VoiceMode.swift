@@ -42,8 +42,17 @@ final class VoiceMode {
     @ObservationIgnored private var working = false
     /// The turn's newest message, said when it ends unless a final reply came.
     @ObservationIgnored private var lastMessage: (String, String, String)?
+    /// Without echo cancellation: ignore the microphone until then.
+    @ObservationIgnored private var quietUntil: CFTimeInterval = 0
 
-    var isOn: Bool { phase != .off }
+    /// Running, or getting ready to. A failure is off (the button's blue
+    /// again), with its message showing until he closes it.
+    var isOn: Bool {
+        switch phase {
+        case .off, .failed: false
+        default: true
+        }
+    }
 
     func isOn(for threadId: String) -> Bool { isOn && self.threadId == threadId }
 
@@ -79,6 +88,7 @@ final class VoiceMode {
                 }
                 audio.onSpeaking = { [weak self] on in
                     guard let self, self.isOn else { return }
+                    if !on { self.quietUntil = CACurrentMediaTime() + 0.8 }
                     if on { self.phase = .speaking } else if case .speaking = self.phase { self.phase = self.working ? .thinking : .listening }
                 }
                 self.audio = audio
@@ -89,7 +99,7 @@ final class VoiceMode {
                 self.endpointTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
                     MainActor.assumeIsolated { self?.checkPause() }
                 }
-                AppLog.write("voice", "on for \(threadId)")
+                VoiceLog.write("on for \(threadId)")
             } catch {
                 guard self.threadId == threadId else { return }
                 self.fail(error.localizedDescription)
@@ -98,6 +108,7 @@ final class VoiceMode {
     }
 
     func stop() {
+        dismissFailure()
         guard isOn || audio != nil else { return }
         if let threadId, let text = tracker.flush() { send(text, to: threadId) }
         endpointTimer?.invalidate()
@@ -108,13 +119,13 @@ final class VoiceMode {
         phase = .off
         level = 0
         working = false
-        if let threadId { AppLog.write("voice", "off for \(threadId)") }
+        if let threadId { VoiceLog.write("off for \(threadId)") }
         threadId = nil
         VoiceServer.shared.stopSoon()
     }
 
     private func fail(_ message: String) {
-        AppLog.write("voice", "failed: \(message)")
+        VoiceLog.write("failed: \(message)")
         endpointTimer?.invalidate()
         endpointTimer = nil
         audio?.stop()
@@ -131,6 +142,10 @@ final class VoiceMode {
 
     private func heard(_ result: UtteranceTracker.Result) {
         guard isOn else { return }
+        // Without echo cancellation the microphone hears the agent: what
+        // it hears while speaking, and just after, is its own voice.
+        // Headphones don't leak, so he can still talk over it there.
+        if let audio, !audio.echoCancels, !VoiceAudio.outputIsHeadphones(), audio.isSpeaking || CACurrentMediaTime() < quietUntil { return }
         if tracker.add(result, now: CACurrentMediaTime()) {
             // He's talking: the agent stops.
             if audio?.isSpeaking == true { audio?.stopSpeaking() }
