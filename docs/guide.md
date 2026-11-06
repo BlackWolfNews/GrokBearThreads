@@ -177,7 +177,10 @@ the page's address. Click it to open it (the middle mouse button works
 too). If an agent already has that page
 open in Chrome through [BrowserBear](https://github.com/mikecann/browserbear)
 (say, a sign-in page it wants you to use), the click brings the agent's tab
-into your Chrome window rather than opening a second one.
+into your Chrome window rather than opening a second one. A link to a file
+without its whole path (`shorts-plan/candidates.md`) is looked for from the
+thread's folder, as a path in a reply's code is. On the phone and the web,
+links to files on the Mac only say so.
 
 The Browser panel, the globe on a thread's right-hand rail, can show the pages
 an agent opens through [BrowserBear](https://github.com/mikecann/browserbear) in

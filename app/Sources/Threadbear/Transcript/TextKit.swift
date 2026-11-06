@@ -223,6 +223,13 @@ final class TranscriptTextView: NSTextView {
         return url
     }
 
+    /// The path a scheme-less link names, decoded (nil for any other link).
+    static func relativeTarget(_ link: Any) -> String? {
+        let url = (link as? URL) ?? (link as? String).flatMap(URL.init(string:))
+        guard let url, url.scheme == nil, !url.relativeString.isEmpty else { return nil }
+        return url.relativeString.removingPercentEncoding ?? url.relativeString
+    }
+
     /// A file path written in inline code (FilePathRefs).
     var openPathRef: (String) -> Bool = { text in
         let commandKey = NSApp.currentEvent?.modifierFlags.contains(.command) ?? false
@@ -246,6 +253,11 @@ final class TranscriptTextView: NSTextView {
             _ = openFileLink(url)
         } else if let url = webURL(link), openWebLink(url) {
             return
+        } else if let text = Self.relativeTarget(link) {
+            // A link with no scheme that didn't come from the renderer:
+            // NSWorkspace can't open one (Finder's -50), so it's looked
+            // for from the thread's folder like a path in inline code.
+            _ = openPathRef(text)
         } else {
             super.clicked(onLink: link, at: charIndex)
         }

@@ -229,6 +229,13 @@ export function MessageText({
               );
             }
             const link = href ? readLink(href) : undefined;
+            // A relative link (`[plan](shorts-plan/candidates.md)`) is a
+            // file in the thread's folder on the Mac; as an address here
+            // it's a page on this site that isn't there.
+            // `/` and `//` ones are this site's own pages and web addresses.
+            if (!link && href && !/^[#/]/.test(href) && !/^[a-z][a-z0-9+.-]*:/i.test(href)) {
+              return <span title="This file is on the Mac">{children}</span>;
+            }
             if (!link) {
               return (
                 <a {...p} href={href} target="_blank" rel="noreferrer">

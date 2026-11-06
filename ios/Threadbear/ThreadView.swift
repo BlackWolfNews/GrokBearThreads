@@ -205,6 +205,12 @@ struct ThreadView: View {
     private func follow(_ url: URL, from seq: Int?, in items: [ThreadItem]) -> OpenURLAction.Result {
         switch ThreadLinks.target(of: url) {
         case nil:
+            // A relative link (`[plan](shorts-plan/candidates.md)`) is a
+            // file in the thread's folder on the Mac; iOS can't open it.
+            guard url.scheme != nil else {
+                model.report(TransportError.server("That file opens on the Mac."))
+                return .handled
+            }
             return .systemAction
         case let .thread(id):
             // Agents may give only the start of the id.

@@ -23,6 +23,15 @@ enum MarkdownRenderer {
             let file = URL(fileURLWithPath: ((parts.path.removingPercentEncoding ?? parts.path) as NSString).expandingTildeInPath)
             return FilePathRefs.withQuery(file, query: parts.query, fragment: parts.fragment)
         }
+        // A relative target (`[plan](shorts-plan/candidates.md)`) means a
+        // file from the thread's folder, so it's found the way a path in
+        // inline code is (FilePathRefs). Left as a scheme-less URL, AppKit
+        // hands it to NSWorkspace and Finder says "can't be opened. -50".
+        // A lone `#section` has nowhere to go in a transcript.
+        if !destination.hasPrefix("/"), destination.range(of: #"^[A-Za-z][A-Za-z0-9+.-]*:"#, options: .regularExpression) == nil {
+            guard !destination.hasPrefix("#") else { return nil }
+            return FilePathRefs.url(for: destination.removingPercentEncoding ?? destination)
+        }
         guard var components = URLComponents(string: destination) else { return nil }
         if components.scheme == nil, destination.hasPrefix("/") {
             components.scheme = "file"
