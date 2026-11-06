@@ -47,7 +47,7 @@ test("a fork's own patches show nothing of Mike's", async () => {
   for (const mark of MIKES) assert.doesNotMatch(shown, mark);
   assert.deepEqual(
     {
-      actions: set.actions.map((a) => [a.title, a.url ?? a.run ?? a.prompt]),
+      actions: set.actions.map((a) => [a.title, a.url ?? a.command ?? a.prompt]),
       panels: set.panels.map((p) => p.title),
     },
     SHOWN,
