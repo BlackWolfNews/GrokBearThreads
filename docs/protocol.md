@@ -850,7 +850,7 @@ the summary and then the reply.
 | `threads.markSeen` | `{ threadId, seq }` | `{ thread: ThreadSummary }` |
 | `threads.tickAsk` | `{ threadId, asksSeq, index, ticked: boolean }` | `{ thread: ThreadSummary }`. Ticks or unticks one of the open card's asks (Needs you), with an `asks.ticked` event. Sends nothing to the agent. `-32602` when `asksSeq` isn't the open card's or `index` is out of range |
 | `threads.share` | `{ threadId, access: "off" \| "link", newLink?: boolean }` | `{ thread: ThreadSummary }`. Whether anyone with the link can read the thread on the website (see Sharing). `newLink` makes a fresh slug, which stops the old link. Another access is `-32602` |
-| `approvals.respond` | `{ threadId, approvalId, decision: "allow" \| "allowAlways" \| "deny" \| "answered", message?: string, answers?: Record<string, string> }` | `{}`. `allowAlways` allows matching requests for the rest of this thread only; it never changes the thread's permission mode or saves anything in the project. With `answered`, the app sends the chosen answers in one line as `message` too: the runner keeps it in `approval.resolved` (only `answers` goes to the CLI), so the transcript can show what was chosen |
+| `approvals.respond` | `{ threadId, approvalId, decision: "allow" \| "allowAlways" \| "deny" \| "answered", message?: string, answers?: Record<string, string> }` | `{}`. `allowAlways` on a card that didn't offer it counts as `allow`. `allowAlways` allows matching requests for the rest of this thread only; it never changes the thread's permission mode or saves anything in the project. With `answered`, the app sends the chosen answers in one line as `message` too: the runner keeps it in `approval.resolved` (only `answers` goes to the CLI), so the transcript can show what was chosen |
 | `secrets.answer` | `{ threadId, approvalId, secret?: string, decline?: true }` | `{}`. Answers a `secret.requested` card (Secrets). The runner never logs, emits or mirrors `secret` |
 | `media.import` | `{ path: string }` | `{ image: ImageRef }` copies a file into `inbox/` and reads its size; HEIC becomes JPEG and TIFF or BMP becomes PNG |
 | `patches.trust` | `{ threadId, files: { file, hash }[] }` | `{ trusted: string[] }`. Trusts those versions of the thread's waiting patch files (each a `file` its `patches` lists with `untrusted`, and the `hash` given there), then every thread's patches are read again, so the answer comes once they have been. The `claude` entry's file trusts the folder's Claude Code settings the same way. `-32602` for a file the thread isn't waiting on, or one whose hash has moved on since (look again). See "Trusting a folder's patches" |
@@ -4452,7 +4452,22 @@ commands), and the ones that only read or end the turn
 (`NEVER_ASK_TOOLS`: `end_turn`, the list and read tools, `unpin`,
 `ask_secret`) never do, in any mode. No tool can delete, interrupt, snooze
 or archive the thread that's calling it; `tb` inside a thread refuses the
-same. There's no tool for restarting the runner: that's `runner.restart`.
+same.
+
+Raising access. From a thread whose mode isn't `full`, a call that would let
+something run with more access than the caller has puts up its own
+`approval.requested` (options `["allow", "deny"]`, the title saying what it
+would do) and waits for it, whatever the CLI's rules or Auto's classifier
+said about the tool: `update_thread` or `update_schedule` setting a mode
+above the target's (`ask` < `auto` < `full`), `create_thread` or a
+`new_thread` `schedule_message` with a mode above the caller's,
+`send_message`, `move_thread`'s `then` or `schedule_message` to a thread
+whose mode is above the caller's, `update_schedule` changing the text, time,
+folder or paused state of a schedule whose runs are above the caller or that
+has a check, and any `check`. Without a `permissionMode`, a thread such a
+caller starts or schedules gets the caller's mode, not `full`. Denied or
+expired, nothing changes and the tool says so; a message from Mike declines
+it. Lowering a mode never asks, and a `full` thread is never asked. There's no tool for restarting the runner: that's `runner.restart`.
 
 | Variable | Value |
 |---|---|

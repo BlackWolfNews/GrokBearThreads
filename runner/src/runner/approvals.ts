@@ -7,7 +7,7 @@ import type { RunnerPart } from './part.ts';
 import type { ApprovalDecision, EventBody } from '../protocol.ts';
 import { ErrorCode, RpcError } from '../protocol.ts';
 import type { QuestionAnswer, QuestionRequest, ToolApprovalAnswer, ToolApprovalRequest } from '../adapters/types.ts';
-import { approvalTitle } from '../threadbear-mcp.ts';
+import { approvalTitle, type AgentApprovalRequest } from '../threadbear-mcp.ts';
 import crypto from 'node:crypto';
 import type { PendingApproval, ThreadState } from '../runner.ts';
 import { matchAnswers } from '../runner.ts';
@@ -86,7 +86,25 @@ export const approvalsPart = {
     };
     if (req.toolUseId) body.itemId = req.toolUseId;
     return new Promise((resolve) => {
-      this.addApproval(st, { approvalId, kind: 'tool', main: Boolean(req.toolUseId), resolve }, body, req.signal);
+      // A card offered without "Always allow" never answers with it, even
+      // if a client sends it: it would save a rule Mike was never offered.
+      const answer = req.canAlwaysAllow ? resolve : (a: ToolApprovalAnswer) => resolve(a.decision === 'allowAlways' ? { ...a, decision: 'allow' } : a);
+      this.addApproval(st, { approvalId, kind: 'tool', main: Boolean(req.toolUseId), resolve: answer }, body, req.signal);
+    });
+  },
+
+  // A threadbear tool's own card, for a call that would raise access from a
+  // thread not in full mode (threadbear-mcp.ts, "Raising access"). Never
+  // "Always allow". The agent's CLI waits on the call, so a message from
+  // Mike declines it, as with a question.
+  requestAgentApproval(this: Runner, threadId: string, req: AgentApprovalRequest): Promise<ToolApprovalAnswer> {
+    const st = this.mustGet(threadId);
+    if (!this.turnForRequest(st, st.rt.generation)) return Promise.resolve({ decision: 'expired', message: 'The thread is not running a turn.' });
+    const approvalId = crypto.randomUUID();
+    const body: EventBody = { type: 'approval.requested', approvalId, name: req.name, title: req.title, input: req.input, options: ['allow', 'deny'] };
+    return new Promise((resolve) => {
+      const answer = (a: ToolApprovalAnswer) => resolve(a.decision === 'allowAlways' ? { ...a, decision: 'allow' } : a);
+      this.addApproval(st, { approvalId, kind: 'tool', main: true, resolve: answer }, body, req.signal ?? new AbortController().signal);
     });
   },
 

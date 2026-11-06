@@ -255,6 +255,13 @@ unless you pick otherwise, so if you're unsure about a task, switch it to Ask
 before edits before you send. Deleting a thread is one thing an agent always
 has to ask about, whatever the mode.
 
+An agent in Ask before edits or Auto can't give itself more room. Switching
+any thread or schedule to more access, starting a thread with more access
+than its own (the threads it starts get its mode), messaging a thread that
+has more, or adding a schedule check all show a card for that one call, with
+no Always allow. On a Codex thread, Always allow on a command allows that
+exact command again in that folder, not anything that starts the same way.
+
 ### When an agent needs a password or a key
 
 An agent that needs a secret (your Mac's administrator password for a

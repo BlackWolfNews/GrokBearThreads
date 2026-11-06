@@ -10,7 +10,9 @@ import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
 import type { McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import type { Runner } from './runner.ts';
-import type { Account, EffortLevel, PersistedEvent, Project, Schedule, ThreadSummary } from './protocol.ts';
+import type { Account, EffortLevel, PermissionMode, PersistedEvent, Project, Schedule, ThreadSummary } from './protocol.ts';
+import type { ToolApprovalAnswer } from './adapters/types.ts';
+import { truncateInput } from './tools.ts';
 import { usageLine } from './usage.ts';
 import { findPool, poolLine } from './pools.ts';
 import { AGENT_MESSAGE_PREFIX, EFFORT_LEVELS, MOVE_MESSAGE_PREFIX, sentByAgent } from './protocol.ts';
@@ -46,6 +48,9 @@ export type ThreadControl = {
   showPanel?: (threadId: string, ask: Parameters<Runner['showPanel']>[1]) => ReturnType<Runner['showPanel']>;
   endTurnNudged?: (threadId: string) => boolean;
   requestSecret?: (threadId: string, req: SecretRequest) => Promise<SecretAnswer>;
+  // A card a threadbear tool puts up itself, with no "Always allow": for a
+  // call from a thread not in full mode that would raise access (below).
+  requestAgentApproval?: (threadId: string, req: AgentApprovalRequest) => Promise<ToolApprovalAnswer>;
 } & Async<Runner, 'list' | 'search' | 'get' | 'events' | 'create' | 'send' | 'update' | 'interrupt' | 'delete'>;
 
 // Messages a thread when the Mac app restarts onto a new build (app-restarts.ts).
@@ -62,6 +67,13 @@ export type ProjectControl = Async<Projects, 'list' | 'get' | 'find' | 'create' 
   Partial<Async<Projects, 'chooseIcon' | 'addLinks' | 'removeLinks'>>;
 
 export const SERVER_NAME = 'threadbear';
+
+export type AgentApprovalRequest = { name: string; title: string; input: Record<string, unknown>; signal?: AbortSignal };
+
+// Permission modes by how much an agent may do in them without asking.
+const ACCESS: Record<PermissionMode, number> = { ask: 0, auto: 1, full: 2 };
+const MODE_NAMES: Record<PermissionMode, string> = { full: 'Full access', auto: 'Auto', ask: 'Ask before edits' };
+export const raises = (to: PermissionMode, from: PermissionMode): boolean => ACCESS[to] > ACCESS[from];
 // Asked about every time, even in a thread with full access: deleting is
 // the one thing here that's hard to take back.
 export const ALWAYS_ASK_TOOLS = new Set([`mcp__${SERVER_NAME}__delete_thread`]);
@@ -95,10 +107,13 @@ const providerName = (a: Pick<Account, 'provider'>): string => (a.provider === '
 const ok = (text: string): Result => ({ content: [{ type: 'text', text }] });
 const fail = (text: string): Result => ({ content: [{ type: 'text', text }], isError: true });
 
-function handle<A>(fn: (args: A) => string | Promise<string>): (args: A) => Promise<Result> {
-  return async (args) => {
+// extra is the SDK's (or CodexTools') second argument: its signal ends a
+// card the call put up when the call itself is cancelled.
+function handle<A>(fn: (args: A, extra?: { signal?: AbortSignal }) => string | Promise<string>): (args: A, extra?: unknown) => Promise<Result> {
+  return async (args, extra) => {
+    const signal = (extra as { signal?: unknown } | undefined)?.signal;
     try {
-      return ok(await fn(args));
+      return ok(await fn(args, signal instanceof AbortSignal ? { signal } : undefined));
     } catch (e) {
       return fail((e as Error).message ?? String(e));
     }
@@ -251,6 +266,50 @@ export function buildThreadbearTools(
     const base = (await control.get(selfId)).cwd;
     return path.resolve(base, expandHome(f.trim()));
   };
+
+  // Raising access (Claude Security scan, 6 Nov 2026, F7 and F14). An agent
+  // in a thread that isn't in full mode can't, without the user's OK on a
+  // card for that one call, make anything run with more access than it
+  // had: raise its own or another thread's mode, start a thread or
+  // schedule above it, message a thread above it (whose agent would do
+  // what it's told), change a schedule whose runs are above it, or add a
+  // schedule check (a shell command the runner runs as the user). Lowering
+  // is free. The card comes from the handler itself and has no "Always
+  // allow", so no tool-wide rule (Claude's allowedTools, Codex's) and no
+  // Auto classifier stands in for it. A thread in full mode can already run
+  // anything as the user, so it isn't asked.
+  const restricted = async (): Promise<PermissionMode | undefined> => {
+    const m = (await control.get(selfId)).permissionMode;
+    return m === 'full' ? undefined : (m ?? 'ask');
+  };
+  // A thread this runner can't read (gone, or on a runner it can't reach)
+  // counts as full.
+  const modeOf = async (id: string): Promise<{ mode: PermissionMode; title: string }> => {
+    try {
+      const t = await control.get(id);
+      return { mode: t.permissionMode ?? 'full', title: t.title };
+    } catch {
+      return { mode: 'full', title: id.slice(0, 8) };
+    }
+  };
+  const confirm = async (tool: string, reasons: string[], input: Record<string, unknown>, signal?: AbortSignal): Promise<void> => {
+    if (!reasons.length) return;
+    const ask = control.requestAgentApproval?.bind(control);
+    if (!ask) throw new Error(`${reasons.join('; ')}: that needs the user's OK, which this runner can't ask for here. Nothing changed; ask them to do it in the app.`);
+    const a = await ask(selfId, { name: `mcp__${SERVER_NAME}__${tool}`, title: reasons.join('; '), input: truncateInput(input), ...(signal ? { signal } : {}) });
+    if (a.decision === 'allow' || a.decision === 'allowAlways') return;
+    if (a.decision === 'expired') throw new Error(`No answer from the user${a.message ? ` (${a.message})` : ''}, so nothing changed.`);
+    throw new Error(`The user said no${a.message ? `: ${a.message}` : ''}. Nothing changed; ask them how to proceed.`);
+  };
+  const threadName = (id: string, title: string): string => (id === selfId ? 'this thread' : `"${title}"`);
+  // A message to a thread with more access than the caller.
+  const sendReason = async (id: string, caller: PermissionMode | undefined, verb = 'Send a message to'): Promise<string[]> => {
+    if (!caller || id === selfId) return [];
+    const t = await modeOf(id);
+    return raises(t.mode, caller) ? [`${verb} "${t.title}", which has ${MODE_NAMES[t.mode]}`] : [];
+  };
+  const checkReason = (check: string | null | undefined, caller: PermissionMode | undefined): string[] =>
+    caller && check?.trim() ? [`Run a shell command as you before each run: ${check.trim().split('\n')[0].slice(0, 120)}`] : [];
 
   // Who put it away, and the user's verdict when they gave one from the
   // done card, so a sweep can tell a thread they confirmed from one an
@@ -491,18 +550,29 @@ export function buildThreadbearTools(
           .describe("With new_thread: the runner (machine) it runs on, by name, e.g. studio-mac. Default: this thread's runner. Only when the user asks for another machine; the folder and account are then that machine's (a path there, or left out for its default)."),
         ...checkArg(false),
       },
-      handle(async ({ text, when, cron, timezone, title, threadId, id: alias, new_thread, folder: f, account: acc, pool: pl, model, effort, permissionMode, runner, ...rest }) => {
+      handle(async ({ text, when, cron, timezone, title, threadId, id: alias, new_thread, folder: f, account: acc, pool: pl, model, effort, permissionMode, runner, ...rest }, extra) => {
         const check = (rest as { check?: string }).check;
         if ((when === undefined) === (cron === undefined)) throw new Error('Give exactly one of when (once) and cron (repeating).');
         if (runner && !new_thread) throw new Error("runner is for new_thread schedules; one that sends to a thread runs on that thread's runner.");
+        if (!new_thread && (f || acc || pl || model || effort || permissionMode)) throw new Error('folder, account, pool, model, effort and permissionMode are for new_thread schedules; a thread keeps its own.');
+        // From a thread not in full mode, new threads get its mode unless
+        // the call says otherwise, and anything above it asks (raising access).
+        const caller = await restricted();
+        const mode = new_thread ? (permissionMode ?? caller) : undefined;
+        const toThread = !new_thread ? await resolve(threadId ?? alias) : undefined;
+        const reasons = [
+          ...(caller && mode && raises(mode, caller) ? [`Schedule new threads with ${MODE_NAMES[mode]}${f ? ` in ${f}` : ''}`] : []),
+          ...(toThread ? await sendReason(toThread, caller, 'Schedule a message to') : []),
+          ...checkReason(check, caller),
+        ];
+        await confirm('schedule_message', reasons, { text, ...(when ? { when } : { cron }), ...(toThread ? { threadId: toThread } : { new_thread, folder: f, permissionMode: mode ?? 'full' }), ...(check ? { check } : {}) }, extra?.signal);
         // On another runner the folder and account are that machine's, so
         // they go as given and are checked there when it runs.
-        const target = !new_thread
-          ? { threadId: await resolve(threadId ?? alias) }
+        const target = toThread
+          ? { threadId: toThread }
           : runner
-            ? { cwd: f, accountId: acc, poolId: pl, model, effort, permissionMode, runnerId: runner }
-            : { cwd: await folder(f ?? '.'), accountId: await account(acc), poolId: pl === undefined ? undefined : pool(pl), model, effort, permissionMode };
-        if (!new_thread && (f || acc || pl || model || effort || permissionMode)) throw new Error('folder, account, pool, model, effort and permissionMode are for new_thread schedules; a thread keeps its own.');
+            ? { cwd: f, accountId: acc, poolId: pl, model, effort, permissionMode: mode, runnerId: runner }
+            : { cwd: await folder(f ?? '.'), accountId: await account(acc), poolId: pl === undefined ? undefined : pool(pl), model, effort, permissionMode: mode };
         const sc = await mustSchedules().create({
           text,
           title,
@@ -544,10 +614,29 @@ export function buildThreadbearTools(
         permissionMode: z.enum(['full', 'ask', 'auto']).optional(),
         ...checkArg(true),
       },
-      handle(async ({ scheduleId, text, title, when, cron, timezone, paused, folder: f, account: acc, pool: pl, model, effort, permissionMode, ...rest }) => {
+      handle(async ({ scheduleId, text, title, when, cron, timezone, paused, folder: f, account: acc, pool: pl, model, effort, permissionMode, ...rest }, extra) => {
         const check = (rest as { check?: string | null }).check;
         const s = mustSchedules();
         const current = await s.find(scheduleId);
+        // Raising access (above): from a thread not in full mode, raising a
+        // schedule's mode, changing one whose runs have more access than
+        // this thread or that has a check, or adding a check, asks.
+        // Renaming and pausing never do.
+        const caller = await restricted();
+        if (caller) {
+          const was = current.threadId ? (await modeOf(current.threadId)).mode : (current.permissionMode ?? 'full');
+          const raised = !current.threadId && permissionMode !== undefined && raises(permissionMode, was);
+          const will = raised ? permissionMode! : was;
+          // What it sends, where, or that it runs again; not its title,
+          // login, model or zone, and not pausing it.
+          const changes = [text, when, cron, f].some((x) => x !== undefined) || (paused === false && current.paused);
+          const reasons = [
+            ...(raised ? [`Switch the schedule "${current.title}" to ${MODE_NAMES[permissionMode!]}`] : changes && raises(will, caller) ? [`Change the schedule "${current.title}", whose runs have ${MODE_NAMES[will]}`] : []),
+            ...(changes && current.check && check === undefined ? [`Change the schedule "${current.title}", which runs a shell command as you first`] : []),
+            ...checkReason(check, caller),
+          ];
+          await confirm('update_schedule', reasons, { scheduleId: current.id, ...Object.fromEntries(Object.entries({ text, when, cron, timezone, paused, folder: f, account: acc, pool: pl, model, effort, permissionMode, check }).filter(([, v]) => v !== undefined)) }, extra?.signal);
+        }
         // A schedule on another runner checks its account and pool there, so
         // a login or pool this Mac doesn't have goes as given. (In the backend every
         // schedule has a runnerId; the Scheduler still checks this
@@ -1185,7 +1274,15 @@ export function buildThreadbearTools(
         permissionMode: z.enum(['full', 'ask', 'auto']).optional().describe('"full" (default), "ask" before edits and commands, or "auto": a classifier approves or blocks each action and asks only when it can\'t decide, for work on untrusted text (Claude only; on Codex it acts like ask).'),
         why: z.string().optional().describe('A few plain words on why this thread exists, about 6 ("fixing a hook it hit"). The sidebar shows them when the user hovers the mark on its row, as they have none of your context for it.'),
       },
-      handle(async ({ text, title, folder: f, pool: p, account: acc, model, effort, permissionMode, why }) => {
+      handle(async ({ text, title, folder: f, pool: p, account: acc, model, effort, permissionMode: asked, why }, extra) => {
+        // From a thread not in full mode, the new thread gets its mode
+        // unless the call says otherwise, and anything above it asks
+        // (raising access, above).
+        const caller = await restricted();
+        const permissionMode = asked ?? caller;
+        if (caller && permissionMode && raises(permissionMode, caller)) {
+          await confirm('create_thread', [`Start a thread with ${MODE_NAMES[permissionMode]}${f ? ` in ${f}` : ''}`], { text, folder: f, permissionMode }, extra?.signal);
+        }
         const r = await control.create({
           text: (await from()) + text,
           title: title?.trim() || text.split('\n').map((l) => l.trim()).find(Boolean)?.slice(0, 200),
@@ -1198,7 +1295,8 @@ export function buildThreadbearTools(
           startedBy: { kind: 'thread', label: 'Agent', threadId: selfId, ...(why?.trim() ? { why: why.replace(/\s+/g, ' ').trim().slice(0, MAX_BYLINE) } : {}) },
         });
         const where = r.thread.poolId ? ` It's in the ${r.thread.poolId} pool, so it moves to another login if this one runs dry.` : '';
-        return `Started thread ${r.thread.id} "${r.thread.title}" in ${r.thread.cwd} on ${r.thread.accountId}${r.thread.model ? ` (${r.thread.model})` : ''}.${where}`;
+        const inherited = caller && asked === undefined ? ` It's in ${MODE_NAMES[caller]}, as this thread is.` : '';
+        return `Started thread ${r.thread.id} "${r.thread.title}" in ${r.thread.cwd} on ${r.thread.accountId}${r.thread.model ? ` (${r.thread.model})` : ''}.${where}${inherited}`;
       }),
     ),
     tool(
@@ -1208,9 +1306,10 @@ export function buildThreadbearTools(
         ...other,
         text: z.string().min(1),
       },
-      handle(async ({ threadId, id: alias, text }) => {
+      handle(async ({ threadId, id: alias, text }, extra) => {
         const id = await resolveOther(threadId ?? alias);
         if (id === selfId) throw new Error("That's this thread. Just carry on here.");
+        await confirm('send_message', await sendReason(id, await restricted()), { threadId: id, text }, extra?.signal);
         await control.send(id, (await from()) + text);
         return `Sent to ${id.slice(0, 8)} "${(await control.get(id)).title}".`;
       }),
@@ -1229,7 +1328,7 @@ export function buildThreadbearTools(
         snooze: z.string().optional().describe('Snooze until: 30m, 2h, 1d, tomorrow, an ISO time, "restart" (until the runner next starts), "release" (until it starts on a new release), or "off" to wake it.'),
         archived: z.boolean().optional().describe('true to archive, false to bring back to the inbox.'),
       },
-      handle(async ({ threadId, id: alias, title, mikeAsked, model, effort, pool: p, permissionMode, snooze, archived }) => {
+      handle(async ({ threadId, id: alias, title, mikeAsked, model, effort, pool: p, permissionMode, snooze, archived }, extra) => {
         const id = await resolve(threadId ?? alias);
         const stops = (snooze !== undefined && snooze.trim().toLowerCase() !== 'off') || archived === true;
         if (id === selfId && stops) throw new Error("Can't snooze or archive this thread from inside its own turn. Do it once the turn is over by calling end_turn with needs \"nothing\" and archive: true, or snooze: and when to wake (the times this takes, or words like \"when the phone arrives\"), again if you already have.");
@@ -1248,6 +1347,12 @@ export function buildThreadbearTools(
         }
         if (archived !== undefined) upd.archived = archived;
         if (archived === true) upd.archivedBy = 'agent';
+        // Raising access (above): a mode above the thread's own asks, from a
+        // thread not in full mode; lowering doesn't.
+        if (permissionMode !== undefined && (await restricted())) {
+          const t = await modeOf(id);
+          if (raises(permissionMode, t.mode)) await confirm('update_thread', [`Switch ${threadName(id, t.title)} to ${MODE_NAMES[permissionMode]}`], { threadId: id, permissionMode }, extra?.signal);
+        }
         return describe((await control.update(upd)).thread);
       }),
     ),
@@ -1260,8 +1365,10 @@ export function buildThreadbearTools(
         account: z.string().optional().describe('Also move to this account (id or email), Claude or Codex. Another provider starts fresh with a summary, on that provider\'s default model.'),
         then: z.string().optional().describe('For this thread: what to do next once moved, sent as the next message.'),
       },
-      handle(async ({ folder: f, threadId, id: alias, account: acc, then }) => {
+      handle(async ({ folder: f, threadId, id: alias, account: acc, then }, extra) => {
         const id = await resolve(threadId ?? alias);
+        // `then` is a message to that thread (raising access, above).
+        if (then?.trim()) await confirm('move_thread', await sendReason(id, await restricted()), { threadId: id, folder: f, then }, extra?.signal);
         const cwd = await folder(f);
         const t = (await control.update({ threadId: id, cwd, accountId: await account(acc) })).thread;
         const self = id === selfId;

@@ -156,7 +156,7 @@ export class CodexTools {
       if (ans.decision === 'allowAlways' && !alwaysAsk) this.deps.addRules([fullName]);
     }
     try {
-      const result = await tool.handler(args, {});
+      const result = await tool.handler(args, { signal: o.signal });
       const out = (result.content ?? [])
         .map((c) => (c && typeof c === 'object' && (c as { type?: string }).type === 'text' ? String((c as { text?: unknown }).text ?? '') : ''))
         .filter(Boolean)

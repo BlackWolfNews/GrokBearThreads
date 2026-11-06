@@ -48,41 +48,60 @@ export function refusal(method: string): Reply {
 // acceptWithExecpolicyAmendment saves a rule that outlives the thread. So
 // the runner keeps its own rules in the thread's allowRules and answers
 // matching requests itself:
-//   codex:fileChange              any edit in this thread
-//   codex:command:<JSON argv>     exactly this command, as the card showed it
-//   codex:prefix:<JSON argv>      a plain command starting with these words,
-//                                 only from Codex's own proposed amendment
+//   codex:fileChange                       any edit in this thread
+//   codex:command:<JSON {cwd, argv}>       exactly this command in this
+//                                          folder, as the card showed it
+// "Always allow" never makes a rule wider than the card. Until 6 Nov 2026 it
+// saved Codex's proposedExecpolicyAmendment as a prefix (codex:prefix:), so
+// ["npm","exec"] from a card for `npm exec -- prettier` went on to allow
+// `npm exec --package=evil`; the card never showed the prefix, and no list
+// of programs that run code can be complete. Those rules, and the older
+// codex:command:<JSON argv> ones with no folder, are no longer honoured:
+// such a command asks again.
 export const FILE_CHANGE_RULE = 'codex:fileChange';
 const COMMAND_RULE = 'codex:command:';
-const PREFIX_RULE = 'codex:prefix:';
 
-export function commandRule(argv: string[]): string {
-  return COMMAND_RULE + JSON.stringify(argv);
+export function commandRule(argv: string[], cwd: string): string {
+  return COMMAND_RULE + JSON.stringify({ cwd, argv });
 }
 
-export function prefixRule(argv: string[]): string {
-  return PREFIX_RULE + JSON.stringify(argv);
-}
-
-function ruleArgv(rule: string, kind: string): string[] | null {
-  if (!rule.startsWith(kind)) return null;
+function ruleCommand(rule: string): { cwd: string; argv: string[] } | null {
+  if (!rule.startsWith(COMMAND_RULE)) return null;
   try {
-    const v = JSON.parse(rule.slice(kind.length));
-    return Array.isArray(v) && v.length && v.every((x) => typeof x === 'string') ? v : null;
+    const v = JSON.parse(rule.slice(COMMAND_RULE.length)) as unknown;
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+    const { cwd, argv } = v as { cwd?: unknown; argv?: unknown };
+    if (typeof cwd !== 'string' || !cwd) return null;
+    if (!Array.isArray(argv) || !argv.length || !argv.every((x) => typeof x === 'string')) return null;
+    return { cwd, argv };
   } catch {
     return null;
   }
 }
 
-// Commands that run other commands, or code, given as arguments. A rule for
-// one would allow anything, so none is made or matched.
+// Commands that run other commands, or code, given as arguments or read
+// from a file the agent can change: no rule is made or matched for one, even
+// an exact one, as the same words can run different code next time. The
+// rules are exact, so this list isn't what stops a rule reaching further;
+// it keeps "Always allow" off commands whose meaning isn't in their words.
 const RUNS_OTHERS = new Set([
-  'sh', 'bash', 'zsh', 'fish', 'dash', 'ksh', 'csh', 'tcsh',
-  'env', 'sudo', 'doas', 'su', 'xargs', 'eval', 'exec', 'command', 'builtin', 'source', '.',
-  'nohup', 'time', 'nice', 'timeout', 'watch', 'osascript',
-  'python', 'python3', 'node', 'deno', 'bun', 'ruby', 'perl', 'php', 'lua', 'tclsh',
-  'npx', 'pnpx', 'bunx', 'uvx', 'uv', 'awk', 'gawk', 'sed', 'find', 'make', 'git',
+  'sh', 'bash', 'zsh', 'fish', 'dash', 'ksh', 'mksh', 'ash', 'csh', 'tcsh', 'nu', 'pwsh', 'xonsh', 'elvish',
+  'env', 'sudo', 'doas', 'su', 'xargs', 'parallel', 'eval', 'exec', 'command', 'builtin', 'source', '.',
+  'nohup', 'time', 'nice', 'timeout', 'gtimeout', 'watch', 'caffeinate', 'taskpolicy', 'arch', 'chroot', 'script', 'expect',
+  'osascript', 'open', 'launchctl', 'ssh', 'tmux', 'screen',
+  'deno', 'bun', 'tclsh', 'wish', 'Rscript', 'julia', 'swift', 'jshell', 'irb', 'ipython', 'jupyter',
+  'npx', 'pnpx', 'bunx', 'uvx', 'uv', 'pipx', 'poetry', 'pdm', 'hatch', 'conda', 'mamba', 'pixi', 'rye',
+  'awk', 'gawk', 'nawk', 'mawk', 'sed', 'gsed', 'find', 'gfind', 'fd', 'make', 'gmake', 'just', 'git',
 ]);
+// The same by pattern, for versioned names (python3.12, node22, perl5.34).
+const RUNS_OTHERS_PATTERN = /^(?:python|pypy|node|nodejs|ruby|perl|php|lua|luajit)[0-9.]*$/;
+const RUNS_OTHERS_LOWER = new Set([...RUNS_OTHERS].map((n) => n.toLowerCase()));
+
+// Lower-cased, as macOS finds /bin/BASH for bash.
+export function runsOthers(program: string): boolean {
+  const name = (program.split('/').pop() ?? program).toLowerCase();
+  return RUNS_OTHERS_LOWER.has(name) || RUNS_OTHERS_PATTERN.test(name);
+}
 
 // Codex wraps every command as `/bin/zsh -lc '<command>'`. Returns the inner
 // command, or the string as it is when it isn't wrapped.
@@ -172,49 +191,36 @@ export function shellWords(s: string): string[] | null {
 }
 
 // The plain argv of a command approval, or null when no rule may cover it:
-// not a plain command, stdin to a running command, or network access.
+// not a plain command, stdin to a running command, network access, or a
+// program that runs other code (runsOthers).
 export function plainArgv(p: CommandExecutionRequestApprovalParams): string[] | null {
   if ((p.kind ?? 'command') !== 'command') return null;
   if (p.networkApprovalContext || (Array.isArray(p.proposedNetworkPolicyAmendments) && p.proposedNetworkPolicyAmendments.length)) return null;
   if (typeof p.command !== 'string') return null;
   const argv = shellWords(unwrapShell(p.command));
-  if (!argv || !argv.length || RUNS_OTHERS.has(argv[0].split('/').pop()!)) return null;
+  if (!argv || !argv.length || runsOthers(argv[0])) return null;
   return argv;
 }
 
-// The rule "Always allow" makes for a command: Codex's proposed amendment
-// (["npm","test"]) as a prefix when it starts the command and is more than
-// one word, else exactly the command the card showed.
-export function ruleFor(p: CommandExecutionRequestApprovalParams): string | null {
+// The rule "Always allow" makes for a command: exactly the command the card
+// showed, in the folder it showed. Codex's proposedExecpolicyAmendment is
+// never used, as it can be shorter than the command (see above).
+// `cwd` is the folder the card shows when the request names none.
+export function ruleFor(p: CommandExecutionRequestApprovalParams, cwd: string): string | null {
   const argv = plainArgv(p);
   if (!argv) return null;
-  const proposed = p.proposedExecpolicyAmendment;
-  if (
-    Array.isArray(proposed) &&
-    proposed.length >= 2 &&
-    proposed.length < argv.length &&
-    proposed.every((x) => typeof x === 'string') &&
-    startsWith(argv, proposed)
-  ) {
-    return prefixRule(proposed);
-  }
-  return commandRule(argv);
+  return commandRule(argv, p.cwd || cwd);
 }
 
-export function commandAllowed(p: CommandExecutionRequestApprovalParams, rules: Iterable<string>): boolean {
+export function commandAllowed(p: CommandExecutionRequestApprovalParams, rules: Iterable<string>, cwd: string): boolean {
   const argv = plainArgv(p);
   if (!argv) return false;
+  const where = p.cwd || cwd;
   for (const r of rules) {
-    const exact = ruleArgv(r, COMMAND_RULE);
-    if (exact && exact.length === argv.length && startsWith(argv, exact)) return true;
-    const prefix = ruleArgv(r, PREFIX_RULE);
-    if (prefix && prefix.length >= 2 && !RUNS_OTHERS.has(prefix[0].split('/').pop()!) && startsWith(argv, prefix)) return true;
+    const rule = ruleCommand(r);
+    if (rule && rule.cwd === where && rule.argv.length === argv.length && rule.argv.every((w, i) => argv[i] === w)) return true;
   }
   return false;
-}
-
-function startsWith(argv: string[], prefix: string[]): boolean {
-  return prefix.length <= argv.length && prefix.every((w, i) => argv[i] === w);
 }
 
 // ---- Handling requests
@@ -329,15 +335,16 @@ export class CodexApprovals {
     const inner = raw ? unwrapShell(raw) : (p.commandActions?.[0]?.command ?? '');
     const network = p.networkApprovalContext;
     const stdin = (p.kind ?? 'command') === 'writeStdin';
-    const rule = stdin || network ? null : ruleFor(p);
-    if (commandAllowed(p, this.deps.rules())) {
+    const cwd = p.cwd || this.deps.cwd();
+    const rule = stdin || network ? null : ruleFor(p, cwd);
+    if (commandAllowed(p, this.deps.rules(), cwd)) {
       this.deps.reply(id, { decision: 'accept' });
       return;
     }
     let title = firstLine(inner) || 'Run a command';
     if (stdin) title = `Send input to a running command${inner ? `: ${firstLine(inner)}` : ''}`;
     else if (network) title = `Allow network access to ${network.host}${inner ? ` for ${firstLine(inner)}` : ''}`;
-    const input: Record<string, unknown> = { command: inner, cwd: p.cwd ?? this.deps.cwd() };
+    const input: Record<string, unknown> = { command: inner, cwd };
     if (p.reason) input.reason = p.reason;
     if (network) input.network = network;
     this.ask(
@@ -490,12 +497,13 @@ export class CodexApprovals {
       cwd: p.cwd,
       reason: p.reason,
     };
-    if (commandAllowed(asV2, this.deps.rules())) {
+    const cwd = p.cwd || this.deps.cwd();
+    if (commandAllowed(asV2, this.deps.rules(), cwd)) {
       this.deps.reply(id, { decision: 'approved' });
       return;
     }
-    const rule = ruleFor(asV2);
-    const input: Record<string, unknown> = { command: asV2.command, cwd: p.cwd };
+    const rule = ruleFor(asV2, cwd);
+    const input: Record<string, unknown> = { command: asV2.command, cwd };
     if (p.reason) input.reason = p.reason;
     this.ask(
       id,

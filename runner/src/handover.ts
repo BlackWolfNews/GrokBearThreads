@@ -23,7 +23,8 @@ import { ErrorCode, RpcError } from './protocol.ts';
 import type { ThreadSummary } from './protocol.ts';
 import type { Notification, Runner } from './runner.ts';
 import type { UsageReading } from './usage.ts';
-import type { ProjectControl, ScheduleControl, ThreadControl } from './threadbear-mcp.ts';
+import type { AgentApprovalRequest, ProjectControl, ScheduleControl, ThreadControl } from './threadbear-mcp.ts';
+import type { ToolApprovalAnswer } from './adapters/types.ts';
 import type { Scheduler } from './schedules.ts';
 import type { CommandHost } from './sync.ts';
 import type { DrainProjectOp, MembershipChange, Projects } from './projects.ts';
@@ -572,6 +573,11 @@ export class ThreadRouter implements ThreadControl {
   // thread, so this never goes elsewhere.
   requestSecret(threadId: string, req: SecretRequest): Promise<SecretAnswer> {
     return this.runner.requestSecret(threadId, req);
+  }
+
+  // Likewise for a threadbear tool's own card (threadbear-mcp.ts, "Raising access").
+  requestAgentApproval(threadId: string, req: AgentApprovalRequest): Promise<ToolApprovalAnswer> {
+    return this.runner.requestAgentApproval(threadId, req);
   }
 
   // Only a thread's own agent pins, and its CLI is a child of the runner
