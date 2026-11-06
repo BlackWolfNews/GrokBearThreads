@@ -892,7 +892,9 @@ test('a handover waits for an archived thread\'s worktree cleanup, so the saved 
   // The CLI has gone and the cleanup has started, but git hasn't finished.
   await until(() => rt.archivePending === false, 'the cleanup to start');
   assert.ok(fs.existsSync(w.path), 'still removing');
-  await h.runner.beginDrain([], { onHandedOver: () => undefined });
+  const handed: string[] = [];
+  await h.runner.beginDrain([], { onHandedOver: (t) => handed.push(t) });
+  await until(() => handed.includes(id), 'the handover');
   assert.equal(h.runner.has(id), false);
   const saved = JSON.parse(fs.readFileSync(path.join(h.home, 'threads', id, 'thread.json'), 'utf8'));
   assert.ok(saved.worktree.removedAt, 'removedAt was saved');
@@ -980,19 +982,24 @@ test('a thread deleted while a handover waits for its cleanup stays deleted', as
   assert.ok(!fs.existsSync(path.join(h.home, 'threads', id)), 'not saved back');
 });
 
-test("a handover doesn't wait forever on a cleanup that never finishes", async () => {
+test("a handover doesn't wait on a thread's cleanup to let the rest go, nor for ever on one that never finishes", async () => {
   const h = harness();
   const { thread } = h.runner.create({ text: 'Go', accountId: 'claude-3' });
   h.adapter.last.init();
   h.adapter.last.result();
+  const other = h.runner.create({ text: 'Other', accountId: 'claude-3' }).thread;
+  h.adapter.last.init();
+  h.adapter.last.result();
   const rt = (h.runner as any).threads.get(thread.id).rt;
   rt.cleaning = new Promise(() => undefined);
-  let done = false;
-  const drained = h.runner.beginDrain([], { onHandedOver: () => undefined }).then(() => (done = true));
+  const handed: string[] = [];
+  await h.runner.beginDrain([], { onHandedOver: (id) => handed.push(id) });
+  assert.equal(h.runner.has(other.id), false, 'the rest go at once');
+  assert.deepEqual(h.runner.keeping(), [thread.id]);
   await new Promise((r) => setTimeout(r, 20));
-  assert.equal(done, false, 'waits a while');
-  h.clock.advance(5 * 60_000);
-  await drained;
+  assert.equal(h.runner.has(thread.id), true, 'waits a while');
+  h.clock.advance(10 * 60_000);
+  await until(() => handed.includes(thread.id), 'the handover past the limit');
   assert.equal(h.runner.has(thread.id), false);
 });
 

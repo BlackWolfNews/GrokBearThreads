@@ -9,7 +9,10 @@ import type { Drain, ThreadState } from '../runner.ts';
 import { DRAIN_AGENT_MS, DRAIN_BACKGROUND_MS, DRAIN_CHECK_MS, DRAIN_MAX_OLD_MS, DRAIN_SETTLE_MS, newRuntime } from '../runner.ts';
 
 // How long a handover waits for an archive's worktree cleanup (letGo).
-const CLEANUP_WAIT_MS = 60_000;
+// Removing a big worktree can take a while, and a git change still running
+// when the wait ends can't be stopped (cleanUpWorktree's stillOurs only
+// stops the next one), so this is long: past it, git has hung.
+const CLEANUP_WAIT_MS = 10 * 60_000;
 
 export const handoversPart = {
   // This runner is handing over to a new release. `keep` are the busy
@@ -25,7 +28,9 @@ export const handoversPart = {
   async beginDrain(this: Runner, keep: Iterable<string>, opts: { onHandedOver: (threadId: string) => void; backgroundMs?: number; agentMs?: number; checkMs?: number; ready?: () => boolean }): Promise<void> {
     if (this.draining) throw new Error('already draining');
     const d: Drain = {
-      keep: new Set([...keep].filter((id) => this.threads.has(id))),
+      // A thread whose worktree cleanup is running stays until it's done
+      // (letGo), as a busy one would, so the rest go now rather than wait.
+      keep: new Set([...keep, ...[...this.threads.values()].filter((st) => st.rt.cleaning).map((st) => st.rec.id)].filter((id) => this.threads.has(id))),
       going: new Set(),
       onHandedOver: opts.onHandedOver,
       since: this.clock.now(),
@@ -132,9 +137,8 @@ export const handoversPart = {
     if (rt.closing) await rt.closing;
     // An archive's worktree cleanup, started as the CLI went: its removedAt
     // and note belong in the record saved below (THREADBEAR-16). Not for
-    // ever, as git can hang (a hook) and the new runner waits on this: past
-    // the limit the record goes as it is, and the next start settles it
-    // (settleLostCleanups).
+    // ever, as git can hang (a hook): past the limit the record goes as it
+    // is, and the adopting runner settles it (settleLostCleanups).
     if (rt.cleaning) {
       let timer: { cancel(): void } | undefined;
       const late = new Promise<void>((resolve) => (timer = this.clock.setTimeout(resolve, CLEANUP_WAIT_MS)));
