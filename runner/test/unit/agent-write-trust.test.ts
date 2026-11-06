@@ -448,6 +448,38 @@ test("Codex review, round 2: the runner's data dir, a link to a patch not there 
   assert.ok(runsAsCode(link));
 });
 
+test("Codex review, round 3: a linked user settings file, its hooks' ./ paths from the thread's folder, a missing project hook script, and a home patch it can't follow", async () => {
+  const root = tmpDir();
+  const home = tmpDir();
+  const project = path.join(root, 'app');
+  const dotfiles = path.join(root, 'dotfiles');
+  put(path.join(dotfiles, 'claude-user.json'), JSON.stringify({ hooks: { PostToolUse: [{ hooks: [{ type: 'command', command: 'sh ./scripts/after-write.sh' }] }] } }));
+  const login = tmpDir();
+  fs.symlinkSync(path.join(dotfiles, 'claude-user.json'), path.join(login, 'settings.json'));
+  put(path.join(project, '.claude', 'settings.json'), JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'sh "$CLAUDE_PROJECT_DIR"/scripts/not-yet.sh' }] }] } }));
+  const make = () =>
+    makeHarness(home, {}, {
+      panelsRoot: root,
+      accounts: new FakeAccounts([...ACCOUNTS, { id: 'claude-9', provider: 'claude', title: 'nine', configDir: login }]),
+      patchTrust: new PatchTrust({ file: path.join(home, 'patch-trust.json'), claudeHome: root }),
+    });
+  let h = make();
+  let { thread } = h.runner.create({ text: 'hi', accountId: 'claude-3', cwd: project, permissionMode: 'auto' });
+  await settle(h, thread.id);
+  let runsAsCode = h.adapter.last.opts.runsAsCode!;
+  assert.ok(runsAsCode(path.join(dotfiles, 'claude-user.json')), 'user settings by what the link points at');
+  assert.ok(runsAsCode(path.join(project, 'scripts', 'after-write.sh')), "a user hook's ./ script, where it runs");
+  assert.ok(runsAsCode(path.join(project, 'scripts', 'not-yet.sh')), "a project hook's script that isn't there yet");
+  assert.ok(!runsAsCode(path.join(project, 'README.md')));
+  // A home patch whose imports can't be followed: every edit asks.
+  put(path.join(root, '.threadbear', 'patches', 'dyn.ts'), `const dir = process.cwd();\nconst m = await import(dir + '/end.ts');\nexport default m.default;\n`);
+  h = make();
+  ({ thread } = h.runner.create({ text: 'hi', accountId: 'claude-3', cwd: project, permissionMode: 'auto' }));
+  await settle(h, thread.id);
+  runsAsCode = h.adapter.last.opts.runsAsCode!;
+  assert.ok(runsAsCode(path.join(project, 'README.md')), 'fails closed');
+});
+
 test('Codex review, round 2: on Full access an Edit of a patch that is a link into the folder carries it on', async () => {
   const root = tmpDir();
   const folder = path.join(root, 'repo');

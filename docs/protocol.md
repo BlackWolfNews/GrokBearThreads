@@ -2947,11 +2947,14 @@ script it names, one it names that isn't there yet), `.claude/settings*.json`
 (home's too), an `.mcp.json`, a script the thread folder's Claude settings
 name, the runner's own data dir (`patch-trust.json` is the trust itself),
 every Claude login's user settings (`settings*.json` and `.claude.json` in
-its config folder, and `~/.claude.json`) and the paths their commands name,
-and for patches that load without trust (home's, Threadbear's own
-checkout's) what each is a link to, imports and names, absolute or `~/`
-paths in it, and its `./` paths from the thread's folder, where its
-commands run. What such a hook runs by name (`npm test`, a tool on PATH)
+its config folder, and `~/.claude.json`, by their names and what a link
+from them points at) and the paths their commands and the thread folder's
+settings' name, there yet or not, from the login's folder or the thread's
+(where hooks run), and for patches that load without trust (home's,
+Threadbear's own checkout's) what each is a link to, imports and names,
+absolute or `~/` paths in it, and its `./` paths from the thread's folder,
+where its commands run; one of those whose code can't all be followed
+makes every edit ask. What such a hook runs by name (`npm test`, a tool on PATH)
 is the folder's own code, run as its owner set it up, and isn't followed.
 Names are matched as written and as the disk has them (through symlinks,
 a link to a file not there yet included, and without case, as macOS names

@@ -219,13 +219,15 @@ function namedScripts(parts: unknown, dir: string): string[] {
   return [...out];
 }
 
-// Every path a Claude Code user settings file's commands name (hooks, a
-// status line, a key helper and the rest): absolute, from `~`, `$HOME` or
-// `$CLAUDE_CONFIG_DIR` (`dir`), or relative to `dir`; there or not. They
+// Every path a Claude Code settings file's commands name (hooks, a status
+// line, a key helper and the rest): absolute, from `~`, `$HOME`,
+// `$CLAUDE_CONFIG_DIR` (`dir`) or `$CLAUDE_PROJECT_DIR` (`cwd`), or
+// relative to `dir` and to `cwd`, the session's folder, where hooks run;
+// there or not. They
 // run unasked in every session on that login, so an edit of one outside
 // Full access asks (code-writes.ts). A file that isn't plain JSON names
 // nothing it can tell, so its own name (code-writes.ts) is what's guarded.
-export function settingsNamedPaths(file: string, dir: string, home: string = os.homedir()): string[] {
+export function settingsNamedPaths(file: string, dir: string, home: string = os.homedir(), cwd?: string): string[] {
   const read = readJson(file);
   if (!read?.ok) return [];
   const strings: string[] = [];
@@ -237,10 +239,17 @@ export function settingsNamedPaths(file: string, dir: string, home: string = os.
   walk(commandParts(read.value));
   const out = new Set<string>();
   for (const s of strings) {
-    const text = s.replace(/\$\{?CLAUDE_CONFIG_DIR\}?/g, dir).replace(/\$\{?HOME\}?/g, home);
-    for (const raw of text.split(/[\s'"`;&|()<>=]+/)) {
+    let text = s.replace(/\$\{?CLAUDE_CONFIG_DIR\}?/g, dir).replace(/\$\{?HOME\}?/g, home);
+    if (cwd) text = text.replace(/\$\{?CLAUDE_PROJECT_DIR\}?/g, cwd);
+    // Quotes out first: `"$CLAUDE_PROJECT_DIR"/x.sh` is one path.
+    for (const raw of text.replace(/["'`]/g, '').split(/[\s;&|()<>=]+/)) {
       if (!raw.includes('/') || raw.includes('$')) continue;
-      out.add(raw.startsWith('~/') ? path.join(home, raw.slice(2)) : path.resolve(dir, raw));
+      if (raw.startsWith('~/')) out.add(path.join(home, raw.slice(2)));
+      else {
+        out.add(path.resolve(dir, raw));
+        // A hook runs in the session's folder, so `./x.sh` is there too.
+        if (cwd && !path.isAbsolute(raw)) out.add(path.resolve(cwd, raw));
+      }
       if (out.size >= MAX_NAMED) return [...out];
     }
   }

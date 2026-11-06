@@ -125,6 +125,9 @@ export interface PatchTrustStore extends PatchGate {
   // Whether `file` is part of a patch this has hashed (the patch file, a
   // helper, a script it names): an edit to it changes code that runs.
   covers(file: string): boolean;
+  // Whether a patch folder's patches load whatever they hold, unhashed
+  // (Threadbear's own checkout): code-writes looks at those itself.
+  loadsUnhashed(dir: string): boolean;
   // Whether `file` hashes to `hash` now, read afresh (no cache): checked
   // just before a trusted hook or setup script runs.
   verify(file: string, hash: string): boolean;
@@ -151,6 +154,7 @@ export const TRUST_ALL: PatchTrustStore = {
   trustCurrent: (files) => files,
   trustAgentWrite: () => [],
   covers: () => false,
+  loadsUnhashed: () => true,
   verify: () => true,
   checkClaude: () => ({ trusted: true }),
   trustClaude: () => true,
@@ -311,6 +315,11 @@ export class PatchTrust implements PatchTrustStore {
       const mine = parts.find((d) => d.path === target);
       return mine?.sha256 === sha256 && parts.every((d) => d.sha256 === undefined || this.isApproved(d.path, d.sha256));
     });
+  }
+
+  loadsUnhashed(dir: string): boolean {
+    const key = folderKeyOfDir(path.dirname(path.dirname(path.resolve(dir))));
+    return this.always.some((d) => isInside(key, d));
   }
 
   // Without case, as macOS names a file either way: a wider match only asks more.
