@@ -79,6 +79,8 @@ const THREAD_METHODS = new Set([
   'panels.convexDeployments',
   'panels.convexLogin',
   'actions.run',
+  'patches.trust',
+  'threads.subagent',
 ]);
 
 // Draining runners' threads, as the primary's server sees them (handover.ts

@@ -10,6 +10,7 @@ import { patiently } from '../helpers/patience.ts';
 import { WebSocket, WebSocketServer } from 'ws';
 import crypto from 'node:crypto';
 import net from 'node:net';
+import fs from 'node:fs';
 import { authProof, isNonce, newNonce } from '../../src/rpc-auth.ts';
 
 const TOKEN = 'test-token-0123456789';
@@ -647,6 +648,37 @@ test('threads.panelShown clears the thread\'s panel request, and goes to a drain
     await assert.rejects(c.call('threads.panelShown', { threadId: thread.id }), (e: { code: number }) => e.code === -32602);
     await c.call('threads.panelShown', { threadId: away.id, requestId: 'r1' });
     assert.deepEqual(calls, [{ threadId: away.id, method: 'threads.panelShown' }]);
+  } finally {
+    c.close();
+    await server.close();
+  }
+});
+
+// Every request that names a thread goes to the draining runner holding it.
+// patches.trust wasn't on the list, so pressing Trust on a thread that was
+// finishing its turn on the old runner during an update said "Thread not
+// found" (Mike, 7 Nov). This reads the methods from rpc.ts so a new one
+// can't miss the list again.
+test('every request about a thread reaches the draining runner that has it', async () => {
+  const src = fs.readFileSync(new URL('../../src/rpc.ts', import.meta.url), 'utf8');
+  const named = new Set<string>();
+  for (const block of src.split(/\n\s*case '/).slice(1)) {
+    const method = block.slice(0, block.indexOf("'"));
+    const body = block.slice(0, block.search(/\n\s*(case '|default:)/) >>> 0);
+    if (/'threadId'/.test(body)) named.add(method);
+  }
+  // Only this connection's own subscription list; nothing to pass on.
+  named.delete('threads.unsubscribe');
+  assert.ok(named.has('patches.trust') && named.has('actions.run'), [...named].join(', '));
+  const calls: string[] = [];
+  const remote = { owns: (id: string) => id === 'away-3', call: async (_id: string, method: string) => { calls.push(method); return {}; }, summaries: () => [], search: async () => [] };
+  const { server, url } = await serve({ remote: remote as any });
+  const c = await RunnerClient.connect(url, TOKEN);
+  try {
+    // threads.showPanel only goes on with a Mac app to show it.
+    await c.call('hello', { client: 'threadbear-mac' });
+    for (const method of named) await c.call(method, { threadId: 'away-3' }).catch((e) => assert.fail(`${method}: ${e.message}`));
+    assert.deepEqual(calls.sort(), [...named].sort());
   } finally {
     c.close();
     await server.close();
