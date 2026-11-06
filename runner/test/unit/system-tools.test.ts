@@ -39,6 +39,7 @@ const KNOWN: Record<string, { everywhere: true } | { linux: string; files: strin
   '/usr/bin/xcrun': { linux: 'behind a darwin check: the secret check is Mac only', files: ['secret-check.ts'] },
   '/usr/bin/pmset': { linux: 'behind darwin checks: the secret check and keeping awake are Mac only', files: ['secret-check.ts', 'keep-awake.ts'] },
   '/usr/bin/caffeinate': { linux: 'behind a darwin check: keeping awake is Mac only', files: ['keep-awake.ts'] },
+  '/usr/bin/lockf': { linux: 'behind a darwin check; flock on Linux', files: ['worktrees.ts'] },
 };
 
 function sources(dir: string): string[] {
