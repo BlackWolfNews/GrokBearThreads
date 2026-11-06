@@ -176,6 +176,12 @@ fix (6 Nov). Their hand test may know more than you can find out. Merge with
 `gh pr merge --rebase` so it shows as merged and stays theirs, and put anything
 of your own in a commit on top. A comment to them goes past Mike first.
 
+A commit on someone's fork isn't an offer, however good it looks: they haven't
+asked for it to go anywhere. Don't suggest bringing one in, and don't take one,
+unless Mike asks for that one by name or they've opened a PR. Mike, 6 Nov: "I
+don't think you should be pulling in anybody's stuff willy nilly." Telling him
+what people have built is fine, and that's all the fork watch schedule does.
+
 ## Experiments
 
 Other people run Threadbear since the repo went public (5 Nov 2026), so a
