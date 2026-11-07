@@ -1222,6 +1222,16 @@ enum Automation {
             return composer.debugHoverChip(number).map { "ok window \($0)" } ?? "error no chip \(number) with a card"
         case "select-text":
             return select(c, app: app)
+        case "room":
+            // Every login's room, as the honey pot and Usage see it:
+            // {"percent": 44}. Lasts until the runner next says otherwise.
+            guard let percent = c["percent"] as? Double else { return "error needs percent" }
+            app.accounts = app.accounts.map {
+                var account = $0
+                account.usage = AccountUsage(windows: [UsageWindow(kind: "weekly", title: "Weekly", remainingPercent: percent)])
+                return account
+            }
+            return "ok"
         case "account-ids":
             // For screenshots: accounts are titled by their email address,
             // so show their ids instead. Lasts until the next reconnect.

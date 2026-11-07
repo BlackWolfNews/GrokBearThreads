@@ -868,7 +868,8 @@ beside the logins it says it has, and `tb runner logins <runnerId>
 claude:you@example.com` sets it. Your first Mac goes by its own readings,
 never that Mac's.
 
-Usage, near the bottom of the left-hand rail, shows how much room each login
+Usage, the honey pot near the bottom of the left-hand rail (it's filled to the
+room left on the login your next new thread would use), shows how much room each login
 has left before it hits its limits: the weekly one, and the 5-hour one for
 logins that still have it (Claude Team does, Max plans don't any more).
 Threadbear learns these numbers from the threads it runs, so a login's bars
