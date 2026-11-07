@@ -2946,7 +2946,8 @@ failure told then brings the thread back, in that worktree. A pass stays
 quiet, whatever `tell` says, and a failure that isn't told (`"never"`, or past
 the limit) is only posted: either way the thread stays archived and the
 cleanup goes ahead. A hook stops at the action timeout (SIGTERM, then SIGKILL
-to its process group), and anything it left running ends with it. A restart
+to its process group), and anything it left running in that group is stopped
+too. A restart
 waits for running hooks, and a thread's hooks hold it on a draining runner. A hook whose folder has gone by the time it finishes gets a
 `system.note` rather than an `action.run`, and isn't told to the agent, as
 its result says nothing about the code.

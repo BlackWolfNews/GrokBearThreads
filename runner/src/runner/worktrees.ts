@@ -194,15 +194,18 @@ export const worktreesPart = {
   // so it shows no Land chip and, brought back, never carries on in the
   // folder. Each check counts as the thread's cleanup, so a message sent
   // meanwhile waits for it (deliver).
-  settleLostCleanups(this: Runner, threads: Iterable<ThreadState> = this.threads.values()): Promise<void> {
+  settleLostCleanups(this: Runner, threads: Iterable<ThreadState> = this.threads.values(), retry = true): Promise<void> {
     const checks = [];
     for (const st of threads) {
       const { rec, rt } = st;
       const w = rec.worktree;
       if (!rec.archivedAt || !w || w.removedAt || rt.cleaning) continue;
       // Archived, but the runner went before the cleanup ran: it's still to
-      // do, not just to record.
-      const check = (w.cleanupOwed ? this.cleanUpWorktree(st) : worktreeGone(w).then((gone) => {
+      // do, not just to record. Not from a handover: one that comes with this
+      // still owed gave up waiting for its git (letGo), which may still be
+      // removing the folder, and a second one beside it could read that as
+      // uncommitted changes. The next start does it.
+      const check = (retry && w.cleanupOwed ? this.cleanUpWorktree(st) : worktreeGone(w).then((gone) => {
           if (!gone || rt.deleted || w.removedAt) return;
           w.removedAt = this.isoNow();
           if (gone === 'taken') w.spare = true;

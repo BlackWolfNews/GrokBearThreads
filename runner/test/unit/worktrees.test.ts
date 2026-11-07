@@ -1194,3 +1194,25 @@ test('a hook that ignores SIGTERM still ends at the timeout, so the archive wait
   assert.match(hookRuns(h, id)[0].text, /Stopped after/);
   assert.ok(!fs.existsSync(w.path));
 });
+
+test('adopting a thread still owed a cleanup leaves it, as the old runner\'s git may still be at it; the next start does it', async () => {
+  const { main } = makeRepo();
+  const h = harness();
+  const { id, w } = await threadWithWorktree(h, main);
+  const threads = (h.runner as any).threads;
+  // As letGo leaves it when its wait for a hung cleanup runs out.
+  const rec = threads.get(id).rec;
+  rec.archivedAt = new Date(h.clock.now()).toISOString();
+  rec.worktree.cleanupOwed = true;
+  (h.runner as any).store.save(rec);
+  threads.delete(id);
+  h.runner.adopt(id);
+  await threads.get(id).rt.cleaning;
+  assert.ok(fs.existsSync(w.path));
+  assert.equal(threads.get(id).rec.worktree.cleanupOwed, true, 'still owed');
+  h.runner.flush();
+  await h.runner.shutdown();
+  const next = makeHarness(h.home, {}, { actionShell: ['/bin/sh', '-c'] });
+  await until(() => notes(next, id).some((n) => n.startsWith('Removed')), 'the cleanup at the next start');
+  assert.ok(!fs.existsSync(w.path));
+});
