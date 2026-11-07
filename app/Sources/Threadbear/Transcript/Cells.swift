@@ -642,6 +642,19 @@ final class TextRowCell: RowCellView {
         for (index, button) in explainButtons where !shown.contains(index) && !button.isHidden { button.isHidden = true }
     }
 
+    /// Where the page number of a paged card's "‹ 2 of 3 ›" is drawn, in this
+    /// view. It's the first number in the text, on the heading line.
+    func pageNumberRect() -> NSRect? {
+        guard let storage = textView.textStorage, let layoutManager = textView.layoutManager, let container = textView.textContainer,
+              let range = RowRenderer.pageNumberRange(in: storage.string) else { return nil }
+        layoutManager.ensureLayout(for: container)
+        let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        let rect = layoutManager.boundingRect(forGlyphRange: glyphs, in: container)
+        let full = textView.fullFrame
+        let origin = textView.textContainerOrigin
+        return rect.offsetBy(dx: full.minX + origin.x, dy: full.minY + origin.y)
+    }
+
     /// The done card's tick draws itself on, as the sidebar row's does. The
     /// tick is an attachment in the text, which can't animate, so a view of
     /// the very same picture takes its exact place, revealed along the tick's

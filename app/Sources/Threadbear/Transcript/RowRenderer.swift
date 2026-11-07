@@ -1648,6 +1648,15 @@ enum RowRenderer {
         return output
     }
 
+    /// Where a paged card's page number is in its text: the 2 of "2 of 3",
+    /// which `asksHeading` sets off with non-breaking spaces, so an ask's
+    /// own "2 of 3" further on isn't taken for it.
+    static func pageNumberRange(in text: String) -> NSRange? {
+        guard let match = text.range(of: "\u{00A0}\u{00A0}[0-9]+ of [0-9]+\u{00A0}\u{00A0}", options: .regularExpression) else { return nil }
+        let found = text[match].drop { !$0.isNumber }.prefix { $0.isNumber }
+        return NSRange(found.startIndex..<found.endIndex, in: text)
+    }
+
     /// The done card: the agent said nothing waits on Mike, so it says
     /// Done, with Archive (`archive`, as ⌘E does) at the right of that
     /// line. Any follow-ups it suggested sit under "Or carry on", one
