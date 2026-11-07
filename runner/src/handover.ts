@@ -145,6 +145,9 @@ export type PeersDeps = {
 export class Peers {
   private deps: PeersDeps;
   private peers = new Map<number, Peer>();
+  // Threads of a draining runner that went, between it going and them being
+  // taken in here (lost): not on any runner for those few seconds.
+  private arriving = new Set<string>();
   private closing = false;
 
   constructor(deps: PeersDeps) {
@@ -261,13 +264,24 @@ export class Peers {
   private async lost(peer: Peer): Promise<void> {
     if (this.closing || peer.gone) return;
     peer.gone = true;
+    const left = [...peer.threads.keys()];
+    // Neither its nor here yet until they're taken in below: arriving() says
+    // so, or the mirror would take their rows (and messages) for stale.
+    for (const id of left) this.arriving.add(id);
     this.peers.delete(peer.info.pid);
     this.deps.onChange?.();
-    const left = [...peer.threads.keys()];
     if (left.length === 0) {
       this.deps.log.info('a draining runner finished', { pid: peer.info.pid });
       return;
     }
+    try {
+      await this.takeIn(peer, left);
+    } finally {
+      for (const id of left) this.arriving.delete(id);
+    }
+  }
+
+  private async takeIn(peer: Peer, left: string[]): Promise<void> {
     // A runner that closed its socket is on its way out; give it a moment
     // to finish exiting before stopping what it left.
     const until = Date.now() + (this.deps.goneWaitMs ?? 10_000);
@@ -305,6 +319,15 @@ export class Peers {
 
   owns(threadId: string): boolean {
     return Boolean(this.ownerOf(threadId));
+  }
+
+  // A thread a draining runner had when it went, until it's taken in here.
+  isArriving(threadId: string): boolean {
+    return this.arriving.has(threadId);
+  }
+
+  arrivingIds(): string[] {
+    return [...this.arriving];
   }
 
   find(threadId: string): ThreadSummary | undefined {

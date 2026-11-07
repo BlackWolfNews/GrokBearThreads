@@ -61,6 +61,7 @@ import { hasLineBreak, stripEnvComment } from './linear-text.ts';
 import { automaticCommand, liveCommandProblem, TRUST_ALL, unhashedFiles, worktreeOf, type PatchGate } from './patch-trust.ts';
 import { verifiedUrl } from './verified-imports.ts';
 import { inBackground } from './background.ts';
+import { CUT_LOOKAHEAD, safeEnd } from './safe-cut.ts';
 
 export const CONVEX_DASHBOARD = 'https://dashboard.convex.dev';
 // `npx convex dev` on an anonymous (no account) deployment serves the
@@ -1205,7 +1206,10 @@ export function runCommand(
     const chunks: Buffer[] = [];
     let size = 0;
     let truncated = false;
-    const limit = LIMITS.toolResultText;
+    // A little past the limit is read, so the cut back to it can be placed
+    // where no secret is split (safe-cut.ts): what's kept goes to Convex in a
+    // hook's message.
+    const limit = LIMITS.toolResultText + CUT_LOOKAHEAD;
     const take = (chunk: Buffer) => {
       if (size >= limit) {
         truncated = true;
@@ -1244,6 +1248,11 @@ export function runCommand(
     const finish = (code: number | null, error?: string) => {
       clearTimeout(timer);
       let text = Buffer.concat(chunks).toString('utf8');
+      if (Buffer.byteLength(text, 'utf8') > LIMITS.toolResultText) {
+        truncated = true;
+        const kept = Buffer.from(text, 'utf8').subarray(0, LIMITS.toolResultText).toString('utf8').replace(/\uFFFD$/, '');
+        text = text.slice(0, safeEnd(text, kept.length));
+      }
       if (error) text = text ? `${text}\n${error}` : error;
       if (timedOut) {
         const seconds = timeoutMs >= 10_000 ? String(Math.round(timeoutMs / 1000)) : String(timeoutMs / 1000);

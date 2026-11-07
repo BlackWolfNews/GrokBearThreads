@@ -123,7 +123,7 @@ import {
   projectPatchFiles,
   webPage,
 } from './patches.ts';
-import { cutSafely, firstLineSafely } from './safe-cut.ts';
+import { cutSafely, firstLineSafely, isSafeSlice } from './safe-cut.ts';
 import { FolderCache } from './folder-cache.ts';
 import { worktreesPart, type WorktreesPart } from './runner/worktrees.ts';
 import { networkPart, type NetworkPart } from './runner/network.ts';
@@ -3403,6 +3403,11 @@ export function cleanTitle(text: string): string {
   if (/^(["'`]).*\1$/.test(t)) t = t.slice(1, -1);
   t = t.replace(/\.$/, '').trim();
   if (t.length > LIMITS.titleChars || t.split(/\s+/).length > 10) return '';
+  // Each tidy-up (its first line, before a dash, without quotes or a full
+  // stop) is a cut of the model's text: one through a secret is no title
+  // (safe-cut.ts), and the thread keeps the one titleFrom made.
+  const at = (text ?? '').indexOf(t);
+  if (t && (at < 0 || !isSafeSlice(text, at, at + t.length))) return '';
   return t;
 }
 

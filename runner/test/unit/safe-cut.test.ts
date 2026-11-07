@@ -14,7 +14,7 @@ import { redactSecrets, scrubDoc, scrubText } from '../../src/redaction.ts';
 import { Scrubber } from '../../src/scrub.ts';
 import { cutSafely, safeEnd, tailSafely, useScrubForCuts } from '../../src/safe-cut.ts';
 import { BodyCollector, prepareBody } from '../../src/full-sync.ts';
-import { oneLine, titleFrom } from '../../src/runner.ts';
+import { cleanTitle, oneLine, titleFrom } from '../../src/runner.ts';
 import { waitForFromTool, needsFromTool, bylineFromTool } from '../../src/needs.ts';
 import { runCheck } from '../../src/schedule-check.ts';
 import type { ThreadSummary } from '../../src/protocol.ts';
@@ -174,4 +174,35 @@ test('review: full sync holds reasoning back cut where no secret is split', () =
   const out = c.see('t', { type: 'assistant.text', seq: 2, ts: 'x', text: 'ok' } as never);
   const body = prepareBody(out[0]!, scrubText);
   assert.ok(!JSON.stringify(body).includes('hunter2hunter3'));
+});
+
+test('review round 2: a password longer than what a cut looks at either side is still seen whole', () => {
+  for (const n of [20_000, 40_000]) {
+    const long = `postgres://alice:${'p9'.repeat(n)}@db is the database`;
+    assert.ok(!titleFrom(long).includes('p9p9p9'));
+    // The other way: the cut deep inside the password, its scheme far behind.
+    for (const at of [33_000, 60_000]) assert.ok(!scrubText(long.slice(0, safeEnd(long, at))).includes('p9p9p9'), `${n} ${at}`);
+    const tail = tailSafely(long, 30_000, '…');
+    assert.ok(!scrubText(tail).includes('p9p9p9'));
+  }
+  // A huge run that's no secret (a minified file) is still cut where it was.
+  const minified = 'a=1;b=2;'.repeat(20_000);
+  assert.equal(safeEnd(minified, 64_000), 64_000);
+});
+
+test('review round 2: taking punctuation off the end is checked too, and a model title cut through a secret is no title', () => {
+  const scrubber = new Scrubber({ env: {}, folders: false });
+  scrubber.known.add('aB7xD3q9.');
+  scrubber.known.add('aB7xD3q9\nrT8vK6z2');
+  useScrubForCuts((t) => redactSecrets(scrubber.known.mask(t)).text);
+  try {
+    const ask = needsFromTool({ needs: 'you', asks: [{ action: `${'x'.repeat(480)} aB7xD3q9. ${'z'.repeat(100)}` }] })!.asks![0]!.action;
+    assert.ok(!/aB7xD3q9(?!\.)/.test(ask), ask.slice(-30));
+    const next = needsFromTool({ needs: 'nothing', next: ['Use aB7xD3q9. Continue later.'] })?.next ?? [];
+    for (const n of next) assert.ok(!/aB7xD3q9(?!\.)/.test(n), n);
+    assert.equal(cleanTitle('aB7xD3q9\nrT8vK6z2'), '');
+    assert.equal(cleanTitle('Title: Fix the sync'), 'Fix the sync');
+  } finally {
+    useScrubForCuts(scrubText);
+  }
 });

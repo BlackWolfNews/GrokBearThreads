@@ -2185,6 +2185,7 @@ export class ConvexSync {
   // a deleted thread. If this write fails, the next flush tries again.
   private async writeRowNow(threadId: string): Promise<void> {
     const me = Symbol('writeRowNow');
+    let failed = false;
     const done = await this.rowTurn();
     try {
       this.mark(this.deps.runner.get(threadId), true);
@@ -2205,10 +2206,23 @@ export class ConvexSync {
       // change back to what was sent before (Stop sharing after a link).
       this.sent.delete(threadId);
       this.lastWrite.delete(threadId);
+      failed = true;
       this.deps.log.debug('new thread row not written yet', { threadId, error: String(e) });
     } finally {
       this.doneWriting(threadId, me);
       done();
+    }
+    // A change marked while it was on its way was weighed against it and may
+    // have been dropped as the same: the thread as it is now goes with the
+    // next flush (Codex's review, 7 Nov: Stop sharing from the phone failing
+    // while a progress update came in left the link up).
+    if (failed) {
+      try {
+        this.mark(this.deps.runner.get(threadId), true);
+      } catch {
+        // Gone meanwhile: its removal is queued.
+      }
+      this.scheduleFlush();
     }
   }
 

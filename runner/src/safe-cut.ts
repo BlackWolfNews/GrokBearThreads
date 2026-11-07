@@ -16,9 +16,12 @@
 import { scrubText } from './redaction.ts';
 
 // How much either side of a cut is looked at: far more than any real secret
-// (an 8192-bit RSA key's PEM is about 6.5 KB), so a text up to 64 KB is looked
-// at whole, and a cut in a huge one (a tool's output) stays cheap.
+// (an 8192-bit RSA key's PEM is about 6.5 KB), and a cut in a huge text (a
+// tool's output) stays cheap. A run without spaces is looked at whole (around).
 const WINDOW = 32 * 1024;
+// How much to read past a limit (a command's output) so the cut back to it can
+// be placed by safeEnd.
+export const CUT_LOOKAHEAD = WINDOW;
 // Ends the text looked at, so the rules for a key cut off at the very end
 // (CUT_SHORT, KnownValues' cut-off values) don't count as having seen it whole:
 // a part that's mid-string once it's put in a longer text has no end there.
@@ -42,8 +45,8 @@ export function useScrubForCuts(fn: (text: string) => string): void {
 export function safeEnd(text: string, end: number): number {
   if (end >= text.length) return text.length;
   if (end <= 0) return 0;
-  const from = Math.max(0, end - WINDOW);
-  const win = text.slice(from, Math.min(text.length, end + WINDOW));
+  const [from, to] = around(text, end);
+  const win = text.slice(from, to);
   let whole: string;
   try {
     whole = scrub(win);
@@ -70,8 +73,7 @@ export function safeEnd(text: string, end: number): number {
 export function safeStart(text: string, start: number): number {
   if (start <= 0) return 0;
   if (start >= text.length) return text.length;
-  const to = Math.min(text.length, start + WINDOW);
-  const from = Math.max(0, start - WINDOW);
+  const [from, to] = around(text, start);
   const win = text.slice(from, to);
   let whole: string;
   try {
@@ -118,6 +120,13 @@ export function tailSafely(text: string, max: number, mark = ''): string {
   return mark + text.slice(safeStart(text, text.length - Math.max(0, max - mark.length)));
 }
 
+// Whether text.slice(start, end), a part taken out of `text` some other way
+// (a model's title tidied, punctuation taken off the end), has no secret cut
+// at either end.
+export function isSafeSlice(text: string, start: number, end: number): boolean {
+  return safeEnd(text, end) === end && safeStart(text, start) === start;
+}
+
 // The first line with anything on it, trimmed and cut to `max`. A line's end
 // is a cut too: a value that goes on to the next line (a key in two lines, a
 // multi-line secret the runner knows) isn't cut at it, and a line that starts
@@ -142,6 +151,31 @@ export function firstLineSafely(text: string, max: number, mark = ''): string {
     start = nl + 1;
   }
   return '';
+}
+
+// What's looked at around a cut at `at`: WINDOW either side, and all of the
+// run of non-space characters the cut is in, however long, so a long token or
+// a URL's password has its start and end in sight (Codex's review, 7 Nov: a
+// 40 KB password ran past a fixed window). Longer secrets with spaces in them
+// (a PEM key over 32 KB) are the one shape a window this size can't see whole.
+function around(text: string, at: number): [number, number] {
+  let from = Math.max(0, at - WINDOW);
+  let to = Math.min(text.length, at + WINDOW);
+  if (at > 0 && at < text.length && /\S/.test(text[at - 1]!) && /\S/.test(text[at]!)) {
+    let runStart = at;
+    while (runStart > 0 && runStart > from - 1 && /\S/.test(text[runStart - 1]!)) runStart--;
+    if (runStart <= from && from > 0) {
+      while (runStart > 0 && /\S/.test(text[runStart - 1]!)) runStart--;
+      from = Math.max(0, runStart - 256);
+    }
+    let runEnd = at;
+    while (runEnd < text.length && runEnd < to + 1 && /\S/.test(text[runEnd]!)) runEnd++;
+    if (runEnd >= to && to < text.length) {
+      while (runEnd < text.length && /\S/.test(text[runEnd]!)) runEnd++;
+      to = Math.min(text.length, runEnd + 256);
+    }
+  }
+  return [from, to];
 }
 
 // The start of the run of non-space characters before `at`, or of the space

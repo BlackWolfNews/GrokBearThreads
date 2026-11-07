@@ -895,6 +895,41 @@ for (const via of ['flush', 'writeRowNow'] as const) {
   });
 }
 
+// Round 2 of that review: the phone's Stop sharing written at once fails
+// before it lands, and an update meanwhile matched the "off" on its way, so
+// nothing was left to write. The thread as it is now goes with the next flush.
+test("Stop sharing written at once that fails isn't lost to an update that came while it was out", async () => {
+  let fail: (() => void) | undefined;
+  let holding = false;
+  const { h, sync, push, landed } = setupFull({
+    apiVersion: BACKEND_API_VERSION,
+    hold: (fn, args) => {
+      if (!holding || fn !== 'sync:upsertThreads' || fail) return undefined;
+      if (!(args.threads as ThreadDoc[]).some((r) => r.share?.access === 'off')) return undefined;
+      return new Promise<void>((_r, reject) => (fail = () => reject(new Error('fetch failed'))));
+    },
+  });
+  sync.start();
+  await sync.flushNow();
+  const t = h.runner.create({ text: 'hello', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  h.runner.share(t.id, { access: 'link' });
+  await sync.flushNow();
+  holding = true;
+  push([{ commandId: 'off', kind: 'share', threadId: t.id, args: { access: 'off' }, createdAt: 1 }]);
+  await tick(10);
+  assert.ok(fail, "the phone's off row is on its way");
+  // The same as what's on its way, so it's dropped as nothing new.
+  h.runner.share(t.id, { access: 'off' });
+  await tick(10);
+  fail!();
+  await tick(10);
+  holding = false;
+  await sync.flushNow();
+  await tick(10);
+  const rows = landed.filter((c) => c.fn === 'sync:upsertThreads').flatMap((c) => c.args.threads as ThreadDoc[]).filter((r) => r.threadId === t.id);
+  assert.equal(rows.at(-1)?.share?.access, 'off');
+});
+
 test('commands: the website pauses, resumes and runs a schedule, and nonsense fails with a note', async () => {
   const { sync, calls, push, applied } = setupFull();
   sync.start();

@@ -630,3 +630,44 @@ test('lsof is looked for only where a Mac and Linux keep it', async () => {
   assert.equal(lsofPath((f) => f === '/usr/bin/lsof'), '/usr/bin/lsof');
   assert.equal(lsofPath(() => false), '/usr/sbin/lsof', 'neither: fails as a missing tool, and the check refuses');
 });
+
+// From the cross-lab review of the sync fixes (Codex, 7 Nov 2026): a draining
+// runner whose socket closes is let go of before its threads are taken in, so
+// for a few seconds they were on no runner, and the mirror's prune or its
+// missing-row check could take their rows and messages for stale.
+test('Peers: the threads of a draining runner that went are arriving until they are taken in', async () => {
+  const h = makeHarness();
+  const { writeDrainInfo, Peers } = await import('../../src/handover.ts');
+  writeDrainInfo(h.home, { pid: 424243, port: 1, version: 'old', since: new Date().toISOString(), threads: ['t-old'] });
+  let closed!: () => void;
+  const client = {
+    call: async (method: string) => (method === 'drain.hello' ? { threads: ['t-old'] } : method === 'threads.list' ? { threads: [{ id: 't-old', title: 'Old', lastActivityAt: '' }] } : {}),
+    onNotification: () => () => {},
+    waitClosed: () => new Promise<void>((r) => (closed = r)),
+    close: () => {},
+  };
+  const adopted: string[] = [];
+  let seenWhileWaiting: boolean | undefined;
+  let alive = true;
+  let gone = false;
+  const peers = new Peers({
+    home: h.home, token: 't', log: nullLogger, sweep: async () => {}, goneWaitMs: 400,
+    alive: () => {
+      if (gone && alive) seenWhileWaiting ??= peers.isArriving('t-old') && !peers.owns('t-old');
+      return alive;
+    },
+    runner: { adopt: (id) => (adopted.push(id), undefined), publish: () => {}, waitedOnDeleted: () => {} },
+    connect: async () => client as any,
+  });
+  await peers.connectAll();
+  assert.equal(peers.owns('t-old'), true);
+  gone = true;
+  closed();
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(seenWhileWaiting, true, 'between the socket closing and being taken in');
+  assert.deepEqual(peers.arrivingIds(), ['t-old']);
+  alive = false;
+  await new Promise((r) => setTimeout(r, 600));
+  assert.deepEqual(adopted, ['t-old']);
+  assert.equal(peers.isArriving('t-old'), false);
+});
