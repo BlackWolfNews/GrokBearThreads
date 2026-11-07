@@ -722,6 +722,7 @@ final class AppModel {
     }
     @ObservationIgnored private var sectionsMemo: (key: DerivedKey, value: ThreadSections)?
     @ObservationIgnored private var projectSectionsMemo: (key: DerivedKey, value: ProjectSections)?
+    @ObservationIgnored private var panelOwnersMemo: (version: Int, value: [String: String])?
 
     // MARK: Derived
 
@@ -749,6 +750,23 @@ final class AppModel {
         projectSectionsMemo = (key, built)
         return built
     }
+    /// Any thread with a panel by this id, for a tab whose panel stays in the
+    /// layout when Mike moves to a thread without it. Every tab asks several
+    /// times on every thread update, mostly for panels nobody has (Threads,
+    /// the transcript), which walked every thread each time; so the answers
+    /// are kept until the threads change.
+    func threadOwning(panel: String) -> ThreadSummary? {
+        let threads = threads
+        if panelOwnersMemo?.version != threadsVersion {
+            var owners: [String: String] = [:]
+            for thread in threads.values where !thread.panels.isEmpty {
+                for panel in thread.panels where owners[panel.id] == nil { owners[panel.id] = thread.id }
+            }
+            panelOwnersMemo = (threadsVersion, owners)
+        }
+        return panelOwnersMemo?.value[panel].flatMap { threads[$0] }
+    }
+
     /// The schedule due to message each thread soonest, for the rows under
     /// Hibernating that are waiting on one.
     var wakes: [String: Schedule] { ThreadSections.wakes(schedules) }
