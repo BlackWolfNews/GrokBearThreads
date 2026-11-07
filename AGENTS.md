@@ -244,7 +244,9 @@ if `tb` isn't found (an older runner, or outside a thread), use
   change outside `runner/`). With a check host set it copies the checkout
   there, runs it, brings back failed steps' logs and deletes the copy
   (`scripts/check-remote.sh`); one run at a time, so it may say it's
-  waiting for another thread's. If the host can't be reached it runs here
+  waiting for another thread's. A host short of disk is passed over (8 GiB
+  free for Swift, 2 otherwise), and if none has room the check fails and
+  names them. If the host can't be reached it runs here
   at low priority. `--e2e` always runs here, as it needs the claude login. It skips the deploy tests and BearDock's
   unless something they cover changed from main (`--all` runs them
   anyway). The app's part is under a minute with a warm `app/.build` and

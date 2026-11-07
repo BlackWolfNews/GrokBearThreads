@@ -28,7 +28,7 @@ args=()
 while [ $# -gt 0 ]; do
   case "$1" in
     -e) shift ;;
-    *:/*) h="\${1%%:*}"; p="\${1#*:}"; case "$p" in */mirror/*) echo "$h" >>"$FAKE/copies.log"; [ -z "$RSYNC_PEEK" ] || bash -c "$RSYNC_PEEK" >>"$FAKE/rsync-peek" ;; esac; args+=("$p") ;;
+    *:/*) h="\${1%%:*}"; p="\${1#*:}"; case "$p" in */mirror/*) echo "$h" >>"$FAKE/copies.log"; [ -z "$RSYNC_PEEK" ] || bash -c "$RSYNC_PEEK" >>"$FAKE/rsync-peek"; [ "$RSYNC_FAILS_ON" != "$h" ] || { [ ! -f "$FAKE/$h/df-after" ] || cp "$FAKE/$h/df-after" "$FAKE/$h/df-out"; exit 11; } ;; esac; args+=("$p") ;;
     *) args+=("$1") ;;
   esac
   shift
@@ -55,18 +55,31 @@ run_copy() {
       echo "log at $b/tmp-$id/threadbear-check.Ab12/step.log"
       echo "near $d/home/Xcache/threadbear-check/tmp-$id/threadbear-check.Ab12/step.log"
     fi
+    # The check failing, and the disk as a host's "df-after" file has it then.
+    if [ -n "$RUN_FAILS" ]; then
+      [ ! -f "$d/df-after" ] || cp "$d/df-after" "$d/df-out"
+      exit 1
+    fi
   else echo "no copy on $host for: $cmd"; exit 1; fi
 }
+# The host's commands find a df that prints its "df-out" file; the real awk
+# reads that, from the script's own command.
+PATH="$d/bin:$PATH"
 case "$cmd" in
   *"uname -s"*)
     # A host's "base" file says what folder it reports, if not its own.
     b="$d/home/.cache/threadbear-check"; [ -f "$d/base" ] && b="$(cat "$d/base")"
-    printf '%s\\n%s\\n%s\\n' "$b" Darwin "$(cat "$d/state")" ;;
+    # A host's "os" file says what system it is, if not a Mac.
+    printf '%s\\n%s\\n%s\\n' "$b" "$(cat "$d/os" 2>/dev/null || echo Darwin)" "$(cat "$d/state")"
+    # What the probe runs after the lock's "fi && ", for real.
+    (cd "$d/home" && bash -c "\${cmd##*fi && }") ;;
   *"lockf -t 0 -k"*)
     n="$(cat "$d/lose" 2>/dev/null || echo 0)"
     if [ "$n" -gt 0 ]; then echo $((n - 1)) >"$d/lose"; [ -f "$d/looks-free" ] || echo busy >"$d/state"; exit 75; fi
     run_copy now ;;
   *"lockf -k"*) run_copy "after waiting" ;;
+  *"flock -n -E 75"*) run_copy now ;;
+  *"flock "*) run_copy "after waiting" ;;
   *) bash -c "$cmd" ;;
 esac
 `;
@@ -84,7 +97,16 @@ function shortHome(): string {
   return h;
 }
 
-type Host = { state: string; lose?: number; looksFree?: boolean; base?: string };
+// df -Pk as each system prints it, the lines copied from Tinker Desk and the
+// cloud box on 7 Nov, with the given KiB available.
+const whole = (kb: number | string) => (typeof kb === 'number' ? Math.ceil(kb) : kb);
+const macDf = (kb: number | string) => `Filesystem   1024-blocks      Used Available Capacity  Mounted on\n/dev/disk3s5   482797652 383744568 ${whole(kb)}    84%    /System/Volumes/Data\n`;
+const linuxDf = (kb: number | string) => `Filesystem     1024-blocks     Used Available Capacity Mounted on\n/dev/sda1         78397936 52179404  ${whole(kb)}      70% /\n`;
+const GiB = 1024 * 1024;
+
+// df: what the host's df prints (plenty free, if not given). dfAfter: what it
+// prints once a copy or a run has failed there. os: Linux, if not a Mac.
+type Host = { state: string; lose?: number; looksFree?: boolean; base?: string; df?: string; dfAfter?: string; os?: string };
 function setup(hosts: Record<string, Host>, opts: { home?: string } = {}) {
   const tmp = tmpDir('check-remote-');
   const home = opts.home ?? shortHome();
@@ -104,6 +126,11 @@ function setup(hosts: Record<string, Host>, opts: { home?: string } = {}) {
     if (s.lose) fs.writeFileSync(path.join(fake, h, 'lose'), String(s.lose));
     if (s.looksFree) fs.writeFileSync(path.join(fake, h, 'looks-free'), '');
     if (s.base !== undefined) fs.writeFileSync(path.join(fake, h, 'base'), s.base);
+    if (s.os) fs.writeFileSync(path.join(fake, h, 'os'), s.os);
+    if (s.dfAfter !== undefined) fs.writeFileSync(path.join(fake, h, 'df-after'), s.dfAfter);
+    fs.writeFileSync(path.join(fake, h, 'df-out'), s.df ?? macDf(100 * GiB));
+    fs.mkdirSync(path.join(fake, h, 'bin'));
+    fs.writeFileSync(path.join(fake, h, 'bin', 'df'), `#!/bin/bash\n[ "$*" = "-Pk ." ] || exit 9\ncat "${path.join(fake, h, 'df-out')}"\n`, { mode: 0o755 });
   }
   fs.copyFileSync(SCRIPT, path.join(repo, 'scripts', 'check-remote.sh'));
   const git = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { stdio: 'ignore' });
@@ -354,4 +381,152 @@ test('a home with a newline in its name gets no shared connection, even with its
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const opts = r.sshOpts.split('\n');
   assert.ok(opts.includes('ControlMaster=no') && opts.includes('ControlPath=none'), r.sshOpts);
+});
+
+// 7 Nov 2026: Tinker Desk fell under 1 GiB and an --app check died with a
+// CodeSign error that said nothing about the disk. A host without room is
+// passed over before anything's copied, and a failure says when room's short.
+// Something changed, so a --quick run has no Swift to build (with nothing
+// changed, check.sh runs everything).
+const changedSomething = (s: ReturnType<typeof setup>) => fs.writeFileSync(path.join(s.repo, 'changed.txt'), 'c\n');
+
+test('a host low on disk is passed over for the next one, nothing copied to it', () => {
+  const s = setup({ h1: { state: 'free', df: macDf(0.9 * GiB) }, h2: { state: 'free' } });
+  const r = s.run('h1,h2', 3600);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stderr, /Passing over h1: it has 0\.9 GiB free, and this check wants 8 GiB\./);
+  assert.match(r.stdout, /ran on h2 now/);
+  assert.deepEqual(r.copies, ['h2']);
+  assert.doesNotMatch(r.ssh, /^h1 .*mirror/m);
+});
+
+test('a host low on disk is passed over even if it is the only one free', () => {
+  const s = setup({ h1: { state: 'free', df: macDf(GiB) }, h2: { state: 'busy' } });
+  const r = s.run('h1,h2', 3600);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /ran on h2 after waiting/);
+  assert.deepEqual(r.copies, ['h2']);
+});
+
+test('with no host that has room it fails naming each and its free space, and not with 255', () => {
+  const s = setup({ h1: { state: 'free', df: macDf(0.95 * GiB) }, h2: { state: 'busy', df: macDf(5 * GiB) } });
+  const r = s.run('h1,h2', 3600);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /No check host has room for this check: h1 has 0\.9 GiB free, h2 has 5\.0 GiB free, and it wants 8 GiB\./);
+  assert.deepEqual(r.copies, []);
+});
+
+test('a host that is reachable but low still fails, with another one unreachable', () => {
+  const s = setup({ h1: { state: 'free', df: macDf(GiB) } });
+  const r = s.run('h1,nope', 3600);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /No check host has room for this check: h1 has 1\.0 GiB free/);
+});
+
+test("df's lines from each system are read, and the limit is inclusive of exactly enough", () => {
+  for (const [df, os] of [[macDf, 'Darwin'], [linuxDf, 'Linux']] as const) {
+    const s = setup({ h1: { state: 'free', df: df(2 * GiB), os } });
+    changedSomething(s);
+    const r = s.run('h1', 3600);
+    assert.equal(r.status, 0, `${os}: ${r.stdout}${r.stderr}`);
+    assert.deepEqual(r.copies, ['h1'], os);
+    assert.doesNotMatch(r.stderr, /Passing over/, os);
+  }
+  const s = setup({ h1: { state: 'free', df: macDf(8 * GiB) } });
+  const r = s.run('h1', 3600);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(r.copies, ['h1']);
+});
+
+test('a run that builds no Swift needs less room than one that does', () => {
+  const room = macDf(3 * GiB);
+  const quick = setup({ h1: { state: 'free', df: room } });
+  changedSomething(quick);
+  const noSwift = quick.run('h1', 3600);
+  assert.equal(noSwift.status, 0, noSwift.stdout + noSwift.stderr);
+  assert.deepEqual(noSwift.copies, ['h1']);
+
+  // Touching ios/ runs ThreadbearKit's Swift tests, even with --quick.
+  const ios = setup({ h1: { state: 'free', df: room } });
+  fs.mkdirSync(path.join(ios.repo, 'ios'));
+  fs.writeFileSync(path.join(ios.repo, 'ios', 'x.swift'), '\n');
+  const swift = ios.run('h1', 3600);
+  assert.equal(swift.status, 1, swift.stdout + swift.stderr);
+  assert.match(swift.stderr, /h1 has 3\.0 GiB free, and it wants 8 GiB/);
+
+  const low = setup({ h1: { state: 'free', df: macDf(1.5 * GiB) } });
+  changedSomething(low);
+  const r = low.run('h1', 3600);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /h1 has 1\.5 GiB free, and it wants 2 GiB/);
+});
+
+test('a Linux host that could not run it anyway is not named as short of room', () => {
+  // Nothing changed, so this one needs a Mac; the Linux host's disk isn't the reason.
+  const s = setup({ h1: { state: 'free', os: 'Linux', df: linuxDf(GiB) }, h2: { state: 'free' } });
+  const r = s.run('h1,h2', 3600);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.doesNotMatch(r.stderr, /h1/);
+  assert.deepEqual(r.copies, ['h2']);
+});
+
+test("a df answer that can't be used doesn't stop the check, and is never run or trusted as room", () => {
+  const marker = path.join(tmpDir('check-remote-marker-'), 'ran');
+  const answers = ['', 'not a disk\n', macDf('$(touch ' + marker + ')'), macDf('12x'), macDf('1'.repeat(40)), macDf('-5'), macDf('٣٣')];
+  for (const df of answers) {
+    const s = setup({ h1: { state: 'free', df } });
+    const r = s.run('h1', 3600);
+    assert.equal(r.status, 0, `${JSON.stringify(df)}: ${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /Couldn't read how much disk h1 has free; trying it anyway\./, JSON.stringify(df));
+    assert.deepEqual(r.copies, ['h1'], JSON.stringify(df));
+  }
+  assert.ok(!fs.existsSync(marker));
+  // A leading zero isn't octal: 0900 would be an error there.
+  const s = setup({ h1: { state: 'free', df: macDf('0900') } });
+  const r = s.run('h1', 3600);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /h1 has 0\.0 GiB free/);
+});
+
+test('a check that fails on a host left short of room says so last', () => {
+  const s = setup({ h1: { state: 'free', dfAfter: macDf(0.5 * GiB) } });
+  const r = s.run('h1', 3600, '', { RUN_FAILS: '1' });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.equal(r.stderr.trim().split('\n').at(-1), 'h1 has only 0.5 GiB free, and this check wants 8 GiB, which may be why it failed. Free some space there and run it again.');
+});
+
+test('a check that fails with plenty of room, or that passes on a low host, says nothing about it', () => {
+  const failed = setup({ h1: { state: 'free' } });
+  const f = failed.run('h1', 3600, '', { RUN_FAILS: '1' });
+  assert.equal(f.status, 1, f.stdout + f.stderr);
+  assert.doesNotMatch(f.stderr, /GiB/);
+
+  const passed = setup({ h1: { state: 'free', dfAfter: macDf(GiB) } });
+  const p = passed.run('h1', 3600);
+  assert.equal(p.status, 0, p.stdout + p.stderr);
+  assert.doesNotMatch(p.stderr, /GiB/);
+});
+
+test('a copy that fails on a host short of room says so, and ends as no room rather than 255', () => {
+  const s = setup({ h1: { state: 'free', dfAfter: macDf(0.2 * GiB) } });
+  const r = s.run('h1', 3600, '', { RSYNC_FAILS_ON: 'h1' });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /Couldn't copy this checkout to h1 \(it has 0\.2 GiB free, and this check wants 8 GiB\); trying the others\./);
+  assert.match(r.stderr, /No check host has room for this check: h1 has 0\.2 GiB free, and it wants 8 GiB\./);
+  assert.deepEqual(r.left('h1'), []);
+});
+
+test('a copy that fails on a host short of room still goes on to one with room', () => {
+  const s = setup({ h1: { state: 'free', dfAfter: macDf(0.2 * GiB) }, h2: { state: 'free' } });
+  const r = s.run('h1,h2', 3600, '', { RSYNC_FAILS_ON: 'h1' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /ran on h2 now/);
+});
+
+test('a copy that fails with plenty of room is still just unreachable: 255', () => {
+  const s = setup({ h1: { state: 'free' } });
+  const r = s.run('h1', 3600, '', { RSYNC_FAILS_ON: 'h1' });
+  assert.equal(r.status, 255, r.stdout + r.stderr);
+  assert.match(r.stderr, /Couldn't copy this checkout to h1; trying the others\./);
+  assert.match(r.stderr, /None of h1 can run this check now\./);
 });

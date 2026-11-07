@@ -34,7 +34,11 @@
 # Desk a CLI signed in over SSH broke the desktop's login (2 Nov), so
 # check.sh runs those on this Mac.
 #
+# A host with too little disk left is passed over (MIN_FREE_GIB, below).
+#
 # Exit 255: no host that can run it could be reached (check.sh then runs here).
+# Hosts that were reached but have no room are exit 1, with their free space:
+# the M5 isn't the place for it either, and clearing the host is the fix.
 set -uo pipefail
 
 BASE_REL=".cache/threadbear-check"
@@ -190,22 +194,59 @@ changed="$(mktemp)"
 linux_ok=0
 if [ "$QUICK" = 1 ] && [ "$ALL" = 0 ] && [ -z "$SHOTS" ] && [ -s "$changed" ] && ! grep -qE '^ios/|^check\.sh$' "$changed"; then linux_ok=1; fi
 
-# Each host: reachable, its system, and whether its lock is free now.
-# The first free one that can run it wins; otherwise the first that can,
-# which then waits for its lock. Two checks can both see a host free, so
-# a run there takes the lock without waiting (exit 75 if it can't), and the
-# one that lost chooses again; after three goes it waits in line.
-probe='mkdir -p ~/'"$BASE_REL"'/runs && cd ~/'"$BASE_REL"' && pwd && uname -s && if [ "$(uname -s)" = Darwin ]; then /usr/bin/lockf -t 0 lock true 2>/dev/null && echo free || echo busy; else flock -n lock true 2>/dev/null && echo free || echo busy; fi'
+# The disk a run wants free on its host. On 7 Nov Tinker Desk fell under 1 GiB
+# and an --app check died with a CodeSign error that said nothing about space,
+# which cost a landing. Sized for a host starting cold, from Tinker Desk that
+# day: anything building Swift can write 2.4 GiB of build folders, 2.3 of
+# SwiftPM's cache and 0.6 of node_modules, about 5.5 GiB, and 8 leaves macOS
+# room to work. A run with no Swift (what a Linux host can take, so linux_ok
+# says which) writes only the node_modules and its temp files.
+MIN_FREE_GIB=8
+[ "$linux_ok" = 0 ] || MIN_FREE_GIB=2
+
+# Available KiB where the run's files go, as one number. -P keeps each disk
+# on one line and the columns the same on macOS and Linux.
+free_cmd='df -Pk . 2>/dev/null | awk "END { print \$4 }"'
+# Whether a df answer is under the limit: 0 yes, and FREE_GIB is it to one
+# place, rounded down; 1 no; 2 it isn't a number we can use. It's the host's
+# word, so it's only compared, and the digits are spelled out because a
+# bracket range in a UTF-8 locale can take in other characters. Rounded down,
+# as "8.0 free, needs 8" would make no sense.
+FREE_GIB=""
+low_on_room() {
+  case "$1" in ""|*[!0123456789]*) return 2 ;; esac
+  # More digits than any disk has would wrap around in bash's arithmetic.
+  [ "${#1}" -le 15 ] || return 2
+  local kb=$((10#$1))
+  [ "$kb" -lt $((MIN_FREE_GIB * 1048576)) ] || return 1
+  FREE_GIB="$((kb / 1048576)).$(((kb % 1048576) * 10 / 1048576))"
+}
+# The host just used, asked again after something failed there: true, with
+# FREE_GIB set, if it's low. Not if it's fine or can't be asked.
+host_is_low() {
+  local kb
+  kb="$("${SSH[@]}" "$HOST" "cd '$remote_base' && $free_cmd" 2>/dev/null)" && low_on_room "$kb"
+}
+
+# Each host: reachable, its system, whether its lock is free now, and how much
+# disk it has left. The first free one that can run it wins; otherwise the
+# first that can, which then waits for its lock. Two checks can both see a host
+# free, so a run there takes the lock without waiting (exit 75 if it can't),
+# and the one that lost chooses again; after three goes it waits in line.
+probe='mkdir -p ~/'"$BASE_REL"'/runs && cd ~/'"$BASE_REL"' && pwd && uname -s && if [ "$(uname -s)" = Darwin ]; then /usr/bin/lockf -t 0 lock true 2>/dev/null && echo free || echo busy; else flock -n lock true 2>/dev/null && echo free || echo busy; fi && '"$free_cmd"
+# Hosts with no room, as "<host> has <n> GiB free": those this choosing passed
+# over, and those whose copy failed for lack of it, which aren't asked again.
+LOW="" LOW_COPY=""
 choose() {
-  HOST="" HOST_OS="" remote_base="" FREE=0
-  local first="" first_os="" first_base="" h out b os state
+  HOST="" HOST_OS="" remote_base="" FREE=0 LOW="$LOW_COPY"
+  local first="" first_os="" first_base="" h out b os state kb
   for h in "${HOSTS[@]}"; do
     # An ssh host, never something ssh would take for an option.
     case "$h" in -*|"") continue ;; esac
     # One that dropped out during a copy this run isn't tried again.
     case " $SKIP " in *" $h "*) continue ;; esac
     out="$("${SSH[@]}" "$h" "$probe" 2>/dev/null)" || { echo "Couldn't reach $h over ssh." >&2; continue; }
-    { read -r b; read -r os; read -r state; } <<<"$out"
+    { read -r b; read -r os; read -r state; read -r kb; } <<<"$out"
     # Every rm -rf over there is under this, so never let it be empty. It's
     # the host's word, so it's only ever data: an absolute path of plain
     # characters ending in the folder asked for, else the host is passed
@@ -216,6 +257,17 @@ choose() {
       Darwin) ;;
       Linux) [ "$linux_ok" = 1 ] || continue ;;
       *) continue ;;
+    esac
+    # After the system, so a host that couldn't run this anyway isn't named.
+    # Busy or free alike: waiting for a full disk gets nobody anywhere.
+    low_on_room "$kb"
+    case $? in
+      0)
+        echo "Passing over $h: it has $FREE_GIB GiB free, and this check wants $MIN_FREE_GIB GiB." >&2
+        LOW+="${LOW:+, }$h has $FREE_GIB GiB free"
+        continue ;;
+      # Not knowing is no reason to stop checks; a failure there still says.
+      2) echo "Couldn't read how much disk $h has free; trying it anyway." >&2 ;;
     esac
     if [ "$state" = free ]; then HOST="$h" HOST_OS="$os" remote_base="$b" FREE=1; return 0; fi
     [ -n "$first" ] || { first="$h" first_os="$os" first_base="$b"; }
@@ -315,6 +367,11 @@ while :; do
   elif ! choose; then
     [ -z "$copied_host" ] || "${SSH[@]}" "$copied_host" "rm -rf '$remote_run'" 2>/dev/null
     rm -f "$files" "$changed"
+    if [ -n "$LOW" ]; then
+      # Not 255: a disk to clear isn't a reason to run it all on this Mac.
+      echo "No check host has room for this check: $LOW, and it wants $MIN_FREE_GIB GiB. Free some space there and run it again." >&2
+      exit 1
+    fi
     echo "None of $HOST_LIST can run this check now." >&2
     exit 255
   fi
@@ -353,7 +410,12 @@ while :; do
       "${SSH[@]}" "$HOST" "rm -rf '$remote_run' '$remote_run.files'" 2>/dev/null
       # The next host that can run it, before this Mac (6 Nov: Tinker Desk
       # dropped off mid-copy and the check ran on the M5).
-      echo "Couldn't copy this checkout to $HOST; trying the others." >&2
+      if host_is_low; then
+        echo "Couldn't copy this checkout to $HOST (it has $FREE_GIB GiB free, and this check wants $MIN_FREE_GIB GiB); trying the others." >&2
+        LOW_COPY+="${LOW_COPY:+, }$HOST has $FREE_GIB GiB free"
+      else
+        echo "Couldn't copy this checkout to $HOST; trying the others." >&2
+      fi
       SKIP+=" $HOST"
       continue
     fi
@@ -423,5 +485,11 @@ fi
 if [ -n "$SHOTS" ]; then
   mkdir -p "$SHOTS"
   rsync -a -e "${SSH[*]}" "$HOST:$remote_shots/" "$SHOTS/" >/dev/null && "${SSH[@]}" "$HOST" "rm -rf '$remote_shots'"
+fi
+# Last, so it's the line read: what a full disk breaks often looks nothing like
+# one (a CodeSign error, 7 Nov). The run's own files have gone by now, so this
+# is what's left without them.
+if [ "$code" != 0 ] && host_is_low; then
+  echo "$HOST has only $FREE_GIB GiB free, and this check wants $MIN_FREE_GIB GiB, which may be why it failed. Free some space there and run it again." >&2
 fi
 exit "$code"
