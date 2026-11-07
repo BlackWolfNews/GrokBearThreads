@@ -21,7 +21,6 @@ struct SecretCard: View {
     /// (AppModel.answerCard), there still if he leaves and comes back.
     private var busy: Bool { model.cardAnswers[approvalId] != nil }
     private var declining: Bool { model.cardAnswers[approvalId]?.choice == "decline" }
-    @State private var lastWasDecline = false
     @State private var problem: String?
     /// Checked against the key kept for this runner (from pairing), and the
     /// runner kept for this thread, once the card shows and again on Save.
@@ -66,7 +65,7 @@ struct SecretCard: View {
                     .disabled(busy)
                 Label("Kept out of chat, in a private file this agent's commands can read for 24 hours", systemImage: "lock.shield")
                     .font(.footnote).foregroundStyle(.secondary)
-                if let problem {
+                if let problem = problem ?? refusal {
                     Text(problem).font(.footnote).foregroundStyle(.red)
                 }
                 HStack {
@@ -94,15 +93,17 @@ struct SecretCard: View {
         .sensoryFeedback(trigger: busy) { _, new in
             new ? (declining ? .selection : .impact(weight: .light)) : nil
         }
-        // Our own words, not the server's: nothing that came back with the
-        // request ends up on screen. The value's gone, so it's typed afresh.
-        .onChange(of: model.refusedSecrets.contains(approvalId)) { _, refused in
-            if refused { problem = lastWasDecline ? "Couldn't decline it. Try again." : "Couldn't send it. Type it again to retry." }
-        }
         .task(id: "\(runnerId) \(key)") {
             guard model.canAnswerSecrets, SecretSeal.isUsableKey(key) else { return }
             trust = RunnerKeyPins.check(key, runnerId: runnerId, threadId: threadId, in: model.runnerKeys)
         }
+    }
+
+    /// Our own words, not the server's: nothing that came back with the request
+    /// ends up on screen. The value's gone, so it's typed afresh.
+    private var refusal: String? {
+        guard !busy, let choice = model.refusedSecrets[approvalId] else { return nil }
+        return choice == "decline" ? "Couldn't decline it. Try again." : "Couldn't send it. Type it again to retry."
     }
 
     private func save() {
@@ -135,7 +136,6 @@ struct SecretCard: View {
 
     private func send(_ answer: SecretAnswer) {
         let (threadId, approvalId) = (threadId, approvalId)
-        lastWasDecline = answer == .decline
         model.answerCard(approvalId, choice: answer == .decline ? "decline" : "save", secret: true, send: { backend in
             try await backend.secret(threadId: threadId, approvalId: approvalId, answer: answer)
         }, sent: onSent)

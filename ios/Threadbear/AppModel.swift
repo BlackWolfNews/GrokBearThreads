@@ -442,7 +442,9 @@ final class AppModel {
             }
             slidingOff.remove(threadId)
             do {
-                let command = try await backend.update(threadId: threadId, change: .archive)
+                // With a deadline: on a client replaced meanwhile it may never
+                // answer, and the row would stay hidden with nothing watching.
+                let command = try await Deadline.run(seconds: 20) { try await backend.update(threadId: threadId, change: .archive) }
                 if let status = await commandOutcome(command), status.state == .failed {
                     throw TransportError.server(status.note ?? "The runner couldn't archive that thread.")
                 }
@@ -485,8 +487,9 @@ final class AppModel {
     /// kept here rather than in the card, so leaving the thread and coming back
     /// doesn't offer the buttons again while the answer's on its way.
     private(set) var cardAnswers: [String: CardAnswer] = [:]
-    /// Secret cards whose answer the runner refused, for the card to say so.
-    private(set) var refusedSecrets: Set<String> = []
+    /// Secret cards whose answer didn't go through, and which it was ("save"
+    /// or "decline"), for the card to say so, even opened again later.
+    private(set) var refusedSecrets: [String: String] = [:]
 
     /// Sends a card's answer with its button spinning. False if one's already
     /// on its way. The spinner stays until the card goes; it gives up if the
@@ -497,19 +500,19 @@ final class AppModel {
                     send: @escaping @Sendable (any Backend) async throws -> String, sent: @escaping (String) -> Void = { _ in }) -> Bool {
         guard let backend, cardAnswers[approvalId] == nil else { return false }
         cardAnswers[approvalId] = CardAnswer(choice: choice)
-        refusedSecrets.remove(approvalId)
+        refusedSecrets[approvalId] = nil
         Task {
             do {
                 let command = try await Deadline.run(seconds: 20) { try await send(backend) }
                 sent(command)
                 let status = await commandOutcome(command)
                 if status?.state == .done { try? await Task.sleep(for: .seconds(5)) }
-                if status?.state == .failed, secret { refusedSecrets.insert(approvalId) }
+                if status?.state == .failed, secret { refusedSecrets[approvalId] = choice }
             } catch {
                 // A secret card says it in its own words, but a refused token
                 // still goes to pairing.
                 if case TransportError.unauthorized = error { report(error) }
-                else if secret { refusedSecrets.insert(approvalId) } else { report(error) }
+                else if secret { refusedSecrets[approvalId] = choice } else { report(error) }
             }
             cardAnswers[approvalId] = nil
         }
@@ -553,7 +556,7 @@ final class AppModel {
                 }
             }
             do {
-                let command = try await backend.update(threadId: threadId, change: change)
+                let command = try await Deadline.run(seconds: 20) { try await backend.update(threadId: threadId, change: change) }
                 if let status = await commandOutcome(command), status.state == .failed {
                     throw TransportError.server(status.note ?? "The runner couldn't hibernate that thread.")
                 }

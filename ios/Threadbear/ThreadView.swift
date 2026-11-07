@@ -44,7 +44,9 @@ struct ThreadView: View {
     /// A card's answer is on its way to the backend: it spins and can't be
     /// pressed again. Uploading first can take a while.
     @State private var sendingCard = false
-    @State private var cardAttempt = 0
+    /// That answer's command, watched to its end, as an older backend's
+    /// refusal comes after `taken`, when `sent` has already gone.
+    @State private var answeredCommand: String?
     /// The card of asks, and the reply under a done card, that's been answered
     /// from here. `sent` goes when the runner takes the message, which is before
     /// the thread's row says so, and the card coming back live for that moment
@@ -91,6 +93,13 @@ struct ThreadView: View {
         .task(id: "\(threadId):\(model.connection)") { await follow() }
         .task(id: "\(threadId):\(limit):\(model.hasMessagePages):\(model.connection)") { await followMessages() }
         .task(id: "\(sent?.id ?? ""):\(model.connection)") { await followCommand() }
+        .task(id: answeredCommand) {
+            guard let id = answeredCommand, let status = await model.commandOutcome(id), status.state == .failed,
+                  answeredCommand == id else { return }
+            // Refused, even after the runner took it: its card comes back.
+            answeredAsks = nil
+            answeredDone = nil
+        }
         .task(id: "\(threadId):\(model.canSeeWaiting):\(model.connection)") { await followWaiting() }
     }
 
@@ -497,19 +506,15 @@ struct ThreadView: View {
     private func sendCard(_ thread: PhoneThread, lastSeq: Int?) {
         guard !sendingCard else { return }
         sendingCard = true
-        cardAttempt += 1
-        let attempt = cardAttempt
         Task {
-            // A send on a client that's since been replaced may never answer:
-            // the card's spinner gives up rather than spinning for good.
-            try? await Task.sleep(for: .seconds(20))
-            if cardAttempt == attempt, sendingCard { sendingCard = false }
-        }
-        Task {
-            defer { if cardAttempt == attempt { sendingCard = false } }
+            // No deadline here, unlike an approval: a second tap after one
+            // would send the message twice, as nothing on the backend joins
+            // them up. Leaving the thread and coming back resets it.
+            defer { sendingCard = false }
             if await send("", to: thread) {
                 answeredAsks = thread.asksSeq
                 answeredDone = lastSeq
+                answeredCommand = sent?.id
             } else if thread.asks?.count == 1 {
                 picks = [:]
             }
