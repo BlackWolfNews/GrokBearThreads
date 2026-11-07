@@ -268,6 +268,12 @@ extension AppModel {
         if becameNeedy && !showing && notificationsEnabled && !thread.isRemote {
             Notifier.post(thread: thread)
         }
+        // The ding for a finished thread (Settings > General >
+        // Notifications), wherever you are looking. Not another runner's,
+        // as with notifications, nor a scripted app's.
+        if notificationsEnabled, !thread.isRemote, let previous {
+            DingPlayer.threadChanged(from: previous.status, to: thread.status)
+        }
         if showing && thread.lastSeq > thread.lastSeenSeq && thread.status != .waiting {
             scheduleMarkSeen(thread.id)
         }

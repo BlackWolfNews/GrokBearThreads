@@ -82,6 +82,9 @@ private struct GeneralSettings: View {
     @Environment(AppModel.self) private var app
     @AppStorage(ActivityRecorder.enabledKey) private var activityLog = false
     @AppStorage(AppAppearance.key) private var appearance: AppAppearance = .system
+    @AppStorage(CompletionSound.enabledKey) private var dingOn = false
+    @AppStorage(CompletionSound.dingKey) private var ding = CompletionSound.Ding.chime.rawValue
+    @AppStorage(CompletionSound.volumeKey) private var dingVolume = CompletionSound.defaultVolume
 
     var body: some View {
         SettingsGate { settings in
@@ -94,6 +97,28 @@ private struct GeneralSettings: View {
                     }
                     .tip("Light or dark for Threadbear, whatever the Mac is set to")
                     .onChange(of: appearance) { _, new in new.apply() }
+                }
+
+                SettingsSection("Notifications",
+                                about: "A soft ding when a thread finishes working: its reply is done, it's waiting for your answer, or it hit an error. It plays wherever you are, even in another app, and stays quiet for a thread you stopped yourself. Notifications themselves are in System Settings > Notifications.",
+                                ask: "change when the ding plays.") {
+                    Toggle("Play a sound when a thread finishes", isOn: $dingOn)
+                        .tip("A soft ding when a thread is done and ready for you")
+                        .onChange(of: dingOn) { _, on in if on { DingPlayer.play() } }
+                    Picker("Sound", selection: $ding) {
+                        ForEach(CompletionSound.Ding.allCases) { Text($0.title).tag($0.rawValue) }
+                    }
+                    .tip("Which ding plays")
+                    .onChange(of: ding) { _, new in DingPlayer.play(CompletionSound.ding(new)) }
+                    LabeledContent("Volume") {
+                        HStack(spacing: 8) {
+                            Slider(value: $dingVolume, in: 0.1...1) { editing in if !editing { DingPlayer.play() } }
+                                .frame(maxWidth: 180)
+                                .tip("How loud the ding is")
+                            Button("Play") { DingPlayer.play() }
+                                .tip("Hear the ding")
+                        }
+                    }
                 }
 
                 SettingsSection("New threads",

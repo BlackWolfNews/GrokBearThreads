@@ -1277,6 +1277,17 @@ unless you pick one for it alone: Settings (⌘,) > General > Appearance has
 Same as the Mac, Light and Dark. It changes straight away and stays picked
 the next time the app opens.
 
+### A ding when a thread is done
+
+To hear when a thread finishes, turn on Play a sound when a thread
+finishes in Settings (⌘,) > General > Notifications. It's off until you
+do. A soft ding then plays whenever a thread on this Mac stops working:
+its reply is done, it's waiting for your answer, or it hit an error. It
+plays wherever you are, in Threadbear or another app, and stays quiet for
+a thread you stopped yourself. Several threads finishing at once make one
+ding. Pick Chime, Bell or Droplet (each plays as you pick it), set the
+volume, and press Play to hear it again.
+
 ### The activity log
 
 Turn on Keep an activity log in Settings (⌘,) > General and the app notes
