@@ -96,21 +96,6 @@ File references are where to look.
   `mac-screen.json` in the data folder
   remembers what it's said about dialogs on the screen (below).
 
-Voice mode is an experiment, off by default: while it's off (`voiceMode`
-in `runner.json`'s `experiments`) there's no button, nothing below happens
-and macOS never asks for the microphone. On, the first time you use it
-(Settings > Voice, or the waveform button beside Send), it downloads Kyutai's pocket-tts (v4.0.1, its
-Apple silicon build, checked against its SHA-256 before it's used) from
-its GitHub release into `~/Library/Application Support/Threadbear/voice/`,
-with its log `serve.log` and a `serve.<app's pid>.pid` (which process to
-stop if the app crashed) beside it. pocket-tts then downloads its English
-model and voices from Hugging Face into `~/.cache/huggingface` (about
-240 MB; another language is another model). macOS asks once for the
-microphone, and may download its own speech recognition files for the
-language (`app/Sources/Threadbear/Voice/`). `~/Library/Logs/Threadbear/voice.log`
-notes what Voice did (which microphone, whether echo cancellation
-started, errors), never what was said, and is started afresh past 256 KB.
-
 ## What runs in the background
 
 - **Landing work** (`runner/src/worktrees.ts`): `tb land` keeps an empty
@@ -201,16 +186,6 @@ started, errors), never what was said, and is started afresh past 256 KB.
   those files and the scripts they reach to hash them, runs `git ls-files`
   in the folder to find skills in folders under it, and keeps what you
   trusted in the same `patch-trust.json`.
-- **Voice** (`app/Sources/Threadbear/Voice/VoiceServer.swift`): only
-  while Voice is in use and for 5 minutes after, the app runs
-  `pocket-tts serve` on a free port on 127.0.0.1 (not reachable from other
-  machines), sends it each reply's sentences and plays what comes back.
-  It stops when the app quits. If the app crashed instead, the next launch
-  reads that pid file and stops it, once it's checked that process really is
-  this pocket-tts. While Voice is on, the microphone is on,
-  and what you say is turned into text on this Mac by macOS's own speech
-  recognition (SpeechAnalyzer); the audio isn't saved or sent anywhere.
-  The text goes to the thread as your message.
 - **Menus on macOS 27.2** (`app/Sources/Threadbear/DragSpace.swift`): every
   5 seconds, and before a button opens a menu, the app asks the window
   server which Spaces its own windows are on, and takes them off the drag
@@ -258,7 +233,6 @@ started, errors), never what was said, and is started afresh past 256 KB.
 | Anthropic, OpenAI | yours | Your threads, through the official CLIs on your own logins. With the `labReview` experiment on (off by default), a thread's code change, with your message and the agent's reply, goes to your other provider's CLI as a review thread, as if you'd started one. After a turn fails because the API couldn't be reached, the runner itself opens (and straight away closes) a connection to api.anthropic.com or chatgpt.com on port 443, at most once a minute, until one opens and the thread carries on. Nothing is sent over it (`runner/src/net-probe.ts`). |
 | Mike's push relay | Mike's | Only when a paired iPhone gets a notification. It's sent from your Convex deployment, not the Mac. The text is encrypted for the phone; the relay sees the device token and thread id (`convex/push.ts`, `docs/push-relay.md`). The first time, your deployment registers with it, giving its own address; the relay keeps that address and checks it by posting a one-time code back to your deployment's `/relay/verify` (`convex/http.ts`). |
 | A Connectors gateway | whoever runs it | Only if one is set in `runner.json` or `~/.claude.json`. Its `/health` every few minutes (and once more at the end of a turn where a call to one of its services failed, to see if it needs signing in), and for a project with a Notion page, a Notion read or two every 5 minutes for its task board (`runner/src/notion-tasks.ts`), signed with the header the `headersHelper` command in that `connectors` entry prints, which it runs for each read |
-| GitHub, Hugging Face | Kyutai's | Only with the `voiceMode` experiment on, the first time Voice is used: the pocket-tts download, then its model and voices. Nothing of yours is sent. |
 | Sentry | Mike's | Nothing from your copy. Only a copy whose `origin` is Mike's own repo reports errors or uploads the app's debug symbols (`runner/src/sentry.ts`, `app/Sources/Threadbear/CrashReporting.swift`, `app/build-app.sh`). The App Store iPhone app sends anonymous crash reports. |
 
 An HTML file opened in the side pane (a mockup or report an agent made,

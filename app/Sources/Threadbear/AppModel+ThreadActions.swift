@@ -9,8 +9,6 @@ extension AppModel {
     // MARK: Thread actions
 
     func newThread() {
-        // Voice talks with the thread on screen: leaving it ends it.
-        if VoiceMode.shared.isOn, VoiceMode.shared.threadId != VoiceMode.newThread { VoiceMode.shared.stop() }
         selection = nil
         openProjectId = nil
         showsProjectsHome = false
@@ -290,50 +288,6 @@ extension AppModel {
                     // The draft never left the box.
                     show(error)
                 }
-            }
-        }
-    }
-
-    /// What Mike said in Voice mode, sent as his message without touching
-    /// whatever is typed in the composer (VoiceMode).
-    func sendSpoken(threadId: String, text: String) {
-        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-        guard let client = client(for: threadId), isRemote(threadId) || connection == .connected else {
-            showConnectionError(notConnectedText(threadId, "that wasn't sent"))
-            return
-        }
-        ActivityRecorder.shared.sent(threadId: threadId, images: 0, answers: 0)
-        post(threadId: threadId, text: text, images: [], answers: [], client: client)
-    }
-
-    /// Starts a new thread with what Mike said in Voice on the new-thread
-    /// composer, with its folder, login and model as the composer has
-    /// them. `then` gets its id before it's selected (so Voice carries on
-    /// in it), or nil if it couldn't be made.
-    func startThreadSpoken(_ text: String, then: @escaping (String?) -> Void) {
-        guard let client, connection == .connected, !creatingThread else { then(nil); return }
-        let account = newThreadAccountId
-        let request = newThreadRequest(text: text, images: [])
-        creatingThread = true
-        Task {
-            defer { creatingThread = false }
-            do {
-                let thread = try await client.createThread(request)
-                // What the new-thread composer's picks were for, as for a
-                // typed first message (send): the next one starts afresh.
-                rememberLastAccount(request.poolId == nil ? account : thread.accountId)
-                newThreadCwd = nil
-                newThreadPermission = .full
-                newThreadAccount = nil
-                newThreadPool = nil
-                newThreadProvider = nil
-                threads[thread.id] = thread
-                then(thread.id)
-                select(thread.id)
-            } catch {
-                then(nil)
-                show(error)
             }
         }
     }

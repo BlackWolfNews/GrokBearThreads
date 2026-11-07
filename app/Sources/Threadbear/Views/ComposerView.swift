@@ -56,10 +56,6 @@ struct ComposerView: View {
         if let thread {
             RefusalOffer(thread: thread)
         }
-        // Voice mode's bear, over the box while it's on for this thread.
-        if VoiceMode.shared.isOn(for: thread?.id ?? VoiceMode.newThread) {
-            VoiceStage(threadId: thread?.id ?? VoiceMode.newThread)
-        }
         // The folder's actions (patches), on shelves sitting on the box's
         // top edge, in from its rounded corner (ActionChips).
         if let thread, !thread.actions.isEmpty || thread.patches.contains(where: { $0.untrusted != nil }) {

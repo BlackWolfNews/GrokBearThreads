@@ -1089,25 +1089,6 @@ enum Automation {
             // give AppKit a moment to redraw in the new one.
             try? await Task.sleep(for: .milliseconds(200))
             return "ok \(mode)"
-        case "voice-stage":
-            // Shows Voice mode's bear in a phase, with no microphone or
-            // engine (screenshots of the avatar); "off" puts it away.
-            guard let id = app.selection else { return "error no thread is open" }
-            // The experiment, for this look only: the mock's hello hasn't it.
-            app.experiments.insert(VoiceMode.experiment)
-            let words = c["text"] as? String ?? ""
-            let level = Float(number(c["level"]) ?? 0)
-            switch c["phase"] as? String {
-            case "listening": VoiceMode.shared.stage(.listening, threadId: id, level: level)
-            case "hearing": VoiceMode.shared.stage(.hearing(words), threadId: id, level: level)
-            case "thinking": VoiceMode.shared.stage(.thinking, threadId: id, level: level)
-            case "speaking": VoiceMode.shared.stage(.speaking, threadId: id, level: level)
-            case "starting": VoiceMode.shared.stage(.starting(words.isEmpty ? "Getting ready…" : words), threadId: id, level: level)
-            case "off": VoiceMode.shared.stage(.off, threadId: nil, level: 0)
-            default: return "error phase is listening, hearing, thinking, speaking, starting or off"
-            }
-            try? await Task.sleep(for: .milliseconds(300))
-            return "ok"
         case "zoom":
             // What ⌘=, ⌘- and ⌘0 do, or a percent from TextZoom.steps.
             let zoom = TextZoom.shared

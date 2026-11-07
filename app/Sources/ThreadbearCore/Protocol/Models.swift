@@ -1603,10 +1603,6 @@ public struct HelloResult: Sendable, Hashable, Decodable {
     /// Nil from a runner older than pools: the app then works as before,
     /// with providers in the picker's rail and an account chip.
     public var pools: [Pool]?
-    /// The runner's experiments that are on (protocol "hello"), for the
-    /// ones that live in the app, like Voice mode. Empty from an older
-    /// runner, so they stay off.
-    public var experiments: Set<String>
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -1619,11 +1615,10 @@ public struct HelloResult: Sendable, Hashable, Decodable {
         clis = c.lossyArray(CliStatus.self, forKey: .clis)
         updates = try? c.decodeIfPresent(RunnerUpdates.self, forKey: .updates)
         pools = c.contains(.pools) ? c.lossyArray(Pool.self, forKey: .pools) : nil
-        experiments = Set(c.lossyArray(String.self, forKey: .experiments))
     }
 
     enum CodingKeys: String, CodingKey {
-        case runnerVersion, `protocol`, accounts, defaults, clis, updates, pools, experiments
+        case runnerVersion, `protocol`, accounts, defaults, clis, updates, pools
     }
 }
 

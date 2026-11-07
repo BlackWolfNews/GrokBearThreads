@@ -743,7 +743,7 @@ test("Threadbear's own patches don't make every edit ask, from a project folder 
   // would give the test a real worktree of this repo.
   for (const cwd of [elsewhere, REPO]) {
     const runsAsCode = (file: string) => h.runner.writeRunsAsCode({ ...thread, cwd } as unknown as ThreadRecord, file);
-    assert.equal(runsAsCode(path.join(REPO, 'app/Sources/ThreadbearCore/Voice/SpokenApprovals.swift')), false, cwd);
+    assert.equal(runsAsCode(path.join(REPO, 'app/Sources/ThreadbearCore/Protocol/Models.swift')), false, cwd);
     assert.equal(runsAsCode(path.join(REPO, 'runner/src/instructions.ts')), false, cwd);
     assert.equal(runsAsCode(path.join(elsewhere, 'notes.md')), false, cwd);
     // What they really do run still asks, and says it runs.

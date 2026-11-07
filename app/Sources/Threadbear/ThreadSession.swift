@@ -345,7 +345,6 @@ final class ThreadSession {
 
     func receive(_ event: Event) {
         guard state == .loaded else { return }
-        if subagentId == nil { VoiceMode.shared.receive(event) }
         handle(feed.receive(event))
     }
 
@@ -813,15 +812,6 @@ final class ThreadSession {
                 app?.show(error)
             }
         }
-    }
-
-    /// The approval card as this thread shows it now, nil once it's settled
-    /// or not there (Voice checks a spoken answer against it).
-    func openApproval(_ approvalId: String) -> ApprovalRequest? {
-        guard !answering.contains(approvalId),
-              case .approval(let item)? = feed.model.item(id: "ap:\(approvalId)")?.content,
-              item.resolution == nil else { return nil }
-        return item.request
     }
 
     /// Go ahead on a "Plan first" plan card (docs/protocol.md).
