@@ -646,6 +646,45 @@ final class WorkGroupTests: XCTestCase {
         XCTAssertNil(model.row(id: "a:m1"), "folded into the work")
     }
 
+    /// Thread 46de9389 (7 Nov 2026): a background `tb land` finished
+    /// around end_turn, and the agent carried on and gave a second card.
+    /// The report before that card is the reply, not "still landing".
+    func testAfterAWakeTheLastCardsMessageIsTheReply() {
+        let model = TranscriptModel(events: [
+            E.user(1, "Land it"), Self.started(2),
+            E.call(3, "c1").withTurn("t1"), E.result(4, "c1").withTurn("t1"),
+            E.event(5, "system.note", ["text": "Background command \"Land\" completed (exit code 0)", "wake": true], turn: "t1"),
+            E.text(6, "m1", "Still landing.").withTurn("t1"),
+            E.call(7, "e1", name: "mcp__threadbear__end_turn", kind: "mcp", title: "end_turn").withTurn("t1"),
+            E.result(8, "e1", text: "Noted: this thread is done.").withTurn("t1"),
+            E.call(9, "c2").withTurn("t1"), E.result(10, "c2").withTurn("t1"),
+            E.text(11, "m2", "Landed on main and pushed.").withTurn("t1"),
+            E.call(12, "e2", name: "mcp__threadbear__end_turn", kind: "mcp", title: "end_turn").withTurn("t1"),
+            E.result(13, "e2", text: "Noted: this thread is done.").withTurn("t1"),
+            E.done(14),
+        ])
+        XCTAssertNotNil(model.row(id: "a:m2"))
+        XCTAssertNil(model.row(id: "a:m1"), "folded into the work")
+    }
+
+    /// One reply: a reply to the card a wake replaced folds away too.
+    func testAfterAWakeAnEarlierFinalReplyGivesWay() {
+        let model = TranscriptModel(events: [
+            E.user(1, "Land it"), Self.started(2),
+            E.call(3, "e1", name: "mcp__threadbear__end_turn", kind: "mcp", title: "end_turn").withTurn("t1"),
+            E.result(4, "e1", text: "Noted: this thread is done. Now write your reply.").withTurn("t1"),
+            E.event(5, "assistant.text", ["itemId": "m1", "text": "Still landing.", "final": true], turn: "t1"),
+            E.event(6, "system.note", ["text": "Background command \"Land\" completed (exit code 0)", "wake": true], turn: "t1"),
+            E.call(7, "c2").withTurn("t1"), E.result(8, "c2").withTurn("t1"),
+            E.text(9, "m2", "Landed on main and pushed.").withTurn("t1"),
+            E.call(10, "e2", name: "mcp__threadbear__end_turn", kind: "mcp", title: "end_turn").withTurn("t1"),
+            E.result(11, "e2", text: "Noted: this thread is done. Stop here: your message above is the reply.").withTurn("t1"),
+            E.done(12),
+        ])
+        XCTAssertNotNil(model.row(id: "a:m2"))
+        XCTAssertNil(model.row(id: "a:m1"), "folded into the work")
+    }
+
     func testATurnWithNoEditsHasNoCard() {
         let model = TranscriptModel(events: [E.user(1, "Hi"), E.call(2, "c1"), E.text(3, "m1", "Hello"), E.done(4)])
         XCTAssertNil(model.rows.first { $0.kind == .changes })

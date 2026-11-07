@@ -835,11 +835,9 @@ export function endTurnTaken(result: { ok: boolean; text: string }): boolean {
 // agent can't have seen one that isn't there yet. One that came while the call
 // ran counts too, as the agent called it without having read that message.
 // A background task finishing mid-turn (a system.note with wake) opens it too,
-// from when the agent reads it: the CLI hands it over with the next tool
-// result, so one that came before the end_turn's own result was unread when
-// the agent called it. On 7 Nov 2026 a backgrounded `tb land` finished just
-// before the agent's "landing now" end_turn, and the real report's end_turn
-// was refused (thread 46de9389).
+// from when the agent has read it (wakeRead). On 7 Nov 2026 a backgrounded
+// `tb land` finished just before the agent's "landing now" end_turn, and the
+// real report's end_turn was refused (thread 46de9389).
 export function takenEndTurn(events: PersistedEvent[], serverName = 'threadbear'): Record<string, unknown> | undefined {
   const endTurn = `mcp__${serverName}__${END_TURN_TOOL}`;
   let start = 0;
@@ -851,21 +849,44 @@ export function takenEndTurn(events: PersistedEvent[], serverName = 'threadbear'
   }
   const calls = new Map<string, Record<string, unknown>>();
   let taken: Record<string, unknown> | undefined;
-  let unread = false;
+  const wake = new WakeRead();
   for (const e of events.slice(start)) {
-    if (e.type === 'user.message' || (e.type === 'system.note' && e.wake && taken)) {
-      calls.clear();
-      taken = undefined;
-    } else if (e.type === 'system.note' && e.wake) unread = true;
-    if (e.type === 'tool.call' && e.name === endTurn) calls.set(e.itemId, e.input);
-    if (e.type === 'tool.result' && !taken && endTurnTaken(e)) taken = calls.get(e.itemId);
-    if (e.type === 'tool.result' && unread) {
-      unread = false;
+    if (e.type === 'user.message' || wake.see(e)) {
       calls.clear();
       taken = undefined;
     }
+    if (e.type === 'tool.call' && e.name === endTurn) calls.set(e.itemId, e.input);
+    if (e.type === 'tool.result' && !taken && endTurnTaken(e)) taken = calls.get(e.itemId);
   }
   return taken;
+}
+
+// When the agent has read a background task's notification that came into
+// its turn (a system.note with wake), fed the turn's events in order. The CLI
+// hands it over with the next request to the model, after the next tool
+// results: the text and calls of the response that was being written when it
+// came weren't written with it, nor were tool results in the same batch, so
+// it counts from the agent's first step after a result (see() is true then).
+// Shared by takenEndTurn, the runner's turn and the Claude adapter's Stop
+// hook, so all three open the turn at the same event.
+export class WakeRead {
+  private state: 'none' | 'unread' | 'handed' = 'none';
+  see(e: { type: string; itemId?: string; wake?: true }): boolean {
+    if (e.type === 'system.note' && e.wake) {
+      if (this.state === 'none') this.state = 'unread';
+      return false;
+    }
+    if (e.type === 'tool.result' && this.state === 'unread') this.state = 'handed';
+    // A Codex child's items (<child>/<id>) aren't the agent's own steps.
+    else if (this.state === 'handed' && (e.type === 'assistant.text' || e.type === 'reasoning' || e.type === 'tool.call') && !e.itemId?.includes('/')) {
+      this.state = 'none';
+      return true;
+    }
+    return false;
+  }
+  reset(): void {
+    this.state = 'none';
+  }
 }
 
 export function endedThisTurn(events: PersistedEvent[], serverName = 'threadbear'): boolean {

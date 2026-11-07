@@ -20,7 +20,7 @@ import { RUNS_AS_CODE, RUNS_AS_CODE_REASON, runsAsCodeByName } from '../../code-
 import path from 'node:path';
 import { RUNNER_VERSION } from '../../config.ts';
 import { stripModelSuffix } from '../../accounts.ts';
-import { END_TURN_FULL_NAME, END_TURN_NUDGE, endTurnMessageStands, endTurnWantsReply, ONE_REPLY_END_TURN_NUDGE, ONE_REPLY_WRITE_NUDGE, owedReplyAfterCompact } from '../../needs.ts';
+import { END_TURN_FULL_NAME, END_TURN_NUDGE, endTurnMessageStands, endTurnWantsReply, ONE_REPLY_END_TURN_NUDGE, ONE_REPLY_WRITE_NUDGE, owedReplyAfterCompact, WakeRead } from '../../needs.ts';
 
 // Variables a parent Claude Code session sets for its own children. If the
 // runner was started from inside one (tests, a terminal in T3), they would
@@ -356,10 +356,10 @@ class ClaudeSession implements AgentSession {
   private messageStands = false;
   private pastEndTurn = false;
   private endTurnCall?: string;
-  // A background task's notification came into the turn and goes to the
-  // agent with the next tool result. From then the turn's end_turn is behind
-  // it, so the Stop hook asks for another (needs.ts, takenEndTurn).
-  private wakeUnread = false;
+  // Whether the agent has read a background task's notification that came
+  // into the turn: from then its end_turn is behind it, so the Stop hook
+  // asks for another (needs.ts, WakeRead).
+  private wake = new WakeRead();
   // Each end_turn call's card questions, by item id, until its result.
   private endTurnAsks = new Map<string, string[]>();
   // A reply owed after an accepted one-reply end_turn, with its card's
@@ -560,7 +560,7 @@ class ClaudeSession implements AgentSession {
         // to call it (1 Nov 2026, thread cdfccbc3).
         if ((msg as { type?: string }).type === 'result') {
           this.forgetEndTurn();
-          this.wakeUnread = false;
+          this.wake.reset();
           this.owedReply = undefined;
           this.endTurnAsks.clear();
         }
@@ -579,6 +579,7 @@ class ClaudeSession implements AgentSession {
           // ahead of the call comes through.
           if (out.kind === 'event') {
             const ev = out.event;
+            if (this.wake.see(ev)) this.forgetEndTurn();
             if (ev.type === 'tool.call' && ev.name === END_TURN_FULL_NAME) {
               this.endTurnCall = ev.itemId;
               const asks = Array.isArray(ev.input.asks) ? (ev.input.asks as { question?: unknown; action?: unknown }[]) : [];
@@ -594,13 +595,6 @@ class ClaudeSession implements AgentSession {
             else if (ev.type === 'assistant.text' && !ev.itemId.includes('/') && ev.text.trim()) {
               if (this.pastEndTurn) this.wroteAfterEnd = true;
               this.owedReply = undefined;
-            }
-            if (ev.type === 'system.note' && ev.wake) {
-              if (this.endTurnTaken || this.pastEndTurn) this.forgetEndTurn();
-              else this.wakeUnread = true;
-            } else if (ev.type === 'tool.result' && this.wakeUnread) {
-              this.wakeUnread = false;
-              this.forgetEndTurn();
             }
           }
           if (out.kind === 'event' && out.event.type === 'tool.call') this.markToolSeen(out.event.itemId);

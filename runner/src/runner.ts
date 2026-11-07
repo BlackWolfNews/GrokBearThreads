@@ -94,7 +94,7 @@ import { parseWhen } from './when.ts';
 import { emptyHighlights, observe as observeHighlights, pinItem, remove as removeHighlight, unpin as unpinHighlight, upsert as upsertHighlight, view as highlightsView, absolute, type ThreadHighlights } from './highlights.ts';
 import { SERVER_NAME, approvalTitle } from './threadbear-mcp.ts';
 import { PANEL_ACK_WAIT_MS, PANEL_PLACES, resolvePanel } from './panel-requests.ts';
-import { archiveFromTool, bylineFromTool, END_TURN_TOOL, endTurnAccepted, endTurnAddedArchive, endTurnAddedSnooze, snoozeFromTool, waitForFromTool, endTurnAsksForMessage, endTurnIsOneReply, endTurnOwesReply, endTurnRefusedRepeat, endTurnTaken, endTurnWantsReply, needsFromText, needsFromTool, replyWithoutRepeat, splitReplySection, summaryFromTool, summaryMarkdown } from './needs.ts';
+import { archiveFromTool, bylineFromTool, END_TURN_TOOL, endTurnAccepted, endTurnAddedArchive, endTurnAddedSnooze, snoozeFromTool, waitForFromTool, endTurnAsksForMessage, endTurnIsOneReply, endTurnOwesReply, endTurnRefusedRepeat, endTurnTaken, endTurnWantsReply, needsFromText, needsFromTool, replyWithoutRepeat, splitReplySection, summaryFromTool, summaryMarkdown, WakeRead } from './needs.ts';
 import type { Needs } from './needs.ts';
 import { asksForAppRestart } from './app-restarts.ts';
 import type { ConnectorsStatus } from './connectors.ts';
@@ -328,10 +328,9 @@ export type Turn = {
   // The Stop hook sent this turn back to call end_turn, so what it already
   // wrote is the reply (threadbear-mcp.ts, needs.ts oneReplyAlreadyWritten).
   endTurnNudged?: boolean;
-  // A background task's notification came into the turn (a system.note with
-  // wake) and the agent hasn't had it yet: the CLI hands it over with the
-  // next tool result (needs.ts, takenEndTurn).
-  wakeUnread?: boolean;
+  // Whether the agent has read a background task's notification that came
+  // into the turn (needs.ts, WakeRead).
+  wake?: WakeRead;
 };
 
 type Runtime = {
@@ -1494,17 +1493,21 @@ export class Runner {
     rt.session!.send({ id: msg.turnId, text: this.forAgent(msg), images: msg.images });
   }
 
-  // A turn that had its end_turn, opened again by a background task's
-  // notification. Unlike a message (steer) nothing new is owed to Mike, but
-  // the work after it is the turn's latest: its text is kept and becomes the
-  // preview, and the card that was taken stands only until the next end_turn.
-  reopenForWake(turn: Turn): void {
+  // A turn that had its end_turn, opened again once the agent has read a
+  // background task's notification (7 Nov 2026, thread 46de9389). Unlike a
+  // message (steer) nothing new is owed to Mike, but the work after it is the
+  // turn's latest: its text is kept and becomes the preview, and the card
+  // that was taken stands only until the next end_turn. A "What I need from
+  // you" the reply had (replyNeeds) stands until then too, as the agent may
+  // stop without another.
+  seeWake(turn: Turn, ev: { type: string; itemId?: string; wake?: true }): void {
+    turn.wake ??= new WakeRead();
+    if (!turn.wake.see(ev) || !(turn.ended || turn.tookEndTurn)) return;
     turn.ended = false;
     turn.owedReply = undefined;
     turn.replyAfter = false;
     turn.headline = false;
     turn.summarized = false;
-    turn.replyNeeds = undefined;
     turn.narrationItem = undefined;
   }
 
@@ -1778,6 +1781,7 @@ export class Runner {
     switch (o.kind) {
       case 'event': {
         let ev = o.event;
+        if (rt.turn) this.seeWake(rt.turn, ev);
         // Text after an accepted end_turn (see Turn.ended), dropped before
         // it can become the preview or a second message. Unless the reply
         // was a narration block's summary: then this is the reply, in the
@@ -1853,18 +1857,11 @@ export class Runner {
               rt.turn.headline = true;
               rec.preview = oneLine(headline, LIMITS.previewChars);
             }
+            // A "What I need from you" taken from a reply before a wake
+            // stands until now (reopenForWake).
+            rt.turn.replyNeeds = undefined;
             const bullets = endTurnIsOneReply(ev) ? undefined : summaryFromTool(rt.turn.endTurn);
             rt.turn.owedReply = !bullets ? undefined : endTurnAsksForMessage(ev) ? 0 : endTurnOwesReply(ev) ? summaryMarkdown(bullets).length : undefined;
-          }
-          // A background task finished: once the agent has its notification
-          // it carries on, so what it writes is kept and its next end_turn's
-          // card and headline replace the last (7 Nov 2026, thread 46de9389).
-          if (ev.type === 'system.note' && ev.wake) {
-            if (rt.turn.ended || rt.turn.tookEndTurn) this.reopenForWake(rt.turn);
-            else rt.turn.wakeUnread = true;
-          } else if (ev.type === 'tool.result' && own && rt.turn.wakeUnread) {
-            rt.turn.wakeUnread = false;
-            if (rt.turn.ended || rt.turn.tookEndTurn) this.reopenForWake(rt.turn);
           }
           // For hooks and the librarian only, never trust: these include
           // previews (an edit.diff before approval) and edits that were
@@ -1901,6 +1898,7 @@ export class Runner {
         // above, so it doesn't flash up and vanish.
         // That includes the message an owed reply keeps (owedReply): it
         // lands whole, as a sign-off line it drops would leave a row behind.
+        if (rt.turn && (o.delta.type === 'assistant.text.delta' || o.delta.type === 'reasoning.delta')) this.seeWake(rt.turn, { type: 'assistant.text', itemId: o.delta.itemId });
         if (rt.turn?.ended && !rt.turn.replyAfter && (o.delta.type === 'assistant.text.delta' || o.delta.type === 'reasoning.delta') && !o.delta.itemId.includes('/')) break;
         this.addDelta(st, o.delta);
         break;

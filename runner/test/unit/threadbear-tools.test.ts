@@ -598,7 +598,9 @@ test('a background task that finishes around end_turn opens the turn again once 
   assert.equal(h.runner.get(thread.id).preview, 'Landed and pushed');
 });
 
-test('a background task that finishes after end_turn opens the turn again', async () => {
+// From Codex's review: a repeat the agent was already writing when the note
+// came wasn't written with it, so it's refused, and the call after it is not.
+test('a background task that finishes after end_turn opens the turn from the step after the next result', async () => {
   const h = makeHarness();
   const { thread, s } = start(h);
   const { call } = tools(h, thread.id);
@@ -609,12 +611,60 @@ test('a background task that finishes after end_turn opens the turn again', asyn
     return r;
   };
   s.text('m1', 'Waiting on the build.');
-  await send('e1', { headline: 'Building', needs: 'nothing' });
+  await send('e1', { headline: 'Building', needs: 'nothing', summary: ['Started the build.'] });
   s.out({ kind: 'event', event: { type: 'system.note', text: 'Background command "Build" completed (exit code 0)', wake: true } });
-  s.text('m2', 'The build passed.');
-  const second = await send('e2', { headline: 'Built', needs: 'nothing' });
-  assert.equal(second.error, false, second.text);
+  const stale = await send('e2', { headline: 'Building still', needs: 'nothing' });
+  assert.equal(stale.error, true);
+  assert.match(stale.text, /Already ended/);
+  s.text('m2', 'The build passed, and here is what it found in full.');
+  assert.ok(h.events(thread.id).some((e) => e.type === 'assistant.text' && e.itemId === 'm2'), 'the report is kept');
+  assert.equal(h.runner.get(thread.id).preview, 'The build passed, and here is what it found in full.');
+  const third = await send('e3', { headline: 'Built', needs: 'nothing' });
+  assert.equal(third.error, false, third.text);
   assert.equal(h.runner.get(thread.id).preview, 'Built');
+});
+
+// From Codex's review: results that come back together are one step, so a
+// Bash result just before end_turn's own doesn't count as the agent reading it.
+test('a background task read with a batch of results opens the turn after the whole batch', async () => {
+  const h = makeHarness();
+  const { thread, s } = start(h);
+  const { call } = tools(h, thread.id);
+  s.text('m1', 'Pushing, and that is it.');
+  toolCall(s, 'b1', 'Bash', { command: 'git push' });
+  const input = { headline: 'Pushing', needs: 'nothing' };
+  toolCall(s, 'e1', END_TURN, input);
+  const r1 = await call('end_turn', input);
+  assert.equal(r1.error, false);
+  s.out({ kind: 'event', event: { type: 'system.note', text: 'Background command "Land" completed (exit code 0)', wake: true } });
+  toolResult(s, 'b1');
+  s.out({ kind: 'event', event: { type: 'tool.result', itemId: 'e1', ok: true, text: r1.text, truncated: false, images: [] } });
+  s.text('m2', 'Landed and pushed.');
+  assert.ok(h.events(thread.id).some((e) => e.type === 'assistant.text' && e.itemId === 'm2'), 'the report is kept');
+  const again = { headline: 'Landed', needs: 'nothing' };
+  toolCall(s, 'e2', END_TURN, again);
+  const r2 = await call('end_turn', again);
+  assert.equal(r2.error, false, r2.text);
+});
+
+// From Codex's review: the agent may stop without another end_turn while
+// other background work runs, and the ask its reply had still stands.
+test('one reply: an ask taken from the reply stands through a wake with no new end_turn', async () => {
+  const h = makeHarness();
+  const { thread, s } = start(h);
+  const { call } = tools(h, thread.id, undefined, () => true);
+  const input = { headline: 'Ready', needs: 'nothing' };
+  toolCall(s, 'e1', END_TURN, input);
+  const r = await call('end_turn', input);
+  s.out({ kind: 'event', event: { type: 'tool.result', itemId: 'e1', ok: !r.error, text: r.text, truncated: false, images: [] } });
+  s.text('m1', 'It is ready.\n\n**What I need from you**\n1. Press Bring Them In, then tell me how it went.');
+  s.out({ kind: 'event', event: { type: 'system.note', text: 'Background command "Build" completed (exit code 0)', wake: true } });
+  toolCall(s, 'b1', 'Bash', { command: 'cat build.log' });
+  toolResult(s, 'b1');
+  s.text('m2', 'The other build passed too.');
+  s.result('completed');
+  await tick();
+  assert.equal(h.runner.get(thread.id).needs, 'you');
 });
 
 test('a background task the agent had read before its end_turn still leaves a repeat refused', async () => {

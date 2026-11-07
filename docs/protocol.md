@@ -2339,13 +2339,17 @@ the thread if a sub-agent stalls, so an ask can't stay hidden for good.
   no new message that adds `archive: true`, where neither call has `needs:
   "you"`, is taken too, and adds only that; the first card stands. A
   background task finishing does the same as a message (a `system.note`
-  with `wake`): the CLI hands its notification to the agent with the next
-  `tool.result`, often the end_turn's own, and the agent carries on with
-  what it says, so its next `end_turn` is taken and its card and headline
-  replace the last, and the text it writes before that is kept. On 7 Nov
-  2026 a `tb land` the agent had sent to the background finished in the
-  same CLI turn as its "landing now" card, and the real report's end_turn
-  was refused (thread 46de9389).
+  with `wake`), from when the agent has read it: the CLI hands the
+  notification over with the next batch of `tool.result`s (often the
+  end_turn's own), so it counts from the agent's first text, thinking or
+  call after one. From there its text is kept, and its next `end_turn` is
+  taken and its card and headline replace the last; a repeat it was
+  already writing when the note came is still refused. The app takes the
+  reply from before the last card, and a one-reply message under a card
+  that was replaced folds into the work. On 7 Nov 2026 a `tb land` the
+  agent had sent to the background finished in the same CLI turn as its
+  "landing now" card, and the real report's end_turn was refused (thread
+  46de9389).
 - **A reply first.** `end_turn` is refused (an error result) until the
   turn has replied to Mike: a `summary` in the call itself, or an own `assistant.text` after the turn's last
   `tool.result` from a tool outside the `threadbear` server, and after
