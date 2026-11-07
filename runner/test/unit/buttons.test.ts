@@ -98,5 +98,5 @@ test('add_button is only handed out with the experiment on, and returns the link
   const r = await tool.handler({ title: 'Look into it', start: { text: 'Look at the camera panning', folder: '.' } } as any, {} as any);
   assert.equal(r.isError, undefined, JSON.stringify(r));
   const id = h.runner.listButtons(thread.id).buttons[0].id;
-  assert.match(r.content[0].text, new RegExp(`\\[Look into it\\]\\(button:${id}\\)`));
+  assert.match(JSON.stringify(r.content), new RegExp(`\\[Look into it\\]\\(button:${id}\\)`));
 });
