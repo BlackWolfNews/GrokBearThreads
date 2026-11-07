@@ -665,7 +665,8 @@ struct PreviewBody: View {
             LocalPagePreview(url: URL(fileURLWithPath: path), opened: preview.opened)
                 .id(path)
         } else if TextFileView.shows(path) {
-            TextFileView(url: URL(fileURLWithPath: path), opened: preview.opened, editing: preview.editing)
+            TextFileView(url: URL(fileURLWithPath: path), opened: preview.opened, editing: preview.editing,
+                         stayedEditing: { [thread] in app.setPreviewEditing(true, in: thread.id) })
                 .id(path)
         } else {
             QuickLookView(url: URL(fileURLWithPath: path), opened: preview.opened)

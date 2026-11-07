@@ -18,6 +18,9 @@ struct TextFileView: View {
     /// Bumped by each open, so the same file opened again is read again.
     let opened: Int
     let editing: Bool
+    /// Done didn't take (what's typed couldn't be saved): the pencil's
+    /// state goes back to editing.
+    var stayedEditing: () -> Void = {}
     /// Made on appear, once: SwiftUI runs a view's init on every update,
     /// and a controller a go would be a text view a go.
     @State private var controller: TextFileController?
@@ -70,7 +73,11 @@ struct TextFileView: View {
         }
         .onDisappear { controller?.stop() }
         .onChange(of: opened) { _, _ in controller?.check() }
-        .onChange(of: editing) { _, editing in controller?.setEditing(editing) }
+        .onChange(of: editing) { _, editing in
+            guard let controller else { return }
+            controller.setEditing(editing)
+            if controller.editing != editing { stayedEditing() }
+        }
         .onChange(of: colorScheme) { _, scheme in controller?.setDark(scheme == .dark) }
     }
 }
@@ -213,7 +220,7 @@ final class TextFileController: NSObject, NSTextViewDelegate {
         scroll.verticalRulerView = LineNumberRuler(textView: textView)
         scroll.hasVerticalRuler = true
         scroll.rulersVisible = false
-        textView.onSave = { [weak self] in self?.saveNow() }
+        textView.onSave = { [weak self] in _ = self?.saveNow() }
     }
 
     // MARK: Lifecycle
@@ -237,7 +244,7 @@ final class TextFileController: NSObject, NSTextViewDelegate {
         }
         // Quitting mid-edit: write what's typed before the app goes.
         terminating = NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.saveNow() }
+            MainActor.assumeIsolated { _ = self?.saveNow() }
         }
     }
 
@@ -353,9 +360,13 @@ final class TextFileController: NSObject, NSTextViewDelegate {
 
     // MARK: Editing
 
+    /// Done while what's typed can't be saved (a conflict waiting, the
+    /// file unreadable) stays in editing, so the typed text is still there
+    /// for the conflict bar or another try; TextFileView puts the pencil's
+    /// state back to match.
     func setEditing(_ editing: Bool) {
         guard self.editing != editing else { return }
-        if !editing { saveNow() }
+        if !editing, !saveNow() { return }
         self.editing = editing
         applyEditing()
         // Markdown changes shape; code and text only change whether they
@@ -389,7 +400,7 @@ final class TextFileController: NSObject, NSTextViewDelegate {
 
     private func scheduleSave() {
         saveTimer?.cancel()
-        let item = DispatchWorkItem { [weak self] in self?.saveNow() }
+        let item = DispatchWorkItem { [weak self] in _ = self?.saveNow() }
         saveTimer = item
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.saveDelay, execute: item)
     }
@@ -397,20 +408,38 @@ final class TextFileController: NSObject, NSTextViewDelegate {
     /// Writes what's typed, unless a conflict is waiting on Mike. If the
     /// file changed on disk since it was read (an agent's edit the watch
     /// hasn't reported yet), it isn't written over: the conflict bar asks.
-    func saveNow() {
+    /// False when what's typed is still unsaved and could be lost.
+    @discardableResult
+    func saveNow() -> Bool {
         saveTimer?.cancel()
         saveTimer = nil
-        guard editing, conflict == nil, document.isEditable else { return }
+        // Read only: nothing it could write, so nothing to keep editing for.
+        guard editing, document.isEditable else { return true }
+        guard conflict == nil else { return false }
         let typed = textView.string
-        guard typed != document.saved else { return }
-        if let onDisk = document.changedOnDisk(), onDisk != typed {
-            conflict = onDisk
-            return
+        guard typed != document.saved else { return true }
+        do {
+            let onDisk = try document.changedOnDisk()
+            // It turned too big or not UTF-8: never written back. What's
+            // typed stays on screen, read only, to copy out.
+            guard document.isEditable else {
+                applyEditing()
+                return false
+            }
+            if let onDisk, onDisk != typed {
+                conflict = onDisk
+                return false
+            }
+        } catch {
+            note = "Couldn't read the file to check it before saving: \(error.localizedDescription)"
+            return false
         }
         do {
             try document.save(typed)
+            return true
         } catch {
             note = "Couldn't save: \(error.localizedDescription)"
+            return false
         }
     }
 
@@ -422,6 +451,8 @@ final class TextFileController: NSObject, NSTextViewDelegate {
             break
         case .reload(let text):
             conflict = nil
+            // It may have turned read only, or back.
+            applyEditing()
             show(text, keepPlace: true)
         case .conflict(let text):
             conflict = text
@@ -435,15 +466,24 @@ final class TextFileController: NSObject, NSTextViewDelegate {
     func useFile(_ text: String) {
         conflict = nil
         document.adopt(text)
+        // It may have become read only (too big, not UTF-8).
+        applyEditing()
         show(text, keepPlace: true)
     }
 
     /// Its "Keep mine": what's typed is written over the file. The file's
     /// text is taken as read first, so the save doesn't find it changed
-    /// and ask again.
+    /// and ask again. A file that's turned too big or not UTF-8 isn't
+    /// written: what's typed stays on screen, read only.
     func keepMine() {
         if let onDisk = conflict { document.adopt(onDisk) }
         conflict = nil
+        guard document.isEditable else {
+            applyEditing()
+            note = document.truncated ? "The file is now too big to edit here, so what you typed wasn't saved."
+                : "The file is no longer UTF-8 text, so what you typed wasn't saved."
+            return
+        }
         saveNow()
     }
 

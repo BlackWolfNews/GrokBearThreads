@@ -84,9 +84,16 @@ public final class TextFileDocument: @unchecked Sendable {
 
     /// The file's text if it no longer says what was last read or written
     /// (someone else wrote it), else nil. Read just before a save, so an
-    /// edit the watch hasn't reported yet isn't written over.
-    public func changedOnDisk() -> String? {
-        guard let read = try? read() else { return nil }
+    /// edit the watch hasn't reported yet isn't written over. Throws if it
+    /// can't be read, as then nobody can say it's safe to write. A change
+    /// to something too big or not UTF-8 makes the file read only, as a
+    /// load would, so nothing cut off or mangled is ever written back.
+    public func changedOnDisk() throws -> String? {
+        let read = try read()
+        // Even when it decodes to the same text: bytes that aren't UTF-8
+        // can read as what was saved and still be mangled by a write.
+        truncated = read.truncated
+        lossy = read.lossy
         return read.text == saved ? nil : read.text
     }
 
@@ -103,11 +110,11 @@ public final class TextFileDocument: @unchecked Sendable {
 
     /// Takes the file's text as the saved one, for `.conflict` when Mike
     /// keeps the file's (the view then shows it) or the view's (its next
-    /// save then writes over it).
+    /// save then writes over it). Whether it can be written stays as the
+    /// read that found it said (`changedOnDisk`): a conflict over a file
+    /// that's become too big or not UTF-8 mustn't make it editable.
     public func adopt(_ text: String) {
         saved = text
-        truncated = false
-        lossy = false
     }
 
     // MARK: Watching
@@ -189,13 +196,28 @@ public final class TextFileDocument: @unchecked Sendable {
             onChange(.gone)
             return
         }
-        let change: Change
-        if !isEditable || read.truncated || read.lossy {
+        var change: Change
+        if !isEditable {
             // A file that can't be edited has no unsaved edits to keep.
             change = read.text == saved ? .same : .reload(read.text)
+        } else if read.truncated || read.lossy {
+            // Turned too big or not UTF-8 under unsaved edits: they aren't
+            // thrown away, but can't be saved over it either (the bar asks,
+            // and Keep mine says why it can't).
+            let shown = shownText()
+            if shown != saved, read.text != shown {
+                truncated = read.truncated
+                lossy = read.lossy
+                change = .conflict(read.text)
+            } else {
+                change = .reload(read.text)
+            }
         } else {
             change = Self.change(onDisk: read.text, saved: saved, shown: shownText())
         }
+        // Whether it can be written changed with the same text (a binary
+        // file put back as UTF-8): reload, so the view follows.
+        if change == .same, read.truncated != truncated || read.lossy != lossy { change = .reload(read.text) }
         if case .reload = change {
             truncated = read.truncated
             lossy = read.lossy

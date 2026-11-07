@@ -91,6 +91,62 @@ final class TextFileEditingTests: XCTestCase {
         XCTAssertEqual(onDisk(), "let a = 1;\n// mine\n")
     }
 
+    /// Done with an outside change waiting: it stays in editing, with what
+    /// was typed, so the bar can ask and Keep mine writes it.
+    func testKeepMineAfterDoneStillSaves() throws {
+        let markdown = file.deletingLastPathComponent().appendingPathComponent("notes.md")
+        try "# Notes\n".write(to: markdown, atomically: true, encoding: .utf8)
+        let controller = TextFileController(url: markdown)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = controller.scroll
+        controller.start(editing: true, dark: false)
+        defer { controller.stop(); window.close() }
+        controller.insertAtEnd("mine\n")
+        try "# Theirs\n".write(to: markdown, atomically: false, encoding: .utf8)
+        controller.setEditing(false)
+        XCTAssertTrue(controller.editing, "Done didn't take")
+        XCTAssertEqual(controller.textView.string, "# Notes\nmine\n")
+        XCTAssertEqual(controller.conflict, "# Theirs\n")
+        XCTAssertEqual(try String(contentsOf: markdown, encoding: .utf8), "# Theirs\n")
+        controller.keepMine()
+        XCTAssertNil(controller.conflict)
+        XCTAssertEqual(try String(contentsOf: markdown, encoding: .utf8), "# Notes\nmine\n")
+    }
+
+    /// Replaced by something that isn't UTF-8 just before a save: it turns
+    /// read only, what was typed stays on screen, and nothing is written.
+    func testAFileThatIsNoLongerTextIsNeverWritten() throws {
+        let (controller, window) = editor(editing: true)
+        defer { controller.stop(); window.close() }
+        controller.insertAtEnd("// mine\n")
+        let bytes = Data([0x68, 0x69, 0xFF, 0xFE])
+        try bytes.write(to: file)
+        XCTAssertFalse(controller.saveNow())
+        XCTAssertFalse(controller.textView.isEditable)
+        XCTAssertEqual(controller.textView.string, "let a = 1;\n// mine\n")
+        controller.setEditing(false)
+        XCTAssertEqual(try Data(contentsOf: file), bytes)
+    }
+
+    /// The file can't be read back to check it: nothing is written.
+    func testASaveThatCantCheckTheFileWritesNothing() throws {
+        let (controller, window) = editor(editing: true)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: file.path)
+            controller.stop(); window.close()
+        }
+        controller.insertAtEnd("// mine\n")
+        try "let a = 99;\n".write(to: file, atomically: false, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o200], ofItemAtPath: file.path)
+        XCTAssertFalse(controller.saveNow())
+        XCTAssertNotNil(controller.note)
+        controller.setEditing(false)
+        XCTAssertTrue(controller.editing, "what's typed isn't dropped")
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: file.path)
+        XCTAssertEqual(onDisk(), "let a = 99;\n")
+    }
+
     /// The save as you type still lands by itself.
     func testTypingIsStillSavedAfterThePause() {
         let (controller, window) = editor(editing: true)
