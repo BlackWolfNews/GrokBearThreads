@@ -895,6 +895,7 @@ key:
 - Show Librarian: `showLibrarian`, ⌘4
 - Show Hibernating: `showHibernating`, no key
 - Show Archived: `showArchived`, no key
+- Settings: `settings`, ⌘,
 - Zoom In: `zoomIn`, ⌘=
 - Zoom Out: `zoomOut`, ⌘-
 - Actual Size: `actualSize`, ⌘0

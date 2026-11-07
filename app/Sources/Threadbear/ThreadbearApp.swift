@@ -51,6 +51,15 @@ struct ThreadbearApp: App {
         .defaultLaunchBehavior(.presented)
         .restorationBehavior(.disabled)
         .commands {
+            // The app menu's Settings… made here rather than left to the
+            // Settings scene, so its key comes from the shortcut list and
+            // Settings > Keyboard can change it. It opens the same window.
+            CommandGroup(replacing: .appSettings) {
+                IconMenuItems {
+                    SettingsLink { Label("Settings…", systemImage: "gearshape") }
+                        .shortcut(.settings)
+                }
+            }
             CommandGroup(after: .appInfo) {
                 IconMenuItems {
                     // Only while a newer build is staged (AppUpdater).

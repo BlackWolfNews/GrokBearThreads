@@ -75,7 +75,7 @@ struct ActivityBar: View {
             UpdatesActivityButton()
             UsageActivityButton()
             // The same window as ⌘, without a trip to the menu bar.
-            ActivityButton(symbol: "gearshape", title: "Settings", shortcut: "⌘,", active: false) {
+            ActivityButton(symbol: "gearshape", title: "Settings", shortcut: AppShortcuts.shared.display(.settings), active: false) {
                 openSettings()
             }
         }
