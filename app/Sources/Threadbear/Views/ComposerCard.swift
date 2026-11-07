@@ -75,6 +75,7 @@ final class ComposerCardHost: NSView {
         scroll.scrollerStyle = .overlay
         scroll.autohidesScrollers = true
         scroll.documentView = document
+        scroll.wantsLayer = true
         document.addSubview(cell)
         addSubview(scroll)
         // It's framed by hand in layout, so it mustn't add constraints.
@@ -230,7 +231,46 @@ final class ComposerCardHost: NSView {
         cell.frame = document.bounds
         cell.configure(row: row, render: render, tableWidth: bounds.width, expanded: false)
         if let ask = pendingFocus, cell.focusAnswerBox(ask) { pendingFocus = nil }
+        settleIfArriving(row)
     }
+
+    /// A card that's just turned up while he watches: the box has taken its
+    /// height at once (animating it would step the transcript's table from
+    /// the main thread), and what's in it rises 6 pt and fades in, as the
+    /// sidebar row's tick draws on for the same moment, so does the done
+    /// card's. Mike picked it from a mockup, 7 Nov. Never for a card that
+    /// was already there when the thread opened. All on layers, so it runs
+    /// whatever the main thread's doing at the end of a turn.
+    private func settleIfArriving(_ row: TranscriptRow) {
+        guard case .asks(let card) = row.content, let session = controller?.session, session.arrivingCard == card.seq else { return }
+        session.arrivingCard = nil
+        Self.settle(scroll)
+        if card.isDone, !collapsed, !Juice.reduceMotion { cell.drawDoneTickOn() }
+    }
+
+    static func settle(_ view: NSView) {
+        guard let layer = view.layer else { return }
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = 0
+        fade.toValue = 1
+        guard !Juice.reduceMotion else {
+            fade.duration = 0.15
+            layer.add(fade, forKey: settleKey)
+            return
+        }
+        // Additive, so it leaves the layer's own geometry to AppKit.
+        let rise = CABasicAnimation(keyPath: "transform.translation.y")
+        rise.isAdditive = true
+        rise.fromValue = view.downward(zoomed(6))
+        rise.toValue = 0
+        let group = CAAnimationGroup()
+        group.animations = [fade, rise]
+        group.duration = 0.2
+        group.timingFunction = CAMediaTimingFunction(controlPoints: 0, 0, 0.2, 1)
+        layer.add(group, forKey: settleKey)
+    }
+
+    static let settleKey = "settle"
 
     #if DEBUG
     /// How many times a card's been built, for tests.

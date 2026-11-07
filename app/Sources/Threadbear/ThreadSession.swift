@@ -548,6 +548,14 @@ final class ThreadSession {
         view?.apply(removed: removed, inserted: inserted, updated: updated)
     }
 
+    private static func cardSeq(_ row: TranscriptRow?) -> Int? {
+        if case .asks(let card)? = row?.content { return card.seq }
+        return nil
+    }
+
+    /// The card that's just turned up, until the composer has settled it in.
+    @ObservationIgnored var arrivingCard: Int?
+
     private func syncOpenCard() {
         if feed.model.openTurn == nil {
             let latest = feed.model.rows.reversed().lazy.compactMap { row -> TurnCompletion? in
@@ -560,6 +568,9 @@ final class ThreadSession {
         }
         let card = feed.model.openCard
         guard card != openCard else { return }
+        // A card turning up as he watches, rather than one that was there
+        // when the thread opened: only this one settles in (`ComposerCard`).
+        if let seq = Self.cardSeq(card), seq != Self.cardSeq(openCard), state == .loaded, !rebuilding, view != nil { arrivingCard = seq }
         openCard = card
         app?.relayCardChanged(threadId)
     }

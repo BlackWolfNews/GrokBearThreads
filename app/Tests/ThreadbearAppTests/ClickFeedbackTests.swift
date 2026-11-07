@@ -196,6 +196,40 @@ final class ClickFeedbackTests: XCTestCase {
         XCTAssertTrue(ArchiveFlight.openRow === old, "an update fills a slot whose view has left the window")
     }
 
+    // MARK: The card settling in
+
+    /// Rises and fades on its layer, so it runs whatever the main thread's
+    /// doing as a turn ends, and it's over quickly.
+    func testTheCardSettlesInOnItsLayer() throws {
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
+        view.wantsLayer = true
+        ComposerCardHost.settle(view)
+        let animation = try XCTUnwrap(view.layer?.animation(forKey: ComposerCardHost.settleKey))
+        XCTAssertEqual(animation.duration, 0.2, accuracy: 0.05)
+    }
+
+    /// The done tick drawn over the text's sits exactly where the text's
+    /// was, and that goes see-through while it draws, then comes back.
+    func testTheDoneTickDrawsOverTheTextsOwnThenGoesAway() async throws {
+        let card = AsksCard(seq: 7, asks: [], next: ["Carry on"])
+        let row = TranscriptRow(id: "ak:7", seq: 7, turnId: "t1", content: .asks(card))
+        let cell = TextRowCell()
+        cell.bare = true
+        let render = ComposerCardHost.render(row, width: 500)
+        cell.frame = NSRect(x: 0, y: 0, width: 500, height: render.height)
+        cell.configure(row: row, render: render, tableWidth: 500, expanded: false)
+        let storage = try XCTUnwrap(cell.textView.textStorage)
+        let before = try XCTUnwrap(storage.attribute(.attachment, at: 0, effectiveRange: nil) as? NSTextAttachment)
+        let views = cell.subviews.count
+        cell.drawDoneTickOn()
+        XCTAssertEqual(cell.subviews.count, views + 1)
+        let during = storage.attribute(.attachment, at: 0, effectiveRange: nil) as? NSTextAttachment
+        XCTAssertFalse(during === before)
+        XCTAssertEqual(during?.bounds, before.bounds, "the same size, so nothing moves")
+        try await until { cell.subviews.count == views }
+        XCTAssertTrue(storage.attribute(.attachment, at: 0, effectiveRange: nil) as? NSTextAttachment === before)
+    }
+
     // MARK: Projects
 
     func testAProjectEditShowsAtOnceAndARefusalPutsItBack() async throws {
