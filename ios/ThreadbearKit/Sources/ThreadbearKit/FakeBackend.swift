@@ -23,6 +23,11 @@ public final class FakeBackend: Backend, @unchecked Sendable {
     /// How long a new thread takes to start (AppModel's -ThreadbearSlowStart
     /// makes it long, so the inbox's Starting row stays for a screenshot).
     public var startDelay: Duration = .seconds(1.5)
+    /// How long an answer to a card waits for the "runner" to take it, to see
+    /// the card waiting. Nothing changes until then, as on a real one.
+    public var answerDelay: Duration = .zero
+    /// And then it refuses them, to see a card coming back.
+    public var answersFail = false
     /// How long the thread lists take to answer the first time, to see the
     /// app's loading rows (`-ThreadbearSlowLoad`). Zero normally.
     private let listDelay: Duration
@@ -502,20 +507,30 @@ public final class FakeBackend: Backend, @unchecked Sendable {
             return id
         }
         let text = Self.withPictures(text, images)
-        mutate { s in
-            s.append(threadId, role: .user, text: text, origin: "phone")
-            // The next turn closes the card, as on the runner.
-            s.threadsById[threadId]?.asks = nil
-            s.threadsById[threadId]?.asksSeq = nil
-            s.threadsById[threadId]?.next = nil
-            s.threadsById[threadId]?.status = .running
-            s.threadsById[threadId]?.working = "Bear with me"
-            s.threadsById[threadId]?.needsYou = false
-            s.threadsById[threadId]?.unread = false
-            s.threadsById[threadId]?.lastActivityAt = .now
+        let id = answered { fake in
+            fake.mutate { s in
+                s.waitingByThread[threadId] = nil
+                s.append(threadId, role: .user, text: text, origin: "phone")
+                // The next turn closes the card, as on the runner.
+                s.threadsById[threadId]?.asks = nil
+                s.threadsById[threadId]?.asksSeq = nil
+                s.threadsById[threadId]?.next = nil
+                s.threadsById[threadId]?.status = .running
+                s.threadsById[threadId]?.working = "Bear with me"
+                s.threadsById[threadId]?.needsYou = false
+                s.threadsById[threadId]?.unread = false
+                s.threadsById[threadId]?.lastActivityAt = .now
+            }
+            fake.runTurn(threadId, reply: "Done. I've made that change and the checks pass.")
         }
-        runTurn(threadId, reply: "Done. I've made that change and the checks pass.")
-        return newCommand()
+        // Slow, it waits faded in the transcript as a real one does.
+        if answerDelay > .zero, !answersFail {
+            mutate { s in
+                s.waitingByThread[threadId, default: []].append(WaitingSend(commandId: id, state: .pending, text: text, photos: images.count,
+                                                                            createdAt: Date.now.timeIntervalSince1970 * 1000))
+            }
+        }
+        return id
     }
 
     /// Marks the button pressed on its message, as the runner's row would
@@ -535,25 +550,46 @@ public final class FakeBackend: Backend, @unchecked Sendable {
         return newCommand(threadId: started)
     }
 
-    public func respond(threadId: String, approvalId: String, decision: ApprovalOption) async throws -> String {
-        mutate { s in
-            s.threadsById[threadId]?.pendingApproval = nil
-            s.threadsById[threadId]?.status = decision == .deny ? .idle : .running
-            s.threadsById[threadId]?.working = decision == .deny ? nil : "Running the command"
+    /// Runs `land` when the runner would take the answer: now, or after
+    /// `answerDelay`, or never if it's refusing them.
+    private func answered(_ land: @escaping @Sendable (FakeBackend) -> Void) -> String {
+        guard answerDelay > .zero else {
+            land(self)
+            return newCommand()
         }
-        if decision != .deny { runTurn(threadId, reply: "That ran fine. Everything's green.") }
-        return newCommand()
+        let id = "cmd_" + UUID().uuidString.prefix(8)
+        lock.withLock { commands[id] = CommandStatus(state: .pending) }
+        let (delay, fails) = (answerDelay, answersFail)
+        Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard let self else { return }
+            if !fails { land(self) }
+            self.mutate { s in s.commands[id] = fails ? CommandStatus(state: .failed, note: "the runner refused it") : CommandStatus(state: .done) }
+        }
+        return id
+    }
+
+    public func respond(threadId: String, approvalId: String, decision: ApprovalOption) async throws -> String {
+        answered { fake in
+            fake.mutate { s in
+                s.threadsById[threadId]?.pendingApproval = nil
+                s.threadsById[threadId]?.status = decision == .deny ? .idle : .running
+                s.threadsById[threadId]?.working = decision == .deny ? nil : "Running the command"
+            }
+            if decision != .deny { fake.runTurn(threadId, reply: "That ran fine. Everything's green.") }
+        }
     }
 
     public func answer(threadId: String, approvalId: String, answers: [String: String], summary: String) async throws -> String {
-        mutate { s in
-            s.append(threadId, role: .user, text: summary, origin: "phone")
-            s.threadsById[threadId]?.pendingApproval = nil
-            s.threadsById[threadId]?.status = .running
-            s.threadsById[threadId]?.working = "Bear with me"
+        answered { fake in
+            fake.mutate { s in
+                s.append(threadId, role: .user, text: summary, origin: "phone")
+                s.threadsById[threadId]?.pendingApproval = nil
+                s.threadsById[threadId]?.status = .running
+                s.threadsById[threadId]?.working = "Bear with me"
+            }
+            fake.runTurn(threadId, reply: "Thanks, going with that.")
         }
-        runTurn(threadId, reply: "Thanks, going with that.")
-        return newCommand()
     }
 
     public func secret(threadId: String, approvalId: String, answer: SecretAnswer) async throws -> String {

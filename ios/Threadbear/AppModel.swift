@@ -357,6 +357,10 @@ final class AppModel {
             // -ThreadbearEmptyInbox: nothing in the inbox from the start, one running.
             if args.contains("-ThreadbearEmptyInbox") { fake.keepOnly(["a5", "a6", "a7"]) }
             // -ThreadbearFinishSoon: the running thread's turn ends after a while, to see its row move.
+            // -ThreadbearSlowAnswers: answers to cards take a few seconds to reach the "runner".
+            if args.contains("-ThreadbearSlowAnswers") { fake.answerDelay = .seconds(3) }
+            // -ThreadbearRefuseAnswers: and it refuses them.
+            if args.contains("-ThreadbearRefuseAnswers") { fake.answerDelay = .seconds(3); fake.answersFail = true }
             if args.contains("-ThreadbearFinishSoon") { fake.finishRunningThread(after: .seconds(14)) }
             connect(fake, pairing: nil)
         } else if let saved = PairingStore.load() {

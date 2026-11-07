@@ -17,7 +17,11 @@ struct SecretCard: View {
     let key: String
     var onSent: (String) -> Void
     @State private var value = ""
+    /// Save or Decline has been tapped: spinning until the card goes (`AnswerWatch`).
     @State private var busy = false
+    @State private var declining = false
+    /// What that sent, once the backend has it.
+    @State private var command: String?
     @State private var problem: String?
     /// Checked against the key kept for this runner (from pairing), and the
     /// runner kept for this thread, once the card shows and again on Save.
@@ -67,21 +71,35 @@ struct SecretCard: View {
                 }
                 HStack {
                     Button(action: save) {
-                        Text("Save securely").frame(maxWidth: .infinity)
+                        Text("Save securely")
+                            .frame(maxWidth: .infinity)
+                            .spinning(busy && !declining, tint: .white)
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(busy || value.isEmpty)
+                    .disabled(busy ? declining : value.isEmpty)
                     Button(action: decline) {
-                        Text("Decline").frame(maxWidth: .infinity)
+                        Text("Decline")
+                            .frame(maxWidth: .infinity)
+                            .spinning(busy && declining)
                     }
                     .buttonStyle(.bordered)
                     .tint(.red)
-                    .disabled(busy)
+                    .disabled(busy && !declining)
                 }
+                .allowsHitTesting(!busy)
             }
         }
         .padding()
         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .sensoryFeedback(trigger: busy) { _, new in
+            new ? (declining ? .selection : .impact(weight: .light)) : nil
+        }
+        .modifier(AnswerWatch(command: command) { refused in
+            busy = false
+            command = nil
+            // Our own words again. The value's gone, so it has to be typed afresh.
+            if refused { problem = declining ? "Couldn't decline it. Try again." : "Couldn't send it. Type it again to retry." }
+        })
         .task(id: "\(runnerId) \(key)") {
             guard model.canAnswerSecrets, SecretSeal.isUsableKey(key) else { return }
             trust = RunnerKeyPins.check(key, runnerId: runnerId, threadId: threadId, in: model.runnerKeys)
@@ -90,6 +108,7 @@ struct SecretCard: View {
 
     private func save() {
         guard model.backend != nil, !busy, !value.isEmpty else { return }
+        declining = false
         // Out of the field (and this view's state) before anything else.
         let typed = value
         value = ""
@@ -110,8 +129,10 @@ struct SecretCard: View {
     }
 
     private func decline() {
+        guard !busy else { return }
         value = ""
         problem = nil
+        declining = true
         send(.decline)
     }
 
@@ -119,12 +140,15 @@ struct SecretCard: View {
         guard let backend = model.backend else { return }
         busy = true
         Task {
-            defer { busy = false }
             do {
-                onSent(try await backend.secret(threadId: threadId, approvalId: approvalId, answer: answer))
+                let id = try await backend.secret(threadId: threadId, approvalId: approvalId, answer: answer)
+                command = id
+                onSent(id)
             } catch TransportError.unauthorized(let message) {
+                busy = false
                 model.report(TransportError.unauthorized(message))
             } catch {
+                busy = false
                 // Our own words, not the server's: nothing that came back
                 // with the request ends up on screen.
                 problem = answer == .decline ? "Couldn't decline it. Try again." : "Couldn't send it. Type it again to retry."

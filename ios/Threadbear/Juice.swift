@@ -22,4 +22,52 @@ enum Juice {
     static var popIn: AnyTransition {
         reduceMotion ? .opacity : .scale(scale: 0.2).combined(with: .opacity)
     }
+
+    /// A card that's been answered going, and what replaces it settling.
+    static let card = Animation.easeInOut(duration: 0.22)
+
+    /// A card leaves by folding up to its top edge and fading; it just turns up.
+    static var cardGoes: AnyTransition {
+        .asymmetric(insertion: .opacity, removal: reduceMotion ? .opacity : .modifier(active: FoldUp(open: 0), identity: FoldUp(open: 1)))
+    }
+}
+
+private struct FoldUp: ViewModifier {
+    var open: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .clipShape(Rectangle().scale(x: 1, y: open, anchor: .top))
+            .scaleEffect(y: 0.97 + 0.03 * open, anchor: .top)
+            .opacity(open)
+    }
+}
+
+/// Watches the command an answered card sent, for as long as the card stays. The
+/// card's spinner stays until the card goes, which is the thread's row catching
+/// up, so nothing can be pressed twice. This says when to stop waiting: the
+/// runner refused it, or took it and the row has still not said so.
+struct AnswerWatch: ViewModifier {
+    @Environment(AppModel.self) private var model
+    var command: String?
+    var giveBack: (_ refused: Bool) -> Void
+
+    func body(content: Content) -> some View {
+        content.task(id: "\(command ?? ""):\(model.connection)") {
+            guard let command, let backend = model.backend else { return }
+            do {
+                for try await status in backend.command(command) {
+                    if status == nil || status?.state == .failed {
+                        giveBack(status != nil)
+                        return
+                    }
+                    if status?.state == .done {
+                        try await Task.sleep(for: .seconds(5))
+                        giveBack(false)
+                        return
+                    }
+                }
+            } catch {}
+        }
+    }
 }

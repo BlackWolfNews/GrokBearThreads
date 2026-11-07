@@ -41,6 +41,15 @@ struct ThreadView: View {
     /// Follow-ups ticked on the done card, and the reply it's under.
     @State private var nextPicks: Set<Int> = []
     @State private var nextPickedFor: Int?
+    /// A card's answer is on its way to the backend: it spins and can't be
+    /// pressed again. Uploading first can take a while.
+    @State private var sendingCard = false
+    /// The card of asks, and the reply under a done card, that's been answered
+    /// from here. `sent` goes when the runner takes the message, which is before
+    /// the thread's row says so, and the card coming back live for that moment
+    /// could be pressed twice.
+    @State private var answeredAsks: Double?
+    @State private var answeredDone: Int?
     /// The working a work: link opened.
     @State private var workLink: ThreadLinks.Hit?
     @Environment(\.pushThread) private var pushThread
@@ -142,17 +151,21 @@ struct ThreadView: View {
                     }
                     if let pending = thread.pendingApproval {
                         PendingCard(threadId: thread.threadId, runnerId: thread.runnerId, pending: pending) { sent = ($0, nil) }
+                            // Its own state per question: a tapped button doesn't carry over to the next.
+                            .id(pending.id)
+                            .transition(Juice.cardGoes)
                     } else if thread.isBusy || thread.working != nil {
                         WorkingLine(text: thread.working)
                             .id("working:\(thread.status == .running)")
-                    } else if let asks = thread.asks, !asks.isEmpty, sent == nil, waiting.isEmpty {
-                        AsksCard(asks: asks, picks: $picks, busy: sent != nil) {
-                            Task { _ = await send("", to: thread) }
+                    } else if let asks = thread.asks, !asks.isEmpty, showsAsks(thread) {
+                        AsksCard(asks: asks, picks: $picks, busy: sendingCard) {
+                            sendCard(thread, lastSeq: messages.last?.seq)
                         }
                         .onChange(of: thread.asksSeq, initial: true) {
                             // A new card starts with nothing picked.
                             if pickedFor != thread.asksSeq { picks = [:]; pickedFor = thread.asksSeq }
                         }
+                        .transition(Juice.cardGoes)
                     } else if thread.status == .error {
                         Label("The last turn failed. Send a message to try again.", systemImage: "exclamationmark.triangle")
                             .font(.subheadline)
@@ -160,8 +173,8 @@ struct ThreadView: View {
                     } else if isDone(thread, messages: messages) {
                         // Ticked follow-ups go from the card's Send on their
                         // own; anything typed stays in the box for later.
-                        DoneCard(next: thread.next ?? [], picked: $nextPicks, busy: sent != nil) {
-                            Task { _ = await send("", to: thread) }
+                        DoneCard(next: thread.next ?? [], picked: $nextPicks, busy: sendingCard) {
+                            sendCard(thread, lastSeq: messages.last?.seq)
                         } archive: {
                             archive()
                         }
@@ -169,6 +182,7 @@ struct ThreadView: View {
                             // A new reply's card starts with nothing ticked.
                             if nextPickedFor != messages.last?.seq { nextPicks = []; nextPickedFor = messages.last?.seq }
                         }
+                        .transition(Juice.cardGoes)
                     }
                     if let note = sentNote {
                         Text(note).font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .trailing)
@@ -177,6 +191,8 @@ struct ThreadView: View {
                 }
                 .padding(.horizontal)
                 .padding(.top, 8)
+                // Only when the card changes: the rest of what comes in just appears.
+                .animation(Juice.card, value: cardShowing(thread, messages: messages))
             }
             .defaultScrollAnchor(.bottom)
             .scrollDismissesKeyboard(.interactively)
@@ -434,15 +450,55 @@ struct ThreadView: View {
             for try await status in backend.command(id) {
                 guard sent?.id == id else { return }
                 sent?.status = status
+                if status?.state == .failed {
+                    // Its card comes back, with why under it.
+                    answeredAsks = nil
+                    answeredDone = nil
+                }
                 if status?.state == .done || status?.state == .taken { sent = nil; return }
             }
         } catch {}
     }
 
+    /// Nothing's on its way that would replace a card. A refused one doesn't
+    /// count: it says why under the transcript, and the card's there to try again.
+    private var nothingOnItsWay: Bool {
+        (sent == nil || sent?.status?.state == .failed) && waiting.isEmpty
+    }
+
+    private func showsAsks(_ thread: PhoneThread) -> Bool {
+        nothingOnItsWay && (answeredAsks == nil || answeredAsks != thread.asksSeq)
+    }
+
     /// A finished turn that needs nothing from Mike: the done card's place.
     private func isDone(_ thread: PhoneThread, messages: [PhoneMessage]) -> Bool {
         thread.status == .idle && !thread.needsYou && thread.archivedAt == nil && thread.working == nil
-            && messages.last?.role == .assistant && sent == nil && waiting.isEmpty
+            && messages.last?.role == .assistant && nothingOnItsWay
+            && (answeredDone == nil || answeredDone != messages.last?.seq)
+    }
+
+    /// Which card is showing, so it's only that changing that animates.
+    private func cardShowing(_ thread: PhoneThread, messages: [PhoneMessage]) -> String {
+        if let pending = thread.pendingApproval { return pending.id }
+        if thread.isBusy || thread.working != nil { return "working" }
+        if !(thread.asks ?? []).isEmpty, showsAsks(thread) { return "asks" }
+        return isDone(thread, messages: messages) ? "done" : "none"
+    }
+
+    /// A tap on a card of asks' answer, or Send on either card. Spinning from
+    /// the tap, and a single ask's chip goes back if it couldn't be sent.
+    private func sendCard(_ thread: PhoneThread, lastSeq: Int?) {
+        guard !sendingCard else { return }
+        sendingCard = true
+        Task {
+            defer { sendingCard = false }
+            if await send("", to: thread) {
+                answeredAsks = thread.asksSeq
+                answeredDone = lastSeq
+            } else if thread.asks?.count == 1 {
+                picks = [:]
+            }
+        }
     }
 
     /// Sends what's typed, with any answers picked on the card of asks
