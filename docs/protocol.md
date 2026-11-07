@@ -664,6 +664,12 @@ their own (A2, A3) that couldn't be picked; Mike also picked more than one
 or none, and answered most reviews in the thread in his own words (4 Nov
 2026), hence several picks, `none` and `reply`.
 
+`recommended` is the agent's own pick, marked "my pick" in the rail and
+over its picture, worded as an asks card marks `suggested`. Both notes are
+inline markdown. Mike, 7 Nov 2026: the note was drawn raw in grey, so
+backticks showed, nothing stood out, and "I'd pick C" sat halfway through
+a paragraph.
+
 ```ts
 // pickedIds lists every pick in the review's option order, only when there
 // are two or more; pickedId is always the first pick, for older clients.
@@ -676,7 +682,8 @@ type ReviewShot = { title?: string, image: ImageRef, media?: ImageRef }
 type DesignReview = {
   id: string
   title: string
-  note?: string
+  note?: string        // markdown (bold, code, links), drawn in the text colour
+  recommended?: string // the option id the agent would pick: marked "my pick", as on an asks card
   options: {
     id: string          // stable within this review
     title: string

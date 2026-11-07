@@ -536,6 +536,9 @@ struct ReviewWindow: View {
                 Text(option.id).font(.system(size: TypeScale.detail, weight: .semibold))
                     .foregroundStyle(picked ? Color.accentColor : Color.secondary)
                 if count > 1 { Text("\(count) shots").font(.system(size: TypeScale.detail)).foregroundStyle(.tertiary) }
+                if session.review.recommended == option.id {
+                    Text("my pick").font(.system(size: TypeScale.detail)).foregroundStyle(Color.accentColor)
+                }
             }
             .lineLimit(1).frame(height: Self.captionHeight, alignment: .topLeading)
             Group {
@@ -569,8 +572,11 @@ struct ReviewWindow: View {
         VStack(spacing: 0) {
             ScrollViewReader { scroller in ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
+                    // The agent's lead, as markdown in the text colour: drawn
+                    // raw in grey it was one long wall where backticks showed
+                    // and nothing stood out (Mike, 7 Nov).
                     if let note = session.review.note, !note.isEmpty {
-                        Text(note).font(.system(size: TypeScale.work)).foregroundStyle(.secondary)
+                        Text(AttributedString.inlineMarkdown(note)).font(.system(size: TypeScale.work)).lineSpacing(2)
                             .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                             .padding(14)
                         Divider()
@@ -652,10 +658,14 @@ struct ReviewWindow: View {
     private func choiceText(_ option: ReviewOption) -> some View {
         HStack(alignment: .top, spacing: 0) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(option.label).font(.system(size: TypeScale.work, weight: .semibold))
+                // The agent's pick, worded and coloured as on an asks card.
+                (Text(option.label).font(.system(size: TypeScale.work, weight: .semibold))
+                    + (session.review.recommended == option.id
+                        ? Text("  my pick").font(.system(size: TypeScale.detail)).foregroundStyle(Color.accentColor)
+                        : Text("")))
                     .fixedSize(horizontal: false, vertical: true)
                 if let reason = option.note, !reason.isEmpty {
-                    Text(reason).font(.system(size: TypeScale.detail)).foregroundStyle(.secondary)
+                    Text(AttributedString.inlineMarkdown(reason)).font(.system(size: TypeScale.detail)).foregroundStyle(.secondary).lineSpacing(1.5)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }

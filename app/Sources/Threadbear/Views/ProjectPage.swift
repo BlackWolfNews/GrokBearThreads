@@ -266,7 +266,13 @@ private struct TextSection: View {
 
     /// Bold, code and links, with the line breaks kept. Headings and lists
     /// show as their plain lines, which reads well enough for notes.
-    static func markdown(_ text: String) -> AttributedString {
+    static func markdown(_ text: String) -> AttributedString { .inlineMarkdown(text) }
+}
+
+extension AttributedString {
+    /// Bold, code and links, with the line breaks kept, for an agent's
+    /// short text in a SwiftUI view (a project's notes, a review's notes).
+    static func inlineMarkdown(_ text: String) -> AttributedString {
         (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
     }
 }

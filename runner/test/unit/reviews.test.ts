@@ -306,6 +306,16 @@ test('an option keeps its shots and url, and old single-image options are unchan
   assert.throws(()=>h.runner.createReview(thread.id,{title:'Too big',options:Array.from({length:6},(_,i)=>({id:`O${i}`,title:'Many',shots:Array.from({length:7},()=>({path:source}))}))}),/at most 40/);
 });
 
+test('recommended marks the agent\'s pick, and must name an option that can be picked', () => {
+  const {h,thread,input}=fixture();
+  const {review}=h.runner.createReview(thread.id,{...input,recommended:'B'});
+  assert.equal(review.recommended,'B');
+  assert.equal(h.restart().runner.getReview(thread.id,review.id).review.recommended,'B');
+  assert.equal(h.runner.createReview(thread.id,input).review.recommended,undefined);
+  assert.throws(()=>h.runner.createReview(thread.id,{...input,recommended:'Z'}),/option ids/);
+  assert.throws(()=>h.runner.createReview(thread.id,{...input,recommended:'D'}),/reference/);
+});
+
 test('several picks, none, and a reply go to the agent in the order of the options', () => {
   const {h,thread,input}=fixture();
   const {review}=h.runner.createReview(thread.id,input);
