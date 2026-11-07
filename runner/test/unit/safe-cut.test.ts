@@ -220,3 +220,12 @@ test('review round 3: output read only up to a limit drops the run it stopped in
   const c = await runCheck({ command: `cat ${JSON.stringify(file)}`, cwd: dir, home: dir, scheduleId: 'long', timeoutMs: 10_000 });
   assert.ok(!scrubText(c.output).includes('p9p9p9'), c.output.slice(0, 40));
 });
+
+test("review round 4: a check's output whose start was cut in a long password loses all of that run, whatever the chunks", async () => {
+  const dir = tmpDir('tb-safe-cut-chunks-');
+  fs.writeFileSync(path.join(dir, 'a'), `postgres://alice:${'p9'.repeat(9000)}`);
+  fs.writeFileSync(path.join(dir, 'b'), `${'p9'.repeat(50)}@db\nlast line`);
+  const c = await runCheck({ command: 'cat a; sleep 0.3; cat b', cwd: dir, home: dir, scheduleId: 'chunks', timeoutMs: 10_000 });
+  assert.ok(!c.output.includes('p9p9p9'), c.output.slice(0, 60));
+  assert.match(c.output, /last line/);
+});

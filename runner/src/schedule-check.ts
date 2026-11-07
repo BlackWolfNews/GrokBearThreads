@@ -154,13 +154,15 @@ export function runCheck(p: { command: string; cwd: string; home: string; schedu
       // Its own process group, so a timeout stops whatever it started too.
       detached: true,
     });
+    // Whether what's kept has lost its start, maybe in a secret whose start is gone.
+    let cutFront = false;
     const take = (b: Buffer) => {
       // Keep the end: the last lines of a long output say the most.
-      const all = out + b.toString('utf8');
-      if (all.length > CHECK_OUTPUT_CHARS * 2) {
-        // Its start is cut, maybe in a secret whose start is gone: that run goes too.
-        out = dropPartialStart(all.slice(-CHECK_OUTPUT_CHARS * 2));
-      } else out = all;
+      out += b.toString('utf8');
+      if (out.length > CHECK_OUTPUT_CHARS * 2) {
+        out = out.slice(-CHECK_OUTPUT_CHARS * 2);
+        cutFront = true;
+      }
     };
     child.stdout?.on('data', take);
     child.stderr?.on('data', take);
@@ -171,12 +173,12 @@ export function runCheck(p: { command: string; cwd: string; home: string; schedu
         child.kill('SIGKILL');
       }
       // Says how to give it longer, for the agent that reads it.
-      finish({ ok: false, output: clip(out), why: `it took longer than ${Math.round((p.timeoutMs ?? CHECK_TIMEOUT_MS) / 1000)} seconds; the schedule's checkTimeoutSecs can give it up to ${MAX_CHECK_TIMEOUT_SECS}` });
+      finish({ ok: false, output: clip(cutFront ? dropPartialStart(out) : out), why: `it took longer than ${Math.round((p.timeoutMs ?? CHECK_TIMEOUT_MS) / 1000)} seconds; the schedule's checkTimeoutSecs can give it up to ${MAX_CHECK_TIMEOUT_SECS}` });
     }, p.timeoutMs ?? CHECK_TIMEOUT_MS);
-    child.on('error', (e) => finish({ ok: false, output: clip(out), why: e.message }));
+    child.on('error', (e) => finish({ ok: false, output: clip(cutFront ? dropPartialStart(out) : out), why: e.message }));
     child.on('close', (code, signal) => {
-      if (code === 0) finish({ ok: true, output: clip(out) });
-      else finish({ ok: false, output: clip(out), why: signal ? `it was stopped by ${signal}` : `it exited with ${code}` });
+      if (code === 0) finish({ ok: true, output: clip(cutFront ? dropPartialStart(out) : out) });
+      else finish({ ok: false, output: clip(cutFront ? dropPartialStart(out) : out), why: signal ? `it was stopped by ${signal}` : `it exited with ${code}` });
     });
   });
 }
