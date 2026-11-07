@@ -466,8 +466,9 @@ export class PrimaryLink {
     if (!this.client) {
       // It says hello so the primary's log can name it (THREADBEAR-F: the
       // primary closed one as "not reading" and couldn't say whose it was).
-      const c = RunnerClient.connect(this.url, this.token).then(async (cl) => {
-        await cl.call('hello', { client: 'threadbear-drain', version: RUNNER_VERSION, pid: process.pid }).catch(() => {});
+      // Not waited for: frames arrive in order, so it's there before any call.
+      const c = RunnerClient.connect(this.url, this.token).then((cl) => {
+        void cl.call('hello', { client: 'threadbear-drain', version: RUNNER_VERSION, pid: process.pid }).catch(() => {});
         return cl;
       });
       this.client = c;

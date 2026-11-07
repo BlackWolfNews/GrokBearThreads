@@ -278,6 +278,13 @@ export function buildThreadbearTools(
   // Full ids, or any unique prefix of one (the list shows 8 characters),
   // here or on another runner. `other` is set for another runner's thread.
   const find = async (id: string): Promise<{ id: string; other?: { t: RemoteThread; runner: string } }> => {
+    // A whole id is looked up by itself. Listing every thread for it cost a
+    // draining runner 2.8 MB from the primary per call, and parallel calls
+    // piled up until the primary closed its link (THREADBEAR-F, 7 Nov).
+    if (id.length >= 36) {
+      const t = await Promise.resolve(control.get(id)).catch(() => undefined);
+      if (t?.id === id) return { id };
+    }
     const hits = (await all()).filter((t) => t.id === id || t.id.startsWith(id));
     // A whole id here needs nothing from the backend.
     if (hits.some((t) => t.id === id)) return { id };

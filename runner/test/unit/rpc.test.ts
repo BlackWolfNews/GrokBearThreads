@@ -774,3 +774,32 @@ test('threads.list with ids answers only those threads, here and on a draining r
     await server.close();
   }
 });
+
+// The same on the tools' side (Codex's review of the fix): every tool that
+// takes a thread id listed all of them to resolve it, so a dozen parallel
+// read_thread calls on a draining runner were the same pile-up. A whole id
+// is looked up by itself; a prefix still needs the list.
+test("the agent tools resolve a whole thread id without listing every thread", async () => {
+  const h = makeHarness();
+  const { buildThreadbearTools } = await import('../../src/threadbear-mcp.ts');
+  const self = h.runner.create({ text: 'me', accountId: 'claude-3' }).thread;
+  const other = h.runner.create({ text: 'the other one', accountId: 'claude-3' }).thread;
+  let lists = 0;
+  const control = new Proxy(h.runner, {
+    get(target, key) {
+      const v = Reflect.get(target, key, target);
+      if (key === 'list') return (...a: unknown[]) => (lists++, (v as Function).apply(target, a));
+      return typeof v === 'function' ? v.bind(target) : v;
+    },
+  });
+  const read = buildThreadbearTools(control as any, self.id).find((t) => t.name === 'read_thread')!;
+  const whole = await read.handler({ threadId: other.id } as never, {} as never);
+  assert.equal(whole.isError, undefined, JSON.stringify(whole));
+  assert.match(JSON.stringify(whole), /the other one/);
+  assert.equal(lists, 0);
+  const prefix = await read.handler({ threadId: other.id.slice(0, 8) } as never, {} as never);
+  assert.match(JSON.stringify(prefix), /the other one/);
+  assert.equal(lists, 1);
+  const missing = await read.handler({ threadId: '00000000-0000-0000-0000-000000000000' } as never, {} as never);
+  assert.equal(missing.isError, true);
+});
