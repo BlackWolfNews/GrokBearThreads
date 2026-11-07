@@ -199,4 +199,14 @@ final class DecisionsTests: XCTestCase {
         XCTAssertEqual(Decisions.nextUnanswered(after: 0, count: 1, picks: [:], orThis: true), 0)
         XCTAssertNil(Decisions.nextUnanswered(after: 0, count: 2, picks: [0: 0, 1: 1], orThis: true))
     }
+
+    /// Something else with an empty box sends nothing for that ask, so
+    /// it's still unanswered (a Return there mustn't send the rest).
+    func testAnEmptySomethingElseBoxIsNotAnAnswer() {
+        let own = Decisions.ownAnswer
+        let picks = [0: own, 1: 0, 2: own, 3: own]
+        let notes = [0: AskNote(text: "  \n"), 2: AskNote(text: "mine"), 3: AskNote(text: "", images: [ImageRef(path: "/tmp/a.png", mediaType: "image/png")])]
+        XCTAssertEqual(Decisions.filled(picks: picks, notes: notes), [1: 0, 2: own, 3: own])
+        XCTAssertEqual(Decisions.nextUnanswered(after: 3, count: 4, picks: Decisions.filled(picks: picks, notes: notes)), 0)
+    }
 }

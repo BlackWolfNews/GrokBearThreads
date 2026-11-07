@@ -120,6 +120,16 @@ public enum Decisions {
     /// goes there instead of sending while one's left, so an early Return
     /// can't send the card half answered (Mike, 7 Nov). `orThis` counts ask
     /// `index` too, last (the empty composer's Return, from the ask shown).
+    /// The picks that will send something: Something else with nothing
+    /// written or pasted in its box is left out of the message (`answers`),
+    /// so it doesn't count as an answer either.
+    public static func filled(picks: [Int: Int], notes: [Int: AskNote]) -> [Int: Int] {
+        picks.filter { index, n in
+            guard n == ownAnswer, let note = notes[index] else { return n != ownAnswer }
+            return !note.images.isEmpty || !note.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
+
     public static func nextUnanswered(after index: Int, count: Int, picks: [Int: Int], orThis: Bool = false) -> Int? {
         guard count > 0 else { return nil }
         let others = count > 1 ? (1..<count).map { (index + $0) % count } : []

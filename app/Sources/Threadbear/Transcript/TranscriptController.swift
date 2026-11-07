@@ -948,9 +948,10 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// Return in ask `ask`'s Something else box goes on to the next ask
     /// still unanswered, and sends only once there's none: Return on ask 7
     /// of 10, meant as a new line or just early, sent the card with 8 to 10
-    /// unanswered (Mike, 7 Nov). ⌘Return sends whatever's answered.
+    /// unanswered (Mike, 7 Nov). Its own box counts too, last: Return in an
+    /// empty one beeps. ⌘Return sends whatever's answered.
     func answerBoxReturn(_ card: AsksCard, ask: Int, command: Bool) {
-        if command || !showUnanswered(after: ask, orThis: false) { sendAnswers(card) }
+        if command || !showUnanswered(after: ask, orThis: true) { sendAnswers(card) }
     }
 
     /// Return in the empty composer with picks on the card: the same rule
@@ -971,7 +972,7 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
                   if case .asks(let card) = row.content { return card } else { return nil }
               }),
               card.isOpen, thread.asksSeq == card.seq,
-              let next = Decisions.nextUnanswered(after: ask, count: card.asks.count, picks: app.picks(for: thread), orThis: orThis)
+              let next = Decisions.nextUnanswered(after: ask, count: card.asks.count, picks: Decisions.filled(picks: app.picks(for: thread), notes: app.notes(for: thread)), orThis: orThis)
         else { return false }
         // Already showing (the composer's Return on an unanswered ask): the beep.
         if composerCard?.page != next, composerCard?.showAsk(next) == true {
