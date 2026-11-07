@@ -331,7 +331,13 @@ const BRUCE = 'runner_bruce';
 // Mike's runner order (backend API 58), every runner's id: set with
 // runners.setOrder and said back in remoteThreads.updated, as the real
 // runner passes on the backend's.
-let runnerOrder = ['runner_mock', BRUCE];
+// MOCK_MORE_RUNNERS=1 adds two more, for a list worth rearranging (only for
+// a look at Settings > Runners: the usual demo stays at two).
+const MORE_RUNNERS = process.env.MOCK_MORE_RUNNERS ? [
+  { id: 'runner_cloud', name: 'Hetzner Cloud', icon: 'cloud', online: true, lastSeenAt: new Date().toISOString() },
+  { id: 'runner_pixel', name: 'Pixel', icon: 'smartphone', online: true, lastSeenAt: new Date().toISOString() },
+] : [];
+let runnerOrder = ['runner_mock', BRUCE, ...MORE_RUNNERS.map((r) => r.id)];
 // Files on bruce's Mac that its threads name, for files.read from
 // /bruce/rpc (docs/protocol.md, "Other runners' threads"): the picture is a
 // real PNG, the rest text. None of these paths exist on this Mac.
@@ -1961,7 +1967,7 @@ function remoteThreads(client) {
     runners: [{
       id: BRUCE, name: bruce.name, icon: bruce.icon, online: true, lastSeenAt: iso(),
       rpcUrl: `ws://127.0.0.1:${port}/bruce/rpc`, tokenFile: path.join(dataDir, `secrets/runners/${BRUCE}.token`),
-    }],
+    }, ...MORE_RUNNERS],
     threads: rows,
     order: runnerOrder,
   };

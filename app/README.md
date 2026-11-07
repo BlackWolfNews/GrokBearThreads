@@ -473,6 +473,7 @@ Tools/dev-app.sh start --mock --fixtures .fixtures/threads/<id>   # a tb export
 Tools/dev-app.sh start --home <dev runner home>  # runner/scripts/dev-runner.sh
 Tools/dev-app.sh do '{"cmd":"open","id":"demo_upload"}' '{"cmd":"expand","row":"g:"}'
 Tools/dev-app.sh do '{"cmd":"collapse","highlightSection":"subagents"}'   # a Highlights heading; see HighlightFold
+Tools/dev-app.sh do '{"cmd":"point","settings":true,"x":200,"y":262,"toX":215,"toY":345,"holdMs":800}'   # real events in the Settings window; holdMs waits mid-drag for a `shot`
 Tools/dev-app.sh do '{"cmd":"click","tip":"Hide Links"}'   # presses a SwiftUI control by its tooltip, without moving the pointer
 Tools/dev-app.sh do '{"cmd":"error","text":"Thread not found"}'   # fills the error bar ({"cmd":"error"} clears it)
 Tools/dev-app.sh dump            # sidebar, rows (id, kind, height, open, text), panels, actions, composer, banner
@@ -649,3 +650,15 @@ streams) and text typed into the composer reaching the draft.
 - The model picker lists the CLI's own rows once the runner has asked each
   account (a few seconds after it starts); until then it offers opus, sonnet
   and haiku by name. The runner passes the row's id through to the CLI.
+
+### A real drag
+
+`point` hands events to a window kept behind everything, so it reaches AppKit
+controls, but a SwiftUI gesture ignores a window that isn't key (a `DragGesture`
+never fires, 7 Nov). For those, on Tinker Desk's desktop and never Mike's:
+`{"cmd":"settings","tab":"runners","front":true}` floats the Settings window
+on top and says its number and top left, and `Tools/realdrag.swift` (compile it
+with `swiftc`, run it through `desk`) posts a real drag. Click a blank part of
+the window with it first to make the window key. Look at the whole desktop
+once if nothing happens: other threads' windows and permission dialogs sit
+there, and a drag that misses lands in them.

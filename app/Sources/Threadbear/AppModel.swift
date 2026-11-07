@@ -380,6 +380,9 @@ final class AppModel {
     /// heartbeat in between doesn't snap the rows back. Nil with none to give.
     var runnerOrder: [String]?
     @ObservationIgnored var pendingRunnerOrder: [String]?
+    /// Screenshots only: holds the top runner mid-drag by this much, as a
+    /// script can't hold a real drag still to photograph it.
+    @ObservationIgnored var runnerDragPreview: CGSize?
     /// Each runner's machine figures by runner id (`runners.stats`), asked
     /// every 10 s while a runner's details are open in the Runners panel.
     var runnerStats: [String: RunnerMachineStats] = [:]

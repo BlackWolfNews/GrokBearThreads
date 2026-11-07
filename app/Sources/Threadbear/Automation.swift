@@ -187,6 +187,20 @@ enum Automation {
             try? await Task.sleep(for: .milliseconds(15))
         }
         guard let window = SettingsWindow.current, window.isVisible else { return "error the Settings window didn't open" }
+        // {"front": true}: in front and key, for real events on a desktop
+        // nobody's using (Tinker Desk). Says its number and where it is, top
+        // left, in screen points. A gesture of SwiftUI's own ignores a window
+        // that isn't key, so `point` can't reach those behind Mike's windows.
+        if c["front"] as? Bool == true {
+            // Floating: macOS can refuse a script's activate, and then a
+            // normal window stays under whatever's in front.
+            window.level = .floating
+            NSApp.activate()
+            window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
+            let top = (NSScreen.screens.first?.frame.height ?? 0) - window.frame.maxY
+            return "ok front \(window.windowNumber) \(Int(window.frame.minX)) \(Int(top))"
+        }
         window.tuckBehind()
         // Let the tab switch and the window's new height settle.
         try? await Task.sleep(for: .milliseconds(400))
@@ -329,9 +343,12 @@ enum Automation {
             // (points from the window's top left), with "toX" and "toY" drags there,
             // and "scrollX"/"scrollY" is a wheel, in lines. They go straight
             // to the window, so Mike's pointer stays where it is.
-            // {"review": id}: in that review's own window.
+            // {"review": id}: in that review's own window. {"settings": true}:
+            // in the Settings window. "holdMs" waits with the button still
+            // down at the end of a drag, for a `shot` of it mid-drag.
             let reviewWindow = (c["review"] as? String).flatMap { id in app.reviewWindows.values.first { $0.session.review.id == id }?.window }
-            guard let window = reviewWindow ?? window, let x = c["x"] as? Double, let y = c["y"] as? Double else { return "error point needs x and y" }
+            let settingsWindow = c["settings"] as? Bool == true ? SettingsWindow.current : nil
+            guard let window = reviewWindow ?? settingsWindow ?? window, let x = c["x"] as? Double, let y = c["y"] as? Double else { return "error point needs x and y" }
             let at = { (px: Double) in NSPoint(x: px, y: window.frame.height - y) }
             // Anywhere on the way from the start to (toX, toY), `t` from 0 to 1.
             let endY = (c["toY"] as? Double) ?? y
@@ -381,6 +398,7 @@ enum Automation {
                     try? await Task.sleep(for: .milliseconds(16))
                 }
             }
+            if let hold = c["holdMs"] as? Double { try? await Task.sleep(for: .milliseconds(hold)) }
             if let up = mouse(.leftMouseUp, along(1, end)) { window.sendEvent(up) }
             try? await Task.sleep(for: .milliseconds(350))
             return "ok"
