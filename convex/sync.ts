@@ -14,7 +14,7 @@ import { dropHead, seedHeads, syncHead, syncHeads } from './projectHeads';
 import { dropNotes, putNotes, syncNotes } from './projectNotes';
 import { cutBytes, docBytes, fitUsage, impossibleUsage, LOGIN_EMAIL, LOGIN_PROVIDER, loginKey, mayClaim, NAME_CHARS, mayFinish, mayTake, mayTouch, mayUseStorage, mayWrite, nameSkeleton, normalName, ownsCard, SCHEDULE_ID, utf8Bytes, type Caller, type UsageDoc } from './runnerAccess';
 import { dropWake, seedWakes, syncWake } from './wakes';
-import { pushFailing } from './pushHealth';
+import { pushFailing, pushOff } from './pushHealth';
 import { issueToken as makeToken, listTokens as allTokens, revokeToken as revokeOne, tokenInfo, tokenKind, MAX_DAYS } from './tokens';
 
 // The second pass on anything a runner sends (docs/convex-backend.md, "Secret
@@ -825,10 +825,12 @@ export const heartbeat = mutation({
   // tb status says, as it should only last while tb runner rotate-owner runs.
   // pushFailing (owner key only): pushes from this backend haven't got
   // through lately, and why (pushHealth.ts), for tb status and the app.
+  // pushOff: it can't send any (pushHealth.ts pushOff), for the same.
   returns: v.object({
     apiVersion: v.number(),
     firstSeen: v.optional(v.boolean()),
     ownerKeyRotating: v.optional(v.boolean()),
+    pushOff: v.optional(v.boolean()),
     pushFailing: v.optional(v.object({ failure: v.string(), since: v.number(), failed: v.number(), via: v.union(v.literal('apple'), v.literal('relay')) })),
   }),
   handler: async (ctx, { key, runner }) => {
@@ -864,7 +866,7 @@ export const heartbeat = mutation({
     // API 48: every project from before projectHeads, once.
     await seedHeads(ctx);
     const failing = caller.owner ? pushFailing(await ctx.db.query('pushHealth').first(), Date.now()) : null;
-    return { apiVersion: API_VERSION, ...(existing ? {} : { firstSeen: true }), ...(caller.owner && process.env.RUNNER_KEY_NEXT ? { ownerKeyRotating: true } : {}), ...(failing ? { pushFailing: failing } : {}) };
+    return { apiVersion: API_VERSION, ...(existing ? {} : { firstSeen: true }), ...(caller.owner && process.env.RUNNER_KEY_NEXT ? { ownerKeyRotating: true } : {}), ...(caller.owner && pushOff(process.env) ? { pushOff: true } : {}), ...(failing ? { pushFailing: failing } : {}) };
   },
 });
 

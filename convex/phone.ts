@@ -9,6 +9,7 @@ import type { Doc, Id } from './_generated/dataModel';
 import { messageButton, threadFields, views } from './schema';
 import { checkPhoneToken, hasLiveKey, readRunnerOrder, runnerStatsRows, saveRunnerOrder, watchRunnersFor } from './lib';
 import { API_VERSION } from './version';
+import { pushOff } from './pushHealth';
 import { imagesFrom, phoneImage, replyImagesFrom } from './share';
 import { deleteIfUnused, eventBodyAnswer, finishedArgs, readEventBody, runnerName } from './sync';
 import { HEADS_MARK } from './projectHeads';
@@ -59,12 +60,14 @@ function stripThread(doc: Doc<'threads'>): PhoneThread {
 
 // apiVersion is the backend's (version.ts), so the app can say "update
 // Threadbear on your Mac" when it's talking to a backend older than it needs.
+// pushOff: this backend can't send notifications (pushHealth.ts), so the
+// phone's Settings says so. An older phone ignores it.
 export const me = query({
   args: { token: v.string() },
-  returns: v.object({ name: v.string(), expiresAt: v.string(), apiVersion: v.number() }),
+  returns: v.object({ name: v.string(), expiresAt: v.string(), apiVersion: v.number(), pushOff: v.optional(v.boolean()) }),
   handler: async (ctx, { token }) => {
     const t = await checkPhoneToken(ctx, token);
-    return { name: t.name, expiresAt: new Date(t.expiresAt).toISOString(), apiVersion: API_VERSION };
+    return { name: t.name, expiresAt: new Date(t.expiresAt).toISOString(), apiVersion: API_VERSION, ...(pushOff(process.env) ? { pushOff: true } : {}) };
   },
 });
 

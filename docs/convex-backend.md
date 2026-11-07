@@ -488,7 +488,10 @@ function takes `token` (a phone token from `tokens:issue`) and throws
 
 Queries:
 
-- `phone:me({ token })` → `{ name, expiresAt }`.
+- `phone:me({ token })` → `{ name, expiresAt, apiVersion, pushOff? }`.
+  `pushOff` is true when this backend can't send notifications (a
+  self-hosted one, docs/self-hosting.md); the phone's Settings says so in
+  place of the Notify me picker.
 - `phone:runners({ token })` → `[{ runnerId, name, version, lastSeenAt,
   draining }]`. Offline is `lastSeenAt` older than 3 minutes (a runner
   that stopped for good has `lastSeenAt` of 1970).

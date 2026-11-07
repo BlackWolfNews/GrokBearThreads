@@ -112,7 +112,7 @@ export type Config = {
   // The Convex mirror (src/sync.ts): the project's URL, whether it's on,
   // the name the phone shows for this runner and its id (made once).
   // THREADBEAR_SYNC=off turns it off for tests and dev runners.
-  sync: { enabled: boolean; url?: string; name?: string; runnerId?: string; icon?: string; rpcUrl?: string; pastedPictures?: boolean; full?: boolean };
+  sync: { enabled: boolean; url?: string; site?: string; name?: string; runnerId?: string; icon?: string; rpcUrl?: string; pastedPictures?: boolean; full?: boolean };
   // The silent on-device secret check (src/secret-check.ts): off unless asked.
   secretCheck?: boolean;
   // Mike's Connectors gateway's base URL (connectors.ts), for the app's
@@ -169,7 +169,7 @@ export type RunnerJson = {
   // (docs/full-convex.md). Off unless you say so.
   // pastedPictures: false keeps pictures you paste off your Convex deployment
   // (docs/on-your-mac.md).
-  sync?: { enabled?: boolean; url?: string; name?: string; runnerId?: string; icon?: string; rpcUrl?: string; pastedPictures?: boolean; full?: boolean };
+  sync?: { enabled?: boolean; url?: string; site?: string; name?: string; runnerId?: string; icon?: string; rpcUrl?: string; pastedPictures?: boolean; full?: boolean };
   secretCheck?: { enabled?: boolean };
   // Days after a thread is archived that housekeeping clears its pictures
   // (housekeeping.ts). Absent: they're kept. Mike's runners set 30.
@@ -303,6 +303,11 @@ function syncConfig(raw: RunnerJson['sync'], env: NodeJS.ProcessEnv): Config['sy
   const url = nonEmpty(env.THREADBEAR_SYNC_URL) ?? nonEmpty(raw?.url);
   const out: Config['sync'] = { enabled: env.THREADBEAR_SYNC === 'off' ? false : raw?.enabled !== false };
   if (url) out.url = url;
+  // Where the website is, for a self-hosted backend, which serves it on a
+  // port of its own (docs/self-hosting.md). A cloud deployment leaves it
+  // out: its site is the .convex.site twin of url.
+  const site = nonEmpty(raw?.site);
+  if (site) out.site = site;
   const name = nonEmpty(raw?.name);
   if (name) out.name = name;
   const runnerId = nonEmpty(raw?.runnerId);

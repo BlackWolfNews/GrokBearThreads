@@ -479,6 +479,9 @@ final class AppModel {
     /// website's root, or why nothing can pair. Never a token.
     var devices: [Device] = []
     var devicesSite: String?
+    /// The backend can't send phone notifications (a self-hosted one), from
+    /// runner.status, so Phone & browser says so.
+    var pushOff = false
     var devicesReason: String?
     var devicesError: String?
     var devicesUnsupported = false

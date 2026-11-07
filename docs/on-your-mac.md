@@ -22,6 +22,19 @@ File references are where to look.
   If that login goes missing or expires, the Convex panel's Sign in to
   Convex button runs `convex login` again from the runner, which writes
   the same file; you approve it in your browser on auth.convex.dev.
+- **Or a self-hosted backend** (`setup --self-hosted`, docs/self-hosting.md;
+  Convex cloud is the one we recommend): no Convex login or deploy key.
+  Instead two Docker containers, `threadbear-convex` (Convex's open source
+  backend) and `threadbear-convex-dashboard`, from pinned
+  `ghcr.io/convex/*` images, with the data in the Docker volume
+  `threadbear-convex-data`. They listen on this Mac's loopback only
+  (ports 13210, 13211 and 16791), and `tailscale serve` puts them on your
+  tailnet as `https://<this Mac>.<tailnet>.ts.net` ports 3210 (the API),
+  3211 (the website) and 6791 (the dashboard), so nothing is reachable off
+  your tailnet. The backend's admin key is in
+  `secrets/convex-self-hosted.env`, and setup sets `PUSH_RELAY=off` on it,
+  as the push relay only works with Convex cloud. runner.json gets
+  `sync.site`, the website's address.
 - **Apps:** `~/Applications/Threadbear.app` and
   `~/Applications/Threadbear Runner.app`, both built and signed on your Mac.
 - **A LaunchAgent:** `~/Library/LaunchAgents/com.mikerosoft.threadbear.runner.plist`,

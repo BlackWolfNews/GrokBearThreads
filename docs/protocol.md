@@ -4738,6 +4738,14 @@ schedule on it, and mint phone tokens. Now there are two kinds of key, and
   days; `convex/pushHealth.ts`). The runner puts it in `runner.status`'s
   `sync.pushFailing`, `tb status` says what's wrong and whose key it is,
   and it sends one `runner.notice` at warning level per failing run.
+  It answers `pushOff: true` when the backend can't send pushes at all
+  (`PUSH_RELAY=off` and no Apple key of its own: a self-hosted backend,
+  docs/self-hosting.md); the runner puts it in `runner.status`'s
+  `sync.pushOff`, which `tb status` and the app's Settings › Phone &
+  browser say. `runner.status`'s `sync.site` is the website's address:
+  runner.json's `sync.site` (a self-hosted backend's), else the
+  `.convex.site` twin of `sync.url`. A client that gets no `site` (an
+  older runner) works it out from `url` as before.
   Both steps refuse, changing nothing, while another runner is still on
   the main key: one `sync:runnersList` has seen in the last 30 days with
   no live runner key (the main key can't act as a runner that has one, so

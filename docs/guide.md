@@ -1122,6 +1122,54 @@ page and on the shared page while you're signed in.
 The Mac app also draws a picture an agent writes into its reply with a path
 on your Mac (`![a chart](/path/to/chart.png)`), rather than showing a link.
 
+## Self-hosting your backend
+<!-- slug: self-hosting -->
+
+We recommend Convex cloud, which is what setup uses unless you ask for
+something else. Your threads go to a Convex project in your own account,
+which keeps working while your Mac is asleep, sends your phone
+notifications, and needs nothing else installed. The free plan is enough
+for one Mac's ordinary use.
+
+If you'd rather keep everything on your own machine, setup can run
+Convex's open source backend in Docker on your Mac instead, and reach it
+over Tailscale. It's the same backend and the same features, with these
+limits:
+
+- **No phone notifications.** The push relay only works with Convex
+  cloud. The iPhone app shows what needs you when you open it, and its
+  Settings say why nothing arrives.
+- **Your phone needs Tailscale on**, as the backend is only on your
+  tailnet.
+- **Nothing works while your Mac sleeps** or Docker is stopped: the phone
+  and the website can't reach the backend until it's back.
+- **Share links only open for people on your tailnet**, so "Anyone with
+  the link" means anyone on your tailnet.
+
+You need Docker Desktop (or OrbStack), set to start when you log in, and
+Tailscale, logged in, with MagicDNS and HTTPS certificates on for your
+tailnet. Then run setup with `--self-hosted`, or ask your agent to
+(INSTALL.md says how):
+
+```sh
+./threadbear setup --self-hosted --yes
+```
+
+It starts the backend and its dashboard in Docker, on this Mac only, and
+puts them on your tailnet with `tailscale serve`: your threads' API on port
+3210, your website on 3211 and the dashboard on 6791, all at
+`https://<your Mac>.<your tailnet>.ts.net`. Then it deploys Threadbear's
+backend and website there as it would to Convex cloud, and keeps them up
+to date the same way. Pair your phone and open the website from Settings ›
+Phone & browser as usual.
+
+The dashboard's sign-in asks for the admin key, which is in
+`secrets/convex-self-hosted.env` in Threadbear's data folder. Keep it to
+yourself: it can do anything to your backend. If the phone or the website
+can't reach it after a restart, run `./threadbear setup` again: it starts
+the backend, or makes it again on the same data. docs/self-hosting.md in the
+repo has how it's put together, backing up, upgrading and taking it out.
+
 ## Patches: your own buttons and panels
 <!-- slug: patches -->
 

@@ -131,7 +131,7 @@ final class AppModel {
         return Self.runnerKeys(for: pairing)
     }
     private static func runnerKeys(for pairing: Pairing) -> KeychainRunnerKeyStore {
-        KeychainRunnerKeyStore(scope: pairing.deploymentURL.host() ?? pairing.deploymentURL.absoluteString)
+        KeychainRunnerKeyStore(scope: Pairing.serverName(pairing.deploymentURL))
     }
     /// Threads whose runner is already pinned this session, so a list
     /// arriving doesn't go to the keychain for every row each time.
@@ -865,19 +865,19 @@ enum PairingStore {
 
     static func load() -> Pairing? {
         guard let raw = UserDefaults.standard.string(forKey: urlKey), let url = URL(string: raw),
-              let token = Keychain.read(service: service, account: url.host() ?? raw) else { return nil }
+              let token = Keychain.read(service: service, account: Pairing.serverName(url)) else { return nil }
         return Pairing(deploymentURL: url, token: token)
     }
 
     static func save(_ pairing: Pairing) {
-        let account = pairing.deploymentURL.host() ?? pairing.deploymentURL.absoluteString
+        let account = Pairing.serverName(pairing.deploymentURL)
         Keychain.write(pairing.token, service: service, account: account)
         UserDefaults.standard.set(pairing.deploymentURL.absoluteString, forKey: urlKey)
     }
 
     static func clear() {
         if let pairing = load() {
-            Keychain.delete(service: service, account: pairing.deploymentURL.host() ?? pairing.deploymentURL.absoluteString)
+            Keychain.delete(service: service, account: Pairing.serverName(pairing.deploymentURL))
         }
         UserDefaults.standard.removeObject(forKey: urlKey)
     }

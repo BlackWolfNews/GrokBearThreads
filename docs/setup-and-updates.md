@@ -75,7 +75,8 @@ Archive moved off Convex because of reads and writes, not storage).
 **Self-hosted as an option:** the same functions run on Convex's open source backend on
 your own machine, served over Tailscale. It's a setting in setup, not a fork. The phone
 then needs Tailscale on, and it can't reach a sleeping Mac unless the backend lives on an
-always-on machine.
+always-on machine. Built 7 Nov (docs/self-hosting.md): `setup --self-hosted`, with no
+phone notifications, as the push relay only reaches Convex cloud.
 
 ### 2.2 Setup: one command
 
@@ -265,7 +266,10 @@ it public is Mike's call, once he's happy for others to use it.
    and pins the key.
 6. The heavy bits over Tailscale for the phone and the website.
 7. Tinker Desk as a second runner on the same backend.
-8. Self-hosted backend as a setup option.
+8. Done 7 Nov: self-hosted backend as a setup option (`setup --self-hosted`,
+   docs/self-hosting.md). Docker on the same Mac, served with `tailscale serve`,
+   phone notifications off. Convex cloud stays the default and the one we
+   recommend everywhere.
 
 Steps 1 and 2 are useful to Mike straight away. 3 to 5 are what make it installable by
 other people. The landing page already says "Threadbear makes a Convex deployment in

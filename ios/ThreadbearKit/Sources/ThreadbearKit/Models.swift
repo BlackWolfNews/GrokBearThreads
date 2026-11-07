@@ -764,10 +764,14 @@ public struct PhoneIdentity: Codable, Sendable, Hashable {
     /// The backend's API version (convex/version.ts). Missing from backends
     /// deployed before there was one.
     public var apiVersion: Int?
-    public init(name: String, expiresAt: Date?, apiVersion: Int? = nil) {
+    /// The backend can't send notifications (a self-hosted one, which the
+    /// push relay doesn't reach: docs/self-hosting.md). Missing means it can.
+    public var pushOff: Bool?
+    public init(name: String, expiresAt: Date?, apiVersion: Int? = nil, pushOff: Bool? = nil) {
         self.name = name
         self._expiresAt = OptionalFlexibleDate(wrappedValue: expiresAt)
         self.apiVersion = apiVersion
+        self.pushOff = pushOff
     }
 }
 

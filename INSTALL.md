@@ -63,6 +63,24 @@ Then run it, with their answers:
 ./threadbear setup --yes --existing --project <name>
 ```
 
+**Only if they ask to self-host** (keep their threads off Convex cloud):
+say first that we recommend Convex cloud, and that self-hosting means no
+phone notifications, the phone needing Tailscale on, nothing working while
+this Mac sleeps, and share links only opening on their tailnet
+(docs/self-hosting.md). If they still want it, check `docker info` works
+(**Ask** them to install and start Docker Desktop or OrbStack if not) and
+that `tailscale status` shows this Mac logged in (**Ask** them to install
+and log in to Tailscale if not). Then, in place of the commands above:
+
+```sh
+./threadbear setup --self-hosted --dry-run --yes
+./threadbear setup --self-hosted --yes
+```
+
+No Convex login or team is needed. If it stops asking for HTTPS
+certificates or MagicDNS, **Ask** them to turn those on in the Tailscale
+admin console (DNS), then run it again.
+
 New threads start in `~/ThreadbearThreads`, which setup makes (not
 `~/Threadbear`: macOS ignores case, so that would be this repo's folder).
 They can change it in the app's Settings, and pick a folder for each

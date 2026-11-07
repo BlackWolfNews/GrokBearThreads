@@ -46,6 +46,7 @@ import { scrubEveryString } from './redaction.ts';
 import { withholdReason } from './withhold.ts';
 import { BodyCollector, prepareBody, type BodyDoc, type RawBody } from './full-sync.ts';
 import { cutSafely } from './safe-cut.ts';
+import { siteOf } from './convex-admin.ts';
 // A `call` for files.list answers with at most this many entries (the backend keeps it a day).
 const CALL_ENTRIES = 500;
 
@@ -101,6 +102,7 @@ const ALL: ('inbox' | 'snoozed' | 'archived')[] = ['inbox', 'snoozed', 'archived
 export type SyncConfig = {
   enabled: boolean;
   url?: string;
+  site?: string;
   name?: string;
   runnerId?: string;
   icon?: string;
@@ -294,6 +296,7 @@ export type SyncStatus = {
   state: 'off' | 'ok' | 'error';
   reason?: string; // why it's off
   url?: string;
+  site?: string; // the website: sync.site, else the .convex.site twin of url
   runnerId?: string;
   name?: string;
   threads?: number; // rows written since start
@@ -315,6 +318,9 @@ export type SyncStatus = {
   // The backend says RUNNER_KEY_NEXT is still set (the owner key only hears
   // it): a rotation (tb runner rotate-owner) waiting for --finish.
   ownerKeyRotating?: boolean;
+  // The backend can't send phone notifications at all (convex/pushHealth.ts
+  // pushOff): a self-hosted backend, where the push relay doesn't reach.
+  pushOff?: boolean;
   // Schedules a runner key couldn't put in the backend, so all of them stay
   // in this runner's schedules.json (schedules.ts heldLocal; the log says which).
   schedulesHeld?: number;
@@ -1193,6 +1199,7 @@ export class ConvexSync {
   private restartAsked = false;
   private picturesPausedUntil?: number;
   private ownerKeyRotating = false;
+  private pushOff = false;
   private pushFailing: PushFailing | undefined;
   private schedulesRefused = false;
   private scrubber: Scrubber;
@@ -1387,6 +1394,7 @@ export class ConvexSync {
     const s: SyncStatus = {
       state: this.lastError && this.retryAt !== undefined ? 'error' : 'ok',
       url: this.deps.config.url,
+      ...(this.site() ? { site: this.site() } : {}),
       runnerId: this.runnerId,
       name: this.name,
       threads: this.written,
@@ -1399,6 +1407,7 @@ export class ConvexSync {
     if (this.retryAt !== undefined) s.retryAt = new Date(this.retryAt).toISOString();
     if (this.backendApiVersion !== undefined) s.backend = { apiVersion: this.backendApiVersion, expected: BACKEND_API_VERSION };
     if (this.ownerKeyRotating) s.ownerKeyRotating = true;
+    if (this.pushOff) s.pushOff = true;
     if (this.pushFailing) s.pushFailing = this.pushFailing;
     if (this.keyRejected) {
       s.state = 'error';
@@ -1445,6 +1454,11 @@ export class ConvexSync {
   /** The deployment's URL (`sync.url`), while sync is on. */
   url(): string | undefined {
     return this.off ? undefined : this.deps.config.url;
+  }
+
+  /** The website's address, while sync is on (src/convex-admin.ts, siteOf). */
+  site(): string | undefined {
+    return this.off ? undefined : siteOf(this.deps.config.url, this.deps.config.site);
   }
 
   async issueToken(args: { kind: DeviceKind; name: string; days?: number }): Promise<{ id: string; token: string; expiresAt: string }> {
@@ -3086,6 +3100,7 @@ export class ConvexSync {
         if (this.sharesCheckDue()) this.scheduleFlush();
         this.keyRejected = false;
         this.ownerKeyRotating = (r as { ownerKeyRotating?: unknown } | null)?.ownerKeyRotating === true;
+        this.pushOff = (r as { pushOff?: unknown } | null)?.pushOff === true;
         this.notePushFailing(asPushFailing((r as { pushFailing?: unknown } | null)?.pushFailing));
         this.lookForReplyImages();
         if ((this.backendApiVersion ?? 0) >= SCHEDULES_API_VERSION && this.running) void this.deps.schedules?.attach(this.scheduleBackend());
