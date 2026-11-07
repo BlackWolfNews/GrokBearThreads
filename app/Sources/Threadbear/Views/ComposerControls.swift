@@ -9,6 +9,7 @@ import ThreadbearCore
 /// for a thread on another Mac.
 struct ComposerControls: View {
     @Environment(AppModel.self) private var app
+    @AppStorage(VoiceMode.enabledKey) private var voiceEnabled = true
     let thread: ThreadSummary?
     let running: Bool
     let canSend: Bool
@@ -169,9 +170,10 @@ struct ComposerControls: View {
                     NSHostingController(rootView: ContextPopover(threadId: thread.id).environment(app))
                 }
             }
-            // Voice is for a thread that exists: what he says is its message.
-            if let thread, !draftAway {
-                VoiceButton(threadId: thread.id, size: SendButton.size)
+            // Voice for the thread, or on a new thread's composer, where
+            // what's said first starts it (Settings > Voice can hide it).
+            if voiceEnabled, !draftAway {
+                VoiceButton(threadId: thread?.id ?? VoiceMode.newThread, size: SendButton.size)
                     .layoutPriority(1)
             }
             SendButton(running: running, canSend: canSend, sending: sending, stopping: thread.map { app.isBusy(BusyKey.stop($0.id)) } ?? false, onSend: onSend, onStop: { app.interrupt(thread?.id) })

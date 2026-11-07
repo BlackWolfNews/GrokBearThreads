@@ -9,6 +9,7 @@ struct VoiceSettings: View {
     @AppStorage(VoiceCatalog.speedKey) private var speed = 1.0
     @AppStorage(VoiceCatalog.languageKey) private var language = "english"
     @AppStorage(VoiceCatalog.microphoneKey) private var microphone = ""
+    @AppStorage(VoiceMode.enabledKey) private var enabled = true
     @State private var microphones: [VoiceAudio.Microphone] = []
     @State private var voice = VoiceMode.shared
 
@@ -17,6 +18,9 @@ struct VoiceSettings: View {
             SettingsSection("Voice",
                             about: "Press the waveform button beside Send to talk with a thread out loud. What you say goes to the thread as your message, even while it's working, and its replies are read out. Talk over it and it stops to listen. It's the same thread, with the same memory, tools and approvals. Speech is turned into text on this Mac by macOS, and replies are spoken by Kyutai's pocket-tts, which Threadbear downloads the first time you use Voice.",
                             ask: "change how Voice sounds, or check on it if it isn't working.") {
+                Toggle("Use Voice", isOn: $enabled)
+                    .tip("Show the waveform button beside Send to talk with threads out loud")
+                    .onChange(of: enabled) { _, on in if !on { VoiceMode.shared.stop() } }
                 Picker("Voice", selection: $voiceId) {
                     ForEach(VoiceCatalog.voices) { Text($0.name).tag($0.id) }
                 }

@@ -305,6 +305,29 @@ extension AppModel {
         post(threadId: threadId, text: text, images: [], answers: [], client: client)
     }
 
+    /// Starts a new thread with what Mike said in Voice on the new-thread
+    /// composer, with its folder, login and model as the composer has
+    /// them. `then` gets its id before it's selected (so Voice carries on
+    /// in it), or nil if it couldn't be made.
+    func startThreadSpoken(_ text: String, then: @escaping (String?) -> Void) {
+        guard let client, connection == .connected, !creatingThread else { then(nil); return }
+        let request = newThreadRequest(text: text, images: [])
+        creatingThread = true
+        Task {
+            defer { creatingThread = false }
+            do {
+                let thread = try await client.createThread(request)
+                newThreadCwd = nil
+                threads[thread.id] = thread
+                then(thread.id)
+                select(thread.id)
+            } catch {
+                then(nil)
+                show(error)
+            }
+        }
+    }
+
     /// Sends a message to a thread, shown dimmed at the end of the
     /// transcript until the runner shows it. `failed` puts back whatever
     /// the send took from the composer, if the runner doesn't take it.

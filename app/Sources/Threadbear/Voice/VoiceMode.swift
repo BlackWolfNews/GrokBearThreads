@@ -58,6 +58,19 @@ final class VoiceMode {
 
     func isOn(for threadId: String) -> Bool { isOn && self.threadId == threadId }
 
+    /// The thread id Voice uses for a new thread's composer: what he says
+    /// first starts the thread (AppModel.startThreadSpoken), and Voice
+    /// carries on in it. "new" is the new thread's draft key too.
+    static let newThread = "new"
+
+    /// Settings > Voice's switch. Off hides every waveform button.
+    static let enabledKey = "voiceEnabled"
+    static var enabled: Bool { UserDefaults.standard.object(forKey: enabledKey) as? Bool ?? true }
+
+    /// What he said while the new thread was being made, sent once it exists.
+    @ObservationIgnored private var waitingWords: [String] = []
+    @ObservationIgnored private var makingThread = false
+
     func toggle(threadId: String) {
         if isOn(for: threadId) { stop() } else { start(threadId: threadId) }
     }
@@ -122,6 +135,7 @@ final class VoiceMode {
         level = 0
         working = false
         pendingApproval = nil
+        waitingWords = []
         if let threadId { VoiceLog.write("off for \(threadId)") }
         threadId = nil
         VoiceServer.shared.stopSoon()
@@ -162,6 +176,25 @@ final class VoiceMode {
     }
 
     private func send(_ text: String, to threadId: String) {
+        // A new thread's composer: the first words start the thread.
+        if threadId == Self.newThread {
+            working = true
+            phase = .thinking
+            if makingThread { waitingWords.append(text); return }
+            makingThread = true
+            AppModel.shared.startThreadSpoken(text) { [weak self] id in
+                guard let self else { return }
+                self.makingThread = false
+                guard let id, self.threadId == Self.newThread else { return }
+                // Before it's selected, so selecting it doesn't end Voice.
+                self.threadId = id
+                VoiceLog.write("started \(id) by voice")
+                let rest = self.waitingWords
+                self.waitingWords = []
+                for words in rest { AppModel.shared.sendSpoken(threadId: id, text: words) }
+            }
+            return
+        }
         // A yes or a no on its own answers the card that's waiting.
         if let card = pendingApproval, let decision = SpokenAnswer.decision(text, options: card.options) {
             pendingApproval = nil

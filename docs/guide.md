@@ -1379,6 +1379,8 @@ volume, and press Play to hear it again.
 ### Talking with a thread
 
 Press the waveform button beside Send to talk with the thread out loud.
+It's on a new thread's composer too: there, what you say first starts the
+thread, and you carry on talking in it.
 It turns red while Voice is on. Say what you want as you would to a
 person; when you pause for about a second it goes to the thread as your
 message, and the agent's reply is read out. You can keep talking while it
@@ -1395,7 +1397,8 @@ voice. Code and tables aren't read out; it
 tells you they're on screen. Press the button again, or go to another
 thread, to end Voice.
 
-Settings (⌘,) > Voice picks who it sounds like (Emily, Mike and about
+Use Voice in Settings (⌘,) > Voice turns it off, which takes the
+waveform button away everywhere. The same tab picks who it sounds like (Emily, Mike and about
 twenty more), how fast it talks, the language, and the microphone. Play
 a Sample tries a voice. The first time you use Voice, Threadbear
 downloads its voice engine (Kyutai's pocket-tts) and a voice model of
