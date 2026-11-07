@@ -151,6 +151,51 @@ final class ClickFeedbackTests: XCTestCase {
         XCTAssertNil(app.threads["th1"]?.wakeWhen)
     }
 
+    // MARK: Hibernate
+
+    /// A row hibernated without being open has no flight, but the moon
+    /// stirs at once so the eye knows where it went.
+    func testHibernatingARowThatIsntOpenStirsTheMoon() async throws {
+        let (app, _) = try await connected()
+        XCTAssertEqual(app.hibernateLandings, 0)
+        app.snooze("th1", until: Date().addingTimeInterval(3600))
+        XCTAssertEqual(app.hibernateLandings, 1)
+        XCTAssertNotNil(app.threads["th1"]?.snoozedUntil, "and it's put away at once")
+        XCTAssertTrue(app.flyingToHibernate.isEmpty)
+        app.snoozeUntilRestart("th1")
+        XCTAssertEqual(app.hibernateLandings, 2)
+        app.hibernateWhen("th1", said: "at the weekend")
+        XCTAssertEqual(app.hibernateLandings, 3)
+    }
+
+    /// A starred thread stays in Starred however long it sleeps, so nothing
+    /// tells him it went to the moon.
+    func testAStarredThreadDoesntStirTheMoon() async throws {
+        let (app, _) = try await connected()
+        app.threads["th1"]?.starredAt = Date()
+        app.snooze("th1", until: Date().addingTimeInterval(3600))
+        XCTAssertEqual(app.hibernateLandings, 0)
+    }
+
+    /// The old row's marker, updated on its way out, doesn't take the slot
+    /// from the new one: it would empty when the old row goes, and the
+    /// flight would land a row short of its heading.
+    func testAMarkerOnItsWayOutDoesntTakeTheSlot() {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 200), styleMask: [], backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let old = NSView(), new = NSView()
+        window.contentView?.addSubview(old)
+        window.contentView?.addSubview(new)
+        ArchiveFlight.mark(old, as: .openRow, new: true)
+        ArchiveFlight.mark(new, as: .openRow, new: true)
+        ArchiveFlight.mark(old, as: .openRow, new: false)
+        XCTAssertTrue(ArchiveFlight.openRow === new)
+        new.removeFromSuperview()
+        ArchiveFlight.mark(old, as: .openRow, new: false)
+        XCTAssertTrue(ArchiveFlight.openRow === old, "an update fills a slot whose view has left the window")
+    }
+
     // MARK: Projects
 
     func testAProjectEditShowsAtOnceAndARefusalPutsItBack() async throws {

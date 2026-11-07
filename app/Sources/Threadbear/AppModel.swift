@@ -135,6 +135,10 @@ final class AppModel {
     var flyingToArchive: Set<String> = []
     /// How many of those have landed, for the heading's box to bounce.
     var archiveLandings = 0
+    /// The same for Hibernating: threads whose panel is still sinking into
+    /// its heading, and how many have landed for the moon to dip.
+    var flyingToHibernate: Set<String> = []
+    var hibernateLandings = 0
     /// The note at the top of the thread panel after Mike archives a thread
     /// here, with Undo; a click on it opens the thread (Mike asked 30 Oct).
     /// Not for one an agent or the phone archives. `ArchivedToast` takes it

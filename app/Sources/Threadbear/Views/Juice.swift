@@ -44,6 +44,14 @@ enum Juice {
     }
 }
 
+extension NSView {
+    /// A distance below where this view is, in its layer's translation:
+    /// which way that runs depends on whether its superview is flipped.
+    func downward(_ distance: CGFloat) -> CGFloat {
+        superview?.isFlipped == true ? distance : -distance
+    }
+}
+
 extension EnvironmentValues {
     /// Shared by a sidebar list's rows: the selected row's highlight is
     /// matched in it, so it slides from row to row, and a thread's rows

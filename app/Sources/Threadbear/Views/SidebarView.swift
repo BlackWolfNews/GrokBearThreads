@@ -62,11 +62,14 @@ private struct InboxList: View {
         // isn't counted or listed there until it lands (`ArchiveFlight`).
         let flying = app.flyingToArchive
         let archived = flying.isEmpty ? sections.archived : sections.archived.filter { !flying.contains($0.id) }
+        // And the same for one sinking into Hibernating.
+        let tucking = app.flyingToHibernate
+        let hibernating = tucking.isEmpty ? sections.hibernating : sections.hibernating.filter { !tucking.contains($0.id) }
         // The Archived section shows the most recent few, or every match
         // while searching.
         let archive = ArchiveRows.shown(archived, limit: archiveLimit, searching: searching, selection: app.selection)
         // Each section's rows as drawn.
-        let drawn: (InboxSection) -> [ThreadSummary] = { $0 == .archived ? archive.rows : sections[$0] }
+        let drawn: (InboxSection) -> [ThreadSummary] = { $0 == .archived ? archive.rows : $0 == .hibernating ? hibernating : sections[$0] }
         // A folded section's rows aren't drawn, so the arrow keys skip
         // them. A search draws every section's matches, folded or not.
         let open = InboxSection.allCases.filter { searching || !app.collapsedSections.contains($0) }
@@ -105,6 +108,11 @@ private struct InboxList: View {
                         if section == .archived {
                             ThreadSection(section: section, threads: archive.rows, total: archived.count, more: archive.more,
                                           searching: searching, showMore: { archiveLimit += ArchiveRows.step }, select: select)
+                        } else if section == .hibernating {
+                            // The heading comes up as the first thread sets
+                            // off for it, so there's a moon to land in.
+                            ThreadSection(section: section, threads: hibernating, searching: searching,
+                                          keepHeading: !tucking.isEmpty && !searching, select: select)
                         } else {
                             ThreadSection(section: section, threads: sections[section], searching: searching, select: select)
                         }
@@ -181,11 +189,13 @@ private struct ThreadSection: View {
     /// back as they were once the search is cleared.
     var searching = false
     var showMore: () -> Void = {}
+    /// Show the heading even with nothing under it yet.
+    var keepHeading = false
     let select: (String) -> Void
 
     var body: some View {
         let count = total ?? threads.count
-        if count > 0 || (section == .inbox && !searching) {
+        if count > 0 || keepHeading || (section == .inbox && !searching) {
             let collapsed = !searching && app.collapsedSections.contains(section)
             SectionHeading(title: section.title, icon: section.icon, fold: searching ? nil : .init(collapsed: collapsed, count: count) {
                 withAnimation(.snappy(duration: 0.2)) {
@@ -195,6 +205,7 @@ private struct ThreadSection: View {
                 if section == .inbox { InboxOrderMenu() }
             }
             .environment(\.archiveLandings, section == .archived ? app.archiveLandings : nil)
+            .environment(\.hibernateLandings, section == .hibernating ? app.hibernateLandings : nil)
             if !collapsed {
                 ForEach(threads.map { SectionRow(section: section.title, thread: $0) }) { row in
                     ThreadRowView(thread: row.thread, mode: RowMode(section, thread: row.thread, now: app.now), section: section) { select(row.thread.id) }
@@ -349,6 +360,7 @@ struct SectionHeading<Accessory: View>: View {
     @ViewBuilder var accessory: () -> Accessory
     @State private var hovering = false
     @Environment(\.archiveLandings) private var archiveLandings
+    @Environment(\.hibernateLandings) private var hibernateLandings
 
     typealias Fold = SectionFold
 
@@ -387,7 +399,17 @@ struct SectionHeading<Accessory: View>: View {
                     // thread's panel lands, bouncing as it does
                     // (`ArchiveFlight`).
                     .symbolEffect(.bounce, value: archiveLandings ?? 0)
-                    .background { if archiveLandings != nil { FlightMarker(kind: .archiveBox) } }
+                    // Hibernating's moon dips rather than hops, its Zs
+                    // stirring after it, and lifts a shade as it takes the
+                    // thread in.
+                    .symbolEffect(.bounce.down.byLayer, value: hibernateLandings ?? 0)
+                    .phaseAnimator([0, 0.16], trigger: hibernateLandings ?? 0) { moon, lit in
+                        moon.brightness(lit)
+                    } animation: { _ in .easeOut(duration: 0.32) }
+                    .background {
+                        if archiveLandings != nil { FlightMarker(kind: .archiveBox) }
+                        if hibernateLandings != nil { FlightMarker(kind: .hibernateBox) }
+                    }
                     .frame(width: zoomed(14))
             }
             Text(title)

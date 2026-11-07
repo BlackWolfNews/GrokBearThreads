@@ -23,22 +23,50 @@ import ThreadbearCore
 /// list that hasn't drawn it) the picture falls off the bottom of the list
 /// instead; with no list (another sidebar view) or under Reduce Motion it
 /// just fades.
+///
+/// Hibernating the open thread is this flight's sleepier sibling (Mike
+/// picked it from mockups, 7 Nov): `.hibernate` sinks into the Hibernating
+/// heading's moon, slower and softer, level, dimming like the lights going
+/// down, and the next thread comes in a little later and slower too.
 @MainActor
 enum ArchiveFlight {
-    /// The Archived heading's box, the inbox list and the open thread's
-    /// row, while they're drawn (`FlightMarker`).
+    enum Destination {
+        case archive, hibernate
+
+        /// Where the card aims first. With no Hibernating heading yet (this
+        /// is the first thread in it), its moon will turn up where Archived's
+        /// box is now, pushing that down, so it aims there.
+        @MainActor fileprivate var boxes: [NSView?] {
+            switch self {
+            case .archive: return [archiveBox]
+            case .hibernate: return [hibernateBox, archiveBox]
+            }
+        }
+
+        var duration: Double { self == .archive ? 0.44 : 0.52 }
+        fileprivate var style: ArchiveFlightPath.Style { self == .archive ? .drop : .tuck }
+        fileprivate var swing: Double { self == .archive ? 40 : 16 }
+        fileprivate var nextThreadDelay: Double { self == .archive ? 0.2 : 0.26 }
+        fileprivate var nextThreadFade: Double { self == .archive ? 0.28 : 0.36 }
+        /// How far the next thread rises as it fades in. The drop is quick
+        /// enough to carry the change alone.
+        fileprivate var nextThreadRise: Double { self == .archive ? 0 : 8 }
+    }
+
+    /// The Archived heading's box, Hibernating's moon, the inbox list and
+    /// the open thread's row, while they're drawn (`FlightMarker`).
     fileprivate(set) static weak var archiveBox: NSView?
+    fileprivate(set) static weak var hibernateBox: NSView?
     fileprivate(set) static weak var inboxList: NSView?
     fileprivate(set) static weak var openRow: NSView?
 
-    static let duration: Double = 0.44
     /// How long the last flight's picture took, for the perf run.
     private(set) static var lastPictureMs = 0.0
 
     /// Starts a flight from `view` as it looks now, and fades `view` back
     /// in for the thread that replaces it. Calls `landed` at the end.
     /// False, with nothing started, when there's nothing to picture.
-    static func launch(from view: NSView, landed: @escaping @MainActor () -> Void) -> Bool {
+    static func launch(from view: NSView, to destination: Destination = .archive, landed: @escaping @MainActor () -> Void) -> Bool {
         let pictureStart = CACurrentMediaTime()
         guard let window = view.window, !view.isHiddenOrHasHiddenAncestor, view.bounds.width > 1, view.bounds.height > 1,
               let picture = picture(of: view) else { return false }
@@ -65,10 +93,22 @@ enum ArchiveFlight {
                 landed()
             }
         }
-        let target = Juice.reduceMotion ? nil : target(in: window)
+        let target = Juice.reduceMotion ? nil : target(in: window, to: destination)
         if let target {
-            let path = ArchiveFlightPath(start: card.position, end: target.point, swing: zoomed(40), onHeading: target.onHeading)
-            card.add(flight(along: path), forKey: "flight")
+            let path = ArchiveFlightPath(start: card.position, end: target.point, swing: zoomed(destination.swing), onHeading: target.onHeading, style: destination.style)
+            card.add(flight(along: path, duration: destination.duration), forKey: "flight")
+            // Dark rather than just see-through: the sidebar's heading shows
+            // through a faded card, and only black reads as the lights
+            // going down. Its own layer, as a brightness filter would have
+            // the card redrawn through Core Image on every frame.
+            if destination.style == .tuck {
+                let dim = CALayer()
+                dim.frame = card.bounds
+                dim.backgroundColor = NSColor.black.cgColor
+                dim.opacity = 0
+                card.addSublayer(dim)
+                dim.add(dimming(along: path, duration: destination.duration), forKey: "flight")
+            }
         } else {
             card.add(fade(), forKey: "flight")
         }
@@ -78,11 +118,22 @@ enum ArchiveFlight {
         // instead, it brought the old transcript back into view behind the
         // card while the main thread was busy opening the next one.
         view.alphaValue = 0
-        DispatchQueue.main.asyncAfter(deadline: .now() + (Juice.reduceMotion ? 0.05 : 0.2)) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + (Juice.reduceMotion ? 0.05 : destination.nextThreadDelay)) {
+            let fade = Juice.reduceMotion ? 0.15 : destination.nextThreadFade
             NSAnimationContext.runAnimationGroup { context in
-                context.duration = Juice.reduceMotion ? 0.15 : 0.28
+                context.duration = fade
                 context.timingFunction = CAMediaTimingFunction(name: .easeOut)
                 view.animator().alphaValue = 1
+            }
+            if !Juice.reduceMotion, destination.nextThreadRise > 0, let layer = view.layer {
+                // Additive, so it leaves the layer's own geometry to AppKit.
+                let rise = CABasicAnimation(keyPath: "transform.translation.y")
+                rise.isAdditive = true
+                rise.fromValue = view.downward(zoomed(destination.nextThreadRise))
+                rise.toValue = 0
+                rise.duration = fade
+                rise.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                layer.add(rise, forKey: "nextThreadRise")
             }
         }
         CATransaction.commit()
@@ -95,13 +146,10 @@ enum ArchiveFlight {
 
     /// The whole flight as keyframes, sampled from the path often enough
     /// that straight lines between them read as the curve.
-    private static func flight(along path: ArchiveFlightPath) -> CAAnimationGroup {
-        let samples = 32
+    private static func flight(along path: ArchiveFlightPath, duration: Double) -> CAAnimationGroup {
         var times: [NSNumber] = [], positions: [NSValue] = [], transforms: [NSValue] = []
         var radii: [NSNumber] = [], opacities: [NSNumber] = []
-        for i in 0...samples {
-            let t = Double(i) / Double(samples)
-            let frame = path.frame(at: ArchiveFlightPath.progress(atTime: t))
+        for (t, frame) in sampled(path) {
             times.append(NSNumber(value: t))
             positions.append(NSValue(point: frame.position))
             transforms.append(NSValue(caTransform3D: CATransform3DRotate(CATransform3DMakeScale(frame.scale, frame.scale, 1), frame.tilt, 0, 0, 1)))
@@ -120,6 +168,25 @@ enum ArchiveFlight {
         group.duration = duration
         finish(group)
         return group
+    }
+
+    /// The dark over a tucked-in card, in step with `flight`.
+    private static func dimming(along path: ArchiveFlightPath, duration: Double) -> CAAnimation {
+        let samples = sampled(path)
+        let animation = CAKeyframeAnimation(keyPath: "opacity")
+        animation.values = samples.map { NSNumber(value: $0.frame.dimming) }
+        animation.keyTimes = samples.map { NSNumber(value: $0.time) }
+        animation.duration = duration
+        finish(animation)
+        return animation
+    }
+
+    private static func sampled(_ path: ArchiveFlightPath) -> [(time: Double, frame: ArchiveFlightPath.Frame)] {
+        let samples = 32
+        return (0...samples).map { i in
+            let t = Double(i) / Double(samples)
+            return (t, path.frame(at: ArchiveFlightPath.progress(atTime: t, style: path.style)))
+        }
     }
 
     /// Nowhere to fly to, or Reduce Motion: a quick fade where it is.
@@ -149,8 +216,8 @@ enum ArchiveFlight {
 
     /// Where the card is headed, in window coordinates, and whether that's
     /// the heading itself or just the bottom of the list.
-    fileprivate static func target(in window: NSWindow) -> (point: CGPoint, onHeading: Bool)? {
-        if let box = archiveBox, box.window === window, !box.visibleRect.isEmpty {
+    fileprivate static func target(in window: NSWindow, to destination: Destination) -> (point: CGPoint, onHeading: Bool)? {
+        if let box = destination.boxes.lazy.compactMap({ $0 }).first(where: { $0.window === window && !$0.visibleRect.isEmpty }) {
             let frame = box.convert(box.bounds, to: nil)
             var point = CGPoint(x: frame.midX, y: frame.midY)
             // The archived thread's row closes up above the heading as the
@@ -227,24 +294,32 @@ private final class Overlay {
 /// Marks where an archive flight can land: an invisible view whose frame
 /// `ArchiveFlight` reads when a flight starts.
 struct FlightMarker: NSViewRepresentable {
-    enum Kind { case archiveBox, inboxList, openRow }
+    enum Kind { case archiveBox, hibernateBox, inboxList, openRow }
     let kind: Kind
 
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
-        register(view)
+        ArchiveFlight.mark(view, as: kind, new: true)
         return view
     }
 
     func updateNSView(_ view: NSView, context: Context) {
-        register(view)
+        ArchiveFlight.mark(view, as: kind, new: false)
     }
+}
 
-    private func register(_ view: NSView) {
+extension ArchiveFlight {
+    /// A marker going away is still updated while its row animates the
+    /// change, after the next row's has registered. If that took the slot
+    /// back, it emptied when the old one went, so the flight stopped allowing
+    /// for the row closing up above the heading, and landed a row short. So
+    /// an update only fills an empty slot; a new marker always takes it.
+    static func mark(_ view: NSView, as kind: FlightMarker.Kind, new: Bool) {
         switch kind {
-        case .archiveBox: ArchiveFlight.archiveBox = view
-        case .inboxList: ArchiveFlight.inboxList = view
-        case .openRow: ArchiveFlight.openRow = view
+        case .archiveBox: if new || archiveBox?.window == nil { archiveBox = view }
+        case .hibernateBox: if new || hibernateBox?.window == nil { hibernateBox = view }
+        case .inboxList: if new || inboxList?.window == nil { inboxList = view }
+        case .openRow: if new || openRow?.window == nil { openRow = view }
         }
     }
 }
@@ -253,4 +328,7 @@ extension EnvironmentValues {
     /// Set on the Archived heading only: how many flights have landed in
     /// it, so its box bounces at each, and where the flights aim.
     @Entry var archiveLandings: Int? = nil
+    /// The same for the Hibernating heading's moon, which also stirs when a
+    /// row that wasn't open goes to sleep.
+    @Entry var hibernateLandings: Int? = nil
 }

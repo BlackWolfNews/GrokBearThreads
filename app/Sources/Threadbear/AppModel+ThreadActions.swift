@@ -699,6 +699,27 @@ extension AppModel {
         if started { flyingToArchive.insert(threadId) }
     }
 
+    /// The open thread's panel sinks into the Hibernating heading's moon
+    /// while the next thread fades in under it (`ArchiveFlight`). Call it
+    /// before the thread changes and the next one opens, as it pictures the
+    /// transcript as it is. A row hibernated without being open just leaves,
+    /// but the moon still stirs, so the eye knows where it went. A starred
+    /// thread stays in Starred however long it sleeps, so it has nowhere to
+    /// fly to: the panel changes over as it always did.
+    private func tuckIn(_ threadId: String) {
+        guard let thread = threads[threadId], !thread.isStarred, !thread.isArchived else { return }
+        let showing = selection == threadId && transcript.session?.threadId == threadId && transcript.session?.subagentId == nil
+        let started = showing && ArchiveFlight.launch(from: transcript.scrollView, to: .hibernate) { [weak self] in
+            self?.flyingToHibernate.remove(threadId)
+            self?.moonStirs()
+        }
+        if started { flyingToHibernate.insert(threadId) } else { moonStirs() }
+    }
+
+    private func moonStirs() {
+        if !Juice.reduceMotion { hibernateLandings &+= 1 }
+    }
+
     /// As long as a swiped row takes to leave (`RowSwipeController`).
     static var slideTime: Duration { .milliseconds(Juice.reduceMotion ? 100 : 160) }
 
@@ -727,6 +748,7 @@ extension AppModel {
     func snooze(_ threadId: String? = nil, until date: Date) {
         guard let threadId = threadId ?? selection else { return }
         let next = neighbour(of: threadId)
+        tuckIn(threadId)
         update(threadId, ThreadUpdate(snoozedUntil: .some(date)))
         if selection == threadId { select(next) }
     }
@@ -740,6 +762,7 @@ extension AppModel {
         let next = neighbour(of: threadId)
         let before = threads[threadId]
         let guess = before?.hibernating(said: said)
+        tuckIn(threadId)
         if let guess { threads[threadId] = guess }
         if selection == threadId { select(next) }
         Task {
@@ -759,6 +782,7 @@ extension AppModel {
     func snoozeUntilRestart(_ threadId: String? = nil) {
         guard let threadId = threadId ?? selection else { return }
         let next = neighbour(of: threadId)
+        tuckIn(threadId)
         update(threadId, ThreadUpdate(snoozeUntilRestart: true))
         if selection == threadId { select(next) }
     }
