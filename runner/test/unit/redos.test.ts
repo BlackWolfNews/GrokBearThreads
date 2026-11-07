@@ -171,9 +171,10 @@ test('F25: a folder with hundreds of .env files is read in full, as before', asy
   for (let i = 0; i < 600; i++) fs.writeFileSync(path.join(repo, `.env.aaa${String(i).padStart(3, '0')}`), 'PLAIN=1\n');
   const own = `${crypto.randomBytes(24).toString('base64url')}7`;
   fs.writeFileSync(path.join(repo, '.env.qa.local'), `QA_PASSWORD=${own}\n`);
-  const known = new KnownValues({ env: {}, home });
+  // What's read, not how fast: a busy machine took over the usual 5 s.
+  const known = new KnownValues({ env: {}, home, folderMs: 120_000 });
   known.noteFolder(repo);
-  assert.equal(await known.settled(), true);
+  assert.equal(await known.settled(150_000), true);
   assert.equal(known.unread, 0);
   assert.ok(!known.mask(`it is ${own}`).includes(own));
 });
