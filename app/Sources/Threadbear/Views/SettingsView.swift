@@ -4,9 +4,9 @@ import ThreadbearCore
 
 /// The Settings window (⌘,): the runner's settings, in the grouped form
 /// every Mac app's settings use. All of it lives in the runner, and this
-/// only shows it and sends changes, apart from the appearance and the
-/// activity log's switch, which are this Mac's own (AppAppearance,
-/// ActivityRecorder).
+/// only shows it and sends changes, apart from the appearance, the ding
+/// and the activity log's switch, which are this Mac's own (AppAppearance,
+/// DingPlayer, ActivityRecorder).
 struct SettingsView: View {
     @Environment(AppModel.self) private var app
 
@@ -37,7 +37,7 @@ struct SettingsView: View {
     }
 }
 
-/// What both tabs show until there are settings to show.
+/// What the runner's settings tabs show until there are settings to show.
 private struct SettingsGate<Content: View>: View {
     @Environment(AppModel.self) private var app
     @ViewBuilder var content: (RunnerSettings) -> Content
@@ -47,19 +47,21 @@ private struct SettingsGate<Content: View>: View {
             content(settings)
         } else {
             Form {
-                Text(message)
+                Text(settingsWaiting(app))
                     .foregroundStyle(.secondary)
             }
             .formStyle(.grouped)
             .frame(height: 140)
         }
     }
+}
 
-    private var message: String {
-        if app.settingsUnsupported { return "This runner is too old for settings. It gets them when it next updates." }
-        if app.connection != .connected { return "Not connected to the runner." }
-        return "Loading…"
-    }
+/// Why there are no runner settings to show yet.
+@MainActor
+private func settingsWaiting(_ app: AppModel) -> String {
+    if app.settingsUnsupported { return "This runner is too old for settings. It gets them when it next updates." }
+    if app.connection != .connected { return "Not connected to the runner." }
+    return "Loading…"
 }
 
 /// The last change that didn't take, under the form it came from.
@@ -87,39 +89,64 @@ private struct GeneralSettings: View {
     @AppStorage(CompletionSound.volumeKey) private var dingVolume = CompletionSound.defaultVolume
 
     var body: some View {
+        if app.runnerSettings == nil {
+            // Appearance and the ding are this Mac's own, so they're here
+            // while the runner's away too; the rest waits for it.
+            Form {
+                thisMac
+                Section {
+                    Text(settingsWaiting(app))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .formStyle(.grouped)
+            .fixedSize(horizontal: false, vertical: true)
+            .scrollIndicators(.never)
+            .scrollDisabled(true)
+        } else {
+            runner
+        }
+    }
+
+    /// The settings kept on this Mac (UserDefaults), not in the runner.
+    @ViewBuilder private var thisMac: some View {
+        SettingsSection("Appearance",
+                        about: "Light or dark for Threadbear only. Same as the Mac follows System Settings > Appearance.",
+                        ask: "change it for you.") {
+            Picker("Appearance", selection: $appearance) {
+                ForEach(AppAppearance.allCases) { Text($0.title).tag($0) }
+            }
+            .tip("Light or dark for Threadbear, whatever the Mac is set to")
+            .onChange(of: appearance) { _, new in new.apply() }
+        }
+
+        SettingsSection("Notifications",
+                        about: "A soft ding when a thread finishes working: its reply is done, it's waiting for your answer, or it hit an error. It plays wherever you are, even in another app, and stays quiet for a thread you stopped yourself. Notifications themselves are in System Settings > Notifications.",
+                        ask: "change when the ding plays.") {
+            Toggle("Play a sound when a thread finishes", isOn: $dingOn)
+                .tip("A soft ding when a thread is done and ready for you")
+                .onChange(of: dingOn) { _, on in if on { DingPlayer.play() } }
+            Picker("Sound", selection: $ding) {
+                ForEach(CompletionSound.Ding.allCases) { Text($0.title).tag($0.rawValue) }
+            }
+            .tip("Which ding plays")
+            .onChange(of: ding) { _, new in DingPlayer.play(CompletionSound.ding(new)) }
+            LabeledContent("Volume") {
+                HStack(spacing: 8) {
+                    Slider(value: $dingVolume, in: 0.1...1) { editing in if !editing { DingPlayer.play() } }
+                        .frame(maxWidth: 180)
+                        .tip("How loud the ding is")
+                    Button("Play") { DingPlayer.play() }
+                        .tip("Hear the ding")
+                }
+            }
+        }
+    }
+
+    private var runner: some View {
         SettingsGate { settings in
             Form {
-                SettingsSection("Appearance",
-                                about: "Light or dark for Threadbear only. Same as the Mac follows System Settings > Appearance.",
-                                ask: "change it for you.") {
-                    Picker("Appearance", selection: $appearance) {
-                        ForEach(AppAppearance.allCases) { Text($0.title).tag($0) }
-                    }
-                    .tip("Light or dark for Threadbear, whatever the Mac is set to")
-                    .onChange(of: appearance) { _, new in new.apply() }
-                }
-
-                SettingsSection("Notifications",
-                                about: "A soft ding when a thread finishes working: its reply is done, it's waiting for your answer, or it hit an error. It plays wherever you are, even in another app, and stays quiet for a thread you stopped yourself. Notifications themselves are in System Settings > Notifications.",
-                                ask: "change when the ding plays.") {
-                    Toggle("Play a sound when a thread finishes", isOn: $dingOn)
-                        .tip("A soft ding when a thread is done and ready for you")
-                        .onChange(of: dingOn) { _, on in if on { DingPlayer.play() } }
-                    Picker("Sound", selection: $ding) {
-                        ForEach(CompletionSound.Ding.allCases) { Text($0.title).tag($0.rawValue) }
-                    }
-                    .tip("Which ding plays")
-                    .onChange(of: ding) { _, new in DingPlayer.play(CompletionSound.ding(new)) }
-                    LabeledContent("Volume") {
-                        HStack(spacing: 8) {
-                            Slider(value: $dingVolume, in: 0.1...1) { editing in if !editing { DingPlayer.play() } }
-                                .frame(maxWidth: 180)
-                                .tip("How loud the ding is")
-                            Button("Play") { DingPlayer.play() }
-                                .tip("Hear the ding")
-                        }
-                    }
-                }
+                thisMac
 
                 SettingsSection("New threads",
                                 about: "Where a new thread starts when you don't pick a folder.",
