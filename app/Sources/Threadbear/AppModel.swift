@@ -135,6 +135,11 @@ final class AppModel {
     var flyingToArchive: Set<String> = []
     /// How many of those have landed, for the heading's box to bounce.
     var archiveLandings = 0
+    /// Archiving the last thread there was, from its own pane: the bear's
+    /// due in the pane once the archived page has landed, then it's there
+    /// until he types or opens a thread (`PaneBear`).
+    var inboxZeroBear: InboxZeroBear?
+    enum InboxZeroBear { case due, shown }
     /// The same for Hibernating: threads whose panel is still sinking into
     /// its heading, and how many have landed for the moon to dip.
     var flyingToHibernate: Set<String> = []

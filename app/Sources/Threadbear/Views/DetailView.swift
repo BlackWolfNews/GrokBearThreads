@@ -667,13 +667,29 @@ struct ComposerPlacement: Layout {
 }
 
 private struct NewThreadHeading: View {
+    @Environment(AppModel.self) private var app
+
     var body: some View {
+        let typing = !(app.drafts["new"]?.text.isEmpty ?? true)
         Text("What should we work on?")
             .font(.system(size: zoomed(24), weight: .semibold))
             .foregroundStyle(.primary)
             .multilineTextAlignment(.center)
             .padding(.horizontal, zoomed(24))
             .frame(maxWidth: .infinity)
+            // Over the heading rather than in the layout, so nothing moves
+            // to make room for it.
+            .overlay(alignment: .top) {
+                if app.inboxZeroBear == .shown, !InboxZero.isBedtime(BearGeometry.date()) {
+                    PaneBear()
+                        .offset(y: -(PaneBear.side + zoomed(12)))
+                        .transition(.opacity)
+                }
+            }
+            .onChange(of: typing) { _, typing in
+                if typing { withAnimation(.easeOut(duration: 0.15)) { app.inboxZeroBear = nil } }
+            }
+            .onDisappear { app.inboxZeroBear = nil }
     }
 }
 

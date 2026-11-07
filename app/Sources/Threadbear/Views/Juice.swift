@@ -159,6 +159,7 @@ extension View {
 /// place, over the usual note. A small reward for clearing everything. After
 /// bedtime it's asleep and says so, rather than waving at you at midnight.
 struct InboxZero: View {
+    @Environment(AppModel.self) private var app
     @State private var shown = false
     @State private var waves = 0
 
@@ -185,7 +186,9 @@ struct InboxZero: View {
         .offset(y: shown || Juice.reduceMotion ? 0 : zoomed(8))
         .onAppear {
             withAnimation(Juice.reduceMotion ? .easeOut(duration: 0.2) : .snappy(duration: 0.4).delay(0.1)) { shown = true }
-            if !Juice.reduceMotion { waves += 1 }
+            // The thread pane's bear does the waving when he's just cleared
+            // the inbox there (`PaneBear`): one wave on screen, not two.
+            if !Juice.reduceMotion, app.inboxZeroBear == nil { waves += 1 }
         }
     }
 
@@ -204,18 +207,54 @@ struct InboxZero: View {
             if hat { swingingPom(side: side) }
         }
             .foregroundStyle(.secondary)
-            // A couple of quick tilts from its feet, like a wave.
-            .keyframeAnimator(initialValue: 0.0, trigger: waves) { bear, angle in
-                bear.rotationEffect(.degrees(angle), anchor: .bottom)
-            } keyframes: { _ in
-                KeyframeTrack {
-                    CubicKeyframe(0, duration: 0.25)
-                    CubicKeyframe(-9, duration: 0.14)
-                    CubicKeyframe(7, duration: 0.16)
-                    CubicKeyframe(-5, duration: 0.14)
-                    CubicKeyframe(0, duration: 0.2)
-                }
+            .tiltWave(waves)
+            .accessibilityHidden(true)
+    }
+}
+
+extension View {
+    /// A couple of quick tilts from its feet, like a wave, each time
+    /// `trigger` changes, after `hold` seconds standing still.
+    func tiltWave(_ trigger: Int, hold: Double = 0.25) -> some View {
+        keyframeAnimator(initialValue: 0.0, trigger: trigger) { bear, angle in
+            bear.rotationEffect(.degrees(angle), anchor: .bottom)
+        } keyframes: { _ in
+            KeyframeTrack {
+                CubicKeyframe(0, duration: hold)
+                CubicKeyframe(-9, duration: 0.14)
+                CubicKeyframe(7, duration: 0.16)
+                CubicKeyframe(-5, duration: 0.14)
+                CubicKeyframe(0, duration: 0.2)
             }
+        }
+    }
+}
+
+/// Inbox zero in the thread pane: archiving the last thread there leaves
+/// the pane on the new thread page, and once the archived page has landed
+/// the bear rises above "What should we work on?" and waves once (Mike
+/// picked it from a mockup, 7 Nov). No words: the heading stays as it is,
+/// and the bear is the reward. It goes when he starts typing or opens a
+/// thread. Not at bedtime, when the sidebar's bear is asleep.
+struct PaneBear: View {
+    @State private var shown = false
+    @State private var waves = 0
+
+    static var side: CGFloat { zoomed(44) }
+
+    var body: some View {
+        Image(nsImage: Bear.image(.wave, side: Self.side))
+            .renderingMode(.template)
+            .foregroundStyle(.secondary)
+            // A beat after the archive box's bounce, which it follows.
+            .tiltWave(waves, hold: 0.35)
+            .opacity(shown ? 1 : 0)
+            .offset(y: shown || Juice.reduceMotion ? 0 : zoomed(10))
+            .onAppear {
+                withAnimation(Juice.reduceMotion ? .easeOut(duration: 0.2) : .snappy(duration: 0.35).delay(0.1)) { shown = true }
+                if !Juice.reduceMotion { waves += 1 }
+            }
+            .allowsHitTesting(false)
             .accessibilityHidden(true)
     }
 }

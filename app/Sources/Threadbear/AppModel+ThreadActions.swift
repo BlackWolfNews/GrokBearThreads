@@ -631,7 +631,13 @@ extension AppModel {
             milestoneNote = nil
         }
         if selection == threadId {
+            // The last thread left: the inbox is clear, and the pane goes
+            // to the new thread page.
+            let sections = sections
+            let clears = next == nil && ![sections.inbox, sections.running, sections.needsYou].joined().contains { $0.id != threadId }
+            if clears { inboxZeroBear = .due }
             flyToArchive(threadId)
+            if clears, !flyingToArchive.contains(threadId) { inboxZeroBear = .shown }
             select(next)
         }
         if slid { return update(threadId, ThreadUpdate(archived: true)) }
@@ -695,6 +701,7 @@ extension AppModel {
         let started = ArchiveFlight.launch(from: transcript.scrollView) { [weak self] in
             self?.flyingToArchive.remove(threadId)
             self?.archiveLandings &+= 1
+            if self?.inboxZeroBear == .due { self?.inboxZeroBear = .shown }
         }
         if started { flyingToArchive.insert(threadId) }
     }

@@ -196,6 +196,30 @@ final class ClickFeedbackTests: XCTestCase {
         XCTAssertTrue(ArchiveFlight.openRow === old, "an update fills a slot whose view has left the window")
     }
 
+    // MARK: Inbox zero in the pane
+
+    /// Archiving the last thread from its own pane brings the bear to the
+    /// new thread page (straight away here, as there's no window for the
+    /// page to fly in).
+    func testArchivingTheLastThreadFromItsPaneBringsTheBear() async throws {
+        let (app, _) = try await connected()
+        app.selection = "th1"
+        app.archive("th1")
+        XCTAssertNil(app.selection)
+        XCTAssertEqual(app.inboxZeroBear, .shown)
+    }
+
+    func testArchivingWithOthersLeftOrFromTheSidebarDoesnt() async throws {
+        let (app, _) = try await connected()
+        app.threads["th2"] = ThreadSummary(id: "th2", title: "Another")
+        app.selection = "th1"
+        app.archive("th1")
+        XCTAssertNil(app.inboxZeroBear, "th2 is still in the inbox")
+        app.selection = nil
+        app.archive("th2")
+        XCTAssertNil(app.inboxZeroBear, "archived from its row, with no pane on it")
+    }
+
     // MARK: The card settling in
 
     /// Rises and fades on its layer, so it runs whatever the main thread's
