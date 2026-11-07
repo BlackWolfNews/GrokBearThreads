@@ -4,7 +4,7 @@ name: Standing instructions
 title: Standing instructions: text you write in Settings that every thread's agent is given, on every login
 added: 2026-11-07
 on: false
-reminder: 00000000
+reminder: 918ac030
 ---
 
 ## What it does
