@@ -14,9 +14,9 @@ import { isDirectory } from '../fsutil.ts';
 import { commandFiles, isPatchFile, namedPaths, patchHash, scanModule, type ClaudeVerdict, type PatchHash } from '../patch-trust.ts';
 import type { AgentWrite } from '../adapters/types.ts';
 import { CLAUDE_PATCH_ID, claudeCommands, claudeOptions, settingsCommands, settingsNamedPaths, type ClaudeOptions } from '../claude-trust.ts';
-import { canonicalPath, runsAsCodeByName } from '../code-writes.ts';
+import { canonicalPath, runsAsCodeByName, type CodeWrite } from '../code-writes.ts';
 import type { PatchInfo } from '../protocol.ts';
-import { actionRunProblem, automaticTrust, EMPTY_PATCH_SET, PATCH_EXTENSIONS, patchDirs, hookApplies, loadPatchSet, applyLive, hasLive, projectPanels, renderListPanel, renderPanel, runCommand, type CommandOutcome, type PanelRender, type PatchSet, type ProjectFolder, projectPatchFiles } from '../patches.ts';
+import { actionRunProblem, automaticTrust, EMPTY_PATCH_SET, PATCH_EXTENSIONS, patchDirs, projectRoots, hookApplies, loadPatchSet, applyLive, hasLive, projectPanels, renderListPanel, renderPanel, runCommand, type CommandOutcome, type PanelRender, type PatchSet, type ProjectFolder, projectPatchFiles } from '../patches.ts';
 import { liveCommandEnv } from '../shell-allowlist.ts';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -26,37 +26,52 @@ import type { ThreadRecord } from '../store.ts';
 import { FOLDER_CACHE_MS, HOOK_TELL_CHARS, HOOK_TELL_LIMIT, LIVE_POLL_MS, LIVE_SHARE_MS, PATCHES_TTL_MS } from '../runner.ts';
 import { safeStart } from '../safe-cut.ts';
 
-// What a patch that loads without a hash makes code, for a thread in
-// `cwd` (writeRunsAsCode): every file it reaches, as canonical lower-case
-// paths, or `all` when it can't all be followed. Kept until anything its
-// hash was made from changes, and for a few seconds at most, as what a
-// command reaches from the thread's folder isn't in that hash.
+// What a patch that loads without a hash makes code, its commands run from
+// `from` (writeRunsAsCode): every file it reaches, as canonical lower-case
+// paths, and `all` when something it can run can't all be followed. Kept until
+// anything its hash was made from changes, and for a few seconds at most, as
+// what a command reaches from that folder isn't in that hash.
 type CodeScan = { at: number; h: PatchHash; all: boolean; files: Set<string> };
 const scans = new Map<string, CodeScan>();
 // The files in a Claude login's folder that hold its user settings.
 const LOGIN_SETTINGS = /^(settings(\..*)?\.json|\.claude\.json)$/i;
 const SCAN_TTL_MS = 10_000;
-function codeOfUnhashedPatch(file: string, cwd: string, now: number): CodeScan {
-  const key = `${file}\0${cwd}`;
+// A web page as a whole string: a constant for an action's url, say. Run as a
+// command it could only be a file by that very name, which `files` has. Nothing
+// a shell would split it at, so `https://x/;./y.sh` is still a command.
+const WEB_PAGE = /^https?:\/\/[^\s;|&<>()`$'"\\]*$/i;
+function codeOfUnhashedPatch(file: string, from: string, now: number): CodeScan {
+  const key = `${file}\0${from}`;
   const hit = scans.get(key);
   if (hit && now - hit.at < SCAN_TTL_MS && hit.h.looked.same()) return hit;
   const h = patchHash(file);
   const files = new Set<string>();
   const add = (f: string) => files.add(canonicalPath(f).toLowerCase());
-  // One it can't follow all of, or that names a script that runs
-  // something it can't follow: any edit might be what it runs.
-  let all = Boolean(h.incomplete || h.blocked);
+  // Code it can't follow: any edit might be what it runs.
+  let all = Boolean(h.incomplete);
   for (const f of [file, h.root, ...h.deps.map((d) => d.path), ...h.unnamed]) add(f);
-  for (const [from, bytes] of all ? [] : h.code) {
+  const worktreeReach = new Set<string>();
+  // The folder holding its `.threadbear/patches`, as a worktree's commands run from there.
+  const patchFolder = path.dirname(path.dirname(path.dirname(file)));
+  for (const [module, bytes] of h.code) {
     const text = bytes.toString('utf8');
-    for (const n of namedPaths(text)) add(path.resolve(cwd, n));
-    // Each string in it as a command run from the thread's folder, as its
-    // hooks are: what that reaches.
-    for (const command of scanModule(text, from).strings) {
+    for (const n of namedPaths(text)) add(path.resolve(from, n));
+    // Each string in it as a command run from where its commands run: what
+    // that reaches, whatever it is. A problem means there may be more it
+    // runs, unless it can't be a command at all. A patch's `worktree` setup
+    // and check don't count either. Setup runs from what's committed, in a new
+    // worktree, and the check when a land is asked for, so neither runs what
+    // an agent just wrote until it has got past a step that's asked about.
+    const scan = scanModule(text, module);
+    const data = new Set(scan.data);
+    const worktree = new Set(scan.worktree);
+    for (const command of scan.strings) {
       if (!/\S/.test(command) || command.length > 2000) continue;
-      const reach = commandFiles(command, cwd);
-      if (reach.problem) all = true;
+      const reach = commandFiles(command, from);
       reach.files.forEach(add);
+      if (worktree.has(command)) {
+        for (const f of commandFiles(command, patchFolder).files) worktreeReach.add(canonicalPath(f).toLowerCase());
+      } else if (reach.problem && !data.has(command) && !WEB_PAGE.test(command)) all = true;
     }
     // Absolute and `~/` paths, there yet or not.
     for (const word of text.split(/[\s'"`;&|()<>=,[\]{}]+/)) {
@@ -64,6 +79,10 @@ function codeOfUnhashedPatch(file: string, cwd: string, now: number): CodeScan {
       else if (word.startsWith('~/')) add(path.join(os.homedir(), word.slice(2)));
     }
   }
+  // A script it names that runs something it can't follow, other than a
+  // worktree's own (above). A hook or action that runs one is a problem as a
+  // command too; this also catches what's named some other way.
+  if (Object.keys(h.blocked ?? {}).some((s) => !worktreeReach.has(canonicalPath(s).toLowerCase()))) all = true;
   const scan = { at: now, h, all, files };
   scans.set(key, scan);
   if (scans.size > 200) scans.delete(scans.keys().next().value!);
@@ -329,11 +348,13 @@ export const patchesPart = {
   // - Patches that load without a hash (home's, Threadbear's own
   //   checkout's): what one is a link to, imports and names, a missing
   //   one included, absolute or `~/` paths in it, and its `./` paths from
-  //   the thread's folder, where its commands run. One whose code can't
-  //   all be followed asks for every edit (Codex review). What such a
-  //   hook runs by name (`npm test`, a tool on PATH) is the folder's own
-  //   code, run as its owner set it up, and isn't followed.
-  writeRunsAsCode(this: Runner, rec: ThreadRecord, file: string): boolean {
+  //   where its commands run: the thread's folder, or for a patch from a
+  //   project's folder, that folder. One that can run something it can't
+  //   follow asks for every edit (Codex review), and answers 'unsure', so
+  //   the card doesn't say this file runs. What such a hook runs by name
+  //   (`npm test`, a tool on PATH) is the folder's own code, run as its
+  //   owner set it up, and isn't followed.
+  writeRunsAsCode(this: Runner, rec: ThreadRecord, file: string): CodeWrite {
     const cwd = rec.cwd;
     const home = this.panelsRoot ?? os.homedir();
     const real = canonicalPath(file).toLowerCase();
@@ -374,11 +395,17 @@ export const patchesPart = {
       }
       const found = claudeCommands(cwd, home);
       if (found && [...found.files, ...found.named].some(same)) return true;
-      // Every patch folder the thread reads, its projects' too: the ones
+      // Every patch folder the thread reads, as loadPatchSet does, its
+      // projects' too, as their hooks run at the end of its turns: the ones
       // that load without a hash.
-      const dirs = new Map<string, 'home' | 'project'>();
-      for (const folder of [cwd, ...(this.projects?.foldersFor(rec) ?? []).map((f) => f.folder)]) for (const d of patchDirs(folder, home)) dirs.set(d.dir, d.source);
-      for (const [dir, source] of dirs) {
+      const dirs = new Map<string, { source: 'home' | 'project'; from: string }>();
+      for (const d of patchDirs(cwd, home)) dirs.set(d.dir, { source: d.source, from: cwd });
+      for (const root of projectRoots(cwd, this.projects?.foldersFor(rec) ?? [])) {
+        for (const d of patchDirs(root.folder, home)) if (!dirs.has(d.dir)) dirs.set(d.dir, { source: d.source, from: root.folder });
+      }
+      // Files one is sure of win over another's "can't tell", for the card.
+      let unsure = false;
+      for (const [dir, { source, from }] of dirs) {
         if (source === 'project' && !this.patchTrust.loadsUnhashed(dir)) continue;
         for (const name of fs.readdirSync(dir)) {
           if (!PATCH_EXTENSIONS.includes(path.extname(name)) || name.endsWith('.d.ts') || name.startsWith('.')) continue;
@@ -386,16 +413,17 @@ export const patchesPart = {
           if (same(p)) return true;
           let scan: CodeScan;
           try {
-            scan = codeOfUnhashedPatch(p, cwd, this.clock.now());
+            scan = codeOfUnhashedPatch(p, from, this.clock.now());
           } catch {
             continue; // can't be read, so can't be loaded either
           }
-          if (scan.all || scan.files.has(real)) return true;
+          if (scan.files.has(real)) return true;
+          if (scan.all) unsure = true;
         }
       }
-      return false;
+      return unsure ? 'unsure' : false;
     } catch {
-      return true;
+      return 'unsure';
     }
   },
 

@@ -316,8 +316,10 @@ shown on the composer (the box you type in) and changed by clicking it.
 
 In Ask before edits and Auto, an edit to a file Threadbear runs by itself
 (a patch, a file a patch uses, or Claude Code's settings) always asks, with
-no Always allow, and the card says Threadbear runs the file as code. Even
-once you allow it, the patch waits for you to trust it in Patches.
+no Always allow, and the card says Threadbear runs the file as code. If a
+patch runs something Threadbear can't follow, every edit asks, and the card
+says it can't tell whether the file runs as code. Even once you allow it, the
+patch waits for you to trust it in Patches.
 
 The mode belongs to one thread. A new thread starts on Full access again
 unless you pick otherwise, so if you're unsure about a task, switch it to Ask

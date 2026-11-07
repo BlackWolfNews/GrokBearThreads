@@ -16,7 +16,7 @@ import { groupSpawner, type ProcessRegistry } from '../../proc.ts';
 import { prepareImageForModel } from '../../media.ts';
 import { placePictures } from '../../pictures.ts';
 import { EDIT_TOOLS, cardInput, toolTitle, tooLongForCard } from '../../tools.ts';
-import { RUNS_AS_CODE, RUNS_AS_CODE_REASON, runsAsCodeByName } from '../../code-writes.ts';
+import { codeWriteNote, codeWriteReason, runsAsCodeByName, type CodeWrite } from '../../code-writes.ts';
 import path from 'node:path';
 import { RUNNER_VERSION } from '../../config.ts';
 import { stripModelSuffix } from '../../accounts.ts';
@@ -521,9 +521,10 @@ class ClaudeSession implements AgentSession {
     this.noteWriteMode(id, full ? 'full' : this.mode === 'full' ? 'ask' : this.mode);
     if (this.mode === 'full') return {};
     const file = this.editTarget(call.tool_input);
-    if (!file || !this.runsAsCode(file)) return {};
+    const kind = file ? this.runsAsCode(file) : false;
+    if (!kind) return {};
     this.codeWrites.add(id);
-    return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: RUNS_AS_CODE_REASON } };
+    return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: codeWriteReason(kind) } };
   }
 
   // Keeps the strictest mode a call was seen on.
@@ -541,8 +542,8 @@ class ClaudeSession implements AgentSession {
     return typeof file === 'string' && file ? path.resolve(this.opts.cwd, file) : undefined;
   }
 
-  private runsAsCode(file: string): boolean {
-    return runsAsCodeByName(file) || this.opts.runsAsCode?.(file) === true;
+  private runsAsCode(file: string): CodeWrite {
+    return runsAsCodeByName(file) || (this.opts.runsAsCode?.(file) ?? false);
   }
 
   private stderr(line: string): void {
@@ -669,7 +670,7 @@ class ClaudeSession implements AgentSession {
     // An edit that writes code Threadbear runs: asked about every time, and
     // the card says why (code-writes.ts).
     const target = EDIT_TOOLS.has(name) ? this.editTarget(input) : undefined;
-    const code = this.codeWrites.has(o.toolUseID) || (target !== undefined && this.runsAsCode(target));
+    const code: CodeWrite = (target !== undefined && this.runsAsCode(target)) || this.codeWrites.has(o.toolUseID);
     // The card shows the whole command, or every argument of an MCP tool
     // (what it does elsewhere is in them); one too long for that is refused
     // rather than allowed from its start (tools.ts, cardInput).
@@ -681,7 +682,7 @@ class ClaudeSession implements AgentSession {
     const ans = await this.sink.requestApproval({
       toolUseId: itemId,
       name,
-      title: code ? `${title} (${RUNS_AS_CODE})` : title,
+      title: code ? `${title} (${codeWriteNote(code)})` : title,
       input: card.input,
       // "Always allow" would defeat a tool that's meant to ask every time.
       canAlwaysAllow: !plan && !code && !o.suppressAlwaysAllowRule && !this.deps.alwaysAsk?.has(name),

@@ -1074,9 +1074,10 @@ enum RowRenderer {
             let call = ToolCall(itemId: request.approvalId, name: request.name, kind: request.name == "Write" ? .write : .edit,
                                 title: request.title, input: input)
             if let diff = DiffBuilder.diff(forTool: call), !diff.hunks.isEmpty {
-                // A file Threadbear runs as code shows every line it writes:
-                // a hook past the eighth line is still a hook.
+                // A file Threadbear runs as code, or can't rule out, shows
+                // every line it writes: a hook past the eighth line is still a hook.
                 let code = request.title.contains("Threadbear runs this file as code")
+                    || request.title.contains("Threadbear can't tell whether this file runs as code")
                 return diffText([diff], maxLines: code ? 1_000_000 : 8, inset: 0).0
             }
             return mono(ToolPresentation.shortTitle(ApprovalText.filePath(request) ?? "", limit: 300), Theme.quietText)

@@ -3,6 +3,7 @@
 // process per live thread and reports normalised output. Claude and Codex
 // are the two implementations of AgentAdapter.
 import type { SlashCommand } from '../slash-commands.ts';
+import type { CodeWrite } from '../code-writes.ts';
 import type {
   Account,
   BackgroundKind,
@@ -65,7 +66,7 @@ export type StartSessionOptions = {
   // what they name (code-writes.ts). Outside Full access such an edit
   // always asks, with no "Always allow". The adapter checks the names in
   // code-writes.ts too, so leaving this out never asks less.
-  runsAsCode?: (file: string) => boolean;
+  runsAsCode?: (file: string) => CodeWrite;
   // Claude, in Full with the folder's settings loaded: they hold
   // permission rules that aren't trusted for a thread that asks first, so
   // the session must be able to stop them applying if the thread leaves

@@ -206,7 +206,7 @@ function placeTool(loaded: LoadedPatch, cwd: string, home: string, roots: Projec
 // thread in a worktree, a project folder in that repo's main checkout is
 // read from the worktree's copy: the main checkout is the same repo on
 // another branch, and loading both showed every chip twice (30 Oct).
-function projectRoots(cwd: string, projectFolders: ProjectFolder[]): ProjectFolder[] {
+export function projectRoots(cwd: string, projectFolders: ProjectFolder[]): ProjectFolder[] {
   const own = path.resolve(cwd);
   const worktree = projectFolders.length > 0 ? worktreeOf(own) : undefined;
   const out: ProjectFolder[] = [];

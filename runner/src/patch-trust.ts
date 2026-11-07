@@ -761,7 +761,11 @@ const SCANNED = ['.ts', '.mts', '.cts', '.js', '.mjs', '.cjs', '.tsx', '.jsx'];
 // paths of files it may run (script-trust.ts).
 // `packages`: the bare specifiers it imports (`zod`, `node:fs`), which are
 // hashed only when the repo commits them (tracked-packages.ts).
-export type ModuleScan = { specifiers: string[]; packages: string[]; strings: string[]; problem?: { kind: 'computed' | 'parse'; line: number; code: string } };
+//
+// `data` and `worktree`: strings found only as a patch's fields that aren't
+// commands, or only as its `worktree` setup and check (writeRunsAsCode). Never
+// a reason to hash less: `strings` still has them.
+export type ModuleScan = { specifiers: string[]; packages: string[]; strings: string[]; data?: string[]; worktree?: string[]; problem?: { kind: 'computed' | 'parse'; line: number; code: string } };
 
 export function scanModule(src: string, file: string): ModuleScan {
   const ext = path.extname(file);
@@ -780,6 +784,15 @@ export function scanModule(src: string, file: string): ModuleScan {
   const specifiers = new Set<string>();
   const packages = new Set<string>();
   const strings = new Set<string>();
+  // Each string by what it's for: one used as anything else even once is
+  // kept out of `data` and `worktree`, as it might be a command.
+  const roles = new Map<AstNode, 'data' | 'worktree'>();
+  const seen = { data: new Set<string>(), worktree: new Set<string>(), other: new Set<string>() };
+  const giveRole = (n: AstNode, role: 'data' | 'worktree') => {
+    if (plainString(n) === undefined) return;
+    roles.set(n, role);
+    if (n.type === 'TemplateLiteral') roles.set(n.quasis[0], role);
+  };
   let problem: { start: number; end: number } | undefined;
   const refuse = (n: AstNode) => {
     if (!problem || n.start < problem.start) problem = { start: n.start, end: n.end };
@@ -814,7 +827,19 @@ export function scanModule(src: string, file: string): ModuleScan {
     if (text !== undefined && strings.size < 5000) strings.add(text);
     // The fixed parts of `node ${x}`, which may name files too.
     if (node.type === 'TemplateElement' && typeof node.value?.cooked === 'string' && strings.size < 5000) strings.add(node.value.cooked);
+    const said = text ?? (node.type === 'TemplateElement' && typeof node.value?.cooked === 'string' ? (node.value.cooked as string) : undefined);
+    if (said !== undefined) seen[roles.get(node) ?? 'other'].add(said);
     switch (node.type) {
+      case 'Property': {
+        const field = propertyKey(node);
+        if (field === undefined) break;
+        if (PATCH_DATA_FIELDS.has(field)) {
+          for (const v of node.value.type === 'ArrayExpression' ? node.value.elements : [node.value]) if (v) giveRole(v, 'data');
+        } else if (field === 'worktree' && node.value.type === 'ObjectExpression') {
+          for (const w of node.value.properties) if (w.type === 'Property' && ['setup', 'check'].includes(propertyKey(w) ?? '')) giveRole(w.value, 'worktree');
+        }
+        break;
+      }
       case 'ImportDeclaration':
       case 'ExportNamedDeclaration':
       case 'ExportAllDeclaration':
@@ -862,6 +887,8 @@ export function scanModule(src: string, file: string): ModuleScan {
     specifiers: [...specifiers],
     packages: [...packages],
     strings: [...strings],
+    data: [...seen.data].filter((s) => !seen.other.has(s) && !seen.worktree.has(s)),
+    worktree: [...seen.worktree].filter((s) => !seen.other.has(s)),
     ...(problem ? { problem: { kind: 'computed' as const, line: lineAt(problem.start), code: src.slice(problem.start, problem.end).replace(/\s+/g, ' ').slice(0, 80) } } : {}),
   };
 }
@@ -884,6 +911,16 @@ function plainString(n: AstNode): string | undefined {
   if (n.type === 'Literal' && typeof n.value === 'string') return n.value;
   if (n.type === 'TemplateLiteral' && n.expressions.length === 0) return n.quasis[0]?.value?.cooked ?? undefined;
   return undefined;
+}
+
+// A patch's fields that hold words, pages and patterns: shown, sent to an
+// agent or matched, never handed to a shell (readPatchModule in patches.ts).
+const PATCH_DATA_FIELDS = new Set(['title', 'note', 'detail', 'icon', 'tone', 'on', 'tell', 'prompt', 'url', 'edited', 'appliesTo', 'keep']);
+
+// The name of an object literal's `name: value`, unless it's worked out.
+function propertyKey(n: AstNode): string | undefined {
+  if (n.computed) return undefined;
+  return n.key.type === 'Identifier' ? n.key.name : plainString(n.key);
 }
 
 // `a.b` and `a['b']` name `b`; `a[k]` names nothing the scan can know.

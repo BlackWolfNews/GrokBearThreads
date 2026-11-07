@@ -475,7 +475,7 @@ export class CodexSession implements AgentSession {
       note: (text) => this.sink.output({ kind: 'event', event: { type: 'system.note', text } }),
       cwd: () => this.cwd,
       itemPaths: (id) => this.itemPaths.get(id),
-      runsAsCode: (file) => runsAsCodeByName(file) || opts.runsAsCode?.(file) === true,
+      runsAsCode: (file) => runsAsCodeByName(file) || (opts.runsAsCode?.(file) ?? false),
       callTool: (params, o) => this.tools.call(params, o),
       now: this.now,
     });

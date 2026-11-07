@@ -3704,10 +3704,18 @@ settings' name, there yet or not, from the login's folder or the thread's
 script, quoted names included, and what it imports or runs in turn), and
 for patches that load without trust (home's, Threadbear's own checkout's)
 what each is a link to, imports and names, absolute or `~/` paths in it,
-and what each of its strings reaches as a command from the thread's
-folder, where its commands run; one of those whose code can't all be
-followed (a script that isn't there yet included, as the follow stops
-there) makes every edit ask. A settings hook that can't be followed all
+and what each of its strings reaches as a command from where its commands
+run: the thread's folder, or for a patch from a folder of one of the thread's
+projects, that folder, as its hooks run there at the end of the thread's turns.
+One of those that can run something it can't follow (a script that isn't there
+yet included, as the follow stops there) makes every edit ask. Strings that
+aren't commands don't count towards that, though what they name still asks: a
+web page as a whole string, and one found only as a patch's `title`, `note`,
+`detail`, `icon`, `tone`, `on`, `tell`, `prompt`, `url`, `edited`, `appliesTo`
+or `keep`. Neither does a patch's `worktree` setup or check: setup runs from
+what's committed, in a new worktree, and the check when a land is asked for, so
+neither runs what an agent just wrote until it has got past a step that's asked
+about. A settings hook that can't be followed all
 the way doesn't: those are the user's own hooks, so what they load by a
 name worked out as they run, or from outside the repo they're followed
 in, isn't guarded. What such a hook runs by name (`npm test`, a tool on PATH)
@@ -3717,7 +3725,9 @@ a link to a file not there yet included, and without case, as macOS names
 a file either way). The runner's PreToolUse hook answers `ask` for these,
 which reaches the approval card whatever an "Always allow" rule, the
 user's own allow rules or Auto's classifier would have said. The card's
-`title` ends "(Threadbear runs this file as code)", its `options` have no
+`title` ends "(Threadbear runs this file as code)", or "(Threadbear can't tell
+whether this file runs as code)" when only the catch-all above made it ask, and
+its `options` have no
 `allowAlways`, and an `allowAlways` answer counts as `allow` once (Codex:
 the thread's file-change rule is passed over for it, and isn't added). What
 it writes still isn't trusted (above): Mike trusts it in Patches. On Full

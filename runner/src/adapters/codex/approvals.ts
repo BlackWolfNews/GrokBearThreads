@@ -4,7 +4,7 @@
 // rules. Every request gets an answer: a card, a rule, or a refusal at once.
 import fs from 'node:fs';
 import path from 'node:path';
-import { RUNS_AS_CODE } from '../../code-writes.ts';
+import { codeWriteNote, type CodeWrite } from '../../code-writes.ts';
 import type { Question } from '../../protocol.ts';
 import type { Logger } from '../../log.ts';
 import { cardInput, displayPath, tooLongForCard } from '../../tools.ts';
@@ -289,7 +289,7 @@ export type ApprovalsDeps = {
   itemPaths(itemId: string): string[] | undefined;
   // Whether a file (absolute) is one Threadbear runs as code
   // (code-writes.ts): a patch that changes one always asks.
-  runsAsCode(file: string): boolean;
+  runsAsCode(file: string): CodeWrite;
   callTool(params: DynamicToolCallParams, o: { fromChild: boolean; signal: AbortSignal }): Promise<DynamicToolCallResponse>;
   now(): number;
 };
@@ -309,8 +309,9 @@ export class CodexApprovals {
   }
 
   // Codex reports a patch's paths as written, maybe relative to the folder.
-  private runsAsCode(paths: string[]): boolean {
-    return paths.some((f) => this.deps.runsAsCode(path.resolve(this.deps.cwd(), f)));
+  private runsAsCode(paths: string[]): CodeWrite {
+    const kinds = paths.map((f) => this.deps.runsAsCode(path.resolve(this.deps.cwd(), f)));
+    return kinds.includes(true) || (kinds.includes('unsure') ? 'unsure' : false);
   }
 
   // `fromChild`: the request came from a subagent's thread. Its card goes to
@@ -440,7 +441,7 @@ export class CodexApprovals {
     this.ask(
       id,
       'item/fileChange/requestApproval',
-      { toolUseId: fromChild ? undefined : p.itemId, name: 'apply_patch', title: code ? `${title} (${RUNS_AS_CODE})` : title, input, canAlwaysAllow: !code },
+      { toolUseId: fromChild ? undefined : p.itemId, name: 'apply_patch', title: code ? `${title} (${codeWriteNote(code)})` : title, input, canAlwaysAllow: !code },
       (a) => {
         if (a.decision === 'allowAlways' && !code) this.deps.addRules([FILE_CHANGE_RULE]);
         return { decision: commandDecision(a) };
@@ -610,7 +611,7 @@ export class CodexApprovals {
     this.ask(
       id,
       'applyPatchApproval',
-      { toolUseId: fromChild ? undefined : p.callId, name: 'apply_patch', title: code ? `${title} (${RUNS_AS_CODE})` : title, input, canAlwaysAllow: !code },
+      { toolUseId: fromChild ? undefined : p.callId, name: 'apply_patch', title: code ? `${title} (${codeWriteNote(code)})` : title, input, canAlwaysAllow: !code },
       (a) => {
         if (a.decision === 'allowAlways' && !code) this.deps.addRules([FILE_CHANGE_RULE]);
         return { decision: legacyDecision(a) };

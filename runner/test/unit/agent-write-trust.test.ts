@@ -10,7 +10,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { ACCOUNTS, FakeAccounts, makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
 import { loadPatchSet } from '../../src/patches.ts';
-import { PatchTrust } from '../../src/patch-trust.ts';
+import { PatchTrust, worktreeOf } from '../../src/patch-trust.ts';
+import type { Projects } from '../../src/projects.ts';
+import type { ThreadRecord } from '../../src/store.ts';
 import { ClaudeAdapter } from '../../src/adapters/claude/adapter.ts';
 import { ClaudeNormalizer } from '../../src/adapters/claude/normalize.ts';
 import { fileContext } from '../../src/adapters/context.ts';
@@ -18,7 +20,8 @@ import type { AdapterOutput, SessionSink, ToolApprovalRequest } from '../../src/
 import { ProcessRegistry } from '../../src/proc.ts';
 import { nullLogger } from '../../src/log.ts';
 import { CLAUDE_PATCH_ID } from '../../src/claude-trust.ts';
-import { RUNS_AS_CODE, runsAsCodeByName } from '../../src/code-writes.ts';
+import { MAYBE_RUNS_AS_CODE, RUNS_AS_CODE, runsAsCodeByName, type CodeWrite } from '../../src/code-writes.ts';
+import { remoteCardShowsAll } from '../../src/tools.ts';
 import type { PermissionMode } from '../../src/protocol.ts';
 
 const sha = (file: string) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -246,7 +249,7 @@ function fakeQuery() {
   return { fn, state };
 }
 
-function session(mode: PermissionMode, runsAsCode?: (file: string) => boolean) {
+function session(mode: PermissionMode, runsAsCode?: (file: string) => CodeWrite) {
   const { fn, state } = fakeQuery();
   const outputs: AdapterOutput[] = [];
   const approvals: ToolApprovalRequest[] = [];
@@ -711,4 +714,146 @@ test('a login with no settings.json yet: writing one is code, and a saved edit r
   assert.equal(asked.length, 1, 'a card, not the saved rule');
   assert.equal(asked[0]!.canAlwaysAllow, false);
   assert.match(asked[0]!.title, new RegExp(RUNS_AS_CODE));
+});
+
+// A thread in Auto in a folder a librarian put in Threadbear's project, as
+// thread 7a98a6fd was on 7 Nov: every Edit and Write raised a card saying
+// Threadbear runs the file as code, Threadbear's own patches being unhashed
+// and full of strings that aren't commands.
+const REPO = path.resolve(import.meta.dirname, '..', '..', '..');
+// What makes it load unhashed on a real runner: it's the runner's own checkout,
+// and a thread's worktree of it counts as that checkout.
+const OWN = worktreeOf(REPO)?.main ?? REPO;
+function inProject(panelsRoot: string, cwd: string, folder: string, always: string[] = [folder], mode: PermissionMode = 'auto') {
+  const home = tmpDir();
+  // Only its folders matter here; anything else a thread asks a project is nothing.
+  const projects = new Proxy({ foldersFor: () => [{ folder, projectId: 'p' }] }, { get: (t, k) => (t as Record<string | symbol, unknown>)[k] ?? (() => undefined) }) as unknown as Projects;
+  const h = makeHarness(home, {}, { panelsRoot, projects, patchTrust: new PatchTrust({ file: path.join(home, 'patch-trust.json'), always, claudeHome: panelsRoot }) });
+  return { h, ...h.runner.create({ text: 'hi', accountId: 'claude-3', cwd, permissionMode: mode }) };
+}
+
+test("Threadbear's own patches don't make every edit ask, from a project folder or its own checkout", async () => {
+  const root = tmpDir();
+  const elsewhere = path.join(root, 'misc');
+  fs.mkdirSync(elsewhere, { recursive: true });
+  const { h, thread } = inProject(root, elsewhere, REPO, [OWN]);
+  await settle(h, thread.id);
+  // Asked directly for the thread in its own checkout: starting one there
+  // would give the test a real worktree of this repo.
+  for (const cwd of [elsewhere, REPO]) {
+    const runsAsCode = (file: string) => h.runner.writeRunsAsCode({ ...thread, cwd } as unknown as ThreadRecord, file);
+    assert.equal(runsAsCode(path.join(REPO, 'app/Sources/ThreadbearCore/Voice/SpokenApprovals.swift')), false, cwd);
+    assert.equal(runsAsCode(path.join(REPO, 'runner/src/instructions.ts')), false, cwd);
+    assert.equal(runsAsCode(path.join(elsewhere, 'notes.md')), false, cwd);
+    // What they really do run still asks, and says it runs.
+    assert.equal(runsAsCode(path.join(REPO, 'worktree-setup.sh')), true, cwd);
+    assert.equal(runsAsCode(path.join(REPO, 'check.sh')), true, cwd);
+    assert.equal(runsAsCode(path.join(REPO, '.threadbear/patches/checks.ts')), true, cwd);
+  }
+});
+
+test("a project folder's unhashed patch is followed from that folder, where its commands run", async () => {
+  const root = tmpDir();
+  const project = path.join(root, 'repo');
+  const elsewhere = path.join(root, 'misc');
+  fs.mkdirSync(elsewhere, { recursive: true });
+  put(path.join(project, 'scripts', 'after.sh'), '#!/bin/sh\ntrue\n');
+  put(path.join(project, 'README.md'), 'hi\n');
+  put(path.join(project, '.threadbear', 'patches', 'p.ts'), `export default { hooks: [{ title: 'After', on: 'turn.end', run: './scripts/after.sh' }] };\n`);
+  const { h, thread } = inProject(root, elsewhere, project);
+  await settle(h, thread.id);
+  const runsAsCode = h.adapter.last.opts.runsAsCode!;
+  assert.equal(runsAsCode(path.join(project, 'scripts', 'after.sh')), true, 'the hook runs it, unasked, in the project folder');
+  assert.equal(runsAsCode(path.join(project, 'README.md')), false);
+  assert.equal(runsAsCode(path.join(elsewhere, 'scripts', 'after.sh')), false, "nothing runs the thread's folder's copy");
+});
+
+test('what an unhashed patch really can run but not follow still makes every edit ask, and says it can\'t tell', async () => {
+  const blockedScript = '#!/bin/bash\n"$1" go\n';
+  const cases: Record<string, { patch: string; files?: Record<string, string> }> = {
+    'a hook that stops at a missing script': { patch: `export default { hooks: [{ title: 'H', on: 'turn.end', run: './missing.sh; ./after.sh' }] };` },
+    "a hook's blocked script": { patch: `export default { hooks: [{ title: 'H', on: 'turn.end', run: './blocked.sh' }] };`, files: { 'blocked.sh': blockedScript } },
+    "an action's blocked script": { patch: `export default { actions: [{ title: 'A', run: './blocked.sh' }] };`, files: { 'blocked.sh': blockedScript } },
+    'a worktree check that a hook runs too': { patch: `export default { worktree: { check: './blocked.sh' }, hooks: [{ title: 'H', on: 'turn.end', run: './blocked.sh' }] };`, files: { 'blocked.sh': blockedScript } },
+    'a name that is both data and a command': { patch: `export default { hooks: [{ title: './missing.sh', on: 'turn.end', run: './missing.sh' }] };` },
+    'a run with a pattern for its command': { patch: `export default { hooks: [{ title: 'H', on: 'turn.end', run: 'scripts/*.sh', edited: 'scripts/*.sh' }] };` },
+    'a string that only starts like a url': { patch: `const c = 'https://x.dev/;./missing.sh;./after.sh'; export default { actions: [{ title: 'A', run: c }] };` },
+    'a data key with a computed name': { patch: `const k = 'run'; export default { hooks: [{ title: 'H', on: 'turn.end', [k]: './missing.sh; ./after.sh' }] };` },
+    'an import it cannot follow': { patch: `const m = await import(process.cwd() + '/x.ts'); export default m.default;` },
+    'setup under another key': { patch: `export default { hooks: [{ title: 'H', on: 'turn.end', run: './blocked.sh' }], other: { check: './blocked.sh' } };`, files: { 'blocked.sh': blockedScript } },
+  };
+  for (const [name, c] of Object.entries(cases)) {
+    const root = tmpDir();
+    const project = path.join(root, 'repo');
+    put(path.join(project, 'README.md'), 'hi\n');
+    put(path.join(project, 'after.sh'), '#!/bin/sh\ntrue\n');
+    for (const [f, text] of Object.entries(c.files ?? {})) put(path.join(project, f), text);
+    put(path.join(project, '.threadbear', 'patches', 'p.ts'), `${c.patch}\n`);
+    const elsewhere = path.join(root, 'misc');
+    fs.mkdirSync(elsewhere, { recursive: true });
+    const { h, thread } = inProject(root, elsewhere, project);
+    await settle(h, thread.id);
+    assert.equal(h.adapter.last.opts.runsAsCode!(path.join(project, 'README.md')), 'unsure', name);
+  }
+});
+
+test("strings a patch can't run, and a worktree's own setup and check, don't make every edit ask", async () => {
+  const blockedScript = '#!/bin/bash\n"$1" go\n';
+  const root = tmpDir();
+  const project = path.join(root, 'repo');
+  put(path.join(project, 'README.md'), 'hi\n');
+  put(path.join(project, 'setup.sh'), blockedScript);
+  put(path.join(project, 'check.sh'), blockedScript);
+  put(path.join(project, '.threadbear', 'patches', 'p.ts'), `const HOME_PAGE = 'https://example.com/a?b=1';
+export default {
+  worktree: { setup: './setup.sh', check: './check.sh --quick', keep: ['app/.build'] },
+  actions: [
+    { title: "Mike's chip", prompt: "Don't stop at what's there; it's only a thought (really)." },
+    { title: 'Site', url: HOME_PAGE },
+  ],
+  hooks: [{ title: 'Types', on: 'turn.end', run: 'true', edited: 'src/**/*.ts' }],
+};\n`);
+  const elsewhere = path.join(root, 'misc');
+  fs.mkdirSync(elsewhere, { recursive: true });
+  const { h, thread } = inProject(root, elsewhere, project);
+  await settle(h, thread.id);
+  const runsAsCode = h.adapter.last.opts.runsAsCode!;
+  assert.equal(runsAsCode(path.join(project, 'README.md')), false);
+  // Not asked about wholesale, but the scripts themselves still are.
+  assert.equal(runsAsCode(path.join(project, 'setup.sh')), true);
+  assert.equal(runsAsCode(path.join(project, 'check.sh')), true);
+});
+
+test("the card for a write it can't rule out says so, and still asks every time", async () => {
+  for (const mode of ['ask', 'auto'] as const) {
+    const a = session(mode, () => 'unsure');
+    const file = path.join(a.dir, 'README.md');
+    const out = await a.hook('m1', file, mode === 'auto' ? 'auto' : 'default');
+    assert.equal(out.hookSpecificOutput?.permissionDecision, 'ask');
+    assert.ok(out.hookSpecificOutput?.permissionDecisionReason?.includes(MAYBE_RUNS_AS_CODE));
+    const res = await a.allow('m1', file);
+    assert.equal(res.updatedPermissions, undefined, 'Always allow is taken as allow once');
+    const card = a.approvals.at(-1)!;
+    assert.ok(card.title.includes(MAYBE_RUNS_AS_CODE), card.title);
+    assert.ok(!card.title.includes(RUNS_AS_CODE), card.title);
+    assert.equal(card.canAlwaysAllow, false);
+    // Shows all it writes on the Mac, so a phone can't allow it from its path.
+    assert.equal(remoteCardShowsAll('Write', {}, a.dir, card.title), false);
+  }
+});
+
+test('a file a patch names is said to run even when another patch makes the rest unsure', async () => {
+  const root = tmpDir();
+  const project = path.join(root, 'repo');
+  const elsewhere = path.join(root, 'misc');
+  fs.mkdirSync(elsewhere, { recursive: true });
+  put(path.join(project, 'go.sh'), '#!/bin/sh\ntrue\n');
+  put(path.join(project, 'README.md'), 'hi\n');
+  put(path.join(project, '.threadbear', 'patches', 'a.ts'), `const m = await import(process.cwd() + '/x.ts'); export default m.default;\n`);
+  put(path.join(project, '.threadbear', 'patches', 'b.ts'), `export default { actions: [{ title: 'Go', run: './go.sh' }] };\n`);
+  const { h, thread } = inProject(root, elsewhere, project);
+  await settle(h, thread.id);
+  const runsAsCode = h.adapter.last.opts.runsAsCode!;
+  assert.equal(runsAsCode(path.join(project, 'go.sh')), true);
+  assert.equal(runsAsCode(path.join(project, 'README.md')), 'unsure');
 });

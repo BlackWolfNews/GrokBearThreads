@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Hunk, PlanEntry, ToolKind } from './protocol.ts';
-import { RUNS_AS_CODE } from './code-writes.ts';
+import { MAYBE_RUNS_AS_CODE, RUNS_AS_CODE } from './code-writes.ts';
 import { LIMITS } from './protocol.ts';
 import { applyReplace, diffLines } from './diff.ts';
 import { firstLineSafely, safeEnd } from './safe-cut.ts';
@@ -258,7 +258,7 @@ export const REMOTE_ALLOW_REFUSED = "It's too long to show in full here, so it c
 // An edit of a file that runs as code shows all it writes on the Mac, and
 // only its path here (its title says it is one), so it counts too.
 export function remoteCardShowsAll(name: string, input: Record<string, unknown>, cwd?: string, title = ''): boolean {
-  if (name === 'permissions' || title.includes(RUNS_AS_CODE)) return false;
+  if (name === 'permissions' || title.includes(RUNS_AS_CODE) || title.includes(MAYBE_RUNS_AS_CODE)) return false;
   const fits = (v: string) => v.trim().length <= REMOTE_COMMAND_CHARS && !/[\r\n]/.test(v.trim());
   // An MCP tool's arguments say what it does (a threadbear tool's own ask,
   // in Ask mode, or any other server's), a `command` among them or not:
