@@ -499,6 +499,23 @@ public final class FakeBackend: Backend, @unchecked Sendable {
         return newCommand()
     }
 
+    /// Marks the button pressed on its message, as the runner's row would
+    /// come back, with the first other thread as the one it started.
+    public func press(threadId: String, buttonId: String) async throws -> String {
+        var started: String?
+        mutate { s in
+            started = s.threadsById.keys.sorted().first { $0 != threadId }
+            guard var list = s.messagesById[threadId] else { return }
+            for i in list.indices {
+                guard let b = list[i].buttons?.firstIndex(where: { $0.id == buttonId }) else { continue }
+                list[i].buttons![b].pressedThreadId = started
+                list[i].buttons![b].failed = nil
+            }
+            s.messagesById[threadId] = list
+        }
+        return newCommand(threadId: started)
+    }
+
     public func respond(threadId: String, approvalId: String, decision: ApprovalOption) async throws -> String {
         mutate { s in
             s.threadsById[threadId]?.pendingApproval = nil

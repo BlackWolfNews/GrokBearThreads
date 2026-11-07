@@ -663,6 +663,7 @@ export function phoneCommands(runner: Runner, remote?: Pick<Peers, 'owns' | 'cal
     share: (id, p) => at(id, 'threads.share', { ...p }, () => runner.share(id, p)),
     interrupt: (id) => at(id, 'threads.interrupt', {}, () => runner.interrupt(id)),
     quickAsk: (p) => runner.quickAsk(p),
+    pressButton: (id, buttonId) => at(id, 'buttons.press', { buttonId }, () => runner.pressButton(id, buttonId)),
   };
 }
 

@@ -404,6 +404,7 @@ async function main(): Promise<void> {
       listProjects: () => projects.list({ archived: true }),
       listSchedules: () => scheduler.list(),
       listAccounts: () => runner.hello().accounts,
+      buttons: (id) => runner.listButtons(id).buttons,
     },
     // The phone's commands, through the same methods the app's RPCs use,
     // on whichever runner has the thread.

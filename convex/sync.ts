@@ -6,7 +6,7 @@ import { ConvexError, v } from 'convex/values';
 import { internalMutation, internalQuery, mutation, query, type MutationCtx, type QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
-import { threadFields, views } from './schema';
+import { messageButton, threadFields, views } from './schema';
 import { API_VERSION } from './version';
 import { actAs, checkRunnerId, forbidden, hasLiveKey, readRunnerOrder, runnerAuth, runnerStatsRows, saveRunnerOrder, sha256, watchRunnersFor } from './lib';
 import { scrubDoc, scrubEveryString, SCRUB_RULES_VERSION, HELD_BACK } from './redaction';
@@ -322,7 +322,23 @@ function fitMessage<T extends Record<string, any>>(m: T): T | undefined {
   const out: Record<string, any> = { ...m, text: cutBytes(String(m.text ?? ''), CAP.message), at: cutBytes(String(m.at ?? ''), 64) };
   for (const f of ['origin', 'toolKind', 'turn']) if (typeof out[f] === 'string') out[f] = cutBytes(out[f], 100);
   if (Array.isArray(out.wokeBy)) out.wokeBy = out.wokeBy.slice(0, 5).map((w: any) => ({ kind: cutBytes(String(w?.kind ?? ''), 40), description: cutBytes(String(w?.description ?? ''), 200) }));
+  if (Array.isArray(out.buttons)) out.buttons = out.buttons.slice(0, MESSAGE_BUTTONS).map((b: any) => fitButton(b));
   return docBytes(out) <= CAP.messageDoc ? (out as T) : undefined;
+}
+
+// A message links at most this many buttons that the mirror keeps.
+const MESSAGE_BUTTONS = 20;
+function fitButton(b: Record<string, any>): Record<string, any> {
+  const out: Record<string, any> = { id: cutBytes(String(b.id ?? ''), 16), title: cutBytes(String(b.title ?? ''), 200), kind: b.kind === 'send' ? 'send' : 'start' };
+  if (typeof b.target === 'string') out.target = cutBytes(b.target, 200);
+  if (typeof b.pressedThreadId === 'string') out.pressedThreadId = cutBytes(b.pressedThreadId, 64);
+  if (typeof b.failed === 'string') out.failed = cutBytes(b.failed, 300);
+  return out;
+}
+
+// Whether a row's buttons already say what the runner sent.
+function sameButtons(a: unknown[] | undefined, b: unknown[] | undefined): boolean {
+  return JSON.stringify(a ?? []) === JSON.stringify(b ?? []);
 }
 
 function fitIndexRow<T extends Record<string, any>>(r: T): T | undefined {
@@ -1046,6 +1062,7 @@ const messageDoc = v.object({
   summary: v.optional(v.boolean()), // API 14
   turn: v.optional(v.string()), // API 26
   wokeBy: v.optional(v.array(v.object({ kind: v.string(), description: v.string() }))), // API 33
+  buttons: v.optional(v.array(messageButton)), // API 58
   at: v.string(),
   pagedAt: v.optional(v.number()), // an old phone asked for it (loadEarlier): phone:thread shows it for a day
 });
@@ -1110,7 +1127,16 @@ export const appendMessages = mutation({
       // put there first (the old shared key, at a seq the thread hadn't
       // reached) is written over when the runner sends it again.
       else if (caller.owner && (existing.text !== m.text || existing.role !== m.role)) await ctx.db.replace(existing._id, { ...m, ...(m.pagedAt ?? existing.pagedAt ? { pagedAt: m.pagedAt ?? existing.pagedAt } : {}) });
-      else if (m.pagedAt && !existing.pagedAt) await ctx.db.patch(existing._id, { pagedAt: m.pagedAt });
+      else {
+        // A row sent again for its buttons (API 58: one was pressed) changes
+        // only them, so what woke the turn and an old phone's paged mark stay.
+        // From before API 58 no row carries any, and an older runner never
+        // sends one again, so nothing here clears them.
+        const patch: Partial<Doc<'messages'>> = {};
+        if (m.pagedAt && !existing.pagedAt) patch.pagedAt = m.pagedAt;
+        if (!sameButtons(existing.buttons, m.buttons)) patch.buttons = m.buttons;
+        if (Object.keys(patch).length) await ctx.db.patch(existing._id, patch);
+      }
     }
     return { skipped };
   },
@@ -2113,7 +2139,8 @@ export const finishCommand = mutation({
     // before finishing): never another runner's id, which the main Mac would
     // then open as this runner's new thread.
     let made: string | undefined;
-    if (resultThreadId && (c.kind === 'create' || c.kind === 'quickAsk')) {
+    // A press (API 58) names the thread its button started or messaged, also the runner's own.
+    if (resultThreadId && (c.kind === 'create' || c.kind === 'quickAsk' || c.kind === 'press')) {
       const t = await ctx.db.query('threads').withIndex('by_threadId', (q) => q.eq('threadId', resultThreadId)).unique();
       if (t && (c.runnerId === 'any' ? caller.owner || t.runnerId === (caller as { runnerId?: string }).runnerId : t.runnerId === c.runnerId)) made = resultThreadId;
     }

@@ -31,7 +31,7 @@ import { makeFunctionReference } from 'convex/server';
 import type { Clock, TimerHandle } from './clock.ts';
 import type { Logger } from './log.ts';
 import { agentsStillWorking, ARCHIVE_VERDICTS, ErrorCode, isEffortLevel } from './protocol.ts';
-import type { Account, ArchiveVerdict, ApprovalDecision, ApprovalOption, AskAnswer, EffortLevel, ImageRef, OpenAsk, PersistedEvent, Project, Question, Schedule, ThreadSummary } from './protocol.ts';
+import type { Account, ArchiveVerdict, ApprovalDecision, ApprovalOption, AskAnswer, EffortLevel, ImageRef, OpenAsk, PersistedEvent, Project, Question, ReplyButton, Schedule, ThreadSummary } from './protocol.ts';
 import type { Notification } from './runner.ts';
 import type { ScheduleBackend, StoredSchedule } from './schedules.ts';
 import { followSchedules } from './schedule-follow.ts';
@@ -261,6 +261,11 @@ export const INDEX_ASKED_API_VERSION = 32;
 // phone's "6 min later · Mine the repo finished" divider. An older
 // backend's validator would turn the row down, so it goes without.
 export const WOKE_BY_API_VERSION = 33;
+// From this one a message row whose text links button:<id> carries those
+// buttons' state (docs/protocol.md, "Reply buttons"), sent again when one is
+// pressed, and the phone can queue a `press` command. An older backend's
+// validator would turn the row down, so it goes without.
+export const BUTTONS_API_VERSION = 58;
 // From this one a thread row's pendingApproval can be a secret (docs/protocol.md,
 // "Secrets"), answered with phone:secret. An older backend's validator would
 // turn the whole row down, so it goes without the card.
@@ -375,7 +380,30 @@ export type PhoneAsk = { action: string; why?: string; reply?: string; options?:
 // A text message, or one line for a tool call (role "tool", since backend
 // API 2): what the phone and the website show of a thread.
 export type WokeByDoc = { kind: string; description: string };
-export type MessageDoc = { threadId: string; seq: number; role: 'user' | 'assistant' | 'tool'; text: string; origin?: string; toolKind?: string; summary?: true; turn?: string; wokeBy?: WokeByDoc[]; at: string; pagedAt?: number };
+export type MessageDoc = { threadId: string; seq: number; role: 'user' | 'assistant' | 'tool'; text: string; origin?: string; toolKind?: string; summary?: true; turn?: string; wokeBy?: WokeByDoc[]; buttons?: MessageButton[]; at: string; pagedAt?: number };
+// A reply button as a message row carries it (API 58): enough to draw it
+// and say where it goes, never its brief or message, which stay on the Mac.
+// target: the new thread's folder name, or the title of the thread it messages.
+export type MessageButton = { id: string; title: string; kind: 'start' | 'send'; target?: string; pressedThreadId?: string; failed?: string };
+
+// The button ids an assistant message links, as [title](button:<id>).
+export function linkedButtonIds(text: string): string[] {
+  const ids = new Set<string>();
+  for (const m of text.matchAll(/\]\(button:([a-z0-9]{8})\)/g)) ids.add(m[1]!);
+  return [...ids];
+}
+
+export function messageButton(b: ReplyButton): MessageButton {
+  const target = b.start ? path.basename(b.start.cwd) : b.send?.threadTitle;
+  return {
+    id: b.id,
+    title: b.title,
+    kind: b.start ? 'start' : 'send',
+    ...(target ? { target } : {}),
+    ...(b.pressed ? { pressedThreadId: b.pressed.threadId } : {}),
+    ...(b.failed && !b.pressed ? { failed: b.failed.error } : {}),
+  };
+}
 
 // What woke each turn the CLI started itself (turn.started's wokeBy), held
 // until that turn's first message row takes it. Rows are what the phone
@@ -417,6 +445,10 @@ export type RunnerStatsRow = {
   os?: string;
 };
 const STATS_WATCH_EVERY_MS = 20_000;
+// Rows remembered for the buttons they link, and how far back a press looks
+// for one it doesn't remember (a thread keeps its last 200 buttons).
+const BUTTON_ROWS = 500;
+const BUTTON_SCAN_EVENTS = 5000;
 
 export type Post = (kind: 'mutation' | 'query', fn: string, args: Record<string, unknown>) => Promise<unknown>;
 
@@ -452,6 +484,9 @@ type Host = {
   listProjects?: () => Project[];
   listSchedules?: () => Schedule[];
   listAccounts?: () => Account[];
+  // The thread's reply buttons (buttons.list); absent in small tests, and
+  // then no row carries any.
+  buttons?: (threadId: string) => ReplyButton[];
 };
 
 // What the phone's commands are applied through: the runner's own
@@ -474,6 +509,8 @@ export type CommandHost = {
   quickAsk(p: { question: string; answer: string; sources?: { title: string; url: string }[]; askedAt?: number }): { thread: ThreadSummary };
   // The website's Pause, Resume and Run now (API 45). Absent in small tests.
   schedule?: (p: { scheduleId: string; action: 'pause' | 'resume' | 'run' }) => unknown;
+  // A reply button's press from the phone or website (API 58), buttons.press.
+  pressButton?: (threadId: string, buttonId: string) => unknown;
 };
 
 export type SyncDeps = {
@@ -1043,6 +1080,9 @@ export class ConvexSync {
   private seeded = false;
   private messages: MessageDoc[] = [];
   private woke = new WokeRows();
+  // "<threadId> <buttonId>" -> the row that links it, as last sent, so a press
+  // sends that row again with the new state (onButton). Newest kept.
+  private buttonRows = new Map<string, MessageDoc>();
   private pending = new Map<string, PendingApproval>(); // threadId -> what it waits on
   private earliest = new Map<string, number | null>(); // threadId -> seq of its first text message (null: none yet)
   private nexts = new Map<string, { lastSeq: number; next?: string[] }>(); // threadId -> its done card's next steps, as of lastSeq
@@ -1727,6 +1767,7 @@ export class ConvexSync {
         this.pending.delete(id);
         this.earliest.delete(id);
         this.nexts.delete(id);
+        for (const k of [...this.buttonRows.keys()]) if (k.startsWith(`${id} `)) this.buttonRows.delete(k);
         this.replyDue.delete(id);
         this.replyUp.delete(id);
         this.pendingReplyImages = this.pendingReplyImages.filter((i) => i.threadId !== id);
@@ -1806,6 +1847,10 @@ export class ConvexSync {
         this.secretCalls.delete(key);
         this.scrubber.known.lookSoon(dir);
       }
+    }
+    if (e.type === 'button.updated') {
+      this.onButton(threadId, e.button);
+      return;
     }
     const m = toMessageDoc(threadId, e, this.scrubber.safeText);
     if (m) {
@@ -2590,6 +2635,75 @@ export class ConvexSync {
     return out;
   }
 
+  // An assistant row with the buttons its text links, in the order it links
+  // them. An id the thread has no button for is left off: the apps draw that
+  // link as its title.
+  private withButtons(m: MessageDoc): MessageDoc {
+    if (m.role !== 'assistant' || !this.deps.runner.buttons || !m.text.includes('](button:')) return m;
+    const ids = linkedButtonIds(m.text);
+    if (!ids.length) return m;
+    let all: ReplyButton[];
+    try {
+      all = this.deps.runner.buttons(m.threadId);
+    } catch {
+      return m;
+    }
+    const buttons = ids.map((id) => all.find((b) => b.id === id)).filter((b): b is ReplyButton => Boolean(b)).map(messageButton);
+    const { buttons: _old, wokeBy: _w, pagedAt: _p, ...plain } = m;
+    for (const b of buttons) this.rememberButtonRow(`${m.threadId} ${b.id}`, plain);
+    return buttons.length ? { ...m, buttons } : m;
+  }
+
+  private rememberButtonRow(k: string, m: MessageDoc): void {
+    this.buttonRows.delete(k);
+    this.buttonRows.set(k, m);
+    while (this.buttonRows.size > BUTTON_ROWS) this.buttonRows.delete(this.buttonRows.keys().next().value!);
+  }
+
+  // A button pressed (or failed): the row that links it goes up again with
+  // its new state. Made, it has nothing to change, as the reply that links it
+  // comes after. A row from before this start is looked for in the thread's
+  // recent events, as a daily brief's buttons are pressed hours later.
+  private onButton(threadId: string, b: ReplyButton): void {
+    if (!b.pressed && !b.failed) return;
+    if ((this.backendApiVersion ?? 0) < BUTTONS_API_VERSION) return;
+    const k = `${threadId} ${b.id}`;
+    let row = this.buttonRows.get(k);
+    if (!row) {
+      row = this.findButtonRow(threadId, b.id);
+      if (!row) return;
+    }
+    this.messages.push(row);
+    this.scheduleFlush();
+  }
+
+  private findButtonRow(threadId: string, buttonId: string): MessageDoc | undefined {
+    const link = `](button:${buttonId})`;
+    let before: number | undefined;
+    let read = 0;
+    const cuts = this.deps.runner.cuts?.(threadId) ?? [];
+    while (read < BUTTON_SCAN_EVENTS) {
+      let events: PersistedEvent[];
+      try {
+        events = this.deps.runner.events(threadId, { ...(before !== undefined ? { beforeSeq: before } : {}), limit: 500 }).events;
+      } catch {
+        return undefined;
+      }
+      if (!events.length) return undefined;
+      for (let i = events.length - 1; i >= 0; i--) {
+        const e = events[i]!;
+        if (e.type !== 'assistant.text' || !e.text.includes(link) || cuts.some((c) => e.seq >= c.from && e.seq <= c.to)) continue;
+        return toMessageDoc(threadId, e, this.scrubber.safeText);
+      }
+      read += events.length;
+      const first = events[0]!.seq;
+      if (before !== undefined && first >= before) return undefined;
+      before = first;
+      if (first <= 1) return undefined;
+    }
+    return undefined;
+  }
+
   // The threads with a message left out, so their history isn't counted as up.
   private async appendMessages(all: MessageDoc[]): Promise<Set<string>> {
     const notFilled = new Set<string>();
@@ -2601,6 +2715,9 @@ export class ConvexSync {
     if (v === undefined || v < ASKS_API_VERSION) messages = messages.map((m) => (m.summary ? (({ summary, ...rest }) => rest)(m) : m));
     if (v === undefined || v < TURNS_API_VERSION) messages = messages.map((m) => (m.turn ? (({ turn, ...rest }) => rest)(m) : m));
     if (v === undefined || v < WOKE_BY_API_VERSION) messages = messages.map((m) => (m.wokeBy ? (({ wokeBy, ...rest }) => rest)(m) : m));
+    // The buttons' state as it is now, not when the row was made: a press
+    // while the row waited would otherwise go up stale.
+    if (v !== undefined && v >= BUTTONS_API_VERSION) messages = messages.map((m) => this.withButtons(m));
     for (let i = 0; i < messages.length; i += MESSAGE_BATCH) {
       const batch = messages.slice(i, i + MESSAGE_BATCH);
       const left = await this.writeRows('sync:appendMessages', 'messages', batch, (m) => `${m.threadId}:${m.seq}`, { key: this.deps.key });
@@ -3326,6 +3443,17 @@ export class ConvexSync {
           .map((m) => ({ ...m, pagedAt: now }));
         await this.appendMessages(page);
         return undefined;
+      }
+      case 'press': {
+        // A reply button (API 58). Pressing twice is harmless: a pressed
+        // button comes back as it is (buttons.ts pressButton).
+        if (!host.pressButton) throw new Error("This runner can't press a button from the phone.");
+        if (typeof a.buttonId !== 'string' || !/^[a-z0-9]{8}$/.test(a.buttonId)) throw new Error('no button');
+        const r = (await host.pressButton(needThread(), a.buttonId)) as { button?: ReplyButton } | undefined;
+        // The thread it started or messaged, so the phone can open it once
+        // the press is done (its row goes up first, as a create's does).
+        const pressed = r?.button?.pressed?.threadId;
+        return pressed ? { threadId: pressed } : undefined;
       }
       case 'schedule': {
         if (!host.schedule) throw new Error('this runner can\'t change schedules');

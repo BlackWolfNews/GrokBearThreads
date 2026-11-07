@@ -19,6 +19,19 @@ export const shareField = v.object({
 
 // The phone's view of a thread, named as in docs/protocol.md's
 // ThreadSummary. Written on change, coalesced, never per token.
+// A reply button as a message row carries it (API 58, docs/protocol.md
+// "Reply buttons"): what the phone and website need to draw it, never the
+// brief or message behind it, which stay on the runner. target is the new
+// thread's folder name or the title of the thread it messages.
+export const messageButton = v.object({
+  id: v.string(),
+  title: v.string(),
+  kind: v.union(v.literal('start'), v.literal('send')),
+  target: v.optional(v.string()),
+  pressedThreadId: v.optional(v.string()),
+  failed: v.optional(v.string()),
+});
+
 export const threadFields = {
   threadId: v.string(),
   runnerId: v.string(),
@@ -360,6 +373,7 @@ export default defineSchema({
     summary: v.optional(v.boolean()), // end_turn's bullets, the turn's reply (since API 14)
     turn: v.optional(v.string()), // the start of its turn's id (since API 26)
     wokeBy: v.optional(v.array(v.object({ kind: v.string(), description: v.string() }))), // what finished and woke this turn, on its first row (since API 33)
+    buttons: v.optional(v.array(messageButton)), // the reply buttons its text links, as they are now (since API 58)
     at: v.string(),
     pagedAt: v.optional(v.number()),
     // The runner key's runner that wrote it, so past its message budget its
@@ -378,7 +392,7 @@ export default defineSchema({
     runnerId: v.string(), // or "any"
     threadId: v.optional(v.string()),
     // interrupt and call (API 44) come only from the main Mac's runner (relay.ts queueCommand).
-    kind: v.union(v.literal('send'), v.literal('respond'), v.literal('update'), v.literal('create'), v.literal('page'), v.literal('share'), v.literal('quickAsk'), v.literal('interrupt'), v.literal('call'), v.literal('schedule'), v.literal('picture')),
+    kind: v.union(v.literal('send'), v.literal('respond'), v.literal('update'), v.literal('create'), v.literal('page'), v.literal('share'), v.literal('quickAsk'), v.literal('interrupt'), v.literal('call'), v.literal('schedule'), v.literal('picture'), v.literal('press')),
     args: v.any(),
     state: v.union(v.literal('pending'), v.literal('taken'), v.literal('done'), v.literal('failed')),
     note: v.optional(v.string()),

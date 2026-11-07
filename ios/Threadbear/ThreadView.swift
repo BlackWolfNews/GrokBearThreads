@@ -183,6 +183,7 @@ struct ThreadView: View {
             .environment(\.threadPictures, pictures)
             .environment(\.picturesWaitUntilSeen, true)
             .environment(\.threadLink) { url, seq in follow(url, from: seq, in: items) }
+            .environment(\.buttonThreadId, threadId)
             .sheet(item: $workLink) { WorkingSheet(link: $0).environment(\.threadPictures, pictures) }
             .onChange(of: messages.last?.seq) { proxy.scrollTo("bottom", anchor: .bottom) }
             // The first page takes over from phone:thread's newest text
@@ -234,6 +235,13 @@ struct ThreadView: View {
             pushThread(model.inbox.first { $0.threadId.hasPrefix(id) }?.threadId ?? id)
         case .review:
             model.report(TransportError.server("That review opens on the Mac."))
+        case let .button(id):
+            // One partway through a line, drawn as a link (ReplyButtons.trailing
+            // only takes the ones at the end). An id the row doesn't carry is
+            // just its words.
+            let buttons = messages.first { $0.seq == seq }?.buttons ?? []
+            guard let button = buttons.first(where: { $0.id == id }) else { return .discarded }
+            model.tap(button, in: threadId, pushThread: pushThread)
         case let .step(quote):
             guard let hit = ThreadLinks.find(quote: quote, from: seq, in: items) else { return .discarded }
             workLink = hit
@@ -675,7 +683,7 @@ struct MessageView: View {
             .padding(.leading, 40)
         case .assistant:
             VStack(alignment: .leading, spacing: 8) {
-                MarkdownText(message.text, seq: message.seq)
+                MarkdownText(message.text, seq: message.seq, buttons: message.buttons)
                     .textSelection(.enabled)
                 ForEach(pinned) { PinnedPicture(image: $0) }
             }
@@ -845,17 +853,43 @@ struct MarkdownText: View {
     let blocks: [MarkdownBlock]
     /// The message's seq, which says which upload a picture's address means.
     var seq: Int?
+    /// The reply buttons the message links (backend API 58). Nil: its button
+    /// links are just their titles.
+    var buttons: [MessageButton]?
     @Environment(\.threadPictures) private var pictures
     @Environment(\.threadLink) private var threadLink
 
-    init(_ text: String, seq: Int? = nil) {
+    init(_ text: String, seq: Int? = nil, buttons: [MessageButton]? = nil) {
         blocks = MarkdownBlock.parse(text)
         self.seq = seq
+        self.buttons = buttons
     }
 
-    init(blocks: [MarkdownBlock], seq: Int? = nil) {
+    init(blocks: [MarkdownBlock], seq: Int? = nil, buttons: [MessageButton]? = nil) {
         self.blocks = blocks
         self.seq = seq
+        self.buttons = buttons
+    }
+
+    /// A line's words, then the buttons it ends with as real buttons. A
+    /// button link whose id the row doesn't carry is its title, as text.
+    @ViewBuilder private func line(_ written: String) -> some View {
+        let text = ReplyButtons.unlinking(written, except: Set((buttons ?? []).map(\.id)))
+        let split = ReplyButtons.trailing(in: text)
+        if split.links.isEmpty {
+            Text(Self.inline(text))
+        } else {
+            VStack(alignment: .leading, spacing: 6) {
+                if !split.text.isEmpty { Text(Self.inline(split.text)) }
+                FlowLayout(spacing: 6) {
+                    ForEach(split.links, id: \.id) { link in
+                        if let button = buttons?.first(where: { $0.id == link.id }) {
+                            ReplyButtonPill(button: button)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     var body: some View {
@@ -870,7 +904,7 @@ struct MarkdownText: View {
     @ViewBuilder private func view(for block: MarkdownBlock) -> some View {
         switch block {
         case let .paragraph(text):
-            Text(Self.inline(text))
+            line(text)
         case let .heading(level, text):
             Text(Self.inline(text)).font(level <= 2 ? .headline : .subheadline.weight(.semibold))
         case let .listItem(text, marker, depth, task):
@@ -880,7 +914,7 @@ struct MarkdownText: View {
                 } else {
                     Text(marker).foregroundStyle(.secondary).monospacedDigit()
                 }
-                Text(Self.inline(text))
+                line(text)
             }
             .padding(.leading, CGFloat(depth) * 18)
         case let .code(text):
@@ -894,7 +928,7 @@ struct MarkdownText: View {
         case let .draft(draft):
             DraftBlockView(draft: draft)
         case let .quote(inner):
-            MarkdownText(blocks: inner, seq: seq)
+            MarkdownText(blocks: inner, seq: seq, buttons: buttons)
                 .foregroundStyle(.secondary)
                 .padding(.leading, 12)
                 .overlay(alignment: .leading) {
@@ -990,6 +1024,8 @@ extension EnvironmentValues {
     @Entry var litStep: Int?
     /// Opens a thread on top of this one, so Back comes back here.
     @Entry var pushThread: @MainActor (String) -> Void = { _ in }
+    /// The open thread, whose reply buttons a tap presses. Nil outside one.
+    @Entry var buttonThreadId: String?
 }
 
 extension ThreadLinks.Hit: Identifiable {

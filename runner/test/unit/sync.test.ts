@@ -336,7 +336,7 @@ test('the poster speaks the deployment HTTP API and reports its errors', async (
 
 // ------------------------------------------------------------ step 2 and 3
 
-import { MESSAGE_CHARS, toMessageDoc, toolLine, inputSummary, WokeRows, WOKE_BY_API_VERSION, type Command, type MessageDoc } from '../../src/sync.ts';
+import { BUTTONS_API_VERSION, MESSAGE_CHARS, toMessageDoc, toolLine, inputSummary, WokeRows, WOKE_BY_API_VERSION, type Command, type MessageDoc } from '../../src/sync.ts';
 
 type Fake = { h: ReturnType<typeof makeHarness>; sync: ConvexSync; calls: Call[]; push: (value: unknown) => void; applied: string[]; landed: Call[] };
 
@@ -395,8 +395,13 @@ function setupFull(opts: { heads?: { threadId: string; lastSeq: number }[]; take
       listProjects: () => [{ id: 'p1', title: 'Threadbear', folders: ['/w'], goals: 'g', state: 's', notes: 'n', links: [], createdBy: 'mike', createdAt: '2026-10-27T00:00:00.000Z', updatedAt: '2026-10-27T00:00:00.000Z', threadCount: 1 }],
       listSchedules: () => [{ id: 's1', title: 'Nightly', text: 'go', cron: '0 3 * * *', whenText: 'every day at 3 am', paused: false, createdAt: '2026-10-27T00:00:00.000Z', updatedAt: '2026-10-27T00:00:00.000Z', runs: 2, lastRun: { at: '2026-10-27T03:00:00.000Z', outcome: 'sent', threadId: 't9' } }],
       listAccounts: () => [{ id: 'claude-3', provider: 'claude', title: 'three@example.com', configDir: '/tmp/three', models: [{ id: 'x', title: 'X' }] as never, usage: { windows: [{ kind: 'five_hour', title: '5-hour', remainingPercent: 80.5 }], readAt: '2026-10-27T00:00:00.000Z', source: 'live' } }],
+      buttons: (id) => h.runner.listButtons(id).buttons,
     },
     commands: {
+      pressButton: (id, buttonId) => {
+        applied.push(`press ${id} ${buttonId}`);
+        return h.runner.pressButton(id, buttonId);
+      },
       schedule: (p) => {
         applied.push(`schedule ${p.scheduleId} ${p.action}`);
       },
@@ -2578,4 +2583,84 @@ test('asking another runner: a deny from anywhere declines it, and no answer in 
   const second = h.runner.requestCard(t.id, { approvalId: 'req-b', title: 'Start?', input: {}, minutes: 60, check: never });
   h.clock.advance(60 * 60_000);
   assert.equal((await second).status, 'expired');
+});
+
+// docs/protocol.md, "Reply buttons": the phone and website draw a reply's
+// buttons from its row, so the row carries their state and goes up again
+// when one is pressed, here or from the phone.
+test('reply buttons: a row carries the buttons it links, is sent again when one is pressed, and a press command presses it once', async () => {
+  const { h, sync, calls, push, applied } = setupFull({ apiVersion: BUTTONS_API_VERSION });
+  sync.start();
+  await sync.flushNow();
+  const t = h.runner.create({ text: 'Daily brief', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  const s = session(h, t.id);
+  s.init();
+  const folder = path.join(h.cfg.home, 'pebble');
+  fs.mkdirSync(folder, { recursive: true });
+  const start = h.runner.createButton(t.id, { title: 'Fill in the form', start: { text: 'Fill in the Pebble form', cwd: folder } }).button;
+  const other = h.runner.create({ text: 'Meetup', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  const send = h.runner.createButton(t.id, { title: 'Ask it', send: { threadId: other.id, text: 'Post it' } }).button;
+  s.text('i1', `Needs attention:\n- Pebble [Fill in the form](button:${start.id})\n- Meetup [Ask it](button:${send.id}) and [gone](button:zzzzzzzz)`);
+  s.result('completed');
+  h.clock.advance(SYNC_COALESCE_MS);
+  await tick();
+  const reply = () => messagesSent(calls).filter((m) => m.threadId === t.id && m.role === 'assistant');
+  assert.equal(reply().length, 1);
+  assert.deepEqual(reply()[0]!.buttons, [
+    { id: start.id, title: 'Fill in the form', kind: 'start', target: 'pebble' },
+    { id: send.id, title: 'Ask it', kind: 'send', target: h.runner.get(other.id).title },
+  ]);
+  // Pressed from the phone: once, however many times the command list comes round.
+  const cmd: Command = { commandId: 'p1', kind: 'press', threadId: t.id, args: { buttonId: start.id }, createdAt: 1 };
+  push([cmd]);
+  await tick(10);
+  push([cmd]);
+  await tick(10);
+  assert.deepEqual(applied.filter((a) => a.startsWith('press')), [`press ${t.id} ${start.id}`]);
+  const pressed = h.runner.listButtons(t.id).buttons.find((b) => b.id === start.id)!.pressed!;
+  h.clock.advance(SYNC_COALESCE_MS);
+  await tick();
+  assert.equal(reply().length, 2, 'the row went up again');
+  assert.equal(reply()[1]!.seq, reply()[0]!.seq);
+  assert.equal(reply()[1]!.buttons![0]!.pressedThreadId, pressed.threadId);
+  assert.equal(reply()[1]!.wokeBy, undefined);
+  const p1 = calls.find((c) => c.fn === 'sync:finishCommand' && c.args.commandId === 'p1')!;
+  assert.equal(p1.args.resultThreadId, pressed.threadId, 'the phone can open what it started');
+  // A bad id fails with a note rather than reaching the runner.
+  push([{ commandId: 'p2', kind: 'press', threadId: t.id, args: { buttonId: '../x' }, createdAt: 2 }]);
+  await tick(10);
+  const p2 = calls.find((c) => c.fn === 'sync:finishCommand' && c.args.commandId === 'p2')!;
+  assert.equal(p2.args.ok, false);
+  await sync.stop();
+});
+
+test('reply buttons: a press after a restart finds the row that links it; an older backend gets no buttons', async () => {
+  for (const [backend, sent] of [[BUTTONS_API_VERSION - 1, false], [BUTTONS_API_VERSION, true]] as const) {
+    const { h, sync, calls } = setupFull({ apiVersion: backend });
+    const t = h.runner.create({ text: 'Daily brief', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+    const s = session(h, t.id);
+    s.init();
+    const b = h.runner.createButton(t.id, { title: 'Go', start: { text: 'Do it', cwd: h.cfg.defaults.cwd } }).button;
+    s.text('i1', `Here: [Go](button:${b.id})`);
+    s.result('completed');
+    sync.start();
+    await sync.flushNow();
+    h.clock.advance(SYNC_COALESCE_MS);
+    await tick();
+    const before = messagesSent(calls).filter((m) => m.role === 'assistant' && m.threadId === t.id).length;
+    // Forget what this start remembered, as a restart would.
+    (sync as never as { buttonRows: Map<string, unknown> }).buttonRows.clear();
+    h.runner.pressButton(t.id, b.id);
+    h.clock.advance(SYNC_COALESCE_MS);
+    await tick();
+    const rows = messagesSent(calls).filter((m) => m.role === 'assistant' && m.threadId === t.id);
+    if (sent) {
+      assert.equal(rows.length, before + 1);
+      assert.ok(rows.at(-1)!.buttons?.[0]?.pressedThreadId);
+    } else {
+      assert.equal(rows.length, before);
+      assert.ok(rows.every((r) => !('buttons' in r)));
+    }
+    await sync.stop();
+  }
 });

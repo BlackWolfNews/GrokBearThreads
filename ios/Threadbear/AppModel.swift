@@ -805,6 +805,47 @@ final class AppModel {
         }
     }
 
+    /// Reply buttons pressed from this phone, by "<threadId> <buttonId>",
+    /// until the row says so itself: on the way (`status` nil) or the
+    /// command's state. A row outside the live tail may never catch up.
+    private(set) var presses: [String: CommandStatus?] = [:]
+
+    func pressLook(_ button: MessageButton, in threadId: String) -> ReplyButtons.Look {
+        let press = presses["\(threadId) \(button.id)"]
+        return ReplyButtons.look(button, status: press ?? nil, asking: press != nil && (press ?? nil) == nil)
+    }
+
+    /// A tap on a reply button: presses it once (a second tap while it's
+    /// on its way does nothing), or once pressed, opens the thread it
+    /// started or messaged if this phone has a row for it.
+    func tap(_ button: MessageButton, in threadId: String, pushThread: @MainActor (String) -> Void) {
+        switch pressLook(button, in: threadId) {
+        case .pressing:
+            return
+        case let .pressed(id):
+            guard let id else { return }
+            if (inbox + hibernating + den).contains(where: { $0.threadId == id }) { pushThread(id) } else { report(TransportError.server("That thread isn't on this phone yet.")) }
+            return
+        case .ready, .failed:
+            break
+        }
+        guard let backend else { return }
+        let key = "\(threadId) \(button.id)"
+        presses[key] = .some(nil)
+        Task {
+            do {
+                let command = try await backend.press(threadId: threadId, buttonId: button.id)
+                for try await status in backend.command(command) {
+                    guard let status, status.state == .done || status.state == .failed else { continue }
+                    presses[key] = status
+                    return
+                }
+            } catch {
+                presses[key] = CommandStatus(state: .failed, note: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+            }
+        }
+    }
+
     func clearError() { lastError = nil }
 
     func report(_ error: Error) {

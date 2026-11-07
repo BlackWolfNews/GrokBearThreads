@@ -4,11 +4,13 @@ import Foundation
 /// the thread"), as the Mac's WorkLinks reads them: `work:<words>` quotes a
 /// step in the turn's working, `thread:<id>` is another thread and
 /// `review:<id>` a design review, which only the Mac can open.
+/// `button:<id>` is a reply button (ReplyButtons.swift).
 public enum ThreadLinks {
     public enum Target: Equatable, Sendable {
         case step(quote: String)
         case thread(String)
         case review
+        case button(String)
     }
 
     /// What a work: link opens: its turn's working, and the step if it was
@@ -56,6 +58,7 @@ public enum ThreadLinks {
         case "work": return words.isEmpty ? nil : .step(quote: words)
         case "thread": return words.isEmpty ? nil : .thread(words)
         case "review": return .review
+        case "button": return words.isEmpty ? nil : .button(words)
         default: return nil
         }
     }

@@ -849,12 +849,23 @@ access can't make a button for more than it has: a new thread's
 message to a thread with more access is refused (send_message, which
 asks first, is for that). A thread keeps its last 200 buttons.
 
-On the phone and the website (Sync), pressing queues a `press` command
-with `{ buttonId }` for the thread's runner, which calls `buttons.press`.
-Each mirrored message carries the state of the buttons its text links
-(`buttons?: { id, title, kind: "start" | "send", target?: string,
-pressedThreadId?: string, failed?: string }[]`), so a pressed button
-shows as pressed there too.
+On the phone and the website (Sync, backend API 58), pressing calls
+`phone:press({ threadId, buttonId })`, which queues a `press` command with
+`{ buttonId }` for the thread's runner; the runner calls `buttons.press`
+and finishes the command with the thread it started or messaged as
+`resultThreadId`, so `phone:command` hands the phone its id to open.
+Each mirrored assistant message carries the state of the buttons its text
+links, in the order it links them (`buttons?: { id, title, kind: "start" |
+"send", target?: string, pressedThreadId?: string, failed?: string }[]`;
+`target` is the new thread's folder name or the messaged thread's title,
+and never the brief or message itself). A `button.updated` that presses or
+fails a button sends the row that links it again (found among the thread's
+recent events after a restart), and the backend changes only its
+`buttons`. A link whose id the row doesn't carry is drawn as its title. A
+shared page draws every button link as its title: whoever it's shared
+with can't press Mike's buttons, and the share query doesn't return
+`buttons`. The phone draws the buttons a line ends with as real buttons
+after its words, and one partway through a line as a link that presses it.
 
 Every persisted event has an envelope:
 
