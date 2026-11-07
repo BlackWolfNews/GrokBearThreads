@@ -345,7 +345,7 @@ show_build_errors() {
 build_binary() {
   mkdir -p "$BUILD_LOGS"
   local log="$BUILD_LOGS/$1.log"
-  if ! swift build --package-path "$APP_ROOT" --product Threadbear >"$log" 2>&1; then
+  if ! swift build --disable-keychain --package-path "$APP_ROOT" --product Threadbear >"$log" 2>&1; then
     show_build_errors "$log"
     return 1
   fi

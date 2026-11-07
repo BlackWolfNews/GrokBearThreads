@@ -232,11 +232,11 @@ if [ "$QUICK" = 0 ]; then
   if [ ! -d "$ROOT/app/Tools/mock-runner/node_modules" ]; then
     step "mock runner packages" "$ROOT/app/Tools/mock-runner" npm ci --no-audit --no-fund
   fi
-  step "app build" "$ROOT/app" swift build
-  step "app tests" "$ROOT/app" env THREADBEAR_REQUIRE_MOCK=1 swift test
+  step "app build" "$ROOT/app" swift build --disable-keychain
+  step "app tests" "$ROOT/app" env THREADBEAR_REQUIRE_MOCK=1 swift test --disable-keychain
   # BearDock, the window's docking panels: its layout tests.
   if needed '^dock/'; then
-    step "dock tests" "$ROOT/dock" swift test
+    step "dock tests" "$ROOT/dock" swift test --disable-keychain
   else
     skip "dock tests" "nothing in dock/ changed"
   fi
@@ -244,7 +244,7 @@ fi
 # The iPhone app's logic and source checks (ios/ThreadbearKit), on the Mac.
 # The app itself only builds with Xcode; ios/scripts/sim-shots.sh does that.
 if needed '^ios/'; then
-  step "iphone kit tests" "$ROOT/ios/ThreadbearKit" swift test
+  step "iphone kit tests" "$ROOT/ios/ThreadbearKit" swift test --disable-keychain
 else
   skip "iphone kit tests" "nothing in ios/ changed"
 fi
