@@ -132,6 +132,8 @@ class RowCellView: NSTableCellView {
         super.prepareForReuse()
         pointer = nil
         updateHover()
+        // A recycled cell mustn't carry a lift on to some other row.
+        layer?.removeAnimation(forKey: SendLift.key)
     }
 
     #if DEBUG

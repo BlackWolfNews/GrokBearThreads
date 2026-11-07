@@ -955,6 +955,7 @@ private struct SendButton: View {
     var stopping = false
     let onSend: () -> Void
     let onStop: () -> Void
+    @Environment(\.sendNudges) private var nudges
 
     static var size: CGFloat { zoomed(28) }
 
@@ -991,6 +992,14 @@ private struct SendButton: View {
         } else {
             Button(action: onSend) {
                 Image(systemName: "arrow.up").font(.system(size: zoomed(13), weight: .semibold))
+                    // Up 3 pt and back as Return lands: the first half of
+                    // the message leaving (`SendLift`).
+                    .keyframeAnimator(initialValue: CGFloat(0), trigger: Juice.reduceMotion ? 0 : nudges) { arrow, y in
+                        arrow.offset(y: y)
+                    } keyframes: { _ in
+                        CubicKeyframe(-zoomed(3), duration: 0.05)
+                        CubicKeyframe(0, duration: 0.07)
+                    }
             }
             .buttonStyle(CircleButtonStyle(filled: canSend))
             .disabled(!canSend)
