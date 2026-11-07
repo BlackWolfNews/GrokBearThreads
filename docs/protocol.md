@@ -1106,9 +1106,22 @@ type RunnerUpdates = {
 A copy of Threadbear that's someone's fork follows Mike's releases
 (`runner/src/upstream.ts`, docs/setup-and-updates.md section 2.3). Every six
 hours, and a couple of minutes after the release is marked good, the runner
-fetches `upstream`'s `release/*` tags into `refs/threadbear/upstream-incoming/*`
-in its checkout, unchecked. Each one that verifies is copied to
-`refs/threadbear/upstream/*`, and the newest there is the release. Verified
+lists `upstream`'s `release/*` tags (`git ls-remote`) and fetches only a
+few of them: tag objects named for a date no later than two days from now,
+the newest 20 from the newest release already kept on (passing over any it
+already found unsigned) and the newest 9 before it, for their notes. They
+go into a folder of their own under `<home>/runner/upstream-fetch`, never
+the checkout: their objects through git's `GIT_OBJECT_DIRECTORY`, with no
+ref of the checkout's changed. They're read and verified there, and only
+one that verifies is copied into the checkout, as
+`refs/threadbear/upstream/<date>`; the newest there is the release. The
+folder is deleted when the check ends, however it ends, so a tag that
+didn't verify, or a fetch cut short, leaves nothing in the checkout. Every
+git command has a deadline (two minutes, five for one that talks to a
+remote) and is stopped with whatever it started, and the check fails and
+says so. A runner from before 7 Nov 2026 fetched every tag into
+`refs/threadbear/upstream-incoming/*`, unchecked; each check deletes
+anything left there. Verified
 means: the tag object is `object`, `type commit`, `tag <the name it came
 in as>` and `tagger` headers, a message, and exactly one SSH signature
 block at the end, with no other armor at the start of any line; and
