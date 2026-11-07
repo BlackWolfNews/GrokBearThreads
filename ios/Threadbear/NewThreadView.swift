@@ -6,26 +6,38 @@ import ThreadbearKit
 /// and effort can be picked, and the runner picks a login with room for them.
 /// The runner starts on the first one online in Mike's order (Settings), so
 /// the Mac asleep doesn't leave the phone nowhere to start one (6 Nov).
+/// It closes as soon as the backend has the request (7 Nov, Mike: waiting on
+/// the runner's answer left the spinner up for ages); a row in the inbox
+/// stands in for the thread until the runner's made it (AppModel.starting).
 struct NewThreadView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    var onCreated: (String) -> Void
+    /// With the create command's id, as the sheet closes.
+    var onStarted: (String) -> Void
     @State private var text: String
 
-    init(text: String = "", onCreated: @escaping (String) -> Void) {
-        _text = State(initialValue: text)
-        self.onCreated = onCreated
+    init(text: String = "", onStarted: @escaping (String) -> Void) {
+        self.init(draft: NewThreadDraft(text: text, photos: []), onStarted: onStarted)
+    }
+
+    /// A failed start's sheet again, as it was.
+    init(draft: NewThreadDraft, onStarted: @escaping (String) -> Void) {
+        _text = State(initialValue: draft.text)
+        _photos = State(initialValue: draft.photos)
+        _runnerId = State(initialValue: draft.runnerId)
+        _modelId = State(initialValue: draft.modelId)
+        _effort = State(initialValue: draft.effort)
+        self.onStarted = onStarted
     }
     /// Nil until the runners are in, then the first online in Mike's order.
     @State private var runnerId: String?
     @State private var modelId: String?
     @State private var effort: String?
-    @State private var commandId: String?
-    /// From the tap on Start until the command's queued. A separate job from
-    /// waiting on the runner, and without it Start looks dead (and can be
-    /// tapped again, for a second thread) while the photos finish going up.
+    /// From the tap on Start until the command's queued. Without it Start
+    /// looks dead (and can be tapped again, for a second thread) while the
+    /// photos finish going up.
     @State private var starting: Task<Void, Never>?
-    @State private var photos: [PickedPhoto] = []
+    @State private var photos: [PickedPhoto]
     @State private var adding = 0
     @State private var cursor = TextCursor()
     @State private var dictation = Dictation()
@@ -99,7 +111,7 @@ struct NewThreadView: View {
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    if commandId != nil || starting != nil { ProgressView() } else {
+                    if starting != nil { ProgressView() } else {
                         // Not with a photo still on its way, which would be left behind.
                         // Nor with Whisper still to type out what was said.
                         Button("Start", action: start).disabled((words.message.isEmpty && photos.isEmpty) || adding > 0
@@ -108,7 +120,6 @@ struct NewThreadView: View {
                 }
             }
             .onDisappear { dictation.close() }
-            .task(id: "\(commandId ?? ""):\(model.connection)") { await waitForThread() }
             .task {
                 if photos.isEmpty, let load = model.loadSamplePhoto { words.add([load], model: model) }
             }
@@ -155,6 +166,7 @@ struct NewThreadView: View {
         guard let backend = model.backend else { return }
         dictation.stop()
         let message = words.message
+        let typed = text
         let photos = photos
         starting = Task {
             defer { starting = nil }
@@ -165,40 +177,18 @@ struct NewThreadView: View {
                 // Picked now if the sheet never got to (the runners or the
                 // API version came in as Start was tapped).
                 if model.canChooseRunner, runnerId == nil { pickRunner() }
-                commandId = try await backend.create(text: message, runnerId: model.canChooseRunner ? runnerId : nil, cwd: nil, images: images,
-                                                     settings: NewThreadSettings(model: modelId, effort: effort))
+                // Taken once: the pickers can still change while the request goes.
+                let draft = NewThreadDraft(text: typed, photos: photos, runnerId: model.canChooseRunner ? runnerId : nil, modelId: modelId, effort: effort)
+                let commandId = try await backend.create(text: message, runnerId: draft.runnerId, cwd: nil, images: images,
+                                                         settings: NewThreadSettings(model: draft.modelId, effort: draft.effort))
                 model.sent(photos)
+                model.started(commandId: commandId, message: message, draft: draft)
+                onStarted(commandId)
+                dismiss()
             } catch is CancellationError {
             } catch {
                 model.report(error)
             }
-        }
-    }
-
-    /// The thread id arrives once the runner's made it. With the Mac asleep
-    /// that's later, so the sheet closes and the thread turns up in the
-    /// inbox when it starts.
-    private func waitForThread() async {
-        guard let commandId, let backend = model.backend else { return }
-        if offlineText != nil { dismiss(); return }
-        do {
-            for try await status in backend.command(commandId) {
-                if let threadId = status?.threadId {
-                    onCreated(threadId)
-                    dismiss()
-                    return
-                }
-                if status?.state == .failed {
-                    model.report(TransportError.server(status?.note ?? "The runner couldn't start it."))
-                    // The backend deleted the copies with the failed command,
-                    // so trying again needs new ones.
-                    for photo in photos { photo.upload = nil }
-                    self.commandId = nil
-                    return
-                }
-            }
-        } catch {
-            model.report(error)
         }
     }
 }

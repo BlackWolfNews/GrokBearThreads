@@ -243,6 +243,70 @@ final class AppModel {
         for photo in photos { photo.upload?.keep() }
     }
 
+    // MARK: Starting threads
+
+    /// New threads asked for from this phone that their runner hasn't made
+    /// yet, newest first. The sheet closes as soon as the backend has the
+    /// request, and these stand in for them at the top of the inbox: the
+    /// runner reports a new thread only once its row is in Convex, which
+    /// waits behind any sync it's in the middle of, and on 7 Nov the sheet's
+    /// spinner sat there 22 seconds after the M5's runner had restarted.
+    private(set) var starting: [StartingThread] = []
+    private var startingTasks: [String: Task<Void, Never>] = [:]
+    /// A thread that started soon after it was asked for, for the inbox to
+    /// open as the sheet used to. One that took longer (its Mac was asleep)
+    /// just turns up in the list, rather than pulling you out of what you're on.
+    var justStarted: (commandId: String, threadId: String)?
+    /// A failed start's sheet, to open again as it was (AppModel.retryStarting).
+    var retryDraft: NewThreadDraft?
+    /// Only the newest start opens by itself: an earlier one landing while
+    /// you wait on the next mustn't take its place.
+    private var latestStart: String?
+
+    func started(commandId: String, message: String, draft: NewThreadDraft) {
+        starting.insert(StartingThread(id: commandId, message: message, draft: draft, startedAt: .now), at: 0)
+        latestStart = commandId
+        watchStarting(commandId)
+    }
+
+    /// Gone from the list: a failed one dismissed, or tapped to try again.
+    func dropStarting(_ id: String) {
+        startingTasks.removeValue(forKey: id)?.cancel()
+        starting.removeAll { $0.id == id }
+    }
+
+    /// A failed one back in the new thread sheet as it was: words, photos,
+    /// runner, model and effort. The photos go up again, as the backend
+    /// deleted its copies with the failed command.
+    func retryStarting(_ row: StartingThread) {
+        dropStarting(row.id)
+        retryDraft = row.draft
+    }
+
+    private func watchStarting(_ id: String) {
+        guard let backend else { return }
+        startingTasks[id]?.cancel()
+        startingTasks[id] = follow(backend.command(id)) { $0.startingChanged(id, $1) }
+    }
+
+    private func startingChanged(_ id: String, _ status: CommandStatus?) {
+        guard let i = starting.firstIndex(where: { $0.id == id }) else { return }
+        if let threadId = status?.threadId {
+            let row = starting[i]
+            dropStarting(id)
+            if id == latestStart, Date.now.timeIntervalSince(row.startedAt) < 60 { justStarted = (id, threadId) }
+        } else if status?.state == .failed {
+            starting[i].failed = status?.note ?? "The runner couldn't start it."
+            for photo in starting[i].draft.photos { photo.upload = nil }
+            startingTasks.removeValue(forKey: id)?.cancel()
+        } else if status == nil || status?.state == .done {
+            // The command's gone from the backend (pruned long after), or
+            // done without saying which thread: nothing left to wait for,
+            // and the thread, if any, is in the list.
+            dropStarting(id)
+        }
+    }
+
     private var tasks: [Task<Void, Never>] = []
     private(set) var apnsToken: String?
     /// Bumped each time the Convex connection is rebuilt (comingBack), so
@@ -267,7 +331,10 @@ final class AppModel {
             // -ThreadbearRunners: the Mac asleep and two more runners, for the runner picker.
             // -ThreadbearOffline: the Mac's been asleep for hours, so messages wait, and a3 has two waiting.
             let offline = args.contains("-ThreadbearOffline")
-            connect(FakeBackend(runnerOnline: !offline, listDelay: args.contains("-ThreadbearSlowLoad") ? .seconds(6) : .zero, pictures: args.contains("-ThreadbearPictures"), long: args.contains("-ThreadbearLong"), secret: args.contains("-ThreadbearSecret"), diagrams: args.contains("-ThreadbearDiagrams"), runners: args.contains("-ThreadbearRunners"), queued: offline), pairing: nil)
+            let fake = FakeBackend(runnerOnline: !offline, listDelay: args.contains("-ThreadbearSlowLoad") ? .seconds(6) : .zero, pictures: args.contains("-ThreadbearPictures"), long: args.contains("-ThreadbearLong"), secret: args.contains("-ThreadbearSecret"), diagrams: args.contains("-ThreadbearDiagrams"), runners: args.contains("-ThreadbearRunners"), queued: offline)
+            // -ThreadbearSlowStart: a new thread takes a minute to start, so its Starting row stays.
+            if args.contains("-ThreadbearSlowStart") { fake.startDelay = .seconds(60) }
+            connect(fake, pairing: nil)
         } else if let saved = PairingStore.load() {
             connect(ConvexBackend(deploymentURL: saved.deploymentURL, token: saved.token), pairing: saved)
         }
@@ -281,6 +348,14 @@ final class AppModel {
         if let i = args.firstIndex(of: "-ThreadbearOpen"), i + 1 < args.count { openThreadId = args[i + 1] }
         if let i = args.firstIndex(of: "-ThreadbearCompose"), i + 1 < args.count { composeText = args[i + 1] }
         if let i = args.firstIndex(of: "-ThreadbearSearch"), i + 1 < args.count { searchText = args[i + 1] }
+        // `-ThreadbearStart <text>`: start a thread with it, as the sheet's Start does.
+        if let i = args.firstIndex(of: "-ThreadbearStart"), i + 1 < args.count, let backend {
+            let text = args[i + 1]
+            Task {
+                guard let id = try? await backend.create(text: text, runnerId: nil, cwd: nil, images: [], settings: NewThreadSettings(model: nil, effort: nil)) else { return }
+                started(commandId: id, message: text, draft: NewThreadDraft(text: text, photos: []))
+            }
+        }
         if let i = args.firstIndex(of: "-ThreadbearPhoto"), i + 1 < args.count {
             let sample = FileManager.default.contents(atPath: args[i + 1])
             let slow = args.contains("-ThreadbearSlowPhoto")
@@ -509,6 +584,7 @@ final class AppModel {
         pocket = []
         pocketSeenUpTo = UserDefaults.standard.string(forKey: "pocketSeenUpTo")
         backend = nil
+        starting = []
         isFake = false
         runners = []
         projects = [:]
@@ -553,6 +629,7 @@ final class AppModel {
         pinnedThreads = []
         stop()
         backend = nil
+        starting = []
         pairing = nil
         authProblem = nil
         backendProblem = nil
@@ -633,12 +710,16 @@ final class AppModel {
                 })
             }
         })
+        for row in starting where row.failed == nil { watchStarting(row.id) }
         if registerPush, let apnsToken { register(apnsToken) }
     }
 
     private func stop() {
         tasks.forEach { $0.cancel() }
         tasks = []
+        // Followed again on the new connection (connect), unless it's unpairing.
+        startingTasks.values.forEach { $0.cancel() }
+        startingTasks = [:]
         listTasks.values.forEach { $0.cancel() }
         listTasks = [:]
     }
@@ -791,4 +872,27 @@ enum Keychain {
         ]
         SecItemDelete(query as CFDictionary)
     }
+}
+
+/// A new thread on its way (AppModel.starting): what was asked, until the
+/// runner has made it, or why it couldn't.
+struct StartingThread: Identifiable {
+    /// The create command's id.
+    let id: String
+    /// What went to the runner, photos as "Picture 1" chips' text.
+    let message: String
+    /// The sheet as it was, for trying again if it fails.
+    let draft: NewThreadDraft
+    let startedAt: Date
+    var failed: String?
+}
+
+/// What the new thread sheet had in it when Start was tapped.
+struct NewThreadDraft {
+    var text: String
+    var photos: [PickedPhoto]
+    /// Nil when the backend picks (only one runner).
+    var runnerId: String?
+    var modelId: String?
+    var effort: String?
 }

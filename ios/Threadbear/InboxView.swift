@@ -35,8 +35,14 @@ struct InboxView: View {
     /// Settings pushed at launch (`-ThreadbearSettings`, for screenshots).
     @State private var settingsOpen = false
     @State private var afterPocket: PocketView.Next?
-    /// The thread a new thread sheet just made, to open once the sheet has gone.
+    /// A thread started from the sheet that's ready before the sheet's gone,
+    /// to open once it has.
     @State private var afterCompose: String?
+    /// The start the sheet closed with, until it's slid away: only that one's
+    /// thread waits to open, not one asked for earlier landing meanwhile.
+    @State private var closingFor: String?
+    /// A failed start, back in the sheet as it was.
+    @State private var composeDraft: NewThreadDraft?
 
     private var pocketValue: String {
         let count = model.pocket.count
@@ -62,6 +68,9 @@ struct InboxView: View {
                     } footer: {
                         Text("Anything you send waits until it's back.")
                     }
+                }
+                if query.trimmingCharacters(in: .whitespaces).isEmpty, !model.starting.isEmpty {
+                    Section { ForEach(model.starting) { startingRow($0) } }
                 }
                 let sections = model.sections
                 if !query.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -172,10 +181,31 @@ struct InboxView: View {
                 // Only once the sheet has gone, as with the Pocket's cover. Pushed while
                 // it was still sliding away with the keyboard, the thread could open
                 // blank on the phone until you went back and in again.
-                if let id = afterCompose { path.append(id) }
+                composeDraft = nil
+                closingFor = nil
+                if let id = afterCompose, path.isEmpty { path.append(id) }
                 afterCompose = nil
             }) {
-                NewThreadView(text: composeText) { afterCompose = $0 }
+                if let composeDraft {
+                    NewThreadView(draft: composeDraft) { closingFor = $0 }
+                } else {
+                    NewThreadView(text: composeText) { closingFor = $0 }
+                }
+            }
+            // A thread that started soon after Start opens, as the sheet
+            // used to wait to do, unless you've gone into another or are
+            // writing the next one meanwhile.
+            .onChange(of: model.justStarted?.threadId) {
+                guard let started = model.justStarted else { return }
+                model.justStarted = nil
+                if started.commandId == closingFor { afterCompose = started.threadId }
+                else if !composing, path.isEmpty { path.append(started.threadId) }
+            }
+            .onChange(of: model.retryDraft != nil) {
+                guard let draft = model.retryDraft else { return }
+                model.retryDraft = nil
+                composeDraft = draft
+                composing = true
             }
             .onChange(of: model.composeText, initial: true) { _, text in
                 guard let text else { return }
@@ -295,6 +325,21 @@ struct InboxView: View {
         }
     }
 
+    /// A new thread the runner hasn't made yet. A failed one opens the sheet
+    /// again with what was typed, or swipes away.
+    private func startingRow(_ row: StartingThread) -> some View {
+        Button { if row.failed != nil { model.retryStarting(row) } } label: { StartingRow(row: row) }
+            .buttonStyle(.plain)
+            .disabled(row.failed == nil)
+            .listRowInsets(ThreadRow.insets)
+            .listRowSeparator(.hidden)
+            .swipeActions(edge: .trailing) {
+                if row.failed != nil {
+                    Button(role: .destructive) { model.dropStarting(row.id) } label: { Label("Remove", systemImage: "xmark") }
+                }
+            }
+    }
+
     private func rows(_ threads: [PhoneThread], running: Bool = false, starred: Bool = false) -> some View {
         ForEach(threads) { row($0, running: running, starred: starred) }
     }
@@ -387,6 +432,63 @@ private struct BringBackSwipe: ViewModifier {
 /// the title across the width, and under it where the thread belongs and
 /// what it's doing, with the unread dot (or the done tick) in the gutter
 /// left of the tile.
+/// A thread row's look for a new thread on its way: what was asked, and
+/// "Starting" with a spinner where a working row's time goes, until the
+/// runner has made it and its own row takes over.
+private struct StartingRow: View {
+    @Environment(AppModel.self) private var model
+    var row: StartingThread
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            ProjectTiles(projects: [])
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.body)
+                    .foregroundStyle(row.failed == nil ? .secondary : .primary)
+                    .lineLimit(1)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(line2).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                    Spacer(minLength: 6)
+                    if row.failed != nil {
+                        Text("Failed").font(.footnote.weight(.medium)).foregroundStyle(Look.failed)
+                    } else {
+                        HStack(alignment: .firstTextBaseline, spacing: 5) {
+                            ProgressView()
+                                .controlSize(.mini)
+                                .tint(.accentColor)
+                                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
+                            Text("Starting")
+                        }
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(Color.accentColor)
+                    }
+                }
+            }
+        }
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityHint(row.failed != nil ? "Opens it again to try once more" : "")
+    }
+
+    private var title: String {
+        let first = row.message.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
+        if !first.isEmpty { return first }
+        let photos = row.draft.photos.count
+        return photos == 1 ? "A photo" : "\(photos) photos"
+    }
+
+    private var line2: String {
+        if let failed = row.failed { return "Tap to try again · \(failed)" }
+        // Its Mac asleep: it starts when it's back, maybe much later.
+        // No runner picked: the backend's, which with one runner is that one.
+        let picked = row.draft.runnerId.flatMap { id in model.runners.first { $0.runnerId == id } }
+        guard let runner = picked ?? (model.runners.count == 1 ? model.runners.first : nil) else { return model.offlineText ?? "On its way" }
+        guard runner.isOnline(at: model.now) else { return "\(runner.name) offline, starts when it's back" }
+        return runner.name
+    }
+}
+
 struct ThreadRow: View {
     @Environment(AppModel.self) private var model
     var thread: PhoneThread

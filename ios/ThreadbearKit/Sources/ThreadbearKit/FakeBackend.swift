@@ -20,6 +20,9 @@ public final class FakeBackend: Backend, @unchecked Sendable {
     private var listeners: [UUID: @Sendable () -> Void] = [:]
     /// How long a fake turn takes. Zero in tests.
     private let turnDelay: Duration
+    /// How long a new thread takes to start (AppModel's -ThreadbearSlowStart
+    /// makes it long, so the inbox's Starting row stays for a screenshot).
+    public var startDelay: Duration = .seconds(1.5)
     /// How long the thread lists take to answer the first time, to see the
     /// app's loading rows (`-ThreadbearSlowLoad`). Zero normally.
     private let listDelay: Duration
@@ -571,13 +574,21 @@ public final class FakeBackend: Backend, @unchecked Sendable {
         let id = UUID().uuidString.lowercased()
         let title = text.isEmpty ? "Untitled" : String(text.prefix(48))
         let text = Self.withPictures(text, images)
-        mutate { s in
-            s.threadsById[id] = PhoneThread(threadId: id, title: title, cwd: cwd ?? "~/code/misc", status: .running,
-                                            lastActivityAt: .now, working: "Bear with me")
-            s.append(id, role: .user, text: text, origin: "phone")
+        // Pending for a moment, as a real runner takes a second or more to
+        // make it, so the demo shows the inbox's Starting row.
+        let commandId = "cmd_" + UUID().uuidString.prefix(8)
+        lock.withLock { commands[commandId] = CommandStatus(state: .pending) }
+        Task {
+            try? await Task.sleep(for: startDelay)
+            mutate { s in
+                s.threadsById[id] = PhoneThread(threadId: id, title: title, cwd: cwd ?? "~/code/misc", status: .running,
+                                                lastActivityAt: .now, working: "Bear with me")
+                s.append(id, role: .user, text: text, origin: "phone")
+                s.commands[commandId] = CommandStatus(state: .done, threadId: id)
+            }
+            runTurn(id, reply: "On it. Here's what I found.")
         }
-        runTurn(id, reply: "On it. Here's what I found.")
-        return newCommand(threadId: id)
+        return String(commandId)
     }
 
     public func quickAsk(_ ask: QuickAskRecord) async throws -> String {
