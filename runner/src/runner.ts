@@ -1206,10 +1206,13 @@ export class Runner {
   // docs/protocol.md, "Pools". The rules are in pools.ts; this is where
   // they meet threads.
 
-  list(include: ('inbox' | 'snoozed' | 'archived')[] = ['inbox']): ThreadSummary[] {
+  // With ids, only those threads (threads.list's ids): a draining runner
+  // looking one up mustn't be sent all 900 (docs/protocol.md, "Handovers").
+  list(include: ('inbox' | 'snoozed' | 'archived')[] = ['inbox'], ids?: string[]): ThreadSummary[] {
     const want = new Set(include);
     const out: ThreadSummary[] = [];
-    for (const st of this.threads.values()) {
+    const states = ids ? [...new Set(ids)].flatMap((id) => this.threads.get(id) ?? []) : this.threads.values();
+    for (const st of states) {
       if (want.has(this.bucket(st.rec))) out.push(this.summary(st));
     }
     return sortByActivity(out);

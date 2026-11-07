@@ -19,6 +19,10 @@ type Conn = {
   authed: boolean;
   subs: Set<string>;
   client?: string;
+  // hello's version and pid, and when it connected, for the log.
+  clientVersion?: string;
+  clientPid?: number;
+  since: number;
   browserPanel?: boolean;
   authTimer?: AwakeTimer;
   // This connection's auth.challenge nonce (docs/protocol.md, "Auth").
@@ -294,7 +298,7 @@ export class RpcServer {
   }
 
   private onConnection(ws: WebSocket, headerAuthed: boolean): void {
-    const conn: Conn = { id: this.nextId++, ws, authed: false, subs: new Set() };
+    const conn: Conn = { id: this.nextId++, ws, authed: false, subs: new Set(), since: Date.now() };
     this.conns.add(conn);
     if (headerAuthed) {
       this.unlock(conn);
@@ -336,7 +340,10 @@ export class RpcServer {
   private write(conn: Conn, msg: string, skippable: boolean): void {
     const buffered = conn.ws.bufferedAmount;
     if (buffered > (this.opts.closeBytes ?? CLOSE_BYTES)) {
-      this.opts.log.warn('client is not reading; closing it', { conn: conn.id, client: conn.client, buffered });
+      this.opts.log.warn('client is not reading; closing it', {
+        conn: conn.id, client: conn.client ?? 'no hello', version: conn.clientVersion, pid: conn.clientPid,
+        subs: conn.subs.size, connectedSecs: Math.round((Date.now() - conn.since) / 1000), buffered,
+      });
       conn.ws.close(4408, 'too far behind');
       this.conns.delete(conn);
       return;
@@ -485,6 +492,8 @@ export class RpcServer {
         return {};
       case 'hello': {
         conn.client = optString(p, 'client');
+        conn.clientVersion = typeof p.version === 'string' ? p.version : undefined;
+        conn.clientPid = typeof p.pid === 'number' ? p.pid : undefined;
         conn.browserPanel = p.browserPanel === true;
         // Only the Mac app's own builds: a dev build has none.
         const build = p.build as Record<string, unknown> | undefined;
@@ -500,8 +509,10 @@ export class RpcServer {
         for (const x of include ?? []) {
           if (x !== 'inbox' && x !== 'snoozed' && x !== 'archived') throw bad(`unknown include value ${x}`);
         }
-        const local = r.list(include as Bucket[] | undefined);
-        const remote = this.opts.remote?.summaries((include as Bucket[] | undefined) ?? ['inbox']);
+        const ids = p.ids === undefined ? undefined : stringArray(p, 'ids');
+        const local = r.list(include as Bucket[] | undefined, ids);
+        const only = ids && new Set(ids);
+        const remote = this.opts.remote?.summaries((include as Bucket[] | undefined) ?? ['inbox']).filter((t) => !only || only.has(t.id));
         return { threads: remote?.length ? mergeSummaries(local, remote) : local };
       }
       case 'threads.search': {

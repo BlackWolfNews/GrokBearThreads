@@ -728,3 +728,49 @@ test('requests about a draining runner\'s thread go to it; a moved answer is han
     await server.close();
   }
 });
+
+// THREADBEAR-F (7 Nov): a thread finishing its turn on a draining runner ran
+// list_schedules all, which looks up ~200 schedules' thread titles at once.
+// Each lookup asked the new runner for every thread's summary (2.8 MB with
+// 931 threads), so a dozen answers sat unsent in one tick and the new runner
+// closed the draining runner's link as "not reading". A lookup now asks for
+// its one thread, and an older runner that lists them all still works.
+test("a draining runner's lookups of other threads ask the new runner for just those", async () => {
+  const { h, server, port } = await serve({ closeBytes: 256 * 1024 });
+  const { PrimaryLink, primaryElsewhere } = await import('../../src/handover.ts');
+  const ids = Array.from({ length: 60 }, (_, i) => h.runner.create({ text: `thread ${i} ${'x'.repeat(2000)}`, accountId: 'claude-3' }).thread.id);
+  const link = new PrimaryLink('127.0.0.1', port, TOKEN);
+  const elsewhere = primaryElsewhere(link, { has: () => false });
+  try {
+    const found = await Promise.all(ids.map((id) => elsewhere.find(id)));
+    assert.deepEqual(found.map((t) => t?.id), ids);
+    assert.equal(await elsewhere.find('missing'), undefined);
+    // An older runner ignores ids and sends the lot; find still picks its own.
+    const old = primaryElsewhere({ call: async () => ({ threads: h.runner.list(['inbox', 'snoozed', 'archived']) }) } as any, { has: () => false });
+    assert.equal((await old.find(ids[3]))?.id, ids[3]);
+  } finally {
+    link.close();
+    await server.close();
+  }
+});
+
+test('threads.list with ids answers only those threads, here and on a draining runner', async () => {
+  const away = { id: 'away-1', title: 'Busy elsewhere', status: 'running', lastActivityAt: '2099-01-01T00:00:00.000Z' } as any;
+  const remote = { owns: (id: string) => id === away.id, call: async () => ({}), summaries: () => [away], search: async () => [] };
+  const { h, server, url } = await serve({ remote: remote as any });
+  const a = h.runner.create({ text: 'one', accountId: 'claude-3' }).thread;
+  h.runner.create({ text: 'two', accountId: 'claude-3' });
+  const archived = h.runner.create({ text: 'three', accountId: 'claude-3' }).thread;
+  h.runner.update({ threadId: archived.id, archived: true });
+  const c = await RunnerClient.connect(url, TOKEN);
+  try {
+    const ids = (r: { threads: { id: string }[] }) => r.threads.map((t) => t.id).sort();
+    assert.deepEqual(ids(await c.call('threads.list', { include: ['inbox', 'snoozed', 'archived'], ids: [a.id, away.id, archived.id, 'nope'] })), [a.id, archived.id, away.id].sort());
+    // include still applies.
+    assert.deepEqual(ids(await c.call('threads.list', { ids: [a.id, archived.id] })), [a.id]);
+    await assert.rejects(c.call('threads.list', { ids: 'x' }), (e: { code: number }) => e.code === -32602);
+  } finally {
+    c.close();
+    await server.close();
+  }
+});

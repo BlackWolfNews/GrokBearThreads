@@ -16,7 +16,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { paths } from './config.ts';
+import { RUNNER_VERSION, paths } from './config.ts';
 import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 import type { Logger } from './log.ts';
 import { RunnerClient, RpcClientError } from './client.ts';
@@ -464,7 +464,12 @@ export class PrimaryLink {
 
   private connect(): Promise<RunnerClient> {
     if (!this.client) {
-      const c = RunnerClient.connect(this.url, this.token);
+      // It says hello so the primary's log can name it (THREADBEAR-F: the
+      // primary closed one as "not reading" and couldn't say whose it was).
+      const c = RunnerClient.connect(this.url, this.token).then(async (cl) => {
+        await cl.call('hello', { client: 'threadbear-drain', version: RUNNER_VERSION, pid: process.pid }).catch(() => {});
+        return cl;
+      });
       this.client = c;
       c.then(
         (cl) => void cl.waitClosed().then(() => {
@@ -525,7 +530,11 @@ export function peersElsewhere(peers: Peers): Elsewhere {
 export function primaryElsewhere(link: PrimaryLink, runner: Pick<Runner, 'has'>): Elsewhere {
   return {
     owns: (id) => !runner.has(id),
-    find: async (id) => (await link.call<{ threads: ThreadSummary[] }>('threads.list', { include: ALL_BUCKETS })).threads.find((t) => t.id === id),
+    // Just this thread (THREADBEAR-F): list_schedules looks up every
+    // schedule's thread at once, and all 900 summaries for each lookup piled
+    // up past the primary's limit, which closed this link. An older primary
+    // ignores ids and sends them all, so the one is still picked out here.
+    find: async (id) => (await link.call<{ threads: ThreadSummary[] }>('threads.list', { include: ALL_BUCKETS, ids: [id] })).threads.find((t) => t.id === id),
     list: async (include) => (await link.call<{ threads: ThreadSummary[] }>('threads.list', { include })).threads,
     search: async (query, limit) => (await link.call<{ threads: ThreadSummary[] }>('threads.search', { query, limit })).threads,
     call: (method, params) => link.call(method, params),
