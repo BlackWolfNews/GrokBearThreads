@@ -127,7 +127,31 @@ enum MarkdownRenderer {
         return NSAttributedString(string: "\u{200B}\n", attributes: [.font: NSFont.systemFont(ofSize: 1), .paragraphStyle: style])
     }()
 
+    /// How deep quotes and lists may nest before a block is drawn as words.
+    static let maxNesting = 32
+    /// Emphasis and links nest too (`*a *b … b* a*`), one level for every
+    /// two of these marks at most. A block with more than a few is parsed
+    /// on a thread with room for every level; past the most it's words.
+    static let inlineMarksOnWorkerStack = 48
+    static let maxInlineMarks = 8_000
+
     static func renderBlock(_ block: String) -> NSAttributedString {
+        let marks = MarkdownNesting.inlineMarks(block)
+        guard marks > inlineMarksOnWorkerStack, marks <= maxInlineMarks else { return renderBlockHere(block) }
+        // 64 MB holds 4,000 levels with room to spare; a worker's is 512 KB.
+        let done = DispatchSemaphore(value: 0)
+        nonisolated(unsafe) var result: NSAttributedString?
+        let thread = Thread {
+            result = renderBlockHere(block)
+            done.signal()
+        }
+        thread.stackSize = 64 << 20
+        thread.start()
+        done.wait()
+        return result ?? NSAttributedString(string: block)
+    }
+
+    private static func renderBlockHere(_ block: String) -> NSAttributedString {
         // The zoom is in the key: a block's layout is all sizes. A block
         // that may hold a ```mermaid or ```html box also keys on whether
         // those have been drawn, or flipped to their source (RichBlocks).
@@ -138,8 +162,21 @@ enum MarkdownRenderer {
         if let cached = cache.object(forKey: key) { return cached }
         // `[tests pass](work:npm test)`: a space ends a link's destination
         // for the parser, so work: and thread: links are escaped first.
-        let document = Document(parsing: WorkLinks.escapeDestinations(block), options: [.disableSmartOpts])
         var builder = Builder()
+        // Quotes or lists nested past this are plain words: parsing and
+        // drawing them recurse once a level, on worker threads with small
+        // stacks, and 8,000 `>`s from a reply ran one out (Daybreak, 7 Nov
+        // 2026). Nothing anyone writes nests this deep.
+        if MarkdownNesting.bound(block) > maxNesting || MarkdownNesting.inlineMarks(block) > maxInlineMarks {
+            let start = builder.output.length
+            builder.append(block, Context())
+            builder.finishParagraph(from: start, style: builder.paragraphStyle(Context()))
+            builder.trimTrailingNewline()
+            let result = NSAttributedString(attributedString: builder.output)
+            cache.setObject(result, forKey: key, cost: block.utf16.count)
+            return result
+        }
+        let document = Document(parsing: WorkLinks.escapeDestinations(block), options: [.disableSmartOpts])
         // Split where cmark ends lines: "\n", "\r" and "\r\n" (one
         // Character), not U+2028 and the other separators Swift counts.
         if rich || DraftBlock.mayHold(block) {

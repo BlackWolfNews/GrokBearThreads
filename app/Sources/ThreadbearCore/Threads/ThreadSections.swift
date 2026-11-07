@@ -222,8 +222,8 @@ public enum RelativeTime {
     public static func short(_ date: Date, now: Date, calendar: Calendar = .current) -> String {
         let seconds = now.timeIntervalSince(date)
         if seconds < 60 { return "now" }
-        if seconds < 3600 { return "\(Int(seconds / 60))m" }
-        if seconds < 86_400 { return "\(Int(seconds / 3600))h" }
+        if seconds < 3600 { return "\(Int(saturating: seconds / 60))m" }
+        if seconds < 86_400 { return "\(Int(saturating: seconds / 3600))h" }
         if seconds < 6 * 86_400 {
             return date.formatted(Date.FormatStyle(calendar: calendar).weekday(.abbreviated))
         }
@@ -243,8 +243,8 @@ public enum RelativeTime {
 
     /// "1m 12s", "850 ms", "2h 4m".
     public static func duration(milliseconds: Double) -> String {
-        if milliseconds < 1000 { return "\(Int(milliseconds)) ms" }
-        let total = Int(milliseconds / 1000)
+        if milliseconds < 1000 { return "\(Int(saturating: milliseconds)) ms" }
+        let total = Int(saturating: milliseconds / 1000)
         if total < 60 { return "\(total)s" }
         if total < 3600 { return "\(total / 60)m \(total % 60)s" }
         return "\(total / 3600)h \((total % 3600) / 60)m"

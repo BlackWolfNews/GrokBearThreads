@@ -130,7 +130,9 @@ public enum ToolPresentation {
             }
         case .read:
             if let path = input["file_path"]?.stringValue ?? input["path"]?.stringValue, tool.result.map({ $0.ok }) ?? true {
-                let offset = input["offset"]?.doubleValue.map { max(1, Int($0)) } ?? 1
+                // The model writes the offset: Int(_:) of 1e300 would stop the app,
+                // and the line numbers are added to it.
+                let offset = input["offset"]?.doubleValue.flatMap { Int(checked: $0) }.map { min(max(1, $0), 1_000_000_000) } ?? 1
                 return .file(path: shortTitle(path, limit: 400), lines: numberedLines(output, from: offset))
             }
         case .search:

@@ -105,7 +105,9 @@ public enum ThreadLinks {
         switch message.role {
         case .tool: normal(message.text).contains(q)
         // A line that links to a step isn't the step, nor is the summary.
-        case .assistant: !message.summary && normal(message.text.replacing(/\]\(work:[^)\n]*\)/, with: "]")).contains(q)
+        // One with no `)` uses up its line and stays: trying every `](work:`
+        // after it again was quadratic.
+        case .assistant: !message.summary && normal(message.text.replacing(/\]\(work:[^)\n]*(\))?/) { $0.1 == nil ? String($0.0) : "]" }).contains(q)
         case .user: false
         }
     }

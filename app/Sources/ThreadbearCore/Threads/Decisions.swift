@@ -38,8 +38,10 @@ public enum Decisions {
     }
 
     private static func oneLine(_ text: String) -> String {
-        text.replacingOccurrences(of: #"\s*\n\s*"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        // Split by hand: `\s*\n\s*` tried every space as a start, quadratic
+        // on a long run of them.
+        text.split(omittingEmptySubsequences: false, whereSeparator: { $0 == "\n" || $0 == "\r\n" })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }.joined(separator: " ")
     }
 
     /// Whether the text ends a sentence, looking past closing quotes,

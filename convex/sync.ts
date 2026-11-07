@@ -12,7 +12,7 @@ import { actAs, checkRunnerId, forbidden, hasLiveKey, pageLimit, readRunnerOrder
 import { scrubDoc, scrubEveryString, SCRUB_RULES_VERSION, HELD_BACK } from './redaction';
 import { dropHead, seedHeads, syncHead, syncHeads } from './projectHeads';
 import { dropNotes, putNotes, syncNotes } from './projectNotes';
-import { cutBytes, docBytes, fitUsage, impossibleUsage, LOGIN_EMAIL, LOGIN_PROVIDER, loginKey, mayClaim, NAME_CHARS, mayFinish, mayTake, mayTouch, mayUseStorage, mayWrite, nameSkeleton, normalName, ownsCard, SCHEDULE_ID, utf8Bytes, type Caller, type UsageDoc } from './runnerAccess';
+import { badRunnerStats, cutBytes, docBytes, fitUsage, impossibleUsage, isIsoTime, LOGIN_EMAIL, LOGIN_PROVIDER, loginKey, mayClaim, NAME_CHARS, mayFinish, mayTake, mayTouch, mayUseStorage, mayWrite, nameSkeleton, normalName, ownsCard, SCHEDULE_ID, utf8Bytes, wholeIn, type Caller, type UsageDoc } from './runnerAccess';
 import { dropWake, seedWakes, syncWake } from './wakes';
 import { pushFailing, pushOff } from './pushHealth';
 import { issueToken as makeToken, listTokens as allTokens, revokeToken as revokeOne, tokenInfo, tokenKind, MAX_DAYS } from './tokens';
@@ -1031,6 +1031,11 @@ export const heartbeat = mutation({
     // A runner key's heartbeat fields are cut to fit, never refused: a
     // refused heartbeat would leave that Mac showing offline.
     if (!caller.owner) for (const field of ['version', 'release', 'startedAt', 'icon', 'rpcUrl'] as const) if (typeof runner[field] === 'string') (runner as Record<string, unknown>)[field] = cutBytes(runner[field], CAP.runnerField);
+    // The Mac app reads startedAt as a time and the count as a number, so
+    // anything else is left out rather than passed on (an offset of
+    // "+////" once crashed the app's date parser; Daybreak, 7 Nov 2026).
+    // The app checks them too, for rows written before this.
+    if (!caller.owner) runner = { ...runner, startedAt: isIsoTime(runner.startedAt) ? runner.startedAt : '', threadCount: wholeIn(runner.threadCount, 1_000_000) ? runner.threadCount : 0 };
     const name = caller.owner ? runner.name : await uniqueName(ctx, runner.runnerId, runner.name);
     const row = { ...runner, name, lastSeenAt: Date.now(), ...(caller.owner ? { byOwner: true } : {}) };
     const existing = await ctx.db
@@ -1144,6 +1149,10 @@ export const setRunnerStats = mutation({
     const caller = await runnerAuth(ctx, key, 'setRunnerStats');
     await actAs(ctx, caller, runnerId);
     const cleaned = clean(stats);
+    // Another runner's figures reach the Mac app's Swift, where Int(1e20)
+    // stopped it (Daybreak, 7 Nov 2026), so they're checked from any key.
+    const bad = badRunnerStats(cleaned);
+    if (bad) throw new ConvexError({ kind: 'badArgs', message: bad });
     const labels = caller.owner ? {} : { ...(cleaned.machine !== undefined ? { machine: cutBytes(cleaned.machine, 128) } : {}), ...(cleaned.os !== undefined ? { os: cutBytes(cleaned.os, 128) } : {}) };
     const row = { runnerId, at: Date.now(), ...cleaned, ...labels };
     const existing = await ctx.db.query('runnerStats').withIndex('by_runnerId', (q) => q.eq('runnerId', runnerId)).unique();

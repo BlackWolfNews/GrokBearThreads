@@ -775,11 +775,16 @@ extension KeyedDecodingContainer {
         ((try? decodeIfPresent(LossyArray<Element>.self, forKey: key)) ?? nil)?.elements ?? []
     }
 
-    /// An integer sent as a whole number or a numeric string.
+    /// An integer sent as a whole number or a numeric string, within what
+    /// JavaScript counts exactly (±2^53), as every number here comes from
+    /// the runner or Convex. Past that it's nil: a seq of Int.max from
+    /// another runner made `seq + 1` trap, as `Int(1e100)` would have.
     func lenientInt(forKey key: Key) -> Int? {
-        if let value = try? decodeIfPresent(Int.self, forKey: key) { return value }
-        if let value = try? decodeIfPresent(Double.self, forKey: key), value.isFinite { return Int(value) }
-        if let text = try? decodeIfPresent(String.self, forKey: key) { return Int(text) }
+        let most = 9_007_199_254_740_991
+        func held(_ value: Int?) -> Int? { value.flatMap { (-most...most).contains($0) ? $0 : nil } }
+        if let value = try? decodeIfPresent(Int.self, forKey: key) { return held(value) }
+        if let value = try? decodeIfPresent(Double.self, forKey: key) { return held(Int(checked: value)) }
+        if let text = try? decodeIfPresent(String.self, forKey: key) { return held(Int(text)) }
         return nil
     }
 }

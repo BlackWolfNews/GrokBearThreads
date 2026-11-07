@@ -37,8 +37,9 @@ public struct FileRead: Sendable, Equatable, Decodable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         path = (try? c.decodeIfPresent(String.self, forKey: .path)) ?? ""
-        // Sizes come as JSON numbers, which may decode as Double.
-        let size = (try? c.decodeIfPresent(Double.self, forKey: .size)).flatMap { $0 }.map { Int($0) } ?? 0
+        // Sizes come as JSON numbers, which may decode as Double, from
+        // another runner: one that isn't a whole number of bytes is 0.
+        let size = (try? c.decodeIfPresent(Double.self, forKey: .size)).flatMap { $0 }.flatMap { $0.wholeCount() } ?? 0
         stamp = FileStamp(size: size, modifiedAt: (try? c.decodeIfPresent(String.self, forKey: .modifiedAt)).flatMap { $0 } ?? "")
         unchanged = (try? c.decodeIfPresent(Bool.self, forKey: .unchanged)).flatMap { $0 } ?? false
         mediaType = (try? c.decodeIfPresent(String.self, forKey: .mediaType)).flatMap { $0 }

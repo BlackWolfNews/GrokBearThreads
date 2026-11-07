@@ -352,7 +352,7 @@ public struct PhoneThread: Codable, Sendable, Hashable, Identifiable {
     /// the oldest the phone has. False when the runner doesn't say.
     public func hasEarlier(than oldestSeq: Int?) -> Bool {
         guard let earliestSeq, let oldestSeq else { return false }
-        return oldestSeq > Int(earliestSeq)
+        return Double(oldestSeq) > earliestSeq
     }
 
     /// The last folder name, for a thread in no project: "misc".
@@ -548,7 +548,10 @@ public struct PhoneMessage: Codable, Sendable, Hashable, Identifiable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
         // Convex numbers are float64, so seq comes back as 12.0.
-        seq = Int(try c.decode(Double.self, forKey: .seq))
+        guard let seq = try c.decode(Double.self, forKey: .seq).wholeCount() else {
+            throw DecodingError.dataCorruptedError(forKey: .seq, in: c, debugDescription: "Not a seq")
+        }
+        self.seq = seq
         role = try c.decode(Role.self, forKey: .role)
         text = try c.decode(String.self, forKey: .text)
         origin = try c.decodeIfPresent(String.self, forKey: .origin)
@@ -883,8 +886,8 @@ public struct PhoneCounts: Codable, Sendable, Hashable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
-        hibernating = Int((try? c.decodeIfPresent(Double.self, forKey: .hibernating)).flatMap { $0 } ?? 0)
-        den = Int((try? c.decodeIfPresent(Double.self, forKey: .den)).flatMap { $0 } ?? 0)
+        hibernating = (try? c.decodeIfPresent(Double.self, forKey: .hibernating)).flatMap { $0 }?.wholeCount() ?? 0
+        den = (try? c.decodeIfPresent(Double.self, forKey: .den)).flatMap { $0 }?.wholeCount() ?? 0
     }
 
     public func encode(to encoder: Encoder) throws {

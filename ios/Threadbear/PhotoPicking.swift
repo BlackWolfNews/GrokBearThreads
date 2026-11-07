@@ -1,6 +1,7 @@
 import PhotosUI
 import SwiftUI
 import ThreadbearKit
+import UniformTypeIdentifiers
 
 /// A photo waiting in a composer, already prepared off the main thread
 /// (PhotoPrep.prepared). `upload` is its copy in file storage, which goes
@@ -50,7 +51,7 @@ final class TextCursor {
         let reading = loads.map { load in
             Task.detached(priority: .userInitiated) { () -> PhotoPrep.Prepared? in
                 guard let data = await load() else { return nil }
-                return PhotoPrep.prepared(from: data)
+                return await PhotoPrep.preparedInTurn(from: data)
             }
         }
         Task {
@@ -68,10 +69,40 @@ final class TextCursor {
         }
     }
 
-    /// Photos pasted in, each encoded off the main thread as the full-size
-    /// original, which PhotoPrep shrinks as it does a picked one.
-    func addPasted(_ images: [UIImage], model: AppModel) {
-        add(images.map { image in { image.jpegData(compressionQuality: 1) } }, model: model)
+    /// Photos pasted in, as many as still fit, each read off the main
+    /// thread as the file it was copied as and prepared as a picked one is.
+    /// Never a UIImage made into a full-size JPEG first: a small file that
+    /// unpacks to a huge picture did all that work before any limit could
+    /// look at it (Daybreak, 7 Nov 2026).
+    func addPasted(_ items: [NSItemProvider], model: AppModel) {
+        add(items.map { PastedItem(provider: $0) }.map { item in { await Self.pastedData(item) } }, model: model)
+    }
+
+    /// NSItemProvider isn't marked Sendable, but it's made to be read from
+    /// any thread (its loads call back on one of their own).
+    nonisolated private struct PastedItem: @unchecked Sendable { let provider: NSItemProvider }
+
+    /// The picture's own bytes, or nil past PhotoPrep's limits (by its
+    /// file's size, before reading it; its width and height are checked
+    /// when it's prepared).
+    nonisolated private static func pastedData(_ pasted: PastedItem) async -> Data? {
+        let item = pasted.provider
+        let type = UTType.image.identifier
+        let file: Data?? = await withCheckedContinuation { done in
+            _ = item.loadFileRepresentation(forTypeIdentifier: type) { url, _ in
+                // nil: no file of it to read (an image only in memory).
+                guard let url else { return done.resume(returning: nil) }
+                guard let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize,
+                      size <= PhotoPrep.maxSourceBytes else { return done.resume(returning: .some(nil)) }
+                done.resume(returning: .some(try? Data(contentsOf: url)))
+            }
+        }
+        if let file { return file }
+        return await withCheckedContinuation { done in
+            _ = item.loadDataRepresentation(forTypeIdentifier: type) { data, _ in
+                done.resume(returning: data.flatMap { $0.count <= PhotoPrep.maxSourceBytes ? $0 : nil })
+            }
+        }
     }
 
     /// New photos as chips where the cursor is (the end, before it's been

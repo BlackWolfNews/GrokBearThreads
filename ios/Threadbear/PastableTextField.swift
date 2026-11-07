@@ -1,6 +1,7 @@
 import SwiftUI
 import ThreadbearKit
 import UIKit
+import UniformTypeIdentifiers
 
 /// A text box that also takes a pasted photo. SwiftUI's TextField only ever
 /// pastes text, so this is UIKit's text view with Paste offered whenever the
@@ -17,7 +18,7 @@ struct PastableTextField: UIViewRepresentable {
     var placeholder: String
     var lines: ClosedRange<Int>
     /// Nil when photos can't be sent: Paste is then text only.
-    var onPasteImages: (([UIImage]) -> Void)?
+    var onPasteImages: (([NSItemProvider]) -> Void)?
     /// The photos whose chips are in the words, in order.
     var photos: Binding<[PickedPhoto]>? = nil
     /// Kept up to date with the cursor, and where it goes after the words
@@ -124,7 +125,7 @@ struct PastableTextField: UIViewRepresentable {
 }
 
 final class PastingTextView: UITextView {
-    var onPasteImages: (([UIImage]) -> Void)?
+    var onPasteImages: (([NSItemProvider]) -> Void)?
     var threadReference: ((String) -> String?)?
     /// While a send is on its way: no typing, pasting or cutting.
     var locked = false
@@ -246,9 +247,12 @@ final class PastingTextView: UITextView {
             return insertText(reference)
         }
         guard pastesImages, let onPasteImages else { return super.paste(sender) }
-        let images = UIPasteboard.general.images ?? []
-        if images.isEmpty { return super.paste(sender) }
-        onPasteImages(images)
+        // The items, not `images`: those are every picture on it decoded
+        // here, before any limit. An item is read when its turn comes, off
+        // the main thread, and only as many as the message has room for.
+        let items = UIPasteboard.general.itemProviders.filter { $0.hasItemConformingToTypeIdentifier(UTType.image.identifier) }
+        if items.isEmpty { return super.paste(sender) }
+        onPasteImages(items)
     }
 
     // Copied chips go as the markers the agent would get, as plain text:

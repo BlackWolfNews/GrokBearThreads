@@ -34,6 +34,13 @@ public indirect enum MarkdownBlock: Sendable, Hashable {
     /// Past this a fence stays code (Pele refuses more itself).
     public static let maxRichSource = 50_000
 
+    /// Quotes nest this deep at most; a `>` past it is words. Each level
+    /// was parsed again from its text, and drawn as a view inside the one
+    /// above, so a line of 8,000 `>`s took seconds and could run out of
+    /// stack (Daybreak, 7 Nov 2026). GitHub's own replies never go past a
+    /// few.
+    public static let maxQuoteDepth = 8
+
     public enum RichKind: String, Sendable, Hashable {
         case mermaid, html
 
@@ -45,7 +52,12 @@ public indirect enum MarkdownBlock: Sendable, Hashable {
     }
 
     public static func parse(_ text: String) -> [MarkdownBlock] {
-        var parser = Parser(lines: text.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n"))
+        parse(text, depth: 0)
+    }
+
+    /// `depth` is how many quotes this text is inside.
+    fileprivate static func parse(_ text: String, depth: Int) -> [MarkdownBlock] {
+        var parser = Parser(lines: text.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n"), depth: depth)
         return parser.run()
     }
 }
@@ -61,7 +73,11 @@ enum InlineImages {
         var pieces: [Piece] = []
         var from = text.startIndex
         let codeSpans = text.ranges(of: /`+[^`]*`+/)
-        for match in text.matches(of: /!\[([^\]]*)\]\(\s*(?:<([^>\n]+)>|([^)\s]+))(?:\s+"[^"]*")?\s*\)/) {
+        // No `[` in the alt or a bare src, nor `<` in a bracketed one: with
+        // them, every `![` was tried to the end of the text again, 4 s on an
+        // 8,000-character reply (the sweep after Daybreak's findings, 7 Nov
+        // 2026). A picture's path never has one.
+        for match in text.matches(of: /!\[([^\[\]]*)\]\(\s*(?:<([^<>\n]+)>|([^)\s\[]+))(?:\s+"[^"]*")?\s*\)/) {
             if codeSpans.contains(where: { $0.overlaps(match.range) }) { continue }
             guard let src = match.2 ?? match.3 else { continue }
             add(text[from..<match.range.lowerBound], to: &pieces)
@@ -91,8 +107,13 @@ private struct Parser {
     var listIndents: [Int] = []
     /// A wrapped line belongs to the list item above it, until a blank line.
     var lastWasListItem = false
+    /// How many quotes these lines are inside.
+    let depth: Int
 
-    init(lines: [String]) { self.lines = lines }
+    init(lines: [String], depth: Int) {
+        self.lines = lines
+        self.depth = depth
+    }
 
     mutating func run() -> [MarkdownBlock] {
         while i < lines.count {
@@ -130,14 +151,15 @@ private struct Parser {
                 i += 1
                 continue
             }
-            if line.hasPrefix(">") {
+            // Past the deepest quote, the line is words like any other.
+            if line.hasPrefix(">"), depth < MarkdownBlock.maxQuoteDepth {
                 flush()
-                blocks.append(.quote(MarkdownBlock.parse(quoteLines().joined(separator: "\n"))))
+                blocks.append(.quote(MarkdownBlock.parse(quoteLines().joined(separator: "\n"), depth: depth + 1)))
                 continue
             }
-            if let match = line.firstMatch(of: /^(#{1,6})\s+(.*?)(?:\s+#+)?$/) {
+            if let match = line.firstMatch(of: /^(#{1,6})\s+(.*)$/) {
                 flush()
-                blocks.append(.heading(level: match.1.count, text: String(match.2)))
+                blocks.append(.heading(level: match.1.count, text: Self.withoutClosingHashes(match.2)))
                 i += 1
                 continue
             }
@@ -296,6 +318,18 @@ private struct Parser {
             i += 1
         }
         return .table(header: header, alignments: alignments, rows: rows)
+    }
+
+    /// "Title ##" is "Title": the closing #s go with the space before them,
+    /// as `(.*?)(?:\s+#+)?$` had it. By hand, as that regex tried every
+    /// place in a long line of spaces with all that came after: 2 s on an
+    /// 8,000-character reply.
+    static func withoutClosingHashes(_ text: Substring) -> String {
+        let hashes = text.reversed().prefix { $0 == "#" }.count
+        guard hashes > 0 else { return String(text) }
+        let rest = text.dropLast(hashes)
+        guard let last = rest.last, last.isWhitespace else { return String(text) }
+        return String(rest.reversed().drop { $0.isWhitespace }.reversed())
     }
 
     static func indent(of line: String) -> Int {
