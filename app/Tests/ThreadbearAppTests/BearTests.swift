@@ -43,6 +43,29 @@ final class BearTests: XCTestCase {
         XCTAssertLessThan(Double(different) / Double(inked), 0.03, "\(different) of \(inked) pixels differ")
     }
 
+    /// The Mac and the iPhone share no package, so the drawing is the same
+    /// file in both. Change one, copy it to the other.
+    func testBothAppsDrawTheSameBear() throws {
+        let tests = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let repo = tests.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let mac = try String(contentsOf: repo.appendingPathComponent("app/Sources/Threadbear/BearGeometry.swift"), encoding: .utf8)
+        let phone = try String(contentsOf: repo.appendingPathComponent("ios/Threadbear/BearGeometry.swift"), encoding: .utf8)
+        XCTAssertEqual(mac, phone, "copy app/Sources/Threadbear/BearGeometry.swift over ios/Threadbear/BearGeometry.swift")
+    }
+
+    /// Tiny specks go when the bear's small, and a cub has both its eyes.
+    func testSmallBearsDropTheirSpecksAndCubsHaveNoButton() {
+        let big = BearGeometry.waveFace(small: false), small = BearGeometry.waveFace(small: true)
+        XCTAssertNotNil(big.stitch)
+        XCTAssertNotNil(big.buttonPip)
+        XCTAssertNil(small.stitch)
+        XCTAssertNil(small.buttonPip)
+        XCTAssertNotNil(small.buttonRing, "the button itself stays, it's the bear's whole character")
+        XCTAssertNil(BearGeometry.pawPad(small: true))
+        let cub = BearGeometry.Face(centre: .zero, scale: 0.6, eyes: .plain)
+        XCTAssertNil(cub.buttonRing)
+    }
+
     func testItMovesUntilStoppedAndStaysStillUnderReduceMotion() {
         let view = WavingBearView(frame: NSRect(x: 0, y: 0, width: 26, height: 26))
         view.start(fresh: false, reduceMotion: true)

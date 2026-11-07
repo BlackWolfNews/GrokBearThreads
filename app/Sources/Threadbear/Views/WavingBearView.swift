@@ -6,7 +6,7 @@ import QuartzCore
 /// watches this line while a turn runs, so the wave comes in bursts rather
 /// than flapping non-stop next to the text he's reading.
 ///
-/// It's the waving pose from Bear.swift cut into layers, so all of the
+/// It's the waving pose from BearGeometry cut into layers, so all of the
 /// movement is Core Animation and carries on while the main thread is busy
 /// (AGENTS.md, "Animations"). Under Reduce Motion it's the still pose.
 final class WavingBearView: NSView {
@@ -25,8 +25,8 @@ final class WavingBearView: NSView {
         static let blink: CFTimeInterval = 7.3
         /// The paw's swing in degrees at seconds into the wave. Starts and
         /// ends at rest, so the still pose and the repeat both line up, and
-        /// only ever swings outward: at rest the paw is already against the
-        /// ear, so going the other way runs it through the head.
+        /// only ever swings outward: at rest the paw is already close to the
+        /// ear, so going the other way runs it into the ear.
         static let paw: [(at: Double, degrees: Double)] = [
             (0, 0), (0.16, 14), (0.38, 3), (0.6, 14), (0.82, 3), (1.04, 10), (1.3, 0), (wave, 0),
         ]
@@ -41,13 +41,21 @@ final class WavingBearView: NSView {
     private let ears = CAShapeLayer()
     private let earMask = CAShapeLayer()
     private let head = CAShapeLayer()
+    /// The eye that blinks. The other one's a button, and buttons don't.
     private let eyes = CAShapeLayer()
+    private let buttonRing = CAShapeLayer()
+    private let buttonPip = CAShapeLayer()
+    private let stitch = CAShapeLayer()
     private let nose = CAShapeLayer()
-    /// The arm, pad and toes, swinging about the shoulder.
+    private let mouth = CAShapeLayer()
+    /// Shows the arm only outside the head, so it hugs it as it swings. It
+    /// doesn't turn itself, or the head's shape would turn with the arm.
+    private let armClip = CALayer()
+    private let armMask = CAShapeLayer()
+    /// The arm and pad, swinging about the shoulder.
     private let paw = CALayer()
     private let arm = CAShapeLayer()
     private let pad = CAShapeLayer()
-    private let toes = CAShapeLayer()
 
     private var builtSide: CGFloat = 0
 
@@ -72,9 +80,11 @@ final class WavingBearView: NSView {
         stage.addSublayer(arrival)
         arrival.addSublayer(figure)
         ears.mask = earMask
-        for part in [ears, head, eyes, nose] { figure.addSublayer(part) }
-        figure.addSublayer(paw)
-        for part in [arm, pad, toes] { paw.addSublayer(part) }
+        armClip.mask = armMask
+        figure.addSublayer(armClip)
+        armClip.addSublayer(paw)
+        for part in [arm, pad] { paw.addSublayer(part) }
+        for part in [ears, head, eyes, buttonRing, buttonPip, stitch, nose, mouth] { figure.addSublayer(part) }
         setAccessibilityRole(.image)
         setAccessibilityLabel(Bear.description(.wave))
         applyTint()
@@ -162,11 +172,11 @@ final class WavingBearView: NSView {
         effectiveAppearance.performAsCurrentDrawingAppearance { ink = self.tint.cgColor }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        for line in [ears, head, arm, pad] {
+        for line in [ears, head, arm, buttonRing, stitch, mouth] {
             line.strokeColor = ink
             line.fillColor = nil
         }
-        for solid in [eyes, nose, toes] {
+        for solid in [eyes, buttonPip, nose, pad] {
             solid.fillColor = ink
             solid.strokeColor = nil
         }
@@ -177,7 +187,7 @@ final class WavingBearView: NSView {
         let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        for part in [stage, arrival, figure, paw, ears, earMask, head, eyes, nose, arm, pad, toes] {
+        for part in [stage, arrival, figure, armClip, armMask, paw, ears, earMask, head, eyes, buttonRing, buttonPip, stitch, nose, mouth, arm, pad] {
             part.contentsScale = scale
         }
         CATransaction.commit()
@@ -195,11 +205,12 @@ final class WavingBearView: NSView {
         builtSide = side
         let unit = side / 24
         let scale = CGAffineTransform(scaleX: unit, y: unit)
-        var transform = scale
         let square = CGRect(x: 0, y: 0, width: side, height: side)
-
-        func circle(_ c: CGPoint, _ r: CGFloat) -> CGRect {
-            CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r)
+        /// A path from the grid at this size. Paths are nil where the face
+        /// has none: small bears drop the stitch, pip and pad.
+        func sized(_ path: CGPath?) -> CGPath? {
+            var transform = scale
+            return path?.copy(using: &transform)
         }
         /// Pins a layer so it turns and scales about this spot on the grid.
         func pin(_ part: CALayer, about point: CGPoint) {
@@ -207,59 +218,46 @@ final class WavingBearView: NSView {
             part.anchorPoint = CGPoint(x: point.x / 24, y: point.y / 24)
             part.position = CGPoint(x: point.x * unit, y: point.y * unit)
         }
-
-        let c = Bear.Wave.headCentre, r = Bear.Wave.headRadius
-        // These match drawHead in Bear.swift; BearTests checks the still
-        // layers against the still pose.
-        let eyeY = c.y - r * 0.12
-        let feet = CGPoint(x: c.x, y: c.y + r)
-
-        pin(arrival, about: feet)
-        pin(figure, about: feet)
-        pin(eyes, about: CGPoint(x: c.x, y: eyeY))
-        pin(paw, about: Bear.Wave.shoulder)
-        for part in [ears, head, nose, arm, pad, toes] { part.frame = square }
-
-        head.path = CGPath(ellipseIn: circle(c, r), transform: &transform)
-
-        let earPath = CGMutablePath()
-        for sign in [-1.0, 1.0] {
-            let ear = CGPoint(x: c.x + sign * r * 0.72, y: c.y - r * 0.72)
-            earPath.addEllipse(in: circle(ear, Bear.Wave.earRadius), transform: scale)
+        /// A mask that shows only what's outside the head, so outlines don't cross.
+        func outsideHead(_ mask: CAShapeLayer, _ head: CGPath) {
+            let outside = CGMutablePath()
+            outside.addRect(square.insetBy(dx: -side, dy: -side))
+            if let sized = sized(head) { outside.addPath(sized) }
+            mask.frame = square
+            mask.path = outside
+            mask.fillRule = .evenOdd
+            mask.fillColor = NSColor.black.cgColor
         }
-        ears.path = earPath
-        // Ears show only outside the head, so the outlines don't cross.
-        let outside = CGMutablePath()
-        outside.addRect(square.insetBy(dx: -side, dy: -side))
-        outside.addEllipse(in: circle(c, r), transform: scale)
-        earMask.frame = square
-        earMask.path = outside
-        earMask.fillRule = .evenOdd
-        earMask.fillColor = NSColor.black.cgColor
 
-        let eyePath = CGMutablePath()
-        for sign in [-1.0, 1.0] {
-            eyePath.addEllipse(in: circle(CGPoint(x: c.x + sign * r * 0.4, y: eyeY), r * 0.14), transform: scale)
-        }
-        eyes.path = eyePath
+        let small = side < BearGeometry.smallSide
+        let face = BearGeometry.waveFace(small: small)
+        let eyeBox = face.blinkingEyes?.boundingBox ?? .zero
 
-        let noseW = r * 0.34, noseH = r * 0.24
-        nose.path = CGPath(ellipseIn: CGRect(x: c.x - noseW / 2, y: c.y + r * 0.3 - noseH / 2, width: noseW, height: noseH),
-                           transform: &transform)
+        pin(arrival, about: BearGeometry.feet)
+        pin(figure, about: BearGeometry.feet)
+        pin(eyes, about: CGPoint(x: eyeBox.midX, y: eyeBox.midY))
+        pin(paw, about: BearGeometry.shoulder)
+        armClip.frame = square
+        for part in [ears, head, buttonRing, buttonPip, stitch, nose, mouth, arm, pad] { part.frame = square }
 
-        let armPath = CGMutablePath()
-        armPath.move(to: Bear.Wave.shoulder, transform: scale)
-        armPath.addCurve(to: Bear.Wave.armEnd, control1: Bear.Wave.armControl1, control2: Bear.Wave.armControl2, transform: scale)
-        arm.path = armPath
-        arm.lineCap = .round
+        head.path = sized(face.head)
+        ears.path = sized(face.ears)
+        outsideHead(earMask, face.head)
+        outsideHead(armMask, face.head)
+        eyes.path = sized(face.blinkingEyes)
+        buttonRing.path = sized(face.buttonRing)
+        buttonPip.path = sized(face.buttonPip)
+        stitch.path = sized(face.stitch)
+        nose.path = sized(face.nose)
+        mouth.path = sized(face.mouth)
+        arm.path = sized(BearGeometry.arm)
+        pad.path = sized(BearGeometry.pawPad(small: small))
 
-        pad.path = CGPath(ellipseIn: circle(Bear.Wave.paw, Bear.Wave.pawRadius), transform: &transform)
-
-        let toePath = CGMutablePath()
-        for toe in Bear.Wave.toes { toePath.addEllipse(in: circle(toe, Bear.Wave.toeRadius), transform: scale) }
-        toes.path = toePath
-
-        for line in [ears, head, arm, pad] { line.lineWidth = 1.6 * unit }
+        for line in [ears, head, arm] { line.lineWidth = BearGeometry.line * unit }
+        buttonRing.lineWidth = BearGeometry.Face.buttonWidth * unit
+        stitch.lineWidth = BearGeometry.Face.stitchWidth * unit
+        mouth.lineWidth = face.mouthWidth * unit
+        for line in [stitch, mouth] { line.lineCap = .round }
         applyScale()
     }
 
