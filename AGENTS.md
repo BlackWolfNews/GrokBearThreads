@@ -193,22 +193,29 @@ Other people run Threadbear since the repo went public (5 Nov 2026), so a
 new feature Mike is still trying out lands as an experiment: off by
 default, on for him (Mike asked 6 Nov).
 
-- Add it to `EXPERIMENTS` in `runner/src/experiments.ts` (id, title,
-  `added` date, `on: false`) and check `experimentOn(home, id)` where it
-  starts. Put `"experiments": { "<id>": true }` in Mike's `runner.json`
-  (`~/Library/Application Support/Threadbear/runner.json`) so it's on
-  for him.
+- Give it a file of its own, `runner/src/experiments/<id>.md` (copy
+  one that's there): its id, name, title, `added` date, `on: false` and
+  `reminder`, then what it does (for the guide), where it lives and how
+  to take it out (for forks). Check `experimentOn(home, '<id>')` where
+  it starts. Put `"experiments": { "<id>": true }` in Mike's
+  `runner.json` (`~/Library/Application Support/Threadbear/runner.json`)
+  so it's on for him.
+- Run `npm run experiment-docs` in `runner/` and commit
+  `docs/experiments.md` with it: the guide and the forking table point
+  there, and `experiment-docs.test.ts` fails while it's out of date. Edit
+  the experiment's file, never the generated doc. One file each and a
+  union merge on the doc mean two threads adding experiments at once
+  don't collide when they land.
 - Book the check-in when it lands: `schedule_message` with `new_thread`
   in this repo, about four days out, telling that thread to look at how
   the experiment has gone and ask Mike whether to turn it on for
-  everyone, keep trying it, or take it out. Its id is the entry's
+  everyone, keep trying it, or take it out. Its id is the file's
   `reminder`; `experiments.test.ts` fails without one.
-- Say it in `docs/guide.md` ("Experiments") and in the forking table.
 - When Mike says to make it standard, take the flag out entirely: its
-  entry in `experiments.ts`, the `experimentOn` check, its key in his
-  runner.json files (the M5, `ssh bruce`, `ssh cloud`), and its place
-  in the guide's "Experiments" section (its text moves to where the
-  feature belongs). Don't leave a default-on switch behind: every flag
+  file, the `experimentOn` check, its key in his runner.json files (the
+  M5, `ssh bruce`, `ssh cloud`), then `npm run experiment-docs`. Its
+  "What it does" text moves to where the feature belongs in the guide.
+  Don't leave a default-on switch behind: every flag
   left in is another path through the code to keep working. If people
   might really want it off, make it a normal setting instead. When he
   says take it out, delete the feature with its flag.

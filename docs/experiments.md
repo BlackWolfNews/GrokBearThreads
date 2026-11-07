@@ -1,0 +1,32 @@
+# Experiments
+
+<!-- Made by `npm run experiment-docs` in runner/ from runner/src/experiments/*.md:
+edit those, not this. Each entry is one line, so two threads adding one at once
+both keep theirs (.gitattributes merges this file by union). -->
+
+New features that are still being tried out start off, with a switch under
+`experiments` in `runner.json` (the user guide, "Experiments", says how to turn one
+on). These are the ones there are now.
+
+## What each one does
+
+<!-- list:start -->
+- **Keep the Mac awake** (`keepAwake`, since 6 Nov 2026). While any thread is working, and for three minutes after, your Mac won't go to sleep on its own, so a long turn, or one you started from your phone, isn't cut off halfway. The screen still dims and locks as usual. It stops below 15% battery when you're not plugged in, and closing the lid on battery still puts the Mac to sleep.
+- **Review by another lab** (`labReview`, since 6 Nov 2026). When a turn that changed code (five lines or more, not counting docs) finishes with nothing for you to do, Threadbear starts a review thread in the same folder on your other provider: Codex reviews a Claude thread's change, and Claude a Codex one's. It's told to try to break the change and not to edit anything. It runs with the same permissions as the thread it reviews: a Full access thread's review has full access, and one in Ask before edits or Auto asks or checks the same way, so a change made from text you don't trust can't get its tests run with no card. The thread says who is reviewing, and hibernates until the review finishes. Then it wakes with the findings, fixes what holds up, and says in its reply what was found and what it did. The review thread is archived when it's done, so it stays out of your inbox; the link in the note opens it. A thread gets at most two reviews between your messages. With no login of another provider, a fresh session of the same one reviews, and the note says it isn't another lab. A folder a pool is kept for (Accounts, pools and Usage, above) is only ever reviewed on that pool's logins.
+- **Diagrams and pages in replies** (`richBlocks`, since 6 Nov 2026). Tells agents that Threadbear draws ```` ```mermaid ```` and ```` ```html ```` blocks (Reading a reply, above), so they use one when a picture explains better than words. The apps draw those blocks either way; this is only whether agents are told.
+- **Schedule checks** (`scheduleChecks`, since 6 Nov 2026). A schedule can have a check: a shell command that runs first, in its folder, each time it's due. If the check prints nothing, that run is skipped and no agent starts, so a schedule that looks for new Sentry issues every five minutes only uses a login when there's something to look at. What it prints is added to the message. If the check itself fails, the run goes ahead with the error, so you hear about it. A check has a minute to finish, or up to five if its schedule says so, for one that reads something slow like Slack. What a check prints is kept until a run carrying it has been sent, so a runner restart in between doesn't lose it. Ask a thread to "only run when there's something new" and it writes the check. Run now skips it.
+- **Loose ends on the done card** (`looseEnds`, since 7 Nov 2026). When a thread finishes with nothing for you to do, Threadbear checks what's still open before you archive it: commits on its worktree's branch that aren't on main, files in its worktree that aren't committed, threads it started that are still working or waiting for you, and check-ins it booked. If there's nothing, the done card says "Nothing left open" beside Done, so Archive is safe without asking the agent first. If there is, it lists them under "Still open" (a thread opens from its line; Land is the chip above the message box). A check-in alone shows under "Coming back", as the thread comes back by itself when it runs. It checks again when you open the thread, after an action like Land, and when a thread it started finishes. The phone's done card doesn't show it yet.
+<!-- list:end -->
+
+## Where each one lives, and taking it out
+
+For forks (docs/forking.md). Each one's switch is `experiments.<id>` in `runner.json`, and
+its own file is `runner/src/experiments/<id>.md`, which goes with it.
+
+| Experiment | Lives in | Taking it out |
+|---|---|---|
+| Keep the Mac awake (`keepAwake`) | `runner/src/keep-awake.ts`; `workingThreads` in `runner.ts`; built in `main.ts` | Self-contained: delete the file and its lines in `main.ts`. |
+| Review by another lab (`labReview`) | `runner/src/runner/lab-review.ts`; `waitOnReview` and `deliverReview` in `runner/src/runner/hibernation.ts`; the call in `completeTurn` (`runner.ts`) | Self-contained: delete the file and those three hooks. |
+| Diagrams and pages in replies (`richBlocks`) | app `Transcript/RichBlocks.swift`, `RichRenderer.swift`, `Views/PreviewSandbox.swift`, Core `Markdown/RichBlock.swift`, `Resources/Rich/pele.js`; phone `ios/Threadbear/RichBlockView.swift`, `ios/Threadbear/Rich/`, `.rich` in ThreadbearKit `MarkdownBlocks.swift`; `RICH_BLOCKS_LINE` in `threadbear-mcp.ts` | Self-contained: the `richBlock` case in `MarkdownRenderer.swift`, `richStamp` in `RowRenderer.swift`, `richChanged` in `TranscriptController.swift` and the rich parts of `TextKit.swift`; on the phone the `.rich` case. `PreviewSandbox` stays, the side pane uses it. |
+| Schedule checks (`scheduleChecks`) | `runner/src/schedule-check.ts`; `checked` and the `check` field in `runner/src/schedules.ts`; `checkArg` in `threadbear-mcp.ts`; `check` on `schedules` in `convex/schema.ts` and `convex/sync.ts` | Self-contained: delete the file and those lines. Leave the Convex field if rows have it. |
+| Loose ends on the done card (`looseEnds`) | `runner/src/loose-ends.ts`, `runner/src/runner/loose-ends.ts`; the calls in `completeTurn` and `update` (`runner.ts`), `runAction` (`runner/patches.ts`) and `threads.subscribe` (`rpc.ts`); `schedulesFor` set in `main.ts`; app `looseEndsText` in `RowRenderer.swift`, `setLooseEnds` in `TranscriptReducer.swift` | Self-contained: delete the two files and those calls; the app draws nothing without the field. |
