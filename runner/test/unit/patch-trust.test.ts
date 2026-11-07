@@ -1029,7 +1029,9 @@ test('a patch is imported from the bytes that were hashed, whatever replaces it 
 test("a trusted patch's bare import of a workspace package (a file of the repo's nothing hashed) refuses it; a local import the hash never followed refuses it", async () => {
   const root = tmpDir();
   const folder = path.join(root, 'mono');
-  fs.mkdirSync(path.join(folder, '.git'), { recursive: true });
+  // A real checkout: git has to say node_modules is installed, not shipped.
+  fs.mkdirSync(folder, { recursive: true });
+  execFileSync('git', ['init', '-q', folder]);
   // An npm workspace: node_modules/@ws/lib is a link to packages/lib,
   // which Node follows, so the code is the repo's own packages/lib, and a
   // pull could change it unasked (Gautam's scan, 6 Nov).

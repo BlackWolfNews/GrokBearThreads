@@ -36,7 +36,9 @@
 // fake (patchHash).
 // Packages (`node:fs`, `zod`) aren't followed: they're the folder's
 // dependencies, as `npm install` put them there, and hashing node_modules
-// every 15 seconds would be slow and re-ask after every install.
+// every 15 seconds would be slow and re-ask after every install. Files the
+// repo commits under node_modules are its own code, though, and are hashed
+// (tracked-packages.ts).
 //
 // The hash is only worth anything if it covers what will run. A patch that
 // loads code by a name worked out when it runs (`import(name)`,
@@ -54,6 +56,7 @@ import { parseSync } from 'oxc-parser';
 import { atomicWriteFileSync } from './fsutil.ts';
 import { claudeCommands, type ClaudeOptions } from './claude-trust.ts';
 import { looksRunnable, MAX_READ_BYTES, reachOf, reachOfCommand, Reads, type FollowOptions } from './script-trust.ts';
+import { bareImport } from './tracked-packages.ts';
 
 export type TrustVerdict =
   // `files`: the local files its hash covered, real paths. Absent when the
@@ -551,11 +554,36 @@ export function patchHash(file: string): PatchHash {
   // Every string in the patch and its helpers: any could be a command it
   // runs (an action's `run`, `sh("node scripts/x.mjs")` in a live function).
   const commands = new Set<string>();
-  const queue: { from: string; text: string }[] = [{ from: root, text: text.toString('utf8') }];
+  const queue: { from: string; text: string; shipped?: boolean }[] = [{ from: root, text: text.toString('utf8') }];
+  const top = repoTop(realpath(folder));
   scan: while (queue.length) {
-    const { from, text: src } = queue.shift()!;
-    const { specifiers, strings, problem } = scanModule(src, from);
-    for (const s of strings) if (commands.size < 2000 && /\S/.test(s) && s.length < 2000) commands.add(s);
+    const { from, text: src, shipped } = queue.shift()!;
+    const { specifiers, packages, strings, problem } = scanModule(src, from);
+    // A package the repo ships is followed for what it loads, not read
+    // for commands: those are the patch's own.
+    if (!shipped) for (const s of strings) if (commands.size < 2000 && /\S/.test(s) && s.length < 2000) commands.add(s);
+    // A bare import of a package inside the repo: every file the repo
+    // commits under node_modules is hashed and followed like a helper
+    // (tracked-packages.ts), so a pull that changes a committed
+    // node_modules/zod asks again; an installed package isn't. One git
+    // can't vouch for refuses the patch.
+    for (const spec of packages) {
+      const bare = bareImport(path.dirname(from), spec, top, reads);
+      if (!bare) continue;
+      if ('problem' in bare) {
+        incomplete ??= `${from === root ? path.basename(root) : path.relative(path.dirname(root), from)} imports ${spec}, and ${bare.problem}`;
+        continue;
+      }
+      for (const f of bare.files) {
+        if (seen.has(f)) continue;
+        seen.add(f);
+        if (!add({ path: f })) break scan;
+        const bytes = isFile(f) ? reads.read(f) : undefined;
+        if (!bytes) continue;
+        code.set(f, bytes);
+        if (SCANNED.includes(path.extname(f))) queue.push({ from: f, text: bytes.toString('utf8'), shipped: true });
+      }
+    }
     if (problem && !incomplete) {
       const name = from === root ? path.basename(root) : path.relative(path.dirname(root), from);
       incomplete =
@@ -573,8 +601,9 @@ export function patchHash(file: string): PatchHash {
       const bytes = isFile(target) ? reads.read(target) : undefined;
       if (!bytes) continue; // hashed as missing below
       code.set(target, bytes);
-      if (SCANNED.includes(path.extname(target))) queue.push({ from: target, text: bytes.toString('utf8') });
+      if (SCANNED.includes(path.extname(target))) queue.push({ from: target, text: bytes.toString('utf8'), ...(shipped ? { shipped } : {}) });
     }
+    if (shipped) continue;
     // Named files are hashed, and what a named script runs in turn is
     // followed below (script-trust.ts). From both places a path is read
     // from, each that's there: the first alone left the folder's own
@@ -604,7 +633,6 @@ export function patchHash(file: string): PatchHash {
   // shells, package scripts and imports: a trusted `./setup.sh` that runs
   // `./helper.sh` ran a changed helper unasked (Daybreak verify-fix,
   // 5 Nov). Its own bound, so a big script doesn't stop the patch loading.
-  const top = repoTop(realpath(folder));
   const opts = { folder: realpath(folder), top, scanJs: scriptScan, resolveImport: resolve, namedPaths, reads };
   let blocked: Record<string, string> | undefined;
   for (const script of named) {
@@ -665,11 +693,12 @@ export function patchHash(file: string): PatchHash {
 }
 
 // scanModule for a script a patch's command runs: its problem as words.
-function scriptScan(src: string, file: string): { specifiers: string[]; strings: string[]; problem?: string } {
-  const { specifiers, strings, problem } = scanModule(src, file);
-  if (!problem) return { specifiers, strings };
+function scriptScan(src: string, file: string): { specifiers: string[]; packages: string[]; strings: string[]; problem?: string } {
+  const { specifiers, packages, strings, problem } = scanModule(src, file);
+  if (!problem) return { specifiers, packages, strings };
   return {
     specifiers,
+    packages,
     strings,
     problem: problem.kind === 'parse' ? `can't be read (${problem.code}, line ${problem.line}), so patch trust can't check what it loads.` : `line ${problem.line} loads code by a name worked out as it runs (\`${problem.code}\`), which patch trust can't follow.`,
   };
@@ -692,7 +721,9 @@ const SCANNED = ['.ts', '.mts', '.cts', '.js', '.mjs', '.cjs', '.tsx', '.jsx'];
 // anything by design, and the scripts they name are hashed (namedPaths).
 // `strings`: every plain string in it, which a script's checks read for
 // paths of files it may run (script-trust.ts).
-export type ModuleScan = { specifiers: string[]; strings: string[]; problem?: { kind: 'computed' | 'parse'; line: number; code: string } };
+// `packages`: the bare specifiers it imports (`zod`, `node:fs`), which are
+// hashed only when the repo commits them (tracked-packages.ts).
+export type ModuleScan = { specifiers: string[]; packages: string[]; strings: string[]; problem?: { kind: 'computed' | 'parse'; line: number; code: string } };
 
 export function scanModule(src: string, file: string): ModuleScan {
   const ext = path.extname(file);
@@ -701,14 +732,15 @@ export function scanModule(src: string, file: string): ModuleScan {
   try {
     parsed = parseSync(file, src, { sourceType, preserveParens: false });
   } catch (e) {
-    return { specifiers: [], strings: [], problem: { kind: 'parse', line: 1, code: e instanceof Error ? e.message : String(e) } };
+    return { specifiers: [], packages: [], strings: [], problem: { kind: 'parse', line: 1, code: e instanceof Error ? e.message : String(e) } };
   }
   const lineAt = (at: number) => src.slice(0, at).split('\n').length;
   if (parsed.errors.length) {
     const err = parsed.errors[0];
-    return { specifiers: [], strings: [], problem: { kind: 'parse', line: lineAt(err.labels[0]?.start ?? 0), code: err.message } };
+    return { specifiers: [], packages: [], strings: [], problem: { kind: 'parse', line: lineAt(err.labels[0]?.start ?? 0), code: err.message } };
   }
   const specifiers = new Set<string>();
+  const packages = new Set<string>();
   const strings = new Set<string>();
   let problem: { start: number; end: number } | undefined;
   const refuse = (n: AstNode) => {
@@ -730,6 +762,8 @@ export function scanModule(src: string, file: string): ModuleScan {
     // A data: module's own imports are in a string, and `#x` maps through
     // package.json to a local file this doesn't follow.
     else if (/^(data:|#)/.test(value) || LOADER_MODULES.includes(value)) refuse(at);
+    // A package: hashed only when the repo commits it (tracked-packages.ts).
+    else packages.add(value);
   };
   // Identifiers and members a load handled already, so they aren't
   // refused as bare references to `require`.
@@ -788,6 +822,7 @@ export function scanModule(src: string, file: string): ModuleScan {
   }
   return {
     specifiers: [...specifiers],
+    packages: [...packages],
     strings: [...strings],
     ...(problem ? { problem: { kind: 'computed' as const, line: lineAt(problem.start), code: src.slice(problem.start, problem.end).replace(/\s+/g, ' ').slice(0, 80) } } : {}),
   };

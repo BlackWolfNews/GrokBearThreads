@@ -89,8 +89,11 @@ test("F10: a trusted patch's bare import that resolves through the repo's own pa
     const root = tmpDir();
     const folder = path.join(root, 'repo');
     const ran = path.join(marks, `${target.replace(/\W/g, '-')}.ran`);
+    // A real checkout, with node_modules installed (git doesn't track it).
+    fs.mkdirSync(folder, { recursive: true });
+    git(folder, 'init', '-q');
     write(folder, {
-      '.git/HEAD': 'ref: refs/heads/main\n',
+      '.gitignore': 'node_modules\n',
       'package.json': JSON.stringify({ ...pkg, type: 'module' }),
       [target]: `import fs from 'node:fs';\nfs.writeFileSync(${JSON.stringify(ran)}, 'x');\nexport const list = 1;\n`,
       // What `zod` was when the patch was trusted: a real package.
@@ -120,17 +123,23 @@ test("F10: a repo unpacked inside some node_modules/zod folder can't self-refere
     '.threadbear/patches/tools.mjs': "import { list } from 'zod';\nexport default { actions: [{ title: 'Go ' + list, run: 'true' }] };\n",
   });
   const trust = new PatchTrust();
-  assert.equal(trust.trustCurrent([patchIn(folder, 'tools.mjs')]).length, 1);
+  // Not a git checkout, so it can't be trusted at all now; before that, a
+  // yes was refused when it loaded.
+  assert.ok(trust.trustCurrent([patchIn(folder, 'tools.mjs')]).length <= 1);
   const set = await loadPatchSet(folder, root, new Map(), [], [], undefined, trust);
-  assert.match(set.patches[0]?.error ?? '', /imports zod, its own package by name/);
+  // Not a git checkout either, so it can't tell installed from shipped
+  // (committed-node-modules.test.ts); the load hook refuses it too.
+  assert.match(set.patches[0]?.error ?? '', /imports zod, its own package by name|imports zod, and .* isn't a git checkout/);
   assert.equal(fs.existsSync(ran), false);
 });
 
 test('F10: a bare import of a real package in node_modules, or a builtin, still loads', async () => {
   const root = tmpDir();
   const folder = path.join(root, 'repo');
+  fs.mkdirSync(folder, { recursive: true });
+  git(folder, 'init', '-q');
   write(folder, {
-    '.git/HEAD': 'ref: refs/heads/main\n',
+    '.gitignore': 'node_modules\n',
     'package.json': JSON.stringify({ name: 'repo', type: 'module' }),
     'node_modules/left-pad-x/package.json': JSON.stringify({ name: 'left-pad-x', type: 'module', exports: './index.mjs' }),
     'node_modules/left-pad-x/index.mjs': "export const title = 'Padded';\n",

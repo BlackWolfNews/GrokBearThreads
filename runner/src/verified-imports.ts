@@ -19,6 +19,9 @@
 //     and must land in a builtin or in that package's own folder in a
 //     node_modules (`node_modules/zod/...`):
 //     packages aren't hashed, by design, as `npm install` put them there.
+//     One the repo commits is its own code, though: every file git tracks
+//     under the repo's node_modules is hashed with the patch and served
+//     from those bytes like a helper (tracked-packages.ts, patchHash).
 //     Anything else is a file of the folder's that nothing hashed, so it
 //     refuses the patch. Node resolves a bare name through the nearest
 //     package.json's own `name` and `exports` before it looks in

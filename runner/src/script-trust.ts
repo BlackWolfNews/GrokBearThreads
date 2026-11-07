@@ -34,6 +34,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { bareImport } from './tracked-packages.ts';
 
 export type ScriptReach = { files: string[]; missing: string[]; problem?: string };
 
@@ -80,6 +81,17 @@ export class Reads {
     const t = b.toString('utf8');
     this.texts.set(real, t);
     return t;
+  }
+
+  // A file the hash depends on without reading it (git's index, which says
+  // what the repo tracks under node_modules: tracked-packages.ts), so a
+  // cached hash looks again once it changes.
+  watch(p: string): void {
+    try {
+      this.prints.set(p, fingerprint(p));
+    } catch {
+      this.links.set(p, '');
+    }
   }
 
   // Files over MAX_READ_BYTES, not read: a hash that needed one can't
@@ -143,7 +155,9 @@ export type FollowOptions = {
   top: string; // the repo's top; only files inside it are the repo's to change
   home?: string;
   // From patch-trust.ts, passed in so the two don't import each other.
-  scanJs: (src: string, file: string) => { specifiers: string[]; strings: string[]; problem?: string };
+  // `packages`: its bare imports, followed when the repo commits them
+  // (tracked-packages.ts).
+  scanJs: (src: string, file: string) => { specifiers: string[]; packages?: string[]; strings: string[]; problem?: string };
   resolveImport: (dir: string, spec: string) => string;
   namedPaths: (src: string) => string[];
   // Shared with the caller's hash, so it hashes the bytes followed here.
@@ -751,6 +765,15 @@ class Reach {
     }
     const ctx: Ctx = { label, file, argv0: [file], dirs, vars: new Map(), depth };
     for (const spec of scan.specifiers) this.follow(this.o.resolveImport(path.dirname(file), spec), 'load', ctx);
+    // A package inside the repo: what the repo commits under node_modules
+    // is its own code, hashed and followed; an installed one isn't.
+    for (const spec of scan.packages ?? []) {
+      const bare = bareImport(path.dirname(file), spec, this.o.top, this.reads);
+      if (!bare) continue;
+      if ('problem' in bare) return this.fail(undefined, undefined, `${label} imports ${spec}, and ${bare.problem}`);
+      for (const f of bare.files) this.follow(f, 'load', ctx);
+      if (this.problem) return;
+    }
     this.namedIn(text, file, ctx);
     // A string naming a file of the repo's (`spawnSync('bash', ['scripts/x.sh'])`).
     for (const s of scan.strings) {

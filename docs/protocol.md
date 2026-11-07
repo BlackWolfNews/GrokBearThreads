@@ -2922,7 +2922,9 @@ its data, so a script that runs what a data file says (`sh -c "$(cat
 cmd.txt)"`) still fails closed, as below. A command that runs by itself
 (a `setup` or hook) must still be one hashed script, so naming a data
 file there refuses the patch as before. Packages (`node:fs`, anything
-from `node_modules`) aren't followed: they're the folder's dependencies.
+npm installed in `node_modules`) aren't followed: they're the folder's
+dependencies. A package the repo commits is its own code, though (below,
+"Committed node_modules").
 
 A patch whose code can't all be seen isn't loaded at all, trusted or not,
 and has `error` (not `untrusted`) saying why, as a stored hash can't vouch
@@ -2965,7 +2967,26 @@ pull that renamed the repo's package `zod` sent `import 'zod'` to one of
 the repo's scripts (Gautam's scan, 6 Nov); a workspace package (a link
 in `node_modules` to `packages/x`, which Node follows) is a file of the
 repo's that nothing hashed in the same way, so it refuses the patch too.
-`#` imports are refused for the same reason (above). A cached hash holds only while every file it was
+`#` imports are refused for the same reason (above).
+
+**Committed node_modules.** A repo can commit its own
+`node_modules/zod` (`git add -f` gets past `.gitignore`), and `import
+'zod'` from a trusted patch then ran whatever a later pull put there,
+unasked. So files git tracks under any `node_modules` folder of the
+repo, submodules included, are the repo's own code: once the patch, a
+helper, or a script one of its commands runs imports a package from
+inside the repo, every one of them is hashed with the patch and followed
+for its own imports like a helper, and the patch's imports of them are
+served from those bytes. Packages npm installed (untracked, ignored)
+aren't, so an install never asks again. The index git keeps is watched
+too, so a pull that starts tracking `node_modules/zod` over an installed
+copy asks again. When git can't say what it tracks (it fails, or the
+folder isn't a git checkout, so `node_modules` could be from npm or from
+the zip), a link the repo commits on the way to a package, a committed
+native addon (`.node`), or more than 100 committed files under
+`node_modules`, the patch isn't loaded at all (`error`). git runs with
+`core.fsmonitor` off, so a folder's own `.git/config` can't make that
+run anything. A cached hash holds only while every file it was
 made from has the same inode, size, mode, mtime and ctime (a write
 can't put ctime back), every path to one still leads to the same real
 file, and nothing that was missing has turned up. A hook or `setup`
@@ -3051,7 +3072,8 @@ scripts deep:
   over 1 MB fails closed too, and so does any file over 32 MB a patch
   reaches (its hash can't be made). A path into the repo by another
   name (`/tmp` for `/private/tmp`) counts as the repo's.
-- JavaScript and TypeScript: imports, as for patch files, and every
+- JavaScript and TypeScript: imports, as for patch files (a package
+  the repo commits too, "Committed node_modules" above), and every
   plain string that's the path of a file of the repo's that looks
   runnable (`spawnSync('bash', ['scripts/x.sh'])`).
 - A file redirected into a shell or `source`/`.` (`bash ... < ./steps.txt`), whatever it
