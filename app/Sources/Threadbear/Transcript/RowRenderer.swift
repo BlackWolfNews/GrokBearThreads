@@ -176,9 +176,9 @@ final class RenderCache: @unchecked Sendable {
     /// a render depends on: tables of different widths with the column at
     /// its widest share renders, so a sidebar drag or a scroller appearing
     /// costs nothing.
-    static func key(_ row: TranscriptRow, expanded: Bool, showAll: Bool = false, width: CGFloat) -> NSString {
+    static func key(_ row: TranscriptRow, expanded: Bool, showAll: Bool = false, width: CGFloat, localPictures: Bool = true) -> NSString {
         let open = openLevel(row, expanded: expanded, showAll: showAll)
-        return "\(row.id)|\(row.version)|\(open)|\(row.inGroup ? 1 : 0)|\(Int(RowMetrics.column(tableWidth: width).width))|\(TypeScale.percent)|\(richStamp(row))|\(buttonStamp(row))" as NSString
+        return "\(row.id)|\(row.version)|\(open)|\(row.inGroup ? 1 : 0)|\(Int(RowMetrics.column(tableWidth: width).width))|\(TypeScale.percent)|\(richStamp(row))|\(buttonStamp(row))\(localPictures ? "" : "|away")" as NSString
     }
 
     /// A reply with a ```mermaid or ```html box renders again when one is
@@ -200,16 +200,19 @@ final class RenderCache: @unchecked Sendable {
     /// Whether a row is drawn differently once its rich blocks change.
     static func holdsRich(_ row: TranscriptRow) -> Bool { richStamp(row) != -1 }
 
-    func cached(_ row: TranscriptRow, expanded: Bool, showAll: Bool = false, width: CGFloat) -> RowRender? {
-        cache.object(forKey: Self.key(row, expanded: expanded, showAll: showAll, width: width))
+    /// `localPictures`: false for another Mac's thread (MarkdownRenderer.localPictures).
+    func cached(_ row: TranscriptRow, expanded: Bool, showAll: Bool = false, width: CGFloat, localPictures: Bool = true) -> RowRender? {
+        cache.object(forKey: Self.key(row, expanded: expanded, showAll: showAll, width: width, localPictures: localPictures))
     }
 
-    func render(_ row: TranscriptRow, expanded: Bool, showAll: Bool = false, width: CGFloat) -> RowRender {
-        let key = Self.key(row, expanded: expanded, showAll: showAll, width: width)
+    func render(_ row: TranscriptRow, expanded: Bool, showAll: Bool = false, width: CGFloat, localPictures: Bool = true) -> RowRender {
+        let key = Self.key(row, expanded: expanded, showAll: showAll, width: width, localPictures: localPictures)
         if let hit = cache.object(forKey: key) { return hit }
-        let render = RowRenderer.render(row, expanded: Self.effectiveExpanded(row, expanded),
-                                        showAll: Self.effectiveShowAll(row, expanded: expanded, showAll: showAll),
-                                        tableWidth: width, measurer: .current)
+        let render = MarkdownRenderer.withLocalPictures(localPictures) {
+            RowRenderer.render(row, expanded: Self.effectiveExpanded(row, expanded),
+                               showAll: Self.effectiveShowAll(row, expanded: expanded, showAll: showAll),
+                               tableWidth: width, measurer: .current)
+        }
         store(render, key: key, row: row, open: Self.openLevel(row, expanded: expanded, showAll: showAll), width: width)
         return render
     }
@@ -228,13 +231,13 @@ final class RenderCache: @unchecked Sendable {
 
     /// Renders rows across all cores. Used before showing a thread or
     /// paging in older rows, so the main thread only reads the cache.
-    func prepare(_ rows: [TranscriptRow], expanded: Set<String>, width: CGFloat) {
+    func prepare(_ rows: [TranscriptRow], expanded: Set<String>, width: CGFloat, localPictures: Bool = true) {
         func showAll(_ row: TranscriptRow) -> Bool { row.kind == .diff && expanded.contains(DiffPreview.allKey(row.id)) }
-        let missing = rows.filter { cached($0, expanded: expanded.contains($0.id), showAll: showAll($0), width: width) == nil }
+        let missing = rows.filter { cached($0, expanded: expanded.contains($0.id), showAll: showAll($0), width: width, localPictures: localPictures) == nil }
         guard !missing.isEmpty else { return }
         DispatchQueue.concurrentPerform(iterations: missing.count) { index in
             let row = missing[index]
-            _ = render(row, expanded: expanded.contains(row.id), showAll: showAll(row), width: width)
+            _ = render(row, expanded: expanded.contains(row.id), showAll: showAll(row), width: width, localPictures: localPictures)
         }
     }
 

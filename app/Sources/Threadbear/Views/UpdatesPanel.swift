@@ -64,7 +64,7 @@ struct AppUpdatePopover: View {
                 // Not while a newer main builds: the line is about that.
                 Button("Show the Log") {
                     app.updatePopoverShown = false
-                    NSWorkspace.shared.open(URL(fileURLWithPath: AppUpdater.logPath))
+                    OpenGate.openOwn(URL(fileURLWithPath: AppUpdater.logPath))
                 }
                 .tip("Open the update build's log, to see why it failed")
             }
@@ -95,7 +95,7 @@ struct UpdatesPanel: View {
                         Button("Restart to Update") { updater.restartToUpdate() }
                             .tip("Quit and reopen on the new version. Running threads carry on in the runner.")
                     } else if side.failed {
-                        Button("Show the Log") { NSWorkspace.shared.open(URL(fileURLWithPath: AppUpdater.logPath)) }
+                        Button("Show the Log") { OpenGate.openOwn(URL(fileURLWithPath: AppUpdater.logPath)) }
                             .tip("Open the update build's log, to see why it failed")
                     }
                 }

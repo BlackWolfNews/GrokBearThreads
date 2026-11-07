@@ -18,6 +18,9 @@ struct TextFileView: View {
     /// Bumped by each open, so the same file opened again is read again.
     let opened: Int
     let editing: Bool
+    /// The thread whose pane it's in: its links are followed in that thread
+    /// (another Mac's copy names that Mac's files), not the selected one.
+    var threadId: String? = nil
     /// Done didn't take (what's typed couldn't be saved): the pencil's
     /// state goes back to editing.
     var stayedEditing: () -> Void = {}
@@ -68,6 +71,7 @@ struct TextFileView: View {
         .onAppear {
             guard controller == nil else { return }
             let made = TextFileController(url: url)
+            made.textView.threadId = threadId
             made.start(editing: editing, dark: colorScheme == .dark)
             controller = made
         }
@@ -178,6 +182,9 @@ final class TextFileController: NSObject, NSTextViewDelegate {
     static let saveDelay: DispatchTimeInterval = .milliseconds(800)
 
     var isMarkdown: Bool { PreviewRules.isMarkdown(url.path) }
+    /// A copy of another Mac's file draws no pictures from this Mac: its
+    /// `![](/path)` are that Mac's paths (MarkdownRenderer.localPictures).
+    var localPictures: Bool { !AppModel.shared.isRemoteCopy(url) }
     var language: String? { PreviewRules.codeLanguage(forPath: url.path) }
 
     init(url: URL) {
@@ -292,13 +299,14 @@ final class TextFileController: NSObject, NSTextViewDelegate {
         let storage = textView.textStorage!
         if !editing && isMarkdown {
             if text.utf8.count <= Self.renderInline {
-                storage.setAttributedString(MarkdownRenderer.render(text).string)
+                storage.setAttributedString(MarkdownRenderer.withLocalPictures(localPictures) { MarkdownRenderer.render(text).string })
                 textView.textContainerInset = NSSize(width: 14, height: 12)
             } else {
                 setPlain(text)
                 let mine = generation
+                let localPictures = localPictures
                 DispatchQueue.global(qos: .userInitiated).async {
-                    let rendered = MarkdownRenderer.render(text).string
+                    let rendered = MarkdownRenderer.withLocalPictures(localPictures) { MarkdownRenderer.render(text).string }
                     DispatchQueue.main.async {
                         MainActor.assumeIsolated {
                             guard mine == self.generation else { return }
@@ -548,8 +556,18 @@ final class FileTextView: NSTextView {
         }
         return super.performKeyEquivalent(with: event)
     }
+    /// The thread whose pane this is in (TextFileView.threadId).
+    var threadId: String?
 
     override func clicked(onLink link: Any, at charIndex: Int) {
+        let app = AppModel.shared
+        let saved = app.linkThreadId
+        app.linkThreadId = threadId ?? saved
+        defer { app.linkThreadId = saved }
+        follow(link, at: charIndex)
+    }
+
+    private func follow(_ link: Any, at charIndex: Int) {
         let commandKey = NSApp.currentEvent?.modifierFlags.contains(.command) ?? false
         let url = (link as? URL) ?? (link as? String).flatMap(URL.init(string:))
         if let url, url.isFileURL {
@@ -558,6 +576,13 @@ final class FileTextView: NSTextView {
             let target = URL(fileURLWithPath: url.path, relativeTo: base).standardizedFileURL
             if FileManager.default.fileExists(atPath: target.path),
                MainActor.assumeIsolated({ AppModel.shared.openTranscriptFileLink(FilePathRefs.withQuery(target, query: url.query, fragment: url.fragment), commandKey: commandKey) }) { return }
+        }
+        // A web page goes to the browser as AppKit does; any other scheme
+        // (a file's `[Continue](x-apple.systempreferences:...)`) through
+        // OpenGate, which asks first (Codex review, 7 Nov).
+        guard let url, LinkPolicy.web(url) != nil else {
+            if let url, url.scheme != nil { MainActor.assumeIsolated { _ = OpenGate.openLink(url) } } else { NSSound.beep() }
+            return
         }
         super.clicked(onLink: link, at: charIndex)
     }

@@ -199,7 +199,7 @@ extension AppModel {
     func runAction(_ action: Action, in threadId: String) {
         if action.kind == .url {
             if let page = action.webPage {
-                NSWorkspace.shared.open(page)
+                OpenGate.openWeb(page)
             } else {
                 errorMessage = "\(action.title) has no web page to open."
             }

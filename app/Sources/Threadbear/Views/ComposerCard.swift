@@ -50,7 +50,7 @@ final class ComposerCardHost: NSView {
     /// A real button rather than a `.tbAction` run like the pager's, so it
     /// has a tooltip, and stays put while a tall card scrolls under it.
     private let toggle = NSHostingView(rootView: CardCollapseButton(collapsed: false, action: {}))
-    private var shown: (row: TranscriptRow, collapsed: Bool, width: CGFloat, zoom: Int)?
+    private var shown: (row: TranscriptRow, collapsed: Bool, width: CGFloat, zoom: Int, local: Bool)?
     /// The Something else box to put the cursor in once the card has made
     /// room for it (picking it and the card growing happen a beat apart).
     private var pendingFocus: Int?
@@ -60,7 +60,7 @@ final class ComposerCardHost: NSView {
     private var pageSeq: Int?
     /// The card built for each width it's been asked about, for this row,
     /// page, collapse and text size; any of those changing starts afresh.
-    private var built: (row: TranscriptRow, page: Int, collapsed: Bool, zoom: Int, renders: [CGFloat: RowRender])?
+    private var built: (row: TranscriptRow, page: Int, collapsed: Bool, zoom: Int, local: Bool, renders: [CGFloat: RowRender])?
 
     override var isFlipped: Bool { true }
 
@@ -90,6 +90,11 @@ final class ComposerCardHost: NSView {
         guard controller !== self.controller else { return }
         self.controller = controller
         cell.delegate = controller
+        // Another thread's card: nothing drawn for the last one stays up
+        // (its pictures from this Mac, say), whatever the rows have in common.
+        built = nil
+        shown = nil
+        needsLayout = true
     }
 
     /// Over this, a card of several asks shows one at a time, with
@@ -144,12 +149,17 @@ final class ComposerCardHost: NSView {
     /// `render`, from what was built last when nothing's changed.
     func rendered(_ row: TranscriptRow, width: CGFloat, collapsed: Bool) -> RowRender {
         let zoom = TypeScale.percent
-        if let built, built.row == row, built.page == page, built.collapsed == collapsed, built.zoom == zoom {
+        // Another Mac's card draws no pictures from this Mac, and what was
+        // built for one thread is never handed to another.
+        let local = controller?.localPictures ?? false
+        if let built, built.row == row, built.page == page, built.collapsed == collapsed, built.zoom == zoom, built.local == local {
             if let render = built.renders[width] { return render }
         } else {
-            built = (row, page, collapsed, zoom, [:])
+            built = (row, page, collapsed, zoom, local, [:])
         }
-        let render = Self.render(row, width: width, page: page, collapsed: collapsed)
+        let render = MarkdownRenderer.withLocalPictures(local) {
+            Self.render(row, width: width, page: page, collapsed: collapsed)
+        }
         // A few widths while the window's resized; not one for every step.
         if built!.renders.count >= 8 { built!.renders.removeAll() }
         built!.renders[width] = render
@@ -157,6 +167,9 @@ final class ComposerCardHost: NSView {
     }
 
     func show(_ row: TranscriptRow, collapsed: Bool = false) {
+        // The same card on another Mac's thread (the transcript's controller
+        // is reused across threads): drawn again, without this Mac's pictures.
+        if let shown, shown.local != (controller?.localPictures ?? false) { needsLayout = true }
         guard row != self.row || collapsed != self.collapsed else { return }
         self.row = row
         self.collapsed = collapsed
@@ -179,7 +192,9 @@ final class ComposerCardHost: NSView {
     /// (every ask is in sight already).
     func showAsk(_ index: Int) -> Bool {
         guard case .asks(let card)? = row?.content, bounds.width > 0 else { return false }
-        let full = TextMeasurer.current.measure(RowRenderer.asksText(card, width: bounds.width), width: bounds.width)
+        let full = MarkdownRenderer.withLocalPictures(controller?.localPictures ?? false) {
+            TextMeasurer.current.measure(RowRenderer.asksText(card, width: bounds.width), width: bounds.width)
+        }
         guard Self.isPaged(card, height: full.height) else { return false }
         showPage(index)
         return true
@@ -206,8 +221,9 @@ final class ComposerCardHost: NSView {
         scroll.frame = bounds
         guard let row, bounds.width > 0 else { return }
         let zoom = TypeScale.percent
-        if let shown, shown.row == row, shown.collapsed == collapsed, shown.width == bounds.width, shown.zoom == zoom { return }
-        shown = (row, collapsed, bounds.width, zoom)
+        let local = controller?.localPictures ?? false
+        if let shown, shown.row == row, shown.collapsed == collapsed, shown.width == bounds.width, shown.zoom == zoom, shown.local == local { return }
+        shown = (row, collapsed, bounds.width, zoom, local)
         placeToggle(row)
         let render = rendered(row, width: bounds.width, collapsed: collapsed)
         document.frame = NSRect(x: 0, y: 0, width: bounds.width, height: render.height)
@@ -232,7 +248,9 @@ final class ComposerCardHost: NSView {
             return
         }
         let width = bounds.width
-        let full = TextMeasurer.current.measure(RowRenderer.asksText(card, width: width), width: width)
+        let full = MarkdownRenderer.withLocalPictures(controller?.localPictures ?? false) {
+            TextMeasurer.current.measure(RowRenderer.asksText(card, width: width), width: width)
+        }
         let line = !collapsed && Self.isPaged(card, height: full.height) ? TypeScale.scaled(38) : TypeScale.workLine
         let size = Self.toggleSize
         toggle.frame = NSRect(x: width - size, y: max(0, (line - size) / 2), width: size, height: size)

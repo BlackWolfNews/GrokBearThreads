@@ -124,6 +124,8 @@ final class ThreadSession {
         failureHeadline = nil
         let threadId = threadId
         let expanded = expanded
+        // Another Mac's thread draws no pictures from this Mac (MarkdownRenderer.localPictures).
+        let localPictures = !(app?.isRemote(threadId) ?? false)
         // File rows name folders from the thread's folder.
         let root = app?.threads[threadId]?.cwd
         let signpost = perfLog.beginInterval("open", id: perfLog.makeSignpostID(), "\(threadId)")
@@ -172,7 +174,7 @@ final class ThreadSession {
                     _ = model.setBackground(background)
                     if debug { print(String(format: "    after model %.0f MB", memoryMB())) }
                     let start = max(0, model.rows.count - Self.initialRows)
-                    TranscriptController.renders.prepare(Array(model.rows[start...]), expanded: expanded, width: width)
+                    TranscriptController.renders.prepare(Array(model.rows[start...]), expanded: expanded, width: width, localPictures: localPictures)
                     if debug { print(String(format: "    after prepare %.0f MB", memoryMB())) }
                     return (model, start)
                 }.value
@@ -206,6 +208,8 @@ final class ThreadSession {
         missing = false
         let threadId = threadId
         let expanded = expanded
+        // Another Mac's thread draws no pictures from this Mac (MarkdownRenderer.localPictures).
+        let localPictures = !(app?.isRemote(threadId) ?? false)
         let root = app?.threads[threadId]?.cwd
         loadTask = Task {
             defer { loadTask = nil }
@@ -217,7 +221,7 @@ final class ThreadSession {
                     model.load(events: reply.events, inProgress: [])
                     if let live { _ = model.setLiveTurn("", startedAt: live) }
                     let start = max(0, model.rows.count - Self.initialRows)
-                    TranscriptController.renders.prepare(Array(model.rows[start...]), expanded: expanded, width: width)
+                    TranscriptController.renders.prepare(Array(model.rows[start...]), expanded: expanded, width: width, localPictures: localPictures)
                     return (model, start)
                 }.value
                 feed = ThreadFeed(model: prepared.0)
@@ -565,12 +569,14 @@ final class ThreadSession {
         loadingOlder = true
         let width = view?.width ?? 800
         let expanded = expanded
+        // Another Mac's thread draws no pictures from this Mac (MarkdownRenderer.localPictures).
+        let localPictures = !(app?.isRemote(threadId) ?? false)
         if displayStart > 0 {
             let newStart = max(0, displayStart - Self.pageRows)
             let rows = Array(feed.model.rows[newStart..<displayStart])
             Task {
                 await Task.detached(priority: .userInitiated) {
-                    TranscriptController.renders.prepare(rows, expanded: expanded, width: width)
+                    TranscriptController.renders.prepare(rows, expanded: expanded, width: width, localPictures: localPictures)
                 }.value
                 // Where the reader is, read while the table and `displayStart`
                 // still agree (a flush may have landed during the await).
@@ -609,7 +615,7 @@ final class ThreadSession {
                     let result = copy.prepend(olderEvents: page.events)
                     if page.atStart { copy.knownStart = true }
                     let newStart = max(0, result.added - Self.pageRows)
-                    TranscriptController.renders.prepare(Array(copy.rows[newStart..<result.added]), expanded: expanded, width: width)
+                    TranscriptController.renders.prepare(Array(copy.rows[newStart..<result.added]), expanded: expanded, width: width, localPictures: localPictures)
                     return (copy, result)
                 }.value
                 // Read the scroll anchor before the model changes under the

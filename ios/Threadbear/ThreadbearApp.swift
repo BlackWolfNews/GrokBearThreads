@@ -18,6 +18,9 @@ struct ThreadbearApp: App {
             RootView()
                 .environment(model)
                 .environment(quick)
+                // Every link in the app: a web page opens, another app's
+                // link asks first (LinkGate).
+                .linksThroughGate()
                 .onAppear {
                     delegate.model = model
                     delegate.pushTaps.open = { [model] threadId in model.openThreadId = threadId }

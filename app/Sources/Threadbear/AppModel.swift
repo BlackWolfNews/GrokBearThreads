@@ -402,6 +402,11 @@ final class AppModel {
     /// This Mac's copies of files in other runners' threads
     /// (`remoteFiles`, RemoteFiles.swift), made on first use.
     @ObservationIgnored var remoteFileStore: RemoteFileStore?
+    /// The thread a transcript link is being followed in, while a click on
+    /// it is handled (TranscriptTextView.forItsThread): a thread open in a
+    /// panel isn't the selected one, and another Mac's paths mustn't be
+    /// read as this Mac's (Daybreak, 7 Nov). Nil means the selected thread.
+    @ObservationIgnored var linkThreadId: String?
     /// Every project, archived ones too, in the runner's order (newest
     /// activity first). Replaced whole by `projects.updated`.
     var projects: [Project] = [] {

@@ -48,13 +48,13 @@ extension AppModel {
     func openConnect(_ service: ConnectorService) {
         guard let url = ConnectorsText.serviceURL(connectors, service) else { return }
         AppLog.write("connectors", "opening the gateway's page for \(service.id)")
-        NSWorkspace.shared.open(url)
+        OpenGate.openWeb(url)
     }
 
     /// Opens the gateway's admin page, with every service on it.
     func openConnectorsAdmin() {
         guard let url = ConnectorsText.manageURL(connectors) else { return }
         AppLog.write("connectors", "opening the gateway's admin page")
-        NSWorkspace.shared.open(url)
+        OpenGate.openWeb(url)
     }
 }

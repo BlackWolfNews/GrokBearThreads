@@ -187,7 +187,8 @@ strip under the picture. Next and back (or the left and right arrow keys)
 step through every picture of every option, up and down jump to the option
 before or after, and after the last one they're all side by side. Click an
 option on the right, one of its small pictures, or a dot under the stage, to
-go straight to it, and Open live to try one the agent has running. An
+go straight to it, and Open live to try one the agent has running (a web
+page only). A review from a thread on another Mac opens on that Mac. An
 agent can show a video or an HTML page in place of a picture: videos play
 quietly on a loop, side by side when they're all showing, with controls
 for sound when one is big; a page shows as it does in the side pane, with
@@ -210,7 +211,12 @@ open in Chrome through [BrowserBear](https://github.com/mikecann/browserbear)
 into your Chrome window rather than opening a second one. A link to a file
 without its whole path (`shorts-plan/candidates.md`) is looked for from the
 thread's folder, as a path in a reply's code is. On the phone and the web,
-links to files on the Mac only say so.
+links to files on the Mac only say so. A link that isn't a web page (one
+that would open Slack, System Settings or another app) asks before it opens,
+naming the app, on the Mac and the phone, and so does a file that isn't a
+plain document (a `.command`, an app, a kind Threadbear can't place).
+Another Mac's program never opens here, and its replies never show
+pictures from this Mac.
 
 The Browser panel, the globe on a thread's right-hand rail, can show the pages
 an agent opens through [BrowserBear](https://github.com/mikecann/browserbear) in
@@ -233,6 +239,9 @@ A passkey, a file picker or a password manager's popup belongs
 to Chrome itself: press the window button beside the address to use Chrome's
 window. Capture and input pause while you use that window; press the button again
 to return to the panel. Closing the panel restores the page's normal size.
+A page's own alert, confirm or prompt shows over the page under its site's
+name ("example.com says"), and what you type in a prompt goes to that site.
+A page that opens one after another gets no more than three in ten seconds.
 
 An agent can also use a separate Chrome with `--profile agent`. Its pages show in
 the same panel, with its own sign-ins. When that Chrome asks for a passkey or a
@@ -806,7 +815,9 @@ shows up in the account menu within a few seconds.
 If a login stops working (you signed out, or its session ran out and
 couldn't be refreshed), the thread's turn fails and a line above its
 messages says so. Sign in… opens Terminal on that login's own sign-in, and
-Send again sends your last message again once you're done.
+Send again sends your last message again once you're done. For a thread on
+another Mac the line says which Mac to sign in on, as Terminal here would
+only sign in this Mac.
 
 If Claude stops with a safeguards refusal, a small box above the message
 field offers **Continue with Codex Sol**, when Sol is available on a Codex

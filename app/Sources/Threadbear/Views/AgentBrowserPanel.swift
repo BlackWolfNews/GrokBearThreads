@@ -827,7 +827,7 @@ final class AgentSurfaceView: NSView {
     }
 
     private func stop() {
-        if dialogSheet != nil { stream?.send("Page.handleJavaScriptDialog", ["accept": false]); closeDialog() }
+        if dialogView != nil { stream?.send("Page.handleJavaScriptDialog", ["accept": false]); closeDialog() }
         stream?.send("Page.stopScreencast")
         stream?.close()
         stream = nil
@@ -1183,35 +1183,45 @@ final class AgentSurfaceView: NSView {
 
     // MARK: Dialogs
 
-    private var dialogSheet: NSWindow?
+    /// The page's dialog, drawn over the page under its site's name
+    /// (WebDialog): never an alert of Threadbear's own, which a page could
+    /// word as Threadbear asking for a password (Daybreak, 7 Nov).
+    private(set) var dialogView: NSView?
+    private(set) var shownDialog: WebDialog?
+    private var dialogPace = WebDialogPace()
+    /// Where an answer goes; the stream, but a test can listen.
+    var answerDialog: ([String: Any]) -> Void = { _ in }
 
-    private func closeDialog() {
-        guard let sheet = dialogSheet else { return }
-        dialogSheet = nil
-        window?.endSheet(sheet)
+    func closeDialog() {
+        dialogView?.removeFromSuperview()
+        dialogView = nil
+        shownDialog = nil
     }
 
-    private func showDialog(_ params: [String: Any]) {
-        guard let window, dialogSheet == nil else { return }
-        let alert = NSAlert()
-        alert.messageText = params["message"] as? String ?? ""
-        alert.addButton(withTitle: "OK")
-        let type = params["type"] as? String
-        if type != "alert" { alert.addButton(withTitle: "Cancel") }
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
-        if type == "prompt" {
-            field.stringValue = params["defaultPrompt"] as? String ?? ""
-            alert.accessoryView = field
+    func showDialog(_ params: [String: Any]) {
+        guard dialogView == nil else { return }
+        let send: ([String: Any]) -> Void = { [weak self] answer in
+            guard let self else { return }
+            if let stream = self.stream { stream.send("Page.handleJavaScriptDialog", answer) } else { self.answerDialog(answer) }
         }
-        dialogSheet = alert.window
-        alert.beginSheetModal(for: window) { [weak self] response in
-            // Closed by closeDialog: already answered.
-            guard self?.dialogSheet != nil else { return }
-            self?.dialogSheet = nil
-            var answer: [String: Any] = ["accept": response == .alertFirstButtonReturn]
-            if type == "prompt" { answer["promptText"] = field.stringValue }
-            self?.stream?.send("Page.handleJavaScriptDialog", answer)
-        }
+        // One after another, as fast as each is closed: past a few, the
+        // rest are answered no without showing.
+        guard dialogPace.allow() else { return send(["accept": false]) }
+        let dialog = WebDialog(type: params["type"] as? String, url: params["url"] as? String,
+                               message: params["message"] as? String, defaultPrompt: params["defaultPrompt"] as? String)
+        let view = NSHostingView(rootView: WebDialogCard(dialog: dialog) { [weak self] accept, text in
+            // Closed by closeDialog meanwhile (the agent answered): done.
+            guard let self, self.dialogView != nil else { return }
+            self.closeDialog()
+            var answer: [String: Any] = ["accept": accept]
+            if dialog.kind == .prompt, accept { answer["promptText"] = text }
+            send(answer)
+        })
+        view.frame = bounds
+        view.autoresizingMask = [.width, .height]
+        addSubview(view)
+        dialogView = view
+        shownDialog = dialog
     }
 
     // MARK: Chrome's own window
@@ -1282,5 +1292,73 @@ enum KeyNames {
         case "Space": return " "
         default: return event.characters ?? ""
         }
+    }
+}
+
+/// A page's dialog over the page (AgentSurfaceView.showDialog), the way a
+/// browser draws one: the site's name above its words, OK and Cancel, and
+/// for a prompt where what's typed goes. The page behind is dimmed, as
+/// nothing on it moves until it's answered.
+struct WebDialogCard: View {
+    let dialog: WebDialog
+    let answer: (Bool, String) -> Void
+    @State private var text: String
+    @FocusState private var focused: Bool
+
+    init(dialog: WebDialog, answer: @escaping (Bool, String) -> Void) {
+        self.dialog = dialog
+        self.answer = answer
+        _text = State(initialValue: dialog.defaultPrompt)
+    }
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            Color.black.opacity(0.18)
+                .contentShape(Rectangle())
+                .onTapGesture {}
+            VStack(alignment: .leading, spacing: 10) {
+                Label(dialog.heading, systemImage: "globe")
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if !dialog.message.isEmpty {
+                    ScrollView {
+                        Text(dialog.message)
+                            .font(.system(size: 13))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
+                    .frame(maxHeight: 160)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                if dialog.kind == .prompt {
+                    TextField("", text: $text)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($focused)
+                        .onSubmit { answer(true, text) }
+                    Text(dialog.sendsTo)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+                HStack {
+                    Spacer()
+                    if dialog.kind != .alert {
+                        Button("Cancel") { answer(false, text) }
+                            .keyboardShortcut(.cancelAction)
+                            .tip("Answer the page no")
+                    }
+                    Button(dialog.kind == .beforeunload ? "Leave" : "OK") { answer(true, text) }
+                        .keyboardShortcut(.defaultAction)
+                        .tip(dialog.kind == .prompt ? "Send what's in the box to \(dialog.site)" : "Answer the page yes")
+                }
+            }
+            .padding(14)
+            .frame(width: 400)
+            // The shadow on the card's shape alone, not on what's inside it.
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .textBackgroundColor)).shadow(color: .black.opacity(0.25), radius: 12, y: 4))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.15)))
+            .padding(.top, 24)
+        }
+        .onAppear { focused = dialog.kind == .prompt }
     }
 }

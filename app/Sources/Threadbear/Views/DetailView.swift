@@ -283,7 +283,7 @@ struct ThreadMenuButton: View {
                 // the share button sits right beside this menu, and the web
                 // page has its own Copy link and share controls.
                 if let link = app.threadWebLink(thread.id) {
-                    Button("Open on the web", systemImage: "safari") { NSWorkspace.shared.open(link) }
+                    Button("Open on the web", systemImage: "safari") { OpenGate.openWeb(link) }
                 }
             }
         } label: {
@@ -844,6 +844,21 @@ struct SignInBanner: View {
                 Spacer(minLength: zoomed(6))
                 Button("Sign in…") { app.signIn(account) }
                     .tip("Opens Terminal on \(name)'s own sign-in for this login")
+                Button("Send again") { app.sendAgain(thread.id) }
+                    .tip("Send your last message again, once you've signed in")
+            }
+            .font(.system(size: TypeScale.label))
+            .padding(.horizontal, zoomed(14))
+            .padding(.vertical, zoomed(7))
+            .overlay(alignment: .bottom) { Rectangle().fill(Color(nsColor: Theme.hairline)).frame(height: 0.5) }
+        } else if let runner = app.remoteSignInRunner(for: thread) {
+            // Another Mac's login: signed in on that Mac, not from here.
+            let name = thread.provider == "codex" ? "Codex" : "Claude"
+            HStack(spacing: zoomed(8)) {
+                Image(systemName: "person.crop.circle.badge.exclamationmark").foregroundStyle(.orange)
+                Text("\(name) on \(runner) needs you to sign in again.").lineLimit(1)
+                    .tip("Sign in on \(runner) itself: \(name == "Codex" ? "codex login" : "claude auth login") in its Terminal")
+                Spacer(minLength: zoomed(6))
                 Button("Send again") { app.sendAgain(thread.id) }
                     .tip("Send your last message again, once you've signed in")
             }

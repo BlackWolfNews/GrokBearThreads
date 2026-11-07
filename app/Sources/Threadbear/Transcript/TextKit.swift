@@ -273,6 +273,10 @@ final class TranscriptTextView: NSTextView {
 
     override func clicked(onLink link: Any, at charIndex: Int) {
         closeChipCard()
+        forItsThread { followLink(link, at: charIndex) }
+    }
+
+    private func followLink(_ link: Any, at charIndex: Int) {
         // work:, thread: and review: links go somewhere in Threadbear: the
         // row's cell knows which turn the link is in (WorkLinks).
         if let url = link as? URL, WorkLinks.quote(of: url) != nil || WorkLinks.threadId(of: url) != nil || WorkLinks.reviewId(of: url) != nil {
@@ -293,9 +297,42 @@ final class TranscriptTextView: NSTextView {
             // NSWorkspace can't open one (Finder's -50), so it's looked
             // for from the thread's folder like a path in inline code.
             _ = openPathRef(text)
-        } else {
+        } else if webURL(link) != nil {
+            // http(s), checked just above: AppKit hands it to the browser.
             super.clicked(onLink: link, at: charIndex)
+        } else {
+            // Any other scheme (`slack:`, `x-apple.systempreferences:`):
+            // AppKit would start its app on the click alone. OpenGate asks
+            // first, naming the app and the link (Daybreak, 7 Nov).
+            openOtherLink(link)
         }
+    }
+
+    /// A link that's neither a file nor a web page, through OpenGate.
+    var openOtherLink: (Any) -> Void = { link in
+        MainActor.assumeIsolated {
+            guard let url = (link as? URL) ?? (link as? String).flatMap(URL.init(string:)) else { return NSSound.beep() }
+            OpenGate.openLink(url)
+        }
+    }
+
+    /// The thread this text is in, for a transcript row's: a thread open in
+    /// a panel isn't the selected one.
+    var linkThreadId: String? {
+        var view: NSView? = superview
+        while let v = view, !(v is RowCellView) { view = v.superview }
+        return (view as? RowCellView)?.delegate?.linkThreadId
+    }
+
+    /// Runs `body` with this text's thread as the one links are followed
+    /// in (AppModel.linkThreadId), so another Mac's thread in a panel has
+    /// its paths fetched from that Mac, not read as this Mac's.
+    func forItsThread<T>(_ threadId: String? = nil, _ body: () -> T) -> T {
+        let app = AppModel.shared
+        let saved = app.linkThreadId
+        app.linkThreadId = threadId ?? linkThreadId ?? saved
+        defer { app.linkThreadId = saved }
+        return body()
     }
 
     convenience init() {
@@ -902,14 +939,26 @@ final class TranscriptTextView: NSTextView {
     }
 
     private func peek(atCharacter index: Int) -> (range: NSRange, peek: LinkPeek)? {
+        forItsThread { peekInThread(atCharacter: index) }
+    }
+
+    private func peekInThread(atCharacter index: Int) -> (range: NSRange, peek: LinkPeek)? {
         guard let storage = textStorage, index < storage.length else { return nil }
         var range = NSRange()
-        if let peek = storage.attribute(.tbPeek, at: index, effectiveRange: &range) as? LinkPeek { return (range, peek) }
-        if let chip = storage.attribute(.tbPictureChip, at: index, effectiveRange: &range) as? NSNumber,
-           let link = storage.attribute(.link, at: index, effectiveRange: nil) as? URL {
-            // This Mac's copy of a picture on another runner, once there is one.
-            let file = pictureGrid?.localPath(chip.intValue).map { URL(fileURLWithPath: $0) } ?? link
-            return (range, LinkPeek(url: file, title: PictureChip.label(chip.intValue + 1), pictureOnly: true))
+        if let peek = storage.attribute(.tbPeek, at: index, effectiveRange: &range) as? LinkPeek {
+            // An ask's file link in another Mac's thread: only this Mac's copy.
+            guard peek.url.isFileURL else { return (range, peek) }
+            guard let file = localCopy(peek.url) else { return nil }
+            return (range, file == peek.url ? peek : LinkPeek(url: file, title: peek.title, pictureOnly: peek.pictureOnly))
+        }
+        if let chip = storage.attribute(.tbPictureChip, at: index, effectiveRange: &range) as? NSNumber {
+            // The picture grid's file: the picture itself, or this Mac's
+            // whole copy of one on another runner. Nothing while there's no
+            // copy, or no grid to ask: the message's path is that Mac's,
+            // and read here it named a file on this Mac that the drag then
+            // handed out (Daybreak, 7 Nov).
+            guard let file = pictureGrid?.localPath(chip.intValue) else { return nil }
+            return (range, LinkPeek(url: URL(fileURLWithPath: file), title: PictureChip.label(chip.intValue + 1), pictureOnly: true))
         }
         // The longest range, as a link's words can change font part way
         // (a bold word in it) and the card belongs to the whole link.
@@ -917,9 +966,15 @@ final class TranscriptTextView: NSTextView {
                                            in: NSRange(location: 0, length: storage.length)) else { return nil }
         let words = storage.attributedSubstring(from: range).string.trimmingCharacters(in: .whitespacesAndNewlines)
         if let web = webURL(link) { return (range, LinkPeek(url: web, title: words)) }
-        guard let url = link as? URL, url.isFileURL || FilePathRefs.text(of: url) != nil, let file = fileLinkTarget(url) else { return nil }
+        guard let url = link as? URL, url.isFileURL || FilePathRefs.text(of: url) != nil, let named = fileLinkTarget(url),
+              let file = localCopy(named) else { return nil }
         // The file alone, for its thumbnail: a page's ?query isn't the file's.
         return (range, LinkPeek(url: URL(fileURLWithPath: file.path), title: words))
+    }
+
+    /// What a press on character `index` would drag out (FileDrag).
+    func dragURL(atCharacter index: Int) -> URL? {
+        peek(atCharacter: index).map(\.peek.url)
     }
 
     /// The index of the picture whose chip is under `point`, in Mike's bubble.
@@ -1226,6 +1281,12 @@ final class TranscriptTextView: NSTextView {
         MainActor.assumeIsolated { _ = AppModel.shared.openTranscriptWebLink(url, action) }
     }
 
+    /// The file on this Mac a hover card or a drag may use for a file link
+    /// (AppModel.localCopy): another Mac's only once there's a whole copy.
+    var localCopy: (URL) -> URL? = { url in
+        MainActor.assumeIsolated { AppModel.shared.localCopy(of: url, in: AppModel.shared.linkThread) }
+    }
+
     /// The right-click menu for the file or web link under `point` (in
     /// this view), if there's one there.
     func fileLinkMenu(at point: NSPoint) -> NSMenu? {
@@ -1242,7 +1303,14 @@ final class TranscriptTextView: NSTextView {
         guard let storage = textStorage, index < storage.length, let link = storage.attribute(.link, at: index, effectiveRange: nil) else { return nil }
         if let web = webURL(link) { return WebLinkMenu(url: web, open: openWeb).menu() }
         guard let url = link as? URL, url.isFileURL || FilePathRefs.text(of: url) != nil else { return nil }
-        return FileLinkMenu(file: fileLinkTarget(url), open: openFile).menu()
+        // The menu's choice comes after this returns, so it carries the
+        // thread with it.
+        let threadId = linkThreadId, open = openFile
+        let file = forItsThread(threadId) { fileLinkTarget(url) }
+        return FileLinkMenu(file: file, open: { [weak self] url, action in
+            guard let self else { return }
+            self.forItsThread(threadId) { open(url, action) }
+        }).menu()
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {

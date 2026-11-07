@@ -491,6 +491,21 @@ public struct ConvexLogin: Sendable, Equatable, Decodable {
     }
 }
 
+public extension ConvexLogin {
+    /// The page to open: only ever Convex's own device sign-in
+    /// (LinkPolicy.convexSignIn). The runner may be another Mac's, and its
+    /// answer is opened on this one, so a `file:` URL or another site from
+    /// it must never reach the browser or another app (Daybreak, 7 Nov).
+    var page: URL? { LinkPolicy.convexSignIn(url) }
+
+    /// Why the sign-in stops: a page that isn't Convex's, from the first
+    /// answer or any later one. Nil when there's no page or it's fine.
+    var refusedPage: String? {
+        guard url != nil, page == nil else { return nil }
+        return "The runner's sign-in page isn't Convex's (\(LinkPolicy.convexSignInHost)), so Threadbear didn't open it. Run npx convex login on that Mac instead."
+    }
+}
+
 /// `panels.convexKey`'s answer. The key is admin of its deployment, so its
 /// description leaves it out, in case one ever lands in a log line.
 public struct ConvexPanelKey: Sendable, Hashable, Decodable, CustomStringConvertible {

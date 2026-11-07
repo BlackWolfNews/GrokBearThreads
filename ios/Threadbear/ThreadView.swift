@@ -225,11 +225,12 @@ struct ThreadView: View {
         case nil:
             // A relative link (`[plan](shorts-plan/candidates.md)`) is a
             // file in the thread's folder on the Mac; iOS can't open it.
-            guard url.scheme != nil else {
+            guard url.scheme != nil, !url.isFileURL else {
                 model.report(TransportError.server("That file opens on the Mac."))
                 return .handled
             }
-            return .systemAction
+            // A web page, or another app's link only once Mike says yes.
+            return LinkGate.shared.decide(url)
         case let .thread(id):
             // Agents may give only the start of the id.
             pushThread(model.inbox.first { $0.threadId.hasPrefix(id) }?.threadId ?? id)
@@ -1020,7 +1021,7 @@ private struct StepLine: ViewModifier {
 extension EnvironmentValues {
     /// What a tap on a link in message `seq` does, set by the open thread.
     /// Outside one, the system opens it.
-    @Entry var threadLink: @MainActor (URL, Int?) -> OpenURLAction.Result = { _, _ in .systemAction }
+    @Entry var threadLink: @MainActor (URL, Int?) -> OpenURLAction.Result = { url, _ in LinkGate.shared.decide(url) }
     @Entry var litStep: Int?
     /// Opens a thread on top of this one, so Back comes back here.
     @Entry var pushThread: @MainActor (String) -> Void = { _ in }

@@ -179,7 +179,9 @@ extension AppModel {
                     if action == .finder {
                         revealInFinder(copy.path)
                     } else {
-                        openExternally(url.query != nil || url.fragment != nil ? FilePathRefs.withQuery(copy.url, query: url.query, fragment: url.fragment) : copy.url)
+                        // Never a program: that Mac chose what the file is.
+                        openExternally(url.query != nil || url.fragment != nil ? FilePathRefs.withQuery(copy.url, query: url.query, fragment: url.fragment) : copy.url,
+                                       from: copyOrigin(of: thread))
                     }
                 } catch where Self.isFolderError(error) && openProjectId == nil {
                     // Nothing here to open it in: the pane can browse it.

@@ -742,6 +742,9 @@ then the reply as written, then any notes; the Mac and phone read that
 wording back for Mike's bubble (`ReviewAnswer`), so change them with it.
 
 Every change persists a `review.updated` event with `{ review: DesignReview }`.
+An option's `url` is an http or https page; the Mac app drops any other
+(a `file:` URL, another app's link) as it decodes one, whatever runner
+sent it, and Open live opens only a web page.
 Its stable card ID is the review ID; later snapshots update that card in
 place even when the original event is outside the loaded transcript page.
 `ThreadSummary.pendingReviews?: number` counts pending reviews and makes
@@ -3648,7 +3651,10 @@ missing (a fresh Mac, another runner) or expire. Then `panels.convexKey`
 fails with `-32040` and the Mac panel offers Sign in to Convex instead of
 the CLI's error: it calls `panels.convexLogin`, opens the `url` it answers
 with, shows the `code`, and polls with `check` until it's done, then loads
-the dashboard. `-32041` (the login can't reach the deployment) gets Sign in
+the dashboard. The app opens `url` only if it's Convex's own device page
+(`https://auth.convex.dev/device`, no other port or user name): a runner,
+maybe another Mac's, sends it, and any other answer, first or on a later
+`check`, stops the sign-in with that said rather than opening it. `-32041` (the login can't reach the deployment) gets Sign in
 as someone else, the same with `force`. No terminal either way.
 
 ## Highlights
@@ -3711,7 +3717,9 @@ note?, show? }` (a path relative to its folder is fine; it must exist;
 a url is at most 2,000 characters).
 A pin of something already found is the same item, now pinned. `show`
 asks the app to open it in the pane now, so an agent shows Mike a
-mockup there instead of running `open`. `unpin { id }` takes one off
+mockup there instead of running `open`. Only the pane: a file shown this
+way never opens in its app (a project file included), and a link only
+opens by itself if it's a web page, where a click on it would go. `unpin { id }` takes one off
 again. The tools' descriptions say when to use them.
 
 **The brief.** The librarian's look (see Projects) also answers with a

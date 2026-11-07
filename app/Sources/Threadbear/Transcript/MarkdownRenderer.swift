@@ -79,6 +79,25 @@ enum MarkdownRenderer {
         return cache
     }()
 
+    /// Whether a picture in the words (`![](/path/shot.png)`) may be read
+    /// from this Mac and drawn: not for another Mac's thread, whose paths
+    /// are that Mac's, as a runner could otherwise put any picture on this
+    /// Mac into its reply (Codex review, 7 Nov). Set for one render on the
+    /// thread doing it (RenderCache.render), so the cache keys on it too.
+    static var localPictures: Bool {
+        (Thread.current.threadDictionary[localPicturesKey] as? Bool) ?? true
+    }
+
+    private static let localPicturesKey = "com.mikerosoft.threadbear.localPictures"
+
+    static func withLocalPictures<T>(_ allowed: Bool, _ body: () -> T) -> T {
+        let dictionary = Thread.current.threadDictionary
+        let saved = dictionary[localPicturesKey]
+        dictionary[localPicturesKey] = allowed
+        defer { dictionary[localPicturesKey] = saved }
+        return body()
+    }
+
     static func render(_ text: String) -> Rendered {
         let blocks = MarkdownBlocks.split(text)
         let output = NSMutableAttributedString()
@@ -115,7 +134,7 @@ enum MarkdownRenderer {
         let rich = RichBlocks.mayHoldRich(block)
         // One that links a reply button keys on the buttons' states.
         let buttons = ReplyButtons.mayHold(block) ? ReplyButtons.shared.generation : -1
-        let key = "\(TypeScale.percent)|\(rich ? RichBlocks.shared.generation : -1)|\(buttons)|\(block)" as NSString
+        let key = "\(TypeScale.percent)|\(rich ? RichBlocks.shared.generation : -1)|\(buttons)|\(localPictures ? 1 : 0)|\(block)" as NSString
         if let cached = cache.object(forKey: key) { return cached }
         // `[tests pass](work:npm test)`: a space ends a link's destination
         // for the parser, so work: and thread: links are escaped first.
@@ -767,7 +786,7 @@ enum MarkdownRenderer {
                 let alt = image.plainText.isEmpty ? (image.source ?? "image") : image.plainText
                 // A picture on this Mac is drawn in the text; a web address,
                 // or a file that's gone, stays a link with its alt text.
-                if let url = inner.link, url.isFileURL, let attachment = MarkdownRenderer.picture(path: url.path, alt: alt) {
+                if let url = inner.link, url.isFileURL, MarkdownRenderer.localPictures, let attachment = MarkdownRenderer.picture(path: url.path, alt: alt) {
                     let run = NSMutableAttributedString(attachment: attachment)
                     run.addAttributes([.link: url, .toolTip: alt], range: NSRange(location: 0, length: run.length))
                     output.append(run)

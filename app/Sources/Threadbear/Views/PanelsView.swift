@@ -105,11 +105,14 @@ struct DockPaneButtons: View {
                         }
                         PaneHeaderButton(symbol: "arrow.clockwise", help: "Reload panel") { pool.reloadConvex(selected) }
                         PaneHeaderButton(symbol: "arrow.up.right", help: "Open \(selected) in browser") {
-                            if let target = pool.convexBrowserURL(convex) { NSWorkspace.shared.open(target) }
+                            if let target = pool.convexBrowserURL(convex) { OpenGate.openWeb(target) }
                         }
                     } else {
                         PaneHeaderButton(symbol: "arrow.clockwise", help: "Reload panel") { WebPanelPool.shared.reloadIfLoaded(url) }
-                        PaneHeaderButton(symbol: "arrow.up.right", help: "Open in browser") { NSWorkspace.shared.open(url) }
+                        // The panel's page is the patch's or a runner's to say:
+                        // a web page opens, another Mac's file is fetched
+                        // from it, anything else asks (OpenGate).
+                        PaneHeaderButton(symbol: "arrow.up.right", help: "Open in browser") { app.openLink(url, in: thread, external: true) }
                     }
                 }
             }
@@ -452,7 +455,7 @@ struct PatchesList: View {
             }
             if let file = patch.file {
                 Button {
-                    NSWorkspace.shared.open(URL(fileURLWithPath: file))
+                    app.openFile(file, of: thread)
                 } label: {
                     Text(file.abbreviatingHome)
                         .font(.system(size: TypeScale.small))
@@ -466,7 +469,7 @@ struct PatchesList: View {
                 if patch.untrusted != nil, let helpers = patch.helpers, !helpers.isEmpty {
                     ForEach(helpers, id: \.self) { helper in
                         Button {
-                            NSWorkspace.shared.open(URL(fileURLWithPath: helper))
+                            app.openFile(helper, of: thread)
                         } label: {
                             Text((patch.source == "claude" ? "Also trusts " : "Imports ") + helper.abbreviatingHome)
                                 .font(.system(size: TypeScale.small))
@@ -657,8 +660,8 @@ private struct ConvexPanel: View {
                         .textSelection(.enabled)
                 }
                 HStack(spacing: zoomed(8)) {
-                    if let url = signIn.url.flatMap(URL.init(string:)) {
-                        Button("Open the page again") { NSWorkspace.shared.open(url) }
+                    if let url = signIn.page {
+                        Button("Open the page again") { OpenGate.openWeb(url) }
                             .tip("Open Convex's sign-in page in your browser")
                     }
                     Button("Cancel") { stopSignIn() }
@@ -757,10 +760,17 @@ private struct ConvexPanel: View {
         signIn = ConvexLogin(state: "waiting")
         signInTask = Task {
             var status = await app.convexPanelLogin(threadId: threadId, panelId: panelId, force: force)
-            if case .success(let started) = status, let url = started.url.flatMap(URL.init(string:)) {
-                NSWorkspace.shared.open(url)
+            if case .success(let started) = status, let url = started.page {
+                OpenGate.openWeb(url)
             }
             while !Task.isCancelled, case .success(let now) = status, now.state == "waiting" {
+                // A page that isn't Convex's sign-in, first or on a later
+                // look: nothing to open, and the sign-in stops saying so.
+                if let refused = now.refusedPage {
+                    signIn = nil
+                    signInFailure = refused
+                    return
+                }
                 signIn = now
                 try? await Task.sleep(for: .seconds(2))
                 guard !Task.isCancelled else { return }
@@ -1038,8 +1048,8 @@ final class WebPanelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUI
         }
         if isConvexView(webView), navigationAction.targetFrame?.isMainFrame ?? true,
            let url = navigationAction.request.url, url.host != Self.convexEmbedded.host,
-           ["http", "https"].contains(url.scheme) {
-            NSWorkspace.shared.open(url)
+           LinkPolicy.web(url) != nil {
+            OpenGate.openWeb(url)
             decisionHandler(.cancel)
             return
         }
@@ -1087,7 +1097,9 @@ final class WebPanelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUI
                  for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         if isPreviewView(webView) { return nil }
         guard let url = navigationAction.request.url else { return nil }
-        if isConvexView(webView) { NSWorkspace.shared.open(url) } else { webView.load(URLRequest(url: url)) }
+        // A page's window.open goes to the browser only as a web page: the
+        // page chose the address (OpenGate refuses anything else).
+        if isConvexView(webView) { OpenGate.openWeb(url) } else { webView.load(URLRequest(url: url)) }
         return nil
     }
 }
@@ -1131,7 +1143,14 @@ private struct ImagePanel: View {
                 if Task.isCancelled { return }
                 render = result
                 // A new NSImage each time: the file's name doesn't change.
-                image = result?.image.flatMap { NSImage(contentsOfFile: $0.path) }
+                // Another Mac's picture is that Mac's file, fetched from it,
+                // never this Mac's file at that path (Codex review, 7 Nov).
+                if let path = result?.image?.path, let thread = app.threads[threadId], thread.isRemote {
+                    let copy = try? await app.remoteCopy(path, in: thread)
+                    image = copy.flatMap { $0.truncated ? nil : NSImage(contentsOf: $0.url) }
+                } else {
+                    image = result?.image.flatMap { NSImage(contentsOfFile: $0.path) }
+                }
                 try? await Task.sleep(for: .seconds(result?.image == nil ? 5 : 3))
             }
         }

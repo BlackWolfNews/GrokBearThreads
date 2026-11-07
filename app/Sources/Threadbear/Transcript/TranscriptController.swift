@@ -42,6 +42,17 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         return app.remoteImages(for: thread)
     }
 
+    var linkThreadId: String? { session?.threadId }
+
+    /// Pictures in the words are read from this Mac only for this Mac's
+    /// own thread (MarkdownRenderer.localPictures). A thread the app
+    /// doesn't list as another runner's is this Mac's: its events come
+    /// from this Mac's runner.
+    var localPictures: Bool {
+        guard let session, let app = session.app else { return true }
+        return !app.isRemote(session.threadId)
+    }
+
     nonisolated static let renders = RenderCache()
 
     /// Overlay scrollers whatever the system setting, so the reading
@@ -284,7 +295,7 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         // Only diff rows have more lines to show; skipping the lookup keeps
         // a full reload's height pass free of a string per row.
         let showAll = row.kind == .diff && session?.expanded.contains(DiffPreview.allKey(row.id)) == true
-        return Self.renders.render(row, expanded: isExpanded(row), showAll: showAll, width: width)
+        return Self.renders.render(row, expanded: isExpanded(row), showAll: showAll, width: width, localPictures: localPictures)
     }
 
     /// Item rows keep their open state in the session; groups and changes
@@ -732,7 +743,7 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
             let margin = 60
             measured = max(0, visibleRange.lowerBound - margin)..<min(count, visibleRange.upperBound + margin)
         }
-        Self.renders.prepare(measured.map { session.displayRow($0) }, expanded: session.expanded, width: width)
+        Self.renders.prepare(measured.map { session.displayRow($0) }, expanded: session.expanded, width: width, localPictures: localPictures)
         tableView.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: measured))
         for index in visibleRange {
             if let row = row(at: index) { refreshCell(at: index, row: row) }
@@ -759,7 +770,7 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         let measured = count <= Self.syncRemeasureLimit
             ? 0..<count
             : max(0, visible.location - margin)..<min(count, visible.location + visible.length + margin)
-        Self.renders.prepare(measured.map { session.displayRow($0) }, expanded: session.expanded, width: width)
+        Self.renders.prepare(measured.map { session.displayRow($0) }, expanded: session.expanded, width: width, localPictures: localPictures)
         NSAnimationContext.beginGrouping()
         NSAnimationContext.current.duration = 0
         tableView.reloadData()
@@ -777,8 +788,9 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
             let zoom = TypeScale.percent
             let rows = (0..<session.displayCount).map { session.displayRow($0) }
             let expanded = session.expanded
+            let localPictures = self.localPictures
             await Task.detached(priority: .userInitiated) {
-                TranscriptController.renders.prepare(rows, expanded: expanded, width: width)
+                TranscriptController.renders.prepare(rows, expanded: expanded, width: width, localPictures: localPictures)
             }.value
             guard !Task.isCancelled, self.session === session, self.width == width, TypeScale.percent == zoom else { return }
             let memory = self.captureMemory()
