@@ -42,6 +42,7 @@ host="$1"; shift
 cmd="$*"
 d="$FAKE/$host"
 echo "$host $cmd" >>"$FAKE/ssh.log"
+[ -d "$d" ] || exit 255
 run_copy() {
   script="$(printf '%s' "$cmd" | grep -oE "$d/home/[^ \\\\']*/scripts/check-remote.sh" | head -1)"
   if [ -n "$script" ] && [ -f "$script" ] && [ -f "$(dirname "$script")/../.check-changed" ]; then
@@ -58,6 +59,12 @@ run_copy() {
     # The check failing, and the disk as a host's "df-after" file has it then.
     if [ -n "$RUN_FAILS" ]; then
       [ ! -f "$d/df-after" ] || cp "$d/df-after" "$d/df-out"
+      # What keep_logs wrote there, as it failed.
+      if [ -n "$KEPT_KB$KEPT_EMPTY" ]; then
+        id="$(printf '%s' "$cmd" | grep -oE 'runs/[0-9]+-[0-9]+-[0-9]+/' | head -1 | cut -d/ -f2)"
+        mkdir -p "$d/home/.cache/threadbear-check/kept-$id"
+        printf '%s' "$KEPT_KB" >"$d/home/.cache/threadbear-check/kept-$id/free-kb"
+      fi
       exit 1
     fi
   else echo "no copy on $host for: $cmd"; exit 1; fi
@@ -67,6 +74,8 @@ run_copy() {
 PATH="$d/bin:$PATH"
 case "$cmd" in
   *"uname -s"*)
+    # A host's "probe-fails" file: it answers, but the probe's mkdir fails.
+    [ ! -f "$d/probe-fails" ] || exit 1
     # A host's "base" file says what folder it reports, if not its own.
     b="$d/home/.cache/threadbear-check"; [ -f "$d/base" ] && b="$(cat "$d/base")"
     # A host's "os" file says what system it is, if not a Mac.
@@ -75,7 +84,7 @@ case "$cmd" in
     (cd "$d/home" && bash -c "\${cmd##*fi && }") ;;
   *"lockf -t 0 -k"*)
     n="$(cat "$d/lose" 2>/dev/null || echo 0)"
-    if [ "$n" -gt 0 ]; then echo $((n - 1)) >"$d/lose"; [ -f "$d/looks-free" ] || echo busy >"$d/state"; exit 75; fi
+    if [ "$n" -gt 0 ]; then echo $((n - 1)) >"$d/lose"; [ ! -f "$d/df-after" ] || cp "$d/df-after" "$d/df-out"; [ -f "$d/looks-free" ] || echo busy >"$d/state"; exit 75; fi
     run_copy now ;;
   *"lockf -k"*) run_copy "after waiting" ;;
   *"flock -n -E 75"*) run_copy now ;;
@@ -492,7 +501,7 @@ test('a check that fails on a host left short of room says so last', () => {
   const s = setup({ h1: { state: 'free', dfAfter: macDf(0.5 * GiB) } });
   const r = s.run('h1', 3600, '', { RUN_FAILS: '1' });
   assert.equal(r.status, 1, r.stdout + r.stderr);
-  assert.equal(r.stderr.trim().split('\n').at(-1), 'h1 has only 0.5 GiB free, and this check wants 8 GiB, which may be why it failed. Free some space there and run it again.');
+  assert.equal(r.stderr.trim().split('\n').at(-1), 'h1 had only 0.5 GiB free when this failed, and this check wants 8 GiB, which may be why. Free some space there and run it again.');
 });
 
 test('a check that fails with plenty of room, or that passes on a low host, says nothing about it', () => {
@@ -529,4 +538,78 @@ test('a copy that fails with plenty of room is still just unreachable: 255', () 
   assert.equal(r.status, 255, r.stdout + r.stderr);
   assert.match(r.stderr, /Couldn't copy this checkout to h1; trying the others\./);
   assert.match(r.stderr, /None of h1 can run this check now\./);
+});
+
+// Codex's review of the above.
+test("a disk too full for the probe's own mkdir is no room, not unreachable", () => {
+  const s = setup({ h1: { state: 'free', df: macDf(0.1 * GiB) } });
+  fs.writeFileSync(path.join(s.fake, 'h1', 'probe-fails'), '');
+  const r = s.run('h1', 3600);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /No check host has room for this check: h1 has 0\.1 GiB free/);
+  assert.deepEqual(r.copies, []);
+});
+
+test('a probe that fails with room to spare, or a host ssh cannot reach, is still unreachable: 255', () => {
+  const s = setup({ h1: { state: 'free' } });
+  fs.writeFileSync(path.join(s.fake, 'h1', 'probe-fails'), '');
+  for (const hosts of ['h1', 'nope']) {
+    const r = s.run(hosts, 3600);
+    assert.equal(r.status, 255, r.stdout + r.stderr);
+    assert.match(r.stderr, new RegExp(`Couldn't reach ${hosts} over ssh`));
+  }
+});
+
+test('a slow copy that loses the race to a check that fills the disk moves on, not waits there', () => {
+  const s = setup({ h1: { state: 'free', lose: 1, dfAfter: macDf(0.5 * GiB) }, h2: { state: 'free' } });
+  const r = s.run('h1,h2', 0);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stderr, /Passing over h1: it has 0\.5 GiB free/);
+  assert.match(r.stdout, /ran on h2 now/);
+  assert.deepEqual(r.copies, ['h1', 'h2']);
+  assert.deepEqual(r.left('h1'), []);
+});
+
+test('a failure is judged by the disk as it failed, not after its temp files went', () => {
+  const s = setup({ h1: { state: 'free' } });
+  const r = s.run('h1', 3600, '', { RUN_FAILS: '1', KEPT_KB: String(GiB) });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr.trim().split('\n').at(-1)!, /^h1 had only 1\.0 GiB free when this failed/);
+
+  // A write the full disk cut short leaves it empty: ask the host now instead.
+  const empty = setup({ h1: { state: 'free', dfAfter: macDf(0.5 * GiB) } });
+  const e = empty.run('h1', 3600, '', { RUN_FAILS: '1', KEPT_EMPTY: '1' });
+  assert.equal(e.status, 1, e.stdout + e.stderr);
+  assert.match(e.stderr, /h1 had only 0\.5 GiB free when this failed/);
+});
+
+// The host's side for real: a scratch copy whose check.sh fails, with temp
+// files that are gone by the end, and a df that sits in the folder --on-host
+// puts first on PATH (the pinned Node's).
+function onHost(checkExit: number, df: string) {
+  const home = shortHome();
+  const base = path.join(home, '.cache', 'threadbear-check');
+  const copy = path.join(base, 'runs', '1-1-0');
+  fs.mkdirSync(path.join(copy, 'scripts'), { recursive: true });
+  fs.copyFileSync(SCRIPT, path.join(copy, 'scripts', 'check-remote.sh'));
+  fs.writeFileSync(path.join(copy, 'check.sh'), `#!/bin/bash\necho made >"$TMPDIR/big"\nexit ${checkExit}\n`, { mode: 0o755 });
+  const nodeBin = path.join(home, '.nvm', 'versions', 'node', 'v24.22.1', 'bin');
+  fs.mkdirSync(nodeBin, { recursive: true });
+  fs.writeFileSync(path.join(nodeBin, 'df'), `#!/bin/bash\n[ "$*" = "-Pk ." ] || exit 9\ncat <<'END'\n${df}END\n`, { mode: 0o755 });
+  const r = spawnSync('bash', [path.join(copy, 'scripts', 'check-remote.sh'), '--on-host', '1-1-0'], { encoding: 'utf8', env: { ...process.env, HOME: home } });
+  return { r, base, kept: path.join(base, 'kept-1-1-0', 'free-kb') };
+}
+
+test('--on-host records the free space of a failed run for this Mac, before clearing up', () => {
+  const { r, base, kept } = onHost(3, macDf(GiB));
+  assert.equal(r.status, 3, r.stdout + r.stderr);
+  assert.equal(fs.readFileSync(kept, 'utf8').trim(), String(GiB));
+  assert.ok(!fs.existsSync(path.join(base, 'tmp-1-1-0')), 'temp files gone');
+  assert.ok(!fs.existsSync(path.join(base, 'src')), 'copy gone');
+});
+
+test('--on-host records nothing when the run passed', () => {
+  const { r, kept } = onHost(0, macDf(GiB));
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.ok(!fs.existsSync(kept));
 });

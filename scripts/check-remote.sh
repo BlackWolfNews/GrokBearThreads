@@ -42,6 +42,9 @@
 set -uo pipefail
 
 BASE_REL=".cache/threadbear-check"
+# Available KiB where the run's files go, as one number. -P keeps each disk
+# on one line and the columns the same on macOS and Linux.
+free_cmd='df -Pk . 2>/dev/null | awk "END { print \$4 }"'
 
 # ---- On the check host: scripts/check-remote.sh --on-host <id> [options]
 if [ "${1:-}" = "--on-host" ]; then
@@ -66,7 +69,14 @@ if [ "${1:-}" = "--on-host" ]; then
   # A failed check keeps its logs in $TMPDIR; they move aside for this
   # Mac to fetch, and everything else goes.
   keep_logs() {
+    local rc=$?
     cd "$base" || return
+    # A failed run's free space, before its temp files go: if they're what
+    # filled the disk, it'd look fine by the time this Mac asks (Codex's
+    # review). The Mac falls back to asking if a full disk stops this write.
+    if [ "$rc" != 0 ] && mkdir -p "$base/kept-$id" 2>/dev/null; then
+      eval "$free_cmd" >"$base/kept-$id/free-kb" 2>/dev/null
+    fi
     for d in "$TMPDIR"/threadbear-check.*; do
       [ -d "$d" ] && mkdir -p "$base/kept-$id" && mv "$d" "$base/kept-$id/"
     done
@@ -204,9 +214,6 @@ if [ "$QUICK" = 1 ] && [ "$ALL" = 0 ] && [ -z "$SHOTS" ] && [ -s "$changed" ] &&
 MIN_FREE_GIB=8
 [ "$linux_ok" = 0 ] || MIN_FREE_GIB=2
 
-# Available KiB where the run's files go, as one number. -P keeps each disk
-# on one line and the columns the same on macOS and Linux.
-free_cmd='df -Pk . 2>/dev/null | awk "END { print \$4 }"'
 # Whether a df answer is under the limit: 0 yes, and FREE_GIB is it to one
 # place, rounded down; 1 no; 2 it isn't a number we can use. It's the host's
 # word, so it's only compared, and the digits are spelled out because a
@@ -237,15 +244,31 @@ probe='mkdir -p ~/'"$BASE_REL"'/runs && cd ~/'"$BASE_REL"' && pwd && uname -s &&
 # Hosts with no room, as "<host> has <n> GiB free": those this choosing passed
 # over, and those whose copy failed for lack of it, which aren't asked again.
 LOW="" LOW_COPY=""
+pass_over() {
+  echo "Passing over $1: it has $FREE_GIB GiB free, and this check wants $MIN_FREE_GIB GiB." >&2
+  LOW+="${LOW:+, }$1 has $FREE_GIB GiB free"
+}
 choose() {
   HOST="" HOST_OS="" remote_base="" FREE=0 LOW="$LOW_COPY"
-  local first="" first_os="" first_base="" h out b os state kb
+  local first="" first_os="" first_base="" h out rc b os state kb
   for h in "${HOSTS[@]}"; do
     # An ssh host, never something ssh would take for an option.
     case "$h" in -*|"") continue ;; esac
     # One that dropped out during a copy this run isn't tried again.
     case " $SKIP " in *" $h "*) continue ;; esac
-    out="$("${SSH[@]}" "$h" "$probe" 2>/dev/null)" || { echo "Couldn't reach $h over ssh." >&2; continue; }
+    out="$("${SSH[@]}" "$h" "$probe" 2>/dev/null)"
+    rc=$?
+    if [ "$rc" != 0 ]; then
+      # It answered, but a disk too full for the probe's mkdir fails it too,
+      # and calling that unreachable would run the check on this Mac (Codex's
+      # review). 255 is ssh itself: nobody there to ask.
+      if [ "$rc" != 255 ] && kb="$("${SSH[@]}" "$h" "cd ~ && $free_cmd" 2>/dev/null)" && low_on_room "$kb"; then
+        pass_over "$h"
+      else
+        echo "Couldn't reach $h over ssh." >&2
+      fi
+      continue
+    fi
     { read -r b; read -r os; read -r state; read -r kb; } <<<"$out"
     # Every rm -rf over there is under this, so never let it be empty. It's
     # the host's word, so it's only ever data: an absolute path of plain
@@ -263,8 +286,7 @@ choose() {
     low_on_room "$kb"
     case $? in
       0)
-        echo "Passing over $h: it has $FREE_GIB GiB free, and this check wants $MIN_FREE_GIB GiB." >&2
-        LOW+="${LOW:+, }$h has $FREE_GIB GiB free"
+        pass_over "$h"
         continue ;;
       # Not knowing is no reason to stop checks; a failure there still says.
       2) echo "Couldn't read how much disk $h has free; trying it anyway." >&2 ;;
@@ -361,7 +383,9 @@ rewrite_logs() {
 copied_host="" copy_secs=0
 stay_secs="${THREADBEAR_CHECK_STAY_SECS:-60}"
 while :; do
-  if [ -n "$copied_host" ] && [ "$copy_secs" -ge "$stay_secs" ]; then
+  # A disk that's filled up since (the check that won may have done it) is no
+  # place to wait: choosing again passes it over and deletes the copy.
+  if [ -n "$copied_host" ] && [ "$copy_secs" -ge "$stay_secs" ] && ! host_is_low; then
     # HOST, HOST_OS and remote_base are still the copy's.
     FREE=0
   elif ! choose; then
@@ -473,6 +497,13 @@ if [ "$code" = 255 ]; then
   code=1
 fi
 
+# The disk as the failure left it (keep_logs), or as it is now if that couldn't
+# be written. -s: a full disk can leave the file empty.
+fail_kb=""
+if [ "$code" != 0 ]; then
+  fail_kb="$("${SSH[@]}" "$HOST" "cd '$remote_base' && if [ -s 'kept-$id/free-kb' ]; then cat 'kept-$id/free-kb'; else $free_cmd; fi" 2>/dev/null)"
+fi
+
 # find, not a glob: the host's login shell may be zsh, which complains
 # out loud when a glob matches nothing.
 kept="$("${SSH[@]}" "$HOST" "find '$remote_base/kept-$id' -maxdepth 1 -name 'threadbear-check.*' 2>/dev/null | head -1")"
@@ -487,9 +518,8 @@ if [ -n "$SHOTS" ]; then
   rsync -a -e "${SSH[*]}" "$HOST:$remote_shots/" "$SHOTS/" >/dev/null && "${SSH[@]}" "$HOST" "rm -rf '$remote_shots'"
 fi
 # Last, so it's the line read: what a full disk breaks often looks nothing like
-# one (a CodeSign error, 7 Nov). The run's own files have gone by now, so this
-# is what's left without them.
-if [ "$code" != 0 ] && host_is_low; then
-  echo "$HOST has only $FREE_GIB GiB free, and this check wants $MIN_FREE_GIB GiB, which may be why it failed. Free some space there and run it again." >&2
+# one (a CodeSign error, 7 Nov).
+if low_on_room "$fail_kb"; then
+  echo "$HOST had only $FREE_GIB GiB free when this failed, and this check wants $MIN_FREE_GIB GiB, which may be why. Free some space there and run it again." >&2
 fi
 exit "$code"
