@@ -625,7 +625,9 @@ the runner, and which events each row came from ("Copy debug info").
 `MockRunnerTests` runs the real WebSocket client against the mock runner,
 its restart included (skipped if node or the mock's `npm install` is
 missing, except under `THREADBEAR_REQUIRE_MOCK=1`, which `../check.sh` sets
-after installing the mock's packages). `ThreadbearAppTests` tests the app target itself: typing into the
+after installing the mock's packages). A test that reaches a real modal (an
+alert, a save panel) ends the run at once with its stack (`Tests/ModalGuard`),
+as nobody can click it on a check host: stub what asks. `ThreadbearAppTests` tests the app target itself: typing into the
 composer, question answers, incremental streaming heights against a full
 measure, the render cache, sliced tall text, drafts kept when a send fails,
 the restart banner, the runner's message as a note, and the automation
