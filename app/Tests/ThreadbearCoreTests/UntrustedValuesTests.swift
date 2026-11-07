@@ -141,6 +141,10 @@ import Testing
         let indented = (0..<200).map { String(repeating: "  ", count: $0) + "- x" }
         #expect(MarkdownNesting.bound(indented.joined(separator: "\n")) >= 200)
         #expect(MarkdownNesting.bound(indented.joined(separator: "\r")) >= 200)
+        // Empty items still nest (cross-lab review).
+        let empty = (0..<300).map { String(repeating: "  ", count: $0) + "-" }
+        #expect(MarkdownNesting.bound(empty.joined(separator: "\n")) >= 300)
+        #expect(MarkdownNesting.bound(empty.joined(separator: "\r") + "\r") >= 300)
         // A lazy line keeps what's open; the next one opens more.
         #expect(MarkdownNesting.bound("> > a\nlazy\n> > > b") >= 3)
         // What people write stays well under MarkdownRenderer's limit.
@@ -168,13 +172,45 @@ import Testing
         #expect(Decisions.paragraph(Ask(action: "Merge\n  it\r\n now ")) == "Merge it now")
     }
 
+    @Test func usageSumsHoldAtIntMax() {
+        // Each hour in range, a quarter of a million of them not.
+        let hour = TokenHour(start: Date(), input: 10_000_000_000_000, output: 10_000_000_000_000, cacheRead: 10_000_000_000_000, cacheWrite: 10_000_000_000_000)
+        var sum = TokenHour(start: Date())
+        for _ in 0..<300_000 { sum = sum + hour }
+        #expect(sum.total == .max)
+        #expect(Int.max.adding(saturating: 1) == .max && Int.min.adding(saturating: -1) == .min && 2.adding(saturating: 3) == 5)
+    }
+
+    @Test func previewTextIsLinearAndUnchanged() {
+        let seconds = cpuSeconds { _ = PreviewText.plain(String(repeating: "[", count: 32_000)) }
+        #expect(seconds < 0.1, "\(seconds) s")
+        // The regex it replaced, to check against.
+        func old(_ text: String) -> String {
+            text.replacingOccurrences(of: #"!?\[([^\]]*)\]\([^)]*\)"#, with: "$1", options: .regularExpression)
+        }
+        func new(_ text: String) -> String {
+            text.replacing(/!?\[([^\]]*)(?:\]\([^)]*(\))?)?/) { $0.2 == nil ? String($0.0) : String($0.1) }
+        }
+        #expect(PreviewText.plain("See [the docs](https://x) and ![a](b.png) [c] [d](e") == "See the docs and a [c] [d](e")
+        let pieces = ["[", "]", "(", ")", "!", "a", " ", "\n", "](", "x)"]
+        var generator = SeededGenerator(seed: 5)
+        for _ in 0..<5_000 {
+            let text = (0..<Int.random(in: 1...12, using: &generator)).map { _ in pieces.randomElement(using: &generator)! }.joined()
+            #expect(new(text) == old(text), "\(text.debugDescription)")
+            if new(text) != old(text) { break }
+        }
+    }
+
     // MARK: Card mentions
 
-    /// CPU time, as the M5 is often busy.
+    /// CPU time, as the Mac running these is often busy.
     private func cpuSeconds(_ work: () -> Void) -> Double {
-        let start = clock()
+        // This thread's own time: Swift Testing runs other tests alongside,
+        // and clock() would count theirs too.
+        func now() -> Double { Double(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)) / 1e9 }
+        let start = now()
         work()
-        return Double(clock() - start) / Double(CLOCKS_PER_SEC)
+        return now() - start
     }
 
     @Test func cardMentionsAreLinearOnBracketsWithNoLink() {

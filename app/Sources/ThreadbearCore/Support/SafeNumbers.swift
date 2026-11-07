@@ -32,6 +32,15 @@ public extension Int {
     }
 }
 
+public extension Int {
+    /// `self + other` held at Int's ends rather than trapping, for sums
+    /// over rows someone else sent: each can be in range and the sum not.
+    func adding(saturating other: Int) -> Int {
+        let (sum, over) = addingReportingOverflow(other)
+        return over ? (other > 0 ? .max : .min) : sum
+    }
+}
+
 public extension Double {
     /// A count or size as the wire sends it: a whole, finite number from 0
     /// to `most`, or nil. For fields where any other value is a lie (a

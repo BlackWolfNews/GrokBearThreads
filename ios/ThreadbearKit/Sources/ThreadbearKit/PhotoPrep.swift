@@ -36,8 +36,14 @@ public enum PhotoPrep {
     /// `prepared(from:)`, two photos at a time at most, so six big ones
     /// added together don't all hold their pixels at once.
     public static func preparedInTurn(from data: Data) async -> Prepared? {
+        await inTurn { prepared(from: data) }
+    }
+
+    /// `work`, two at a time at most across the app (the same turns as
+    /// `preparedInTurn`'s).
+    public static func inTurn<T: Sendable>(_ work: @Sendable () async -> T) async -> T {
         await gate.enter()
-        let result = prepared(from: data)
+        let result = await work()
         await gate.leave()
         return result
     }

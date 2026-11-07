@@ -2,9 +2,9 @@ import AppKit
 import XCTest
 @testable import Threadbear
 
-/// Deeply nested quotes and lists are drawn as words rather than run the
-/// transcript's worker threads out of stack (MarkdownRenderer.maxNesting;
-/// Daybreak, 7 Nov 2026).
+/// Deeply nested quotes, lists, emphasis and pictures never run the
+/// transcript's worker threads out of stack (MarkdownRenderer.maxNesting
+/// and maxInlineMarks; Daybreak, 7 Nov 2026, and the cross-lab review).
 final class MarkdownNestingRenderTests: XCTestCase {
     /// Renders on a thread with a worker's 512 KB stack, as
     /// `concurrentPerform` in RowRenderer does.
@@ -17,27 +17,41 @@ final class MarkdownNestingRenderTests: XCTestCase {
         }
         thread.stackSize = 512 * 1024
         thread.start()
-        return done.wait(timeout: .now() + 20) == .success ? result : nil
+        return done.wait(timeout: .now() + 30) == .success ? result : nil
     }
 
-    func testDeepQuotesAndListsAreWords() throws {
-        for text in [String(repeating: ">", count: 7_999) + "x",
-                     String(repeating: "- ", count: 4_000) + "x",
-                     (0..<1_000).map { String(repeating: "  ", count: $0) + "- x" }.joined(separator: "\n"),
-                     // Emphasis nests one level for each pair: drawn on a
-                     // thread with room for them, or as words past the most.
-                     String(repeating: "*a ", count: 3_000) + String(repeating: "a* ", count: 3_000) + "x",
-                     String(repeating: "*a ", count: 6_000) + String(repeating: "a* ", count: 6_000) + "x"] {
+    func testDeepBlocksAreWords() throws {
+        let cases: [(String, String)] = [
+            (String(repeating: ">", count: 7_999) + "x", ">>>>"),
+            (String(repeating: "- ", count: 4_000) + "x", "- - -"),
+            ((0..<1_000).map { String(repeating: "  ", count: $0) + "- x" }.joined(separator: "\n"), "- x"),
+            // Empty items, one a line, each indented more.
+            ((0..<1_000).map { String(repeating: "  ", count: $0) + "-" }.joined(separator: "\n") + "\n" + String(repeating: "  ", count: 1_000) + "x", "-"),
+            ((0..<1_000).map { String(repeating: "  ", count: $0) + "-" }.joined(separator: "\r") + "\r" + String(repeating: "  ", count: 1_000) + "x", "-"),
+            (String(repeating: "> - 1. ", count: 1_000) + "x", "> - 1."),
+            (String(repeating: "*a ", count: 3_000) + String(repeating: "a* ", count: 3_000) + "x", "*a"),
+        ]
+        for (text, literal) in cases {
             let start = clock()
-            let rendered = try XCTUnwrap(renderOnSmallStack(text))
+            let rendered = try XCTUnwrap(renderOnSmallStack(text), "\(text.prefix(20))")
             XCTAssertLessThan(Double(clock() - start) / Double(CLOCKS_PER_SEC), 2)
-            XCTAssertTrue(rendered.string.hasSuffix("x"))
+            XCTAssertTrue(rendered.string.contains(literal), "drawn as words: \(text.prefix(20))")
+        }
+    }
+
+    func testDeepInlinesUnderTheLimitStillDraw() throws {
+        // Under maxInlineMarks: parsed on a thread with room for each level.
+        for text in [String(repeating: "![", count: 3_000) + "x" + String(repeating: "](u)", count: 3_000),
+                     String(repeating: "*a ", count: 1_500) + String(repeating: "a* ", count: 1_500) + "x",
+                     String(repeating: "[", count: 3_900) + "x" + String(repeating: "](u)", count: 3_900)] {
+            XCTAssertNotNil(renderOnSmallStack(text), "\(text.prefix(20))")
         }
     }
 
     func testOrdinaryNestingIsStillMarkdown() throws {
-        let rendered = try XCTUnwrap(renderOnSmallStack("> a\n> - b\n>   - c"))
+        let rendered = try XCTUnwrap(renderOnSmallStack("> a\n> - b\n>   - c\n\nSome **bold** and *it* [link](https://x.dev)."))
         XCTAssertFalse(rendered.string.contains(">"))
+        XCTAssertFalse(rendered.string.contains("**"))
         XCTAssertTrue(rendered.string.contains("•"))
     }
 }

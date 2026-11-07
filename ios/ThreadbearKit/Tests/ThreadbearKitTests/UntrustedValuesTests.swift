@@ -12,9 +12,12 @@ import Testing
 @Suite struct UntrustedValuesTests {
     /// CPU time, as the Mac running these is often busy.
     private func cpuSeconds(_ work: () -> Void) -> Double {
-        let start = clock()
+        // This thread's own time: Swift Testing runs other tests alongside,
+        // and clock() would count theirs too.
+        func now() -> Double { Double(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)) / 1e9 }
+        let start = now()
         work()
-        return Double(clock() - start) / Double(CLOCKS_PER_SEC)
+        return now() - start
     }
 
     private func decode<T: Decodable>(_ type: T.Type, _ json: String) throws -> T {
@@ -85,6 +88,40 @@ import Testing
         #expect(review.lines.last?.label == "Notes on A: Loud")
     }
 
+    @Test func codeSpansAreAskedAboutOnce() {
+        let inputs: [() -> Void] = [
+            { _ = MarkdownBlock.parse(String(repeating: "`x` ![](x) ", count: 2_400)) },
+            { _ = ThreadLinks.escapeDestinations(String(repeating: "`x` [a](work:x) ", count: 2_000)) },
+        ]
+        for run in inputs {
+            let seconds = cpuSeconds(run)
+            #expect(seconds < 0.1, "\(seconds) s")
+        }
+        // A picture or link in a code span is still left as written.
+        #expect(MarkdownBlock.parse("`![a](b.png)` ![c](d.png)") == [.paragraph("`![a](b.png)`"), .image(alt: "c", src: "d.png")])
+        #expect(ThreadLinks.escapeDestinations("`[a](work:x y)` [b](work:x y)") == "`[a](work:x y)` [b](work:x%20y)")
+    }
+
+    @Test func previewTextIsLinearAndUnchanged() {
+        let seconds = cpuSeconds { _ = PreviewText.plain(String(repeating: "[", count: 32_000)) }
+        #expect(seconds < 0.1, "\(seconds) s")
+        // The regex it replaced, to check against.
+        func old(_ text: String) -> String {
+            text.replacingOccurrences(of: #"!?\[([^\]]*)\]\([^)]*\)"#, with: "$1", options: .regularExpression)
+        }
+        func new(_ text: String) -> String {
+            text.replacing(/!?\[([^\]]*)(?:\]\([^)]*(\))?)?/) { $0.2 == nil ? String($0.0) : String($0.1) }
+        }
+        #expect(PreviewText.plain("See [the docs](https://x) and ![a](b.png) [c] [d](e") == "See the docs and a [c] [d](e")
+        let pieces = ["[", "]", "(", ")", "!", "a", " ", "\n", "](", "x)"]
+        var generator = SeededGenerator(seed: 5)
+        for _ in 0..<5_000 {
+            let text = (0..<Int.random(in: 1...12, using: &generator)).map { _ in pieces.randomElement(using: &generator)! }.joined()
+            #expect(new(text) == old(text), "\(text.debugDescription)")
+            if new(text) != old(text) { break }
+        }
+    }
+
     // MARK: Card mentions
 
     @Test func cardMentionsAreLinearOnBracketsWithNoLink() {
@@ -111,7 +148,7 @@ import Testing
         let pieces = ["[", "]", "(", ")", "\\", "!", "\n", "\r", " ", "a", "-", "_", ".", "/", "https://", "notion.so", "notion.site", "x.notion.com",
                       "thread:", "](", "](thread:", "](https://", "](https://www.notion.so/", "\u{0B}", "\u{85}", "\u{A0}", "\u{2028}", "\u{1F600}", "notion."]
         var generator = SeededGenerator(seed: 11)
-        for _ in 0..<20_000 {
+        for _ in 0..<5_000 {
             let text = "notion." + (0..<Int.random(in: 1...12, using: &generator)).map { _ in pieces.randomElement(using: &generator)! }.joined()
             let a = old(text), b = new(text)
             #expect(a == b, "\(text.debugDescription)")

@@ -277,7 +277,10 @@ public enum PreviewText {
     public static func plain(_ text: String) -> String {
         var line = text
         // [label](url) reads as the label.
-        line = line.replacingOccurrences(of: #"!?\[([^\]]*)\]\([^)]*\)"#, with: "$1", options: .regularExpression)
+        // A `[` with no link after it uses up what it was tried against,
+        // rather than every `[` being tried to the end again, which was
+        // quadratic (cross-lab review, 7 Nov 2026). The same links match.
+        line = line.replacing(/!?\[([^\]]*)(?:\]\([^)]*(\))?)?/) { $0.2 == nil ? String($0.0) : String($0.1) }
         // Heading and quote markers wherever a line started (the preview has
         // its newlines folded into spaces, so look after any whitespace too).
         line = line.replacingOccurrences(of: #"(^|\s)(#{1,6}|>)\s+"#, with: "$1", options: .regularExpression)

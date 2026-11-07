@@ -172,7 +172,7 @@ test("a runner key's startedAt has to be a time, and its figures in range", () =
   for (const ok of ['2026-11-05T01:00:00.000Z', '2026-11-05T01:00:00Z', '2026-11-05T01:00:00+01:30', '2026-11-05T01:00:00-0130', '2026-11-05T01:00:00.123456789Z', '2026-11-05T01:00:00']) {
     assert.ok(isIsoTime(ok), ok);
   }
-  for (const bad of ['2026-11-05T01:00:00+////', '2026-11-05T01:00:00+0a:00', '2026-11-05T01:00:00+24:00', '2026-13-05T01:00:00Z', 'yesterday', '', '2026-11-05T01:00:00Z ', `2026-11-05T01:00:00.${'1'.repeat(80)}Z`, 42]) {
+  for (const bad of ['2026-11-05T01:00:00+////', '2026-11-05T01:00:00+0a:00', '2026-11-05T01:00:00+24:00', '2026-13-05T01:00:00Z', 'yesterday', '', '2026-11-05T01:00:00Z ', '2026-11-05T01:00:00Z\n', `2026-11-05T01:00:00.${'1'.repeat(80)}Z`, 42]) {
     assert.ok(!isIsoTime(bad), String(bad));
   }
   assert.ok(wholeIn(3, 10) && wholeIn(0, 10) && !wholeIn(-1, 10) && !wholeIn(1.5, 10) && !wholeIn(11, 10) && !wholeIn(Infinity, 10) && !wholeIn('3', 10));

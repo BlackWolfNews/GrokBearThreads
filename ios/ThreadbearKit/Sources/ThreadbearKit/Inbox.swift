@@ -335,7 +335,10 @@ public enum RelativeTime {
 public enum PreviewText {
     public static func plain(_ text: String) -> String {
         var line = text
-        line = line.replacingOccurrences(of: #"!?\[([^\]]*)\]\([^)]*\)"#, with: "$1", options: .regularExpression)
+        // A `[` with no link after it uses up what it was tried against,
+        // rather than every `[` being tried to the end again, which was
+        // quadratic (cross-lab review, 7 Nov 2026). The same links match.
+        line = line.replacing(/!?\[([^\]]*)(?:\]\([^)]*(\))?)?/) { $0.2 == nil ? String($0.0) : String($0.1) }
         line = line.replacingOccurrences(of: #"(^|\s)(#{1,6}|>)\s+"#, with: "$1", options: .regularExpression)
         for marker in ["**", "__", "~~", "`"] {
             line = line.replacingOccurrences(of: marker, with: "")

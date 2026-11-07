@@ -23,6 +23,9 @@ public enum MarkdownNesting {
         var digits = 0
         var afterMarker = false
         func endLine() {
+            // A marker that ends its line is an empty item, which still nests
+            // ("-" on each line, each indented more: cross-lab review, 7 Nov).
+            if afterMarker { markers += 1 }
             if markers > 0 { open = min(open, quotes + columns / 2) + markers }
             most = max(most, open)
             markers = 0
@@ -67,15 +70,13 @@ public enum MarkdownNesting {
                 inPrefix = false
             }
         }
-        // A marker at the very end of the text, with nothing after it.
-        if afterMarker { markers += 1 }
         endLine()
         return most
     }
 
-    /// The marks inline Markdown nests with (`*`, `_`, `~`, `[`): emphasis,
-    /// strikethrough, links and pictures each take at least two, so these
-    /// over two bound how deep a paragraph's tree can go.
+    /// The marks inline Markdown nests with (`*`, `_`, `~`, `[`): emphasis
+    /// and strikethrough take two a level and a link or picture one (its
+    /// `[`), so these bound how deep a paragraph's tree can go.
     public static func inlineMarks(_ text: String) -> Int {
         var count = 0
         for byte in text.utf8 where byte == UInt8(ascii: "*") || byte == UInt8(ascii: "_") || byte == UInt8(ascii: "~") || byte == UInt8(ascii: "[") {

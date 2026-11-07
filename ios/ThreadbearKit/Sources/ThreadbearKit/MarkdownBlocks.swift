@@ -72,13 +72,13 @@ enum InlineImages {
         guard text.contains("![") else { return [.words(text)] }
         var pieces: [Piece] = []
         var from = text.startIndex
-        let codeSpans = text.ranges(of: /`+[^`]*`+/)
+        var codeSpans = CodeSpans(text.ranges(of: /`+[^`]*`+/))
         // No `[` in the alt or a bare src, nor `<` in a bracketed one: with
         // them, every `![` was tried to the end of the text again, 4 s on an
         // 8,000-character reply (the sweep after Daybreak's findings, 7 Nov
         // 2026). A picture's path never has one.
         for match in text.matches(of: /!\[([^\[\]]*)\]\(\s*(?:<([^<>\n]+)>|([^)\s\[]+))(?:\s+"[^"]*")?\s*\)/) {
-            if codeSpans.contains(where: { $0.overlaps(match.range) }) { continue }
+            if codeSpans.overlap(match.range) { continue }
             guard let src = match.2 ?? match.3 else { continue }
             add(text[from..<match.range.lowerBound], to: &pieces)
             pieces.append(.image(alt: String(match.1), src: String(src)))
@@ -91,6 +91,24 @@ enum InlineImages {
     private static func add(_ words: Substring, to pieces: inout [Piece]) {
         let trimmed = words.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty { pieces.append(.words(trimmed)) }
+    }
+}
+
+/// A text's code spans, asked about matches in the order they come: each
+/// span is passed once, rather than every span looked at for every match,
+/// which was quadratic on a reply of many spans and links (cross-lab
+/// review, 7 Nov 2026).
+struct CodeSpans {
+    private let spans: [Range<String.Index>]
+    private var next = 0
+
+    init(_ spans: [Range<String.Index>]) { self.spans = spans }
+
+    /// Whether `range` overlaps a span. Ranges asked about must come in
+    /// order, as `matches(of:)` gives them.
+    mutating func overlap(_ range: Range<String.Index>) -> Bool {
+        while next < spans.count, spans[next].upperBound <= range.lowerBound { next += 1 }
+        return next < spans.count && spans[next].lowerBound < range.upperBound
     }
 }
 

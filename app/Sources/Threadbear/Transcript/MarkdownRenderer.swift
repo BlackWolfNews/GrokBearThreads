@@ -129,23 +129,25 @@ enum MarkdownRenderer {
 
     /// How deep quotes and lists may nest before a block is drawn as words.
     static let maxNesting = 32
-    /// Emphasis and links nest too (`*a *b … b* a*`), one level for every
-    /// two of these marks at most. A block with more than a few is parsed
-    /// on a thread with room for every level; past the most it's words.
+    /// Emphasis, links and pictures nest too (`*a *b … b* a*`, `![![x](u)](u)`),
+    /// a level for each of these marks at most. A block with more than a
+    /// few is parsed on a thread with room for every level; past the most
+    /// it's words.
     static let inlineMarksOnWorkerStack = 48
-    static let maxInlineMarks = 8_000
+    static let maxInlineMarks = 4_000
 
     static func renderBlock(_ block: String) -> NSAttributedString {
         let marks = MarkdownNesting.inlineMarks(block)
         guard marks > inlineMarksOnWorkerStack, marks <= maxInlineMarks else { return renderBlockHere(block) }
-        // 64 MB holds 4,000 levels with room to spare; a worker's is 512 KB.
+        // 256 MB holds 4,000 levels with room to spare (each takes a few KB
+        // between swift-markdown and the Builder); a worker's is 512 KB.
         let done = DispatchSemaphore(value: 0)
         nonisolated(unsafe) var result: NSAttributedString?
         let thread = Thread {
             result = renderBlockHere(block)
             done.signal()
         }
-        thread.stackSize = 64 << 20
+        thread.stackSize = 256 << 20
         thread.start()
         done.wait()
         return result ?? NSAttributedString(string: block)

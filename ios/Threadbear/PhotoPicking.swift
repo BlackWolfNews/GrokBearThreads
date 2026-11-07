@@ -44,12 +44,21 @@ final class TextCursor {
     /// Reads and prepares each photo off the main thread, shows it as soon
     /// as it's ready and starts uploading it. All at once, so one waiting on
     /// iCloud doesn't hold up the rest, but they go in in the order given.
-    func add(_ loads: [@Sendable () async -> Data?], model: AppModel) {
+    /// `inTurn` reads each in the same turn it's prepared in, two at a time,
+    /// for pasted ones, whose sizes nobody chose: then no more than two
+    /// pictures' bytes are held at once.
+    func add(_ loads: [@Sendable () async -> Data?], model: AppModel, inTurn: Bool = false) {
         let loads = Array(loads.prefix(room))
         guard !loads.isEmpty else { return }
         adding.wrappedValue += loads.count
         let reading = loads.map { load in
             Task.detached(priority: .userInitiated) { () -> PhotoPrep.Prepared? in
+                if inTurn {
+                    return await PhotoPrep.inTurn {
+                        guard let data = await load() else { return nil }
+                        return PhotoPrep.prepared(from: data)
+                    }
+                }
                 guard let data = await load() else { return nil }
                 return await PhotoPrep.preparedInTurn(from: data)
             }
@@ -75,7 +84,7 @@ final class TextCursor {
     /// unpacks to a huge picture did all that work before any limit could
     /// look at it (Daybreak, 7 Nov 2026).
     func addPasted(_ items: [NSItemProvider], model: AppModel) {
-        add(items.map { PastedItem(provider: $0) }.map { item in { await Self.pastedData(item) } }, model: model)
+        add(items.map { PastedItem(provider: $0) }.map { item in { await Self.pastedData(item) } }, model: model, inTurn: true)
     }
 
     /// NSItemProvider isn't marked Sendable, but it's made to be read from
@@ -84,23 +93,16 @@ final class TextCursor {
 
     /// The picture's own bytes, or nil past PhotoPrep's limits (by its
     /// file's size, before reading it; its width and height are checked
-    /// when it's prepared).
+    /// when it's prepared). Only ever as a file: its data in memory could
+    /// be any size before anything could look (cross-lab review, 7 Nov).
     nonisolated private static func pastedData(_ pasted: PastedItem) async -> Data? {
         let item = pasted.provider
         let type = UTType.image.identifier
-        let file: Data?? = await withCheckedContinuation { done in
-            _ = item.loadFileRepresentation(forTypeIdentifier: type) { url, _ in
-                // nil: no file of it to read (an image only in memory).
-                guard let url else { return done.resume(returning: nil) }
-                guard let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize,
-                      size <= PhotoPrep.maxSourceBytes else { return done.resume(returning: .some(nil)) }
-                done.resume(returning: .some(try? Data(contentsOf: url)))
-            }
-        }
-        if let file { return file }
         return await withCheckedContinuation { done in
-            _ = item.loadDataRepresentation(forTypeIdentifier: type) { data, _ in
-                done.resume(returning: data.flatMap { $0.count <= PhotoPrep.maxSourceBytes ? $0 : nil })
+            _ = item.loadFileRepresentation(forTypeIdentifier: type) { url, _ in
+                guard let url, let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize,
+                      size <= PhotoPrep.maxSourceBytes else { return done.resume(returning: nil) }
+                done.resume(returning: try? Data(contentsOf: url))
             }
         }
     }

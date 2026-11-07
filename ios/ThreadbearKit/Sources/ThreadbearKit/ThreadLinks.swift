@@ -28,12 +28,12 @@ public enum ThreadLinks {
     /// (Mike, 1 Nov). Code spans stay as written, as they're being talked about.
     public static func escapeDestinations(_ markdown: String) -> String {
         guard markdown.contains("](work:") || markdown.contains("](thread:") else { return markdown }
-        let codeSpans = markdown.ranges(of: /`+[^`\n]*`+/)
+        var codeSpans = CodeSpans(markdown.ranges(of: /`+[^`\n]*`+/))
         var out = ""
         var from = markdown.startIndex
         // One level of brackets inside, for `work:npm test (unit)`.
         for match in markdown.matches(of: /\]\((work|thread):((?:[^()\n]|\([^()\n]*\))*)\)/) {
-            if codeSpans.contains(where: { $0.overlaps(match.range) }) { continue }
+            if codeSpans.overlap(match.range) { continue }
             out += markdown[from..<match.output.2.startIndex]
             let raw = String(match.output.2)
             out += (raw.removingPercentEncoding ?? raw).addingPercentEncoding(withAllowedCharacters: allowed) ?? raw
