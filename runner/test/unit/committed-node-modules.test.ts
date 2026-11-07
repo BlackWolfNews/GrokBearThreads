@@ -181,3 +181,82 @@ test("a script a patch's command runs that imports a committed package has that 
   assert.ok(covered.includes('scripts/count.mjs'));
   assert.ok(covered.includes('node_modules/zod/index.mjs'), 'what the script imports from the committed package');
 });
+
+// ---- Codex's review of the fix (7 Nov) ----
+
+test("Codex 1: a package that isn't there when the patch is hashed, and a later commit adds, asks again", async () => {
+  const { folder } = repo({});
+  write(folder, { '.threadbear/patches/tools.ts': "export default { actions: [{ title: 'Go', run: 'true', when: async () => { if (globalThis.never) await import('zod'); return true; } }] };\n" });
+  git(folder, 'add', '.');
+  git(folder, 'commit', '-qm', 'lazy');
+  const trust = new PatchTrust();
+  assert.equal(trust.trustCurrent([patchIn(folder)]).length, 1);
+  assert.equal((await trust.check(patchIn(folder), 0)).trusted, true);
+  write(folder, zod('export const list = 2;\n'));
+  git(folder, 'add', '-f', 'node_modules/zod');
+  git(folder, 'commit', '-qm', 'vendor zod');
+  const verdict = await trust.check(patchIn(folder), 0);
+  assert.equal(verdict.trusted === false && verdict.reason, 'changed');
+});
+
+test('Codex 1: the module hook refuses a committed package file the hash never covered, whenever the import comes', async () => {
+  const { unhashedPackageFile } = await import('../../src/tracked-packages.ts');
+  const { folder } = repo(zod('export const list = 1;\n'));
+  const f = path.join(folder, 'node_modules/zod/index.mjs');
+  assert.match(unhashedPackageFile(f, folder, () => false) ?? '', /commits under node_modules that patch trust didn't hash/);
+  assert.equal(unhashedPackageFile(f, folder, () => true), undefined);
+  const { folder: plain } = repo({}, zod('export const list = 1;\n'));
+  assert.equal(unhashedPackageFile(path.join(plain, 'node_modules/zod/index.mjs'), plain, () => false), undefined, 'installed');
+});
+
+test("Codex 2: a submodule its config calls inactive is still followed, as its files are on disk", () => {
+  const lib = tmpDir();
+  write(lib, { 'package.json': JSON.stringify({ name: 'zod', type: 'module', exports: './index.mjs' }), 'index.mjs': 'export const list = 1;\n' });
+  git(lib, 'init', '-q');
+  git(lib, 'add', '.');
+  git(lib, 'commit', '-qm', 'lib');
+  const { folder } = repo({});
+  git(folder, 'submodule', '-q', 'add', '-f', lib, 'node_modules/zod');
+  git(folder, 'commit', '-qm', 'sub');
+  const name = git(folder, 'config', '-f', '.gitmodules', '--get-regexp', 'path').split(' ')[0]!.replace(/^submodule\./, '').replace(/\.path$/, '');
+  git(folder, 'config', `submodule.${name}.active`, 'false');
+  assert.equal(git(folder, 'ls-files', '--recurse-submodules').includes('node_modules/zod/index.mjs'), false, "git's own recursion skips it");
+  const h = patchHash(patchIn(folder));
+  assert.equal(h.incomplete, undefined);
+  assert.ok(h.deps.some((d) => d.path === path.join(folder, 'node_modules/zod/index.mjs')));
+});
+
+test("Codex 3: a submodule's own commit that starts tracking a package its script requires asks again, though the outer index didn't change", async () => {
+  const sub = tmpDir();
+  write(sub, { '.gitignore': 'node_modules\n', 'scripts/x.cjs': "const z = require('zod');\nconsole.log(z.n);\n", 'node_modules/zod/index.js': 'exports.n = 1;\n', 'node_modules/zod/package.json': JSON.stringify({ name: 'zod', main: 'index.js' }) });
+  git(sub, 'init', '-q');
+  git(sub, 'add', '.');
+  git(sub, 'commit', '-qm', 'sub');
+  const { folder } = repo({});
+  git(folder, 'submodule', '-q', 'add', '-f', sub, 'sub');
+  write(folder, { '.threadbear/patches/tools.ts': "export default { panels: [{ title: 'N', url: 'http://localhost:1', badge: async ({ sh }) => Number(await sh('node sub/scripts/x.cjs')) }] };\n" });
+  git(folder, 'add', '.');
+  git(folder, 'commit', '-qm', 'patch');
+  // The submodule's checkout has its own installed (ignored) copy.
+  write(path.join(folder, 'sub'), { 'node_modules/zod/index.js': 'exports.n = 1;\n', 'node_modules/zod/package.json': JSON.stringify({ name: 'zod', main: 'index.js' }) });
+  const trust = new PatchTrust();
+  assert.equal(trust.trustCurrent([patchIn(folder)]).length, 1);
+  assert.equal((await trust.check(patchIn(folder), 0)).trusted, true);
+  fs.writeFileSync(path.join(folder, 'sub/node_modules/zod/index.js'), 'exports.n = 2;\n');
+  git(path.join(folder, 'sub'), 'add', '-f', 'node_modules/zod');
+  git(path.join(folder, 'sub'), 'commit', '-qm', 'vendor');
+  const verdict = await trust.check(patchIn(folder), 0);
+  assert.equal(verdict.trusted === false && verdict.reason, 'changed');
+});
+
+test("Codex 4: require('payload') finding a committed node_modules/payload.js (no folder of that name) hashes it", () => {
+  const { folder } = repo({ 'node_modules/payload.js': 'module.exports = 1;\n' });
+  write(folder, {
+    'scripts/x.cjs': "console.log(require('payload'));\n",
+    '.threadbear/patches/tools.ts': "export default { panels: [{ title: 'N', url: 'http://localhost:1', badge: async ({ sh }) => Number(await sh('node scripts/x.cjs')) }] };\n",
+  });
+  git(folder, 'add', '.');
+  git(folder, 'commit', '-qm', 'script');
+  const covered = patchHash(patchIn(folder)).deps.map((d) => path.relative(folder, d.path));
+  assert.ok(covered.includes('node_modules/payload.js'), covered.join(', '));
+});

@@ -2973,20 +2973,26 @@ repo's that nothing hashed in the same way, so it refuses the patch too.
 `node_modules/zod` (`git add -f` gets past `.gitignore`), and `import
 'zod'` from a trusted patch then ran whatever a later pull put there,
 unasked. So files git tracks under any `node_modules` folder of the
-repo, submodules included, are the repo's own code: once the patch, a
-helper, or a script one of its commands runs imports a package from
-inside the repo, every one of them is hashed with the patch and followed
-for its own imports like a helper, and the patch's imports of them are
-served from those bytes. Packages npm installed (untracked, ignored)
-aren't, so an install never asks again. The index git keeps is watched
-too, so a pull that starts tracking `node_modules/zod` over an installed
-copy asks again. When git can't say what it tracks (it fails, or the
-folder isn't a git checkout, so `node_modules` could be from npm or from
-the zip), a link the repo commits on the way to a package, a committed
-native addon (`.node`), or more than 100 committed files under
-`node_modules`, the patch isn't loaded at all (`error`). git runs with
-`core.fsmonitor` off, so a folder's own `.git/config` can't make that
-run anything. A cached hash holds only while every file it was
+repo, submodules included (inactive ones too, as their files are on
+disk), are the repo's own code: once the patch, a helper, or a script one
+of its commands runs has any bare import that isn't a builtin, every one
+of them is hashed with the patch and followed for its own imports like a
+helper, and the patch's imports of them are served from those bytes.
+All of them, not only the named package's folder: Node also finds
+`node_modules/payload.js` for `require('payload')`, a package a pull adds
+later, or one in a parent folder, and an installed package may import a
+committed one. Packages npm installed (untracked, ignored) aren't
+hashed, so an install never asks again. The index files git keeps (each
+submodule's too) are watched, so a pull that starts tracking
+`node_modules/zod` over an installed copy asks again, and the module hook
+refuses a committed file under `node_modules` that a patch's import
+reaches but the hash didn't cover. When git can't say what it tracks (it
+fails, or the folder isn't a git checkout but has a `node_modules`, which
+could be from npm or from the zip), a link the repo commits under
+`node_modules`, a committed native addon (`.node`), or more than 100
+committed files under `node_modules`, the patch isn't loaded at all
+(`error`). git runs with `core.fsmonitor` off, so a folder's own
+`.git/config` can't make that run anything. A cached hash holds only while every file it was
 made from has the same inode, size, mode, mtime and ctime (a write
 can't put ctime back), every path to one still leads to the same real
 file, and nothing that was missing has turned up. A hook or `setup`
