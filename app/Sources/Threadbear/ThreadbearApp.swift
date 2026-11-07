@@ -228,6 +228,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             // Not over the pages a screenshot, perf or scripted run opens.
             Tour.shared.introsEnabled = !scripted
             if !scripted { Notifier.setUp(delegate: self) }
+            if !scripted { app.milestones = MilestoneWatch() }
             app.onThreadsLoaded = { [weak self] in
                 LaunchClock.threadsLoaded()
                 if let threadId = self?.linkedThread {

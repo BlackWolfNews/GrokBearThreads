@@ -628,6 +628,7 @@ extension AppModel {
         if let thread = threads[threadId] {
             archivedNote = ArchivedNote(threadId: threadId, title: thread.title, wasOpen: selection == threadId)
             inboxEndNote = nil
+            milestoneNote = nil
         }
         if selection == threadId {
             flyToArchive(threadId)

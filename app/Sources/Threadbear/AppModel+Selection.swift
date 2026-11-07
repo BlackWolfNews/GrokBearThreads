@@ -59,6 +59,7 @@ extension AppModel {
         let inbox = sections.inbox.map(\.id)
         guard let next = SidebarOrder.nextInInbox(after: selection, inbox: inbox) else {
             archivedNote = nil
+            milestoneNote = nil
             inboxEndNote = InboxEndNote(empty: inbox.isEmpty)
             return
         }
@@ -190,5 +191,13 @@ extension AppModel {
     func appBecameActive() {
         if subagentSelection == nil, let selection, let thread = threads[selection], thread.needsYou { scheduleMarkSeen(selection) }
         servePanelRequest()
+        // He's back: a milestone may have been waiting for him. The window
+        // isn't key yet at this point.
+        if milestones != nil {
+            Task {
+                try? await Task.sleep(for: .milliseconds(200))
+                considerMilestone()
+            }
+        }
     }
 }

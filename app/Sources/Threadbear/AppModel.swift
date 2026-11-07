@@ -144,6 +144,11 @@ final class AppModel {
     /// (⌥⌘↓) has nowhere to go: the open thread is the Inbox's last, or the
     /// Inbox is empty. `InboxEndToast` takes it down after a few seconds.
     var inboxEndNote: InboxEndNote?
+    /// The note at the top of the thread panel when the thread count passes
+    /// a milestone. `MilestoneToast` takes it down.
+    var milestoneNote: MilestoneNote?
+    /// Nil in scripted runs and tests, which never show that note.
+    @ObservationIgnored var milestones: MilestoneWatch?
     /// Bumped when a thread is picked from somewhere other than the list
     /// (Next Inbox Thread), so the list scrolls its row into view.
     var revealSelectionRequests = 0

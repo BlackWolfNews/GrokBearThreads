@@ -653,6 +653,10 @@ enum Automation {
             guard let id = target.id else { return target.error }
             app.setStarred(id, name == "star")
             return "ok \(id)"
+        case "milestone":
+            // Scripted runs never earn the note, so this is how to see it.
+            app.milestoneNote = MilestoneNote(tier: c["tier"] as? Int ?? 1000)
+            return "ok"
         case "undo-archive":
             // The Archived note's Undo.
             guard let id = app.archivedNote?.threadId else { return "error no archived note" }

@@ -168,6 +168,8 @@ struct AppDump: Encodable {
     var banner: BannerInfo?
     /// The Archived note with Undo at the top of the thread panel: its thread.
     var archivedNote: String?
+    /// The milestone note at the top of the thread panel: its first line.
+    var milestoneNote: String?
     var error: String?
     var window: Window?
     var sidebar: Sidebar
@@ -328,6 +330,7 @@ struct AppDump: Encodable {
             runnerVersion: app.runnerVersion,
             banner: app.banner.map { BannerInfo(style: $0.style.rawValue, text: $0.text, detail: $0.detail) },
             archivedNote: app.archivedNote?.threadId,
+            milestoneNote: app.milestoneNote.map { ThreadMilestones.title($0.tier) },
             error: app.errorMessage,
             window: window.map { Window(width: Int(contentSize($0).width), height: Int(contentSize($0).height), appearance: appearance) },
             sidebar: Sidebar(mode: String(describing: app.sidebarMode), sections: sections,
@@ -532,6 +535,7 @@ struct AppDump: Encodable {
         lines.append(head)
         if let banner { lines.append("banner (\(banner.style)): \(banner.text)" + (banner.detail.map { "  [\($0)]" } ?? "")) }
         if let archivedNote { lines.append("archived note: \(archivedNote), with Undo") }
+        if let milestoneNote { lines.append("milestone note: \(milestoneNote)") }
         if let error { lines.append("error banner: \(error)") }
         lines.append("")
         lines.append("sidebar, \(sidebar.mode) (\(sidebar.snoozed) snoozed, \(sidebar.archived) archived):")

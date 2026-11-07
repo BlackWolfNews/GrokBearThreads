@@ -112,6 +112,7 @@ struct DetailView: View {
         .overlay(alignment: .top) {
             ArchivedToast()
             InboxEndToast()
+            MilestoneToast()
         }
     }
 }
@@ -225,6 +226,81 @@ private struct InboxEndToast: View {
         .tip("Dismiss")
         .font(.system(size: TypeScale.label))
         .padding(.horizontal, zoomed(14))
+        .padding(.vertical, zoomed(7))
+        .background {
+            shape
+                .fill(.regularMaterial)
+                .shadow(color: .black.opacity(dark ? 0.4 : 0.12), radius: zoomed(10), y: zoomed(3))
+        }
+        .overlay(shape.strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5))
+        .onHover { hovering = $0 }
+        .padding(.top, zoomed(10))
+    }
+}
+
+/// Floats where `ArchivedToast` does, once, when the thread count passes a
+/// milestone (`ThreadMilestones`), with the little bear waving. A click takes
+/// it down; otherwise it goes after a few seconds, once he's seen to be there.
+private struct MilestoneToast: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var hovering = false
+    @State private var waves = 0
+
+    static let shownFor: Duration = .seconds(5)
+
+    var body: some View {
+        ZStack {
+            if let note = app.milestoneNote {
+                toast(note)
+                    .id(note.id)
+                    .transition(Juice.reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
+                    .onAppear { if !Juice.reduceMotion { waves += 1 } }
+                    .task(id: note.id) {
+                        try? await Task.sleep(for: Self.shownFor)
+                        // It's rare, and he may have stepped away just as it
+                        // came: it stays until he's back.
+                        while hovering || MilestoneWatch.secondsIdle() > 5, !Task.isCancelled {
+                            try? await Task.sleep(for: .milliseconds(300))
+                        }
+                        guard !Task.isCancelled else { return }
+                        app.dismissMilestoneNote(note.id)
+                    }
+            }
+        }
+        .animation(Juice.reduceMotion ? .easeOut(duration: 0.15) : .snappy(duration: 0.3), value: app.milestoneNote?.id)
+    }
+
+    private func toast(_ note: MilestoneNote) -> some View {
+        let dark = colorScheme == .dark
+        let shape = Capsule(style: .continuous)
+        return Button { app.dismissMilestoneNote(note.id) } label: {
+            HStack(spacing: zoomed(7)) {
+                Image(nsImage: Bear.image(.wave, side: zoomed(17)))
+                    .renderingMode(.template)
+                    // InboxZero's wave: a beat, then tilts from its feet.
+                    .keyframeAnimator(initialValue: 0.0, trigger: waves) { bear, angle in
+                        bear.rotationEffect(.degrees(angle), anchor: .bottom)
+                    } keyframes: { _ in
+                        KeyframeTrack {
+                            CubicKeyframe(0, duration: 0.25)
+                            CubicKeyframe(-9, duration: 0.14)
+                            CubicKeyframe(7, duration: 0.16)
+                            CubicKeyframe(-5, duration: 0.14)
+                            CubicKeyframe(0, duration: 0.2)
+                        }
+                    }
+                    .accessibilityHidden(true)
+                Text(ThreadMilestones.title(note.tier))
+                Text(ThreadMilestones.line(note.tier)).foregroundStyle(.secondary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .tip("Dismiss")
+        .font(.system(size: TypeScale.label))
+        .padding(.leading, zoomed(11))
+        .padding(.trailing, zoomed(14))
         .padding(.vertical, zoomed(7))
         .background {
             shape

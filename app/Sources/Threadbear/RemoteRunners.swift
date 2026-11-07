@@ -52,6 +52,7 @@ extension AppModel {
         let gone = next.values.filter { $0.isRemote && !listed.contains($0.id) && !liveRemote.contains($0.id) && !madeRemote.contains($0.id) }.map(\.id)
         if next != threads { threads = next }
         for id in gone { forget(id) }
+        threadCountMayHaveChanged()
     }
 
     /// A thread read through Convex has the table's row for a summary,

@@ -34,7 +34,8 @@ sort it newest first or oldest first instead, which is handy for working
 through a long inbox from the bottom up. ⌥⌘↓ (Go > Next Inbox Thread)
 opens the thread below the open one in the Inbox, or the Inbox's first if
 the open one is somewhere else; past the last one, a note says you're
-caught up. Running holds threads whose agent is
+caught up. When your threads pass 100, and each thousand after (archived ones
+count), a note says so once, the next time you're at the app. Running holds threads whose agent is
 working now. A thread that
 asks you something keeps its place in the inbox, wake-up or not, and so does
 one that has left a job running while it waits for you. Sub-agents are

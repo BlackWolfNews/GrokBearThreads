@@ -71,6 +71,7 @@ extension AppModel {
                 threads = fresh
                 threadsLoaded = true
                 onThreadsLoaded?()
+                threadCountMayHaveChanged()
                 servePanelRequest()
                 loadSchedules()
                 loadRunners()
@@ -256,6 +257,7 @@ extension AppModel {
     private func apply(_ thread: ThreadSummary) {
         let previous = threads[thread.id]
         threads[thread.id] = thread
+        threadCountMayHaveChanged()
         // The open transcript's "3 sub-agents working in the background"
         // line follows the summary, not the events.
         if previous?.background != thread.background { sessions[thread.id]?.setBackground(thread.background) }
