@@ -148,6 +148,9 @@ struct AppDump: Encodable {
         var seq: Int
         var turn: String?
         var text: String
+        /// The reply buttons its text links, as each pill reads with its
+        /// id ("✓ Fill in the form [b7k2abcd]"), or "unknown <id>".
+        var buttons: [String]? = nil
     }
 
     struct Transcript: Encodable {
@@ -305,7 +308,8 @@ struct AppDump: Encodable {
                 let row = session.displayRow(index)
                 return Row(id: row.id, kind: row.kind.rawValue, height: Int(table.rect(ofRow: index).height.rounded()),
                            expanded: opens(row) ? app.transcript.isExpanded(row) : nil, inGroup: row.inGroup,
-                           onScreen: NSLocationInRange(index, visible), seq: row.seq, turn: row.turnId, text: RowDebug.excerpt(row))
+                           onScreen: NSLocationInRange(index, visible), seq: row.seq, turn: row.turnId, text: RowDebug.excerpt(row),
+                           buttons: Self.buttons(row))
             }
             let state: String
             switch session.state {
@@ -606,9 +610,22 @@ struct AppDump: Encodable {
             for (row, id) in zip(transcript.rows, ids) {
                 let open = row.expanded.map { $0 ? "open" : "closed" } ?? ""
                 lines.append("\(row.onScreen ? ">" : " ") \(pad(id, rowWidth)) \(pad(row.kind, 10)) \(pad(String(row.height), 5)) \(pad(open, 7)) \(row.text)")
+                for button in row.buttons ?? [] { lines.append("  \(pad("", rowWidth)) button     \(button)") }
             }
         }
         return lines.joined(separator: "\n") + "\n"
+    }
+
+    /// The pills a reply's buttons show as, for `dump`.
+    static func buttons(_ row: TranscriptRow) -> [String]? {
+        guard case .assistant(let item) = row.content else { return nil }
+        let ids = ReplyButtons.ids(in: item.text)
+        guard !ids.isEmpty else { return nil }
+        return ids.map { id in
+            guard let known = ReplyButtons.shared.known(id) else { return "unknown \(id)" }
+            let look = ReplyButtons.look(known.button, pressing: ReplyButtons.shared.isPressing(id))
+            return "\(ReplyButtons.label(known.button, look: look)) [\(id), \(look.rawValue)]"
+        }
     }
 
     private func pad(_ text: String, _ width: Int) -> String {

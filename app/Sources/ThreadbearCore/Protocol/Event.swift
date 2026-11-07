@@ -494,6 +494,9 @@ public enum EventPayload: Sendable, Hashable {
     case questionRequested(QuestionRequest)
     case secretRequested(SecretRequest)
     case reviewUpdated(DesignReview)
+    /// A reply button made, pressed or failed (docs/protocol.md, "Reply
+    /// buttons"): the whole button each time.
+    case buttonUpdated(ReplyButton)
     case approvalResolved(ApprovalResolution)
     case planUpdated([PlanEntry])
     /// "Plan first": the agent's plan, waiting for Mike, and what became of
@@ -654,6 +657,9 @@ public struct Event: Sendable, Hashable, Decodable {
         case "review.updated":
             let c = try decoder.container(keyedBy: ReviewFields.self)
             return .reviewUpdated(try c.decode(DesignReview.self, forKey: .review))
+        case "button.updated":
+            let c = try decoder.container(keyedBy: ButtonFields.self)
+            return .buttonUpdated(try c.decode(ReplyButton.self, forKey: .button))
         case "approval.resolved":
             return .approvalResolved(try ApprovalResolution(from: decoder))
         case "plan.updated":
@@ -696,6 +702,7 @@ public struct Event: Sendable, Hashable, Decodable {
     }
 
     private enum ReviewFields: String, CodingKey { case review }
+    private enum ButtonFields: String, CodingKey { case button }
     private enum TurnStartedFields: String, CodingKey { case wokeBy }
 }
 

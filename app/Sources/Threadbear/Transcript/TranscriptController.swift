@@ -111,6 +111,7 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         NotificationCenter.default.addObserver(self, selector: #selector(frameChanged), name: NSView.frameDidChangeNotification, object: scrollView.contentView)
         NotificationCenter.default.addObserver(self, selector: #selector(zoomChanged), name: TextZoom.didChange, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(richChanged), name: RichBlocks.changed, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(buttonsChanged), name: ReplyButtons.changed, object: nil)
     }
 
     /// A ```mermaid or ```html box was drawn, or flipped between its
@@ -121,12 +122,28 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
     @objc private func richChanged() {
         guard !richPending else { return }
         richPending = true
+        rerender { [weak self] in self?.richPending = false } where: { RenderCache.holdsRich($0) }
+    }
+
+    /// A reply button was made, pressed or failed, or a press set off or
+    /// came back (ReplyButtons): the replies linking one draw again, as
+    /// for rich blocks. Several together are done once.
+    private var buttonsPending = false
+    @objc private func buttonsChanged() {
+        guard !buttonsPending else { return }
+        buttonsPending = true
+        rerender { [weak self] in self?.buttonsPending = false } where: { RenderCache.holdsButtons($0) }
+    }
+
+    /// Renders the rows `holds` picks again on the next turn of the main
+    /// loop, keeping what's on screen where it is.
+    private func rerender(_ done: @escaping @MainActor () -> Void, where holds: @escaping (TranscriptRow) -> Bool) {
         DispatchQueue.main.async { [weak self] in
             MainActor.assumeIsolated {
+                done()
                 guard let self else { return }
-                self.richPending = false
                 guard let session = self.session else { return }
-                let indices = IndexSet((0..<session.displayCount).filter { RenderCache.holdsRich(session.displayRow($0)) })
+                let indices = IndexSet((0..<session.displayCount).filter { holds(session.displayRow($0)) })
                 guard !indices.isEmpty else { return }
                 let wasPinned = self.isAtBottom
                 let anchor = wasPinned ? nil : self.captureMemory()

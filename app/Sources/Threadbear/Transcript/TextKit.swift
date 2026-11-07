@@ -78,6 +78,13 @@ final class BackgroundLayoutManager: NSLayoutManager {
             drawButton(range, style: style, storage: storage, origin: origin)
         }
 
+        // By id rather than look, so two pills side by side stay two.
+        storage.enumerateAttribute(.tbReplyButton, in: characters) { value, range, _ in
+            guard value != nil, let raw = storage.attribute(.tbReplyLook, at: range.location, effectiveRange: nil) as? String,
+                  let look = ReplyButtons.Look(rawValue: raw) else { return }
+            drawReplyButton(range, look: look, storage: storage, origin: origin)
+        }
+
         storage.enumerateAttribute(.tbLineBackground, in: characters) { value, range, _ in
             guard let color = value as? NSColor else { return }
             let glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
@@ -128,6 +135,34 @@ final class BackgroundLayoutManager: NSLayoutManager {
             path.fill()
             NSGraphicsContext.restoreGraphicsState()
             style.stroke.setStroke()
+            path.lineWidth = 1
+            path.stroke()
+        }
+    }
+
+    /// A reply button's capsule (MarkdownRenderer.replyButton), one per
+    /// line if a long one wraps, with an edge as in the mockup.
+    private func drawReplyButton(_ range: NSRange, look: ReplyButtons.Look, storage: NSTextStorage, origin: NSPoint) {
+        let font = storage.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont ?? Theme.labelFont
+        let colors = Theme.replyButton(look)
+        let glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        enumerateLineFragments(forGlyphRange: glyphs) { fragment, _, textContainer, lineGlyphs, _ in
+            let part = NSIntersectionRange(lineGlyphs, glyphs)
+            guard part.length > 0 else { return }
+            var box = self.boundingRect(forGlyphRange: part, in: textContainer)
+            // The last character's kern is the room after the pill.
+            let last = self.characterIndexForGlyph(at: NSMaxRange(part) - 1)
+            if let kern = storage.attribute(.kern, at: last, effectiveRange: nil) as? CGFloat {
+                box.size.width = max(0, box.width - kern)
+            }
+            let baseline = fragment.minY + self.location(forGlyphAt: part.location).y
+            box.origin.y = baseline - font.ascender - zoomed(3)
+            box.size.height = font.ascender - font.descender + zoomed(6)
+            box = box.insetBy(dx: -MarkdownRenderer.replyPad, dy: 0).offsetBy(dx: origin.x, dy: origin.y).insetBy(dx: 0.5, dy: 0.5)
+            let path = NSBezierPath(roundedRect: box, xRadius: box.height / 2, yRadius: box.height / 2)
+            colors.fill.setFill()
+            path.fill()
+            colors.edge.setStroke()
             path.lineWidth = 1
             path.stroke()
         }
@@ -462,6 +497,12 @@ final class TranscriptTextView: NSTextView {
             closeChipCard()
             return
         }
+        // A reply button's pill presses it (or opens what it started).
+        if let id = replyButton(at: point) {
+            closeChipCard()
+            AppModel.shared.pressReplyButton(id)
+            return
+        }
         if let onAction, let action = row(at: point)?.action ?? character(at: point).flatMap({ textStorage?.attribute(.tbAction, at: $0, effectiveRange: nil) as? String }) {
             closeChipCard()
             onAction(action)
@@ -761,9 +802,17 @@ final class TranscriptTextView: NSTextView {
         if let chip { hoverChip(chip) } else { hoverPeek(peek(at: point)) }
     }
 
-    /// Over a clickable run (an asks card's buttons, "Show 30 more lines").
+    /// Over a clickable run (an asks card's buttons, "Show 30 more lines",
+    /// a reply button).
     private func isAction(at point: NSPoint) -> Bool {
-        onAction != nil && character(at: point).flatMap { textStorage?.attribute(.tbAction, at: $0, effectiveRange: nil) } != nil
+        if replyButton(at: point) != nil { return true }
+        return onAction != nil && character(at: point).flatMap { textStorage?.attribute(.tbAction, at: $0, effectiveRange: nil) } != nil
+    }
+
+    /// The id of the reply button under `point`, if it's one that can be
+    /// clicked: an unknown button is drawn as plain words with no id.
+    func replyButton(at point: NSPoint) -> String? {
+        character(at: point).flatMap { textStorage?.attribute(.tbReplyButton, at: $0, effectiveRange: nil) as? String }
     }
 
     /// A `PointerButton` laid over this text (the done card's "?") is what's

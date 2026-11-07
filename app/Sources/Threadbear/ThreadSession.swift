@@ -133,7 +133,24 @@ final class ThreadSession {
                 let debug = CommandLine.arguments.contains("--perf-debug")
                 if debug { print(String(format: "    open %@: before fetch %.0f MB", threadId, memoryMB())) }
                 let client = try await appModel.openClient(for: threadId)
+                // Buttons made in turns older than the page: asked for
+                // alongside it (an older runner has no buttons.list).
+                let buttonList = Task { try? await client.replyButtons(threadId: threadId) }
                 let page = try await client.events(threadId: threadId, limit: Self.eventsPage)
+                // Known before the rows render, so a reply's pills are
+                // right the first time. The list is waited for only when
+                // the page links a button its events don't have.
+                let buttons = ReplyButtons.shared
+                buttons.fold(page.events, threadId: threadId)
+                let unknown = page.events.contains { event in
+                    guard case .assistantText(_, let text, _, _, _, _) = event.payload else { return false }
+                    return ReplyButtons.ids(in: text).contains { buttons.known($0) == nil }
+                }
+                if unknown {
+                    if let list = await buttonList.value { buttons.receive(list, threadId: threadId) }
+                } else {
+                    Task { if let list = await buttonList.value { buttons.receive(list, threadId: threadId) } }
+                }
                 if debug { print(String(format: "    after fetch %.0f MB", memoryMB())) }
                 // What the thread's summary says is running in the
                 // background, for the line at the end.
@@ -250,6 +267,7 @@ final class ThreadSession {
         do {
             let reply = try await client.subscribe(threadId: threadId, afterSeq: feed.acceptedSeq)
             subscribed = true
+            ReplyButtons.shared.fold(reply.events, threadId: threadId)
             handle(feed.finishSubscribe(reply.events, inProgress: reply.inProgress))
             // An older page that failed while the connection was down,
             // retries used up on a short page that can't scroll: ask again
@@ -349,6 +367,7 @@ final class ThreadSession {
                 if stalls > 0 { try? await Task.sleep(for: .milliseconds(250 << min(stalls, 3))) }
                 do {
                     let page = try await client.events(threadId: threadId, afterSeq: afterSeq, limit: 2000)
+                    ReplyButtons.shared.fold(page.events, threadId: threadId)
                     handle(feed.catchUp(page.events))
                 } catch {
                     feed.catchUpFailed()
@@ -572,6 +591,8 @@ final class ThreadSession {
                 let fetchStart = CACurrentMediaTime()
                 let page = try await client.events(threadId: threadId, beforeSeq: before, limit: Self.eventsPage)
                 olderFetchMs.append((CACurrentMediaTime() - fetchStart) * 1000)
+                // An older snapshot never undoes a newer one (ReplyButton.supersedes).
+                ReplyButtons.shared.fold(page.events, threadId: threadId)
                 olderFailures = 0
                 guard page.events.contains(where: { !$0.isTransient && $0.seq < before }) else {
                     // Step back past the range the page covered and go on.

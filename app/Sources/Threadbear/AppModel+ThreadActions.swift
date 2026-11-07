@@ -831,6 +831,39 @@ extension AppModel {
         return refs
     }
 
+    /// A reply button's pill was clicked (docs/protocol.md, "Reply
+    /// buttons"). Not pressed yet: presses it, dimmed with "…" until the
+    /// runner answers, and a second click meanwhile does nothing. Pressed:
+    /// opens the thread it started or messaged rather than pressing again.
+    func pressReplyButton(_ id: String) {
+        let store = ReplyButtons.shared
+        guard let known = store.known(id) else { return }
+        if let pressed = known.button.pressed {
+            if threads[pressed.threadId] != nil {
+                openThread(pressed.threadId)
+            } else {
+                NSSound.beep()
+                errorMessage = "The thread that button \(known.button.send != nil ? "messaged" : "started") isn't in your sidebar, so it can't open here. It was deleted, or it's archived on another machine."
+            }
+            return
+        }
+        guard let client = client(for: known.threadId) else {
+            errorMessage = "Can't reach that thread's runner, so the button can't be pressed yet."
+            return
+        }
+        guard store.setPressing(id, true) else { return }
+        AppLog.write("buttons", "press \(id) in \(known.threadId)")
+        Task {
+            do {
+                let button = try await client.pressReplyButton(threadId: known.threadId, buttonId: id)
+                store.receive(button, threadId: known.threadId)
+            } catch {
+                show(error)
+            }
+            store.setPressing(id, false)
+        }
+    }
+
     func show(_ error: Error) {
         AppLog.write("rpc", "error: \(error.localizedDescription)")
         // Its description alone doesn't say which Mac it means.

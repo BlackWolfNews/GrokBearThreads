@@ -134,6 +134,7 @@ extension AppModel {
             case .threadEvent(let threadId, let event):
                 sessions[threadId]?.receive(event)
                 if case .reviewUpdated(let review) = event.payload { receiveReview(review, threadId: threadId) }
+                if case .buttonUpdated(let button) = event.payload { ReplyButtons.shared.receive(button, threadId: threadId) }
             case .threadDeleted(let threadId):
                 forget(threadId)
             case .accountsUpdated(let list):

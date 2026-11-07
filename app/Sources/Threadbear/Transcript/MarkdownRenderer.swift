@@ -40,6 +40,16 @@ enum MarkdownRenderer {
         return components.url
     }
 
+    /// The button a `button:<id>` destination names.
+    static func replyButtonId(_ destination: String) -> String? {
+        URL(string: destination.trimmingCharacters(in: .whitespaces)).flatMap(ReplyButtons.id(of:))
+    }
+
+    /// A reply button pill's padding past its glyphs on each side, and the
+    /// gap kept between it and the words around it.
+    static var replyPad: CGFloat { zoomed(8) }
+    static var replyGap: CGFloat { zoomed(3) }
+
     nonisolated(unsafe) static let urlDetector = try! NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
 
     struct Rendered {
@@ -103,7 +113,9 @@ enum MarkdownRenderer {
         // that may hold a ```mermaid or ```html box also keys on whether
         // those have been drawn, or flipped to their source (RichBlocks).
         let rich = RichBlocks.mayHoldRich(block)
-        let key = "\(TypeScale.percent)|\(rich ? RichBlocks.shared.generation : -1)|\(block)" as NSString
+        // One that links a reply button keys on the buttons' states.
+        let buttons = ReplyButtons.mayHold(block) ? ReplyButtons.shared.generation : -1
+        let key = "\(TypeScale.percent)|\(rich ? RichBlocks.shared.generation : -1)|\(buttons)|\(block)" as NSString
         if let cached = cache.object(forKey: key) { return cached }
         // `[tests pass](work:npm test)`: a space ends a link's destination
         // for the parser, so work: and thread: links are escaped first.
@@ -666,6 +678,39 @@ enum MarkdownRenderer {
             }
         }
 
+        /// `[title](button:<id>)`: the button the agent made with add_button,
+        /// as a pill in the colours of its state (Theme.replyButton). Its
+        /// words alone, not clickable, for a button this app doesn't know
+        /// (another runner's, or one the list hasn't brought yet). The
+        /// render depends on the button's state, so a block that may hold
+        /// one keys its cache on `ReplyButtons.generation`.
+        mutating func replyButton(_ id: String, words: String, _ context: Context) {
+            var plain = context
+            plain.link = nil
+            guard let known = ReplyButtons.shared.known(id) else {
+                append(words, plain)
+                return
+            }
+            let button = known.button
+            let look = ReplyButtons.look(button, pressing: ReplyButtons.shared.isPressing(id))
+            let room = MarkdownRenderer.replyPad + MarkdownRenderer.replyGap
+            let start = output.length
+            // Room for the pill's padding and a gap, kerned into the
+            // character before it as for inline code.
+            if start > 0, ![9, 10, 0x2028].contains(output.mutableString.character(at: start - 1)) {
+                output.addAttribute(.kern, value: room, range: NSRange(location: start - 1, length: 1))
+            }
+            // No-break spaces, so a pill doesn't wrap apart.
+            let label = ReplyButtons.label(button, look: look).replacingOccurrences(of: " ", with: "\u{00A0}")
+            output.append(NSAttributedString(string: label, attributes: [
+                .font: NSFont.systemFont(ofSize: TypeScale.label, weight: .medium),
+                .foregroundColor: Theme.replyButton(look).text,
+                .tbReplyButton: id, .tbReplyLook: look.rawValue,
+                .toolTip: ReplyButtons.tip(button, look: look),
+            ]))
+            output.addAttribute(.kern, value: room, range: NSRange(location: output.length - 1, length: 1))
+        }
+
         mutating func inlines(_ children: MarkupChildren, _ context: Context) {
             for child in children { inline(child, context) }
         }
@@ -705,6 +750,8 @@ enum MarkdownRenderer {
                 if output.length > start {
                     output.addAttribute(.kern, value: MarkdownRenderer.pillKern, range: NSRange(location: output.length - 1, length: 1))
                 }
+            case let link as Markdown.Link where link.destination.flatMap(MarkdownRenderer.replyButtonId) != nil:
+                replyButton(MarkdownRenderer.replyButtonId(link.destination!)!, words: link.plainText, context)
             case let link as Markdown.Link:
                 var inner = context
                 inner.link = link.destination.flatMap(MarkdownRenderer.linkURL)

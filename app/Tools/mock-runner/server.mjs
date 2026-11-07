@@ -803,6 +803,43 @@ async function dispatch(client, method, p) {
       broadcastSummary(t.summary.id);
       return { thread: t.summary };
     }
+    case 'buttons.list': {
+      // docs/protocol.md, "Reply buttons": every button the thread has.
+      const t = need(p.threadId);
+      return { buttons: [...(t.buttons?.values() ?? [])].map((button) => structuredClone(button)) };
+    }
+    case 'buttons.press': {
+      // Starts the thread or sends the message once, like the runner. It
+      // takes a moment (longer under mock.slow), and a button whose folder
+      // is "/gone" fails, so the app's pressing and failed pills can be seen.
+      const t = need(p.threadId);
+      const button = t.buttons?.get(p.buttonId);
+      if (!button) throw rpcError(-32602, `Button not found: ${p.buttonId}`);
+      if (button.pressed) return { button: structuredClone(button) };
+      await new Promise((resolve) => setTimeout(resolve, 600 + slow.queueMs));
+      const from = `[Sent by the agent in the thread "${t.summary.title}" (${t.summary.id.slice(0, 8)})]\n\n`;
+      let next;
+      try {
+        if (button.start?.cwd === '/gone') throw rpcError(-32602, 'Folder not found: /gone');
+        if (button.start) {
+          const made = await dispatch(client, 'threads.create', { text: from + button.start.text, title: button.start.title ?? button.title, cwd: button.start.cwd, permissionMode: button.start.permissionMode });
+          next = { ...button, pressed: { at: iso(), threadId: made.thread.id } };
+        } else {
+          need(button.send.threadId);
+          await dispatch(client, 'threads.send', { threadId: button.send.threadId, text: from + button.send.text });
+          next = { ...button, pressed: { at: iso(), threadId: button.send.threadId } };
+        }
+        delete next.failed;
+      } catch (e) {
+        const failed = { ...button, failed: { at: iso(), error: String(e.message ?? e).slice(0, 300) } };
+        t.buttons.set(failed.id, failed);
+        persist(t.summary.id, { type: 'button.updated', button: failed });
+        throw e;
+      }
+      t.buttons.set(next.id, next);
+      persist(t.summary.id, { type: 'button.updated', button: next });
+      return { button: structuredClone(next) };
+    }
     case 'reviews.list': {
       const t = need(p.threadId);
       return { reviews: [...(t.reviews?.values() ?? [])].filter((review) => review.status === 'pending').sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)).map((review) => structuredClone(review)) };
@@ -2944,7 +2981,9 @@ function loadFixtures() {
       summary.asked ??= events.map(askedLine).findLast(Boolean);
       const reviews = new Map();
       for (const event of events) if (event.type === 'review.updated') reviews.set(event.review.id, event.review);
-      const t = { summary, events, reviews, inProgress: new Map(), timers: [], dir };
+      const buttons = new Map();
+      for (const event of events) if (event.type === 'button.updated') buttons.set(event.button.id, event.button);
+      const t = { summary, events, reviews, buttons, inProgress: new Map(), timers: [], dir };
       updateReviewCount(t);
       loaded.push(t);
     }

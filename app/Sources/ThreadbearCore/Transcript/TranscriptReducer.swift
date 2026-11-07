@@ -1008,6 +1008,10 @@ public struct TranscriptModel: Sendable {
             if run.trigger == nil { pressedRuns.insert("t:\(itemId)") }
             append(TranscriptRow(id: "t:\(itemId)", seq: seq, turnId: turnId, content: .tool(ToolItem(itemId: itemId, call: call, result: result, root: root))))
 
+        case .buttonUpdated:
+            // No row: the reply that links it draws it (ReplyButtons).
+            break
+
         case .unknown:
             break
         }
