@@ -88,16 +88,68 @@ final class BearTests: XCTestCase {
         XCTAssertLessThan(lastMove / WavingBearView.Timing.wave, 0.5, "the bear should rest more than it waves")
     }
 
+    /// Rest the pointer on the bear and it waves back at once, but only every
+    /// few seconds however much the pointer wiggles, and only while it's a
+    /// working bear: a finished line's stays still.
+    func testItWavesBackAtThePointerNowAndThen() {
+        let view = WavingBearView(frame: NSRect(x: 0, y: 0, width: 26, height: 26))
+        XCTAssertFalse(view.waveBack(at: 1000), "not started, so nothing's there to wave")
+        view.start(fresh: false, reduceMotion: false)
+        XCTAssertTrue(view.waveBack(at: 1000))
+        XCTAssertFalse(view.waveBack(at: 1000 + WavingBearView.Timing.waveBackGap - 0.1))
+        XCTAssertTrue(view.waveBack(at: 1000 + WavingBearView.Timing.waveBackGap))
+        view.stop()
+        XCTAssertFalse(view.isAnimating)
+        XCTAssertFalse(view.waveBack(at: 2000), "a finished line")
+        XCTAssertFalse(view.hop(at: 2000), "a finished line")
+        XCTAssertFalse(view.isAnimating, "and the pointer doesn't start it up again")
+    }
+
+    func testAPointerOverItReallyWaves() throws {
+        let view = WavingBearView(frame: NSRect(x: 0, y: 0, width: 26, height: 26))
+        view.updateTrackingAreas()
+        let area = try XCTUnwrap(view.trackingAreas.first)
+        XCTAssertTrue(area.options.contains(.mouseEnteredAndExited))
+        XCTAssertTrue(area.options.contains(.inVisibleRect), "it has to follow the bear's own size, which is set after it's made")
+        XCTAssertTrue(area.owner === view)
+    }
+
+    func testTheHopStartsAndEndsOnTheGroundAndIsNotInterrupted() {
+        let keys = WavingBearView.Timing.hopKeys
+        XCTAssertEqual(keys.first?.up, 0)
+        XCTAssertEqual(keys.first?.y, 1)
+        XCTAssertEqual(keys.last?.up, 0)
+        XCTAssertEqual(keys.last?.y, 1)
+        XCTAssertEqual(keys.last?.at, 1)
+        let view = WavingBearView(frame: NSRect(x: 0, y: 0, width: 26, height: 26))
+        view.start(fresh: false, reduceMotion: false)
+        XCTAssertTrue(view.hop(at: 1000))
+        XCTAssertFalse(view.hop(at: 1000 + WavingBearView.Timing.hop / 2), "already in the air")
+        XCTAssertTrue(view.hop(at: 1000 + WavingBearView.Timing.hop + 0.01))
+    }
+
+    /// Under Reduce Motion the bear doesn't move, but it still sees you.
+    func testReduceMotionGetsABlinkAndNoMovement() {
+        let view = WavingBearView(frame: NSRect(x: 0, y: 0, width: 26, height: 26))
+        view.start(fresh: false, reduceMotion: true)
+        XCTAssertTrue(view.waveBack(at: 1000))
+        XCTAssertTrue(view.hop(at: 1000))
+        XCTAssertFalse(view.isAnimating)
+    }
+
     /// Set BEAR_FRAMES to a folder to get the moving bear as numbered PNGs,
     /// to look at or turn into a GIF. Drawn 8pt in from each edge, so a paw
     /// swinging past the frame shows.
     func testFramesWhenAsked() throws {
         guard let folder = ProcessInfo.processInfo.environment["BEAR_FRAMES"] else { throw XCTSkip("BEAR_FRAMES not set") }
-        let side = 192, pad = 32, canvas = side + 2 * pad
+        // BEAR_FRAMES_HOP: the hop on a click instead, from the click on.
+        let hopping = ProcessInfo.processInfo.environment["BEAR_FRAMES_HOP"] != nil
+        let side = 192, pad = hopping ? 96 : 32, canvas = side + 2 * pad
         let view = WavingBearView(frame: NSRect(x: 0, y: 0, width: side, height: side))
         view.tint = .black
         view.start(fresh: false, reduceMotion: false)
-        for frame in 0..<(8 * 30) {
+        if hopping { view.hop() }
+        for frame in 0..<(hopping ? 15 : 8 * 30) {
             let context = CGContext(data: nil, width: canvas, height: canvas, bitsPerComponent: 8, bytesPerRow: canvas * 4,
                                     space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
             context.setFillColor(.white)
