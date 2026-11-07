@@ -26,7 +26,7 @@ protocol RowCellDelegate: AnyObject {
     /// A click on an asks card: `tick:<index>` or `reply:<index>`.
     func askAction(_ card: AsksCard, action: String)
     /// An ask's Something else box on the open card (AskAnswerBox): what's
-    /// in it changed, pictures were added to it, or Return sent.
+    /// in it changed, or pictures were added to it.
     func askNoteChanged(_ card: AsksCard, ask: Int, note: AskNote)
     func askNoteImages(_ card: AsksCard, ask: Int, urls: [URL])
     /// Pictures pasted, dropped or chosen in a box go in as chips: whether
@@ -34,6 +34,9 @@ protocol RowCellDelegate: AnyObject {
     func askPicturesAllowed(_ card: AsksCard) -> Bool
     func askImportPicture(_ card: AsksCard, url: URL) async -> ImageRef?
     func sendAnswers(_ card: AsksCard)
+    /// Return in ask `ask`'s box: on to the next unanswered ask, or send
+    /// (⌘Return, or nothing left unanswered).
+    func answerBoxReturn(_ card: AsksCard, ask: Int, command: Bool)
     func openReview(_ review: DesignReview)
     /// The pencil by one of Mike's messages: edit it and carry on from
     /// there (docs/protocol.md, "Editing a message").
@@ -61,6 +64,7 @@ extension RowCellDelegate {
     func askPicturesAllowed(_ card: AsksCard) -> Bool { false }
     func askImportPicture(_ card: AsksCard, url: URL) async -> ImageRef? { nil }
     func sendAnswers(_ card: AsksCard) {}
+    func answerBoxReturn(_ card: AsksCard, ask: Int, command: Bool) {}
     func openReview(_ review: DesignReview) {}
     func editMessage(rowId: String) {}
     func openThreadLink(_ url: URL, fromRow rowId: String) {}
@@ -640,9 +644,9 @@ final class TextRowCell: RowCellView {
                 guard let self, let card = self.answerCard else { return nil }
                 return await self.delegate?.askImportPicture(card, url: url)
             })
-        box.onSend = { [weak self] in
+        box.onReturn = { [weak self] command in
             guard let self, let card = self.answerCard else { return }
-            self.delegate?.sendAnswers(card)
+            self.delegate?.answerBoxReturn(card, ask: index, command: command)
         }
         answerBoxes[index] = box
         addSubview(box)

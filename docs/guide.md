@@ -171,8 +171,12 @@ card and go with your next message. To answer an ask in your own
 words, click Something else under it and write in the box that opens
 there. You can paste or drop screenshots in that box too, or use its
 picture button, and each goes in where the cursor is as a chip, as in
-the composer. Each ask can have a box of its own. Return sends the lot
-as one message, with anything you wrote in the message box at the end.
+the composer. Each ask can have a box of its own. Return in a box takes
+you on to the next ask that hasn't got an answer yet (Shift-Return adds a
+line), and once they all have one it sends the lot as one message, with
+anything you wrote in the message box at the end. Return in an empty
+message box does the same with your picks. To send with some left
+unanswered, press ⌘Return.
 
 When an ask is about pictures the agent put up to compare, its button can
 open that comparison window straight from the card.

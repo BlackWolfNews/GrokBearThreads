@@ -142,9 +142,9 @@ extension Automation {
 
     /// A key event the text box with the cursor gets, as a real key press
     /// would reach it, without the app coming to the front.
-    static func pressAtCursor(_ window: NSWindow?, characters: String, keyCode: UInt16) -> String {
+    static func pressAtCursor(_ window: NSWindow?, characters: String, keyCode: UInt16, modifiers: NSEvent.ModifierFlags = []) -> String {
         guard let field = window?.firstResponder as? NSTextView else { return "error the cursor isn't in a text box" }
-        guard let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+        guard let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: ProcessInfo.processInfo.systemUptime,
                                            windowNumber: window?.windowNumber ?? 0, context: nil, characters: characters,
                                            charactersIgnoringModifiers: characters, isARepeat: false, keyCode: keyCode)
         else { return "error no event" }

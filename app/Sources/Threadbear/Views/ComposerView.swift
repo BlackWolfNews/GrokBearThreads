@@ -96,7 +96,7 @@ struct ComposerView: View {
                 focusTrigger: app.focusRequests[draftKey] ?? 0,
                 placeholder: placeholder(picks, followUps: followUps, needsYou: needsYou),
                 onSend: { send() },
-                onReturnWhenEmpty: { returnWhenEmpty(draft.wrappedValue) },
+                onReturnWhenEmpty: { command in returnWhenEmpty(draft.wrappedValue, command: command) },
                 pictures: ComposerTextView.Pictures(allowed: { picturesAllowed() }, importOne: { await importPicture($0) }),
                 handle: handle,
                 onEscape: { cancelEdit() },
@@ -285,15 +285,19 @@ struct ComposerView: View {
         app.send(threadId: thread?.id)
     }
 
-    /// Return with nothing typed sends picked answers on their own, or
-    /// else allows the sole approval (below).
-    private func returnWhenEmpty(_ draft: Draft) -> Bool {
+    /// Return with nothing typed sends picked answers on their own (once
+    /// every ask has one, or with ⌘), or else allows the sole approval (below).
+    private func returnWhenEmpty(_ draft: Draft, command: Bool) -> Bool {
         // An edit with only pictures left still sends; an empty one does nothing.
         if let thread, app.editing[thread.id] != nil {
             if !draft.images.isEmpty { send() }
             return true
         }
         if let thread, !app.picks(for: thread).isEmpty || !app.pickedFollowUps(threadId: thread.id).isEmpty {
+            // Picks with asks still unanswered: on to the next of those, as
+            // in a Something else box; ⌘Return sends them as they are.
+            if !app.picks(for: thread).isEmpty, !command,
+               controller?.returnWithUnanswered() == true { return true }
             send()
             return true
         }
@@ -606,7 +610,7 @@ struct ComposerTextField: NSViewRepresentable {
     var placeholder: String
     var onSend: () -> Void
     /// Return with nothing typed: true if it did something.
-    var onReturnWhenEmpty: () -> Bool = { false }
+    var onReturnWhenEmpty: (_ command: Bool) -> Bool = { _ in false }
     var pictures: ComposerTextView.Pictures?
     var handle: ComposerHandle?
     /// Esc: true if it did something (left an edit).
@@ -762,7 +766,12 @@ final class ComposerTextView: NSTextView {
     /// composer: lookups for the composer skip it.
     var inAnswerBox = false
     var onSend: (() -> Void)?
-    var onReturnWhenEmpty: (() -> Bool)?
+    /// With whether ⌘ was held.
+    var onReturnWhenEmpty: ((_ command: Bool) -> Bool)?
+    /// An answer box's Return, with whether ⌘ was held, in place of
+    /// `onSend` and `onReturnWhenEmpty`: there Return goes on to the next
+    /// unanswered ask and only ⌘Return always sends (AskAnswerBox).
+    var onAnswerReturn: ((_ command: Bool) -> Void)?
     var onPaletteKey: ((PaletteKey) -> Bool)?
     var onEscape: (() -> Bool)?
     /// Pictures pasted or dropped in an ask's box, which keeps them beside
@@ -930,7 +939,9 @@ final class ComposerTextView: NSTextView {
         if isReturn, !hasMarkedText() {
             if event.modifierFlags.contains(.shift) || event.modifierFlags.contains(.option) {
                 insertLineContinuingList()
-            } else if string.isEmpty, onReturnWhenEmpty?() == true {
+            } else if let onAnswerReturn {
+                onAnswerReturn(event.modifierFlags.contains(.command))
+            } else if string.isEmpty, onReturnWhenEmpty?(event.modifierFlags.contains(.command)) == true {
                 // Allowed the waiting approval.
             } else {
                 onSend?()

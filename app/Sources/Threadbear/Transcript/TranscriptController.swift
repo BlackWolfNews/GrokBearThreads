@@ -938,11 +938,48 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         await session?.app?.importImages([url]).first
     }
 
-    /// Return in a Something else box sends, as it does in the composer:
-    /// the picks, every box and whatever's in the composer, as one message.
+    /// Sends the picks, every box and whatever's in the composer, as one
+    /// message.
     func sendAnswers(_ card: AsksCard) {
         guard let session, let app = session.app else { return }
         app.send(threadId: session.threadId)
+    }
+
+    /// Return in ask `ask`'s Something else box goes on to the next ask
+    /// still unanswered, and sends only once there's none: Return on ask 7
+    /// of 10, meant as a new line or just early, sent the card with 8 to 10
+    /// unanswered (Mike, 7 Nov). ⌘Return sends whatever's answered.
+    func answerBoxReturn(_ card: AsksCard, ask: Int, command: Bool) {
+        if command || !showUnanswered(after: ask, orThis: false) { sendAnswers(card) }
+    }
+
+    /// Return in the empty composer with picks on the card: the same rule
+    /// as a Something else box, from the ask the card is showing. False
+    /// when every ask's answered, so Return sends as before.
+    func returnWithUnanswered() -> Bool {
+        showUnanswered(after: composerCard?.page ?? 0, orThis: true)
+    }
+
+    /// Puts the next ask after `ask` with nothing picked in front: its page
+    /// on a paged card, with the cursor back in the composer (the box it
+    /// was in has gone with its page). On a card showing every ask, it's in
+    /// sight already, so a beep says Return didn't send. False if there's
+    /// none, or no open card.
+    private func showUnanswered(after ask: Int, orThis: Bool) -> Bool {
+        guard let session, let app = session.app, let thread = app.threads[session.threadId],
+              let card = session.openCard.flatMap({ row -> AsksCard? in
+                  if case .asks(let card) = row.content { return card } else { return nil }
+              }),
+              card.isOpen, thread.asksSeq == card.seq,
+              let next = Decisions.nextUnanswered(after: ask, count: card.asks.count, picks: app.picks(for: thread), orThis: orThis)
+        else { return false }
+        // Already showing (the composer's Return on an unanswered ask): the beep.
+        if composerCard?.page != next, composerCard?.showAsk(next) == true {
+            app.focusComposer(thread.id)
+        } else {
+            NSSound.beep()
+        }
+        return true
     }
 
     /// Puts the cursor in ask `ask`'s Something else box on the card from `seq`.

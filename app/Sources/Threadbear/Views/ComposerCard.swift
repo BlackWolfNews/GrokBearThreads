@@ -175,18 +175,24 @@ final class ComposerCardHost: NSView {
         needsLayout = true
     }
 
+    /// Ask `index` in front on a paged card; false if the card isn't paged
+    /// (every ask is in sight already).
+    func showAsk(_ index: Int) -> Bool {
+        guard case .asks(let card)? = row?.content, bounds.width > 0 else { return false }
+        let full = TextMeasurer.current.measure(RowRenderer.asksText(card, width: bounds.width), width: bounds.width)
+        guard Self.isPaged(card, height: full.height) else { return false }
+        showPage(index)
+        return true
+    }
+
     /// After an answer's picked on a paged card, on to the next ask still
     /// waiting for one, a beat later so the tick shows first. Stays put
     /// once they're all answered, so he can look over the last one.
     func pagePast(_ index: Int) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-            guard let self, self.page == index, case .asks(let card)? = self.row?.content, self.bounds.width > 0 else { return }
-            let full = TextMeasurer.current.measure(RowRenderer.asksText(card, width: self.bounds.width), width: self.bounds.width)
-            guard Self.isPaged(card, height: full.height) else { return }
-            let count = card.asks.count
-            if let next = (1..<count).map({ (index + $0) % count }).first(where: { card.picks[$0] == nil }) {
-                self.showPage(next)
-            }
+            guard let self, self.page == index, case .asks(let card)? = self.row?.content,
+                  let next = Decisions.nextUnanswered(after: index, count: card.asks.count, picks: card.picks) else { return }
+            _ = self.showAsk(next)
         }
     }
 

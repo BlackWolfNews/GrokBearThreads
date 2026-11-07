@@ -462,8 +462,11 @@ enum Automation {
             return composer.readSelection(from: board) ? "ok" : "error paste refused"
         case "return":
             // `"shift": true` for Shift-Return (a new line, carrying a list on).
-            // `"focused": true` presses it where the cursor is, as `type` does.
-            if c["focused"] as? Bool == true { return pressAtCursor(window, characters: "\r", keyCode: 36) }
+            // `"focused": true` presses it where the cursor is, as `type` does,
+            // with `"command": true` for ⌘Return.
+            if c["focused"] as? Bool == true {
+                return pressAtCursor(window, characters: "\r", keyCode: 36, modifiers: c["command"] as? Bool == true ? .command : [])
+            }
             return pressReturn(window, shift: c["shift"] as? Bool == true)
         case "escape":
             // The Escape key, where the cursor is.

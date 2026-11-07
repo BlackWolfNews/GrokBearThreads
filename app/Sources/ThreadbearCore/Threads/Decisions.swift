@@ -115,6 +115,17 @@ public enum Decisions {
         }
     }
 
+    /// The next ask after `index` (wrapping round) with nothing picked, or
+    /// nil when every other ask has a pick. Return in a Something else box
+    /// goes there instead of sending while one's left, so an early Return
+    /// can't send the card half answered (Mike, 7 Nov). `orThis` counts ask
+    /// `index` too, last (the empty composer's Return, from the ask shown).
+    public static func nextUnanswered(after index: Int, count: Int, picks: [Int: Int], orThis: Bool = false) -> Int? {
+        guard count > 0 else { return nil }
+        let others = count > 1 ? (1..<count).map { (index + $0) % count } : []
+        return (others + (orThis ? [index] : [])).first { picks[$0] == nil }
+    }
+
     /// The pictures from the answered asks' boxes, in the card's order,
     /// numbered as `answers` says. The composer's own go after them.
     public static func images(asks: [Ask], picks: [Int: Int], notes: [Int: AskNote]) -> [ImageRef] {
