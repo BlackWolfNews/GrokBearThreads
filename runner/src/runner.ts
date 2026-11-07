@@ -1376,7 +1376,11 @@ export class Runner {
     // New work: its last finish no longer says it's done, for threads
     // waiting on it (runner/hibernation.ts).
     delete rec.finished;
-    // Sending to a snoozed or archived thread brings it back.
+    // Sending to a snoozed or archived thread brings it back. A schedule's
+    // message notes it came out of the archive, so the run can put it back
+    // if it ends with nothing for Mike (the end of the turn, below).
+    if (rec.archivedAt && opts.origin === 'schedule') rec.unarchivedBySchedule = { by: rec.archivedBy };
+    if (fromMike(text, opts)) delete rec.unarchivedBySchedule;
     if (rec.snoozedUntil || rec.archivedAt) {
       delete rec.snoozedUntil;
       delete rec.snoozedUntilRestart;
@@ -2248,6 +2252,21 @@ export class Runner {
     // Owed to the next runner (a handover): finished once it's reviewed.
     else if (finished && !rec.labReviewOwed) this.markFinished(st, turn.lastText);
     if (outcome === 'completed' && this.waitedOnFor(rec.id).length) this.tellActivity({ kind: 'waited-on', threadId: rec.id });
+    // A schedule's message brought this thread out of the archive (sendTo).
+    // A run that finishes with nothing for Mike puts it back, so a watcher he
+    // archived doesn't land in his inbox each time it looks and finds
+    // nothing (7 Nov 2026, a twice-daily Pebble check). One that needs him,
+    // failed, or is still waiting on work stays out. Another queued message
+    // decides at the end of its own turn.
+    if (rec.unarchivedBySchedule && !rec.queue.length && !rt.turn) {
+      const by = rec.unarchivedBySchedule.by;
+      delete rec.unarchivedBySchedule;
+      this.markDirty(st);
+      if (finished && !review && !rec.archivedAt && !this.stopping) {
+        this.emit(st, { type: 'system.note', text: 'Back in the archive: the scheduled run ended with nothing for you.' });
+        this.update({ threadId: rec.id, archived: true, archivedBy: by ?? 'threadbear' });
+      }
+    }
     if (archive && !rt.turn && !rec.archivedAt && !this.stopping) {
       this.emit(st, { type: 'system.note', text: 'Archived, as the agent was asked to once it had finished.' });
       this.update({ threadId: rec.id, archived: true, archivedBy: 'agent' });
@@ -2737,6 +2756,9 @@ export class Runner {
     }
     let archiving = false;
     if (params.archived !== undefined) {
+      // Mike (or an agent) archived or unarchived it himself: that settles
+      // where it lives, not the schedule run that brought it back.
+      delete rec.unarchivedBySchedule;
       if (params.archived) {
         archiving = !rec.archivedAt;
         const by = params.archivedBy ?? 'mike';

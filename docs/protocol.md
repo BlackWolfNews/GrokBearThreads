@@ -4346,7 +4346,12 @@ kept in `schedules.json` in the data dir.
   just type it, and its `user.message` has `origin: "schedule"` and
   `scheduleId`. A message for a thread that's busy waits for the running
   turn to end (it doesn't go into it), then starts its own turn. A snoozed
-  or archived thread comes back to the inbox, as with any message.
+  or archived thread comes back to the inbox, as with any message. One it
+  brought out of the archive (`unarchivedBySchedule` on the record, with who
+  had archived it) goes back, archived by them again with a `system.note`,
+  when that run finishes with `needs: "nothing"` and nothing left running
+  or queued; one that needs Mike, fails or waits stays out. Mike writing to
+  it, or archiving or unarchiving it himself, clears the mark.
 - **New threads** get the schedule's title and settings and are made the
   way `threads.create` makes them. One with a `poolId` starts on that
   pool's pick of its logins at the time (Which login), and stays in the pool.

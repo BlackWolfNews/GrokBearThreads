@@ -1883,6 +1883,58 @@ test('needs you: an interrupted turn, or one without archive, leaves the thread 
   assert.equal(h.runner.get(thread.id).archivedAt, undefined);
 });
 
+test('a scheduled run puts an archived thread back in the archive when it ends with nothing for Mike', () => {
+  const h = makeHarness();
+  const { thread } = create(h);
+  let s = h.adapter.last;
+  s.init();
+  endTurnCall(s, 't1', { needs: 'nothing' });
+  s.result('completed');
+  h.runner.update({ threadId: thread.id, archived: true });
+  assert.ok(h.runner.get(thread.id).archivedAt);
+
+  // Nothing new: it comes out for the run, then goes back as Mike left it.
+  h.runner.send(thread.id, 'Check for a reply', [], { origin: 'schedule', scheduleId: 'sch_1' });
+  assert.equal(h.runner.get(thread.id).archivedAt, undefined, 'out of the archive while it runs');
+  s = h.adapter.last;
+  s.init();
+  endTurnCall(s, 't2', { needs: 'nothing' });
+  s.result('completed');
+  let t = h.runner.get(thread.id);
+  assert.ok(t.archivedAt, 'back in the archive');
+  assert.equal(t.archivedBy, 'mike');
+  assert.ok(h.events(thread.id).some((e) => e.type === 'system.note' && /back in the archive/i.test(String(e.text))), 'says why');
+
+  // A run that needs him stays in the inbox.
+  h.runner.send(thread.id, 'Check for a reply', [], { origin: 'schedule', scheduleId: 'sch_1' });
+  s = h.adapter.last;
+  s.init();
+  endTurnCall(s, 't3', { needs: 'you', asks: [{ action: 'Send the reply?' }] });
+  s.result('completed');
+  t = h.runner.get(thread.id);
+  assert.equal(t.archivedAt, undefined, 'stays out when it needs Mike');
+
+  // So does one Mike wrote into, even if it then ends with nothing.
+  h.runner.update({ threadId: thread.id, archived: true });
+  h.runner.send(thread.id, 'Check for a reply', [], { origin: 'schedule', scheduleId: 'sch_1' });
+  s = h.adapter.last;
+  s.init();
+  h.runner.send(thread.id, 'also tell me the size');
+  endTurnCall(s, 't4', { needs: 'nothing' });
+  s.result('completed');
+  assert.equal(h.runner.get(thread.id).archivedAt, undefined, 'his message keeps it out');
+
+  // And a scheduled message to a thread in the inbox never archives it.
+  s = h.adapter.last;
+  endTurnCall(s, 't5', { needs: 'nothing' });
+  s.result('completed');
+  h.runner.send(thread.id, 'Check for a reply', [], { origin: 'schedule', scheduleId: 'sch_1' });
+  s = h.adapter.last;
+  endTurnCall(s, 't6', { needs: 'nothing' });
+  s.result('completed');
+  assert.equal(h.runner.get(thread.id).archivedAt, undefined, 'only one that came out of the archive goes back');
+});
+
 test('needs you: the card survives a reload of the thread record', () => {
   const h = makeHarness();
   const { thread } = create(h);

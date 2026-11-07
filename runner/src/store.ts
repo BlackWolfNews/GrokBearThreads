@@ -98,6 +98,9 @@ export type ThreadRecord = {
   // bring a thread back needn't clear them.
   archivedBy?: ArchivedBy;
   archiveVerdict?: ArchiveVerdict;
+  // A schedule's message brought it out of the archive (Runner.sendTo), and
+  // who had archived it: a run that ends with nothing for Mike puts it back.
+  unarchivedBySchedule?: { by?: ArchivedBy };
   starredAt?: string; // Mike starred it: the Starred section, oldest star first
   preview: string;
   lastSeq: number;
