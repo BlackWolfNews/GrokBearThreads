@@ -15,7 +15,8 @@ PREFS=""
 export PATH=/Applications/Docker.app/Contents/Resources/bin:$PATH
 DATA="$HOME/Library/Application Support/Threadbear"
 
-osascript -e 'quit app "Threadbear"' 2>/dev/null
+# By its bundle id: by name this could quit another thread's debug app.
+osascript -e 'tell application id "com.mikerosoft.threadbear" to quit' 2>/dev/null
 if [[ -x "$HOME/threadbear/runner/scripts/install-runner.sh" ]]; then
   bash "$HOME/threadbear/runner/scripts/install-runner.sh" --uninstall --force || true
 fi
@@ -28,7 +29,7 @@ TS=$(command -v tailscale || echo /Applications/Tailscale.app/Contents/MacOS/Tai
 for p in 3210 3211 6791; do "$TS" serve --https=$p off 2>/dev/null; done
 
 rm -rf "$HOME/Applications/Threadbear.app" "$HOME/Applications/Threadbear Runner.app" \
-  "$DATA" "$HOME/threadbear" "$HOME/ThreadbearThreads" "$HOME/.local/bin/threadbear" \
+  "$DATA" "$HOME/threadbear" "$HOME/ThreadbearThreads" "$HOME/install-threadbear" "$HOME/.local/bin/threadbear" \
   "$HOME/Library/Caches/Threadbear" "$HOME/Library/Logs/Threadbear" \
   "$HOME/Library/Logs/threadbear-runner.log" "$HOME/Library/Logs/threadbear-update.log"
 if [[ -n "$PREFS" ]]; then

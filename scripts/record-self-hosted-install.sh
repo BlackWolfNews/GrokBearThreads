@@ -15,6 +15,10 @@
 set -u
 OUT=${1:-$HOME/threadbear-install-video}
 mkdir -p "$OUT"
+# Only on a clean Mac, or the video shows an install that isn't one.
+for f in "$HOME/threadbear" "$HOME/Applications/Threadbear.app" "$HOME/Library/Application Support/Threadbear"; do
+  [[ -e "$f" ]] && { echo "$f is here, so this Mac isn't clean: scripts/remove-self-hosted-install.sh --yes takes it out." >&2; exit 1; }
+done
 LIMIT_MIN=${LIMIT_MIN:-75}
 
 # The website's install prompt (site/scripts/build.mjs INSTALL_PROMPT), then
@@ -32,32 +36,90 @@ SCREEN=$(ffmpeg -f avfoundation -list_devices true -i "" 2>&1 | sed -nE 's/.*\[(
 # needs no quoting through AppleScript.
 cat > "$OUT/run-claude.sh" <<EOF
 #!/bin/zsh -l
-cd ~
+# Where its installer puts it, which a login shell doesn't always have on its PATH.
+export PATH="\$HOME/.local/bin:\$PATH"
+# An empty folder, not the home folder: Claude Code walks where it starts, and
+# macOS then stops to ask about Photos, Documents and so on.
+mkdir -p ~/install-threadbear
+cd ~/install-threadbear
 clear
 exec claude --allowedTools Bash Read Edit Write Glob Grep TodoWrite -- "\$(cat '$OUT/prompt.txt')"
 EOF
 chmod +x "$OUT/run-claude.sh"
 
-ffmpeg -nostdin -y -f avfoundation -capture_cursor 1 -framerate 10 -i "${SCREEN}:none" \
-  -vf "scale=1920:-2" -c:v h264_videotoolbox -b:v 6M -pix_fmt yuv420p "$OUT/install.mp4" > "$OUT/ffmpeg.log" 2>&1 &
-FF=$!
-trap 'kill -INT $FF 2>/dev/null; wait $FF 2>/dev/null' EXIT
-sleep 2
-START=$(date +%s)
-
+# A full-screen Terminal in a Space of its own, so nothing else that's open on
+# this desktop is in the shot (another thread's debug app floats over an
+# ordinary window, on Tinker Desk), nor the menu bar or the Dock. It's made
+# before the recording starts, and the agent started after, so the video opens
+# on an empty Terminal.
+FONT=$(osascript -e 'tell application "Terminal" to get font size of default settings')
 osascript <<EOF
 tell application "Terminal"
   activate
-  do script "'$OUT/run-claude.sh'"
+  do script ""
+  delay 3
+  -- For a shell that opens by asking something (oh-my-zsh's "update? [Y/n]"
+  -- reads one key, which would eat the start of the next command). With no
+  -- question it's only a "command not found", and run-claude.sh clears it.
+  do script "n" in front window
   delay 1
-  set bounds of front window to {0, 25, 1920, 1080}
   set font size of current settings of selected tab of front window to 15
 end tell
+delay 2
 EOF
+# A real control-command-F, as this only needs Accessibility: scripting
+# System Events needs a permission Desk Runner doesn't have, and fails silently.
+press() {
+  osascript -l JavaScript - "$1" "${2:-0}" <<'JS'
+ObjC.import('CoreGraphics');
+function run(argv) {
+  for (const down of [true, false]) {
+    const e = $.CGEventCreateKeyboardEvent(null, Number(argv[0]), down);
+    $.CGEventSetFlags(e, Number(argv[1]));
+    $.CGEventPost(0, e);
+    delay(0.05);
+  }
+}
+JS
+}
+# Terminal in front right before the key, or it goes to whatever took focus
+# (another thread's test window, on Tinker Desk), and checked, as a take in a
+# small window is no use and costs a whole audit of the code to find out.
+for try in 1 2 3; do
+  osascript -e 'tell application "Terminal" to activate'
+  sleep 1
+  press 3 $(( 0x100000 | 0x40000 ))
+  sleep 4
+  WIDTH=$(osascript -e 'tell application "Terminal" to get item 3 of (get bounds of front window)')
+  (( WIDTH >= 1900 )) && break
+done
+(( WIDTH >= 1900 )) || { echo "Terminal wouldn't go full screen (width $WIDTH)." >&2; exit 1; }
+clear_up() {
+  [[ -n "${FF:-}" ]] && { kill -INT $FF 2>/dev/null; wait $FF 2>/dev/null; }
+  osascript -e "tell application \"Terminal\" to set font size of default settings to $FONT"
+}
+# TERM too: an EXIT trap alone doesn't run when this is stopped, and would
+# leave ffmpeg recording.
+trap clear_up EXIT
+trap 'exit 1' INT TERM
+
+ffmpeg -nostdin -y -f avfoundation -capture_cursor 1 -framerate 10 -i "${SCREEN}:none" \
+  -vf "scale=1920:-2" -c:v h264_videotoolbox -b:v 6M -pix_fmt yuv420p "$OUT/install.mp4" > "$OUT/ffmpeg.log" 2>&1 &
+FF=$!
+sleep 3
+START=$(date +%s)
+osascript -e "tell application \"Terminal\" to do script \"'$OUT/run-claude.sh'\" in front window"
+# Yes to "do you trust this folder?", which a new folder asks first. On a
+# prompt already sent, an empty Return does nothing.
+for wait in 6 8; do
+  sleep $wait
+  osascript -e 'tell application "Terminal" to activate'
+  press 36
+done
 
 # Done when the agent's transcript has ended its turn and gone quiet for a
 # minute and a half, after the app is installed (or the time runs out).
-PROJECT_DIR="$HOME/.claude/projects/-Users-$(whoami)"
+PROJECT_DIR="$HOME/.claude/projects/-Users-$(whoami)-install-threadbear"
 while :; do
   sleep 15
   NOW=$(date +%s)
