@@ -43,6 +43,9 @@ struct InboxView: View {
     @State private var closingFor: String?
     /// A failed start, back in the sheet as it was.
     @State private var composeDraft: NewThreadDraft?
+    /// How far the list's pulled down, for the bear peeking over it. Only the
+    /// bear reads it, so a pull redraws the bear and not the whole list.
+    @State private var pull = PullState()
 
     private var pocketValue: String {
         let count = model.pocket.count
@@ -91,6 +94,9 @@ struct InboxView: View {
             // empty section would leave.
             .listSectionSpacing(0)
             .navigationTitle("Threadbear")
+            // As it sits anyway with the search field always showing. A large
+            // title also grew out of it on a pull, over the bear peeking up.
+            .navigationBarTitleDisplayMode(.inline)
             // Always showing, rather than tucked under the title until you
             // pull down: on the phone it's the quickest way to an old thread.
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always))
@@ -209,7 +215,25 @@ struct InboxView: View {
                 model.composeText = nil
             }
             .hibernateDialog(for: $hibernateTarget)
-            .refreshable { try? await Task.sleep(for: .milliseconds(400)) }
+            // Its own pull to refresh rather than .refreshable, whose spinner
+            // holds back until the list's been pulled about 190 pt: the bear
+            // blinks at 80, as in the mockup Mike picked, and letting go there
+            // refreshes, holding the list open while it does.
+            .onScrollGeometryChange(for: CGPoint.self) { CGPoint(x: $0.contentInsets.top, y: $0.contentOffset.y) } action: { _, g in
+                pull.scrolled(offset: g.y, topInset: g.x)
+            }
+            .onScrollPhaseChange { old, new in
+                if new == .interacting { pull.touching = true }
+                if old == .interacting, new != .interacting {
+                    pull.touching = false
+                    if pull.letGo() { Task { await refresh() } }
+                }
+            }
+            .contentMargins(.top, pull.holding ? PullPeek.hold : 0, for: .scrollContent)
+            .accessibilityAction(named: "Reconnect") { Task { await refresh() } }
+            .overlay(alignment: .top) {
+                if query.trimmingCharacters(in: .whitespaces).isEmpty { PullPeekBear(pull: pull) }
+            }
             .overlay(alignment: .bottom) { ConnectionToast() }
             .onChange(of: query, initial: true) { _, text in
                 model.setSearching(!text.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -227,6 +251,25 @@ struct InboxView: View {
             }
         }
         .environment(\.pushThread) { path.append($0) }
+    }
+
+    /// Pull to refresh: the bear blinks with a light tap as the list's held open,
+    /// the app reconnects to Convex for real, the bear nods, then ducks back
+    /// behind the list as it slides home.
+    private func refresh() async {
+        guard !pull.refreshing else { return }
+        pull.refreshing = true
+        pull.holding = true
+        await model.reconnect()
+        if !reduceMotion {
+            pull.nods += 1
+            try? await Task.sleep(for: .milliseconds(560))
+        }
+        withAnimation(.easeIn(duration: 0.2)) { pull.ducked = true }
+        try? await Task.sleep(for: .milliseconds(200))
+        withAnimation(.snappy(duration: 0.32)) { pull.holding = false }
+        try? await Task.sleep(for: .milliseconds(320))
+        pull.refreshing = false
     }
 
     /// One line of the flat top of the list: Starred, Inbox and Running, where
@@ -643,6 +686,69 @@ struct ThreadRow: View {
         case .time:
             Text(RowStatus.text(thread, now: model.now)).font(.footnote).monospacedDigit().foregroundStyle(Look.faint)
         }
+    }
+}
+
+/// The inbox's pull, kept apart from InboxView so only the bear redraws as it
+/// changes (`PullPeek` has the sums).
+@MainActor @Observable
+final class PullState {
+    private(set) var peek = PullPeek()
+    /// Held open while it reconnects: the whole head shows.
+    var refreshing = false {
+        didSet { if refreshing { ducked = false } }
+    }
+    /// Gone back down behind the list, until the list is home again.
+    var ducked = false
+    var blinks = 0
+    var nods = 0
+
+    /// The list held open below the search field while it reconnects.
+    var holding = false
+    /// A finger's on the list.
+    var touching = false
+    @ObservationIgnored private let tap = UIImpactFeedbackGenerator(style: .light)
+
+    func scrolled(offset: CGFloat, topInset: CGFloat) {
+        var next = peek
+        next.scrolled(offset: offset, topInset: topInset, refreshing: refreshing)
+        if touching, !refreshing, next.pulling(gap: next.gap) {
+            // The refresh point: a blink and a light tap, so he knows letting go will do it.
+            blinks += 1
+            tap.impactOccurred()
+        }
+        // Every scroll lands here: only a change is news.
+        if next != peek { peek = next }
+        if ducked, !refreshing, peek.gap == 0 { ducked = false }
+    }
+
+    func letGo() -> Bool { peek.letGo() }
+}
+
+/// The sat bear's head coming up over the top of the inbox as it's pulled
+/// down, in the gap between the search field and the list, as far as the
+/// pull goes. Under Reduce Motion it fades in whole rather than rising.
+private struct PullPeekBear: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var pull: PullState
+
+    var body: some View {
+        let gap = pull.peek.gap
+        let rising = pull.refreshing ? PullPeek.head : PullPeek.shown(gap: gap)
+        let shown = pull.ducked ? 0 : reduceMotion ? (rising > 0 ? PullPeek.head : 0) : rising
+        // The list's first heading has room above its words, so the bear can
+        // come up from just behind them.
+        let room = gap + 10
+        PeekingBear(size: 64, blinks: pull.blinks, nods: pull.nods)
+            .foregroundStyle(.secondary)
+            .offset(y: room - shown)
+            .opacity(reduceMotion && shown == 0 ? 0 : 1)
+            .animation(reduceMotion ? .easeOut(duration: 0.15) : nil, value: shown)
+            .frame(maxWidth: .infinity, maxHeight: room, alignment: .top)
+            .frame(height: room, alignment: .top)
+            .clipped()
+            .allowsHitTesting(false)
+            .opacity(gap > 0 || pull.refreshing ? 1 : 0)
     }
 }
 

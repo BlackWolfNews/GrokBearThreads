@@ -198,6 +198,51 @@ struct WaveOnceBear: View {
     }
 }
 
+/// The sat bear for peeking over the inbox: its dot eye blinks when `blinks`
+/// goes up (the button doesn't), and it gives a little nod when `nods` does.
+struct PeekingBear: View {
+    var size: CGFloat = 64
+    var blinks: Int
+    var nods: Int
+
+    var body: some View {
+        let small = size < BearGeometry.smallSide
+        let face = BearGeometry.sitFace(small: small)
+        let eye = face.blinkingEyes?.boundingBox ?? .zero
+        let feet = UnitPoint(x: 0.5, y: 20 / 24)
+        return ZStack {
+            BearPart(inks: BearGeometry.sitBody(face: face) + face.stillInks, size: size)
+            BearPart(inks: face.blinkingEyes.map { [BearGeometry.Ink(path: $0, width: nil)] } ?? [], size: size)
+                .keyframeAnimator(initialValue: 1.0, trigger: blinks) { eyes, open in
+                    eyes.scaleEffect(y: open, anchor: UnitPoint(x: eye.midX / 24, y: eye.midY / 24))
+                } keyframes: { _ in
+                    KeyframeTrack {
+                        LinearKeyframe(0.1, duration: 0.085)
+                        LinearKeyframe(1, duration: 0.085)
+                    }
+                }
+        }
+        .frame(width: size, height: size)
+        .keyframeAnimator(initialValue: Nod(), trigger: nods) { bear, nod in
+            bear.scaleEffect(y: nod.squash, anchor: feet).offset(y: nod.drop)
+        } keyframes: { _ in
+            KeyframeTrack(\.drop) {
+                CubicKeyframe(2.2 * size / 24, duration: 0.133)
+                CubicKeyframe(-0.6 * size / 24, duration: 0.133)
+                CubicKeyframe(0, duration: 0.114)
+            }
+            KeyframeTrack(\.squash) {
+                CubicKeyframe(0.95, duration: 0.133)
+                CubicKeyframe(1.01, duration: 0.133)
+                CubicKeyframe(1, duration: 0.114)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+
+    private struct Nod { var drop: CGFloat = 0; var squash: CGFloat = 1 }
+}
+
 /// Some of a pose on its own canvas, so it can move by itself.
 private struct BearPart: View {
     var inks: [BearGeometry.Ink]

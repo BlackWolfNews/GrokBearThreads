@@ -607,6 +607,7 @@ final class AppModel {
                         if glides { model.landing.formUnion(old.landed(in: new)) }
                     }
                     if glides { model.popMarksAfterLanding() }
+                    model.inboxAnswers += 1
                 case .hibernating: model.hibernating = list
                 case .den: model.den = list
                 }
@@ -774,14 +775,40 @@ final class AppModel {
     /// hours. So back from the background, a fresh client.
     func comingBack() {
         defer { backgroundedAt = nil }
-        guard let since = backgroundedAt, Date.now.timeIntervalSince(since) > 5,
-              !isFake, let pairing, authProblem == nil else { return }
+        guard let since = backgroundedAt, Date.now.timeIntervalSince(since) > 5, !isFake else { return }
+        freshConnection()
+    }
+
+    /// Pulling the inbox down: a fresh Convex client, as coming back from the
+    /// background has, and back once the inbox has answered on it (or a few
+    /// seconds have gone), so the list holds open while it really reconnects.
+    /// It used to wait 400 ms and do nothing. The demo follows its sample
+    /// threads again, as there's no client to replace.
+    func reconnect() async {
+        let answered = inboxAnswers
+        guard freshConnection() else { return }
+        let giveUp = Date.now.addingTimeInterval(6)
+        while inboxAnswers == answered, Date.now < giveUp { try? await Task.sleep(for: .milliseconds(50)) }
+    }
+
+    /// Answers the inbox list has had, on any connection, for `reconnect`.
+    @ObservationIgnored private var inboxAnswers = 0
+
+    @discardableResult
+    private func freshConnection() -> Bool {
+        guard authProblem == nil, let backend else { return false }
         let kept = loaded
-        connect(ConvexBackend(deploymentURL: pairing.deploymentURL, token: pairing.token), pairing: pairing, registerPush: false)
+        if isFake {
+            connect(backend, pairing: nil, registerPush: false)
+        } else {
+            guard let pairing else { return false }
+            connect(ConvexBackend(deploymentURL: pairing.deploymentURL, token: pairing.token), pairing: pairing, registerPush: false)
+        }
         // What's on screen stays until the fresh answers replace it, rather
         // than flashing the loading rows.
         loaded = kept
         connection += 1
+        return true
     }
 
     private func connect(_ backend: any Backend, pairing: Pairing?, registerPush: Bool = true) {
