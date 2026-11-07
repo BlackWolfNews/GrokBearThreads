@@ -442,6 +442,7 @@ final class TranscriptTextView: NSTextView {
             closeChipCard()
             header.cell.copyDraft()
             setNeedsDisplay(header.frame)
+            CopiedBubble.show(above: header.cell.button(in: header.frame), in: self)
             // Back to Copy once Copied has had its moment.
             let frame = header.frame
             DispatchQueue.main.asyncAfter(deadline: .now() + DraftBlockCell.copiedFor + 0.05) { [weak self] in self?.setNeedsDisplay(frame) }

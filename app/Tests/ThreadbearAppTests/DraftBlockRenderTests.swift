@@ -107,5 +107,14 @@ final class DraftBlockRenderTests: XCTestCase {
         view.mouseDown(with: click)
         XCTAssertEqual(board.string(forType: .string), "*Hi* there (https://x.dev) " + source.components(separatedBy: " ").last!)
         XCTAssertTrue(header.cell.wasJustCopied())
+        // And says so: the green-tick bubble, just above the button.
+        let bubble = try XCTUnwrap(view.subviews.first { $0 is CopiedBubble })
+        let button = header.cell.button(in: header.frame)
+        XCTAssertLessThanOrEqual(bubble.frame.maxY, button.minY)
+        XCTAssertEqual(bubble.frame.midX, button.midX, accuracy: bubble.frame.width)
+        if let out = ProcessInfo.processInfo.environment["DRAFT_SHOT"], let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+            view.cacheDisplay(in: view.bounds, to: rep)
+            try rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: out))
+        }
     }
 }

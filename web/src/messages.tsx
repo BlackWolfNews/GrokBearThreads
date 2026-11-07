@@ -346,8 +346,8 @@ function DraftBox({ draft }: { draft: Draft }) {
     <div className="draft">
       <div className="draft-head">
         <span>{draftLabel(draft.kind)}</span>
-        <button className="btn plain" onClick={() => void copy()} title="Copy the draft, with its links and formatting">
-          {copied ? 'Copied' : 'Copy'}
+        <button className={copied ? 'btn plain copied' : 'btn plain'} onClick={() => void copy()} title="Copy the draft, with its links and formatting">
+          {copied ? '✓ Copied' : 'Copy'}
         </button>
       </div>
       <div className="draft-body">

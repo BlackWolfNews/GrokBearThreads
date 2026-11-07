@@ -61,7 +61,7 @@ final class DraftBlockCell: NSTextAttachmentCell {
     override func wantsToTrackMouse() -> Bool { false }
 
     private func buttonTitle(copied: Bool) -> NSAttributedString {
-        NSAttributedString(string: copied ? "Copied" : "Copy", attributes: [.font: Self.buttonFont, .foregroundColor: NSColor.secondaryLabelColor])
+        NSAttributedString(string: copied ? "Copied" : "Copy", attributes: [.font: Self.buttonFont, .foregroundColor: copied ? NSColor.systemGreen : NSColor.secondaryLabelColor])
     }
 
     /// The Copy button, at the right of `frame` (as wide as "Copied", so
@@ -87,9 +87,10 @@ final class DraftBlockCell: NSTextAttachmentCell {
         let rect = button(in: cellFrame)
         let copied = wasJustCopied()
         let title = buttonTitle(copied: copied)
+        // Green with a tick for a moment after a click (Mike, 7 Nov).
         let symbol = copied ? "checkmark" : "doc.on.doc"
-        let config = NSImage.SymbolConfiguration(pointSize: TypeScale.detail - 1, weight: .regular)
-            .applying(.init(paletteColors: [.secondaryLabelColor]))
+        let config = NSImage.SymbolConfiguration(pointSize: TypeScale.detail - 1, weight: copied ? .bold : .regular)
+            .applying(.init(paletteColors: [copied ? .systemGreen : .secondaryLabelColor]))
         var x = rect.minX + zoomed(6)
         if let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?.withSymbolConfiguration(config) {
             let s = image.size
