@@ -4,6 +4,7 @@
 // partial Edit trusting the whole file.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -777,6 +778,10 @@ test('what an unhashed patch really can run but not follow still makes every edi
     'a worktree check that a hook runs too': { patch: `export default { worktree: { check: './blocked.sh' }, hooks: [{ title: 'H', on: 'turn.end', run: './blocked.sh' }] };`, files: { 'blocked.sh': blockedScript } },
     'a name that is both data and a command': { patch: `export default { hooks: [{ title: './missing.sh', on: 'turn.end', run: './missing.sh' }] };` },
     'a run with a pattern for its command': { patch: `export default { hooks: [{ title: 'H', on: 'turn.end', run: 'scripts/*.sh', edited: 'scripts/*.sh' }] };` },
+    'a url as a hook, which a shell would expand': { patch: `export default { hooks: [{ title: 'H', on: 'turn.end', run: 'https://example.com/[ab]' }] };` },
+    "a title read back as a hook's command": { patch: `const command = { title: 'eval "$(cat command.txt)"' }; export default { hooks: [{ title: 'H', on: 'turn.end', run: command.title }] };` },
+    "a data field of an imported file's default": { patch: `import c from '../lib/c.ts'; export default { hooks: [{ title: 'H', on: 'turn.end', run: c.actions[0].title }] };`, files: { '.threadbear/lib/c.ts': `export default { actions: [{ title: 'eval "$(cat command.txt)"' }] };\n` } },
+    "a worktree check read back as a hook's command": { patch: `const w = { check: './blocked.sh' }; export default { worktree: w, hooks: [{ title: 'H', on: 'turn.end', run: w.check }] };`, files: { 'blocked.sh': blockedScript } },
     'a string that only starts like a url': { patch: `const c = 'https://x.dev/;./missing.sh;./after.sh'; export default { actions: [{ title: 'A', run: c }] };` },
     'a data key with a computed name': { patch: `const k = 'run'; export default { hooks: [{ title: 'H', on: 'turn.end', [k]: './missing.sh; ./after.sh' }] };` },
     'an import it cannot follow': { patch: `const m = await import(process.cwd() + '/x.ts'); export default m.default;` },
@@ -804,12 +809,11 @@ test("strings a patch can't run, and a worktree's own setup and check, don't mak
   put(path.join(project, 'README.md'), 'hi\n');
   put(path.join(project, 'setup.sh'), blockedScript);
   put(path.join(project, 'check.sh'), blockedScript);
-  put(path.join(project, '.threadbear', 'patches', 'p.ts'), `const HOME_PAGE = 'https://example.com/a?b=1';
-export default {
+  put(path.join(project, '.threadbear', 'patches', 'p.ts'), `export default {
   worktree: { setup: './setup.sh', check: './check.sh --quick', keep: ['app/.build'] },
   actions: [
     { title: "Mike's chip", prompt: "Don't stop at what's there; it's only a thought (really)." },
-    { title: 'Site', url: HOME_PAGE },
+    { title: 'Site', url: 'https://example.com/a?b=1' },
   ],
   hooks: [{ title: 'Types', on: 'turn.end', run: 'true', edited: 'src/**/*.ts' }],
 };\n`);
@@ -856,4 +860,54 @@ test('a file a patch names is said to run even when another patch makes the rest
   const runsAsCode = h.adapter.last.opts.runsAsCode!;
   assert.equal(runsAsCode(path.join(project, 'go.sh')), true);
   assert.equal(runsAsCode(path.join(project, 'README.md')), 'unsure');
+});
+
+test("worktree setup doesn't run the main checkout's uncommitted package.json", () => {
+  const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd, stdio: 'pipe' }).toString();
+  const root = fs.realpathSync(tmpDir());
+  const main = path.join(root, 'main');
+  const log = path.join(root, 'npm.log');
+  // Stands in for npm: says where it ran, and what it was asked.
+  const bin = path.join(root, 'bin');
+  put(path.join(bin, 'node'), '#!/bin/sh\n');
+  put(path.join(bin, 'npm'), `#!/bin/sh\necho "$PWD $1" >> ${JSON.stringify(log)}\nmkdir -p node_modules\n`);
+  fs.chmodSync(path.join(bin, 'npm'), 0o755);
+  fs.chmodSync(path.join(bin, 'node'), 0o755);
+  put(path.join(main, 'worktree-setup.sh'), fs.readFileSync(path.join(REPO, 'worktree-setup.sh'), 'utf8'));
+  for (const dir of ['.', 'runner', 'app/Tools/mock-runner']) {
+    put(path.join(main, dir, 'package.json'), '{}\n');
+    put(path.join(main, dir, 'package-lock.json'), '{}\n');
+  }
+  fs.writeFileSync(path.join(main, '.gitignore'), 'node_modules\n');
+  git(root, 'init', '-q', '-b', 'main', main);
+  git(main, 'add', '-A');
+  git(main, 'commit', '-qm', 'one');
+  // Installed, then the lock looks newer than the install.
+  const old = new Date(Date.now() - 60_000);
+  for (const dir of ['.', 'runner', 'app/Tools/mock-runner']) {
+    put(path.join(main, dir, 'node_modules', '.package-lock.json'), '{}\n');
+    fs.utimesSync(path.join(main, dir, 'node_modules', '.package-lock.json'), old, old);
+  }
+  const setup = (name: string) => {
+    const wt = path.join(root, name);
+    git(main, 'worktree', 'add', '-q', '--detach', wt, 'HEAD');
+    fs.rmSync(log, { force: true });
+    execFileSync('bash', [path.join(wt, 'worktree-setup.sh')], { cwd: wt, env: { ...process.env, THREADBEAR_NODE: path.join(bin, 'node') }, stdio: 'pipe' });
+    return fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n') : [];
+  };
+  // An agent in Auto writes a script into main's package.json.
+  const pkg = path.join(main, 'app/Tools/mock-runner/package.json');
+  fs.writeFileSync(pkg, '{"scripts":{"prepare":"./evil.sh"}}\n');
+  const dirty = setup('wt1');
+  assert.ok(!dirty.includes(`${path.join(main, 'app/Tools/mock-runner')} install`), dirty.join('; '));
+  assert.ok(dirty.includes(`${path.join(root, 'wt1', 'app/Tools/mock-runner')} ci`), dirty.join('; '));
+  // A newer lock with everything committed still refreshes main.
+  git(main, 'checkout', '-q', '--', 'app/Tools/mock-runner/package.json');
+  fs.rmSync(path.join(main, 'node_modules', '.package-lock.json'));
+  put(path.join(main, 'node_modules', '.package-lock.json'), '{}\n');
+  const stale = path.join(main, 'node_modules', '.package-lock.json');
+  fs.utimesSync(stale, old, old);
+  fs.utimesSync(path.join(main, 'package-lock.json'), new Date(), new Date());
+  const clean = setup('wt2');
+  assert.ok(clean.includes(`${main} install`), clean.join('; '));
 });

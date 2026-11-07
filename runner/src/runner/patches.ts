@@ -36,10 +36,11 @@ const scans = new Map<string, CodeScan>();
 // The files in a Claude login's folder that hold its user settings.
 const LOGIN_SETTINGS = /^(settings(\..*)?\.json|\.claude\.json)$/i;
 const SCAN_TTL_MS = 10_000;
-// A web page as a whole string: a constant for an action's url, say. Run as a
-// command it could only be a file by that very name, which `files` has. Nothing
-// a shell would split it at, so `https://x/;./y.sh` is still a command.
-const WEB_PAGE = /^https?:\/\/[^\s;|&<>()`$'"\\]*$/i;
+// A web address held in a constant (`const PAGE = \`https://x/\${id}\``), so not
+// in the default export where `url` would say so. Run as a command it's one
+// file by that very name, which `files` has: only characters a shell neither
+// splits at nor expands, so no `?`, `[`, `;` or `$` (Codex's review).
+const PLAIN_WEB_ADDRESS = /^https?:\/\/[\w.~/%:-]*$/i;
 function codeOfUnhashedPatch(file: string, from: string, now: number): CodeScan {
   const key = `${file}\0${from}`;
   const hit = scans.get(key);
@@ -58,20 +59,23 @@ function codeOfUnhashedPatch(file: string, from: string, now: number): CodeScan 
     for (const n of namedPaths(text)) add(path.resolve(from, n));
     // Each string in it as a command run from where its commands run: what
     // that reaches, whatever it is. A problem means there may be more it
-    // runs, unless it can't be a command at all. A patch's `worktree` setup
-    // and check don't count either. Setup runs from what's committed, in a new
-    // worktree, and the check when a land is asked for, so neither runs what
-    // an agent just wrote until it has got past a step that's asked about.
+    // runs, unless the patch file's own default export has it as something
+    // else (scanModule). A `worktree` setup and check don't count either. Setup
+    // runs what's committed, in a new worktree, and worktree-setup.sh won't
+    // install from an uncommitted package.json in the main checkout; the check
+    // runs when a land is asked for. So neither runs what an agent just wrote
+    // until it has got past a step that's asked about.
     const scan = scanModule(text, module);
-    const data = new Set(scan.data);
-    const worktree = new Set(scan.worktree);
+    const own = canonicalPath(module) === canonicalPath(h.root);
+    const data = new Set(own ? scan.data : []);
+    const worktree = new Set(own ? scan.worktree : []);
     for (const command of scan.strings) {
       if (!/\S/.test(command) || command.length > 2000) continue;
       const reach = commandFiles(command, from);
       reach.files.forEach(add);
       if (worktree.has(command)) {
         for (const f of commandFiles(command, patchFolder).files) worktreeReach.add(canonicalPath(f).toLowerCase());
-      } else if (reach.problem && !data.has(command) && !WEB_PAGE.test(command)) all = true;
+      } else if (reach.problem && !data.has(command) && !PLAIN_WEB_ADDRESS.test(command)) all = true;
     }
     // Absolute and `~/` paths, there yet or not.
     for (const word of text.split(/[\s'"`;&|()<>=,[\]{}]+/)) {

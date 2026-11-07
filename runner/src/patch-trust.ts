@@ -762,9 +762,9 @@ const SCANNED = ['.ts', '.mts', '.cts', '.js', '.mjs', '.cjs', '.tsx', '.jsx'];
 // `packages`: the bare specifiers it imports (`zod`, `node:fs`), which are
 // hashed only when the repo commits them (tracked-packages.ts).
 //
-// `data` and `worktree`: strings found only as a patch's fields that aren't
-// commands, or only as its `worktree` setup and check (writeRunsAsCode). Never
-// a reason to hash less: `strings` still has them.
+// `data` and `worktree`: strings found only as fields of the default export
+// that aren't commands (patchRoles), or only as its `worktree` setup and check
+// (writeRunsAsCode). Never a reason to hash less: `strings` still has them.
 export type ModuleScan = { specifiers: string[]; packages: string[]; strings: string[]; data?: string[]; worktree?: string[]; problem?: { kind: 'computed' | 'parse'; line: number; code: string } };
 
 export function scanModule(src: string, file: string): ModuleScan {
@@ -830,16 +830,9 @@ export function scanModule(src: string, file: string): ModuleScan {
     const said = text ?? (node.type === 'TemplateElement' && typeof node.value?.cooked === 'string' ? (node.value.cooked as string) : undefined);
     if (said !== undefined) seen[roles.get(node) ?? 'other'].add(said);
     switch (node.type) {
-      case 'Property': {
-        const field = propertyKey(node);
-        if (field === undefined) break;
-        if (PATCH_DATA_FIELDS.has(field)) {
-          for (const v of node.value.type === 'ArrayExpression' ? node.value.elements : [node.value]) if (v) giveRole(v, 'data');
-        } else if (field === 'worktree' && node.value.type === 'ObjectExpression') {
-          for (const w of node.value.properties) if (w.type === 'Property' && ['setup', 'check'].includes(propertyKey(w) ?? '')) giveRole(w.value, 'worktree');
-        }
+      case 'ExportDefaultDeclaration':
+        if (node.declaration.type === 'ObjectExpression') patchRoles(node.declaration, giveRole);
         break;
-      }
       case 'ImportDeclaration':
       case 'ExportNamedDeclaration':
       case 'ExportAllDeclaration':
@@ -913,9 +906,34 @@ function plainString(n: AstNode): string | undefined {
   return undefined;
 }
 
-// A patch's fields that hold words, pages and patterns: shown, sent to an
-// agent or matched, never handed to a shell (readPatchModule in patches.ts).
-const PATCH_DATA_FIELDS = new Set(['title', 'note', 'detail', 'icon', 'tone', 'on', 'tell', 'prompt', 'url', 'edited', 'appliesTo', 'keep']);
+// The literals of a patch's `export default { ... }` that aren't commands:
+// shown, sent to an agent or matched, never handed to a shell
+// (readPatchModule in patches.ts). Only there, written in place: that object
+// has no name, so nothing else in the file can run what's in it, where
+// `{ title: 'x' }` anywhere else might be read back as `run: o.title` (Codex's
+// review). Anything less plain than this isn't given a role.
+const PATCH_FIELDS = new Set(['icon', 'appliesTo']);
+const ITEM_FIELDS = new Set(['title', 'note', 'icon', 'on', 'tell', 'prompt', 'url', 'edited']);
+function patchRoles(patch: AstNode, give: (n: AstNode, role: 'data' | 'worktree') => void): void {
+  const fields = (o: AstNode): [string, AstNode][] => o.properties.flatMap((p: AstNode) => {
+    const name = p.type === 'Property' ? propertyKey(p) : undefined;
+    return name === undefined ? [] : [[name, p.value] as [string, AstNode]];
+  });
+  const list = (v: AstNode): AstNode[] => (v.type === 'ArrayExpression' ? v.elements.filter(Boolean) : [v]);
+  for (const [name, value] of fields(patch)) {
+    if (PATCH_FIELDS.has(name)) list(value).forEach((v) => give(v, 'data'));
+    else if (name === 'worktree' && value.type === 'ObjectExpression') {
+      for (const [k, v] of fields(value)) {
+        if (k === 'setup' || k === 'check') give(v, 'worktree');
+        else if (k === 'keep') list(v).forEach((e) => give(e, 'data'));
+      }
+    } else if ((name === 'actions' || name === 'panels' || name === 'hooks') && value.type === 'ArrayExpression') {
+      for (const item of list(value)) {
+        if (item.type === 'ObjectExpression') for (const [k, v] of fields(item)) if (ITEM_FIELDS.has(k)) give(v, 'data');
+      }
+    }
+  }
+}
 
 // The name of an object literal's `name: value`, unless it's worked out.
 function propertyKey(n: AstNode): string | undefined {

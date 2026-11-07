@@ -3709,13 +3709,16 @@ run: the thread's folder, or for a patch from a folder of one of the thread's
 projects, that folder, as its hooks run there at the end of the thread's turns.
 One of those that can run something it can't follow (a script that isn't there
 yet included, as the follow stops there) makes every edit ask. Strings that
-aren't commands don't count towards that, though what they name still asks: a
-web page as a whole string, and one found only as a patch's `title`, `note`,
-`detail`, `icon`, `tone`, `on`, `tell`, `prompt`, `url`, `edited`, `appliesTo`
-or `keep`. Neither does a patch's `worktree` setup or check: setup runs from
-what's committed, in a new worktree, and the check when a land is asked for, so
-neither runs what an agent just wrote until it has got past a step that's asked
-about. A settings hook that can't be followed all
+aren't commands don't count towards that, though what they name still asks: one
+found only in place in the patch file's own `export default { ... }`, as its
+`icon`, `appliesTo` or `worktree.keep`, or an action's, panel's or hook's
+`title`, `note`, `icon`, `on`, `tell`, `prompt`, `url` or `edited`, and a plain
+web address with nothing a shell would split or expand. Neither does a
+patch's `worktree` setup or check: setup runs what's committed, in a new
+worktree, and the check when a land is asked for, so neither runs what an agent
+just wrote until it has got past a step that's asked about. A repo's setup has to
+keep that true: `worktree-setup.sh` won't `npm install` in the main checkout while
+its package files have uncommitted changes. A settings hook that can't be followed all
 the way doesn't: those are the user's own hooks, so what they load by a
 name worked out as they run, or from outside the repo they're followed
 in, isn't guarded. What such a hook runs by name (`npm test`, a tool on PATH)
