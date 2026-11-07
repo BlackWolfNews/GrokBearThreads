@@ -235,14 +235,18 @@ final class ClickFeedbackTests: XCTestCase {
     }
 
     /// The empty-inbox bear waits for a page leaving the Inbox, but not for a
-    /// starred thread's, which leaves a bear that's already there alone.
+    /// starred or sleeping thread's, which leaves a bear that's already there
+    /// alone.
     func testOnlyAFlightLeavingTheInboxHoldsUpTheBear() async throws {
         let (app, _) = try await connected()
         app.threads["th2"] = ThreadSummary(id: "th2", title: "Starred")
         app.threads["th2"]?.starredAt = Date()
-        app.flyingToArchive = ["th2"]
+        app.threads["th3"] = ThreadSummary(id: "th3", title: "Asleep")
+        app.threads["th3"]?.snoozedUntil = Date().addingTimeInterval(3600)
+        app.noteFlightLeaving("th2")
+        app.noteFlightLeaving("th3")
         XCTAssertFalse(app.flightLeavingTheInbox)
-        app.flyingToHibernate = ["th1"]
+        app.noteFlightLeaving("th1")
         XCTAssertTrue(app.flightLeavingTheInbox)
     }
 

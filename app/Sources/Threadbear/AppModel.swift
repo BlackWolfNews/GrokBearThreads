@@ -144,13 +144,21 @@ final class AppModel {
     /// its heading, and how many have landed for the moon to dip.
     var flyingToHibernate: Set<String> = []
 
-    /// Whether a page is flying away from an Inbox (or Running) row. The
-    /// empty-inbox bear waits for those to land, as arriving under the
-    /// heading mid-flight would push it down and the page would land short.
-    /// A starred thread's flight doesn't hold it up: it never left the
-    /// Inbox, so a bear already there stays put rather than blinking off.
-    var flightLeavingTheInbox: Bool {
-        flyingToArchive.union(flyingToHibernate).contains { threads[$0]?.isStarred != true }
+    /// Pages in flight that left an Inbox or Running row, noted as each one
+    /// sets off. The empty-inbox bear waits for those to land, as arriving
+    /// under the heading mid-flight would push it down and the page would
+    /// land short. A starred or sleeping thread's flight doesn't hold it up:
+    /// the Inbox was already empty, so a bear already there stays put rather
+    /// than blinking off and on under the page.
+    var leavingTheInbox: Set<String> = []
+    var flightLeavingTheInbox: Bool { !leavingTheInbox.isEmpty }
+
+    /// Notes where a flight is leaving from, before the thread moves.
+    func noteFlightLeaving(_ threadId: String) {
+        let sections = sections
+        if sections.inbox.contains(where: { $0.id == threadId }) || sections.running.contains(where: { $0.id == threadId }) {
+            leavingTheInbox.insert(threadId)
+        }
     }
     var hibernateLandings = 0
     /// The note at the top of the thread panel after Mike archives a thread

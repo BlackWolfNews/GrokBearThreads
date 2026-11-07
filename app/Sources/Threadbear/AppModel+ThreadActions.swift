@@ -698,12 +698,14 @@ extension AppModel {
     /// thread open in a panel of its own.
     private func flyToArchive(_ threadId: String) {
         guard transcript.session?.threadId == threadId, transcript.session?.subagentId == nil else { return }
+        noteFlightLeaving(threadId)
         let started = ArchiveFlight.launch(from: transcript.scrollView) { [weak self] in
             self?.flyingToArchive.remove(threadId)
+            self?.leavingTheInbox.remove(threadId)
             self?.archiveLandings &+= 1
             if self?.inboxZeroBear == .due { self?.inboxZeroBear = .shown }
         }
-        if started { flyingToArchive.insert(threadId) }
+        if started { flyingToArchive.insert(threadId) } else { leavingTheInbox.remove(threadId) }
     }
 
     /// The open thread's panel sinks into the Hibernating heading's moon
@@ -716,13 +718,16 @@ extension AppModel {
     private func tuckIn(_ threadId: String) {
         guard let thread = threads[threadId], !thread.isStarred, !thread.isArchived else { return }
         let showing = selection == threadId && transcript.session?.threadId == threadId && transcript.session?.subagentId == nil
-        // Asked before it goes, so this thread isn't one of them yet.
-        let headingThere = !flyingToHibernate.isEmpty || sections.hibernating.contains { $0.id != threadId }
+        // Asked before it goes. A thread already asleep (hibernated again, or
+        // waiting on a schedule) counts: its heading is there and stays.
+        let headingThere = !flyingToHibernate.isEmpty || !sections.hibernating.isEmpty
+        if showing { noteFlightLeaving(threadId) }
         let started = showing && ArchiveFlight.launch(from: transcript.scrollView, to: .hibernate, headingThere: headingThere) { [weak self] in
             self?.flyingToHibernate.remove(threadId)
+            self?.leavingTheInbox.remove(threadId)
             self?.moonStirs()
         }
-        if started { flyingToHibernate.insert(threadId) } else { moonStirs() }
+        if started { flyingToHibernate.insert(threadId) } else { leavingTheInbox.remove(threadId); moonStirs() }
     }
 
     private func moonStirs() {
