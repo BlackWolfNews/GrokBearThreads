@@ -289,6 +289,12 @@ final class SpokenApprovalsTests: XCTestCase {
             ApprovalRequest(approvalId: "e", name: StartRequest.cardName, title: "Start a thread"),
             ApprovalRequest(approvalId: "f", name: "ExitPlanMode", title: "Finish the plan"),
             card("g", command: String(repeating: "x", count: 161)),
+            // Codex's second round: what can't be heard for what it is.
+            card("h", command: "echo checking; rm -rf important"),
+            card("i", command: "cat $(echo secret)"),
+            card("j", command: "./safe\u{200B}"),
+            card("k", command: "c\u{0430}t notes"),
+            ApprovalRequest(approvalId: "l", name: "Read", title: "Read .env", input: .object(["file_path": .string("/production/.env")])),
         ]
         for each in cards {
             var a = SpokenApprovals()
@@ -302,7 +308,7 @@ final class SpokenApprovalsTests: XCTestCase {
     }
 
     func testAOneLineCommandIsReadAsItStands() {
-        let command = "npm test -- [a](b) `c`"
+        let command = "npm run test:unit -- --filter=a.b/c,d"
         XCTAssertEqual(SpokenApprovals.reading(of: card("a", command: command)), command)
     }
 
@@ -321,7 +327,7 @@ final class SpokenAnswerWholePhraseTests: XCTestCase {
 
     /// Codex's: questions that were a bag of allowed words.
     func testQuestionsAreNotAnswers() {
-        for said in ["Do you always do that?", "Is that always on?", "Is that it?", "Do it for that?", "Go for it on that", "Not that way", "It's fine", "good", "go", "always", "do"] {
+        for said in ["Do you always do that?", "Is that always on?", "Is that it?", "Do it for that?", "Go for it on that", "Not that way", "It's fine", "good", "go", "always", "do", "You always allow it?", "You approve it", "Okay?", "you always allow it", "do you"] {
             XCTAssertNil(SpokenAnswer.decision(said, options: all), said)
         }
     }

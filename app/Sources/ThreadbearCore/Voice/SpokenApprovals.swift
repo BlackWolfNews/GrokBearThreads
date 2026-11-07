@@ -40,28 +40,27 @@ public struct SpokenApprovals: Sendable, Equatable {
     /// The longest command read out: past this nobody's really following.
     static let longestReading = 160
 
+    /// What a command read out may be made of: what can be said and heard
+    /// for what it is. Not `;`, `|`, `$(...)` and the like, which a voice skips
+    /// or a listener loses, nor anything outside ASCII, where an invisible or
+    /// look-alike character makes it a different command that sounds the same.
+    private static let sayable = Set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_./=:,@")
+
     /// The words that say all of what approving this card would do, or nil
-    /// if the title doesn't: then Voice can't answer it, and it's for the
-    /// screen. A title alone isn't enough. A command's is its first line, so
-    /// "echo checking" could hide an `rm -rf` on the line below, and "Edit
-    /// a.ts" says nothing of the edit. Plans and another Mac asking for a
+    /// if there aren't any: then Voice can't answer it, and it's for the
+    /// screen. Only a plain one-line command is. A title alone isn't enough:
+    /// a command's is its first line, so "echo checking" could hide an
+    /// `rm -rf` on the line below, "Edit a.ts" says nothing of the edit, and
+    /// "Read .env" not which folder's. Plans and another Mac asking for a
     /// thread have more on screen too. Read as it stands, not through
     /// SpokenText, which leaves code and links out.
     public static func reading(of card: ApprovalRequest) -> String? {
         let title = card.title
-        guard !title.isEmpty, title.count <= longestReading else { return nil }
-        guard case .object(let input) = card.input else { return nil }
-        switch card.name {
-        case "Bash", "PowerShell":
-            guard case .string(let command)? = input["command"], command == title,
-                  !command.contains(where: \.isNewline) else { return nil }
-            return title
-        case "Read", "LS", "Glob":
-            // Their titles are the whole of what they do (runner's toolTitle).
-            return title.contains(where: \.isNewline) ? nil : title
-        default:
-            return nil
-        }
+        guard !title.isEmpty, title.count <= longestReading,
+              card.name == "Bash" || card.name == "PowerShell",
+              card.input["command"]?.stringValue == title,
+              title.allSatisfy({ sayable.contains($0) }) else { return nil }
+        return title
     }
 
     /// A card came in (or came again, maybe changed). Nothing heard counts

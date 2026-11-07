@@ -7,8 +7,11 @@ import Foundation
 /// bag, "do you always do that?" came out as always allow (Codex's review).
 public enum SpokenAnswer {
     public static func decision(_ said: String, options: [ApprovalOption]) -> ApprovalDecision? {
+        // "Okay?" is him asking.
+        guard !said.contains("?") else { return nil }
         let phrase = said.lowercased()
             .replacingOccurrences(of: "’", with: "'")
+            .replacingOccurrences(of: "thank you", with: " ")
             .replacingOccurrences(of: #"[^a-z' ]"#, with: " ", options: .regularExpression)
             .split(separator: " ").map(String.init)
             .filter { !filler.contains($0) }
@@ -20,7 +23,7 @@ public enum SpokenAnswer {
     }
 
     /// Said round an answer and meaning nothing on their own.
-    static let filler: Set<String> = ["um", "uh", "er", "erm", "hmm", "please", "thanks", "thank", "you", "bear", "threadbear"]
+    static let filler: Set<String> = ["um", "uh", "er", "erm", "hmm", "please", "thanks", "bear", "threadbear"]
 
     static let yes: Set<String> = {
         let starts = ["yes", "yeah", "yep", "yup", "sure", "ok", "okay", "alright"]

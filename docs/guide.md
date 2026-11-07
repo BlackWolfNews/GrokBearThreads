@@ -1396,7 +1396,7 @@ typing would. Your answer only counts once it has finished reading the
 request out and stopped talking: if another one comes in first, or you
 answer before it's done, nothing is answered and it reads the newest one
 to you. It only takes an answer by voice for a request it can read out
-whole, like a one-line command. Anything more (a longer command, an edit,
+whole, a plain one-line command. Anything more (a longer command, an edit,
 a plan, another Mac asking to start a thread) it names and leaves for you
 to answer on screen, as you do question cards.
 While Voice is on, the bear sits over the message box with what you're

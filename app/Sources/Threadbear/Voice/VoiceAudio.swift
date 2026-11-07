@@ -244,10 +244,11 @@ final class VoiceAudio {
         setSpeaking(false)
     }
 
-    /// Far fewer than any voice takes over it (about 30 ms a letter, when
-    /// speech is around 70), to catch a reply that came back cut short.
+    /// Far fewer than any voice takes over it (40 ms a letter, when speech
+    /// is around 70), to catch a reply that came back with little in it. It
+    /// can't prove every word was said; that's trusting pocket-tts.
     static func fewestSamples(for sentence: String) -> Int {
-        sentence.count * 720
+        sentence.count * 960
     }
 
     /// Plays it as it arrives. The samples scheduled.
@@ -326,7 +327,9 @@ final class VoiceAudio {
         queued += 1
         setSpeaking(true)
         onOutputLevel?(level)
-        player.scheduleBuffer(buffer) { [weak self] in
+        // Played back, not just taken: the app isn't done talking, and his
+        // words can't be an answer, while it's still coming out of a speaker.
+        player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in
             Task { @MainActor in
                 // A buffer from before he talked over it: the count started again.
                 guard let self, self.speakRound == round else { return }
@@ -449,16 +452,20 @@ final class VoiceAudio {
 }
 
 /// When the microphone's first buffer was captured, from the audio thread,
-/// read on the main one.
+/// read on the main one. Only ever the first: a later one's time would make
+/// everything heard look more recent than it was. A first with no time leaves
+/// it unknown, and an unknown time can't answer a card.
 final class AudioClock: @unchecked Sendable {
     private let lock = NSLock()
+    private var began = false
     private var first: Double?
 
     func begin(at when: AVAudioTime) {
         lock.lock()
         defer { lock.unlock() }
-        guard first == nil, when.isHostTimeValid else { return }
-        first = AVAudioTime.seconds(forHostTime: when.hostTime)
+        guard !began else { return }
+        began = true
+        if when.isHostTimeValid { first = AVAudioTime.seconds(forHostTime: when.hostTime) }
     }
 
     var start: Double? {
