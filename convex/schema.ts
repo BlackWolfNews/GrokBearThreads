@@ -332,6 +332,47 @@ export default defineSchema({
     .index('by_runner_at', ['runnerId', 'at'])
     .index('by_unattached', ['attachedAt', 'at']),
 
+  // A phone's photo uploads (phone:imageUploadUrl, convex/http.ts
+  // /phone/upload): the one-use ticket, and once it's used the file it
+  // stored, so the photo is that phone token's. A command takes only its own
+  // token's photos, phone:discardImage deletes only those, and one never sent
+  // goes after a day (sync:pruneFiles). The rows stay a day whatever happens
+  // to the file, as the allowances count them (phone.ts PHONE_UPLOADS).
+  phoneUploads: defineTable({
+    ticketHash: v.string(),
+    tokenId: v.id('tokens'),
+    issuedAt: v.number(),
+    usedAt: v.optional(v.number()),
+    storageId: v.optional(v.id('_storage')),
+    bytes: v.optional(v.number()),
+  })
+    .index('by_hash', ['ticketHash'])
+    .index('by_token_issued', ['tokenId', 'issuedAt'])
+    .index('by_storageId', ['storageId'])
+    .index('by_issued', ['issuedAt']),
+
+  // The stored files a command names (its args.images), so whether a file is
+  // still on its way to a runner is one index read (sync.ts storageInUse)
+  // rather than a look through every waiting command. Written with the
+  // command (phone.ts queue); a finished command's go when it does (pruneOld).
+  // A thread id whose old rows are more than one mutation may read (a thread
+  // removed, or one the owner is taking over): they go in runs (sync.ts
+  // dropThreadRows), and nothing is written under the id meanwhile. A
+  // takeover (`moving`) goes through on the owner's next write once `done`.
+  threadClears: defineTable({
+    threadId: v.string(),
+    runnerId: v.string(),
+    moving: v.optional(v.boolean()),
+    done: v.optional(v.boolean()),
+  }).index('by_threadId', ['threadId']),
+
+  commandFiles: defineTable({
+    storageId: v.id('_storage'),
+    commandId: v.id('commands'),
+  })
+    .index('by_storageId', ['storageId'])
+    .index('by_commandId', ['commandId']),
+
   // pushedAt is the mirror's own: when a push last went out for the thread
   // (push.ts), kept across the runner's writes.
   // pushHeldAt: a push to "when I'm away" phones held back because Mike was
@@ -410,7 +451,9 @@ export default defineSchema({
     // phone:waiting (API 57): a thread's messages its runner hasn't taken yet.
     .index('by_thread_state', ['threadId', 'state'])
     // pruneOld: finished ones by when they finished.
-    .index('by_state_done', ['state', 'doneAt']),
+    .index('by_state_done', ['state', 'doneAt'])
+    // pruneOld: ones no runner took in COMMAND_KEEP_MS, by when they were made.
+    .index('by_state_created', ['state', 'createdAt']),
 
   // A runner on a runner key asking for a new thread on another runner
   // (docs/protocol.md, "Asking another runner"). It can't queue work there
@@ -805,7 +848,13 @@ export default defineSchema({
     // The phone's own key for encrypting what goes through the push relay
     // (API 4): base64 of 32 bytes, made on the phone and sent only here.
     pushKey: v.optional(v.string()),
-  }).index('by_apnsToken', ['apnsToken']),
+  })
+    .index('by_apnsToken', ['apnsToken'])
+    // A token's phones: at most MAX_DEVICES_PER_TOKEN (phone:registerDevice),
+    // deleted a batch at a time once it's revoked (tokens.ts dropDevices).
+    .index('by_tokenId', ['tokenId', 'updatedAt'])
+    // Rows from before tokenId, by name (tokens.ts dropDevices).
+    .index('by_tokenName', ['tokenName', 'tokenId']),
 
   // The pictures of a shared thread (API 8), in file storage, uploaded by
   // the runner while the thread is shared and dropped when it stops

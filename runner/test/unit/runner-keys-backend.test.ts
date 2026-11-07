@@ -227,7 +227,9 @@ test("Bruce's key attaches and deletes only files it uploaded; a phone's photo i
   await s.bruce.upsert(thread('B', BRUCE));
   // A phone photo on its way to the M5, and one with no row at all.
   const photo = s.file('phone-photo');
-  await s.ctx.db.insert('commands', { runnerId: M5, kind: 'send', args: { text: 'x', images: [{ storageId: photo, url: 'u' }] }, state: 'pending', createdAt: 1 });
+  // As phone.ts queue writes them: the command, and the record of its photos.
+  const toM5 = await s.ctx.db.insert('commands', { runnerId: M5, kind: 'send', args: { text: 'x', images: [{ storageId: photo, url: 'u' }] }, state: 'pending', createdAt: 1 });
+  await s.ctx.db.insert('commandFiles', { storageId: photo, commandId: toM5 });
   const stray = s.file('stray');
   assert.equal(await outcome(s.bruce.shareImage('B', photo)), 'forbidden');
   assert.equal(await outcome(s.bruce.replyImage('NOROW', photo)), 'forbidden');
@@ -239,6 +241,7 @@ test("Bruce's key attaches and deletes only files it uploaded; a phone's photo i
   assert.equal(s.rows('shareImages').length, 1);
   // The same photo sent to Bruce and the M5: Bruce finishing its command leaves the M5's copy.
   const forBruce = await s.ctx.db.insert('commands', { runnerId: BRUCE, kind: 'send', args: { text: 'x', images: [{ storageId: photo, url: 'u' }] }, state: 'pending', createdAt: 2 });
+  await s.ctx.db.insert('commandFiles', { storageId: photo, commandId: forBruce });
   await call(s.ctx, sync.finishCommand, { key: BRUCE_KEY, commandId: forBruce, ok: true });
   assert.equal(s.hasFile(photo), true);
   // A picture row naming a file keeps it through a command finishing too.
@@ -262,8 +265,9 @@ test('upload URLs for a runner key are limited, and uploads never attached are c
   await upload(s2, BRUCE_KEY, 'orphan');
   const realNow = Date.now;
   Date.now = () => realNow() + 2 * 24 * 60 * 60_000;
+  await s2.ctx.db.insert('backendMarks', { name: 'limits-2026-11-07-done' });
   try {
-    await call(s2.ctx, sync.pruneOld, {});
+    await call(s2.ctx, sync.pruneFiles, {});
   } finally {
     Date.now = realNow;
   }
@@ -818,7 +822,8 @@ test("past the message budget a runner key's oldest messages anywhere give way, 
   const { RUNNER_KEY_CAPS: CAP } = sync as { RUNNER_KEY_CAPS: { messageBytes: number } };
   assert.ok(CAP.messageBytes >= 2 * 21 * 1024 * 1024, "at least twice the M5's whole history (about 21 MB)");
   await s.bruce.upsert(thread('OLD', BRUCE));
-  await s.bruce.append('OLD', 'oldest', 1);
+  // Longer than the new one, so taking it out alone makes room.
+  await s.bruce.append('OLD', 'oldest '.padEnd(60, '.'), 1);
   await s.bruce.append('OLD', 'next', 2);
   const usage = s.rows('runnerStorage').find((r) => r.runnerId === BRUCE)!;
   await s.ctx.db.patch(usage._id, { messageBytes: CAP.messageBytes });

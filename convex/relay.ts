@@ -11,7 +11,7 @@
 // a command's state is one get by id.
 import { ConvexError, v } from 'convex/values';
 import { mutation, query } from './_generated/server';
-import { checkRunnerId, forbidden, runnerAuth } from './lib';
+import { checkRunnerId, forbidden, pageLimit, runnerAuth } from './lib';
 import { docBytes } from './runnerAccess';
 
 // The live tail: enough for a message or two of tool rows between texts.
@@ -54,7 +54,7 @@ export const remoteTail = query({
   returns: v.object({ messages: v.array(relayRow), hasMore: v.boolean() }),
   handler: async (ctx, { key, threadId, limit }) => {
     await runnerAuth(ctx, key, 'remoteTail');
-    const want = Math.max(1, Math.min(TAIL_MAX, Math.floor(limit ?? TAIL_MAX)));
+    const want = pageLimit(limit, TAIL_MAX, TAIL_MAX);
     const rows = await ctx.db.query('messages').withIndex('by_thread_seq', (q) => q.eq('threadId', threadId)).order('desc').take(want + 1);
     return { messages: rows.slice(0, want).reverse().map(toRow), hasMore: rows.length > want };
   },
@@ -69,7 +69,7 @@ export const remoteMessages = query({
   returns: v.object({ messages: v.array(relayRow), hasMore: v.boolean() }),
   handler: async (ctx, { key, threadId, beforeSeq, afterSeq, limit }) => {
     await runnerAuth(ctx, key, 'remoteMessages');
-    const want = Math.max(1, Math.min(PAGE_MAX, Math.floor(limit ?? PAGE_DEFAULT)));
+    const want = pageLimit(limit, PAGE_DEFAULT, PAGE_MAX);
     if (afterSeq !== undefined) {
       const rows = await ctx.db.query('messages').withIndex('by_thread_seq', (q) => q.eq('threadId', threadId).gt('seq', afterSeq)).order('asc').take(want + 1);
       return { messages: rows.slice(0, want).map(toRow), hasMore: rows.length > want };

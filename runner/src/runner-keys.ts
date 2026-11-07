@@ -237,6 +237,7 @@ export async function runnerKeysCommand(cfg: Pick<Config, 'home' | 'sync'>, args
   };
   const url = cfg.sync.url;
   const key = readSyncKey(cfg.home);
+  if (cfg.sync.urlRefused) return fail(`This Mac doesn't mirror to Convex: ${cfg.sync.urlRefused}.`);
   if (!url || !key) return fail("This Mac doesn't mirror to Convex (no sync.url in runner.json, or no secrets/convex-key), so it has no runner keys to manage. Run ./threadbear setup first.");
   const post = deps.post ?? convexPoster(url);
   const call = async (kind: 'query' | 'mutation', fn: string, a: Record<string, unknown>) => {

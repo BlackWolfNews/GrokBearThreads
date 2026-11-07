@@ -10,7 +10,8 @@ import type { Project } from '../../src/protocol.ts';
 import type { ScheduleBackend } from '../../src/schedules.ts';
 import { nullLogger, type Logger } from '../../src/log.ts';
 import { AT_MAC_IDLE_MS, isAtMac } from '../../src/presence.ts';
-import { paths, readRunnerJson } from '../../src/config.ts';
+import { loadConfig, paths, readRunnerJson } from '../../src/config.ts';
+import { downgradeFetch, redirectTrap } from '../helpers/redirect-trap.ts';
 import { scrubText } from '../../src/redaction.ts';
 import { Scrubber } from '../../src/scrub.ts';
 import { SCRUB_API_VERSION } from '../../src/sync.ts';
@@ -22,7 +23,7 @@ function setup(
     fail?: () => Error | undefined;
     config?: Partial<ConstructorParameters<typeof ConvexSync>[0]['config']>;
     key?: string;
-    answer?: (fn: string) => unknown;
+    answer?: (fn: string, args: Record<string, unknown>) => unknown;
     schedules?: ConstructorParameters<typeof ConvexSync>[0]['schedules'];
     extra?: Partial<ConstructorParameters<typeof ConvexSync>[0]>;
   } = {},
@@ -33,7 +34,7 @@ function setup(
     const err = opts.fail?.();
     if (err) throw err;
     calls.push({ kind, fn, args });
-    return opts.answer ? opts.answer(fn) : null;
+    return opts.answer ? opts.answer(fn, args) : null;
   };
   const sync = new ConvexSync({
     config: { enabled: true, url: 'https://x.convex.cloud', name: 'TestMac', runnerId: 'r1', ...opts.config },
@@ -332,6 +333,83 @@ test('the poster speaks the deployment HTTP API and reports its errors', async (
   await assert.rejects(post('query', 'sync:threadsOf', {}), /bad runner key/);
   reply = { ok: false, status: 502, json: undefined };
   await assert.rejects(post('query', 'sync:threadsOf', {}), /HTTP 502/);
+});
+
+// Daybreak, 7 Nov: sync took any http:// URL, and every post carries the
+// runner key and thread text (src/secure-url.ts).
+test('sync.url has to be https, or plain http to this Mac; anything else leaves sync off and says why', () => {
+  const home = tmpDir();
+  const syncWith = (sync: unknown, env: Record<string, string> = {}) => {
+    fs.writeFileSync(path.join(home, 'runner.json'), JSON.stringify({ sync }));
+    return loadConfig({ THREADBEAR_HOME: home, THREADBEAR_PORT: '0', THREADBEAR_CLAUDE_MAIN_JSON: path.join(home, 'none.json'), ...env }).sync;
+  };
+  assert.equal(syncWith({ url: 'https://opulent-moose-249.ap-southeast-2.convex.cloud' }).url, 'https://opulent-moose-249.ap-southeast-2.convex.cloud');
+  assert.equal(syncWith({ url: 'http://127.0.0.1:3210' }).url, 'http://127.0.0.1:3210');
+  // The e2e test's local backend.
+  assert.equal(syncWith({}, { THREADBEAR_SYNC_URL: 'http://127.0.0.1:3210' }).url, 'http://127.0.0.1:3210');
+  assert.equal(syncWith({ url: 'http://localhost:3210' }).urlRefused, undefined);
+  for (const bad of ['http://x.convex.cloud', 'HTTP://x.convex.cloud', 'http://127.0.0.1.evil.example', 'http://localhost.evil.example', 'http://127.0.0.1@evil.example', 'http://[::ffff:127.0.0.1]:3210', 'ws://127.0.0.1:3210']) {
+    const fromJson = syncWith({ url: bad });
+    assert.equal(fromJson.url, undefined, bad);
+    assert.match(fromJson.urlRefused ?? '', /^sync\.url in runner\.json /, bad);
+    // The env var wins, and a bad one doesn't fall back on runner.json's:
+    // sync is off rather than somewhere nobody asked for.
+    const fromEnv = syncWith({ url: 'https://x.convex.cloud' }, { THREADBEAR_SYNC_URL: bad });
+    assert.equal(fromEnv.url, undefined, bad);
+    assert.match(fromEnv.urlRefused ?? '', /^THREADBEAR_SYNC_URL /, bad);
+  }
+});
+
+test('a refused sync.url is the reason sync is off, and nothing is sent', async () => {
+  const reason = 'sync.url in runner.json is plain http to x.convex.cloud, so its keys would go in the clear';
+  const { h, sync, calls } = setup({ config: { url: undefined, urlRefused: reason } });
+  h.runner.create({ text: 'x', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' });
+  sync.start();
+  await sync.flushNow();
+  assert.deepEqual(sync.status(), { state: 'off', reason });
+  assert.equal(calls.length, 0);
+});
+
+test('the poster never follows a redirect, so the key never goes to another host or over http', async () => {
+  // https answering 307 to plain http elsewhere.
+  const down = downgradeFetch('https://x.convex.cloud/');
+  await assert.rejects(convexPoster('https://x.convex.cloud', down.fetch)('mutation', 'sync:heartbeat', { key: 'tbr_secret' }));
+  assert.equal(down.inits[0]!.redirect, 'error');
+  assert.deepEqual(down.leaked, []);
+  // And with real fetch: a 307 to another origin on this Mac.
+  const t = await redirectTrap();
+  try {
+    await assert.rejects(convexPoster(t.url)('mutation', 'sync:heartbeat', { key: 'tbr_secret' }));
+    assert.deepEqual(t.hits, []);
+  } finally {
+    await t.close();
+  }
+});
+
+test('the poster refuses a URL that would send the key in the clear, before any fetch', async () => {
+  let fetched = 0;
+  const fake = (async () => {
+    fetched++;
+    return new Response('{"status":"success","value":1}');
+  }) as unknown as typeof fetch;
+  await assert.rejects(convexPoster('http://x.convex.cloud', fake)('mutation', 'sync:heartbeat', { key: 'k' }), /plain http/);
+  await assert.rejects(convexPoster('http://127.0.0.1@evil.example', fake)('query', 'sync:threadsOf', { key: 'k' }), /name or password/);
+  assert.equal(fetched, 0);
+  assert.equal(await convexPoster('http://127.0.0.1:3210', fake)('mutation', 'sync:heartbeat', { key: 'k' }), 1);
+});
+
+test('the uploader never follows a redirect with the bytes, nor posts them in the clear', async () => {
+  const down = downgradeFetch('https://x.convex.cloud/');
+  await assert.rejects(convexUploader(down.fetch)('https://x.convex.cloud/api/storage/upload?token=t', new Uint8Array([1]), 'image/png'));
+  assert.equal(down.inits[0]!.redirect, 'error');
+  assert.deepEqual(down.leaked, []);
+  let fetched = 0;
+  const fake = (async () => {
+    fetched++;
+    return new Response('{"storageId":"st_1"}');
+  }) as unknown as typeof fetch;
+  await assert.rejects(convexUploader(fake)('http://x.convex.site/upload?ticket=t', new Uint8Array([1]), 'image/png'), /plain http/);
+  assert.equal(fetched, 0);
 });
 
 // ------------------------------------------------------------ step 2 and 3
@@ -2167,6 +2245,117 @@ test("the upload route refusing a picture is a refusal for good, and a row the b
   await f.sync.flushNow();
   assert.equal(f.docs().filter((d) => d.threadId === a.id).length, 2, 'sent again');
   await f.sync.stop();
+});
+
+test('a message left out of a closed thread id goes again with its whole history, and the row goes again by itself', async () => {
+  let closed = true;
+  const f = setup({
+    answer: (fn, args) => {
+      if (fn === 'sync:upsertThreads') return closed ? { skipped: (args.threads as { threadId: string }[]).map((t) => t.threadId), closed: (args.threads as { threadId: string }[]).map((t) => t.threadId) } : { skipped: [] };
+      if (fn === 'sync:appendMessages') {
+        const ms = args.messages as { threadId: string; seq: number }[];
+        return closed ? { skipped: ms.map((m) => `${m.threadId}:${m.seq}`), closed: [...new Set(ms.map((m) => m.threadId))] } : { skipped: [] };
+      }
+      return null;
+    },
+  });
+  const a = f.h.runner.create({ text: 'one', cwd: f.h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  f.sync.start();
+  await f.sync.flushNow();
+  closed = false;
+  const before = f.calls.length;
+  // Ordinary flushes meanwhile don't go again: that's the retry's.
+  await f.sync.flushNow();
+  assert.equal(f.calls.filter((c, i) => i >= before && (c.fn === 'sync:upsertThreads' || c.fn === 'sync:appendMessages')).length, 0);
+  // Nothing about the thread changes: the retry alone brings it up.
+  f.h.clock.advance(30_000);
+  await tick(20);
+  await f.sync.flushNow();
+  assert.ok(f.docs().filter((d) => d.threadId === a.id).length >= 2, 'the row went again');
+  const sent = f.calls.filter((c) => c.fn === 'sync:appendMessages').flatMap((c) => c.args.messages as { threadId: string; seq: number }[]).filter((m) => m.threadId === a.id);
+  assert.equal(sent.filter((m) => m.seq === sent[0]!.seq).length, 2, 'its messages went again');
+  await f.sync.stop();
+});
+
+test("what's held for a closed id's retry survives a failed write, and a deleted thread's row doesn't come back", async () => {
+  let closed = true;
+  let boom = false;
+  const f = setup({
+    fail: () => (boom ? new Error('network') : undefined),
+    answer: (fn, args) => (fn === 'sync:upsertThreads' && closed ? { skipped: (args.threads as { threadId: string }[]).map((t) => t.threadId), closed: (args.threads as { threadId: string }[]).map((t) => t.threadId) } : null),
+  });
+  const a = f.h.runner.create({ text: 'one', cwd: f.h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  f.sync.start();
+  await f.sync.flushNow();
+  closed = false;
+  // Held bodies wait, and hold the cached head back, whatever else fails.
+  const held = f.sync as unknown as { closedBodies: { threadId: string; seq: number }[]; bodyHeads(): Record<string, number>; bodies: unknown[] };
+  held.closedBodies.push({ threadId: a.id, seq: 3 } as never);
+  boom = true;
+  await f.sync.flushNow().catch(() => {});
+  boom = false;
+  assert.equal(held.closedBodies.length, 1);
+  held.closedBodies.length = 0;
+  // Deleted while it waits: the retry writes nothing for it.
+  f.h.runner.delete(a.id);
+  const before = f.docs().length;
+  f.h.clock.advance(30_000);
+  await tick(20);
+  await f.sync.flushNow();
+  assert.equal(f.docs().slice(before).filter((d) => d.threadId === a.id).length, 0);
+  await f.sync.stop();
+});
+
+test('a closed id: held bodies of a deleted thread stay gone, a late left-out history still gets its retry, and a removed row stays removed', async () => {
+  // Deleted while its body waits, or while the write that was left out was on its way.
+  const f = setup();
+  const a = f.h.runner.create({ text: 'one', cwd: f.h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  f.sync.start();
+  await f.sync.flushNow();
+  const held = f.sync as unknown as { closedBodies: { threadId: string; seq: number }[]; bodies: unknown[]; closedHistories: Set<string>; markUnfilled(ids: string[]): void; retryClosedLater(): void; dirty: Map<string, unknown>; messages: unknown[] };
+  held.closedBodies.push({ threadId: a.id, seq: 3 });
+  held.retryClosedLater();
+  f.h.runner.delete(a.id);
+  assert.equal(held.closedBodies.length, 0);
+  held.closedBodies.push({ threadId: a.id, seq: 4 });
+  f.h.clock.advance(30_000);
+  await tick(20);
+  assert.equal(held.bodies.length, 0, 'not queued for a thread that has gone');
+  // The closed answer's timer has fired by the time a long flush gets to its history.
+  held.markUnfilled(['t-long']);
+  assert.equal(held.closedHistories.has('t-long'), true);
+  f.h.clock.advance(30_000);
+  await tick(20);
+  assert.equal(held.closedHistories.has('t-long'), false, 'its own retry lets it go again');
+  await f.sync.stop();
+  // Removed by a flush that then fails: its stale row isn't put back to write.
+  let during: (() => void) | undefined;
+  let fail = false;
+  const g = setup({
+    answer: (fn, args) => {
+      if (fn === 'sync:upsertThreads') {
+        during?.();
+        during = undefined;
+        const ids = (args.threads as { threadId: string }[]).map((t) => t.threadId);
+        return { skipped: ids, closed: ids };
+      }
+      if (fn === 'sync:appendMessages' && fail) throw new Error('network');
+      return null;
+    },
+  });
+  const c = g.h.runner.create({ text: 'one', cwd: g.h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  during = () => g.h.runner.delete(c.id);
+  fail = true;
+  g.sync.start();
+  const other = g.h.runner.create({ text: 'two', cwd: g.h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  await g.sync.flushNow().catch(() => {});
+  await g.sync.flushNow().catch(() => {});
+  assert.ok(g.calls.some((x) => x.fn === 'sync:removeThreads'), 'removed');
+  const gHeld = g.sync as unknown as { dirty: Map<string, unknown> };
+  assert.equal(gHeld.dirty.has(c.id), false, 'not to be written again');
+  assert.ok(other.id);
+  fail = false;
+  await g.sync.stop();
 });
 
 test('a picture over the upload allowance waits and goes once the window has passed, without holding up the rest', async () => {

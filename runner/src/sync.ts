@@ -47,6 +47,9 @@ import { withholdReason } from './withhold.ts';
 import { BodyCollector, prepareBody, type BodyDoc, type RawBody } from './full-sync.ts';
 import { cutSafely } from './safe-cut.ts';
 import { siteOf } from './convex-admin.ts';
+import { credentialUrlProblem } from './secure-url.ts';
+// How soon what the backend left out of a closed thread id goes again.
+const CLOSED_RETRY_MS = 30_000;
 // A `call` for files.list answers with at most this many entries (the backend keeps it a day).
 const CALL_ENTRIES = 500;
 
@@ -103,6 +106,9 @@ export type SyncConfig = {
   enabled: boolean;
   url?: string;
   site?: string;
+  // Why runner.json's (or THREADBEAR_SYNC_URL's) url wasn't used (config.ts):
+  // the off reason in place of "no sync.url".
+  urlRefused?: string;
   name?: string;
   runnerId?: string;
   icon?: string;
@@ -612,13 +618,22 @@ export function keyRejected(e: unknown): boolean {
 
 // POST /api/mutation or /api/query on a Convex deployment, the plain HTTP
 // API, so a write needs no client and a fake is one function.
+//
+// Every body has the runner key in it, so: only to an https URL, or plain
+// http to this Mac (config.ts already turns sync off for any other, this
+// is for any caller that didn't go through it), and never a redirect, as
+// fetch sends a 307's or 308's body on to wherever it points. Convex's
+// /api/mutation and /api/query answer without one.
 export function convexPoster(url: string, fetchFn: typeof fetch = fetch): Post {
   const base = url.replace(/\/+$/, '');
+  const problem = credentialUrlProblem(base);
   return async (kind, fn, args) => {
+    if (problem) throw new Error(`The sync URL ${problem}.`);
     const res = await fetchFn(`${base}/api/${kind}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: fn, args, format: 'json' }),
+      redirect: 'error',
       signal: AbortSignal.timeout(POST_TIMEOUT_MS),
     });
     const body = (await res.json().catch(() => undefined)) as { status?: string; value?: unknown; errorMessage?: string; errorData?: unknown } | undefined;
@@ -670,10 +685,14 @@ export function forbiddenText(e: unknown): string | undefined {
 }
 
 // File storage's upload URL takes a plain POST of the bytes and answers
-// `{ storageId }`.
+// `{ storageId }`. The URL is the backend's, a one-use ticket with no key
+// in it, but the bytes are a thread's pictures: the same rule as the
+// poster's, https or this Mac, and no redirects.
 export function convexUploader(fetchFn: typeof fetch = fetch): Upload {
   return async (url, bytes, mediaType) => {
-    const res = await fetchFn(url, { method: 'POST', headers: { 'Content-Type': mediaType }, body: bytes, signal: AbortSignal.timeout(POST_TIMEOUT_MS) });
+    const problem = credentialUrlProblem(url);
+    if (problem) throw new Error(`The upload URL ${problem}.`);
+    const res = await fetchFn(url, { method: 'POST', headers: { 'Content-Type': mediaType }, body: bytes, redirect: 'error', signal: AbortSignal.timeout(POST_TIMEOUT_MS) });
     const body = (await res.json().catch(() => undefined)) as { storageId?: unknown } | undefined;
     // The upload route refusing (403: a used or dead ticket, or over the
     // allowance; 413: too big) won't change on a retry: said as a refusal
@@ -1217,7 +1236,7 @@ export class ConvexSync {
     this.name = deps.config.name ?? defaultRunnerName();
     const { enabled, url } = deps.config;
     if (!enabled) this.off = 'sync.enabled is false';
-    else if (!url) this.off = 'no sync.url in runner.json';
+    else if (!url) this.off = deps.config.urlRefused ?? 'no sync.url in runner.json';
     else if (!deps.key) this.off = 'no secrets/convex-key';
     this.scrubber = deps.scrubber ?? new Scrubber({ env: {}, folders: false });
     // The one way up: every mutation, the sidebar table's and the scheduler's
@@ -1611,7 +1630,9 @@ export class ConvexSync {
       this.bodies = this.bodies.filter((b) => !sent.has(b));
       this.bodyQueueChars = this.bodies.reduce((n, b) => n + rawChars(b), 0);
       for (const b of batch) {
-        if (left.has(`${b.threadId}:${b.seq}`)) this.bodyStats.unsent++;
+        // Left out as its thread id is closed: goes again with the retry.
+        if (left.has(`${b.threadId}:${b.seq}`) && this.closedIds.has(b.threadId)) this.closedBodies.push(b);
+        else if (left.has(`${b.threadId}:${b.seq}`)) this.bodyStats.unsent++;
         else if (b.withheld) this.bodyStats.withheld++;
         else this.bodyStats.bodies++;
       }
@@ -1629,7 +1650,7 @@ export class ConvexSync {
       const h = this.bodyCollector.head(id);
       if (h !== undefined) heads[id] = h;
     }
-    for (const b of this.bodies) {
+    for (const b of [...this.bodies, ...this.closedBodies]) {
       const from = (b.from ?? b.seq) - 1;
       if (heads[b.threadId] !== undefined && heads[b.threadId]! > from) heads[b.threadId] = from;
     }
@@ -1719,7 +1740,8 @@ export class ConvexSync {
     const url = (await this.post('mutation', 'sync:iconUploadUrl', { key: this.deps.key })) as string;
     const storageId = await this.upload(url, read.bytes, read.mediaType);
     const { mediaType, width, height } = read;
-    await this.post('mutation', 'sync:addHeldPicture', { key: this.deps.key, threadId, seq, index, storageId, mediaType, ...(width ? { width } : {}), ...(height ? { height } : {}) });
+    const r = await this.post('mutation', 'sync:addHeldPicture', { key: this.deps.key, threadId, seq, index, storageId, mediaType, ...(width ? { width } : {}), ...(height ? { height } : {}) });
+    if ((r as { later?: unknown } | null)?.later === true) throw new Error('That thread is being moved: try again in a moment.');
   }
 
   private async writeRows<T>(fn: string, field: string, rows: T[], idOf: (row: T) => string, extra: Record<string, unknown>): Promise<Set<string>> {
@@ -1755,6 +1777,12 @@ export class ConvexSync {
   // not attach), it's left out with a log line and the rest go on: false.
   // For now ("later": an allowance), it stays queued and pictures pause
   // until PICTURES_PAUSE_MS has passed; the rest of the flush goes on.
+  // An added picture's answer, for picture() above: later means it wasn't
+  // kept, as its thread id's old rows are still going, so it stays queued.
+  private pictureKept(r: unknown): void {
+    if ((r as { later?: unknown } | null)?.later === true) throw Object.assign(new Error('its thread is still being cleared'), { data: { kind: 'retryLater' } });
+  }
+
   private async picture(fn: string, what: string, send: () => Promise<void>): Promise<'sent' | 'dropped' | 'later'> {
     try {
       await send();
@@ -1778,7 +1806,57 @@ export class ConvexSync {
     return false;
   }
 
+  // Thread ids the backend said are closed this flush: a removed or moving
+  // thread's old rows are still going (convex/sync.ts clearThread), so what
+  // it left out of them goes again shortly, whatever went after it.
+  // What waits for the retry, held out of the ordinary flushes, which come
+  // every couple of seconds while anything's waiting: rows by id (as the
+  // thread is then, if it's still here), tool output (still holding back
+  // bodyHeads), and threads whose history goes again.
+  private closedIds = new Set<string>();
+  private closedRows = new Set<string>();
+  private closedBodies: RawBody[] = [];
+  private closedHistories = new Set<string>();
+  private closedTimerSet = false;
+  private closedRetryDue = false;
+
+  private retryClosedLater(): void {
+    if (this.closedTimerSet) return;
+    this.closedTimerSet = true;
+    this.deps.clock.setTimeout(() => {
+      this.closedTimerSet = false;
+      if (!this.running) return;
+      for (const id of this.closedRows) {
+        try {
+          this.mark(this.deps.runner.get(id), true);
+        } catch {
+          // Deleted meanwhile: nothing to write, and its removal is on its way.
+        }
+      }
+      this.closedRows.clear();
+      // Only a thread that's still here: writing one that's gone would bring its tool output back.
+      const here = (b: RawBody) => {
+        try {
+          return Boolean(this.deps.runner.get(b.threadId));
+        } catch {
+          return false;
+        }
+      };
+      this.bodies.push(...this.closedBodies.filter(here));
+      this.closedBodies = [];
+      this.bodyQueueChars = this.bodies.reduce((n, b) => n + rawChars(b), 0);
+      this.closedHistories.clear();
+      this.closedRetryDue = true;
+      this.scheduleFlush();
+    }, CLOSED_RETRY_MS);
+  }
+
   private noteSkipped(fn: string, r: unknown): string[] {
+    const closed = (r as { closed?: unknown } | null)?.closed;
+    if (Array.isArray(closed)) {
+      for (const id of closed) if (typeof id === 'string') this.closedIds.add(id);
+      if (closed.length) this.retryClosedLater();
+    }
     const skipped = (r as { skipped?: unknown } | null)?.skipped;
     if (!Array.isArray(skipped) || !skipped.length) return [];
     this.deps.log.warn('the backend left rows out, over what this runner\'s key may write', { fn, rows: skipped.slice(0, 20), count: skipped.length });
@@ -1826,6 +1904,7 @@ export class ConvexSync {
         this.pendingReplyImages = this.pendingReplyImages.filter((i) => i.threadId !== id);
         this.bodyCollector.forget(id);
         this.bodies = this.bodies.filter((b) => b.threadId !== id);
+        this.closedBodies = this.closedBodies.filter((b) => b.threadId !== id);
         this.bodyQueueChars = this.bodies.reduce((n, b) => n + rawChars(b), 0);
         this.removed.add(id);
         this.scheduleFlush();
@@ -2457,7 +2536,7 @@ export class ConvexSync {
     // Project pictures waiting (picturesDue) count too: one an upload
     // allowance held back goes once its pause is over, idle or not.
     const picturesWaiting = this.picturesDue && (this.backendApiVersion ?? 0) >= ICONS_API_VERSION && !this.picturesPaused();
-    if (!picturesWaiting && !this.bodies.length && !this.dirty.size && !this.removed.size && !this.messages.length && !this.dirtyLists.size && !this.full && !this.catchUpDue && !this.imagesDue.size && !this.imagesDrop.size && !this.pendingImages.length && !this.replyDue.size && !this.pendingReplyImages.length && !this.sharesCheckDue()) return;
+    if (!picturesWaiting && !this.closedRetryDue && !this.bodies.length && !this.dirty.size && !this.removed.size && !this.messages.length && !this.dirtyLists.size && !this.full && !this.catchUpDue && !this.imagesDue.size && !this.imagesDrop.size && !this.pendingImages.length && !this.replyDue.size && !this.pendingReplyImages.length && !this.sharesCheckDue()) return;
     const now = this.deps.clock.now();
     let delay = Math.max(0, this.lastFlushAt + SYNC_COALESCE_MS - now);
     if (this.retryAt !== undefined) delay = Math.max(delay, this.retryAt - now);
@@ -2476,6 +2555,8 @@ export class ConvexSync {
     // Before taking the rows, so none is older than one writeRowNow wrote.
     const rowsDone = await this.rowTurn();
     this.lastFlushAt = this.deps.clock.now();
+    this.closedRetryDue = false;
+    this.closedIds.clear();
     const docs = [...this.dirty.values()];
     // Not while settling: a thread the file says went may yet come across.
     this.removing = new Set(this.settling ? [] : this.removed);
@@ -2485,6 +2566,7 @@ export class ConvexSync {
     if (!this.settling) this.removed.clear();
     this.dirtyLists.clear();
     const key = this.deps.key;
+    const removedNow = new Set<string>();
     try {
       // What was written is what's remembered as sent, so a row whose
       // share or woke was held back from an older backend goes again once
@@ -2504,6 +2586,8 @@ export class ConvexSync {
           else {
             this.sent.delete(d.threadId);
             this.lastWrite.delete(d.threadId);
+            // Its id's old rows still going: tried again shortly, not only on its next change.
+            if (this.closedIds.has(d.threadId)) this.closedRows.add(d.threadId);
             this.noteSent();
           }
         }
@@ -2514,6 +2598,7 @@ export class ConvexSync {
         const removed = [...this.removing];
         await this.post('mutation', 'sync:removeThreads', { key, threadIds: removed });
         for (const id of removed) {
+          removedNow.add(id);
           this.removing.delete(id);
           this.removedFromFile.delete(id);
           // Its messages went with it: one that turns up again gets its whole history.
@@ -2573,6 +2658,10 @@ export class ConvexSync {
       });
       const notFilled = await this.appendMessages(messages);
       this.markFilled(filling.filter((id) => !notFilled.has(id)));
+      // A message left out of a closed id: its whole history goes again once
+      // it opens (histories()), as messages after it may have gone up, and
+      // catching up from the newest would never fill the gap.
+      this.markUnfilled([...notFilled].filter((id) => this.closedIds.has(id)));
       if (v >= SHARE_API_VERSION) await this.sendShareImages();
       if (v >= REPLY_IMAGES_API_VERSION) await this.sendReplyImages();
       await this.sendBodies(v);
@@ -2603,7 +2692,8 @@ export class ConvexSync {
         try {
           this.mark(this.deps.runner.get(d.threadId), true);
         } catch {
-          if (!this.dirty.has(d.threadId) && this.sent.get(d.threadId) !== digest(JSON.stringify(forBackend(d, this.backendApiVersion ?? 0, this.deps.clock.now())))) this.dirty.set(d.threadId, d);
+          // Not one this flush took off the backend, or the retry would put it back.
+          if (!removedNow.has(d.threadId) && !this.dirty.has(d.threadId) && this.sent.get(d.threadId) !== digest(JSON.stringify(forBackend(d, this.backendApiVersion ?? 0, this.deps.clock.now())))) this.dirty.set(d.threadId, d);
         }
       }
       for (const id of this.removing) this.removed.add(id);
@@ -2718,7 +2808,7 @@ export class ConvexSync {
             const { threadId, seq, path: file_, src } = img;
             const width = file.width ?? img.width;
             const height = file.height ?? img.height;
-            await this.post('mutation', 'sync:addShareImage', { key, threadId, seq, path: file_, ...(src ? { src } : {}), storageId, mediaType, ...(width ? { width } : {}), ...(height ? { height } : {}) });
+            this.pictureKept(await this.post('mutation', 'sync:addShareImage', { key, threadId, seq, path: file_, ...(src ? { src } : {}), storageId, mediaType, ...(width ? { width } : {}), ...(height ? { height } : {}) }));
           });
           // Still queued (this one stays first), for after the pause.
           if (sent === 'later') return;
@@ -2789,7 +2879,7 @@ export class ConvexSync {
             const url = (await this.post('mutation', 'sync:iconUploadUrl', { key })) as string;
             const storageId = await this.upload(url, read.bytes, read.mediaType);
             const { mediaType, width, height } = read;
-            await this.post('mutation', 'sync:addReplyImage', { key, threadId, seq, path: file, ...(src ? { src } : {}), ...(pinned ? { pinned } : {}), storageId, mediaType, ...(width ? { width } : {}), ...(height ? { height } : {}) });
+            this.pictureKept(await this.post('mutation', 'sync:addReplyImage', { key, threadId, seq, path: file, ...(src ? { src } : {}), ...(pinned ? { pinned } : {}), storageId, mediaType, ...(width ? { width } : {}), ...(height ? { height } : {}) }));
           });
           if (sent === 'later') return;
         }
@@ -2971,7 +3061,7 @@ export class ConvexSync {
     const docs: MessageDoc[] = [];
     const threadIds: string[] = [];
     for (const t of this.deps.runner.list(ALL)) {
-      if (filled.has(t.id)) continue;
+      if (filled.has(t.id) || this.closedHistories.has(t.id)) continue;
       const got = this.messagesAfter(t, 0, true);
       if (!got) continue;
       docs.push(...got);
@@ -3037,6 +3127,20 @@ export class ConvexSync {
     if (!threadIds.length) return;
     const filled = this.filledThreads();
     for (const id of threadIds) filled.add(id);
+    this.saveFilled();
+  }
+
+  private markUnfilled(threadIds: string[]): void {
+    const filled = this.filledThreads();
+    const had = threadIds.filter((id) => filled.delete(id));
+    for (const id of threadIds) this.closedHistories.add(id);
+    // The timer the closed answer set may have fired already, in a long flush.
+    if (threadIds.length) this.retryClosedLater();
+    if (had.length) this.saveFilled();
+  }
+
+  private saveFilled(): void {
+    const filled = this.filledThreads();
     if (!this.deps.statePath) return;
     try {
       let state: { histories?: Record<string, string[]> } = {};

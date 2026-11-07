@@ -543,7 +543,9 @@ Queries:
   oldest message the phone has is newer than that, there's more to load.
 - `phone:messages({ token, threadId, beforeSeq?, limit?, tools? })` (since
   API 2, 28 Oct) → `{ messages, hasMore }`, oldest first: the newest `limit`
-  (default 50, at most 2000) or the `limit` before `beforeSeq`. Every message
+  (default 50, at most 2000; NaN or an infinity is refused, here and in every
+  `limit`) or the `limit` before `beforeSeq`. Without `tools` it looks past at
+  most 4,000 tool rows for the page's text ones, then says `hasMore`. Every message
   is kept since API 2, and with `tools: true` there's one row per tool call
   too (`role: "tool"`, a one-line `text` such as "Run the unit tests" or
   "Edited ~/dev/x.ts", and `toolKind`). It reads Convex alone, so it works
@@ -595,7 +597,11 @@ sidebar does; a runner before API 5 sends projects without `icon`.
 Mutations, each returning a `commandId`. The owning runner takes it
 within a second or two while it's online (state `taken`, then `done` or
 `failed` with a `note`); while it's offline the command waits as
-`pending`:
+`pending`, for up to 14 days (then `failed`, `sync:pruneFiles`). At most
+200 commands, or 8 MB of them, wait for one runner; past that the next is
+refused with `{ kind: "tooMany" }` until it takes some. A `runnerId` the
+phone names must be one that has heartbeated (or `"any"`), else
+`{ kind: "notFound" }`:
 
 - `phone:send({ token, threadId, text, answers? })` (`answers`, API 14: the card's asks it answers, `{ action, answer }[]`)
 - `phone:press({ token, threadId, buttonId })` (API 59) → commandId: a
@@ -644,7 +650,11 @@ within a second or two while it's online (state `taken`, then `done` or
   after a day, so the phone should ask again rather than expect them to
   stay.
 - `phone:registerDevice({ token, apnsToken, environment: "sandbox" |
-  "production" })`. A push arrives when a thread starts needing Mike,
+  "production" })`. `apnsToken` is the device token in hex. A phone token
+  keeps at most 5 registrations; a new one past that replaces its oldest.
+  Revoking a token takes effect in that one small write (its phones get no
+  more pushes at once, `devices:targets`); their rows are deleted after, 100
+  a run (`tokens:dropDevices`). A push arrives when a thread starts needing Mike,
   as `{ aps: { alert: { title, body }, sound: "default", "thread-id":
   threadId }, threadId }` for bundle id `com.mikecann.threadbear`; the
   title is the thread's title and the body the question, the approval

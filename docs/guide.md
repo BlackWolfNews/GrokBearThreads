@@ -1385,7 +1385,8 @@ a message go up as they are, so your website can show them, and nothing can
 scrub a secret out of a picture: `"sync": { "pastedPictures": false }` in
 `runner.json` keeps them on your Mac. A photo you send from your phone passes
 through that deployment on its way to the Mac and is deleted once the Mac has
-it.
+it; one you picked and never sent goes after a day. A message from the phone
+waits up to two weeks for its Mac to take it.
 A thread you share can be read by anyone with its link, pictures included,
 and only that thread. The pictures are uploaded only while it's shared,
 and only real pictures from its own media folder: your attachments, the

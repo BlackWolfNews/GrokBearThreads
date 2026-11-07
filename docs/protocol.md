@@ -3900,7 +3900,13 @@ the base is used), else the `connectors` MCP server's `url` in the main
 login's `~/.claude.json` (only that field is read). `connectors.url: ""`
 or `connectors.enabled: false` turns it off, as does
 `THREADBEAR_CONNECTORS_URL=off` (tests); `THREADBEAR_CONNECTORS_URL`
-set to a URL wins over both.
+set to a URL wins over both. Its calls carry the gateway's token, so the
+URL must be `https:`, or plain `http:` only to this machine (`localhost`,
+`127.0.0.0/8`, `[::1]`), with no name or password in it
+(`runner/src/secure-url.ts`). One that isn't is not used, and doesn't
+fall back on the next place: the gateway stays off, `connectors.status`
+says why (`error` with state `off`) and so does the log. Every request to
+it (`/health` too) refuses redirects, so a 307 can't pass the call on.
 
 **Status.** The runner asks the gateway's open `GET <base>/health` every
 3 minutes, and when the app passes `refresh` to `connectors.status`
@@ -4569,6 +4575,12 @@ the mirror back as state. The Mac app doesn't use it.
   turns it off; so does `THREADBEAR_SYNC=off` in the environment, which
   check.sh sets so no test runner writes to the real project.
   `THREADBEAR_SYNC_URL` points a dev or test runner at its own deployment.
+  Every post carries the key, so the URL must be `https:`, or plain `http:`
+  only to this machine (a local backend, tests), with no name or password
+  in it (`runner/src/secure-url.ts`); one that isn't leaves sync off, with
+  the reason as `sync.reason` and in the log, rather than falling back on
+  runner.json's. Posts and uploads refuse redirects, as fetch would send a
+  307's body, key and all, on to wherever it points.
   `sync.name` is what the phone calls this runner (default: the Mac's
   hostname without `.local` or `.localdomain`); `sync.runnerId` is made
   once and written back to `runner.json`, so a data dir stays one runner
@@ -4721,7 +4733,13 @@ the mirror back as state. The Mac app doesn't use it.
   runner fetches each, sends it as an ordinary `ImageRef`, and
   `sync:finishCommand` deletes them from storage, whether or not the send
   worked. The phone uploads a photo as soon as it's picked, so one that's
-  never sent goes back with `phone:discardImage` (backend API 25). The phone's text can place its photos with `[Picture N]`
+  never sent goes back with `phone:discardImage` (backend API 25). Since
+  7 Nov 2026 the upload URL is the deployment's own `/phone/upload` with a
+  one-use ticket, which records the photo as that phone token's
+  (`phoneUploads`): a command takes only its own token's photos,
+  `discardImage` deletes only those (and not one still in a waiting
+  command), and one never sent is deleted after a day. A token gets 60
+  upload URLs an hour, 300 and 300 MB a day, 10 MB a photo. The phone's text can place its photos with `[Picture N]`
   markers, in `images`' order (Pictures in a message). A message row with
   pictures no marker places gets a `[1 picture]` line, as the pictures
   themselves stay on the Mac; the ones a marker places show as chips. `update` takes one
@@ -4804,7 +4822,9 @@ the mirror back as state. The Mac app doesn't use it.
   queues a `picture` command for the thread's runner, which checks `sync.full` is on,
   the tool isn't withheld and `index` is one its result names in that thread's media
   folder, then uploads it (`sync:addHeldPicture`). `phone:heldPicture` has its URL for a
-  day (`pruneOld`). An older runner fails the command as unknown.
+  day (`pruneFiles`). An older runner fails the command as unknown. A runner key's
+  `addHeldPicture` is refused unless it has taken a `picture` command for that thread,
+  seq and index and not finished it yet, so there are only as many as were asked for.
 - **Status.** `runner.status` has `sync: { state: "off" | "ok" | "error",
   reason?, url?, runnerId?, name?, threads?, messages?, lastSyncAt?,
   lastError?, pending?, retryAt?, commands?: { state: "off" | "on" |
@@ -4990,12 +5010,24 @@ schedule on it, and mint phone tokens. Now there are two kinds of key, and
   records it as that runner's (`storageOwners`); the URL dies with the key
   that asked for it, a file is at most 10 MB, a runner at most 300 URLs
   and 200 MB an hour, and one not attached within a day is deleted
-  (`pruneOld`). A
+  (`pruneFiles`). A
   runner key may attach or delete only files it uploaded: the owner's and
-  the phone's have no record and are nobody's to take, named or not. And
+  the phone's are nobody's to take, named or not. A runner key's file goes
+  on one row (a picture, held picture or icon), never several, so one
+  small upload can't be named by any number of rows. And
   nothing is deleted while anything names it: a picture row, a project
   icon, or a phone command still pending or taken (`finishCommand` too).
-  The owner key still gets Convex's own upload URL.
+  Whether anything does is one indexed read per table that stops at the
+  first row, with a waiting command's files in `commandFiles` (rows that go
+  when the command ends), so a delete reads a few rows however many name
+  the file. Each upload counts as at least 64 KB against the 150 MB, so a
+  runner key keeps at most 2,400 files, and so as many picture rows. Rows
+  from before these limits were cut to them once (`sync:limitsMigration`,
+  started by the first heartbeat or `pruneFiles` run on a backend that has
+  it), and `pruneFiles` waits for that; until then a delete also looks
+  through waiting commands the old way, up to 2 MB a mutation, and keeps
+  the file past that. The owner key still gets Convex's
+  own upload URL.
 - **Share links.** A slug is one thread's for good. A runner key may put
   one on its thread only if no other row has it and no other runner's
   thread ever did: a deleted thread's slug, and the old one when Share
@@ -5095,6 +5127,13 @@ schedule on it, and mint phone tokens. Now there are two kinds of key, and
     schedules 100 at 16 KB (text 12 KB: the longest real prompt on 5 Nov
     was 2,286 bytes), Pocket cards 50 (title 60, text 2,000), accounts 20 at
     8 KB, pushes 10 a minute.
+  - Pictures (reply, share and held): a type the runner sends (PNG, JPEG,
+    GIF, WebP, MP4, QuickTime), whole numbers for seq, index (0 to 100) and
+    size, `path` and `src` 2 KB each; refused otherwise. A page of messages
+    reads at most 300 of each kind of picture (the newest), an older page
+    only its own, and at most 8 MB of messages (then `hasMore`; a client
+    that pages by raising `limit` stops there, one using `beforeSeq` goes on).
+  - A finished command's `note`: 500 bytes (4,000 from the owner key).
   - Uploads: 10 MB a file, 200 MB an hour, 150 MB stored. Over an allowance
     is "later" (the upload route's 429): the runner keeps that picture and
     tries again after ten minutes, the rest of its flush going on; only a
@@ -5109,7 +5148,26 @@ schedule on it, and mint phone tokens. Now there are two kinds of key, and
   schedule) is refused when too big, so it hears why. The owner key isn't
   capped. `pruneOld` works 1,000 rows (20 messages) a run, finds finished
   commands by when they finished, drops thread tombstones after 30 days (a
-  share link's stay), and runs again if there's more.
+  share link's stay), and runs again if there's more. What frees stored
+  files is `pruneFiles`, a cron of its own, so one can't hold up the
+  other: held pictures past a day, uploads never attached in a day, and
+  commands no runner took or finished in 14 days (failed, their words
+  dropped, their photos deleted). It stops at 200 rows or 6 MB read,
+  counting 64 KB more for each file it checks. Finished commands are read
+  4 MB at most a run. A thread's messages and pictures go with it as far as
+  4 MB of reading in the mutation that removes it (tool output too), and
+  the rest in runs of their own (`dropThreadRows`). Until they've gone the
+  id is closed to messages, pictures and tool output (`threadClears`): a
+  runner key's go nowhere, and the owner's are answered as left out, with
+  the id in `closed` (a picture: `{ later: true }`), so what's left is only
+  ever the old rows, and the old pictures aren't listed as sent. Its runner
+  holds those back and tries again 30 seconds on: the row, the tool output,
+  the thread's whole history (a backend that has a message already writes
+  nothing) and, after the usual pause, the picture. A runner from before
+  this drops them until its next start, when it sends what's missing. The owner
+  taking over a runner key's thread that big waits the same way, and the
+  old runner can't write to it from then on. A thread removed meanwhile
+  leaves the rows to the run under way, and the id opens when they've gone.
 - **Refusals name nothing a key can't see.** They never say whose a
   thread, command, card or schedule is. Messages, pictures and reads for
   another runner's thread go as for an id with no row (dropped, empty);

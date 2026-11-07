@@ -95,6 +95,10 @@ async function main(): Promise<void> {
   process.on('exit', () => lock.release());
 
   if (!fs.existsSync(cfg.claudePath)) log.warn('claude CLI not found', { path: cfg.claudePath });
+  // A sync or gateway URL that would send keys in the clear (secure-url.ts):
+  // left unused, and said here as well as in tb status and the Connectors panel.
+  if (cfg.sync.urlRefused) log.warn('sync URL refused, so sync is off', { reason: cfg.sync.urlRefused });
+  if (cfg.connectorsRefused) log.warn('Connectors gateway URL refused, so it is off', { reason: cfg.connectorsRefused });
 
   // Temp files from atomic writes a crash interrupted.
   removeTempFiles(cfg.home, paths.run(cfg.home), paths.threads(cfg.home));
@@ -351,6 +355,7 @@ async function main(): Promise<void> {
   // (docs/protocol.md, "Connectors"). Off when there's no gateway.
   const connectors = new ConnectorsMonitor({
     url: cfg.connectorsUrl,
+    ...(cfg.connectorsRefused ? { offReason: cfg.connectorsRefused } : {}),
     log,
     onChange: (s) => runner.publish({ method: 'connectors.updated', params: { connectors: s } }),
   });
