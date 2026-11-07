@@ -68,7 +68,7 @@ public enum RPCNotification: Sendable {
     /// The runner's settings after any change (a setting, the key, or the
     /// spend going up).
     case settingsUpdated(RunnerSettings)
-    case standingInstructions(String)
+    case standingInstructions(StandingInstructions)
     case runnerNotice(level: String, message: String)
     /// The runner's own update, whole each time.
     case runnerUpdates(RunnerUpdates)

@@ -1,91 +1,72 @@
 import SwiftUI
 import ThreadbearCore
 
-/// Instructions: what every thread's agent should always keep in mind
-/// (who he is, how to write, what he works with), given to every session
-/// on every login, Claude and Codex (docs/protocol.md).
-/// Folded away until he opens it; empty is fine. Saved a moment after he
-/// stops typing, and when it's folded or the page closes.
-struct InstructionsBox: View {
+/// Settings > General's Instructions: what every thread's agent should always
+/// keep in mind (who he is, how to write, what he works with), given to every
+/// session on every login, Claude and Codex (docs/protocol.md, "Standing
+/// instructions"). Saved a moment after he stops typing, and when the window
+/// closes. After Wayne Sutton's Instructions box.
+///
+/// If the file was changed anywhere but here, no agent is given it, and this
+/// shows what it holds with no way to edit it until he's decided, so a typed
+/// word can't sign someone else's text by accident.
+struct InstructionsSection: View {
     @Environment(AppModel.self) private var app
-    @State private var open = false
+
+    var body: some View {
+        if let current = app.standingInstructions {
+            SettingsSection("Instructions",
+                            about: "Threadbear gives these to every thread's agent in every session, on every login, Claude and Codex alike. A chat that's already going hears a change before your next message. A login's own CLAUDE.md or AGENTS.md still applies, for what's particular to it. Leave this empty for none.",
+                            ask: "draft some for you to paste here. Agents can't change them themselves: only what's saved here is given to them.") {
+                if current.outside == true {
+                    InstructionsChangedOutside(file: current.text)
+                } else {
+                    InstructionsEditor(saved: current.text)
+                }
+            }
+        }
+    }
+}
+
+private struct InstructionsEditor: View {
+    @Environment(AppModel.self) private var app
+    let saved: String
     @State private var text = ""
     @State private var loaded = false
     @State private var status: String?
     @State private var save: Task<Void, Never>?
-    @FocusState private var typing: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: zoomed(8)) {
-            Button {
-                withAnimation(.easeOut(duration: 0.15)) { open.toggle() }
-                if open {
-                    // Ready to type straight away.
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { typing = true }
-                } else {
-                    commit()
-                }
-            } label: {
-                HStack(spacing: zoomed(6)) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: zoomed(10), weight: .semibold))
-                        .rotationEffect(.degrees(open ? 90 : 0))
-                        .foregroundStyle(.secondary)
-                    Text("Instructions").font(.headline)
-                    if !open {
-                        Text(summary)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
+        VStack(alignment: .leading, spacing: 6) {
+            TextEditor(text: $text)
+                .font(.body)
+                .scrollContentBackground(.hidden)
+                .frame(minHeight: 96, maxHeight: 200)
+                .overlay(alignment: .topLeading) {
+                    if text.isEmpty {
+                        Text("For example: I build with React, TypeScript and Convex. Write plainly and briefly.")
+                            .foregroundStyle(.tertiary)
+                            .padding(.leading, 5)
+                            .allowsHitTesting(false)
                     }
-                    Spacer()
                 }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .tip(open ? "Fold the instructions away" : "What every thread's agent should always keep in mind")
-            if open {
-                Text("Threadbear gives these to every thread's agent in every session, on every login, Claude and Codex alike. A chat that's already going hears a change before your next message. Leave it empty for none.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                TextEditor(text: $text)
-                    .font(.body)
-                    .scrollContentBackground(.hidden)
-                    .padding(zoomed(6))
-                    .frame(minHeight: zoomed(120), maxHeight: zoomed(300))
-                    .background(RoundedRectangle(cornerRadius: zoomed(8)).fill(Color.primary.opacity(0.04)))
-                    .overlay(RoundedRectangle(cornerRadius: zoomed(8)).strokeBorder(Color.accentColor.opacity(0.35)))
-                    .overlay(alignment: .topLeading) {
-                        if text.isEmpty {
-                            Text("For example: You're a senior full-stack developer and marketer. Write plainly and briefly. I build with React, TypeScript and Convex.")
-                                .foregroundStyle(.tertiary)
-                                .padding(zoomed(11))
-                                .allowsHitTesting(false)
-                        }
-                    }
-                    .focused($typing)
-                    .onChange(of: text) { _, _ in scheduleSave() }
-                    .tip("Your standing instructions for every agent")
-                if let status {
-                    Text(status).font(.caption).foregroundStyle(.secondary)
-                }
+                .onChange(of: text) { _, _ in scheduleSave() }
+                .tip("What every thread's agent should always keep in mind")
+            if let status {
+                Text(status).font(.caption).foregroundStyle(.secondary)
             }
         }
         .onAppear {
-            if !loaded { text = app.standingInstructions; loaded = true }
+            if !loaded { text = saved; loaded = true }
         }
-        .onChange(of: app.standingInstructions) { _, new in
+        .onChange(of: saved) { _, new in
             // Set elsewhere (or loaded late) while he isn't typing here.
-            if save == nil, new.trimmingCharacters(in: .whitespacesAndNewlines) != text.trimmingCharacters(in: .whitespacesAndNewlines) { text = new }
+            if save == nil, trimmed(new) != trimmed(text) { text = new }
         }
         .onDisappear { commit() }
     }
 
-    private var summary: String {
-        let first = app.standingInstructions.split(separator: "\n").first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-        return first.map(String.init) ?? "None set"
-    }
+    private func trimmed(_ s: String) -> String { s.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     private func scheduleSave() {
         guard loaded else { return }
@@ -107,7 +88,57 @@ struct InstructionsBox: View {
     private func write() async {
         save = nil
         let wanted = text
-        guard wanted.trimmingCharacters(in: .whitespacesAndNewlines) != app.standingInstructions.trimmingCharacters(in: .whitespacesAndNewlines) else { return }
-        if let error = await app.saveStandingInstructions(wanted) { status = error } else { status = wanted.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Cleared" : "Saved" }
+        guard trimmed(wanted) != trimmed(saved) else { return }
+        if let error = await app.saveStandingInstructions(wanted) {
+            status = error
+        } else {
+            status = trimmed(wanted).isEmpty ? "Cleared" : "Saved"
+        }
+    }
+}
+
+/// The file isn't what was saved here. Keeping it sends the words shown, not
+/// "trust the file", so a file changed again while he reads doesn't get signed.
+private struct InstructionsChangedOutside: View {
+    @Environment(AppModel.self) private var app
+    let file: String
+    @State private var busy = false
+    @State private var error: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Something other than Settings changed these, so agents aren't being given them.", systemImage: "exclamationmark.triangle")
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+            ScrollView {
+                Text(file.isEmpty ? "The file is gone, or can't be read." : file)
+                    .foregroundStyle(file.isEmpty ? .secondary : .primary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 160)
+            if let error {
+                Text(error).font(.caption).foregroundStyle(.red)
+            }
+            HStack {
+                if busy { ProgressView().controlSize(.small) }
+                Spacer()
+                Button("Clear") { resolve("") }
+                    .tip("Delete these, so agents are given no standing instructions")
+                Button("Use These") { resolve(file) }
+                    .disabled(file.isEmpty)
+                    .tip("Give every agent exactly the text shown here")
+            }
+            .disabled(busy)
+        }
+    }
+
+    private func resolve(_ text: String) {
+        busy = true
+        error = nil
+        Task {
+            error = await app.saveStandingInstructions(text)
+            busy = false
+        }
     }
 }

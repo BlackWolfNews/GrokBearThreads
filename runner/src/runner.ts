@@ -161,7 +161,7 @@ export type Notification =
   | { method: 'remoteThreads.updated'; params: import('./thread-index.ts').RemoteThreads }
   | { method: 'clis.updated'; params: { clis: CliStatus[] } }
   | { method: 'settings.updated'; params: { settings: Settings } }
-  | { method: 'instructions.updated'; params: { instructions: string } }
+  | { method: 'instructions.updated'; params: { instructions: import('./instructions.ts').StandingInstructions } }
   | { method: 'runner.updates'; params: { updates: RunnerUpdates } }
   | { method: 'projects.updated'; params: { projects: Project[] } }
   | { method: 'librarian.updated'; params: { librarian: LibrarianStatus } }
@@ -1661,7 +1661,12 @@ export class Runner {
     if (news) text = `${news}\n\n${text}`;
     // Kept for the next message when this one is a command, as the news is.
     const standing = command ? undefined : this.instructionsNews(rec);
-    if (standing) text = `${standing}\n\n${text}`;
+    if (standing) {
+      text = `${standing}\n\n${text}`;
+      // In the transcript too: a change anything made reaches every thread,
+      // so it shouldn't only be something the agents can see.
+      this.emit(st, { type: 'system.note', text: "Told this thread's agent about a change to your standing instructions." }, msg.turnId);
+    }
     if (rec.moved) {
       // A CLI that moves folders itself: the live session got setCwd, or a
       // released one resumes in the new folder (startSession passes it).
@@ -3225,8 +3230,12 @@ export class Runner {
     const parts: string[] = [];
     // Mike's own standing instructions first: they're for everything.
     const standing = this.standingInstructions?.().trim() ?? '';
-    rec.instructionsTold = instructionsHash(standing);
-    if (standing) parts.push(standingText(standing));
+    if (standing) {
+      rec.instructionsTold = instructionsHash(standing);
+      parts.push(standingText(standing));
+    } else {
+      delete rec.instructionsTold;
+    }
     if (this.projects) {
       rec.projectsTold = this.projects.briefIds(rec);
       const brief = this.projects.brief(rec);
@@ -3243,12 +3252,18 @@ export class Runner {
   instructionsNews(rec: ThreadRecord): string | undefined {
     if (!this.standingInstructions) return undefined;
     const standing = this.standingInstructions().trim();
-    const hash = instructionsHash(standing);
-    if (rec.instructionsTold === hash) return undefined;
     const before = rec.instructionsTold;
+    if (!standing) {
+      // Nothing written while it never held any: with the experiment off a
+      // thread record doesn't change at all.
+      if (before === undefined) return undefined;
+      delete rec.instructionsTold;
+      return 'Note from Threadbear: the user cleared their standing instructions; earlier ones no longer apply.';
+    }
+    const hash = instructionsHash(standing);
+    if (before === hash) return undefined;
     rec.instructionsTold = hash;
-    if (!standing) return before === undefined || before === instructionsHash('') ? undefined : 'Note from Threadbear: the user cleared their standing instructions; earlier ones no longer apply.';
-    return `Note from Threadbear: the user's standing instructions${before === undefined || before === instructionsHash('') ? '' : ' have changed, and replace any earlier ones'}.\n\n${standingText(standing)}`;
+    return `Note from Threadbear: the user's standing instructions${before === undefined ? '' : ' have changed, and replace any earlier ones'}.\n\n${standingText(standing)}`;
   }
 
   // The thread's projects its session hasn't been told about, as lines to
@@ -3594,7 +3609,7 @@ function moreAccess(a: PermissionMode | undefined, b: PermissionMode): Permissio
 
 // Mike's standing instructions as an agent is given them.
 function standingText(text: string): string {
-  return `The user's standing instructions (set in Threadbear, Skills > Instructions). Keep them in mind in everything you do for them:\n\n${text}`;
+  return `The user's standing instructions (set in Threadbear, Settings > General, the only place they can change: writing the file does nothing). Keep them in mind in everything you do for them:\n\n${text}`;
 }
 
 function instructionsHash(text: string): string {

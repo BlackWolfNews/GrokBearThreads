@@ -163,6 +163,8 @@ private struct GeneralSettings: View {
                     }
                 }
 
+                InstructionsSection()
+
                 // One reply, Bullet replies, the two live-CLI steppers and
                 // Follow main left here on 2 Nov: Mike wants as few settings
                 // as possible, the defaults suit nearly everyone, and anyone
@@ -204,6 +206,7 @@ private struct GeneralSettings: View {
 
                 SettingsErrorRow()
             }
+            .task { app.loadStandingInstructions() }
             .formStyle(.grouped)
             .fixedSize(horizontal: false, vertical: true)
             // The window fits the form; a scroller beside it is just noise

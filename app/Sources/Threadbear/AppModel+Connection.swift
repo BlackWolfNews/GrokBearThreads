@@ -74,6 +74,7 @@ extension AppModel {
                 loadProjects()
                 loadConnectors()
                 loadSettings()
+                loadStandingInstructions()
                 // Other runners' threads come back with their own connection.
                 for session in sessions.values where session.state == .loaded && !viaDirectLink(session.threadId) {
                     await session.subscribe()
@@ -162,8 +163,8 @@ extension AppModel {
                 connectors = status
             case .settingsUpdated(let settings):
                 receive(settings)
-            case .standingInstructions(let text):
-                standingInstructions = text
+            case .standingInstructions(let instructions):
+                standingInstructions = instructions
             case .runnerNotice(let level, let message):
                 notice(level: level, message)
             case .runnerUpdates(let updates):

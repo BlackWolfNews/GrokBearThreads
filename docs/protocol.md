@@ -1012,6 +1012,8 @@ the summary and then the reply.
 | `pools.save` | `{ pools: Pool[] }` | `{ pools: Pool[] }`. Replaces the whole list in `runner.json` (`builtIn` is dropped; an empty list goes back to the built-in ones). `-32602` for a duplicate id, a blank id or title, an empty `accountIds`, or an account id the runner doesn't know. A blank or non-string `icon` is dropped. Every client gets `pools.updated` |
 | `settings.get` | `{}` | `{ settings: Settings }` |
 | `settings.update` | `{ defaultCwd?, idleMinutes?, maxLiveCLIs?, followMain?, bulletReplies?, oneReply?, bringIn?, models?: { pool?: string \| null, privateFolders? } }` | `{ settings: Settings }`. Saves what's given to `runner.json` and applies it straight away, except `followMain` (next restart). `defaultCwd` must be an existing folder, `idleMinutes` at least 1, `maxLiveCLIs` 1 to 20, `pool` a pool id or `null`; otherwise `-32602` saying which. Every client gets `settings.updated` |
+| `instructions.get` | `{}` | `{ instructions: StandingInstructions }` (see Standing instructions). `-32601` with the experiment off, and from an older runner: the app then shows no box |
+| `instructions.set` | `{ text: string }` | `{ instructions: StandingInstructions }`. Saves and signs the text, trimmed; an empty one clears them and removes both files. `-32602` for a `text` that isn't a string or is over 20,000 characters, `-32601` as for `instructions.get`. Every client gets `instructions.updated` |
 | `devices.list` | `{}` | `{ devices: Device[], site?: string, reason?: string }` (see Devices). `site` is the website's root while sync is on; `reason` says why nothing can pair when it's off |
 | `devices.pair` | `{ kind: "phone" \| "browser", name?: string, days?: number }` | `{ device: Device, pairingLink?: string, signInLink?: string }`. Issues a phone token for a new phone or browser (see Devices) and returns the link that carries it: a `threadbear://pair?url=…&token=…&key=<runnerId>:<key>` link for a phone, for the app to draw as a QR code (the `key` item is this runner's secret-box public key, see Secrets, "Trusting the key"; absent when the runner has none), or the website's sign-in link (`<site>/#token=…`) for a browser, for the app to open. `days` is 1 to 365 (default 90). `-32000` while sync is off, or while the backend is older than this |
 | `devices.revoke` | `{ deviceId }` | `{ devices: Device[] }`. The phone or browser is signed out at its next request. `-32602` for an id that isn't there |
@@ -1073,6 +1075,7 @@ still `-32602`.)
 | `librarian.updated` | `{ librarian: LibrarianStatus }` sent to every connected client when the librarian's status changes |
 | `connectors.updated` | `{ connectors: ConnectorsStatus }` sent to every connected client when what the Connectors panel would show changes (a service signs out or back in, the gateway stops or starts answering); not when only `checkedAt` moves |
 | `settings.updated` | `{ settings: Settings }` sent to every connected client when a setting or the key changes, and at most once a minute while model calls are adding to the spend |
+| `instructions.updated` | `{ instructions: StandingInstructions }` sent to every connected client when they're saved, or found changed outside Settings |
 | `runner.notice` | `{ level: "info" \| "warning" \| "error", message }`. Also sent straight after the `hello` result for things the client missed (startup problems, a missing `claude` binary) |
 | `runner.updates` | `{ updates: RunnerUpdates }` sent to every connected client when the runner's own update state changes (below). Replaces the one from `hello` |
 
@@ -1579,6 +1582,59 @@ older runner's `openRouterKey`, `dailyBudgetUsd`, `spentTodayUsd` and
   every login is out of room; `off`: this runner makes no model calls;
   private folder, timed out, error), and the feature falls back to what
   it did before there was a model to ask.
+
+## Standing instructions
+
+Experiment `standingInstructions` (`runner/src/instructions.ts`), off unless
+`runner.json` has `"experiments": { "standingInstructions": true }`. After
+Wayne Sutton's PR (7 Nov 2026). Text Mike writes in Settings > General, given
+to every session on every login, Claude and Codex alike, which a login's
+`CLAUDE.md` or `AGENTS.md` can't do.
+
+```ts
+type StandingInstructions = {
+  text: string    // what's saved, up to 20,000 characters; "" for none
+  outside?: true  // instructions.md isn't what Settings last saved, so no
+                  // agent is given it. `text` is what the file holds now
+                  // ("" if it's gone or can't be read), to read and decide
+}
+```
+
+- **Who's told.** A fresh session gets them first in its instructions
+  (Claude's appended system prompt, Codex's developer instructions). A live
+  or resumed one is told a change once, before Mike's next message that isn't
+  a command, as a resumed Claude session keeps its first system prompt, and
+  the thread gets a `system.note` saying so. `instructionsTold` on the thread
+  record is the hash it last heard; absent when it holds none. With the
+  experiment off, or nothing set, nothing is added and the field isn't written.
+- **Where.** `instructions.md` in the data dir, and beside it
+  `instructions.sig`: the hex HMAC-SHA-256 of the file's bytes, after the line
+  `threadbear-standing-instructions-v1`, keyed by the runner's RPC token.
+- **Only `instructions.set` makes them count.** They reach every future
+  session in every folder, Ask and Auto threads included, so a thread that can
+  write a file mustn't be able to brief all the others. Each read is one read
+  of the file, checked against the signature, and what's given is those bytes.
+  A file that doesn't match, a signature or file that's missing while the
+  other is there, a link, a FIFO or a file over 64 KB gives nothing, and
+  `outside` says so. The runner says it once per version with a `runner.notice`
+  (`warning`, and after `hello` while it lasts) and `instructions.updated`, and
+  live sessions hear they no longer apply. Nothing comes back until Mike saves
+  in Settings, which sends the text he read, not "trust the file", so a file
+  changed while he reads isn't what gets signed.
+- **Agent edits.** Both files are in the data dir, so outside Full access an
+  Edit, MultiEdit, Write or Codex patch of either always asks, with no "Always
+  allow" ("Agent writes that run as code"). A shell write that gets past Auto's
+  classifier, or any write on Full access, trips the signature instead.
+- **Who can call it.** Only a client holding the runner's token. The agent
+  tools have no such method, and neither the backend nor another runner can
+  reach it: `relay.ts` and `sync.ts` pass only the methods they list.
+- **The limit.** Writing them takes the runner's token, however it's done. A
+  Full access agent runs as Mike, so one that sets out to can read
+  `secrets/runner-token` and call `instructions.set` or sign a file, as it can
+  call `patches.trust`. That's the line Full access already draws: this stops
+  a write that doesn't know the token, and makes it a deliberate act against
+  the credential. It also doesn't stop an older signed pair being put back:
+  those are Mike's own words from before.
 
 ## Explain
 

@@ -51,7 +51,9 @@ File references are where to look.
   `shared-pools.json`, the last pools your Convex backend had, which every
   runner shares, so one starts with them while the backend can't be reached,
   and `shortcuts.json`, the keyboard shortcuts you've changed in Settings >
-  Keyboard, which the app reads and writes and never sends anywhere). In `secrets/`, `asked/` holds the answers you
+  Keyboard, which the app reads and writes and never sends anywhere, and
+  with the standing instructions experiment on, `instructions.md`, which every
+  agent is given, and `instructions.sig`, which says Settings saved it). In `secrets/`, `asked/` holds the answers you
   type into an agent's secret card, one owner-only file each with a small
   script beside it that prints it for `sudo -A`, removed after 24 hours,
   and `secret-box.key` is the key your phone seals those answers to;

@@ -294,7 +294,7 @@ const devices = [
 let deviceSeq = devices.length;
 const deviceList = () => ({ devices: [...devices], site: DEMO_SITE });
 
-let mockInstructions = '';
+let mockInstructions = { text: '' };
 const settings = {
   defaultCwd: defaults.cwd, idleMinutes: 30, maxLiveCLIs: 6, followMain: true, bulletReplies: true, oneReply: true,
   models: {
@@ -1260,7 +1260,7 @@ async function dispatch(client, method, p) {
     case 'instructions.get':
       return { instructions: mockInstructions };
     case 'instructions.set':
-      mockInstructions = p.text.trim() ? p.text.trim() + '\n' : '';
+      mockInstructions = { text: p.text.trim() ? p.text.trim() + '\n' : '' };
       broadcast('instructions.updated', { instructions: mockInstructions });
       return { instructions: mockInstructions };
     case 'settings.get':

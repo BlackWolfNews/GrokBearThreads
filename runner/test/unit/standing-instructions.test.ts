@@ -11,7 +11,7 @@ test('standing instructions reach a fresh session, and each change reaches a liv
   const h = makeHarness(tmpDir(), {}, { standingInstructions: () => standing });
   const { thread } = h.runner.create({ text: 'Write a tagline', cwd, accountId: 'claude-3' });
   await tick();
-  assert.match(h.adapter.last.opts.instructions ?? '', /standing instructions \(set in Threadbear, Skills > Instructions\)[\s\S]*world-class copywriter/);
+  assert.match(h.adapter.last.opts.instructions ?? '', /standing instructions \(set in Threadbear, Settings > General[\s\S]*world-class copywriter/);
   assert.equal(h.adapter.last.sent.at(-1)!.text, 'Write a tagline');
   const finish = async () => {
     h.adapter.last.init();
@@ -47,4 +47,47 @@ test('with none set, sessions get nothing extra', async () => {
   await tick();
   assert.equal(h.adapter.last.opts.instructions, undefined);
   assert.equal(h.adapter.last.sent.at(-1)!.text, 'Hi');
+});
+
+test("a change says so in the transcript, and a session with none writes nothing on the thread's record", async () => {
+  let standing = '';
+  const h = makeHarness(tmpDir(), {}, { standingInstructions: () => standing });
+  const { thread } = h.runner.create({ text: 'Hi', cwd: tmpDir(), accountId: 'claude-3' });
+  await tick();
+  const finish = async () => {
+    h.adapter.last.init();
+    h.adapter.last.result('completed');
+    await tick();
+  };
+  await finish();
+  h.runner.send(thread.id, 'again');
+  await tick();
+  await finish();
+  assert.equal(h.store.load(thread.id)?.instructionsTold, undefined);
+  assert.equal(h.events(thread.id).filter((e: { text?: string }) => /standing instructions/.test(e.text ?? '')).length, 0);
+  standing = 'Be brief.';
+  h.runner.send(thread.id, 'now');
+  await tick();
+  assert.equal(h.events(thread.id).filter((e: { type: string; text?: string }) => e.type === 'system.note' && /standing instructions/.test(e.text ?? '')).length, 1);
+  assert.match(h.adapter.last.sent.at(-1)!.text, /^Note from Threadbear: the user's standing instructions\.\n\n[\s\S]*Be brief\.\n\nnow$/);
+});
+
+test('a command keeps the news for the next message', async () => {
+  let standing = '';
+  const h = makeHarness(tmpDir(), {}, { standingInstructions: () => standing });
+  const { thread } = h.runner.create({ text: 'Hi', cwd: tmpDir(), accountId: 'claude-3' });
+  await tick();
+  h.adapter.last.init();
+  h.adapter.last.result('completed');
+  await tick();
+  standing = 'Be brief.';
+  h.runner.send(thread.id, '/compact');
+  await tick();
+  assert.equal(h.adapter.last.sent.at(-1)!.text, '/compact');
+  h.adapter.last.init();
+  h.adapter.last.result('completed');
+  await tick();
+  h.runner.send(thread.id, 'next');
+  await tick();
+  assert.match(h.adapter.last.sent.at(-1)!.text, /Be brief\.\n\nnext$/);
 });

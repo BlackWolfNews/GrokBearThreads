@@ -474,8 +474,8 @@ final class AppModel {
     /// The runner's settings for the Settings window: nil until
     /// `settings.get` answers, then replaced whole by `settings.updated`.
     var runnerSettings: RunnerSettings?
-    /// His standing instructions for every session.
-    var standingInstructions = ""
+    /// His standing instructions for every session; nil: no box (InstructionsModel.swift).
+    var standingInstructions: StandingInstructions?
     /// The runner is from before settings (it answers -32601).
     var settingsUnsupported = false
     /// Why the last change in the Settings window didn't take, shown there.
