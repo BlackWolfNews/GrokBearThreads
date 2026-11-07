@@ -722,7 +722,10 @@ export type EventBody =
     }
   // The ticks on a card of asks, the whole set each time. Outside any turn.
   | { type: 'asks.ticked'; asksSeq: number; ticked: number[] }
-  | { type: 'system.note'; text: string }
+  // wake: a background task's notification that went into the running
+  // turn, which opens a turn that's had its end_turn again (needs.ts,
+  // takenEndTurn).
+  | { type: 'system.note'; text: string; wake?: true }
   | { type: 'error'; message: string }
   // A command action that ran (patches.ts): its output, truncated like a
   // tool result. Outside any turn.

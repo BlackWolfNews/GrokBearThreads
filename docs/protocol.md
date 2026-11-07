@@ -900,7 +900,7 @@ Persisted event types (stored in `events.ndjson`, returned by `threads.events`):
 | `turn.started` | `turnId`, `wokeBy?: {kind, description}[]`. A turn the agent starts by itself (a background task finished, or a background subagent needs an approval) has no `user.message` before it. `wokeBy` is on such a turn when background work finishing started it: each task that had finished since the last turn, `kind` as in `BackgroundTask` (`agent` \| `shell` \| `monitor` \| `other`), its `description` possibly empty. Clients mark the time between that turn and the one before it in the transcript (a "6 min later" divider, Mike 3 Nov). A `user.message` after `turn.started` was sent while the turn ran and went into it |
 | `turn.completed` | `turnId`, `outcome` (`completed` \| `interrupted` \| `failed`), `durationMs`, `costUsd?` (Codex turns have none), `usage?` (Claude: `{inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens}`; Codex: `{inputTokens, cachedInputTokens, cacheWriteTokens?, outputTokens, reasoningTokens}`), `error?`, `errorKind?` (`usageLimit` \| `contextWindow` \| `auth` \| `network`, when a failed turn's cause is known, so a client can offer the fix without reading `error`), `needs?` (`you` \| `nothing`), `asks?: Ask[]`, `next?: string[]` (with `nothing`: suggested follow-ups), `needsFrom?` (`tool` \| `text`): what a completed turn said it needs from Mike (Needs you) |
 | `asks.ticked` | `asksSeq`, `ticked: number[]` (indexes into that turn's `asks`, the whole set now ticked). Outside any turn. The latest one for an `asksSeq` is that card's ticks |
-| `system.note` | `text` (e.g. "Resumed session", "Compacted the conversation", "Patch reseed added: action Reseed dev DB.") |
+| `system.note` | `text` (e.g. "Resumed session", "Compacted the conversation", "Patch reseed added: action Reseed dev DB."), `wake?: true` on a background task's notification that went into the running turn, which the agent reads at its next step (see "Once a turn, or once a message") |
 | `error` | `message` |
 | `action.run` | `actionId`, `patch`, `title`, `command`, `ok`, `exitCode?`, `text` (what it printed, truncated to 64 KB), `truncated`, `durationMs`, `trigger?` (`"turn.end"` when a hook ran it, `"worktree.setup"` for a new worktree's `setup` (see Worktrees); absent for a chip or `tb run`). A command that `actions.run` or a hook ran; outside any turn unless one was running, in which case it carries that `turnId` |
 | `thread.rewound` | `fromSeq`, `toSeq`, `files: { undone: string[], failed: { path, reason }[], how: "checkpoint" \| "diffs" \| "none" }`. Mike edited the message at `fromSeq` (see Editing a message): every event from `fromSeq` to `toSeq` (inclusive, always this event's `seq` - 1) is gone from the conversation, and clients hide them. Outside any turn. The edited message comes next, as a `user.message` with `editOf: fromSeq` |
@@ -2337,7 +2337,15 @@ the thread if a sub-agent stalls, so an ask can't stay hidden for good.
   came back accepted counts, since the agent can't have read it), so that
   message's `end_turn` is taken and its card replaces the last. A repeat with
   no new message that adds `archive: true`, where neither call has `needs:
-  "you"`, is taken too, and adds only that; the first card stands.
+  "you"`, is taken too, and adds only that; the first card stands. A
+  background task finishing does the same as a message (a `system.note`
+  with `wake`): the CLI hands its notification to the agent with the next
+  `tool.result`, often the end_turn's own, and the agent carries on with
+  what it says, so its next `end_turn` is taken and its card and headline
+  replace the last, and the text it writes before that is kept. On 7 Nov
+  2026 a `tb land` the agent had sent to the background finished in the
+  same CLI turn as its "landing now" card, and the real report's end_turn
+  was refused (thread 46de9389).
 - **A reply first.** `end_turn` is refused (an error result) until the
   turn has replied to Mike: a `summary` in the call itself, or an own `assistant.text` after the turn's last
   `tool.result` from a tool outside the `threadbear` server, and after

@@ -184,6 +184,23 @@ test('Stop hook: a message sent after end_turn does not make it forget the call'
   state.close!();
 });
 
+// Thread 46de9389 (7 Nov 2026): a background `tb land` finished just before
+// end_turn, and the agent read its notification with end_turn's result. The
+// work after that is past the card it gave, so Stop asks for another.
+test('Stop hook: a background task the agent read after end_turn makes it ask for end_turn again', async () => {
+  const { state, outputs } = start([], {}, { mcpServersFor: () => ({ threadbear: { type: 'sdk', name: 'threadbear' } }) });
+  const stop = state.options.hooks.Stop[0].hooks[0];
+  await state.frame!({ type: 'system', subtype: 'init', session_id: 's' });
+  await state.frame!({ type: 'system', subtype: 'task_notification', session_id: 's', task_id: 'b1', status: 'completed', summary: 'Background command "Land" completed (exit code 0)' });
+  assert.ok(outputs.some((o: AdapterOutput) => o.kind === 'event' && o.event.type === 'system.note' && o.event.wake === true), 'the note says it wakes the turn');
+  await state.frame!({ type: 'assistant', session_id: 's', message: { id: 'a', role: 'assistant', content: [{ type: 'text', text: 'Still landing.' }, { type: 'tool_use', id: 'e1', name: END_TURN_FULL_NAME, input: { needs: 'nothing' } }] } });
+  await state.options.hooks.PostToolUse[0].hooks[0]({ hook_event_name: 'PostToolUse', tool_name: END_TURN_FULL_NAME });
+  await state.frame!({ type: 'user', session_id: 's', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'e1', content: 'Noted: this thread is done.' }] } });
+  await state.frame!({ type: 'assistant', session_id: 's', message: { id: 'b', role: 'assistant', content: [{ type: 'text', text: 'Landed and pushed.' }] } });
+  assert.equal((await stop({ hook_event_name: 'Stop', stop_hook_active: false })).reason, END_TURN_NUDGE);
+  state.close!();
+});
+
 test('Stop hook: an end_turn in a turn that ended with no Stop does not count for the next', async () => {
   const { session, state } = start([], {}, { mcpServersFor: () => ({ threadbear: { type: 'sdk', name: 'threadbear' } }) });
   const stop = state.options.hooks.Stop[0].hooks[0];

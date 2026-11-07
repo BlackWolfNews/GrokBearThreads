@@ -152,7 +152,7 @@ export class ClaudeNormalizer {
       // and the note says why.
       const text = typeof msg.summary === 'string' && msg.summary.trim() ? oneLineNote(msg.summary) : 'A background task finished.';
       if (this.turn === 'none') this.pendingNote = this.pendingNote ? `${this.pendingNote}\n${text}` : text;
-      else out.push({ kind: 'event', event: { type: 'system.note', text } });
+      else out.push({ kind: 'event', event: { type: 'system.note', text, wake: true } });
     } else if (msg.subtype === 'background_tasks_changed' && Array.isArray(msg.tasks)) {
       const tasks = (msg.tasks as AnyMsg[])
         .filter((t) => !t.ambient && typeof t.task_id === 'string')

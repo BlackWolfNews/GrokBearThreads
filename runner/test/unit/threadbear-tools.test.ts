@@ -567,6 +567,77 @@ test('end_turn is taken once a turn', async () => {
   assert.match(r2.text, /Already ended/);
 });
 
+// Thread 46de9389 (7 Nov 2026): a `tb land` sent to the background finished
+// just before the agent's "landing now" end_turn, in the same CLI turn. The
+// CLI handed the agent its notification with that end_turn's result, and the
+// real report's end_turn was refused, so the card kept "landing now".
+test('a background task that finishes around end_turn opens the turn again once the agent has read it', async () => {
+  const h = makeHarness();
+  const { thread, s } = start(h);
+  const { call } = tools(h, thread.id);
+  const send = async (itemId: string, input: Record<string, unknown>) => {
+    toolCall(s, itemId, END_TURN, input);
+    const r = await call('end_turn', input);
+    s.out({ kind: 'event', event: { type: 'tool.result', itemId, ok: !r.error, text: r.text, truncated: false, images: [] } });
+    return r;
+  };
+  s.out({ kind: 'event', event: { type: 'system.note', text: 'Background command "Land" completed (exit code 0)', wake: true } });
+  s.text('m1', 'tb land is still running. I will finish up when it lands.');
+  const first = await send('e1', { headline: 'Landing now', needs: 'nothing' });
+  assert.equal(first.error, false);
+  // The agent reads the notification, and carries on.
+  toolCall(s, 'b1', 'Bash', { command: 'git push' });
+  toolResult(s, 'b1');
+  s.text('m2', 'Landed on main and pushed.');
+  const second = await send('e2', { headline: 'Landed and pushed', needs: 'nothing' });
+  assert.equal(second.error, false, second.text);
+  assert.ok(h.events(thread.id).some((e) => e.type === 'assistant.text' && e.text === 'Landed on main and pushed.'), 'the report is kept');
+  assert.equal(h.runner.get(thread.id).preview, 'Landed and pushed');
+  s.result('completed');
+  await tick();
+  assert.equal(h.runner.get(thread.id).preview, 'Landed and pushed');
+});
+
+test('a background task that finishes after end_turn opens the turn again', async () => {
+  const h = makeHarness();
+  const { thread, s } = start(h);
+  const { call } = tools(h, thread.id);
+  const send = async (itemId: string, input: Record<string, unknown>) => {
+    toolCall(s, itemId, END_TURN, input);
+    const r = await call('end_turn', input);
+    s.out({ kind: 'event', event: { type: 'tool.result', itemId, ok: !r.error, text: r.text, truncated: false, images: [] } });
+    return r;
+  };
+  s.text('m1', 'Waiting on the build.');
+  await send('e1', { headline: 'Building', needs: 'nothing' });
+  s.out({ kind: 'event', event: { type: 'system.note', text: 'Background command "Build" completed (exit code 0)', wake: true } });
+  s.text('m2', 'The build passed.');
+  const second = await send('e2', { headline: 'Built', needs: 'nothing' });
+  assert.equal(second.error, false, second.text);
+  assert.equal(h.runner.get(thread.id).preview, 'Built');
+});
+
+test('a background task the agent had read before its end_turn still leaves a repeat refused', async () => {
+  const h = makeHarness();
+  const { thread, s } = start(h);
+  const { call } = tools(h, thread.id);
+  const send = async (itemId: string, input: Record<string, unknown>) => {
+    toolCall(s, itemId, END_TURN, input);
+    const r = await call('end_turn', input);
+    s.out({ kind: 'event', event: { type: 'tool.result', itemId, ok: !r.error, text: r.text, truncated: false, images: [] } });
+    return r;
+  };
+  s.out({ kind: 'event', event: { type: 'system.note', text: 'Background command "Build" completed (exit code 0)', wake: true } });
+  toolCall(s, 'b1', 'Bash', { command: 'cat build.log' });
+  toolResult(s, 'b1');
+  s.text('m1', 'The build passed.');
+  await send('e1', { headline: 'Built', needs: 'nothing' });
+  const again = await send('e2', { headline: 'Built again', needs: 'nothing' });
+  assert.equal(again.error, true);
+  assert.match(again.text, /Already ended/);
+  assert.equal(h.runner.get(thread.id).preview, 'Built');
+});
+
 // Thread cdfccbc3 (1 Nov 2026): "Archive" sent from the phone just after
 // end_turn, with both ways to do it refused. The agent scheduled a message to
 // itself a minute later, and only that looked like an answer.

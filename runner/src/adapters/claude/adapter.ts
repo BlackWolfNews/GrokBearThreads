@@ -356,6 +356,10 @@ class ClaudeSession implements AgentSession {
   private messageStands = false;
   private pastEndTurn = false;
   private endTurnCall?: string;
+  // A background task's notification came into the turn and goes to the
+  // agent with the next tool result. From then the turn's end_turn is behind
+  // it, so the Stop hook asks for another (needs.ts, takenEndTurn).
+  private wakeUnread = false;
   // Each end_turn call's card questions, by item id, until its result.
   private endTurnAsks = new Map<string, string[]>();
   // A reply owed after an accepted one-reply end_turn, with its card's
@@ -556,6 +560,7 @@ class ClaudeSession implements AgentSession {
         // to call it (1 Nov 2026, thread cdfccbc3).
         if ((msg as { type?: string }).type === 'result') {
           this.forgetEndTurn();
+          this.wakeUnread = false;
           this.owedReply = undefined;
           this.endTurnAsks.clear();
         }
@@ -589,6 +594,13 @@ class ClaudeSession implements AgentSession {
             else if (ev.type === 'assistant.text' && !ev.itemId.includes('/') && ev.text.trim()) {
               if (this.pastEndTurn) this.wroteAfterEnd = true;
               this.owedReply = undefined;
+            }
+            if (ev.type === 'system.note' && ev.wake) {
+              if (this.endTurnTaken || this.pastEndTurn) this.forgetEndTurn();
+              else this.wakeUnread = true;
+            } else if (ev.type === 'tool.result' && this.wakeUnread) {
+              this.wakeUnread = false;
+              this.forgetEndTurn();
             }
           }
           if (out.kind === 'event' && out.event.type === 'tool.call') this.markToolSeen(out.event.itemId);

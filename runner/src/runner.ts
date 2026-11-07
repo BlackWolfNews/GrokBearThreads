@@ -328,6 +328,10 @@ export type Turn = {
   // The Stop hook sent this turn back to call end_turn, so what it already
   // wrote is the reply (threadbear-mcp.ts, needs.ts oneReplyAlreadyWritten).
   endTurnNudged?: boolean;
+  // A background task's notification came into the turn (a system.note with
+  // wake) and the agent hasn't had it yet: the CLI hands it over with the
+  // next tool result (needs.ts, takenEndTurn).
+  wakeUnread?: boolean;
 };
 
 type Runtime = {
@@ -1490,6 +1494,20 @@ export class Runner {
     rt.session!.send({ id: msg.turnId, text: this.forAgent(msg), images: msg.images });
   }
 
+  // A turn that had its end_turn, opened again by a background task's
+  // notification. Unlike a message (steer) nothing new is owed to Mike, but
+  // the work after it is the turn's latest: its text is kept and becomes the
+  // preview, and the card that was taken stands only until the next end_turn.
+  reopenForWake(turn: Turn): void {
+    turn.ended = false;
+    turn.owedReply = undefined;
+    turn.replyAfter = false;
+    turn.headline = false;
+    turn.summarized = false;
+    turn.replyNeeds = undefined;
+    turn.narrationItem = undefined;
+  }
+
   // The text the agent gets for a message. One from the phone says so, and
   // whether he's still at the Mac, so the agent doesn't hand him a Mac-only
   // step while he's out and keeps the reply short. It goes on every phone
@@ -1837,6 +1855,16 @@ export class Runner {
             }
             const bullets = endTurnIsOneReply(ev) ? undefined : summaryFromTool(rt.turn.endTurn);
             rt.turn.owedReply = !bullets ? undefined : endTurnAsksForMessage(ev) ? 0 : endTurnOwesReply(ev) ? summaryMarkdown(bullets).length : undefined;
+          }
+          // A background task finished: once the agent has its notification
+          // it carries on, so what it writes is kept and its next end_turn's
+          // card and headline replace the last (7 Nov 2026, thread 46de9389).
+          if (ev.type === 'system.note' && ev.wake) {
+            if (rt.turn.ended || rt.turn.tookEndTurn) this.reopenForWake(rt.turn);
+            else rt.turn.wakeUnread = true;
+          } else if (ev.type === 'tool.result' && own && rt.turn.wakeUnread) {
+            rt.turn.wakeUnread = false;
+            if (rt.turn.ended || rt.turn.tookEndTurn) this.reopenForWake(rt.turn);
           }
           // For hooks and the librarian only, never trust: these include
           // previews (an edit.diff before approval) and edits that were

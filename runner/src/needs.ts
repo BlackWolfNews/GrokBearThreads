@@ -834,6 +834,12 @@ export function endTurnTaken(result: { ok: boolean; text: string }): boolean {
 // cdfccbc3). The message goes in the events before the CLI gets it, so the
 // agent can't have seen one that isn't there yet. One that came while the call
 // ran counts too, as the agent called it without having read that message.
+// A background task finishing mid-turn (a system.note with wake) opens it too,
+// from when the agent reads it: the CLI hands it over with the next tool
+// result, so one that came before the end_turn's own result was unread when
+// the agent called it. On 7 Nov 2026 a backgrounded `tb land` finished just
+// before the agent's "landing now" end_turn, and the real report's end_turn
+// was refused (thread 46de9389).
 export function takenEndTurn(events: PersistedEvent[], serverName = 'threadbear'): Record<string, unknown> | undefined {
   const endTurn = `mcp__${serverName}__${END_TURN_TOOL}`;
   let start = 0;
@@ -845,13 +851,19 @@ export function takenEndTurn(events: PersistedEvent[], serverName = 'threadbear'
   }
   const calls = new Map<string, Record<string, unknown>>();
   let taken: Record<string, unknown> | undefined;
+  let unread = false;
   for (const e of events.slice(start)) {
-    if (e.type === 'user.message') {
+    if (e.type === 'user.message' || (e.type === 'system.note' && e.wake && taken)) {
+      calls.clear();
+      taken = undefined;
+    } else if (e.type === 'system.note' && e.wake) unread = true;
+    if (e.type === 'tool.call' && e.name === endTurn) calls.set(e.itemId, e.input);
+    if (e.type === 'tool.result' && !taken && endTurnTaken(e)) taken = calls.get(e.itemId);
+    if (e.type === 'tool.result' && unread) {
+      unread = false;
       calls.clear();
       taken = undefined;
     }
-    if (e.type === 'tool.call' && e.name === endTurn) calls.set(e.itemId, e.input);
-    if (e.type === 'tool.result' && !taken && endTurnTaken(e)) taken = calls.get(e.itemId);
   }
   return taken;
 }
