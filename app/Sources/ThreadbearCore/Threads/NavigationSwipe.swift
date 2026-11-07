@@ -1,7 +1,8 @@
 import Foundation
 
-/// A two-finger swipe across the window going back or forward: fingers to
-/// the right go back, to the left forward, as in Safari. It works like a
+/// A two-finger swipe across the window going back or forward, as in Safari:
+/// content moved right goes back, left forward (with natural scrolling the
+/// fingers' way, without it the other way). It works like a
 /// sidebar row's swipe (`RowSwipe`): an arrow follows the fingers, and let
 /// go past the line (or flicked) it goes. Fed the trackpad's scroll events
 /// by `SwipeNavigation` in the app; this decides whether a gesture is a
@@ -81,8 +82,8 @@ public struct NavigationSwipe: Sendable, Equatable {
         self.holds = holds
     }
 
-    /// The fingers moved (`dx` right positive, whichever way the system
-    /// scrolls), `elapsed` seconds after the last event.
+    /// The fingers moved the content `dx` (right positive, so Back) and `dy`,
+    /// as the system scrolls it, `elapsed` seconds after the last event.
     public mutating func move(dx: Double, dy: Double, elapsed: Double = 1.0 / 60) -> Verdict {
         // Coalesced events can arrive all but together.
         let elapsed = max(elapsed, 1.0 / 240)

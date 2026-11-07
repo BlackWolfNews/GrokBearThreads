@@ -26,7 +26,14 @@ import WebKit
 ///
 /// Over a sidebar row nothing's held back, as the row (RowSwipeController)
 /// needs the whole gesture: a swipe left is its archive, and it gives up a
-/// swipe right to Back while there's somewhere to go back to (`takesBack`).
+/// swipe the other way to Back or Forward while there's somewhere to go
+/// (`takesFingersRight`).
+///
+/// Which way is Back follows System Settings' natural scrolling, as Safari's
+/// does: the page moves with the content, so with natural scrolling fingers
+/// going right go Back, and without it fingers going left do. The first
+/// version always went Back to the right, backwards for Mike, who has natural
+/// scrolling off (8 Nov).
 @MainActor
 @Observable
 final class SwipeNavigation {
@@ -68,10 +75,12 @@ final class SwipeNavigation {
         }
     }
 
-    /// Whether a swipe right goes Back just now: a row deciding what a
-    /// swipe is asks, so the two never both take it.
-    var takesBack: Bool {
-        scrollSwipesOn() && (app?.canGoBack ?? false)
+    /// Whether fingers going right go Back or Forward just now: a row
+    /// deciding what a swipe is asks, so the two never both take it.
+    /// `inverted`: natural scrolling, where that's Back.
+    func takesFingersRight(inverted: Bool) -> Bool {
+        guard scrollSwipesOn(), let app else { return false }
+        return inverted ? app.canGoBack : app.canGoForward
     }
 
     /// Whether the event was ours (held back, or a page swipe's).
@@ -133,10 +142,11 @@ final class SwipeNavigation {
         eatingMomentum = false
         release()
         guard scrollSwipesOn() else { return swipe.reset() }
-        // A row only ever lets a swipe right by.
+        // A row only ever lets fingers going right by.
         let overRow = RowSwipeController.listening?.isHovered == true
-        let ways = ways(at: event.locationInWindow, in: window, inverted: event.isDirectionInvertedFromDevice, app: app)
-        swipe.begin(allowed: overRow ? ways.intersection([.back]) : ways, holds: !overRow)
+        let ways = ways(at: event.locationInWindow, in: window, scrolls: true, app: app)
+        let fingersRight: NavigationSwipe.Direction = event.isDirectionInvertedFromDevice ? .back : .forward
+        swipe.begin(allowed: overRow ? ways.intersection([fingersRight]) : ways, holds: !overRow)
     }
 
     /// A movement with no gesture under way, or after a scroll that went
@@ -158,12 +168,11 @@ final class SwipeNavigation {
     private static let flickGap: TimeInterval = 0.1
 
     private func moved(_ event: NSEvent, in window: NSWindow) -> Bool {
-        // The fingers' way, right positive, whichever way the system
-        // scrolls: with natural scrolling the delta already goes with them.
-        let sign: CGFloat = event.isDirectionInvertedFromDevice ? 1 : -1
+        // The content's way, right positive (Back), as the system scrolls
+        // it: the fingers' way with natural scrolling, the other way without.
         let wasArmed = swipe.armed
         let verdict = withAnimation(nil) {
-            swipe.move(dx: Double(event.scrollingDeltaX * sign), dy: Double(event.scrollingDeltaY), elapsed: event.timestamp - lastEvent)
+            swipe.move(dx: Double(event.scrollingDeltaX), dy: Double(event.scrollingDeltaY), elapsed: event.timestamp - lastEvent)
         }
         if swipe.armed != wasArmed {
             // A tick under the fingers on crossing the line, as a row's.
@@ -214,7 +223,7 @@ final class SwipeNavigation {
     /// AppKit's swipe event, one per gesture: a positive deltaX is the
     /// fingers going left, which is Forward, as Safari has it.
     private func threeFingers(_ event: NSEvent, in window: NSWindow, app: AppModel) -> Bool {
-        let ways = ways(at: event.locationInWindow, in: window, inverted: nil, app: app)
+        let ways = ways(at: event.locationInWindow, in: window, scrolls: false, app: app)
         if event.deltaX < 0, ways.contains(.back) { go(.back, app: app); return true }
         if event.deltaX > 0, ways.contains(.forward) { go(.forward, app: app); return true }
         return false
@@ -231,12 +240,12 @@ final class SwipeNavigation {
     /// The ways a swipe at `point` can go: somewhere in the history that
     /// way, and nothing under the pointer that scrolls sideways that way
     /// first (a wide table, a row of chips), as Safari leaves a wide page
-    /// to scroll until it's at its edge. A web page in a panel keeps every
-    /// swipe, as it scrolls (and goes back) by itself. `inverted`: natural
-    /// scrolling, where fingers going right scroll a page towards its start;
-    /// nil for a three-finger swipe, which doesn't scroll anything, so what's
-    /// under it can't want it first unless it's a web page.
-    private func ways(at point: NSPoint, in window: NSWindow, inverted: Bool?, app: AppModel) -> Set<NavigationSwipe.Direction> {
+    /// to scroll until it's at its edge. Back moves the content right, which
+    /// shows what's to its left, whichever way the system scrolls. A web page
+    /// in a panel keeps every swipe, as it scrolls (and goes back) by itself.
+    /// `scrolls`: false for a three-finger swipe, which doesn't scroll
+    /// anything, so only a web page can want it first.
+    private func ways(at point: NSPoint, in window: NSWindow, scrolls: Bool, app: AppModel) -> Set<NavigationSwipe.Direction> {
         var ways: Set<NavigationSwipe.Direction> = []
         if app.canGoBack { ways.insert(.back) }
         if app.canGoForward { ways.insert(.forward) }
@@ -244,14 +253,11 @@ final class SwipeNavigation {
         var view = (window.contentView?.superview ?? window.contentView)?.hitTest(point)
         while let v = view, !ways.isEmpty {
             if v is WKWebView || v is AgentSurfaceView { return [] }
-            if let inverted, let scroll = v as? NSScrollView, let document = scroll.documentView {
+            if scrolls, let scroll = v as? NSScrollView, let document = scroll.documentView {
                 let shown = scroll.contentView.bounds
                 if document.frame.width > shown.width + 1 {
-                    // Fingers going right show what's to the left, with
-                    // natural scrolling; the other way round without.
-                    let canShowLeft = shown.minX > 0.5, canShowRight = shown.maxX < document.frame.width - 0.5
-                    if inverted ? canShowLeft : canShowRight { ways.remove(.back) }
-                    if inverted ? canShowRight : canShowLeft { ways.remove(.forward) }
+                    if shown.minX > 0.5 { ways.remove(.back) }
+                    if shown.maxX < document.frame.width - 0.5 { ways.remove(.forward) }
                 }
             }
             view = v.superview
