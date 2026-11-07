@@ -47,6 +47,10 @@ struct FolderBrowser: NSViewRepresentable {
 
     final class Coordinator {
         var opened: Int?
+        /// The preview this browser shows now, which a file or folder
+        /// opened from it comes Back to. Kept up to date here, as the view
+        /// outlives a preview replaced by another of the same folder.
+        var showing: PanePreview?
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -65,11 +69,11 @@ struct FolderBrowser: NSViewRepresentable {
             source = { folder in try await Task.detached(priority: .userInitiated) { try FolderListing.read(folder) }.value }
         }
         let view = FolderPaneView(path: path, away: preview.away, memory: preview.folderMemory, mode: mode, source: source)
-        // The folder this browser shows, which a file or folder opened from
-        // it comes Back to.
-        let showing = preview
-        view.onOpen = { [weak app] entry, memory in app?.openFromFolder(entry, from: memory, showing: showing, in: thread) }
-        view.onBrowse = { [weak app] folder, memory, selecting in app?.browseFolder(folder, from: memory, selecting: selecting, showing: showing, in: thread) }
+        let coordinator = context.coordinator
+        coordinator.showing = preview
+        let first = preview
+        view.onOpen = { [weak app] entry, memory in app?.openFromFolder(entry, from: memory, showing: coordinator.showing ?? first, in: thread) }
+        view.onBrowse = { [weak app] folder, memory, selecting in app?.browseFolder(folder, from: memory, selecting: selecting, showing: coordinator.showing ?? first, in: thread) }
         view.onExternal = { [weak app] url in app?.openExternally(url) }
         view.onReveal = { [weak app] file in app?.revealInFinder(file) }
         return view
@@ -80,6 +84,7 @@ struct FolderBrowser: NSViewRepresentable {
         // Opened again (a link clicked, Back): read it again.
         if context.coordinator.opened != nil, context.coordinator.opened != preview.opened { view.refresh() }
         context.coordinator.opened = preview.opened
+        context.coordinator.showing = preview
     }
 
     static func dismantleNSView(_ view: FolderPaneView, coordinator: Coordinator) {

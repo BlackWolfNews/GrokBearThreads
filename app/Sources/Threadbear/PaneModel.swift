@@ -242,12 +242,22 @@ extension AppModel {
         if entry.isFolder { return browseFolder(entry.path, from: memory, showing: current, in: thread) }
         let back = backStack(of: current, leaving: memory)
         if thread.isRemote {
-            return openRemoteFile(URL(fileURLWithPath: entry.path), .panel, in: thread, title: entry.name, back: back)
+            return openRemoteFile(URL(fileURLWithPath: entry.path), .panel, in: thread, title: entry.name, back: back, from: current.from)
         }
         if entry.isPackage || FileLinkAction.opensInItsApp(entry.path) { return openExternally(URL(fileURLWithPath: entry.path)) }
         var next = PanePreview(target: .file(entry.path), title: entry.name, from: current.from)
         next.back = back
         show(next, in: thread.id)
+    }
+
+    /// What the rail's Files panel shows while nothing's open over it: the
+    /// thread's folder, not stored in `panePreview`, so it's there for
+    /// every thread. Another Mac's folder says whose it is, as a folder
+    /// link there does.
+    func filesPanelPreview(for thread: ThreadSummary) -> PanePreview {
+        var preview = PanePreview(target: .folder(thread.cwd), title: "Files", from: .panel(BuiltinPanels.files))
+        if thread.isRemote { preview.away = runnerName(of: thread) ?? "another Mac" }
+        return preview
     }
 
     private func backStack(of current: PanePreview, leaving memory: FolderMemory) -> [PanePreview] {

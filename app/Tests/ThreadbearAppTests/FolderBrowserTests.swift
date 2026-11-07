@@ -328,6 +328,24 @@ final class FolderBrowserTests: XCTestCase {
         XCTAssertEqual(app.panePreview[thread.id]?.from, files)
     }
 
+    /// Another Mac's thread: its Files panel says whose folder it is, and a
+    /// file opened from it is fetched over Files too, not over whichever
+    /// section the thread would pick.
+    func testTheFilesPanelOnAnotherMac() {
+        let app = AppModel()
+        var thread = thread()
+        thread.runnerId = "bruce"
+        let shown = app.filesPanelPreview(for: thread)
+        XCTAssertEqual(shown.folderPath, "/tmp")
+        XCTAssertNotNil(shown.away)
+        XCTAssertNil(app.filesPanelPreview(for: self.thread()).away, "this Mac's own")
+
+        let notes = FolderEntry(name: "notes.md", path: "/tmp/notes.md", isFolder: false)
+        app.openFromFolder(notes, from: FolderMemory(selected: [notes.path]), showing: shown, in: thread)
+        XCTAssertEqual(app.panePreview[thread.id]?.from, .panel(BuiltinPanels.files))
+        XCTAssertEqual(app.panePreview[thread.id]?.back.last?.folderPath, "/tmp", "Back is the folder")
+    }
+
     /// A file opened from outside the browser has only the section behind it.
     func testALinkFromOutsideStartsAfresh() {
         let app = AppModel()

@@ -131,8 +131,10 @@ extension AppModel {
     /// it's here. The pane shows it loading, then the copy; a failure says
     /// so there, or in the banner for the other ways of opening it. A
     /// plain click (`automatic`) previews it in the pane whatever it is:
-    /// a copy opened in an editor would look like the real file.
-    func openRemoteFile(_ url: URL, _ action: FileLinkAction, in thread: ThreadSummary, title: String? = nil, back: [PanePreview] = []) {
+    /// a copy opened in an editor would look like the real file. `from` is
+    /// the section it opens over, when that isn't the one the thread
+    /// would pick (the rail's Files panel).
+    func openRemoteFile(_ url: URL, _ action: FileLinkAction, in thread: ThreadSummary, title: String? = nil, back: [PanePreview] = [], from: PaneSection? = nil) {
         let path = url.path
         let name = runnerName(of: thread) ?? "another Mac"
         let title = title ?? (path as NSString).lastPathComponent
@@ -140,7 +142,7 @@ extension AppModel {
         case .panel, .automatic:
             // The pane belongs to a thread; on a project page there's none.
             guard openProjectId == nil else { return openRemoteFile(url, .app, in: thread, title: title) }
-            var preview = PanePreview(target: .remote(path: path, failed: nil), title: title, from: paneSection(for: thread))
+            var preview = PanePreview(target: .remote(path: path, failed: nil), title: title, from: from ?? paneSection(for: thread))
             preview.away = name
             preview.back = back
             show(preview, in: thread.id)

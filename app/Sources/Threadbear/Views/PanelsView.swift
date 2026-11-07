@@ -47,7 +47,7 @@ struct DockPane: View {
                     case .panel(BuiltinPanels.files):
                         // The thread's folder, browsed as a folder link is:
                         // a file opens over it, Back comes back.
-                        PreviewBody(thread: thread, preview: PanePreview(target: .folder(thread.cwd), title: "Files", from: section))
+                        PreviewBody(thread: thread, preview: app.filesPanelPreview(for: thread))
                             .id(thread.id)
                     case .panel(let id):
                         if let panel = thread.panels.first(where: { $0.id == id }) {
