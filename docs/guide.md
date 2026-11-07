@@ -505,8 +505,9 @@ there, puts one back.
 Back and Forward (⌘[ and ⌘], in the Go menu) step through the threads and
 pages you've had open, as a browser does. A mouse's side buttons do the same,
 and so does a trackpad swipe, as in Safari: right for Back, left for Forward,
-with an arrow at the window's edge that follows your fingers. A swipe that
-starts mostly up or down is a scroll, so a long thread still scrolls. It
+with an arrow at the window's edge that follows your fingers and turns blue
+once letting go will go. A swipe that starts mostly up or down is a scroll, so
+a long thread still scrolls. It
 follows Swipe between pages in System Settings > Trackpad (two or three
 fingers). Over a thread's row a swipe left still archives it.
 
