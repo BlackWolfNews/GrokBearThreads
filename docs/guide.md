@@ -661,8 +661,15 @@ click one for its page, with its threads, state and notes. The search at
 the top of the Projects page looks through their names, state, goals, notes
 and folders: Return opens the top result and Escape clears it.
 
-A thread gets into a project in one of three ways: the librarian files it
-(below), its agent joins one, or you put it there, from Projects in its
+To start a thread in a project, press New Thread at the top of its page
+(or New thread… by its Threads). The message box opens with the project's
+folder picked and an "In" chip naming the project (its x starts the thread
+outside it instead). The thread is in the project from its first message,
+so its agent starts with the project's goals, state and notes; it shows
+in your Inbox like any other, and under the project's Threads.
+
+A thread also gets into a project when the librarian files it (below),
+when its agent joins one, or when you put it there, from Projects in its
 right-click menu. A thread can be in more than one. Its agent is told a
 little about each project it's in, and gets the panels and Patches from
 the projects' folders. If one is wrong, Take out in its Highlights keeps

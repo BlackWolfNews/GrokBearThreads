@@ -623,6 +623,8 @@ async function dispatch(client, method, p) {
     }
     case 'threads.create': {
       if (!p.text) throw rpcError(-32602, 'text is required');
+      // New Thread on a project's page: every project checked first, as the runner does.
+      const startIn = (p.projectIds ?? []).map((id) => needProject(id));
       const threadId = 'th_' + crypto.randomBytes(6).toString('hex');
       const now = iso();
       // Like the runner: a login named pins the thread; otherwise a pool
@@ -644,7 +646,9 @@ async function dispatch(client, method, p) {
       // `fresh`: started this session, so the librarian files it after its first turn
       // (librarianFiles). The demo fixtures never are, so nothing they show changes.
       threads.set(threadId, { summary, events: [], inProgress: new Map(), timers: [], fresh: true, ...(client.as ? { runnerId: client.as } : {}) });
+      for (const project of startIn) join(summary, project, 'mike', true);
       broadcastSummary(threadId);
+      if (startIn.length) broadcastProjects();
       setTimeout(() => fakeTurn(threadId, p.text, p.images ?? []), 10);
       return { thread: summary };
     }

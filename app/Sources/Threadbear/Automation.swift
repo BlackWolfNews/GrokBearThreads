@@ -1000,7 +1000,8 @@ enum Automation {
             return "ok"
         case "project":
             // {"cmd":"project","id":"p_…"} opens a project's page in the
-            // detail area; {"cmd":"project","close":true} closes it.
+            // detail area; {"cmd":"project","close":true} closes it, and
+            // "newThread" true is the page's New Thread button.
             if c["close"] as? Bool == true {
                 app.openProjectId = nil
                 return "ok"
@@ -1010,6 +1011,11 @@ enum Automation {
             }
             guard app.project(id) != nil else { return "error no project \(id); there are \(app.projects.map(\.id).joined(separator: ", "))" }
             app.openProjectPage(id)
+            if c["newThread"] as? Bool == true, let project = app.project(id) {
+                app.newThread(in: project)
+                try? await Task.sleep(for: .milliseconds(200))
+                return "ok new thread in \(app.newThreadProjectId ?? "no project"), folder \(app.newThreadCwd ?? "default")"
+            }
             try? await Task.sleep(for: .milliseconds(200))
             return "ok"
         case "close-schedule":

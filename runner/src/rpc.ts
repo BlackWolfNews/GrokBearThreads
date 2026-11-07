@@ -549,6 +549,7 @@ export class RpcServer {
           // agent's create_thread), so any client may ask for it.
           ...(p.confined === true ? { confined: true } : {}),
           ...optStartedBy(p),
+          ...optProjectIds(p),
         });
         return { thread: res.thread, turnId: res.turnId };
       }
@@ -893,4 +894,12 @@ function optImages(p: Record<string, unknown>): ImageRef[] | undefined {
     if (!x || typeof x !== 'object' || typeof (x as ImageRef).path !== 'string') throw bad('each image needs a path');
     return x as ImageRef;
   });
+}
+
+// threads.create's projectIds: project ids, the thread joining each before its first turn.
+function optProjectIds(p: Record<string, unknown>): { projectIds?: string[] } {
+  const v = p.projectIds;
+  if (v === undefined || v === null) return {};
+  if (!Array.isArray(v) || v.some((x) => typeof x !== 'string' || !x)) throw bad('projectIds must be a list of project ids');
+  return v.length ? { projectIds: v as string[] } : {};
 }

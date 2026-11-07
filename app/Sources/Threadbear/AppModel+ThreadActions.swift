@@ -9,6 +9,7 @@ extension AppModel {
     // MARK: Thread actions
 
     func newThread() {
+        newThreadProjectId = nil
         selection = nil
         openProjectId = nil
         showsProjectsHome = false
@@ -17,6 +18,21 @@ extension AppModel {
         stopShowingSubagent()
         sidebarMode = .inbox
         focusComposer("new")
+    }
+
+    /// New Thread on a project's page: the new-thread box, in the project's
+    /// first folder (the default folder if it has none), the thread joining
+    /// the project as it's made. The folder can still be changed there.
+    func newThread(in project: Project) {
+        newThread()
+        guard selection == nil else { return }
+        newThreadProjectId = project.id
+        if let folder = project.folders.first { newThreadCwd = folder }
+        // A project is this Mac's runner's.
+        if newThreadRunnerId != nil {
+            newThreadRunnerPicked = true
+            newThreadRunnerId = nil
+        }
     }
 
     /// Collapses the thread's card of asks, or brings it back. The cursor
@@ -258,7 +274,8 @@ extension AppModel {
             }
         } else {
             let account = newThreadAccountId
-            let request = newThreadRequest(text: trimmed, images: draft.images)
+            var request = newThreadRequest(text: trimmed, images: draft.images)
+            if let project = newThreadProjectId, projects.contains(where: { $0.id == project }) { request.projectIds = [project] }
             creatingThread = true
             Task {
                 defer { creatingThread = false }
@@ -274,6 +291,7 @@ extension AppModel {
                     // from the defaults again, on whichever account then
                     // has the most room. The model and effort stick.
                     newThreadCwd = nil
+                    newThreadProjectId = nil
                     newThreadPermission = .full
                     newThreadAccount = nil
                     newThreadPool = nil

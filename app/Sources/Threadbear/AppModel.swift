@@ -307,6 +307,10 @@ final class AppModel {
     /// across launches; the folder and "Ask before edits" are for one
     /// thread and go back to the defaults after it starts.
     var newThreadCwd: String?
+    /// The project a new thread starts in (New Thread on a project's page):
+    /// it joins before its first turn, so the agent has the project's goals
+    /// from its first message. Cleared by a plain New Thread and once sent.
+    var newThreadProjectId: String?
     /// The runner the next new thread starts on ("Runs on", the
     /// composer's machine chip): nil for this Mac, or another runner's id.
     /// Its folder, account, model and effort are then that runner's
