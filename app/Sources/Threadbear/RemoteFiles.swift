@@ -171,7 +171,9 @@ extension AppModel {
                 panePreview[thread.id] = current
             }
         case .app, .finder:
-            Task {
+            // It can take a while over the network, and a menu or a row has
+            // nothing to spin. A second click on the same file does nothing.
+            whileBusy(BusyKey.fetching(path, runner: thread.runnerId, action: action), note: "Getting \(title) from \(name)…") { [self] in
                 do {
                     let copy = try await remoteCopy(path, in: thread)
                     if action == .finder {

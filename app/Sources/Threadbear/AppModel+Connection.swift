@@ -218,7 +218,7 @@ extension AppModel {
     }
 
     func startRunner() {
-        Task {
+        whileBusy(BusyKey.startRunner) { [self] in
             let result = await RunnerLauncher.start()
             if let failure = result { errorMessage = failure }
             try? await Task.sleep(for: .milliseconds(600))

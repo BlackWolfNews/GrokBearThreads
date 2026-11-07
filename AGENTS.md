@@ -109,8 +109,13 @@ and ask the user what they use instead, rather than trying to reach them.
   confirms or rolls back, with the error) or shows a spinner and stops
   taking clicks until it lands. Never leave a button that looks idle and
   can be clicked twice. Mike, 6 Nov, after Start it on a cloud thread's
-  card sat for a second with nothing happening:
-  `ThreadSession.answering` and `Spinner` in Cells.swift are the pattern.
+  card sat for a second with nothing happening. The pieces:
+  `whileBusy(BusyKey...)` and `isBusy` (`AppModel+Busy.swift`) with `.busy(_:)`
+  on the control, `note:` for a click from a menu (it shows in the banner),
+  a guess with rollback like `update` and `updateProject`, and in the
+  transcript `ThreadSession.answering` with `Spinner` in Cells.swift.
+  `EveryClickShowsTests` fails on a new call that changes something on the
+  runner until you've done that and listed where it shows.
 - Every control gets a tooltip, with `.tip("…")` (SwiftUI) or `setTip` (AppKit).
   `.help` and `toolTip` never show in this app; TipsTests fails on them.
 - Transcript files and fixtures made from real sessions are private: keep them

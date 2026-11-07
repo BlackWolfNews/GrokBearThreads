@@ -39,12 +39,12 @@ struct DevicesSettings: View {
                                 ask: "put the iPhone app on your phone, or change how the mirror is set up.") {
                     LabeledContent("iPhone") {
                         Button("Show the code…") { pairPhone() }
-                            .disabled(pairing)
+                            .busy(pairing)
                             .tip("A code to scan with the Threadbear iPhone app. It pairs the phone with your threads for 90 days.")
                     }
                     LabeledContent("Website") {
                         Button("Open signed in") { openBrowser() }
-                            .disabled(opening)
+                            .busy(opening)
                             .tip("Opens your Threadbear website in \(DefaultBrowser.current()?.name ?? "your browser"), signed in for 90 days")
                     }
                 }

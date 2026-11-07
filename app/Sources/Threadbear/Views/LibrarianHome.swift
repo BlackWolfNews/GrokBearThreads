@@ -60,6 +60,7 @@ private struct LibrarianSettings: View {
                         .labelsHidden()
                         .toggleStyle(.switch)
                         .controlSize(.small)
+                        .disabled(app.isBusy(BusyKey.pauseLibrarian))
                         .tip(status.paused ? "Paused: what's queued waits. Turn it on to carry on" : "Turn it off to pause; what's queued waits")
                 }
                 if let settings = app.runnerSettings, settings.models.poolSupported {

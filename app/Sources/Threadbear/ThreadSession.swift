@@ -676,18 +676,32 @@ final class ThreadSession {
 
     // MARK: Actions
 
-    /// Ticks an ask on the open card. The runner's thread.updated and
-    /// asks.ticked event bring the change back.
+    /// Ticks an ask on the open card. The box changes at once and goes back
+    /// if the runner refuses. A click while one's on its way does nothing, so
+    /// a double click doesn't undo itself, and two can't overlap: if both
+    /// failed, the second's rollback would leave the first's guess showing.
+    /// The runner's thread.updated and asks.ticked event bring the change back.
     func tickAsk(asksSeq: Int, index: Int, ticked: Bool) {
-        guard let client = app?.client(for: threadId) else { return }
+        guard let app, let client = app.client(for: threadId) else { return }
         let threadId = threadId
-        Task {
+        let key = BusyKey.tickAsk(threadId, asksSeq: asksSeq, index: index)
+        guard !app.isBusy(key) else { return }
+        if askShown(asksSeq: asksSeq, index: index) != nil { app.threads[threadId]?.asks[index].ticked = ticked }
+        app.whileBusy(key) { [self] in
             do {
                 _ = try await client.tickAsk(threadId: threadId, asksSeq: asksSeq, index: index, ticked: ticked)
             } catch {
-                app?.show(error)
+                if askShown(asksSeq: asksSeq, index: index) == ticked { app.threads[threadId]?.asks[index].ticked = !ticked }
+                app.show(error)
             }
         }
+    }
+
+    /// Whether the ask is ticked now, or nil if that card has gone: a newer
+    /// card's ask at the same place mustn't be changed.
+    private func askShown(asksSeq: Int, index: Int) -> Bool? {
+        guard let thread = app?.threads[threadId], thread.asksSeq == asksSeq, thread.asks.indices.contains(index) else { return nil }
+        return thread.asks[index].ticked
     }
 
     /// Requests being read for their cards (docs/protocol.md, "Asking
@@ -781,18 +795,28 @@ final class ThreadSession {
     }
 
     /// Go ahead on a "Plan first" plan card (docs/protocol.md).
+    /// The card spins like an approval's until the answer lands.
     func approvePlan(itemId: String) {
-        guard let client = app?.client(for: threadId) else { return }
+        guard !answering.contains(itemId), let client = app?.client(for: threadId) else { return }
         let threadId = threadId
         ActivityRecorder.shared.answered(threadId: threadId, decision: .allow)
+        startAnswering(itemId)
         Task {
             do {
                 try await client.approvePlan(threadId: threadId, itemId: itemId)
+                // The card turns into its approved state by itself. Let go
+                // a little later in case that never comes, so it can be
+                // pressed again.
+                try? await Task.sleep(for: Self.planLetGo)
             } catch {
                 app?.show(error)
             }
+            self.stopAnswering(itemId)
         }
     }
+
+    /// A var only so tests can make it short.
+    static var planLetGo: Duration = .seconds(5)
 
     /// Sends a secret card's answer (docs/protocol.md, "Secrets") to the
     /// thread's own runner, this Mac's or another's. Nil once it's gone,
@@ -814,23 +838,34 @@ final class ThreadSession {
         }
     }
 
-    /// Copies the whole thread, fetching any older pages first.
+    /// Copies the whole thread, fetching any older pages first, which takes
+    /// a while on a long one: the banner says so until it's on the clipboard.
+    /// A page that can't be read leaves the clipboard alone and says why,
+    /// rather than copying part of the thread as if it were all of it.
     func copyTranscript() {
-        guard let client = app?.client(for: threadId) else { return }
+        guard let app, let client = app.client(for: threadId) else { return }
         let threadId = threadId
-        let title = app?.threads[threadId]?.title ?? ""
-        var events = feed.model.events
-        Task {
+        let title = app.threads[threadId]?.title ?? ""
+        let newest = feed.model.events
+        app.whileBusy(BusyKey.copying(threadId), note: "Copying the transcript…") {
+            var events = newest
             var first = events.first?.seq ?? 0
-            while first > 1 {
-                guard let page = try? await client.events(threadId: threadId, beforeSeq: first, limit: 2000), !page.events.isEmpty else { break }
-                events = page.events + events
-                first = page.events.first?.seq ?? 1
+            do {
+                while first > 1 {
+                    let page = try await client.events(threadId: threadId, beforeSeq: first, limit: 2000)
+                    guard !page.events.isEmpty else { break }
+                    events = page.events + events
+                    first = page.events.first?.seq ?? 1
+                }
+            } catch {
+                app.show(error)
+                return
             }
             let all = events
             // Items, not rows: nothing folded in a group is left out.
             let text = await Task.detached { MarkdownExport.transcript(title: title, rows: TranscriptModel(events: all).items) }.value
-            app?.copyToPasteboard(text)
+            app.copyToPasteboard(text)
+            app.flashDone("Transcript copied")
         }
     }
 }

@@ -465,22 +465,50 @@ extension AppModel {
         drafts[key] = restored
     }
 
-    func interrupt() {
-        guard let threadId = selection, let client = client(for: threadId) else { return }
-        Task { try? await client.interrupt(threadId: threadId) }
+    /// Stops a thread's turn (the open one unless it's told which: a panel's
+    /// composer can show another). The turn ends a moment after the runner
+    /// takes the stop, so the button keeps its spinner until the thread stops
+    /// being busy. `interruptWait` is a little past the runner's own limit
+    /// (INTERRUPT_GRACE_MS), and only then can it be pressed again.
+    func interrupt(_ threadId: String? = nil) {
+        guard let threadId = threadId ?? selection else { return }
+        guard let client = client(for: threadId) else {
+            let runner = threads[threadId].flatMap { runnerName(of: $0) } ?? "the runner"
+            return showConnectionError("Not connected to \(runner), so it wasn't stopped.")
+        }
+        whileBusy(BusyKey.stop(threadId)) { [self] in
+            do {
+                try await client.interrupt(threadId: threadId)
+                let deadline = ContinuousClock.now + Self.interruptWait
+                while threads[threadId]?.status.isBusy == true, ContinuousClock.now < deadline {
+                    try? await Task.sleep(for: .milliseconds(100))
+                }
+            } catch {
+                show(error)
+            }
+        }
     }
+
+    /// A var only so tests can make it short.
+    static var interruptWait: Duration = .seconds(12)
 
     /// Changes a thread on the runner. What can safely be guessed (archived,
     /// snoozed, permission, model, effort) shows at once
     /// (`ThreadUpdate.applied`), so the click does something however slow
     /// the runner is; its reply replaces the guess, and a failure puts back
-    /// what was there unless something else has changed it since.
+    /// what was there unless something else has changed it since. What
+    /// can't be guessed (a folder, login or pool) has the composer's chip
+    /// spin until the reply (`BusyKey.moving`).
     func update(_ threadId: String, _ update: ThreadUpdate) {
         guard isRemote(threadId) || client != nil else { return }
         let before = threads[threadId]
         let guess = before.map { update.applied(to: $0) }
         if let guess, guess != before { threads[threadId] = guess }
+        let moving = update.cwd != nil ? BusyKey.movingFolder(threadId)
+            : update.accountId != nil || update.poolId != nil ? BusyKey.moving(threadId) : nil
+        if let moving { beginBusy(moving) }
         Task {
+            defer { if let moving { endBusy(moving) } }
             do {
                 // Made as a restarting runner lets go of its idle threads,
                 // as a send can be: Mike saw "Thread not found" picking an
@@ -659,15 +687,20 @@ extension AppModel {
     /// Hibernate until when Mike said, in his words. The runner puts it
     /// away straight off (its row says Thinking… until the time is worked
     /// out); if the model can't say, it comes back and the banner says why.
+    /// The row goes at once, and comes back if the runner refuses.
     func hibernateWhen(_ threadId: String, said: String) {
         guard isRemote(threadId) || client != nil else { return }
         let next = neighbour(of: threadId)
+        let before = threads[threadId]
+        let guess = before?.hibernating(said: said)
+        if let guess { threads[threadId] = guess }
         if selection == threadId { select(next) }
         Task {
             do {
                 let client = try await rowClient(for: threadId)
                 threads[threadId] = try await client.hibernateWhen(threadId: threadId, said: said)
             } catch {
+                if let before, threads[threadId] == guess { threads[threadId] = before }
                 show(error)
             }
         }
@@ -887,7 +920,7 @@ extension AppModel {
         }
     }
 
-    private func showConnectionError(_ message: String) {
+    func showConnectionError(_ message: String) {
         errorMessage = message
         connectionErrorMessage = message
     }

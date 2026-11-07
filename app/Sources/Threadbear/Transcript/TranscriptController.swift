@@ -861,7 +861,7 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// Lays out an approval or question card again as its answer goes
     /// (ThreadSession.answering). Its height doesn't change.
     func refreshCard(_ approvalId: String) {
-        for id in ["ap:" + approvalId, "q:" + approvalId] {
+        for id in ["ap:" + approvalId, "q:" + approvalId, "pl:" + approvalId] {
             if let index = session?.displayIndex(of: id), let row = row(at: index) { refreshCell(at: index, row: row) }
         }
     }

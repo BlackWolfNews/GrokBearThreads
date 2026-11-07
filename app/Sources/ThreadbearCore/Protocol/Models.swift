@@ -1482,6 +1482,18 @@ public struct WaitingOn: Sendable, Hashable, Codable {
     enum CodingKeys: String, CodingKey { case threadId, title, until, done }
 }
 
+extension ThreadSummary {
+    /// The thread as it will be once "Wake when…" has landed: put away, its
+    /// row saying Thinking… until the runner has worked out when.
+    public func hibernating(said: String) -> ThreadSummary {
+        var thread = self
+        thread.snoozedUntil = .distantFuture
+        thread.snoozedUntilRestart = false
+        thread.wakeWhen = WakeWhen(said: said, pending: true)
+        return thread
+    }
+}
+
 public struct WakeWhen: Sendable, Hashable, Codable {
     public var said: String
     public var topic: String?

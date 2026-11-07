@@ -81,6 +81,7 @@ private struct IconButton: View {
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
+        .busy(app.isBusy(BusyKey.projectIcon(project.id)))
         .onHover { hovering = $0 }
         .tip(Self.help(project))
     }
@@ -293,6 +294,7 @@ private struct TasksSection: View {
                     HStack(spacing: zoomed(10)) {
                         Button { app.refreshProjectTasks(project.id, force: true) } label: { Image(systemName: "arrow.clockwise") }
                             .buttonStyle(.borderless)
+                            .busy(app.isBusy(BusyKey.projectTasks(project.id)))
                             .tip("Read the board from Notion again")
                         Button { if let url = URL(string: project.tasks?.url ?? notion) { NSWorkspace.shared.open(url) } } label: { Image(systemName: "arrow.up.forward.square") }
                             .buttonStyle(.borderless)

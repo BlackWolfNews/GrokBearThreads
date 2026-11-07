@@ -415,7 +415,7 @@ final class PendingSendTests: XCTestCase {
 
 /// Holds every request until the test answers or fails it, like a runner
 /// whose event loop is stalled.
-private final class HoldingTransport: RPCTransport, @unchecked Sendable {
+final class HoldingTransport: RPCTransport, @unchecked Sendable {
     private let lock = NSLock()
     private var inbox: [Data] = []
     private var waiter: CheckedContinuation<Data, Error>?

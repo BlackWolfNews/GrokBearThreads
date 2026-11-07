@@ -150,13 +150,13 @@ struct ThreadbearApp: App {
                     .disabled(app.selection == nil)
                     Button("Stop", systemImage: "stop.circle") { app.interrupt() }
                         .shortcut(.stop)
-                        .disabled(app.selectedThread?.status.isBusy != true)
+                        .disabled(app.selectedThread?.status.isBusy != true || app.selection.map { app.isBusy(BusyKey.stop($0)) } == true)
                     Divider()
                     Button("Copy Transcript as Markdown", systemImage: "doc.plaintext") {
                         if let id = app.selection { app.session(for: id).copyTranscript() }
                     }
                     .shortcut(.copyTranscript)
-                    .disabled(app.selection == nil)
+                    .disabled(app.selection.map { app.isBusy(BusyKey.copying($0)) } ?? true)
                     Divider()
                     // ⌘1 to ⌘4 in the activity bar's order, as VS Code numbers
                     // its views. Hibernating and Archive are sections of the

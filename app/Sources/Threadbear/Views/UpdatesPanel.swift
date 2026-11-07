@@ -163,6 +163,9 @@ struct UpdatesPanel: View {
                                     .tip("Start a thread that merges Mike's release into your main. It asks before it lands.")
                                 Button("Let's Discuss") { app.bringInUpstream(upstream, discuss: true) }
                                     .tip("Start a thread that talks the release through against your own changes first, and changes nothing until you say")
+                                if app.creatingThread {
+                                    SpinnerMark(color: .secondaryLabelColor).frame(width: zoomed(11), height: zoomed(11))
+                                }
                             }
                             .disabled(app.creatingThread)
                         }
@@ -219,6 +222,7 @@ struct CliSection: View {
                     Spacer()
                     Button("Check now") { app.checkClis() }
                         .buttonStyle(.borderless)
+                        .busy(app.isBusy(BusyKey.checkClis))
                         .tip("Look for new versions of the CLIs now")
                         .font(.system(size: zoomed(11)))
                 }
@@ -242,6 +246,7 @@ private struct CliRow: View {
                 if let title = CliText.updateTitle(cli) {
                     Button(title) { app.updateCli(cli.provider, force: cli.status == "held") }
                         .controlSize(.small)
+                        .busy(app.isBusy(BusyKey.updateCli(cli.provider)))
                         .tip(cli.status == "held" ? "Install it even though the check held it back" : "Install the new version now")
                 }
             }
@@ -278,11 +283,14 @@ private struct CliRow: View {
                 .controlSize(.small)
                 .fixedSize()
                 .foregroundStyle(.secondary)
+                // It already says the new setting (`setCliPolicy`).
+                .disabled(app.isBusy(BusyKey.cliPolicy(cli.provider)))
                 .tip("Whether new versions install by themselves")
                 Spacer()
                 if let back = CliText.goBackTitle(cli), let previous = cli.previousVersion {
                     Button(back) { app.updateCli(cli.provider, version: previous) }
                         .buttonStyle(.borderless)
+                        .busy(app.isBusy(BusyKey.updateCli(cli.provider)))
                         .tip("Go back to the version you had before the last update")
                         .font(.system(size: zoomed(11)))
                 }

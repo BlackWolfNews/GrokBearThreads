@@ -275,6 +275,7 @@ struct ThreadMenuButton: View {
                 ThreadMenu(thread: thread)
                 Divider()
                 Button("Copy transcript as Markdown", systemImage: "doc.plaintext") { session?.copyTranscript() }
+                    .disabled(app.isBusy(BusyKey.copying(thread.id)))
                 // So Mike can point an agent at this thread (`tb show <id>`).
                 Button("Copy thread id", systemImage: "number") { app.copyToPasteboard(thread.id) }
                 // Only while there's a website to go to, as with the share
@@ -771,6 +772,7 @@ struct ConnectionBanner: View {
             Spacer()
             if banner.showStart {
                 Button("Start runner") { app.startRunner() }
+                    .busy(app.isBusy(BusyKey.startRunner))
                     .tip("Start the runner's background service")
             }
             if banner.showRetry {
@@ -812,6 +814,7 @@ struct LimitBanner: View {
                     Button(waiting ? title.replacingOccurrences(of: "Switch to", with: "Pin to") : title) {
                         app.switchAccount(thread.id, to: target.id)
                     }
+                    .busy(app.isBusy(BusyKey.moving(thread.id)))
                     .tip("Carry on this thread on that account, from where it is")
                 }
             }

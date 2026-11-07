@@ -304,9 +304,11 @@ struct ReviewWindow: View {
                     Spacer()
                     if session.conflict && session.review.isPending {
                         Button("Save my draft") { Task { await session.keepMyDraft() } }
+                            .busy(session.saving)
                             .tip("Keep what you have here, over the copy that changed elsewhere")
                     } else if session.review.isPending {
                         Button("Try saving again") { Task { await session.saveNow() } }
+                            .busy(session.saving)
                             .tip("Save the draft to the runner again")
                     }
                 }.padding(12).background(Color.orange.opacity(0.1))

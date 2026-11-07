@@ -1517,6 +1517,8 @@ final class PlanCardCell: RowCellView {
     let goAhead = PillButton(pill: "Go ahead", prominent: true)
     let sendBack = PillButton(pill: "Send back…")
     let toggle = PointerButton()
+    /// Go ahead is on its way (ThreadSession.answering).
+    let spinner = Spinner.make()
     private var itemId = ""
 
     override init(frame frameRect: NSRect) {
@@ -1531,7 +1533,7 @@ final class PlanCardCell: RowCellView {
         status.textColor = .secondaryLabelColor
         status.alignment = .right
         status.lineBreakMode = .byTruncatingTail
-        [card, titleView, status, info, bodyView, goAhead, sendBack, toggle].forEach(addSubview)
+        [card, titleView, status, info, bodyView, goAhead, sendBack, toggle, spinner].forEach(addSubview)
         goAhead.setTip("Approve the plan and let it start")
         sendBack.setTip("Tell it what to change; it plans again")
     }
@@ -1570,13 +1572,17 @@ final class PlanCardCell: RowCellView {
         y += render.detailSize.height + zoomed(12)
 
         let waiting = plan.state == .waiting
+        let busy = waiting && delegate?.isAnswering(plan.itemId) == true
         var buttonX = left
         for button in [goAhead, sendBack] {
             button.isHidden = !waiting
             guard waiting else { continue }
+            button.isEnabled = !busy
             button.frame = NSRect(x: buttonX, y: y, width: max(zoomed(76), button.fittingWidth), height: RowMetrics.buttonHeight)
             buttonX = button.frame.maxX + zoomed(8)
         }
+        Spinner.show(spinner, busy, at: NSPoint(x: buttonX + zoomed(2), y: y + RowMetrics.buttonHeight / 2))
+        if busy { buttonX += zoomed(22) }
         let clipped = PlanCardText.preview(PlanCardText.split(plan.text).body).clipped
         let title: String? = !plan.entries.isEmpty ? (expanded ? "Hide plan" : "Show plan") : clipped ? (expanded ? "Show less" : "Show full plan") : nil
         toggle.isHidden = title == nil

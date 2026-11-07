@@ -39,28 +39,39 @@ extension AppModel {
 
     /// The usage popover's buttons. Each returns at once; progress comes
     /// through `clis.updated`.
-    func checkClis() { cliCall("clis.check") { try await $0.checkClis() } }
+    /// The button spins until the runner takes it.
+    func checkClis() { cliCall(BusyKey.checkClis) { try await $0.checkClis() } }
 
     func updateCli(_ provider: String, version: String? = nil, force: Bool = false) {
-        cliCall("clis.update") { try await $0.updateCli(provider: provider, version: version, force: force) }
+        cliCall(BusyKey.updateCli(provider)) { try await $0.updateCli(provider: provider, version: version, force: force) }
     }
 
+    /// The menu says the new setting at once, and goes back if it's refused.
     func setCliPolicy(_ provider: String, _ policy: String) {
-        cliCall("clis.setPolicy") { try await $0.setCliPolicy(provider: provider, policy: policy) }
+        guard let index = clis.firstIndex(where: { $0.provider == provider }) else {
+            return cliCall(BusyKey.cliPolicy(provider)) { try await $0.setCliPolicy(provider: provider, policy: policy) }
+        }
+        let before = clis[index].policy
+        clis[index].policy = policy
+        cliCall(BusyKey.cliPolicy(provider), failed: { [self] in
+            if let now = clis.firstIndex(where: { $0.provider == provider }), clis[now].policy == policy { clis[now].policy = before }
+        }) { try await $0.setCliPolicy(provider: provider, policy: policy) }
     }
 
-    private func cliCall(_ method: String, _ call: @escaping (RPCClient) async throws -> [CliStatus]) {
-        guard let client else { return }
-        Task {
+    private func cliCall(_ key: String, failed: @escaping @MainActor () -> Void = {}, _ call: @escaping (RPCClient) async throws -> [CliStatus]) {
+        guard let client else { return failed() }
+        guard whileBusy(key, { [self] in
             do {
                 clis = try await call(client)
                 clisSupported = true
             } catch RPCError.server(let code, _) where code == RPCError.methodNotFound {
+                failed()
                 clisSupported = false
             } catch {
+                failed()
                 show(error)
             }
-        }
+        }) else { return failed() }
     }
 
     /// An update under way, or one that failed and hasn't been dismissed,

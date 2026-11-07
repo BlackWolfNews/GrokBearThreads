@@ -577,6 +577,14 @@ final class AppModel {
     @ObservationIgnored var highlightAutoShow = HighlightAutoShow()
     /// The agents' show_panel requests shown this run (PanelRequestModel).
     @ObservationIgnored var panelRequestGate = PanelRequestGate()
+    /// What's waiting on the runner, by `BusyKey`, with how many of each
+    /// (AppModel+Busy.swift).
+    var busyKeys: [String: Int] = [:]
+    /// What those are doing, in words, for the ones clicked somewhere that
+    /// can't show a spinner: the newest shows in the banner.
+    var busyNotes: [BusyNote] = []
+    /// A moment's "that's done", in the same place.
+    var doneNote: String?
     /// Actions whose command is running, as "<threadId>/<actionId>", so
     /// the chip shows it and a second click doesn't start another.
     var runningActions: Set<String> = []

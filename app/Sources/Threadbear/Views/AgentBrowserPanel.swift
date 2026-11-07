@@ -102,6 +102,12 @@ final class AgentBrowserModel: ObservableObject {
     @Published private(set) var port = 0
     @Published private(set) var profiles: [BrowserProfile] = []
     @Published private(set) var error: String?
+    /// Requests whose buttons are waiting for BrowserBear's answer, by
+    /// `pendingKey`. It can take a while, as Chrome has to do the thing.
+    @Published private(set) var pending: Set<String> = []
+    /// The request each key is waiting on, so an old request's timeout
+    /// can't clear a newer one's spinner.
+    private var pendingRequests: [String: UUID] = [:]
     private var agentTabs: [AgentTab] = []
     private var profileTabs: [AgentTab] = []
     private var pipe: BrowserBearPipe?
@@ -227,21 +233,47 @@ final class AgentBrowserModel: ObservableObject {
         })
     }
 
-    private func action(_ cmd: String, _ args: [String: Any], thread: String? = nil, then: (() -> Void)? = nil) {
+    static func pendingKey(_ cmd: String, _ tab: AgentTab) -> String { "\(cmd)/\(tab.tabId)" }
+    static let openingKey = "open"
+
+    /// `key` is what a button watches, in `pending`, until the answer comes.
+    private func action(_ cmd: String, _ args: [String: Any], thread: String? = nil, key: String? = nil, then: (() -> Void)? = nil) {
         requestError = nil
         error = nil
-        pipe?.request(cmd, args, thread: thread, failure: { [weak self] message in
-            DispatchQueue.main.async { self?.requestError = message; self?.error = message }
-        }, reply: { result in
-            guard result["_error"] == nil else { return }
-            DispatchQueue.main.async { then?() }
+        guard let pipe else { return }
+        let request = UUID()
+        if let key {
+            pending.insert(key)
+            pendingRequests[key] = request
+            // A connection that drops takes its answers with it, and the pipe
+            // gives up on any by 45 seconds, so the button comes back by then.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 46) { [weak self] in self?.answered(key, request) }
+        }
+        pipe.request(cmd, args, thread: thread, failure: { [weak self] message in
+            DispatchQueue.main.async {
+                self?.requestError = message
+                self?.error = message
+                if let key { self?.answered(key, request) }
+            }
+        }, reply: { [weak self] result in
+            let failed = result["_error"] != nil
+            DispatchQueue.main.async {
+                if let key { self?.answered(key, request) }
+                if !failed { then?() }
+            }
         })
     }
 
-    func done(_ tab: AgentTab) { action("markDone", ["tab": tab.tabId]) }
+    private func answered(_ key: String, _ request: UUID) {
+        guard pendingRequests[key] == request else { return }
+        pendingRequests[key] = nil
+        pending.remove(key)
+    }
+
+    func done(_ tab: AgentTab) { action("markDone", ["tab": tab.tabId], key: Self.pendingKey("markDone", tab)) }
 
     func resume(_ tab: AgentTab, thread: String, then: (() -> Void)? = nil) {
-        action("panelResume", ["tab": tab.tabId, "profile": tab.profile ?? "agent-chrome"], thread: thread, then: then)
+        action("panelResume", ["tab": tab.tabId, "profile": tab.profile ?? "agent-chrome"], thread: thread, key: Self.pendingKey("panelResume", tab), then: then)
     }
 
     func showInChrome(_ tab: AgentTab, thread: String) {
@@ -250,7 +282,7 @@ final class AgentBrowserModel: ObservableObject {
 
     /// The profile is an exact connected identity, never a partial display name.
     func open(_ url: String, thread: String, profile: String) {
-        action("open", ["profile": profile, "url": url], thread: thread)
+        action("open", ["profile": profile, "url": url], thread: thread, key: Self.openingKey)
     }
 
 }
@@ -297,6 +329,7 @@ struct AgentBrowserPanel: View {
                         surface.connected = false
                         model.resume(tab, thread: thread.id)
                     }
+                    .busy(model.pending.contains(AgentBrowserModel.pendingKey("panelResume", tab)))
                     .tip("Display this tab here using its existing Chrome sign-in")
                 }
             } else if let tab, tab.bridge == true || model.port != 0 {
@@ -424,7 +457,11 @@ struct AgentBrowserPanel: View {
             }
             .menuStyle(.borderlessButton)
             .fixedSize(horizontal: false, vertical: true)
+            .disabled(model.pending.contains(AgentBrowserModel.openingKey))
             .tip("Open a page in a Chrome profile using its existing sign-ins")
+            if model.pending.contains(AgentBrowserModel.openingKey) {
+                SpinnerMark(color: .secondaryLabelColor).frame(width: zoomed(11), height: zoomed(11))
+            }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, zoomed(10))
@@ -460,6 +497,7 @@ struct AgentBrowserPanel: View {
             Spacer()
             Button("Done") { model.done(tab) }
                 .controlSize(.small)
+                .busy(model.pending.contains(AgentBrowserModel.pendingKey("markDone", tab)))
                 .tip("Tell the agent you've finished here")
         }
         .padding(.horizontal, zoomed(10))

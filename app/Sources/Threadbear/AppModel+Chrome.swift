@@ -67,6 +67,9 @@ extension AppModel {
         let restarting = restart.isRestarting(now: max(now, Date()))
         switch connection {
         case .connected:
+            // Mike's own click comes first: he's looking for it.
+            if let note = busyNotes.last { return Banner(style: .quiet, icon: nil, text: note.text) }
+            if let doneNote { return Banner(style: .quiet, icon: "checkmark", text: doneNote) }
             if restarting {
                 return Banner(style: .quiet, icon: nil, text: "The runner is restarting now.")
             }

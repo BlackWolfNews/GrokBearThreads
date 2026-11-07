@@ -1085,6 +1085,8 @@ struct SidebarButtonRow: View {
     /// The tooltip, if the title alone doesn't say enough.
     var tip: String? = nil
     var active = false
+    /// Its work is on the way: a spinner for the icon, and no more clicks.
+    var busy = false
     let action: () -> Void
     @State private var hovering = false
     @Environment(\.controlActiveState) private var activeState
@@ -1092,10 +1094,16 @@ struct SidebarButtonRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: zoomed(8)) {
-                Image(systemName: icon)
-                    .font(.system(size: TypeScale.sidebarButton))
-                    .foregroundStyle(.secondary)
-                    .frame(width: zoomed(16))
+                Group {
+                    if busy {
+                        SpinnerMark(color: .secondaryLabelColor).frame(width: zoomed(12), height: zoomed(12))
+                    } else {
+                        Image(systemName: icon)
+                            .font(.system(size: TypeScale.sidebarButton))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(width: zoomed(16))
                 Text(title)
                     .font(.system(size: TypeScale.sidebarButton))
                     .foregroundStyle(.primary)
@@ -1109,6 +1117,7 @@ struct SidebarButtonRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(busy)
         .onHover { hovering = $0 }
         .tip(tip ?? title)
     }
@@ -1175,7 +1184,9 @@ struct ThreadProjectsMenu: View {
             }
             if !live.isEmpty { Divider() }
             Button("New project…", systemImage: "plus") { app.newProject(with: thread.id) }
+                .disabled(app.isBusy(BusyKey.newProject))
             Button("Ask the librarian to look", systemImage: "books.vertical") { app.runLibrarian(threadId: thread.id) }
+                .disabled(app.isBusy(BusyKey.runLibrarian(thread.id)))
         }
     }
 }
