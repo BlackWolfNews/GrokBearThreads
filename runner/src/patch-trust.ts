@@ -793,6 +793,7 @@ export function scanModule(src: string, file: string): ModuleScan {
     roles.set(n, role);
     if (n.type === 'TemplateLiteral') roles.set(n.quasis[0], role);
   };
+  let readsBack = false;
   let problem: { start: number; end: number } | undefined;
   const refuse = (n: AstNode) => {
     if (!problem || n.start < problem.start) problem = { start: n.start, end: n.end };
@@ -827,6 +828,9 @@ export function scanModule(src: string, file: string): ModuleScan {
     if (text !== undefined && strings.size < 5000) strings.add(text);
     // The fixed parts of `node ${x}`, which may name files too.
     if (node.type === 'TemplateElement' && typeof node.value?.cooked === 'string' && strings.size < 5000) strings.add(node.value.cooked);
+    // `this` or a getter can read a literal back as something else (a hook's
+    // `get run() { return this.title; }`), so nothing here has a role.
+    if (node.type === 'ThisExpression' || (node.type === 'Property' && node.kind !== 'init')) readsBack = true;
     const said = text ?? (node.type === 'TemplateElement' && typeof node.value?.cooked === 'string' ? (node.value.cooked as string) : undefined);
     if (said !== undefined) seen[roles.get(node) ?? 'other'].add(said);
     switch (node.type) {
@@ -880,8 +884,8 @@ export function scanModule(src: string, file: string): ModuleScan {
     specifiers: [...specifiers],
     packages: [...packages],
     strings: [...strings],
-    data: [...seen.data].filter((s) => !seen.other.has(s) && !seen.worktree.has(s)),
-    worktree: [...seen.worktree].filter((s) => !seen.other.has(s)),
+    data: readsBack ? [] : [...seen.data].filter((s) => !seen.other.has(s) && !seen.worktree.has(s)),
+    worktree: readsBack ? [] : [...seen.worktree].filter((s) => !seen.other.has(s)),
     ...(problem ? { problem: { kind: 'computed' as const, line: lineAt(problem.start), code: src.slice(problem.start, problem.end).replace(/\s+/g, ' ').slice(0, 80) } } : {}),
   };
 }

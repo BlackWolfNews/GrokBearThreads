@@ -782,6 +782,9 @@ test('what an unhashed patch really can run but not follow still makes every edi
     "a title read back as a hook's command": { patch: `const command = { title: 'eval "$(cat command.txt)"' }; export default { hooks: [{ title: 'H', on: 'turn.end', run: command.title }] };` },
     "a data field of an imported file's default": { patch: `import c from '../lib/c.ts'; export default { hooks: [{ title: 'H', on: 'turn.end', run: c.actions[0].title }] };`, files: { '.threadbear/lib/c.ts': `export default { actions: [{ title: 'eval "$(cat command.txt)"' }] };\n` } },
     "a worktree check read back as a hook's command": { patch: `const w = { check: './blocked.sh' }; export default { worktree: w, hooks: [{ title: 'H', on: 'turn.end', run: w.check }] };`, files: { 'blocked.sh': blockedScript } },
+    "a getter reading a title back as the command": { patch: `export default { hooks: [{ title: 'eval "$(cat command.txt)"', on: 'turn.end', get run() { return this.title; } }] };` },
+    'a patch that imports itself': { patch: `import me from './p.ts'; export default { hooks: [{ title: 'eval "$(cat command.txt)"', on: 'turn.end', run: 'true' }, { title: 'H', on: 'turn.end', run: me.hooks[0].title }] };` },
+    'a web address that climbs out of the folder': { patch: `export default { hooks: [{ title: 'H', on: 'turn.end', run: 'https://example.com/../../../outside/eval' }] };` },
     'a string that only starts like a url': { patch: `const c = 'https://x.dev/;./missing.sh;./after.sh'; export default { actions: [{ title: 'A', run: c }] };` },
     'a data key with a computed name': { patch: `const k = 'run'; export default { hooks: [{ title: 'H', on: 'turn.end', [k]: './missing.sh; ./after.sh' }] };` },
     'an import it cannot follow': { patch: `const m = await import(process.cwd() + '/x.ts'); export default m.default;` },
@@ -910,4 +913,18 @@ test("worktree setup doesn't run the main checkout's uncommitted package.json", 
   fs.utimesSync(path.join(main, 'package-lock.json'), new Date(), new Date());
   const clean = setup('wt2');
   assert.ok(clean.includes(`${main} install`), clean.join('; '));
+  // Anything else npm might read, listed by nobody.
+  const gyp = path.join(main, 'binding.gyp');
+  fs.writeFileSync(gyp, '{}\n');
+  const other = setup('wt3');
+  assert.ok(!other.includes(`${main} install`), other.join('; '));
+  fs.rmSync(gyp);
+  // A git that can't say whether it's clean isn't clean.
+  const wt = path.join(root, 'wt4');
+  git(main, 'worktree', 'add', '-q', '--detach', wt, 'HEAD');
+  fs.writeFileSync(path.join(main, '.git', 'index'), 'not an index');
+  fs.rmSync(log, { force: true });
+  execFileSync('bash', [path.join(wt, 'worktree-setup.sh')], { cwd: wt, env: { ...process.env, THREADBEAR_NODE: path.join(bin, 'node') }, stdio: 'pipe' });
+  const broken = fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '';
+  assert.ok(!broken.includes(`${main} install`), broken);
 });

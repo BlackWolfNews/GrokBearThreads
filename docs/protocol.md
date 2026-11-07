@@ -3718,7 +3718,7 @@ patch's `worktree` setup or check: setup runs what's committed, in a new
 worktree, and the check when a land is asked for, so neither runs what an agent
 just wrote until it has got past a step that's asked about. A repo's setup has to
 keep that true: `worktree-setup.sh` won't `npm install` in the main checkout while
-its package files have uncommitted changes. A settings hook that can't be followed all
+it has uncommitted changes. A patch using `this` or a getter gets none of this. A settings hook that can't be followed all
 the way doesn't: those are the user's own hooks, so what they load by a
 name worked out as they run, or from outside the repo they're followed
 in, isn't guarded. What such a hook runs by name (`npm test`, a tool on PATH)

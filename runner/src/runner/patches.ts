@@ -39,8 +39,9 @@ const SCAN_TTL_MS = 10_000;
 // A web address held in a constant (`const PAGE = \`https://x/\${id}\``), so not
 // in the default export where `url` would say so. Run as a command it's one
 // file by that very name, which `files` has: only characters a shell neither
-// splits at nor expands, so no `?`, `[`, `;` or `$` (Codex's review).
-const PLAIN_WEB_ADDRESS = /^https?:\/\/[\w.~/%:-]*$/i;
+// splits at nor expands, so no `?`, `[`, `;` or `$`, and no `..` to leave the
+// folder by (Codex's review).
+const PLAIN_WEB_ADDRESS = /^https?:\/\/(?!.*\.\.)[\w.~/%:-]*$/i;
 function codeOfUnhashedPatch(file: string, from: string, now: number): CodeScan {
   const key = `${file}\0${from}`;
   const hit = scans.get(key);
@@ -66,7 +67,9 @@ function codeOfUnhashedPatch(file: string, from: string, now: number): CodeScan 
     // runs when a land is asked for. So neither runs what an agent just wrote
     // until it has got past a step that's asked about.
     const scan = scanModule(text, module);
-    const own = canonicalPath(module) === canonicalPath(h.root);
+    // Imported by anything it imports, its default export has a name after all.
+    const rootPath = canonicalPath(h.root);
+    const own = canonicalPath(module) === rootPath && ![...h.edges.values()].some((to) => [...to.values()].some((f) => canonicalPath(f) === rootPath));
     const data = new Set(own ? scan.data : []);
     const worktree = new Set(own ? scan.worktree : []);
     for (const command of scan.strings) {
@@ -75,7 +78,8 @@ function codeOfUnhashedPatch(file: string, from: string, now: number): CodeScan 
       reach.files.forEach(add);
       if (worktree.has(command)) {
         for (const f of commandFiles(command, patchFolder).files) worktreeReach.add(canonicalPath(f).toLowerCase());
-      } else if (reach.problem && !data.has(command) && !PLAIN_WEB_ADDRESS.test(command)) all = true;
+      } else if (PLAIN_WEB_ADDRESS.test(command)) add(path.resolve(from, command));
+      else if (reach.problem && !data.has(command)) all = true;
     }
     // Absolute and `~/` paths, there yet or not.
     for (const word of text.split(/[\s'"`;&|()<>=,[\]{}]+/)) {
