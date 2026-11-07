@@ -5,6 +5,12 @@ import SwiftUI
 import ThreadbearCore
 import WebKit
 
+/// The rail's built-in Files panel, below the folder's own panels (such as
+/// Worktrees): the thread's folder to look through.
+enum BuiltinPanels {
+    static let files = "threadbear.files"
+}
+
 /// A pane section as a panel in the window's dock (WindowDock): Highlights,
 /// one of the thread's panels, or Patches, for the thread that's selected,
 /// or on a project's page the project's panels and Patches.
@@ -38,6 +44,11 @@ struct DockPane: View {
                     case .panel(AgentBrowser.panelId):
                         // One per thread, with its own tabs and picture.
                         AgentBrowserPanel(thread: thread).id(thread.id)
+                    case .panel(BuiltinPanels.files):
+                        // The thread's folder, browsed as a folder link is:
+                        // a file opens over it, Back comes back.
+                        PreviewBody(thread: thread, preview: PanePreview(target: .folder(thread.cwd), title: "Files", from: section))
+                            .id(thread.id)
                     case .panel(let id):
                         if let panel = thread.panels.first(where: { $0.id == id }) {
                             panelView(panel, in: thread)
@@ -235,6 +246,12 @@ struct PanelRail: View {
                 }
                 .onAppear {
                     if tabs.contains(where: { $0.state == "yours" }) { app.showPane(.panel(AgentBrowser.panelId)) }
+                }
+            }
+            // The thread's folder, in the folder browser.
+            if project == nil {
+                ActivityButton(symbol: "folder", title: "Files", tip: "The files in this thread's folder", active: app.dock.isShowing(BuiltinPanels.files)) {
+                    app.clickRail(.panel(BuiltinPanels.files), in: thread)
                 }
             }
             Spacer(minLength: zoomed(8))
