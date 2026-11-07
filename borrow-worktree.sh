@@ -23,7 +23,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MAIN="$(git -C "$ROOT" worktree list --porcelain | awk '
   /^worktree / { path = substr($0, 10) }
-  /^branch refs\/heads\/main$/ { print path; exit }
+  /^branch refs\/heads\/main$/ && !found { print path; found = 1 }
 ')"
 [ -n "$MAIN" ] || { echo "No checkout of this repo has main checked out." >&2; exit 1; }
 THREADS="$(dirname "$MAIN")/$(basename "$MAIN")-threads"
