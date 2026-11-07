@@ -2260,14 +2260,18 @@ export class Runner {
     // sub-agent, a lab review, owed or started, a wait, a pool move or a lost
     // network) keeps the mark, so the turn that really ends the run decides;
     // a queued message decides at the end of its own turn.
-    if (rec.unarchivedBySchedule && !rec.queue.length && !rt.turn) {
+    // A run that ends for good drops the mark even with another message
+    // queued (endTurn may have started it already), so a later run that
+    // finds nothing can't archive a question this one left for Mike.
+    if (rec.unarchivedBySchedule) {
       const by = rec.unarchivedBySchedule.by;
       const goingOn = !!limitHit || !!netLost || (outcome === 'completed' && said?.needs === 'nothing');
-      if (finished && !review && !rec.labReviewOwed && !rec.archivedAt && !this.stopping) {
+      if (!goingOn || rec.archivedAt) delete rec.unarchivedBySchedule;
+      else if (!rec.queue.length && !rt.turn && finished && !review && !rec.labReviewOwed && !this.stopping) {
         delete rec.unarchivedBySchedule;
         this.emit(st, { type: 'system.note', text: 'Back in the archive: the scheduled run ended with nothing for you.' });
         this.update({ threadId: rec.id, archived: true, archivedBy: by ?? 'threadbear' });
-      } else if (!goingOn || rec.archivedAt) delete rec.unarchivedBySchedule;
+      }
       this.markDirty(st);
     }
     if (archive && !rt.turn && !rec.archivedAt && !this.stopping) {
@@ -2352,6 +2356,10 @@ export class Runner {
     this.settleInstructionsNews(st, false);
     this.persistInProgress(st, turn.turnId);
     this.expireApprovals(st, 'The turn ended.');
+    // A crash or a Stop ends a scheduled run for good: it stays in the
+    // inbox, and a later run can't put it back in the archive (the end of
+    // a turn, above).
+    if (rec.unarchivedBySchedule) delete rec.unarchivedBySchedule;
     const interrupted = turn.interruptRequested;
     if (!interrupted) this.emit(st, { type: 'error', message }, turn.turnId);
     const body: EventBody = {

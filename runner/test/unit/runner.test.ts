@@ -1935,6 +1935,43 @@ test('a scheduled run puts an archived thread back in the archive when it ends w
   assert.equal(h.runner.get(thread.id).archivedAt, undefined, 'only one that came out of the archive goes back');
 });
 
+test('a scheduled run that asks Mike something, or is stopped, keeps the thread out even after a later run finds nothing', () => {
+  const h = makeHarness();
+  const { thread } = create(h);
+  let s = h.adapter.last;
+  s.init();
+  endTurnCall(s, 't1', { needs: 'nothing' });
+  s.result('completed');
+  h.runner.update({ threadId: thread.id, archived: true });
+
+  // Run A asks him something while run B waits in the queue: B finding
+  // nothing mustn't archive A's question.
+  h.runner.send(thread.id, 'Check A', [], { origin: 'schedule', scheduleId: 'sch_a' });
+  s = h.adapter.last;
+  s.init();
+  h.runner.send(thread.id, 'Check B', [], { origin: 'schedule', scheduleId: 'sch_b', queue: true });
+  endTurnCall(s, 't2', { needs: 'you', asks: [{ action: 'Send the reply?' }] });
+  s.result('completed');
+  s = h.adapter.last;
+  endTurnCall(s, 't3', { needs: 'nothing' });
+  s.result('completed');
+  assert.equal(h.runner.get(thread.id).archivedAt, undefined, "B doesn't archive A's question");
+
+  // Stopped: it stays out, and the next run that finds nothing leaves it there.
+  h.runner.update({ threadId: thread.id, archived: true });
+  h.runner.send(thread.id, 'Check again', [], { origin: 'schedule', scheduleId: 'sch_a' });
+  s = h.adapter.last;
+  s.init();
+  h.runner.interrupt(thread.id);
+  s.result('interrupted');
+  assert.equal(h.runner.get(thread.id).archivedAt, undefined);
+  h.runner.send(thread.id, 'Keep going', [], { origin: 'runner' });
+  s = h.adapter.last;
+  endTurnCall(s, 't4', { needs: 'nothing' });
+  s.result('completed');
+  assert.equal(h.runner.get(thread.id).archivedAt, undefined, 'a stopped run leaves no mark behind');
+});
+
 test('needs you: the card survives a reload of the thread record', () => {
   const h = makeHarness();
   const { thread } = create(h);
