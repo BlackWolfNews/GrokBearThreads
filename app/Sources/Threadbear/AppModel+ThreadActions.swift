@@ -336,10 +336,11 @@ extension AppModel {
     /// How long a send bounced by a restart waits for the new runner.
     static let restartResendWait: Duration = .seconds(30)
 
-    /// A send the restarting runner refused before taking it, so sending
-    /// again can't make two: "Thread not found" once it has let the idle
-    /// thread go, or its handing-over refusal while it's still letting go
-    /// (runner.ts `send`, whose words these are). Not a dropped
+    /// A send (or `threads.update`) the restarting runner refused before
+    /// taking it, so sending again can't make two: "Thread not found" from
+    /// a runner older than 7 Nov once it has let the idle thread go, or its
+    /// handing-over refusal (runner.ts `send` and `mustGet`, whose words
+    /// these are). Not a dropped
     /// connection, which might have taken the message first.
     static func turnedAwayByRestart(_ error: Error) -> Bool {
         switch error {
@@ -428,7 +429,27 @@ extension AppModel {
         Task {
             do {
                 let client = try await rowClient(for: threadId)
-                threads[threadId] = try await client.updateThread(threadId, update)
+                do {
+                    threads[threadId] = try await client.updateThread(threadId, update)
+                } catch {
+                    // Made as a restarting runner lets go of its idle
+                    // threads, before the new one is up, as a send can be
+                    // (`post`): the old one turns it away, and Mike saw
+                    // "Thread not found" picking an effort (7 Nov). It goes
+                    // again on the new runner, still showing, after any
+                    // earlier one turned away like it, so the last pick wins.
+                    guard Self.turnedAwayByRestart(error), !isRemote(threadId),
+                          restart.isPending || restart.isRestarting(now: Date()) else { throw error }
+                    let earlier = updateAfterRestart
+                    let again = Task { @MainActor in
+                        await earlier?.value
+                        guard let next = await self.clientAfterRestart(sentOn: client) else { throw error }
+                        AppLog.write("rpc", "updating again after the restart: \(threadId)")
+                        self.threads[threadId] = try await next.updateThread(threadId, update)
+                    }
+                    updateAfterRestart = Task { _ = try? await again.value }
+                    try await again.value
+                }
             } catch {
                 if let before, let guess, threads[threadId] == guess { threads[threadId] = before }
                 show(error)

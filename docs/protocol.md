@@ -1244,6 +1244,13 @@ restart wait for busy threads. It hands over instead:
   nothing, the draining runner exits.
 - A request for a thread the draining runner has already let go answers
   `-32030` ("moved"), and the primary handles it itself.
+- It lets the idle threads go before it stops listening on the runner's
+  port, so for those few seconds a client's request about one of them
+  there answers `-32020` "The runner is handing over to a new one; try
+  again in a moment." rather than "Thread not found". The Mac app sends a
+  `threads.send` or `threads.update` turned away like that (or with
+  "Thread not found" from an older runner, while a restart is on) again
+  once it's connected to the new runner, in the order they were made.
 - The threadbear tools in a kept thread's session reach the primary over
   the runner's port for anything about other threads, its schedules and
   its projects.

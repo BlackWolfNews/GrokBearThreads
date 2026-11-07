@@ -32,6 +32,7 @@ export const handoversPart = {
       // (letGo), as a busy one would, so the rest go now rather than wait.
       keep: new Set([...keep, ...[...this.threads.values()].filter((st) => st.rt.cleaning).map((st) => st.rec.id)].filter((id) => this.threads.has(id))),
       going: new Set(),
+      gone: new Set(),
       onHandedOver: opts.onHandedOver,
       since: this.clock.now(),
       backgroundMs: opts.backgroundMs ?? DRAIN_BACKGROUND_MS,
@@ -156,6 +157,7 @@ export const handoversPart = {
     rt.deleted = true;
     this.dirty.delete(rec.id);
     this.threads.delete(rec.id);
+    this.draining?.gone.add(rec.id);
     this.store.forget(rec.id);
   },
 

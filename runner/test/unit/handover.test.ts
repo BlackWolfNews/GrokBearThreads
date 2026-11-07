@@ -79,6 +79,26 @@ test('a draining runner lets idle threads go at once and keeps a busy one until 
   assert.equal(b.adapter.last.opts.sessionId, s2.opts.sessionId);
 });
 
+// The old runner still answers the app on the runner's port for a few
+// seconds after letting the idle threads go, until its drain port is up.
+// Mike picked an effort then and saw "Thread not found" (7 Nov): the app
+// tries again on the new runner on these words (AppModel.turnedAwayByRestart).
+test('a thread a draining runner has let go is "handing over", not "not found", until the new runner has it', async () => {
+  const h = makeHarness();
+  const idle = create(h, 'idle one').thread;
+  h.adapter.last.init();
+  h.adapter.last.result('completed');
+  await h.runner.beginDrain([], { onHandedOver: () => {}, backgroundMs: 30 * MIN });
+  assert.equal(h.runner.has(idle.id), false);
+  const handingOver = (e: unknown) => e instanceof RpcError && e.code === ErrorCode.busy && e.message.startsWith('The runner is handing over to a new one');
+  assert.throws(() => h.runner.update({ threadId: idle.id, effort: 'high' }), handingOver);
+  assert.throws(() => h.runner.get(idle.id), handingOver);
+  assert.throws(() => h.runner.send(idle.id, 'hello'), handingOver);
+  // Without a drain, a thread that isn't there is still not found.
+  const fresh = makeHarness();
+  assert.throws(() => fresh.runner.get(idle.id), (e: unknown) => e instanceof RpcError && e.code === ErrorCode.threadNotFound);
+});
+
 test('a message queued during the turn moves across with the thread and starts on the new runner', async () => {
   const h = makeHarness();
   const t = create(h).thread;

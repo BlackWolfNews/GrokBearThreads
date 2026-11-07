@@ -429,6 +429,7 @@ export type ThreadState = { rec: ThreadRecord; rt: Runtime };
 export type Drain = {
   keep: Set<string>;
   going: Set<string>; // being let go
+  gone: Set<string>; // let go: the new runner's now (mustGet)
   onHandedOver: (threadId: string) => void;
   since: number;
   backgroundMs: number;
@@ -3117,7 +3118,15 @@ export class Runner {
 
   mustGet(threadId: string): ThreadState {
     const st = typeof threadId === 'string' ? this.threads.get(threadId) : undefined;
-    if (!st) throw new RpcError(ErrorCode.threadNotFound, `Thread not found: ${threadId}`);
+    if (!st) {
+      // Let go by this draining runner, which still answers on the runner's
+      // port until its drain port is up (main.ts handOver), a few seconds:
+      // the new runner has it in a moment. The Mac app tries again there on
+      // these words (AppModel.turnedAwayByRestart); Mike saw "Thread not
+      // found" picking an effort in that gap (7 Nov).
+      if (this.draining?.gone.has(threadId)) throw new RpcError(ErrorCode.busy, 'The runner is handing over to a new one; try again in a moment.');
+      throw new RpcError(ErrorCode.threadNotFound, `Thread not found: ${threadId}`);
+    }
     return st;
   }
 

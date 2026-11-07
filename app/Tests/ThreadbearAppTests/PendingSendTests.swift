@@ -240,6 +240,50 @@ final class PendingSendTests: XCTestCase {
         XCTAssertEqual(app.threads["th1"]?.isArchived, false)
     }
 
+    /// A pick the old runner turns away while restarting (it has let the
+    /// idle thread go) goes again to the new runner once it's connected,
+    /// still showing, with no error, and two picks go in the order they
+    /// were made. Mike picked an effort then and saw "Thread not found"
+    /// (7 Nov).
+    func testAnUpdateTurnedAwayByARestartGoesAgainToTheNewRunnerInOrder() async throws {
+        let (app, old) = try await connected()
+        _ = app.restart(notice: "The runner is restarting onto a new release.")
+        app.update("th1", ThreadUpdate(effort: .some("low")))
+        try await until { old.waiting("threads.update") }
+        old.fail("threads.update", code: RPCError.busy, message: "The runner is handing over to a new one; try again in a moment.")
+        app.update("th1", ThreadUpdate(effort: .some("high")))
+        try await until { old.waiting("threads.update") }
+        old.fail("threads.update", code: RPCError.threadNotFound, message: "Thread not found: th1")
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(app.threads["th1"]?.effort, "high", "the pick still shows while the runner restarts")
+        XCTAssertNil(app.errorMessage)
+        let new = HoldingTransport()
+        let client = RPCClient(transport: new)
+        try await client.start()
+        app.useClientForTesting(client)
+        try await until { new.waiting("threads.update") }
+        XCTAssertEqual(new.params("threads.update")?["effort"] as? String, "low")
+        new.answer("threads.update", ["thread": ["id": "th1", "title": "Fix it", "effort": "low"]])
+        try await until { new.count("threads.update") == 2 }
+        XCTAssertEqual(new.params("threads.update")?["effort"] as? String, "high", "the later pick goes after the earlier one")
+        new.answer("threads.update", ["thread": ["id": "th1", "title": "Fix it", "effort": "high"]])
+        try await until { !new.waiting("threads.update") && app.threads["th1"]?.effort == "high" }
+        XCTAssertEqual(app.threads["th1"]?.effort, "high")
+        XCTAssertNil(app.errorMessage)
+    }
+
+    /// With no restart on, "Thread not found" for a pick is shown, and the
+    /// guess put back.
+    func testAnUpdateForAThreadNotFoundWithNoRestartStillFails() async throws {
+        let (app, transport) = try await connected()
+        app.update("th1", ThreadUpdate(effort: .some("high")))
+        try await until { transport.waiting("threads.update") }
+        transport.fail("threads.update", code: RPCError.threadNotFound, message: "Thread not found: th1")
+        try await until { app.errorMessage != nil }
+        XCTAssertEqual(app.errorMessage, "Thread not found: th1")
+        XCTAssertNil(app.threads["th1"]?.effort)
+    }
+
     /// The guesses: what the runner will do for the simple fields, and
     /// nothing for a login or folder move, which can change more.
     func testWhatAnUpdateGuesses() throws {
