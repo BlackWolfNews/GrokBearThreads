@@ -1499,13 +1499,14 @@ export class Runner {
   // turn's latest: its text is kept and becomes the preview, and the card
   // that was taken stands only until the next end_turn. A "What I need from
   // you" the reply had (replyNeeds) stands until then too, as the agent may
-  // stop without another.
+  // stop without another. A one-reply turn's text stays its reply (replyAfter,
+  // marked final), so a report written after the wake shows even without a
+  // new end_turn (TranscriptReducer, reply(of:), picks among them).
   seeWake(turn: Turn, ev: { type: string; itemId?: string; wake?: true }): void {
     turn.wake ??= new WakeRead();
     if (!turn.wake.see(ev) || !(turn.ended || turn.tookEndTurn)) return;
     turn.ended = false;
     turn.owedReply = undefined;
-    turn.replyAfter = false;
     turn.headline = false;
     turn.summarized = false;
     turn.narrationItem = undefined;

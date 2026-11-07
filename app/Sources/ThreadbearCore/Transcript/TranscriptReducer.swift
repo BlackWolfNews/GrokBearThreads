@@ -1221,7 +1221,9 @@ public struct TranscriptModel: Sendable {
         let final = beforeEnd.filter { k in
             text(k).map { !$0.isSummary } == true && k > (steps.last ?? Int.min) && items[k].seq > lastResult
         }
-        if let summary = turn.last(where: { text($0)?.isSummary == true }) {
+        // The last card's own summary: one a wake replaced says what was
+        // true before it (from Codex's review).
+        if let summary = turn[(end < turn.count ? end : 0)...].last(where: { text($0)?.isSummary == true }) {
             // A narration block is only a paraphrase of what the agent
             // wrote, so it never beats the bullets: one about a list of 13
             // names for Paws showed instead of them (30 Oct 2026).

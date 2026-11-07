@@ -667,6 +667,63 @@ test('one reply: an ask taken from the reply stands through a wake with no new e
   assert.equal(h.runner.get(thread.id).needs, 'you');
 });
 
+// From Codex's review, round two: the SDK can run a call before its frame
+// reaches the events, so a call with the wake handed over and no step since
+// is the agent's step after reading it.
+test('a background task handed over just before an end_turn whose frame has not landed yet', async () => {
+  const h = makeHarness();
+  const { thread, s } = start(h);
+  const { call } = tools(h, thread.id);
+  s.out({ kind: 'event', event: { type: 'system.note', text: 'Background command "Land" completed (exit code 0)', wake: true } });
+  s.text('m1', 'Still landing.');
+  const input = { headline: 'Landing', needs: 'nothing' };
+  toolCall(s, 'e1', END_TURN, input);
+  const r1 = await call('end_turn', input);
+  s.out({ kind: 'event', event: { type: 'tool.result', itemId: 'e1', ok: true, text: r1.text, truncated: false, images: [] } });
+  const r2 = await call('end_turn', { headline: 'Landed', needs: 'nothing', summary: ['Landed and pushed.'] });
+  assert.equal(r2.error, false, r2.text);
+});
+
+test('two background tasks, the second after the first was handed over, open the turn twice', async () => {
+  const h = makeHarness();
+  const { thread, s } = start(h);
+  const { call } = tools(h, thread.id);
+  const send = async (itemId: string, input: Record<string, unknown>) => {
+    toolCall(s, itemId, END_TURN, input);
+    const r = await call('end_turn', input);
+    s.out({ kind: 'event', event: { type: 'tool.result', itemId, ok: !r.error, text: r.text, truncated: false, images: [] } });
+    return r;
+  };
+  const note = (what: string) => s.out({ kind: 'event', event: { type: 'system.note', text: `Background command "${what}" completed (exit code 0)`, wake: true } });
+  note('Build');
+  s.text('m1', 'Waiting on the build and the tests.');
+  await send('e1', { headline: 'Waiting', needs: 'nothing' });
+  note('Tests');
+  s.text('m2', 'The build passed.');
+  assert.equal((await send('e2', { headline: 'Built', needs: 'nothing' })).error, false);
+  s.text('m3', 'The tests passed too.');
+  const third = await send('e3', { headline: 'Built and tested', needs: 'nothing' });
+  assert.equal(third.error, false, third.text);
+  assert.equal(h.runner.get(thread.id).preview, 'Built and tested');
+});
+
+test('one reply: a report written after a wake is marked as the reply too', async () => {
+  const h = makeHarness();
+  const { thread, s } = start(h);
+  const { call } = tools(h, thread.id, undefined, () => true);
+  const input = { headline: 'Landing', needs: 'nothing' };
+  toolCall(s, 'e1', END_TURN, input);
+  const r = await call('end_turn', input);
+  s.out({ kind: 'event', event: { type: 'tool.result', itemId: 'e1', ok: !r.error, text: r.text, truncated: false, images: [] } });
+  s.text('m1', 'Still landing.');
+  s.out({ kind: 'event', event: { type: 'system.note', text: 'Background command "Land" completed (exit code 0)', wake: true } });
+  toolCall(s, 'b1', 'Bash', { command: 'git push' });
+  toolResult(s, 'b1');
+  s.text('m2', 'Landed and pushed.');
+  const m2 = h.events(thread.id).find((e: { type: string; itemId?: string }) => e.type === 'assistant.text' && e.itemId === 'm2');
+  assert.equal(m2?.final, true);
+});
+
 test('a background task the agent had read before its end_turn still leaves a repeat refused', async () => {
   const h = makeHarness();
   const { thread, s } = start(h);

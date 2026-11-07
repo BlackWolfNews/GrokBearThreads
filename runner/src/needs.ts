@@ -858,6 +858,10 @@ export function takenEndTurn(events: PersistedEvent[], serverName = 'threadbear'
     if (e.type === 'tool.call' && e.name === endTurn) calls.set(e.itemId, e.input);
     if (e.type === 'tool.result' && !taken && endTurnTaken(e)) taken = calls.get(e.itemId);
   }
+  // Handed over with no step of the agent's since: the SDK can run this call
+  // before its own frames reach the events, so it is that step (from Codex's
+  // review).
+  if (wake.handed) return undefined;
   return taken;
 }
 
@@ -871,21 +875,31 @@ export function takenEndTurn(events: PersistedEvent[], serverName = 'threadbear'
 // hook, so all three open the turn at the same event.
 export class WakeRead {
   private state: 'none' | 'unread' | 'handed' = 'none';
+  // One that came while another was handed over: the request may have gone
+  // to the model before it, so it waits for results of its own (from Codex's
+  // review). At worst that opens the turn once more than needed.
+  private next = false;
+  get handed(): boolean {
+    return this.state === 'handed';
+  }
   see(e: { type: string; itemId?: string; wake?: true }): boolean {
     if (e.type === 'system.note' && e.wake) {
-      if (this.state === 'none') this.state = 'unread';
+      if (this.state === 'handed') this.next = true;
+      else this.state = 'unread';
       return false;
     }
     if (e.type === 'tool.result' && this.state === 'unread') this.state = 'handed';
     // A Codex child's items (<child>/<id>) aren't the agent's own steps.
     else if (this.state === 'handed' && (e.type === 'assistant.text' || e.type === 'reasoning' || e.type === 'tool.call') && !e.itemId?.includes('/')) {
-      this.state = 'none';
+      this.state = this.next ? 'unread' : 'none';
+      this.next = false;
       return true;
     }
     return false;
   }
   reset(): void {
     this.state = 'none';
+    this.next = false;
   }
 }
 
