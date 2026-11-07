@@ -440,7 +440,7 @@ final class TranscriptTextView: NSTextView {
         // A draft's Copy (DraftBlockCell).
         if let header = draftHeader(at: point), header.cell.isButton(at: point, in: header.frame) {
             closeChipCard()
-            header.cell.copy()
+            header.cell.copyDraft()
             setNeedsDisplay(header.frame)
             // Back to Copy once Copied has had its moment.
             let frame = header.frame

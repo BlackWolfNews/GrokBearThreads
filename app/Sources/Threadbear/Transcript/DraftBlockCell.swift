@@ -28,6 +28,8 @@ final class DraftBlockCell: NSTextAttachmentCell {
     // Only touched on the main thread (clicks and drawing).
     nonisolated(unsafe) private static var copied: [String: Date] = [:]
     static let copiedFor: TimeInterval = 1.5
+    /// Where a click's Copy goes; tests give it a pasteboard of their own.
+    nonisolated(unsafe) static var pasteboard: NSPasteboard = .general
 
     func wasJustCopied(now: Date = Date()) -> Bool {
         guard let at = Self.copied[draft.source] else { return false }
@@ -36,7 +38,10 @@ final class DraftBlockCell: NSTextAttachmentCell {
 
     /// Puts the draft on the clipboard as plain text and as HTML, so a
     /// paste into Slack or Mail keeps its links and bold.
-    func copy(to pasteboard: NSPasteboard = .general) {
+    /// Not `copy(to:)`: called with no pasteboard, that name is NSCell's
+    /// own copy(), which makes a shallow copy of the cell whose release
+    /// crashed the app on the first click of Copy (7 Nov).
+    func copyDraft(to pasteboard: NSPasteboard = DraftBlockCell.pasteboard) {
         pasteboard.clearContents()
         pasteboard.declareTypes([.html, .string], owner: nil)
         pasteboard.setString(draft.html, forType: .html)

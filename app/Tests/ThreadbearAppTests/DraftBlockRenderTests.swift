@@ -70,7 +70,7 @@ final class DraftBlockRenderTests: XCTestCase {
         let cell = DraftBlockCell(draft: DraftBlock(kind: .slack, source: "*Hi* <https://x.dev|there> \(UUID())"))
         let board = NSPasteboard(name: NSPasteboard.Name("DraftBlockRenderTests-\(UUID())"))
         XCTAssertFalse(cell.wasJustCopied())
-        cell.copy(to: board)
+        cell.copyDraft(to: board)
         XCTAssertTrue(cell.wasJustCopied())
         XCTAssertFalse(cell.wasJustCopied(now: Date().addingTimeInterval(DraftBlockCell.copiedFor + 0.1)))
         XCTAssertTrue(try XCTUnwrap(board.string(forType: .string)).hasPrefix("*Hi* there (https://x.dev) "))
@@ -81,5 +81,31 @@ final class DraftBlockRenderTests: XCTestCase {
         let button = cell.button(in: frame)
         XCTAssertTrue(cell.isButton(at: NSPoint(x: button.midX, y: button.midY), in: frame))
         XCTAssertFalse(cell.isButton(at: NSPoint(x: 10, y: frame.midY), in: frame))
+    }
+
+    /// The click itself, through the text view: Copy once called NSCell's
+    /// own copy() and crashed the app (7 Nov).
+    func testClickingCopyInTheTranscriptCopiesTheDraft() throws {
+        let board = NSPasteboard(name: NSPasteboard.Name("DraftBlockRenderTests-\(UUID())"))
+        DraftBlockCell.pasteboard = board
+        addTeardownBlock { DraftBlockCell.pasteboard = .general; board.releaseGlobally() }
+        let source = "*Hi* <https://x.dev|there> \(UUID())"
+        let view = TranscriptTextView(frame: NSRect(x: 0, y: 0, width: 500, height: 400))
+        view.show(MarkdownRenderer.render("Draft:\n\n```slack\n\(source)\n```").string, width: 500)
+        let storage = try XCTUnwrap(view.textStorage)
+        let index = (storage.string as NSString).range(of: "\u{FFFC}").location
+        XCTAssertNotEqual(index, NSNotFound)
+        let layout = try XCTUnwrap(view.layoutManager)
+        let glyph = layout.glyphIndexForCharacter(at: index)
+        let line = layout.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+        // Inside the header's line, at its right-hand end where Copy is.
+        let point = NSPoint(x: view.textContainerOrigin.x + line.maxX - 30, y: view.textContainerOrigin.y + line.maxY - DraftBlockCell.height / 2)
+        let header = try XCTUnwrap(view.draftHeader(at: point))
+        XCTAssertTrue(header.cell.isButton(at: point, in: header.frame))
+        let click = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDown, location: view.convert(point, to: nil), modifierFlags: [], timestamp: 0,
+                                                     windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+        view.mouseDown(with: click)
+        XCTAssertEqual(board.string(forType: .string), "*Hi* there (https://x.dev) " + source.components(separatedBy: " ").last!)
+        XCTAssertTrue(header.cell.wasJustCopied())
     }
 }
