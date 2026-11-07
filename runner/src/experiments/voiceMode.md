@@ -4,7 +4,7 @@ name: Voice mode
 title: Voice mode: talk with a thread out loud in the Mac app, and hear its replies
 added: 2026-11-07
 on: false
-reminder: abc94100
+reminder: 25b1c3a4
 ---
 
 ## What it does
