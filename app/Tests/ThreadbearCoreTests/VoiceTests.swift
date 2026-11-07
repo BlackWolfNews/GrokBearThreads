@@ -143,3 +143,123 @@ final class SpokenAnswerTests: XCTestCase {
         }
     }
 }
+
+/// A spoken yes can let a tool run, so it goes only to the card he heard.
+final class SpokenApprovalsTests: XCTestCase {
+    private func card(_ id: String, title: String = "Run the tests", name: String = "Bash", options: [ApprovalOption] = [.allow, .allowAlways, .deny]) -> ApprovalRequest {
+        ApprovalRequest(approvalId: id, name: name, title: title, options: options)
+    }
+
+    func testNothingWaitingIsAMessage() {
+        var a = SpokenApprovals()
+        XCTAssertEqual(a.take("yes"), .message)
+    }
+
+    func testAYesAnswersTheCardReadOut() {
+        var a = SpokenApprovals()
+        let first = card("a")
+        a.requested(first)
+        a.readOut(first)
+        XCTAssertEqual(a.take("yes"), .answer(first, .allow))
+        XCTAssertTrue(a.open.isEmpty)
+        XCTAssertEqual(a.take("yes"), .message, "answered once, and that's it")
+    }
+
+    func testBeforeItIsReadOutAYesAnswersNothing() {
+        var a = SpokenApprovals()
+        let first = card("a")
+        a.requested(first)
+        XCTAssertEqual(a.take("yes"), .readAgain(first))
+        XCTAssertEqual(a.open, [first], "still waiting")
+    }
+
+    /// The one the review found: a new card just before he speaks.
+    func testANewCardJustBeforeHeSpeaksDoesNotTakeHisYes() {
+        var a = SpokenApprovals()
+        let first = card("a"), second = card("b", title: "Delete everything")
+        a.requested(first)
+        a.readOut(first)
+        a.requested(second)
+        XCTAssertEqual(a.take("yes"), .readAgain(second))
+        XCTAssertEqual(a.open, [first, second], "neither was answered")
+    }
+
+    func testAnOlderCardFinishingItsReadOutDoesNotBindOverANewerOne() {
+        var a = SpokenApprovals()
+        let first = card("a"), second = card("b")
+        a.requested(first)
+        a.requested(second)
+        a.readOut(first)
+        XCTAssertNil(a.heard)
+        XCTAssertEqual(a.take("yes"), .readAgain(second))
+        a.readOut(second)
+        XCTAssertEqual(a.take("yes"), .answer(second, .allow))
+        // Then the older one, once it has been read in turn.
+        XCTAssertEqual(a.take("yes"), .readAgain(first))
+        a.readOut(first)
+        XCTAssertEqual(a.take("no"), .answer(first, .deny))
+    }
+
+    func testAGoneCardIsNotAnswered() {
+        var a = SpokenApprovals()
+        let first = card("a")
+        a.requested(first)
+        a.readOut(first)
+        a.resolved("a")
+        XCTAssertEqual(a.take("yes"), .message)
+    }
+
+    func testAChangedCardMustBeHeardAgain() {
+        var a = SpokenApprovals()
+        let first = card("a", title: "Run the tests"), changed = card("a", title: "Delete everything")
+        a.requested(first)
+        a.readOut(first)
+        a.requested(changed)
+        XCTAssertEqual(a.take("yes"), .readAgain(changed))
+        // The first wording's read-out finishing late doesn't count for it.
+        a.readOut(first)
+        XCTAssertEqual(a.take("yes"), .readAgain(changed))
+        a.readOut(changed)
+        XCTAssertEqual(a.take("yes"), .answer(changed, .allow))
+    }
+
+    func testAlwaysOnlyWhereTheCardOffersIt() {
+        var a = SpokenApprovals()
+        let first = card("a", options: [.allow, .deny])
+        a.requested(first)
+        a.readOut(first)
+        XCTAssertEqual(a.take("always allow"), .readAgain(first), "not a plain yes, and read out again")
+        a.readOut(first)
+        XCTAssertEqual(a.take("yes"), .answer(first, .allow))
+    }
+
+    func testLongerWordsAreAMessage() {
+        var a = SpokenApprovals()
+        let first = card("a")
+        a.requested(first)
+        a.readOut(first)
+        XCTAssertEqual(a.take("no, use the other folder"), .message)
+        XCTAssertEqual(a.heard, first, "still the card he heard")
+    }
+
+    func testAnotherMacsRequestAndAPlanAreLeftToTheScreen() {
+        for name in [StartRequest.cardName, "ExitPlanMode"] {
+            var a = SpokenApprovals()
+            let first = card("a", name: name)
+            a.requested(first)
+            a.readOut(first)
+            XCTAssertNil(a.heard, name)
+            XCTAssertEqual(a.take("yes"), .onScreen(first), name)
+            XCTAssertEqual(a.open, [first], name)
+        }
+    }
+
+    func testClearForgetsAll() {
+        var a = SpokenApprovals()
+        let first = card("a")
+        a.requested(first)
+        a.readOut(first)
+        a.clear()
+        XCTAssertEqual(a.take("yes"), .message)
+    }
+}

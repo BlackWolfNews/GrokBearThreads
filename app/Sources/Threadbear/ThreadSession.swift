@@ -801,6 +801,15 @@ final class ThreadSession {
         }
     }
 
+    /// The approval card as this thread shows it now, nil once it's settled
+    /// or not there (Voice checks a spoken answer against it).
+    func openApproval(_ approvalId: String) -> ApprovalRequest? {
+        guard !answering.contains(approvalId),
+              case .approval(let item)? = feed.model.item(id: "ap:\(approvalId)")?.content,
+              item.resolution == nil else { return nil }
+        return item.request
+    }
+
     /// Go ahead on a "Plan first" plan card (docs/protocol.md).
     /// The card spins like an approval's until the answer lands.
     func approvePlan(itemId: String) {

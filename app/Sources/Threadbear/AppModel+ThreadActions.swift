@@ -9,6 +9,8 @@ extension AppModel {
     // MARK: Thread actions
 
     func newThread() {
+        // Voice talks with the thread on screen: leaving it ends it.
+        if VoiceMode.shared.isOn, VoiceMode.shared.threadId != VoiceMode.newThread { VoiceMode.shared.stop() }
         selection = nil
         openProjectId = nil
         showsProjectsHome = false
@@ -311,13 +313,21 @@ extension AppModel {
     /// in it), or nil if it couldn't be made.
     func startThreadSpoken(_ text: String, then: @escaping (String?) -> Void) {
         guard let client, connection == .connected, !creatingThread else { then(nil); return }
+        let account = newThreadAccountId
         let request = newThreadRequest(text: text, images: [])
         creatingThread = true
         Task {
             defer { creatingThread = false }
             do {
                 let thread = try await client.createThread(request)
+                // What the new-thread composer's picks were for, as for a
+                // typed first message (send): the next one starts afresh.
+                rememberLastAccount(request.poolId == nil ? account : thread.accountId)
                 newThreadCwd = nil
+                newThreadPermission = .full
+                newThreadAccount = nil
+                newThreadPool = nil
+                newThreadProvider = nil
                 threads[thread.id] = thread
                 then(thread.id)
                 select(thread.id)

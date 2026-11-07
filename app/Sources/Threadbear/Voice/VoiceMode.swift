@@ -42,8 +42,12 @@ final class VoiceMode {
     @ObservationIgnored private var working = false
     /// The turn's newest message, said when it ends unless a final reply came.
     @ObservationIgnored private var lastMessage: (String, String, String)?
-    /// The approval card waiting on him, for a spoken yes or no.
-    @ObservationIgnored private var pendingApproval: ApprovalRequest?
+    /// The approval cards waiting, and the one read out to him, which is
+    /// the only one a spoken yes or no can answer (SpokenApprovals).
+    @ObservationIgnored private var approvals = SpokenApprovals()
+    /// The newest start: one that's been overtaken (he turned it off and on
+    /// again, or changed the language) gives way to it.
+    @ObservationIgnored private var startId = UUID()
     /// Without echo cancellation: ignore the microphone until then.
     @ObservationIgnored private var quietUntil: CFTimeInterval = 0
 
@@ -63,6 +67,12 @@ final class VoiceMode {
     /// carries on in it. "new" is the new thread's draft key too.
     static let newThread = "new"
 
+    /// The experiment (runner/src/experiments/voiceMode.md), on in this
+    /// Mac's runner.json. Off: no button, no Voice settings, nothing
+    /// downloaded and no microphone prompt.
+    static let experiment = "voiceMode"
+    static var available: Bool { AppModel.shared.experiments.contains(experiment) }
+
     /// Settings > Voice's switch. Off hides every waveform button.
     static let enabledKey = "voiceEnabled"
     static var enabled: Bool { UserDefaults.standard.object(forKey: enabledKey) as? Bool ?? true }
@@ -76,7 +86,10 @@ final class VoiceMode {
     }
 
     func start(threadId: String) {
+        guard Self.available else { return }
         stop()
+        let startId = UUID()
+        self.startId = startId
         self.threadId = threadId
         startedAt = Date()
         phase = .starting("Getting ready…")
@@ -89,17 +102,17 @@ final class VoiceMode {
         Task {
             do {
                 let base = try await VoiceServer.shared.ready(language: language.id)
-                guard self.threadId == threadId else { return }
+                guard self.startId == startId else { return }
                 self.base = base
                 let audio = VoiceAudio()
                 audio.onResult = { [weak self] in self?.heard($0) }
                 audio.onInputLevel = { [weak self] level in
                     guard let self, !(self.audio?.isSpeaking ?? false) else { return }
-                    self.level = level
+                    self.show(level: level)
                 }
                 audio.onOutputLevel = { [weak self] level in
                     guard let self, self.audio?.isSpeaking ?? false else { return }
-                    self.level = level
+                    self.show(level: level)
                 }
                 audio.onSpeaking = { [weak self] on in
                     guard let self, self.isOn else { return }
@@ -109,21 +122,38 @@ final class VoiceMode {
                 self.audio = audio
                 self.phase = .starting("Asking for the microphone…")
                 try await audio.start(locale: Locale(identifier: language.locale), microphone: mic)
-                guard self.threadId == threadId else { audio.stop(); return }
+                guard self.startId == startId else { audio.stop(); return }
                 self.phase = .listening
                 self.endpointTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
                     MainActor.assumeIsolated { self?.checkPause() }
                 }
                 VoiceLog.write("on for \(threadId)")
             } catch {
-                guard self.threadId == threadId else { return }
+                guard self.startId == startId else { return }
                 self.fail(error.localizedDescription)
             }
         }
     }
 
+    /// The language changed in Settings: the engine and the recogniser are
+    /// per language, so Voice starts over in the new one, on the same thread.
+    func languageChanged() {
+        guard isOn, let threadId else { return }
+        start(threadId: threadId)
+    }
+
+    /// Levels reach the button and the bear a few times a second, in tenths:
+    /// Core Animation eases between them, and the app redraws only for a
+    /// change it could show.
+    private func show(level new: Float) {
+        let rounded = (new * 10).rounded() / 10
+        if rounded != level { level = rounded }
+    }
+
     func stop() {
         dismissFailure()
+        // A start still under way gives way, whatever else is going on.
+        startId = UUID()
         guard isOn || audio != nil else { return }
         if let threadId, let text = tracker.flush() { send(text, to: threadId) }
         endpointTimer?.invalidate()
@@ -134,7 +164,8 @@ final class VoiceMode {
         phase = .off
         level = 0
         working = false
-        pendingApproval = nil
+        approvals.clear()
+        makingThread = false
         waitingWords = []
         if let threadId { VoiceLog.write("off for \(threadId)") }
         threadId = nil
@@ -143,6 +174,10 @@ final class VoiceMode {
 
     private func fail(_ message: String) {
         VoiceLog.write("failed: \(message)")
+        startId = UUID()
+        approvals.clear()
+        makingThread = false
+        waitingWords = []
         endpointTimer?.invalidate()
         endpointTimer = nil
         audio?.stop()
@@ -185,7 +220,13 @@ final class VoiceMode {
             AppModel.shared.startThreadSpoken(text) { [weak self] id in
                 guard let self else { return }
                 self.makingThread = false
-                guard let id, self.threadId == Self.newThread else { return }
+                guard self.threadId == Self.newThread else { return }
+                guard let id else {
+                    // Nothing could be made: say so, rather than sit on
+                    // "working" with nothing behind it.
+                    self.fail("That thread couldn't be started. Try again, or type it.")
+                    return
+                }
                 // Before it's selected, so selecting it doesn't end Voice.
                 self.threadId = id
                 VoiceLog.write("started \(id) by voice")
@@ -195,19 +236,44 @@ final class VoiceMode {
             }
             return
         }
-        // A yes or a no on its own answers the card that's waiting.
-        if let card = pendingApproval, let decision = SpokenAnswer.decision(text, options: card.options) {
-            pendingApproval = nil
-            AppModel.shared.session(for: threadId).respond(approvalId: card.approvalId, decision: decision, answers: nil, message: nil)
+        // A yes or a no on its own answers the card he heard, and only that
+        // one (SpokenApprovals says why).
+        switch approvals.take(text) {
+        case .answer(let card, let decision):
+            let session = AppModel.shared.session(for: threadId)
+            // Last look at what the thread itself shows: live events can't
+            // reach Voice while it's reconnecting, so a card settled from the
+            // phone meanwhile, or changed, is only known here.
+            guard session.openApproval(card.approvalId) == card else {
+                VoiceLog.write("an approval answered by voice had gone; not answered")
+                speakNow("That request has gone, so I didn't answer it.")
+                idle()
+                return
+            }
+            session.respond(approvalId: card.approvalId, decision: decision, answers: nil, message: nil)
             VoiceLog.write("answered an approval by voice: \(decision.rawValue)")
             speakNow(decision == .deny ? "OK, I won't." : "OK, going ahead.")
             working = true
             phase = .thinking
-            return
+            // Another card still waiting: its turn to be heard.
+            if let next = approvals.open.last { readOut(next) }
+        case .readAgain(let card):
+            VoiceLog.write("heard an answer to an approval not read out yet; reading it")
+            idle()
+            readOut(card)
+        case .onScreen:
+            speakNow("That one's on screen for you to answer.")
+            idle()
+        case .message:
+            AppModel.shared.sendSpoken(threadId: threadId, text: text)
+            working = true
+            phase = .thinking
         }
-        AppModel.shared.sendSpoken(threadId: threadId, text: text)
-        working = true
-        phase = .thinking
+    }
+
+    /// Back from hearing him, with nothing sent.
+    private func idle() {
+        phase = working ? .thinking : .listening
     }
 
     // MARK: The agent's side
@@ -236,11 +302,11 @@ final class VoiceMode {
                 lastMessage = (itemId, text, event.ts)
             }
         case .approvalRequested(let request):
-            pendingApproval = request
-            let ask = request.options.contains(.allowAlways) ? "Say yes, no, or always allow." : "Say yes or no."
-            say("I need your OK: \(request.title). \(ask)", id: "approval-\(event.seq)", at: event.ts)
+            approvals.requested(request)
+            guard !isBeforeVoice(event.ts), spoken.insert("approval-\(event.seq)").inserted else { return }
+            readOut(request)
         case .approvalResolved(let resolution):
-            if pendingApproval?.approvalId == resolution.approvalId { pendingApproval = nil }
+            approvals.resolved(resolution.approvalId)
         case .questionRequested:
             say("I've got a question for you on screen.", id: "question-\(event.seq)", at: event.ts)
         default:
@@ -248,23 +314,43 @@ final class VoiceMode {
         }
     }
 
+    /// A card's question, then what to say to it. The card can be answered
+    /// from when the question has played to its end, not before, so a card
+    /// he talked over or hasn't got to yet can't take his yes. The "say yes
+    /// or no" is apart from it, so he needn't wait through that to answer.
+    private func readOut(_ card: ApprovalRequest) {
+        guard SpokenApprovals.answerable(card) else {
+            speakNow("There's a request on screen for you to answer.")
+            return
+        }
+        // Only the words that are read: SpokenText leaves code out, so a
+        // command in the title gets its "on screen" line, as a reply's does.
+        speak(SpokenText.sentences("I need your OK: \(card.title)."), played: { [weak self] in self?.approvals.readOut(card) })
+        speak([card.options.contains(.allowAlways) ? "Say yes, no, or always allow." : "Say yes or no."])
+    }
+
     /// A short line of its own, said straight away (an answer's "OK").
     private func speakNow(_ line: String) {
+        speak([line])
+    }
+
+    private func say(_ markdown: String, id: String, at ts: String) {
+        guard !isBeforeVoice(ts), spoken.insert(id).inserted else { return }
+        speak(SpokenText.sentences(markdown))
+    }
+
+    /// Only what came after Voice was turned on is said.
+    private func isBeforeVoice(_ ts: String) -> Bool {
+        guard let date = ISO8601DateFormatter.withFractions.date(from: ts) ?? ISO8601DateFormatter().date(from: ts) else { return false }
+        return date < startedAt
+    }
+
+    private func speak(_ sentences: [String], played: (() -> Void)? = nil) {
         guard let audio, let base else { return }
         let defaults = UserDefaults.standard
         let voice = VoiceCatalog.voice(defaults.string(forKey: VoiceCatalog.voiceKey))
         let speed = VoiceCatalog.speed(defaults.object(forKey: VoiceCatalog.speedKey) as? Double)
-        audio.speak([line], voice: voice.engineVoice, speed: speed, base: base)
-    }
-
-    private func say(_ markdown: String, id: String, at ts: String) {
-        // Only what came after Voice was turned on.
-        if let date = ISO8601DateFormatter.withFractions.date(from: ts) ?? ISO8601DateFormatter().date(from: ts), date < startedAt { return }
-        guard spoken.insert(id).inserted, let audio, let base else { return }
-        let defaults = UserDefaults.standard
-        let voice = VoiceCatalog.voice(defaults.string(forKey: VoiceCatalog.voiceKey))
-        let speed = VoiceCatalog.speed(defaults.object(forKey: VoiceCatalog.speedKey) as? Double)
-        audio.speak(SpokenText.sentences(markdown), voice: voice.engineVoice, speed: speed, base: base)
+        audio.speak(sentences, voice: voice.engineVoice, speed: speed, base: base, played: played)
     }
 
     #if DEBUG
@@ -282,6 +368,7 @@ final class VoiceMode {
     private(set) var previewStatus: String?
 
     func preview(voice: VoiceOption, speed: Double) {
+        guard Self.available else { return }
         let language = VoiceCatalog.language(UserDefaults.standard.string(forKey: VoiceCatalog.languageKey))
         previewStatus = "Getting the voice ready…"
         VoiceServer.shared.onStatus = { [weak self] in self?.previewStatus = $0 }
@@ -292,7 +379,8 @@ final class VoiceMode {
                 previewAudio = audio
                 try audio.preview("Hi, I'm \(voice.name). Ask me anything, and I'll keep working while we talk.", voice: voice.engineVoice, speed: speed, base: base)
                 previewStatus = nil
-                VoiceServer.shared.stopSoon()
+                // Not out from under a conversation that's using the engine.
+                if !isOn { VoiceServer.shared.stopSoon() }
             } catch {
                 previewStatus = error.localizedDescription
             }
