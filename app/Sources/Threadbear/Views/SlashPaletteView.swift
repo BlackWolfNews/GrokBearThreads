@@ -180,7 +180,7 @@ struct SlashPaletteView: View {
                 Text("/\(command.name)")
                     .font(.system(size: TypeScale.cardTitle + 3, weight: .semibold))
                 if let text = command.description, !text.isEmpty {
-                    Text(text)
+                    Text(SlashPalette.description(text))
                         .font(.system(size: TypeScale.label + 1))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

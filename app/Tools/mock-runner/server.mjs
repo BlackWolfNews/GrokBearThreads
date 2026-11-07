@@ -1056,7 +1056,7 @@ async function dispatch(client, method, p) {
           ];
       const skills = [
         { name: 'code-review', description: 'Review the current diff, or a PR number, branch or path, for correctness bugs, at the effort level given first.', argumentHint: '[low|medium|high] [target]', source: 'skill', scope: 'user', path: `${os.homedir()}/.claude/skills/code-review/SKILL.md` },
-        { name: 'computercub', description: "Drive Mac apps and the parts of Chrome extensions can't reach.", source: 'skill' },
+        { name: 'computercub', description: "Drive Mac apps and the parts of Chrome extensions can't reach, with the `computercub` command.", source: 'skill' },
         { name: 'cloudflare', description: 'Cloudflare platform: Workers, Pages, KV, D1, R2 and the rest.', source: 'skill' },
         { name: 'claude-api', description: 'Model ids, pricing, params and the Anthropic SDK.', source: 'skill' },
         { name: 'deslop', description: 'A second-pass cleanup over AI-written code using the repo style guide.', source: 'skill', scope: 'project', path: `${t.summary.cwd}/.claude/skills/deslop/SKILL.md` },
