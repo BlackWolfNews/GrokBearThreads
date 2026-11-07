@@ -343,3 +343,15 @@ test('without a short private folder for the socket, each ssh connects on its ow
     if (what === 'long') assert.ok(!fs.existsSync(path.join(home, '.ssh', 'tbc')));
   }
 });
+
+test('a home with a newline in its name gets no shared connection, even with its folder ready', () => {
+  const home = path.join(shortHome(), 'a\nb');
+  fs.mkdirSync(path.join(home, '.ssh', 'tbc'), { recursive: true, mode: 0o700 });
+  fs.chmodSync(path.join(home, '.ssh'), 0o700);
+  fs.chmodSync(path.join(home, '.ssh', 'tbc'), 0o700);
+  const s = setup({ h1: { state: 'free' } }, { home });
+  const r = s.run('h1', 3600);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const opts = r.sshOpts.split('\n');
+  assert.ok(opts.includes('ControlMaster=no') && opts.includes('ControlPath=none'), r.sshOpts);
+});

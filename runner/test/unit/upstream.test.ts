@@ -884,3 +884,36 @@ test("tags too big to read are remembered, so they can't hold a real release out
   for (let i = 0; i < 2 && s.release?.commit !== real; i++) s = await up.check();
   assert.equal(s.release?.commit, real, s.reason ?? '');
 });
+
+test('a server that lists commits as tags (forged peeled lines) still lets a real release through', async () => {
+  const w = world();
+  const base = git(w.mike, 'rev-parse', 'HEAD');
+  const lines: string[] = [];
+  for (let i = 7; i <= 31; i++) lines.push(`create refs/tags/release/2026-12-${String(i).padStart(2, '0')} ${base}`);
+  assert.equal(spawnSync('git', ['-C', w.mike, 'update-ref', '--stdin'], { input: lines.join('\n') + '\n' }).status, 0);
+  const real = commit(w.mike, 'b.txt', 'Real');
+  signedTag(w.mike, 'release/2026-11-06', w.mikeKey.priv);
+  git(w.mike, 'push', '-q', 'origin', 'main', '--tags');
+  // ls-remote as such a server would answer: a peeled line for every name.
+  const forge = async (cwd: string, args: string[], opts?: Parameters<typeof gitAsync>[2]) => {
+    const out = await gitAsync(cwd, args, opts);
+    if (args[0] !== 'ls-remote') return out;
+    return out.split('\n').flatMap((l) => (l.endsWith('^{}') || !l ? [l] : [l, `${l.split('\t')[0]}\t${l.split('\t')[1]}^{}`])).join('\n');
+  };
+  const up = upstreamFor(w.theirs, w.home, new FakeClock(LATER), { git: forge });
+  let s = await up.check();
+  for (let i = 0; i < 2 && s.release?.commit !== real; i++) s = await up.check();
+  assert.equal(s.release?.commit, real, s.reason ?? '');
+});
+
+test("gitAsync's watcher stops a command it says is over its limit, and what it started", async () => {
+  const dir = tmpDir('tb-git-watch-');
+  const pidFile = path.join(dir, 'pid');
+  let asked = 0;
+  await assert.rejects(
+    gitAsync(dir, ['-c', `alias.hang=!sleep 600 & echo $! >${pidFile}; wait`, 'hang'], { timeoutMs: 60_000, over: () => (++asked >= 2 ? 'fetched more than 1 MB' : undefined) }),
+    /fetched more than 1 MB/,
+  );
+  await new Promise((r) => setTimeout(r, 200));
+  assert.ok(!alive(Number(fs.readFileSync(pidFile, 'utf8'))));
+});

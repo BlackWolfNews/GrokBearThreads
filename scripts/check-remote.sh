@@ -132,8 +132,11 @@ private_dir() {
 plain_path() {
   case "$1" in /*) ;; *) return 1 ;; esac
   # Byte by byte, in the C locale: a bracket range in a UTF-8 locale
-  # took é for a letter on Linux.
-  [ -z "$(printf '%s' "$1" | LC_ALL=C tr -d 'A-Za-z0-9._/-')" ] || return 1
+  # took é for a letter on Linux. Counted, not captured, as $() drops a
+  # newline at the end (Codex's review).
+  local odd
+  odd="$(printf '%s' "$1" | LC_ALL=C tr -d 'A-Za-z0-9._/-' | wc -c)"
+  [ $((odd)) -eq 0 ] || return 1
   case "/$1/" in */../*|*/./*) return 1 ;; esac
 }
 

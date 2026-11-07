@@ -608,7 +608,10 @@ export class Upstream {
     const newest = [...kept.keys()].filter((n) => RELEASE_NAME.test(n)).sort().at(-1) ?? '';
     const latest = new Date(this.deps.clock.now() + FUTURE_SLACK_MS).toISOString().slice(0, 10);
     const incoming = [...(await this.refs(staged, STAGED_NS))]
-      .filter(([name, ref]) => RELEASE_NAME.test(name) && name >= newest && name <= latest && ref.type === 'tag' && kept.get(name)?.oid !== ref.oid)
+      // Not a tag object goes through verified() too, unread, so it's
+      // remembered and stageReleases passes it over next time: a server
+      // can list a commit as a tag (Codex's review).
+      .filter(([name, ref]) => RELEASE_NAME.test(name) && name >= newest && name <= latest && kept.get(name)?.oid !== ref.oid)
       .sort(([a], [b]) => (a < b ? 1 : -1));
     let reads = 0;
     for (const [name, ref] of incoming) {
