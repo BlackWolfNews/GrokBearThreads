@@ -443,15 +443,77 @@ final class AppModel {
             slidingOff.remove(threadId)
             do {
                 let command = try await backend.update(threadId: threadId, change: .archive)
-                for try await status in backend.command(command) {
-                    if status?.state == .failed { throw TransportError.server(status?.note ?? "The runner couldn't archive that thread.") }
-                    if status?.state == .done { return }
+                if let status = await commandOutcome(command), status.state == .failed {
+                    throw TransportError.server(status.note ?? "The runner couldn't archive that thread.")
                 }
             } catch {
                 withAnimation(.snappy(duration: 0.25)) { _ = archiving.remove(threadId) }
                 report(error)
             }
         }
+    }
+
+    /// How a command ended: failed or done, or nil once it's gone from the
+    /// backend. On whichever Convex client is current, so a reconnect partway
+    /// through (coming back, a pull to refresh) doesn't leave it watching one
+    /// that may never answer, and a subscription that errors is tried again.
+    func commandOutcome(_ commandId: String) async -> CommandStatus? {
+        final class Seen { var status: CommandStatus?? ; var ended = false }
+        while !Task.isCancelled {
+            guard let backend else { return nil }
+            let on = connection, seen = Seen()
+            let watch = Task {
+                do {
+                    for try await status in backend.command(commandId) where status == nil || status?.state == .failed || status?.state == .done {
+                        seen.status = .some(status)
+                        return
+                    }
+                } catch {}
+                seen.ended = true
+            }
+            while seen.status == nil, !seen.ended, connection == on, !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+            watch.cancel()
+            if let status = seen.status { return status }
+            if seen.ended, connection == on { try? await Task.sleep(for: .seconds(2)) }
+        }
+        return nil
+    }
+
+    /// Cards answered from this phone, by approval id, until the card goes:
+    /// kept here rather than in the card, so leaving the thread and coming back
+    /// doesn't offer the buttons again while the answer's on its way.
+    private(set) var cardAnswers: [String: CardAnswer] = [:]
+    /// Secret cards whose answer the runner refused, for the card to say so.
+    private(set) var refusedSecrets: Set<String> = []
+
+    /// Sends a card's answer with its button spinning. False if one's already
+    /// on its way. The spinner stays until the card goes; it gives up if the
+    /// runner refuses, or took it and the row still hasn't said so after a few
+    /// seconds, or the backend never answers the send (a replaced client).
+    @discardableResult
+    func answerCard(_ approvalId: String, choice: String, secret: Bool = false,
+                    send: @escaping @Sendable (any Backend) async throws -> String, sent: @escaping (String) -> Void = { _ in }) -> Bool {
+        guard let backend, cardAnswers[approvalId] == nil else { return false }
+        cardAnswers[approvalId] = CardAnswer(choice: choice)
+        refusedSecrets.remove(approvalId)
+        Task {
+            do {
+                let command = try await Deadline.run(seconds: 20) { try await send(backend) }
+                sent(command)
+                let status = await commandOutcome(command)
+                if status?.state == .done { try? await Task.sleep(for: .seconds(5)) }
+                if status?.state == .failed, secret { refusedSecrets.insert(approvalId) }
+            } catch {
+                // A secret card says it in its own words, but a refused token
+                // still goes to pairing.
+                if case TransportError.unauthorized = error { report(error) }
+                else if secret { refusedSecrets.insert(approvalId) } else { report(error) }
+            }
+            cardAnswers[approvalId] = nil
+        }
+        return true
     }
 
     /// Hibernates a thread, as `archive` archives one, but the row sinks rather
@@ -492,9 +554,8 @@ final class AppModel {
             }
             do {
                 let command = try await backend.update(threadId: threadId, change: change)
-                for try await status in backend.command(command) {
-                    if status?.state == .failed { throw TransportError.server(status?.note ?? "The runner couldn't hibernate that thread.") }
-                    if status?.state == .done { return }
+                if let status = await commandOutcome(command), status.state == .failed {
+                    throw TransportError.server(status.note ?? "The runner couldn't hibernate that thread.")
                 }
             } catch {
                 withAnimation(.snappy(duration: 0.25)) { tucks.undo(threadId) }
@@ -1061,6 +1122,11 @@ enum Keychain {
         ]
         SecItemDelete(query as CFDictionary)
     }
+}
+
+/// A card's answer on its way (AppModel.cardAnswers): which button was tapped.
+struct CardAnswer {
+    var choice: String
 }
 
 /// A new thread on its way (AppModel.starting): what was asked, until the

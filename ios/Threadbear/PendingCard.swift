@@ -9,16 +9,19 @@ struct PendingCard: View {
     let runnerId: String
     let pending: PendingApproval
     var onSent: (String) -> Void
-    /// The button that's been tapped, spinning until the card goes (`AnswerWatch`).
-    @State private var tapped: Tapped?
-    /// What that sent, once the backend has it.
-    @State private var command: String?
     @State private var chosen: [Int: Set<String>] = [:]
     @State private var typed = ""
 
     private enum Tapped: Equatable {
         case option(ApprovalOption)
         case sendAnswer
+    }
+
+    /// The button that's been tapped, spinning until the card goes
+    /// (AppModel.answerCard), there still if he leaves and comes back.
+    private var tapped: Tapped? {
+        guard let choice = model.cardAnswers[pending.id]?.choice else { return nil }
+        return ApprovalOption(rawValue: choice).map(Tapped.option) ?? .sendAnswer
     }
 
     var body: some View {
@@ -105,11 +108,6 @@ struct PendingCard: View {
             }
         }
         .sensoryFeedback(.selection, trigger: chosen)
-        .modifier(AnswerWatch(command: command) { _ in
-            // ThreadView says why under the transcript; the buttons are back.
-            tapped = nil
-            command = nil
-        })
     }
 
     private func optionRow(index: Int, question: Question, option: Question.Option) -> some View {
@@ -151,35 +149,20 @@ struct PendingCard: View {
     }
 
     private func respond(_ approvalId: String, _ decision: ApprovalOption) {
-        guard let backend = model.backend, tapped == nil else { return }
-        tapped = .option(decision)
-        Task {
-            do {
-                let id = try await backend.respond(threadId: threadId, approvalId: approvalId, decision: decision)
-                command = id
-                onSent(id)
-            } catch {
-                tapped = nil
-                model.report(error)
-            }
-        }
+        let threadId = threadId
+        // ThreadView says why under the transcript if it's refused.
+        model.answerCard(approvalId, choice: decision.rawValue, send: { backend in
+            try await backend.respond(threadId: threadId, approvalId: approvalId, decision: decision)
+        }, sent: onSent)
     }
 
     private func answer(_ approvalId: String, _ questions: [Question]) {
-        guard let backend = model.backend, tapped == nil else { return }
+        let threadId = threadId
         let answers = Answers.build(questions, chosen: chosen, typed: typed)
-        tapped = .sendAnswer
-        Task {
-            do {
-                let id = try await backend.answer(threadId: threadId, approvalId: approvalId, answers: answers,
-                                                  summary: Answers.summary(questions, answers: answers))
-                command = id
-                onSent(id)
-            } catch {
-                tapped = nil
-                model.report(error)
-            }
-        }
+        let summary = Answers.summary(questions, answers: answers)
+        model.answerCard(approvalId, choice: "send", send: { backend in
+            try await backend.answer(threadId: threadId, approvalId: approvalId, answers: answers, summary: summary)
+        }, sent: onSent)
     }
 }
 

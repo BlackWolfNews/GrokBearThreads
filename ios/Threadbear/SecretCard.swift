@@ -17,11 +17,11 @@ struct SecretCard: View {
     let key: String
     var onSent: (String) -> Void
     @State private var value = ""
-    /// Save or Decline has been tapped: spinning until the card goes (`AnswerWatch`).
-    @State private var busy = false
-    @State private var declining = false
-    /// What that sent, once the backend has it.
-    @State private var command: String?
+    /// Save or Decline has been tapped: spinning until the card goes
+    /// (AppModel.answerCard), there still if he leaves and comes back.
+    private var busy: Bool { model.cardAnswers[approvalId] != nil }
+    private var declining: Bool { model.cardAnswers[approvalId]?.choice == "decline" }
+    @State private var lastWasDecline = false
     @State private var problem: String?
     /// Checked against the key kept for this runner (from pairing), and the
     /// runner kept for this thread, once the card shows and again on Save.
@@ -94,12 +94,11 @@ struct SecretCard: View {
         .sensoryFeedback(trigger: busy) { _, new in
             new ? (declining ? .selection : .impact(weight: .light)) : nil
         }
-        .modifier(AnswerWatch(command: command) { refused in
-            busy = false
-            command = nil
-            // Our own words again. The value's gone, so it has to be typed afresh.
-            if refused { problem = declining ? "Couldn't decline it. Try again." : "Couldn't send it. Type it again to retry." }
-        })
+        // Our own words, not the server's: nothing that came back with the
+        // request ends up on screen. The value's gone, so it's typed afresh.
+        .onChange(of: model.refusedSecrets.contains(approvalId)) { _, refused in
+            if refused { problem = lastWasDecline ? "Couldn't decline it. Try again." : "Couldn't send it. Type it again to retry." }
+        }
         .task(id: "\(runnerId) \(key)") {
             guard model.canAnswerSecrets, SecretSeal.isUsableKey(key) else { return }
             trust = RunnerKeyPins.check(key, runnerId: runnerId, threadId: threadId, in: model.runnerKeys)
@@ -108,7 +107,6 @@ struct SecretCard: View {
 
     private func save() {
         guard model.backend != nil, !busy, !value.isEmpty else { return }
-        declining = false
         // Out of the field (and this view's state) before anything else.
         let typed = value
         value = ""
@@ -132,27 +130,14 @@ struct SecretCard: View {
         guard !busy else { return }
         value = ""
         problem = nil
-        declining = true
         send(.decline)
     }
 
     private func send(_ answer: SecretAnswer) {
-        guard let backend = model.backend else { return }
-        busy = true
-        Task {
-            do {
-                let id = try await backend.secret(threadId: threadId, approvalId: approvalId, answer: answer)
-                command = id
-                onSent(id)
-            } catch TransportError.unauthorized(let message) {
-                busy = false
-                model.report(TransportError.unauthorized(message))
-            } catch {
-                busy = false
-                // Our own words, not the server's: nothing that came back
-                // with the request ends up on screen.
-                problem = answer == .decline ? "Couldn't decline it. Try again." : "Couldn't send it. Type it again to retry."
-            }
-        }
+        let (threadId, approvalId) = (threadId, approvalId)
+        lastWasDecline = answer == .decline
+        model.answerCard(approvalId, choice: answer == .decline ? "decline" : "save", secret: true, send: { backend in
+            try await backend.secret(threadId: threadId, approvalId: approvalId, answer: answer)
+        }, sent: onSent)
     }
 }

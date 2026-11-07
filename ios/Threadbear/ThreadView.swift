@@ -44,6 +44,7 @@ struct ThreadView: View {
     /// A card's answer is on its way to the backend: it spins and can't be
     /// pressed again. Uploading first can take a while.
     @State private var sendingCard = false
+    @State private var cardAttempt = 0
     /// The card of asks, and the reply under a done card, that's been answered
     /// from here. `sent` goes when the runner takes the message, which is before
     /// the thread's row says so, and the card coming back live for that moment
@@ -320,6 +321,9 @@ struct ThreadView: View {
         }
         if status?.state == .failed {
             gone.removeAll { $0.id == send.id }
+            // Refused after the runner took it: a card it answered comes back.
+            answeredAsks = nil
+            answeredDone = nil
             guard status?.note != "Cancelled" else { return }
             // The last one sent from here already says so under the transcript.
             if sent?.id != send.commandId {
@@ -346,6 +350,9 @@ struct ThreadView: View {
                     // Gone from the list straight away rather than on the next update.
                     waiting.removeAll { $0.id == send.id }
                     if sent?.id == send.commandId { sent = nil }
+                    // Taken back, so a card it answered is there again.
+                    answeredAsks = nil
+                    answeredDone = nil
                     if draft.isEmpty { draft = send.text }
                 } else {
                     model.report(TransportError.server("Too late to cancel: it's already gone to the Mac."))
@@ -490,8 +497,16 @@ struct ThreadView: View {
     private func sendCard(_ thread: PhoneThread, lastSeq: Int?) {
         guard !sendingCard else { return }
         sendingCard = true
+        cardAttempt += 1
+        let attempt = cardAttempt
         Task {
-            defer { sendingCard = false }
+            // A send on a client that's since been replaced may never answer:
+            // the card's spinner gives up rather than spinning for good.
+            try? await Task.sleep(for: .seconds(20))
+            if cardAttempt == attempt, sendingCard { sendingCard = false }
+        }
+        Task {
+            defer { if cardAttempt == attempt { sendingCard = false } }
             if await send("", to: thread) {
                 answeredAsks = thread.asksSeq
                 answeredDone = lastSeq

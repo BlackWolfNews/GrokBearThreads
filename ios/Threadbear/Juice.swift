@@ -42,32 +42,3 @@ private struct FoldUp: ViewModifier {
             .opacity(open)
     }
 }
-
-/// Watches the command an answered card sent, for as long as the card stays. The
-/// card's spinner stays until the card goes, which is the thread's row catching
-/// up, so nothing can be pressed twice. This says when to stop waiting: the
-/// runner refused it, or took it and the row has still not said so.
-struct AnswerWatch: ViewModifier {
-    @Environment(AppModel.self) private var model
-    var command: String?
-    var giveBack: (_ refused: Bool) -> Void
-
-    func body(content: Content) -> some View {
-        content.task(id: "\(command ?? ""):\(model.connection)") {
-            guard let command, let backend = model.backend else { return }
-            do {
-                for try await status in backend.command(command) {
-                    if status == nil || status?.state == .failed {
-                        giveBack(status != nil)
-                        return
-                    }
-                    if status?.state == .done {
-                        try await Task.sleep(for: .seconds(5))
-                        giveBack(false)
-                        return
-                    }
-                }
-            } catch {}
-        }
-    }
-}
