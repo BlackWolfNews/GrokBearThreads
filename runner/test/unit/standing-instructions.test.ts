@@ -160,3 +160,87 @@ test('going back past a clear says it again, and a session that never had any he
   assert.equal(never.told, 'second');
   assert.equal(never.edited, 'second, edited');
 });
+
+// The second round of that review.
+test('news sent into a turn that was stopped goes again', async () => {
+  let standing = 'Be brief.';
+  const h = makeHarness(tmpDir(), {}, { standingInstructions: () => standing });
+  const { thread } = h.runner.create({ text: 'Start', cwd: tmpDir(), accountId: 'claude-3' });
+  await tick();
+  h.adapter.last.init();
+  standing = '';
+  h.runner.send(thread.id, 'also');
+  await tick();
+  assert.match(h.adapter.last.sent.at(-1)!.text, /cleared their standing instructions/);
+  h.runner.interrupt(thread.id);
+  await tick();
+  h.adapter.last.result('interrupted');
+  await tick();
+  h.runner.send(thread.id, 'next');
+  await tick();
+  assert.match(h.adapter.last.sent.at(-1)!.text, /^Note from Threadbear: the user cleared their standing instructions[\s\S]*next$/);
+  h.adapter.last.init();
+  h.adapter.last.result('completed');
+  await tick();
+  h.runner.send(thread.id, 'then');
+  await tick();
+  assert.equal(h.adapter.last.sent.at(-1)!.text, 'then');
+});
+
+test("after Claude's /clear the next message says what's current", async () => {
+  let standing = 'Be brief.';
+  const h = makeHarness(tmpDir(), {}, { standingInstructions: () => standing });
+  const { thread } = h.runner.create({ text: 'Start', cwd: tmpDir(), accountId: 'claude-3' });
+  await tick();
+  h.adapter.last.init();
+  h.adapter.last.result('completed');
+  await tick();
+  standing = '';
+  h.runner.send(thread.id, 'told');
+  await tick();
+  assert.match(h.adapter.last.sent.at(-1)!.text, /cleared their standing instructions/);
+  h.adapter.last.init();
+  h.adapter.last.result('completed');
+  await tick();
+  h.runner.send(thread.id, '/clear');
+  await tick();
+  h.adapter.last.init();
+  h.adapter.last.result('completed');
+  await tick();
+  h.runner.send(thread.id, 'fresh');
+  await tick();
+  assert.match(h.adapter.last.sent.at(-1)!.text, /^Note from Threadbear: the user cleared their standing instructions[\s\S]*fresh$/);
+});
+
+test('a fresh session with none keeps that it was told, and one that never had any writes nothing', async () => {
+  let standing = 'Be brief.';
+  const h = makeHarness(tmpDir(), {}, { standingInstructions: () => standing });
+  const { thread } = h.runner.create({ text: 'Start', cwd: tmpDir(), accountId: 'claude-3' });
+  await tick();
+  const rec = h.runner.threads.get(thread.id)!.rec;
+  standing = '';
+  assert.deepEqual(h.runner.briefFor(rec, false), {});
+  assert.equal(rec.instructionsTold, 'cleared');
+  const never = { ...rec, instructionsTold: undefined };
+  h.runner.briefFor(never, false);
+  assert.equal(never.instructionsTold, undefined);
+});
+
+test("failing to write the note doesn't fail a message the CLI has", async () => {
+  let standing = 'Be brief.';
+  const h = makeHarness(tmpDir(), {}, { standingInstructions: () => standing });
+  const { thread } = h.runner.create({ text: 'Start', cwd: tmpDir(), accountId: 'claude-3' });
+  await tick();
+  h.adapter.last.init();
+  h.adapter.last.result('completed');
+  await tick();
+  standing = 'Be kind.';
+  const st = h.runner.threads.get(thread.id)!;
+  const emit = h.runner.emit;
+  h.runner.emit = () => {
+    throw new Error('disk full');
+  };
+  h.runner.sendWithInstructionsNews(st, { id: 'x', text: 'hello', images: [] });
+  h.runner.emit = emit;
+  assert.match(h.adapter.last.sent.at(-1)!.text, /Be kind\.\n\nhello$/);
+});

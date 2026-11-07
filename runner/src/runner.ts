@@ -3,7 +3,7 @@
 // server in rpc.ts is a thin layer over the public methods here.
 import { RELEASE } from './release.ts';
 import type { UserInput } from './adapters/types.ts';
-import { INSTRUCTIONS_CLEARED } from './instructions.ts';
+import { INSTRUCTIONS_CLEARED, INSTRUCTIONS_REWOUND } from './instructions.ts';
 import { reachable, type Reachable } from './net-probe.ts';
 import type { UpstreamStatus } from './upstream.ts';
 import fs from 'node:fs';
@@ -348,6 +348,8 @@ type Runtime = {
   releasedGen?: number; // generation of the session being released on purpose
   resumed: boolean; // the live session was started with resume
   retriedFresh: boolean;
+  // News of the standing instructions went out in this turn (settleInstructionsNews).
+  instructionsNewsSent?: boolean;
   // Where the live session's transcript was carried from, if it moved
   // folder; used only if resuming the copy fails.
   carried?: ThreadRecord['handoff'];
@@ -1617,6 +1619,9 @@ export class Runner {
     // (its next init), but says nothing.
     if (command && rec.provider === 'claude' && /^\/clear\b/i.test(msg.text.trim())) {
       this.emit(st, { type: 'system.note', text: 'Cleared the conversation. The agent starts fresh from your next message; the transcript above stays here for you.' }, msg.turnId);
+      // The same CLI goes on with the system prompt it started with, and
+      // whatever a message told it has gone (Codex review).
+      if (rec.instructionsTold !== undefined) rec.instructionsTold = INSTRUCTIONS_REWOUND;
     }
     if (!rt.session && rec.worktreePending) {
       await this.prepareWorktree(st, msg.turnId);
@@ -2133,6 +2138,7 @@ export class Runner {
     const { rec, rt } = st;
     const turn = rt.turn;
     if (!turn) return;
+    this.settleInstructionsNews(st, r.outcome === 'completed' && !turn.interruptRequested);
     this.flushDeltas(st);
     rt.inProgress.clear();
     this.expireApprovals(st, 'The turn ended.');
@@ -2321,6 +2327,7 @@ export class Runner {
     const { rec, rt } = st;
     const turn = rt.turn;
     if (!turn) return;
+    this.settleInstructionsNews(st, false);
     this.persistInProgress(st, turn.turnId);
     this.expireApprovals(st, 'The turn ended.');
     const interrupted = turn.interruptRequested;
@@ -2419,8 +2426,11 @@ export class Runner {
       const inUse = Boolean(err && !rt.resumed && /Session ID \S+ is already in use/i.test(err.message));
       if (((notFound && rt.resumed) || inUse) && !rt.retriedFresh) {
         rt.retriedFresh = true;
-        if (inUse) rec.sessionUsed = true;
-        else {
+        if (inUse) {
+          rec.sessionUsed = true;
+          // The old session goes on, not the fresh one the brief was for.
+          if (rec.instructionsTold !== undefined) rec.instructionsTold = INSTRUCTIONS_REWOUND;
+        } else {
           rec.sessionUsed = false;
           rec.nativeSessionId = crypto.randomUUID();
           rec.sessionCostTotal = 0;
@@ -3231,8 +3241,10 @@ export class Runner {
     if (standing) {
       rec.instructionsTold = instructionsHash(standing);
       parts.push(standingText(standing));
-    } else {
-      delete rec.instructionsTold;
+    } else if (rec.instructionsTold !== undefined) {
+      // Not forgotten: a session id already in use goes back to the session
+      // that held them (below, inUse). With none ever, nothing's written.
+      rec.instructionsTold = INSTRUCTIONS_CLEARED;
     }
     if (this.projects) {
       rec.projectsTold = this.projects.briefIds(rec);
@@ -3280,7 +3292,24 @@ export class Runner {
       else rec.instructionsTold = before;
       throw e;
     }
-    if (standing) this.emit(st, { type: 'system.note', text: "Told this thread's agent about a change to your standing instructions." }, message.id);
+    if (!standing) return;
+    // A turn that ends any other way may have dropped it (a message Codex was
+    // still holding when Stop came), so the turn's end looks at this.
+    rt.instructionsNewsSent = true;
+    // Only a note: failing here would report a message the CLI has as lost.
+    try {
+      this.emit(st, { type: 'system.note', text: "Told this thread's agent about a change to your standing instructions." }, message.id);
+    } catch (e) {
+      this.log.warn('could not note the standing instructions change', { threadId: rec.id, error: String(e) });
+    }
+  }
+
+  // At a turn's end: news sent in a turn that didn't complete may never have
+  // arrived, so the next message says what's current.
+  settleInstructionsNews(st: ThreadState, completed: boolean): void {
+    const { rec, rt } = st;
+    if (rt.instructionsNewsSent && !completed && rec.instructionsTold !== undefined) rec.instructionsTold = INSTRUCTIONS_REWOUND;
+    rt.instructionsNewsSent = false;
   }
 
   // The thread's projects its session hasn't been told about, as lines to

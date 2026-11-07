@@ -1606,9 +1606,11 @@ type StandingInstructions = {
   a command, sent into a running turn too, as a resumed Claude session keeps
   its first system prompt, and the thread gets a `system.note` saying so.
   `instructionsTold` on the thread record is the hash it last heard (`cleared`
-  once told they've gone, `rewound` after going back in the session, when the
-  next message says what's current), set once the CLI has taken the message,
-  and absent while it has never held any. With the experiment off, or nothing
+  once told they've gone; `rewound` when what it holds isn't known, so the next
+  message says what's current: after going back in the session, Claude's
+  `/clear`, a session id already in use, or a turn that didn't complete after
+  news went out in it), set once the CLI has taken the message, and absent while
+  it has never held any. With the experiment off, or nothing
   ever set, nothing is added and the field isn't written.
 - **Where.** `instructions.md` in the data dir, and beside it
   `instructions.sig`: the hex HMAC-SHA-256 of the file's bytes, after the line
@@ -1637,11 +1639,14 @@ type StandingInstructions = {
   Full access agent runs as Mike, so one that sets out to can read
   `secrets/runner-token` and call `instructions.set` or sign a file, as it can
   call `patches.trust`. That's the line Full access already draws: this stops
-  a write that doesn't know the token, and makes it a deliberate act against
-  the credential. Replacing `secrets/runner-token` picks the key only from the
-  runner's next start, when every client has to hold that token too. Nor does
-  it stop an older signed pair being put back: those are Mike's own words from
-  before.
+  a write that leaves the credential alone, and makes anything else a deliberate
+  act against it. Replacing `secrets/runner-token` needs no read of the old one,
+  and picks the key from the runner's next start (the app reads the new token
+  when it reconnects, so nothing asks). The same replacement hands over all of
+  the runner's RPC, which isn't special to this. Nor does it stop an older signed
+  pair being put back: those are Mike's own words from before. And news told by
+  message, not in a fresh session's instructions, can fade in a compaction, as a
+  project's joined line can.
 
 ## Explain
 
