@@ -88,8 +88,12 @@ struct Composer: View {
         .background(.bar)
         .onDisappear { dictation.close() }
         #if DEBUG
-        // For sim-shots.sh: a still of the listening bar, as the simulator has no one talking.
-        .task { if ProcessInfo.processInfo.arguments.contains("-ThreadbearDictating") { dictation.fakeListening() } }
+        // For sim-shots.sh: stills of the dictating bar, as the simulator has no one talking.
+        .task {
+            let args = ProcessInfo.processInfo.arguments
+            if args.contains("-ThreadbearDictating") { dictation.fakeListening() }
+            if args.contains("-ThreadbearTypingOut") { dictation.fakeTypingOut() }
+        }
         #endif
         .task {
             if photos.isEmpty, let load = model.loadSamplePhoto { words.add([load], model: model) }
@@ -158,13 +162,18 @@ private struct ComposerListeningBar: View {
     let dictation: Dictation
 
     var body: some View {
-        Button { dictation.finish() } label: {
+        // Not a disabled button while typing out: that dims it past reading.
+        if dictation.isTranscribing {
             HStack(spacing: 12) {
-                if dictation.isTranscribing {
-                    ProgressView()
-                    Text("Typing it out").foregroundStyle(.secondary)
-                    Spacer()
-                } else {
+                ProgressView()
+                Text("Typing it out").foregroundStyle(.secondary)
+                Spacer()
+            }
+            .modifier(BarShape())
+            .accessibilityElement(children: .combine)
+        } else {
+            Button { dictation.finish() } label: {
+                HStack(spacing: 12) {
                     TimelineView(.periodic(from: .now, by: 1.0 / 15)) { context in
                         HStack(spacing: 12) {
                             Waveform(levels: dictation.level.history)
@@ -173,21 +182,28 @@ private struct ComposerListeningBar: View {
                     }
                     Image(systemName: "stop.circle.fill").font(.system(size: 26))
                 }
+                .foregroundStyle(.red)
+                .modifier(BarShape())
             }
-            .foregroundStyle(.red)
-            .padding(.leading, 14)
-            .padding(.trailing, 6)
-            .frame(minHeight: 40)
-            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .buttonStyle(.plain)
+            .accessibilityLabel("Stop dictating")
         }
-        .buttonStyle(.plain)
-        .disabled(dictation.isTranscribing)
-        .accessibilityLabel(dictation.isTranscribing ? "Typing out what you said" : "Stop dictating")
     }
 
     private func elapsed(at now: Date) -> String {
         let seconds = Int(now.timeIntervalSince(dictation.startedAt ?? now))
         return String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
+}
+
+/// The bar's box, the same size and shape as the text box it stands in for.
+private struct BarShape: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .padding(.leading, 14)
+            .padding(.trailing, 6)
+            .frame(minHeight: 40)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 }
 

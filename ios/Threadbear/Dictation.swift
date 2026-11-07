@@ -143,6 +143,9 @@ final class Dictation {
     }
 
     #if DEBUG
+    /// Whisper working after the mic's off, for screenshots (-ThreadbearTypingOut).
+    func fakeTypingOut() { isTranscribing = true }
+
     /// Looks 8 seconds into listening, for screenshots (-ThreadbearDictating).
     func fakeListening() {
         isListening = true

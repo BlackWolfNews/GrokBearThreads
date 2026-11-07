@@ -42,6 +42,7 @@ shot question -ThreadbearOpen a2
 shot reply -ThreadbearOpen a3
 shot running -ThreadbearOpen a5
 shot dictating -ThreadbearOpen a3 -ThreadbearDictating
+shot typing-out -ThreadbearOpen a3 -ThreadbearTypingOut
 shot pictures -ThreadbearPictures -ThreadbearOpen pics
 shot new-thread -ThreadbearCompose "Add a dark mode to the garden planner, matching the system setting"
 shot pair --unpaired
