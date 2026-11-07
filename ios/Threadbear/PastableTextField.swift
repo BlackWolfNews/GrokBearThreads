@@ -61,6 +61,13 @@ struct PastableTextField: UIViewRepresentable {
         view.placeholderLabel.isHidden = !text.isEmpty
         view.onPasteImages = onPasteImages
         view.threadReference = threadReference
+        // .disabled() while a send is on its way: the box empties when it
+        // lands, so words typed meanwhile would be lost. Edits are turned
+        // away rather than isEditable going off, which would drop the
+        // keyboard he's about to type the next message on.
+        let locked = !context.environment.isEnabled
+        view.locked = locked
+        view.alpha = locked ? 0.5 : 1
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView view: PastingTextView, context: Context) -> CGSize? {
@@ -105,6 +112,10 @@ struct PastableTextField: UIViewRepresentable {
             view.placeholderLabel.isHidden = !view.text.isEmpty
         }
 
+        func textView(_ view: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+            !((view as? PastingTextView)?.locked ?? false)
+        }
+
         func textViewDidChangeSelection(_ view: UITextView) {
             guard !updating else { return }
             parent.cursor?.range = view.selectedRange
@@ -115,6 +126,8 @@ struct PastableTextField: UIViewRepresentable {
 final class PastingTextView: UITextView {
     var onPasteImages: (([UIImage]) -> Void)?
     var threadReference: ((String) -> String?)?
+    /// While a send is on its way: no typing, pasting or cutting.
+    var locked = false
     let placeholderLabel = UILabel()
     /// The photos the chips stand for, to draw them again in the other
     /// appearance.
@@ -217,12 +230,15 @@ final class PastingTextView: UITextView {
     private var pastesImages: Bool { onPasteImages != nil && UIPasteboard.general.hasImages }
 
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if locked, [#selector(paste(_:)), #selector(cut(_:)), #selector(delete(_:))].contains(action) { return false }
         // A plain text view turns Paste off for an image, as it can't hold one.
         if action == #selector(paste(_:)), pastesImages { return true }
         return super.canPerformAction(action, withSender: sender)
     }
 
     override func paste(_ sender: Any?) {
+        // A photo pasted goes round the delegate, so this one's checked here.
+        if locked { return }
         // A thread's id goes in as a link to it, which the agent can read the
         // thread from and the bubble draws as a chip, as the Mac does.
         // insertText goes through the delegate like typing does.

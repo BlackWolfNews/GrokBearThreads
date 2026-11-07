@@ -28,36 +28,41 @@ struct Composer: View {
                 LinkChips(links: links)
             }
             if !photos.isEmpty || adding > 0 {
-                PhotoStrip(words: words)
+                PhotoStrip(words: words).disabled(sending)
             }
             DictationNotes(dictation: dictation)
                 .frame(maxWidth: .infinity, alignment: .leading)
             HStack(alignment: .bottom, spacing: 8) {
-                if model.canSendPhotos {
-                    PhotoMenu(words: words) {
-                        Image(systemName: "plus.circle")
-                            .font(.system(size: 30))
-                            .symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(.secondary)
+                Group {
+                    if model.canSendPhotos {
+                        PhotoMenu(words: words) {
+                            Image(systemName: "plus.circle")
+                                .font(.system(size: 30))
+                                .symbolRenderingMode(.hierarchical)
+                                .foregroundStyle(.secondary)
+                        }
+                        // A menu's label takes the accent otherwise, and only Send should have it.
+                        .tint(.secondary)
+                        .accessibilityLabel("Add a photo")
                     }
-                    // A menu's label takes the accent otherwise, and only Send should have it.
-                    .tint(.secondary)
-                    .accessibilityLabel("Add a photo")
+                    PastableTextField(text: $text, placeholder: placeholder, lines: 1...6,
+                                      onPasteImages: model.canSendPhotos ? { words.addPasted($0, model: model) } : nil,
+                                      photos: $photos, cursor: cursor, threadReference: { model.threadReference(pasted: $0) })
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 9)
+                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    // Grey like Add a photo, as only Send has the accent; red while listening.
+                    DictateButton(text: $text, dictation: dictation, idleTint: .secondary) {
+                        Image(systemName: "mic")
+                            .font(.system(size: 22))
+                            .frame(width: 30, height: 30)
+                    }
+                    .frame(minHeight: 30)
+                    .accessibilityLabel(dictation.isListening ? "Stop dictating" : "Dictate")
                 }
-                PastableTextField(text: $text, placeholder: placeholder, lines: 1...6,
-                                  onPasteImages: model.canSendPhotos ? { words.addPasted($0, model: model) } : nil,
-                                  photos: $photos, cursor: cursor, threadReference: { model.threadReference(pasted: $0) })
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 9)
-                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                // Grey like Add a photo, as only Send has the accent; red while listening.
-                DictateButton(text: $text, dictation: dictation, idleTint: .secondary) {
-                    Image(systemName: "mic")
-                        .font(.system(size: 22))
-                        .frame(width: 30, height: 30)
-                }
-                .frame(minHeight: 30)
-                .accessibilityLabel(dictation.isListening ? "Stop dictating" : "Dictate")
+                // Nothing more in while it goes: the box empties when it lands,
+                // taking anything added meanwhile with it (Mike, 7 Nov).
+                .disabled(sending)
                 Button(action: send) {
                     // A photo can take a while to go up on mobile data.
                     if sending && !photos.isEmpty {
