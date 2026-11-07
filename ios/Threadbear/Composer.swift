@@ -1,8 +1,9 @@
 import SwiftUI
 import ThreadbearKit
 
-/// The text box at the bottom of a thread: type, or use the keyboard's own
-/// dictation, add or paste photos, then send.
+/// The text box at the bottom of a thread: type or dictate, add or paste
+/// photos, then send. The mic is the new thread sheet's (Mike wanted it on
+/// replies too, 7 Nov), beside Send so a thumb finds both.
 struct Composer: View {
     @Environment(AppModel.self) private var model
     @Binding var text: String
@@ -16,6 +17,7 @@ struct Composer: View {
     @State private var adding = 0
     @State private var cursor = TextCursor()
     @State private var sending = false
+    @State private var dictation = Dictation()
 
     /// Each photo a chip in the words where it was put in, as on the Mac.
     private var words: PhotoWords { PhotoWords(text: $text, photos: $photos, adding: $adding, cursor: cursor) }
@@ -28,6 +30,8 @@ struct Composer: View {
             if !photos.isEmpty || adding > 0 {
                 PhotoStrip(words: words)
             }
+            DictationNotes(dictation: dictation)
+                .frame(maxWidth: .infinity, alignment: .leading)
             HStack(alignment: .bottom, spacing: 8) {
                 if model.canSendPhotos {
                     PhotoMenu(words: words) {
@@ -46,6 +50,14 @@ struct Composer: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 9)
                     .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                // Grey like Add a photo, as only Send has the accent; red while listening.
+                DictateButton(text: $text, dictation: dictation, idleTint: .secondary) {
+                    Image(systemName: "mic")
+                        .font(.system(size: 22))
+                        .frame(width: 30, height: 30)
+                }
+                .frame(minHeight: 30)
+                .accessibilityLabel(dictation.isListening ? "Stop dictating" : "Dictate")
                 Button(action: send) {
                     // A photo can take a while to go up on mobile data.
                     if sending && !photos.isEmpty {
@@ -56,13 +68,15 @@ struct Composer: View {
                     }
                 }
                 // Not with a photo still on its way, which would be left behind.
-                .disabled((words.message.isEmpty && photos.isEmpty) || sending || adding > 0)
+                // Nor with Whisper still to type out what was said.
+                .disabled((words.message.isEmpty && photos.isEmpty) || sending || adding > 0 || dictation.holdsWords)
                 .accessibilityLabel("Send")
             }
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
         .background(.bar)
+        .onDisappear { dictation.close() }
         .task {
             if photos.isEmpty, let load = model.loadSamplePhoto { words.add([load], model: model) }
         }
@@ -71,6 +85,8 @@ struct Composer: View {
     private func send() {
         let message = words.message
         guard !message.isEmpty || !photos.isEmpty else { return }
+        // Apple's dictation still listening would type into the emptied box.
+        dictation.stop()
         sending = true
         Task {
             if await onSend(message, photos) {

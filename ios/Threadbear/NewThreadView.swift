@@ -29,8 +29,6 @@ struct NewThreadView: View {
     @State private var adding = 0
     @State private var cursor = TextCursor()
     @State private var dictation = Dictation()
-    @State private var askEngine = false
-    private var whisperModel: WhisperModel { .shared }
 
     /// Each photo a chip in the words where it was put in, as on the Mac.
     private var words: PhotoWords { PhotoWords(text: $text, photos: $photos, adding: $adding, cursor: cursor) }
@@ -49,30 +47,14 @@ struct NewThreadView: View {
                             }
                         }
                         Spacer()
-                        if dictation.isTranscribing {
-                            ProgressView()
-                        } else {
-                            Button(action: toggleDictation) {
-                                if dictation.isListening {
-                                    ListeningLabel(dictation: dictation)
-                                } else {
-                                    Label("Dictate", systemImage: "mic")
-                                }
-                            }
-                            .tint(dictation.isListening ? .red : nil)
+                        DictateButton(text: $text, dictation: dictation) {
+                            Label("Dictate", systemImage: "mic")
                         }
                     }
                     // Two buttons in one Form row: without this a tap anywhere
                     // in the row fires both.
                     .buttonStyle(.borderless)
-                    if let problem = dictation.problem {
-                        Text(problem).font(.footnote).foregroundStyle(.secondary)
-                    }
-                    if DictationEngine.chosen == .whisper, let progress = whisperModel.progress {
-                        ProgressView(value: progress) {
-                            Text("Downloading Whisper. Apple's dictation until then.").font(.footnote).foregroundStyle(.secondary)
-                        }
-                    }
+                    DictationNotes(dictation: dictation)
                     if model.canSendPhotos, !photos.isEmpty || adding > 0 { PhotoStrip(words: words) }
                 }
                 if model.canChooseRunner || !models.isEmpty {
@@ -126,12 +108,6 @@ struct NewThreadView: View {
                 }
             }
             .onDisappear { dictation.close() }
-            .confirmationDialog("Dictate with", isPresented: $askEngine, titleVisibility: .visible) {
-                Button("Whisper, \(WhisperModel.sizeText) download") { choose(.whisper) }
-                Button("Apple's dictation") { choose(.apple) }
-            } message: {
-                Text("Whisper's more accurate and runs on this phone. Change it in Settings.")
-            }
             .task(id: "\(commandId ?? ""):\(model.connection)") { await waitForThread() }
             .task {
                 if photos.isEmpty, let load = model.loadSamplePhoto { words.add([load], model: model) }
@@ -174,26 +150,6 @@ struct NewThreadView: View {
         runnerId = NewThreadChoices.runner(model.runners, now: model.now)?.runnerId
     }
     private var chosenModel: PhoneModelChoice? { models.first { $0.id == modelId } }
-
-    /// Adds to what's typed, after a space. The first time, asks which engine.
-    private func toggleDictation() {
-        if dictation.isListening { dictation.finish(); return }
-        guard let engine = DictationEngine.chosen else { askEngine = true; return }
-        // A download stopped by the app being swiped away picks up again.
-        if engine == .whisper, !whisperModel.installed, whisperModel.progress == nil { whisperModel.download() }
-        listen()
-    }
-
-    private func choose(_ engine: DictationEngine) {
-        DictationEngine.chosen = engine
-        if engine == .whisper { whisperModel.download() }
-        listen()
-    }
-
-    private func listen() {
-        let before = text.isEmpty || text.hasSuffix(" ") || text.hasSuffix("\n") ? text : text + " "
-        Task { await dictation.start { text = before + $0 } }
-    }
 
     private func start() {
         guard let backend = model.backend else { return }
@@ -244,33 +200,5 @@ struct NewThreadView: View {
         } catch {
             model.report(error)
         }
-    }
-}
-
-/// The mic button while it's listening: the waveform, the time so far and a
-/// small stop square, so it's plain the phone's hearing.
-private struct ListeningLabel: View {
-    let dictation: Dictation
-
-    var body: some View {
-        TimelineView(.periodic(from: .now, by: 1.0 / 15)) { context in
-            HStack(spacing: 8) {
-                HStack(alignment: .center, spacing: 2) {
-                    ForEach(Array(dictation.level.history.enumerated()), id: \.offset) { _, value in
-                        Capsule().frame(width: 2, height: 3 + CGFloat(value) * 15)
-                    }
-                }
-                .frame(height: 18)
-                .animation(.linear(duration: 1.0 / 15), value: dictation.level.history)
-                Text(elapsed(at: context.date)).monospacedDigit()
-                Image(systemName: "stop.fill").imageScale(.small)
-            }
-        }
-        .accessibilityLabel("Stop dictating")
-    }
-
-    private func elapsed(at now: Date) -> String {
-        let seconds = Int(now.timeIntervalSince(dictation.startedAt ?? now))
-        return String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
 }
