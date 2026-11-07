@@ -2256,16 +2256,19 @@ export class Runner {
     // A run that finishes with nothing for Mike puts it back, so a watcher he
     // archived doesn't land in his inbox each time it looks and finds
     // nothing (7 Nov 2026, a twice-daily Pebble check). One that needs him,
-    // failed, or is still waiting on work stays out. Another queued message
-    // decides at the end of its own turn.
+    // fails or is stopped stays out. One still going (a background job, a
+    // sub-agent, a lab review, owed or started, a wait, a pool move or a lost
+    // network) keeps the mark, so the turn that really ends the run decides;
+    // a queued message decides at the end of its own turn.
     if (rec.unarchivedBySchedule && !rec.queue.length && !rt.turn) {
       const by = rec.unarchivedBySchedule.by;
-      delete rec.unarchivedBySchedule;
-      this.markDirty(st);
-      if (finished && !review && !rec.archivedAt && !this.stopping) {
+      const goingOn = !!limitHit || !!netLost || (outcome === 'completed' && said?.needs === 'nothing');
+      if (finished && !review && !rec.labReviewOwed && !rec.archivedAt && !this.stopping) {
+        delete rec.unarchivedBySchedule;
         this.emit(st, { type: 'system.note', text: 'Back in the archive: the scheduled run ended with nothing for you.' });
         this.update({ threadId: rec.id, archived: true, archivedBy: by ?? 'threadbear' });
-      }
+      } else if (!goingOn || rec.archivedAt) delete rec.unarchivedBySchedule;
+      this.markDirty(st);
     }
     if (archive && !rt.turn && !rec.archivedAt && !this.stopping) {
       this.emit(st, { type: 'system.note', text: 'Archived, as the agent was asked to once it had finished.' });
