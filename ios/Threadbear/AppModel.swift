@@ -42,6 +42,9 @@ final class AppModel {
     /// Hibernated from this phone, kept out of the lists and on the heading's
     /// count until Convex catches up.
     private(set) var tucks = Tucks()
+    /// He's just taken the last row away, for the empty view to wave.
+    private var inboxCleared = InboxCleared()
+    var inboxJustCleared: Bool { inboxCleared.isPending(now: .now) }
     private(set) var hibernating: [PhoneThread] = []
     private(set) var den: [PhoneThread] = []
     /// For each thread a schedule will message, the one due soonest: the
@@ -351,6 +354,8 @@ final class AppModel {
             if args.contains("-ThreadbearSlowStart") { fake.startDelay = .seconds(60) }
             // -ThreadbearShortInbox: one thread in the inbox, one running, one of each put away.
             if args.contains("-ThreadbearShortInbox") { fake.keepOnly(["a4", "a5", "a6", "a7"]) }
+            // -ThreadbearEmptyInbox: nothing in the inbox from the start, one running.
+            if args.contains("-ThreadbearEmptyInbox") { fake.keepOnly(["a5", "a6", "a7"]) }
             connect(fake, pairing: nil)
         } else if let saved = PairingStore.load() {
             connect(ConvexBackend(deploymentURL: saved.deploymentURL, token: saved.token), pairing: saved)
@@ -425,7 +430,7 @@ final class AppModel {
             // The Mac may have archived it during the wait; an id that's not
             // in the list would never get cleared by the next list update.
             if inbox.contains(where: { $0.threadId == threadId }) {
-                withAnimation(.snappy(duration: 0.25)) { _ = archiving.insert(threadId) }
+                takeOffInbox { _ = archiving.insert(threadId) }
             }
             slidingOff.remove(threadId)
             do {
@@ -468,7 +473,7 @@ final class AppModel {
                 // The Mac may have moved it during the wait; `tucks` only
                 // lets go of an id when a list update says so.
                 if hasRow() {
-                    withAnimation(.snappy(duration: 0.25)) { tucks.tuck(threadId) }
+                    takeOffInbox { tucks.tuck(threadId) }
                 }
                 // Not until it's collapsed: back at full opacity, the row
                 // going away would show again on its way out.
@@ -489,6 +494,21 @@ final class AppModel {
             }
         }
     }
+
+    /// A row he's taken away collapsing, which may be the last: only this
+    /// counts as clearing the inbox, so the bear never waves at a launch or when
+    /// the Mac empties it.
+    private func takeOffInbox(_ change: () -> Void) {
+        let before = sections
+        withAnimation(.snappy(duration: 0.25)) {
+            change()
+            // In the same breath, as the empty view reads it when it's made.
+            inboxCleared.note(before: before, after: sections, now: .now)
+        }
+    }
+
+    /// Whether to wave, once: the empty view asks as it appears.
+    func takeInboxCleared() -> Bool { inboxCleared.take(now: .now) }
 
     func toggle(_ section: PhoneSection) {
         folds.toggle(section)

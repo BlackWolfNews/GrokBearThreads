@@ -77,13 +77,6 @@ struct InboxView: View {
                     results(ThreadSearch(query, sections: sections, hibernating: model.hibernating, archived: model.den, olderArchived: olderArchived))
                 } else if !model.loaded.contains(.inbox) {
                     LoadingRows()
-                } else if sections.isEmpty {
-                    ContentUnavailableView {
-                        Label { Text("Nothing in the inbox") } icon: { BearView(pose: .sit, size: 44) }
-                    } description: {
-                        Text("Threads that finish or need you turn up here.")
-                    }
-                    .listRowBackground(Color.clear)
                 }
                 if query.trimmingCharacters(in: .whitespaces).isEmpty, model.loaded.contains(.inbox) {
                     ForEach(PhoneSection.allCases, id: \.self) { section($0) }
@@ -272,6 +265,11 @@ struct InboxView: View {
             }
         } else if section == .inbox, !threads.isEmpty {
             Section { rows(threads) } header: { SectionHeading(title: section.title, icon: section.icon) }
+        } else if section == .inbox, model.sections.isInboxZero {
+            // In the Inbox's place, so anything still running sits under it.
+            InboxZeroView(celebrating: model.inboxJustCleared)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
         }
     }
 
@@ -620,6 +618,54 @@ struct ThreadRow: View {
                 .accessibilityLabel("Scheduled: \(wake?.whenText ?? "")")
         case .time:
             Text(RowStatus.text(thread, now: model.now)).font(.footnote).monospacedDigit().foregroundStyle(Look.faint)
+        }
+    }
+}
+
+/// "Nothing in the inbox". Having just taken the last row away, the bear stands
+/// up and gives one wave as the row's collapse finishes, with one soft tap, as the
+/// Mac's InboxZero does. Open the app to an empty inbox and it just sits there:
+/// it's a reward for clearing it, not a launch animation.
+private struct InboxZeroView: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var shown: Bool
+    @State private var waves = 0
+    @State private var taps = 0
+
+    init(celebrating: Bool) {
+        // Hidden from the first frame when it's about to rise, or it flashes.
+        _shown = State(initialValue: !celebrating)
+    }
+
+    var body: some View {
+        ContentUnavailableView {
+            Label { Text("Nothing in the inbox") } icon: { WaveOnceBear(size: 46, waves: waves) }
+        } description: {
+            Text("Threads that finish or need you turn up here.")
+        }
+        .opacity(shown ? 1 : 0)
+        .offset(y: shown || reduceMotion ? 0 : 8)
+        .sensoryFeedback(.impact(flexibility: .soft, intensity: 0.6), trigger: taps)
+        .onAppear {
+            // Asked here rather than from the archive call: the List only puts
+            // this row in as the last one starts to collapse.
+            guard model.takeInboxCleared() else { shown = true; return }
+            if reduceMotion {
+                withAnimation(.easeOut(duration: 0.2)) { shown = true }
+                taps += 1
+                return
+            }
+            // The collapse is 250 ms, then 100 ms, then the snappy rise. Waited for
+            // here rather than with the animation's delay: a change made as a
+            // List's row appears goes in with its first frame, not animated.
+            Task {
+                try? await Task.sleep(for: .milliseconds(350))
+                withAnimation(.snappy(duration: 0.4)) { shown = true }
+                try? await Task.sleep(for: .milliseconds(250))
+                waves += 1
+                taps += 1
+            }
         }
     }
 }

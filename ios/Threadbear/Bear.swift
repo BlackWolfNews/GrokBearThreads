@@ -129,6 +129,61 @@ struct WavingBear: View {
     }
 
     private func part(_ inks: [BearGeometry.Ink]) -> some View {
+        BearPart(inks: inks, size: size)
+    }
+}
+
+/// The bear waving the once, for when `waves` goes up: the paw swings and the
+/// whole bear tilts from its feet, three quick tilts as the Mac's InboxZero has,
+/// and it stops. Until then, and after, it's the wave pose holding still.
+struct WaveOnceBear: View {
+    var size: CGFloat = 46
+    var waves: Int
+
+    var body: some View {
+        let small = size < BearGeometry.smallSide
+        let face = BearGeometry.waveFace(small: small)
+        let shoulder = UnitPoint(x: BearGeometry.shoulder.x / 24, y: BearGeometry.shoulder.y / 24)
+        let feet = UnitPoint(x: BearGeometry.feet.x / 24, y: BearGeometry.feet.y / 24)
+        var paw = [BearGeometry.Ink(path: BearGeometry.arm, width: BearGeometry.line)]
+        if let pad = BearGeometry.pawPad(small: small) { paw.append(BearGeometry.Ink(path: pad, width: nil)) }
+        return ZStack {
+            BearPart(inks: paw, size: size)
+                .keyframeAnimator(initialValue: 0.0, trigger: waves) { arm, angle in
+                    arm.rotationEffect(.degrees(angle), anchor: shoulder)
+                } keyframes: { _ in
+                    KeyframeTrack {
+                        CubicKeyframe(18, duration: 0.175)
+                        CubicKeyframe(2, duration: 0.175)
+                        CubicKeyframe(16, duration: 0.175)
+                        CubicKeyframe(0, duration: 0.175)
+                    }
+                }
+                .mask { OutsideHead(head: Path(face.head)).fill(style: FillStyle(eoFill: true)) }
+            BearPart(inks: face.inks, size: size)
+        }
+        .frame(width: size, height: size)
+        .keyframeAnimator(initialValue: 0.0, trigger: waves) { bear, angle in
+            bear.rotationEffect(.degrees(angle), anchor: feet)
+        } keyframes: { _ in
+            KeyframeTrack {
+                CubicKeyframe(-9, duration: 0.154)
+                CubicKeyframe(7, duration: 0.182)
+                CubicKeyframe(-5, duration: 0.154)
+                CubicKeyframe(0, duration: 0.21)
+            }
+        }
+        .accessibilityElement()
+        .accessibilityLabel("The bear, waving")
+    }
+}
+
+/// Some of a pose on its own canvas, so it can move by itself.
+private struct BearPart: View {
+    var inks: [BearGeometry.Ink]
+    var size: CGFloat
+
+    var body: some View {
         Canvas { context, canvas in
             let scale = min(canvas.width, canvas.height) / 24
             context.scaleBy(x: scale, y: scale)
