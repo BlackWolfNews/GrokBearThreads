@@ -463,6 +463,19 @@ final class TranscriptTextView: NSTextView {
     /// drawn in `linkTextAttributes`) and needs no URL scheme.
     var onAction: ((String) -> Void)?
 
+    /// The thread whose transcript this text is in, from the table it sits
+    /// in. A reply button is only pressed from its own thread's transcript:
+    /// an agent copying another thread's `button:` link into its reply must
+    /// not get that thread's button pressed (Codex's review, 7 Nov 2026).
+    var transcriptThreadId: String? {
+        var view: NSView? = superview
+        while let v = view {
+            if let table = v as? NSTableView, let controller = table.delegate as? TranscriptController { return controller.session?.threadId }
+            view = v.superview
+        }
+        return nil
+    }
+
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         // A ```mermaid or ```html box's buttons. Elsewhere in the box a
@@ -500,7 +513,7 @@ final class TranscriptTextView: NSTextView {
         // A reply button's pill presses it (or opens what it started).
         if let id = replyButton(at: point) {
             closeChipCard()
-            AppModel.shared.pressReplyButton(id)
+            AppModel.shared.pressReplyButton(id, from: transcriptThreadId)
             return
         }
         if let onAction, let action = row(at: point)?.action ?? character(at: point).flatMap({ textStorage?.attribute(.tbAction, at: $0, effectiveRange: nil) as? String }) {

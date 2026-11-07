@@ -37,7 +37,9 @@ export function ReplyButton({ token, threadId, button, title, threadPath }: { to
     <span className="reply-button-wrap">
       <button className={`reply-button rb-${button.kind} rb-${look.kind}`} disabled={look.kind === 'pressing' || (look.kind === 'pressed' && !look.threadId)} title={look.tip} onClick={() => void onClick()}>
         {look.kind === 'pressing' ? <span className="spinner" /> : look.kind === 'pressed' ? <Icon.Check /> : null}
-        <span>{title}</span>
+        {/* The title the runner keeps, not the link's words: an agent can't
+            label a button one thing and have it do another (Codex's review). */}
+        <span>{button.title || title}</span>
       </button>
       {look.kind === 'failed' ? <span className="reply-button-error">{look.error}</span> : null}
     </span>

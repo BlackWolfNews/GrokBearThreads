@@ -608,7 +608,7 @@ enum Automation {
                 ?? (c["title"] as? String).flatMap { want in ids.last { ReplyButtons.shared.known($0)?.button.title == want } }
             guard let id else { return "error no reply button like that in the open thread" }
             guard ReplyButtons.shared.known(id) != nil else { return "error button \(id) isn't known" }
-            app.pressReplyButton(id)
+            app.pressReplyButton(id, from: app.transcript.session?.threadId)
             return "ok"
         case "ask":
             // {"cmd":"ask","row":"ak:6","action":"pick:0:1"} clicks an open

@@ -835,9 +835,17 @@ extension AppModel {
     /// buttons"). Not pressed yet: presses it, dimmed with "…" until the
     /// runner answers, and a second click meanwhile does nothing. Pressed:
     /// opens the thread it started or messaged rather than pressing again.
-    func pressReplyButton(_ id: String) {
+    func pressReplyButton(_ id: String, from threadId: String?) {
         let store = ReplyButtons.shared
         guard let known = store.known(id) else { return }
+        // Only from the transcript of the thread that made it (TextKit's
+        // transcriptThreadId): ids are the runner's per thread, and a link
+        // copied into another thread's reply mustn't press this one.
+        guard known.threadId == threadId else {
+            NSSound.beep()
+            errorMessage = "That button belongs to another thread, so it can't be pressed from here."
+            return
+        }
         if let pressed = known.button.pressed {
             if threads[pressed.threadId] != nil {
                 openThread(pressed.threadId)

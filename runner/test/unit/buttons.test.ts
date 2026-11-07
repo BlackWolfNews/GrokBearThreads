@@ -100,3 +100,14 @@ test('add_button is only handed out with the experiment on, and returns the link
   const id = h.runner.listButtons(thread.id).buttons[0].id;
   assert.match(JSON.stringify(r.content), new RegExp(`\\[Look into it\\]\\(button:${id}\\)`));
 });
+
+test('access is checked again when pressed', () => {
+  const { h, thread, folder } = fixture();
+  const { button } = h.runner.createButton(thread.id, { title: 'Go', start: { text: 'x', cwd: folder } });
+  assert.equal(button.start?.permissionMode, 'full');
+  h.runner.update({ threadId: thread.id, permissionMode: 'ask' });
+  // A running turn keeps the access it started with; once it's over, the new mode counts.
+  h.adapter.last.result();
+  assert.throws(() => h.runner.pressButton(thread.id, button.id), /now has Ask before edits/);
+  assert.ok(h.runner.listButtons(thread.id).buttons[0].failed);
+});

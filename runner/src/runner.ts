@@ -134,7 +134,7 @@ import { approvalsPart, settleDeclined, type ApprovalsPart, type SecretAnswer } 
 import type { RequestAnswer } from './cross-runner.ts';
 import { SecretStore } from './secrets.ts';
 import { reviewsPart, type ReviewsPart } from './runner/reviews.ts';
-import { buttonsPart, type ButtonsPart } from './runner/buttons.ts';
+import { buttonsPart, MAX_BUTTONS, type ButtonsPart } from './runner/buttons.ts';
 import { clisPart, type ClisPart } from './runner/clis.ts';
 import { editingPart, type EditingPart } from './runner/editing.ts';
 import { patchesPart, type PatchesPart } from './runner/patches.ts';
@@ -893,7 +893,7 @@ export class Runner {
     if (reviews.size) rec.reviews = [...reviews.values()];
     const buttons = new Map<string, ReplyButton>();
     for (const event of events) if (event.type === 'button.updated') buttons.set(event.button.id, event.button);
-    if (buttons.size) rec.buttons = [...buttons.values()];
+    if (buttons.size) rec.buttons = [...buttons.values()].slice(-MAX_BUTTONS);
     if (rewinds.length) rec.rewinds = rewinds;
     if (open && lastStarted) rec.turnId = lastStarted.turnId;
     this.log.warn('thread.json was unreadable; rebuilt it from the event log', { threadId: id });

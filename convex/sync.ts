@@ -1134,13 +1134,27 @@ export const appendMessages = mutation({
         // sends one again, so nothing here clears them.
         const patch: Partial<Doc<'messages'>> = {};
         if (m.pagedAt && !existing.pagedAt) patch.pagedAt = m.pagedAt;
-        if (!sameButtons(existing.buttons, m.buttons)) patch.buttons = m.buttons;
+        const buttons = keepPresses(existing.buttons, m.buttons);
+        if (!sameButtons(existing.buttons, buttons)) patch.buttons = buttons;
         if (Object.keys(patch).length) await ctx.db.patch(existing._id, patch);
       }
     }
     return { skipped };
   },
 });
+
+// A press is final: a slower, older send of the row (one queued before the
+// press) mustn't turn a pressed button back into one that can be pressed
+// (Codex's review, 7 Nov 2026).
+function keepPresses<B extends { id: string; pressedThreadId?: string; failed?: string }>(old: B[] | undefined, next: B[] | undefined): B[] | undefined {
+  if (!old?.length || !next) return next;
+  return next.map((b) => {
+    const was = old.find((o) => o.id === b.id);
+    if (!was?.pressedThreadId || b.pressedThreadId) return b;
+    const { failed: _failed, ...rest } = b;
+    return { ...rest, pressedThreadId: was.pressedThreadId } as B;
+  });
+}
 
 // The newest message seq per thread of a runner, so a runner starting up
 // only sends what the mirror doesn't have.

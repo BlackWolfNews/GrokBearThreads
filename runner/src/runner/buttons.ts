@@ -98,6 +98,19 @@ export const buttonsPart = {
     const button = st.rec.buttons?.find((b) => b.id === buttonId);
     if (!button) throw new RpcError(ErrorCode.badParams, `Button not found: ${buttonId}`);
     if (button.pressed) return { button: structuredClone(button) };
+    // Access is checked again now, not only when it was made: the maker or
+    // the target may have changed mode since (Codex's review, 7 Nov 2026).
+    // A refusal here is saved as a failed press, like any other.
+    const maker = this.accessOf(threadId);
+    const over = button.start && RANK[button.start.permissionMode] > RANK[maker]
+      ? `This thread now has ${MODE_NAMES[maker]}, so its button can't start a thread with ${MODE_NAMES[button.start.permissionMode]}.`
+      : button.send && this.threads.has(button.send.threadId) && RANK[this.accessOf(button.send.threadId)] > RANK[maker]
+        ? `"${button.send.threadTitle}" now has more access than this thread, so its button can't message it. Ask in this thread for it to use send_message.`
+        : undefined;
+    if (over) {
+      this.persistButton(st, { ...button, failed: { at: this.isoNow(), error: over } });
+      throw new RpcError(ErrorCode.badParams, over);
+    }
     // The words are the agent's, so they say so, as send_message's do.
     const from = `${AGENT_MESSAGE_PREFIX}"${st.rec.title}" (${st.rec.id.slice(0, 8)})]\n\n`;
     let next: ReplyButton;
@@ -144,7 +157,7 @@ export const buttonsPart = {
 
   persistButton(this: Runner, st: ThreadState, button: ReplyButton): void {
     const previous = st.rec.buttons ?? [];
-    const buttons = previous.some((b) => b.id === button.id) ? previous.map((b) => (b.id === button.id ? button : b)) : [...previous, button].slice(-MAX_BUTTONS);
+    const buttons = (previous.some((b) => b.id === button.id) ? previous.map((b) => (b.id === button.id ? button : b)) : [...previous, button]).slice(-MAX_BUTTONS);
     this.store.save({ ...st.rec, buttons });
     st.rec.buttons = buttons;
     this.emit(st, { type: 'button.updated', button });

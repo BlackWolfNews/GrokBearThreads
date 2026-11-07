@@ -239,7 +239,7 @@ struct ThreadView: View {
             // One partway through a line, drawn as a link (ReplyButtons.trailing
             // only takes the ones at the end). An id the row doesn't carry is
             // just its words.
-            let buttons = messages.first { $0.seq == seq }?.buttons ?? []
+            let buttons = (page?.messages ?? detail?.messages ?? []).first { $0.seq == seq }?.buttons ?? []
             guard let button = buttons.first(where: { $0.id == id }) else { return .discarded }
             model.tap(button, in: threadId, pushThread: pushThread)
         case let .step(quote):
