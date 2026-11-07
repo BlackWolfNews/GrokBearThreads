@@ -28,6 +28,10 @@ certificates on for the tailnet. Then:
 ./threadbear setup --self-hosted --yes
 ```
 
+Partway through, macOS may ask whether Terminal can "access data from other
+apps". Setup doesn't need it, and Don't Allow is fine: that's what the 7 Nov
+recording did.
+
 Running setup again later doesn't need the flag: the admin key file says
 this Mac is self-hosted. A Mac already set up with Convex cloud is refused,
 as setup doesn't move a Threadbear between backends.
@@ -83,6 +87,8 @@ A second Mac joins as it would with cloud: `setup --existing` there, then
 - The iPhone app pairs with `https://<name>.ts.net:<port>` as well as Convex
   cloud addresses (`ios/ThreadbearKit Pairing.swift`), asking first as
   always. That needs an iPhone app newer than 1.0.4.
+- It doesn't ask for notification permission on a backend that says
+  `pushOff`, as there'd be nothing to send.
 - The Mac app takes the website's address from `runner.status`'s
   `sync.site`, falling back to the `.convex.site` twin for cloud.
 - `phone:me` and the owner's heartbeat answer `pushOff: true`
@@ -119,3 +125,8 @@ runner.json.
 install from the website's prompt on a clean Mac's desktop (Mike's is Tinker
 Desk, through `desk`), and `scripts/remove-self-hosted-install.sh --yes`
 takes it all out again, so it can be recorded again whenever setup changes.
+
+The recording has to start with no prompts in the way, so the script runs the
+agent in an empty folder with GitHub logged out and its permissions named, in a
+full-screen Terminal. Claude Code hides setup's output, so the video's list of
+steps comes from running `./threadbear setup` again afterwards, in that Terminal.

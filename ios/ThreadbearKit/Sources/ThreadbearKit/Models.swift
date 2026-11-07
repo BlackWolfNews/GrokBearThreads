@@ -770,6 +770,7 @@ public struct PhoneIdentity: Codable, Sendable, Hashable {
     /// The backend can't send notifications (a self-hosted one, which the
     /// push relay doesn't reach: docs/self-hosting.md). Missing means it can.
     public var pushOff: Bool?
+    public var sendsNotifications: Bool { pushOff != true }
     public init(name: String, expiresAt: Date?, apiVersion: Int? = nil, pushOff: Bool? = nil) {
         self.name = name
         self._expiresAt = OptionalFlexibleDate(wrappedValue: expiresAt)

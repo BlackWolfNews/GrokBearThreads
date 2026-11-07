@@ -42,8 +42,16 @@ export PATH="\$HOME/.local/bin:\$PATH"
 # macOS then stops to ask about Photos, Documents and so on.
 mkdir -p ~/install-threadbear
 cd ~/install-threadbear
+# GitHub logged out for this run, as it says in the prompt: a gh login as Mike
+# makes setup treat this as his own copy, which isn't what a stranger sees.
+export GH_CONFIG_DIR="\$(mktemp -d)"
+unset GH_TOKEN GITHUB_TOKEN
 clear
-exec claude --allowedTools Bash Read Edit Write Glob Grep TodoWrite -- "\$(cat '$OUT/prompt.txt')"
+# Named permissions, rather than whatever mode this Mac's Claude Code last used:
+# in auto mode its check stops at running the downloaded setup script, as it
+# should for an agent nobody's watching, and says how to allow it. This is that
+# allowing, by whoever starts this recording.
+exec claude --permission-mode acceptEdits --allowedTools Bash Read Edit Write Glob Grep TodoWrite -- "\$(cat '$OUT/prompt.txt')"
 EOF
 chmod +x "$OUT/run-claude.sh"
 
@@ -128,9 +136,9 @@ while :; do
   T=$(ls -t "$PROJECT_DIR"/*.jsonl 2>/dev/null | head -1)
   [[ -n "$T" ]] || continue
   AGE=$(( NOW - $(stat -f %m "$T") ))
-  # The last lines can be bookkeeping rather than the reply, so a quiet
-  # transcript with an end_turn near its end is enough.
-  if (( AGE > 90 )) && tail -5 "$T" | grep -q '"stop_reason": *"end_turn"'; then
+  # The transcript ends in bookkeeping lines, so it's the last assistant
+  # message that says whether the agent has finished its turn.
+  if (( AGE > 90 )) && grep '"type":"assistant"' "$T" | tail -1 | grep -q '"stop_reason": *"end_turn"'; then
     echo "The agent finished after $(( (NOW - START) / 60 )) minutes."
     sleep 20   # the app's first window and its tour
     break

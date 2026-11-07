@@ -81,6 +81,12 @@ No Convex login or team is needed. If it stops asking for HTTPS
 certificates or MagicDNS, **Ask** them to turn those on in the Tailscale
 admin console (DNS), then run it again.
 
+If your own permission check refuses to run setup (Claude Code's auto mode
+does: it's a script you've just downloaded), that's its job, so don't try to
+get round it. **Ask** them to allow it, by running the command themselves
+with `! ` in front or by adding a permission rule for `./threadbear setup`,
+then carry on from what it printed.
+
 New threads start in `~/ThreadbearThreads`, which setup makes (not
 `~/Threadbear`: macOS ignores case, so that would be this repo's folder).
 They can change it in the app's Settings, and pick a folder for each

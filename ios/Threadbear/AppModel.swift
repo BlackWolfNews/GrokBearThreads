@@ -81,6 +81,14 @@ final class AppModel {
         !isFake && apnsToken != nil && (apiVersion ?? 0) >= BackendCompatibility.notificationSettingAPIVersion
     }
 
+    /// Whether to ask for notification permission. Only a backend that says
+    /// it can't send any stops it: one that can't be reached right now is
+    /// asked about as ever.
+    func backendSendsNotifications() async -> Bool {
+        guard let backend, let identity = try? await backend.me() else { return true }
+        return identity.sendsNotifications
+    }
+
     func setNotifyMode(_ mode: NotifyMode) {
         notifyMode = mode
         UserDefaults.standard.set(mode.rawValue, forKey: "notifyMode")

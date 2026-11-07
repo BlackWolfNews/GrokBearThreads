@@ -418,6 +418,13 @@ import UniformTypeIdentifiers
         }
     }
 
+    /// An older backend leaves pushOff out, and that means it can send.
+    @Test func onlyABackendThatSaysSoCantNotify() {
+        #expect(PhoneIdentity(name: "p", expiresAt: nil).sendsNotifications)
+        #expect(PhoneIdentity(name: "p", expiresAt: nil, pushOff: false).sendsNotifications)
+        #expect(!PhoneIdentity(name: "p", expiresAt: nil, pushOff: true).sendsNotifications)
+    }
+
     @Test func siteURLBecomesCloud() throws {
         let url = URL(string: "threadbear://pair?url=https://happy-bear-123.convex.site&token=t")!
         #expect(try #require(Pairing.parse(url)).deploymentURL.host() == "happy-bear-123.convex.cloud")
