@@ -541,9 +541,18 @@ export const patchesPart = {
     } finally {
       st.rt.hooksRunning--;
       // Before the handover check, which then waits for what this starts.
-      this.archiveWhenGone(st);
+      // Not while stopping: the next runner picks it up (cleanupOwed), and
+      // two cleanups shouldn't run side by side.
+      if (!this.stopping) this.archiveWhenGone(st);
       if (this.draining) this.queueHandoverCheck();
+      // A restart waiting for this hook hears through thread.updated.
+      this.markDirty(st);
     }
+  },
+
+  // The threads a turn-end hook is running for, which a restart waits for.
+  threadsWithHooksRunning(this: Runner): string[] {
+    return [...this.threads.values()].filter((st) => st.rt.hooksRunning && !st.rt.deleted).map((st) => st.rec.id);
   },
 
   async runHookList(this: Runner, st: ThreadState, hooks: PatchSet['hooks']): Promise<void> {
@@ -567,6 +576,10 @@ export const patchesPart = {
         shell: this.actionShell,
         timeoutMs: this.actionTimeoutMs,
         background: this.backgroundJobs,
+        // An archive's cleanup and a handover wait for this, so it has to
+        // end: SIGKILL for one that ignores SIGTERM, and nothing it left
+        // running can hold the pipes open.
+        killGroup: true,
       });
       if (st.rt.deleted || this.stopping) return;
       // An archive waits for its hooks, but a folder can go other ways (by

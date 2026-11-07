@@ -115,10 +115,13 @@ its next turn in the main checkout, with a note.
 
 An archive's cleanup waits for the thread's turn-end hooks, which run in that
 folder: on 7 Nov a typecheck lost its files partway through, "failed", and
-woke the thread just archived. A handover keeps a thread while its hooks run
-for the same reason. A hook that really fails brings the thread back in its
-worktree, so nothing gets removed. Deleting a thread doesn't wait: nothing is
-left to report a hook's result to.
+woke the thread just archived. A restart waits for those hooks and a handover
+keeps the thread while they run, for the same reason. A hook failure told to
+the agent brings the thread back in its worktree, so nothing gets removed; one
+that isn't told (`tell: "never"`, or past the limit) leaves it archived and the
+cleanup goes ahead. If the runner stops or crashes first, the next one does the
+cleanup (`cleanupOwed` in the worktree's record). Deleting a thread doesn't
+wait: nothing is left to report a hook's result to.
 
 The folder is only removed while it's still a checkout of the thread's own
 branch: slot folders are reused, and a record can miss hearing its worktree

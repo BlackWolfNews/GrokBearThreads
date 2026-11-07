@@ -200,14 +200,15 @@ export const worktreesPart = {
       const { rec, rt } = st;
       const w = rec.worktree;
       if (!rec.archivedAt || !w || w.removedAt || rt.cleaning) continue;
-      const check = worktreeGone(w)
-        .then((gone) => {
+      // Archived, but the runner went before the cleanup ran: it's still to
+      // do, not just to record.
+      const check = (w.cleanupOwed ? this.cleanUpWorktree(st) : worktreeGone(w).then((gone) => {
           if (!gone || rt.deleted || w.removedAt) return;
           w.removedAt = this.isoNow();
           if (gone === 'taken') w.spare = true;
           this.markDirty(st);
           this.log.info("recorded a worktree's removal the record missed", { threadId: rec.id, path: w.path });
-        })
+        }))
         .catch((e: unknown) => this.log.warn("couldn't check an archived thread's worktree", { threadId: rec.id, error: String(e) }))
         .finally(() => {
           if (rt.cleaning === check) rt.cleaning = undefined;
@@ -234,6 +235,7 @@ export const worktreesPart = {
     this.log.info('worktree cleanup', { threadId: rec.id, path: w.path, ...result });
     // Deleted meanwhile: nothing to record it in, and emit would throw.
     if (st.rt.deleted && !deleted) return;
+    delete w.cleanupOwed;
     if (result.removed) {
       w.removedAt = this.isoNow();
       // A folder that's another checkout's now counts as a spare: the

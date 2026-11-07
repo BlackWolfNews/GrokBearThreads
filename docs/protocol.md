@@ -2943,8 +2943,11 @@ anyone else starts the count again, so a hook and an agent can't go round
 for ever. A thread archived as its turn ended (`end_turn`'s `archive`, or
 by hand while the hook runs) keeps its worktree until its hooks finish. A
 failure told then brings the thread back, in that worktree. A pass stays
-quiet, whatever `tell` says, so the thread stays archived and the cleanup
-goes ahead. A hook whose folder has gone by the time it finishes gets a
+quiet, whatever `tell` says, and a failure that isn't told (`"never"`, or past
+the limit) is only posted: either way the thread stays archived and the
+cleanup goes ahead. A hook stops at the action timeout (SIGTERM, then SIGKILL
+to its process group), and anything it left running ends with it. A restart
+waits for running hooks, and a thread's hooks hold it on a draining runner. A hook whose folder has gone by the time it finishes gets a
 `system.note` rather than an `action.run`, and isn't told to the agent, as
 its result says nothing about the code.
 

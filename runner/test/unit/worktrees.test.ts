@@ -1148,3 +1148,49 @@ test('a handover that starts while a hook runs keeps the thread, so the archive\
   assert.equal(saved.queue?.length ?? 0, 0, 'nothing to wake it');
   assert.ok(!fs.existsSync(w.path));
 });
+
+test('a runner that stops while an archive waits for a hook leaves the cleanup to the next one', async () => {
+  const { main } = makeRepo(HOOK_PATCH('sleep 0.3'));
+  const h = harness();
+  const { id, w } = await threadWithWorktree(h, main);
+  await archiveAfterEdit(h, id);
+  await until(() => h.adapter.last.ended === true, 'the CLI to go');
+  await h.runner.shutdown();
+  assert.ok(fs.existsSync(w.path), 'nothing removed it yet');
+  await new Promise((r) => setTimeout(r, 500));
+  assert.ok(fs.existsSync(w.path), 'nor as the hook ended, on a runner that was stopping');
+  const next = makeHarness(h.home, {}, { actionShell: ['/bin/sh', '-c'], actionTimeoutMs: 10_000 });
+  await until(() => notes(next, id).some((n) => n.startsWith('Removed')), 'the next runner to clean up');
+  assert.ok(!fs.existsSync(w.path));
+  assert.equal(next.runner.get(id).worktree, undefined);
+  assert.ok(next.runner.get(id).archivedAt);
+  // Once only: the runner after that has nothing owed.
+  next.runner.flush();
+  assert.equal(JSON.parse(fs.readFileSync(path.join(h.home, 'threads', id, 'thread.json'), 'utf8')).worktree.cleanupOwed, undefined);
+});
+
+test('a cleanup that keeps the worktree is not owed again, so the next runner says nothing more', async () => {
+  const { main } = makeRepo();
+  const h = harness();
+  const { id, w } = await threadWithWorktree(h, main);
+  commit(w.path, { 'runner/b.ts': '2\n' }, 'Not landed');
+  h.runner.update({ threadId: id, archived: true });
+  await until(() => notes(h, id).some((n) => n.includes(' stay: ')), 'the cleanup');
+  await h.runner.shutdown();
+  const next = makeHarness(h.home, {}, { actionShell: ['/bin/sh', '-c'] });
+  // Started as it loaded; this waits for it. A harness's events are what
+  // happened since it started.
+  await (next.runner as any).threads.get(id).rt.cleaning;
+  assert.equal(notes(next, id).filter((n) => n.includes(' stay: ')).length, 0);
+});
+
+test('a hook that ignores SIGTERM still ends at the timeout, so the archive waiting for it is not held for ever', async () => {
+  const { main } = makeRepo(HOOK_PATCH(`trap '' TERM; while :; do sleep 0.2; done`, 'never'));
+  const h = makeHarness(undefined, {}, { actionShell: ['/bin/sh', '-c'], actionTimeoutMs: 300 });
+  const { id, w } = await threadWithWorktree(h, main);
+  await archiveAfterEdit(h, id);
+  await until(() => notes(h, id).some((n) => n.startsWith('Removed')), 'the cleanup, past the hook');
+  assert.deepEqual(hookRuns(h, id).map((e) => e.ok), [false]);
+  assert.match(hookRuns(h, id)[0].text, /Stopped after/);
+  assert.ok(!fs.existsSync(w.path));
+});

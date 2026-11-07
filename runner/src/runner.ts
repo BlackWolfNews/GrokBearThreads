@@ -2755,6 +2755,7 @@ export class Runner {
     // first, then released, so that can take a moment. Resuming unarchives.
     if (archiving) {
       rt.archivePending = true;
+      if (rec.worktree && !rec.worktree.removedAt) rec.worktree.cleanupOwed = true;
       this.archiveWhenGone(st);
     }
     rec.updatedAt = this.isoNow();
