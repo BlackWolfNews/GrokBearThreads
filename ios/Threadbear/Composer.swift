@@ -176,7 +176,7 @@ private struct ComposerListeningBar: View {
                 HStack(spacing: 12) {
                     TimelineView(.periodic(from: .now, by: 1.0 / 15)) { context in
                         HStack(spacing: 12) {
-                            Waveform(levels: dictation.level.history)
+                            Waveform(levels: dictation.level.shown)
                             Text(elapsed(at: context.date)).monospacedDigit()
                         }
                     }
