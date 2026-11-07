@@ -195,6 +195,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var linkedThread: String?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // A voice server the last run left behind by crashing (VoiceServer).
+        VoiceServer.reapLeftover()
         MainActor.assumeIsolated {
             let app = AppModel.shared
             let arguments = CommandLine.arguments

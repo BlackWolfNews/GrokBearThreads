@@ -33,6 +33,7 @@ struct VoiceSettings: View {
                     ForEach(VoiceCatalog.languages) { Text($0.name).tag($0.id) }
                 }
                 .tip("The language you speak and replies are read in")
+                .onChange(of: language) { VoiceMode.shared.languageChanged() }
                 LabeledContent("Try it") {
                     HStack(spacing: 8) {
                         if let status = voice.previewStatus {

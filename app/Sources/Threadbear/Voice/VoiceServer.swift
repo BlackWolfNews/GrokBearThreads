@@ -1,4 +1,5 @@
 import CryptoKit
+import Darwin
 import Foundation
 import ThreadbearCore
 
@@ -7,7 +8,8 @@ import ThreadbearCore
 /// its GitHub release (that exact version, checked against its checksum)
 /// into ~/Library/Application Support/Threadbear/voice/, and run there as
 /// `pocket-tts serve` on a free port on 127.0.0.1 for as long as Voice is
-/// in use (it stops a few minutes after, and when the app quits). Its
+/// in use (it stops a few minutes after, and when the app quits; if the app
+/// crashes, the next launch stops it, from serve.pid). Its
 /// model and voices come from Hugging Face on first use, into the usual
 /// ~/.cache/huggingface (about 240 MB). docs/on-your-mac.md lists all of it.
 @MainActor
@@ -28,7 +30,7 @@ final class VoiceServer {
 
     static let release = "v4.0.1"
     static let asset = "pocket-tts-3.3.0-aarch64-apple-darwin.tar.gz"
-    static let sha256 = "ee9ca6c7c000ee72c5846e3a8ba01d08f56636d94a614d2259c3f12b8fd69afa"
+    nonisolated static let sha256 = "ee9ca6c7c000ee72c5846e3a8ba01d08f56636d94a614d2259c3f12b8fd69afa"
     static var downloadURL: URL { URL(string: "https://github.com/kyutai-labs/pocket-tts/releases/download/\(release)/\(asset)")! }
 
     static var folder: URL {
@@ -40,7 +42,10 @@ final class VoiceServer {
     private var process: Process?
     private var port: Int?
     private var language: String?
-    private var starting: Task<URL, Error>?
+    /// The start under way. A newer one replaces it, and it gives up: without
+    /// the id, a language change mid-start left both running, with the old
+    /// one's process overwriting the new one's.
+    private var starting: (id: UUID, task: Task<URL, Error>)?
     private var idleStop: Task<Void, Never>?
     /// Says what it's doing while it gets ready ("Downloading the voice engine…").
     var onStatus: ((String) -> Void)?
@@ -54,12 +59,13 @@ final class VoiceServer {
         if let process, process.isRunning, let port, self.language == language {
             return URL(string: "http://127.0.0.1:\(port)")!
         }
-        if let starting, self.language == language { return try await starting.value }
+        if let starting, self.language == language { return try await starting.task.value }
         stop()
         self.language = language
-        let task = Task { try await self.start(language: language) }
-        starting = task
-        defer { starting = nil }
+        let id = UUID()
+        let task = Task { try await self.start(language: language, id: id) }
+        starting = (id, task)
+        defer { if starting?.id == id { starting = nil } }
         return try await task.value
     }
 
@@ -75,16 +81,59 @@ final class VoiceServer {
 
     func stop() {
         idleStop?.cancel()
+        starting?.task.cancel()
+        starting = nil
         if let process, process.isRunning { process.terminate() }
         process = nil
         port = nil
+        language = nil
+        try? FileManager.default.removeItem(at: Self.pidFile)
     }
 
-    private func start(language: String) async throws -> URL {
+    // MARK: A server left behind by a crash
+
+    /// The running server's process id, and the app's that started it. The
+    /// app quitting stops the server, but a crash can't, and one nobody talks
+    /// to would hold its model in memory until the Mac restarts.
+    static var pidFile: URL { folder.appendingPathComponent("serve.pid") }
+
+    /// Stops a server an earlier run of the app left going, checking it's
+    /// really ours first: pids get reused. On launch, whether or not Voice is
+    /// on, so turning the experiment off can't strand one, and before a start.
+    /// One whose app is still running is left alone: a debug build shares this
+    /// folder, and mustn't end Mike's conversation in the real app.
+    static func reapLeftover() {
+        guard let text = try? String(contentsOf: pidFile, encoding: .utf8) else { return }
+        let parts = text.split(whereSeparator: \.isWhitespace).compactMap { pid_t($0) }
+        guard parts.count == 2, parts[0] > 1 else {
+            try? FileManager.default.removeItem(at: pidFile)
+            return
+        }
+        let (pid, owner) = (parts[0], parts[1])
+        if owner != getpid(), kill(owner, 0) == 0 { return }
+        if executablePath(of: pid) == binary.resolvingSymlinksInPath().path {
+            kill(pid, SIGTERM)
+            VoiceLog.write("stopped pocket-tts left over from an earlier run")
+        }
+        try? FileManager.default.removeItem(at: pidFile)
+    }
+
+    private static func executablePath(of pid: pid_t) -> String? {
+        var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
+        return URL(fileURLWithPath: String(cString: buffer)).resolvingSymlinksInPath().path
+    }
+
+    // MARK: Starting
+
+    private func start(language: String, id: UUID) async throws -> URL {
         #if !arch(arm64)
         throw Failure.notAppleSilicon
         #endif
-        if !isInstalled { try await install() }
+        if !isInstalled { try await install(id: id) }
+        // A newer start (or a stop) took over during the download.
+        guard starting?.id == id, !Task.isCancelled else { throw CancellationError() }
+        Self.reapLeftover()
         onStatus?("Starting the voice engine…")
         let port = try Self.freePort()
         let process = Process()
@@ -99,10 +148,17 @@ final class VoiceServer {
         do { try process.run() } catch { throw Failure.start(error.localizedDescription) }
         self.process = process
         self.port = port
+        try? "\(process.processIdentifier) \(getpid())".write(to: Self.pidFile, atomically: true, encoding: .utf8)
         let base = URL(string: "http://127.0.0.1:\(port)")!
         // The first start downloads the model, which can take a minute.
         onStatus?(FileManager.default.fileExists(atPath: Self.hubCache.path) ? "Starting the voice engine…" : "Downloading the voice model (about 240 MB)…")
         for _ in 0..<600 {
+            // Overtaken: stop() has ended this process, or is about to find
+            // the newer one in its place, so don't touch self.process.
+            guard starting?.id == id, !Task.isCancelled else {
+                if process.isRunning { process.terminate() }
+                throw CancellationError()
+            }
             guard process.isRunning else {
                 let tail = (try? String(contentsOf: log, encoding: .utf8))?.split(separator: "\n").suffix(2).joined(separator: " ") ?? ""
                 throw Failure.start(tail.isEmpty ? "it stopped" : tail)
@@ -113,7 +169,7 @@ final class VoiceServer {
             }
             try await Task.sleep(for: .milliseconds(500))
         }
-        stop()
+        if starting?.id == id { stop() } else if process.isRunning { process.terminate() }
         throw Failure.start("it took too long")
     }
 
@@ -121,17 +177,34 @@ final class VoiceServer {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".cache/huggingface/hub/models--kyutai--pocket-tts-without-voice-cloning")
     }
 
-    private func install() async throws {
+    private func install(id: UUID) async throws {
         onStatus?("Downloading the voice engine…")
         let (file, response): (URL, URLResponse)
         do { (file, response) = try await URLSession.shared.download(from: Self.downloadURL) } catch { throw Failure.download(error.localizedDescription) }
+        defer { try? FileManager.default.removeItem(at: file) }
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw Failure.download("the server said \((response as? HTTPURLResponse)?.statusCode ?? 0)") }
-        let data = try Data(contentsOf: file, options: .mappedIfSafe)
-        guard SHA256.hash(data: data).map({ String(format: "%02x", $0) }).joined() == Self.sha256 else { throw Failure.checksum }
-        let dest = Self.binary.deletingLastPathComponent()
         let unpack = Self.folder.appendingPathComponent("unpack-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: unpack, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: unpack) }
+        // Checking and unpacking a big archive isn't for the main thread.
+        let inner = try await Task.detached(priority: .userInitiated) {
+            try Self.checkAndUnpack(file, into: unpack)
+        }.value
+        // Overtaken while unpacking: the newer start installs its own, and
+        // the two mustn't both move into place.
+        guard starting?.id == id else { throw CancellationError() }
+        let dest = Self.binary.deletingLastPathComponent()
+        try? FileManager.default.removeItem(at: dest)
+        try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.moveItem(at: inner, to: dest)
+        VoiceLog.write("installed pocket-tts \(Self.release)")
+    }
+
+    /// The archive's checksum, then its contents into `unpack`: the folder
+    /// holding the program. Nothing is unpacked from one that doesn't match.
+    private nonisolated static func checkAndUnpack(_ file: URL, into unpack: URL) throws -> URL {
+        let data = try Data(contentsOf: file, options: .mappedIfSafe)
+        guard SHA256.hash(data: data).map({ String(format: "%02x", $0) }).joined() == sha256 else { throw Failure.checksum }
+        try FileManager.default.createDirectory(at: unpack, withIntermediateDirectories: true)
         let tar = Process()
         tar.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
         tar.arguments = ["-xzf", file.path, "-C", unpack.path]
@@ -141,10 +214,7 @@ final class VoiceServer {
               let inner = try FileManager.default.contentsOfDirectory(at: unpack, includingPropertiesForKeys: nil).first(where: { $0.hasDirectoryPath }),
               FileManager.default.fileExists(atPath: inner.appendingPathComponent("pocket-tts").path)
         else { throw Failure.download("the archive wasn't as expected") }
-        try? FileManager.default.removeItem(at: dest)
-        try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try FileManager.default.moveItem(at: inner, to: dest)
-        VoiceLog.write("installed pocket-tts \(Self.release)")
+        return inner
     }
 
     /// A port nothing's listening on, from the kernel.
