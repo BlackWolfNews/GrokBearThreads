@@ -31,13 +31,13 @@ struct RunnersSettings: View {
 
             SettingsSection("Runners",
                             about: canOrder
-                                ? "The machines your threads can run on, in your order. New threads from your phone start on the first one that's online. Drag to change the order. Each runner is set up on its own machine."
+                                ? "The machines your threads can run on, in your order. New threads from your phone start on the first one that's online. Drag a runner by its handle to change the order. Each runner is set up on its own machine."
                                 : "The machines your threads can run on. Each runner is set up on its own machine.",
                             ask: "add one, rename one, pair it with this Mac or change how it runs. It knows how, and a Linux server's steps are in INSTALL.md.") {
                 if canOrder {
                     let ids = app.orderedRunnerIds
-                    ForEach(Array(ids.enumerated()), id: \.element) { index, id in
-                        row(for: id, move: Move(up: index > 0, down: index < ids.count - 1) { app.moveRunner(id, by: $0) })
+                    ForEach(ids, id: \.self) { id in
+                        row(for: id, movable: true)
                             .draggable(id)
                             .dropDestination(for: String.self) { dropped, _ in
                                 guard let from = dropped.first, from != id, ids.contains(from) else { return false }
@@ -76,11 +76,11 @@ struct RunnersSettings: View {
     /// would save an order without it and push it down the phone's list.
     private var canOrder: Bool { app.runnerOrder != nil && !app.remoteRunners.isEmpty && app.runners.contains(where: \.isSelf) }
 
-    @ViewBuilder private func row(for id: String, move: Move) -> some View {
+    @ViewBuilder private func row(for id: String, movable: Bool) -> some View {
         if let runner = app.remoteRunners.first(where: { $0.id == id }) {
-            RunnerRow(icon: RunnerIcon.symbol(runner.icon), name: runner.name, status: status(runner), isDefault: app.defaultRunnerId == runner.id, move: move)
+            RunnerRow(icon: RunnerIcon.symbol(runner.icon), name: runner.name, status: status(runner), isDefault: app.defaultRunnerId == runner.id, movable: movable)
         } else {
-            RunnerRow(icon: app.selfRunnerIcon, name: selfName, status: "This Mac", isDefault: app.defaultRunnerId == nil, move: move)
+            RunnerRow(icon: app.selfRunnerIcon, name: selfName, status: "This Mac", isDefault: app.defaultRunnerId == nil, movable: movable)
         }
     }
 
@@ -93,25 +93,24 @@ struct RunnersSettings: View {
     }
 }
 
-/// A row's arrows: one place up or down the order, for anyone who'd rather
-/// click than drag, as with a pool's logins.
-private struct Move {
-    let up: Bool
-    let down: Bool
-    let by: (Int) -> Void
-}
-
 /// A runner: its icon, name and how it is, with a star on the default, and
-/// in the ordered list its arrows.
+/// in the ordered list a drag handle on the left, as on the phone (Mike,
+/// 7 Nov: arrows on the right didn't say "drag me").
 private struct RunnerRow: View {
     let icon: String
     let name: String
     let status: String
     let isDefault: Bool
-    var move: Move?
+    var movable = false
 
     var body: some View {
         HStack(spacing: 8) {
+            if movable {
+                Image(systemName: "line.3.horizontal")
+                    .foregroundStyle(.tertiary)
+                    .tip("Drag to change the order")
+                    .accessibilityLabel("Drag to change the order")
+            }
             Image(systemName: icon)
                 .foregroundStyle(.secondary)
                 .frame(width: 20)
@@ -127,16 +126,6 @@ private struct RunnerRow: View {
             Spacer(minLength: 8)
             Text(status)
                 .foregroundStyle(.secondary)
-            if let move {
-                Button { move.by(-1) } label: { Image(systemName: "chevron.up") }
-                    .buttonStyle(.borderless)
-                    .disabled(!move.up)
-                    .tip("Earlier in the order")
-                Button { move.by(1) } label: { Image(systemName: "chevron.down") }
-                    .buttonStyle(.borderless)
-                    .disabled(!move.down)
-                    .tip("Later in the order")
-            }
         }
     }
 }

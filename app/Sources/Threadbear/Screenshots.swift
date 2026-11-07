@@ -290,7 +290,7 @@ enum ScreenshotRunner {
                 try? await Task.sleep(for: .milliseconds(600))
                 await capture(settings, dir.appendingPathComponent("15h-settings-models.png"))
                 // Settings › Runners: every runner in Mike's order, which
-                // the phone shares, with the arrows to move one.
+                // the phone shares, each with its drag handle.
                 app.settingsTab = .runners
                 try? await Task.sleep(for: .milliseconds(600))
                 await capture(settings, dir.appendingPathComponent("15i-settings-runners.png"))
