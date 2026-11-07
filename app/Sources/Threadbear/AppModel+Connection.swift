@@ -162,6 +162,8 @@ extension AppModel {
                 connectors = status
             case .settingsUpdated(let settings):
                 receive(settings)
+            case .standingInstructions(let text):
+                standingInstructions = text
             case .runnerNotice(let level, let message):
                 notice(level: level, message)
             case .runnerUpdates(let updates):

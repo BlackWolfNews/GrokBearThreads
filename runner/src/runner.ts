@@ -161,6 +161,7 @@ export type Notification =
   | { method: 'remoteThreads.updated'; params: import('./thread-index.ts').RemoteThreads }
   | { method: 'clis.updated'; params: { clis: CliStatus[] } }
   | { method: 'settings.updated'; params: { settings: Settings } }
+  | { method: 'instructions.updated'; params: { instructions: string } }
   | { method: 'runner.updates'; params: { updates: RunnerUpdates } }
   | { method: 'projects.updated'; params: { projects: Project[] } }
   | { method: 'librarian.updated'; params: { librarian: LibrarianStatus } }
@@ -518,6 +519,8 @@ export type RunnerDeps = {
   // Projects (projects.ts): their folders' patches, the brief a session
   // starts with, and the summary's `projects`. Started by start().
   projects?: Projects;
+  /** Mike's standing instructions for every session (instructions.ts); '' for none. */
+  standingInstructions?: () => string;
   // A completed turn asked Mike to Restart to Update, by end_turn or in its
   // closing "What I need from you" (app-restarts.ts signs the thread up).
   appRestartAsked?: (threadId: string) => void;
@@ -616,6 +619,7 @@ export class Runner {
   secrets: SecretStore;
   models?: Pick<Models, 'generate'>;
   projects?: Projects;
+  standingInstructions?: () => string;
   activity = new Set<(a: ThreadActivity) => void>();
   patchCache: PatchCache = new Map();
   patchTrust: PatchTrustStore;
@@ -696,6 +700,7 @@ export class Runner {
     this.secrets = new SecretStore(paths.secrets(deps.config.home), () => this.clock.now());
     this.models = deps.models;
     this.projects = deps.projects;
+    this.standingInstructions = deps.standingInstructions;
     this.appRestartAsked = deps.appRestartAsked;
     this.atMac = deps.atMac;
     this.adapters = deps.adapters;
@@ -1654,6 +1659,9 @@ export class Runner {
     // Kept for the next message when this one is a command.
     const news = command ? undefined : this.projectNews(rec);
     if (news) text = `${news}\n\n${text}`;
+    // Kept for the next message when this one is a command, as the news is.
+    const standing = command ? undefined : this.instructionsNews(rec);
+    if (standing) text = `${standing}\n\n${text}`;
     if (rec.moved) {
       // A CLI that moves folders itself: the live session got setCwd, or a
       // released one resumes in the new folder (startSession passes it).
@@ -3215,6 +3223,10 @@ export class Runner {
   briefFor(rec: ThreadRecord, resume: boolean): { instructions?: string } {
     if (resume) return {};
     const parts: string[] = [];
+    // Mike's own standing instructions first: they're for everything.
+    const standing = this.standingInstructions?.().trim() ?? '';
+    rec.instructionsTold = instructionsHash(standing);
+    if (standing) parts.push(standingText(standing));
     if (this.projects) {
       rec.projectsTold = this.projects.briefIds(rec);
       const brief = this.projects.brief(rec);
@@ -3223,6 +3235,20 @@ export class Runner {
     // Where its worktree is and how its work gets to main.
     if (rec.worktree && !rec.worktree.removedAt) parts.push(worktreeInstructions(rec.worktree));
     return parts.length ? { instructions: parts.join('\n\n') } : {};
+  }
+
+  // Mike's standing instructions, when they've changed since the session
+  // last heard them (or it never has): a resumed Claude session keeps its
+  // first system prompt, so the change comes before his next message.
+  instructionsNews(rec: ThreadRecord): string | undefined {
+    if (!this.standingInstructions) return undefined;
+    const standing = this.standingInstructions().trim();
+    const hash = instructionsHash(standing);
+    if (rec.instructionsTold === hash) return undefined;
+    const before = rec.instructionsTold;
+    rec.instructionsTold = hash;
+    if (!standing) return before === undefined || before === instructionsHash('') ? undefined : 'Note from Threadbear: the user cleared their standing instructions; earlier ones no longer apply.';
+    return `Note from Threadbear: the user's standing instructions${before === undefined || before === instructionsHash('') ? '' : ' have changed, and replace any earlier ones'}.\n\n${standingText(standing)}`;
   }
 
   // The thread's projects its session hasn't been told about, as lines to
@@ -3564,4 +3590,13 @@ function openInBrowser(url: string): Promise<void> {
 const ACCESS_ORDER: PermissionMode[] = ['ask', 'auto', 'full'];
 function moreAccess(a: PermissionMode | undefined, b: PermissionMode): PermissionMode {
   return a && ACCESS_ORDER.indexOf(a) > ACCESS_ORDER.indexOf(b) ? a : b;
+}
+
+// Mike's standing instructions as an agent is given them.
+function standingText(text: string): string {
+  return `The user's standing instructions (set in Threadbear, Skills > Instructions). Keep them in mind in everything you do for them:\n\n${text}`;
+}
+
+function instructionsHash(text: string): string {
+  return crypto.createHash('sha256').update(text).digest('hex').slice(0, 16);
 }

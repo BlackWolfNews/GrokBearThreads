@@ -294,6 +294,7 @@ const devices = [
 let deviceSeq = devices.length;
 const deviceList = () => ({ devices: [...devices], site: DEMO_SITE });
 
+let mockInstructions = '';
 const settings = {
   defaultCwd: defaults.cwd, idleMinutes: 30, maxLiveCLIs: 6, followMain: true, bulletReplies: true, oneReply: true,
   models: {
@@ -1256,6 +1257,12 @@ async function dispatch(client, method, p) {
       if (oldRunner) throw rpcError(-32601, `Unknown method ${method}`);
       if (p.refresh) connectors = { ...connectors, checkedAt: iso() };
       return { connectors };
+    case 'instructions.get':
+      return { instructions: mockInstructions };
+    case 'instructions.set':
+      mockInstructions = p.text.trim() ? p.text.trim() + '\n' : '';
+      broadcast('instructions.updated', { instructions: mockInstructions });
+      return { instructions: mockInstructions };
     case 'settings.get':
       return { settings };
     case 'settings.update': {
