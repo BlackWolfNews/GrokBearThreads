@@ -124,6 +124,20 @@ yourself: it can run their agents.
 Say what was set up (their Convex project and its URL, where the app is), and
 that the runner and app update themselves when their `main` changes.
 
+## Another Mac (optional)
+
+Running Threadbear on several machines is supported, for example a laptop and a
+Mac mini that's always on. Each runs its own threads in its own folders, and
+project files aren't copied between them. To add a Mac, follow this file on it
+and say yes to joining (`setup --existing`), then on the first Mac run
+`tb runner add <name> --ssh <that Mac>` and `tb restart` on the new one. (With no
+ssh between them, `--out <file> --id <runnerId>` writes the key to a file, which
+goes in the new Mac's `secrets/convex-key`.) Only the first Mac's app lists every
+machine's threads, so that's best as the Mac they sit at; the phone and website
+show them all. The guide's "If you run Threadbear on more than one Mac" has the
+rest, and `docs/setup-and-updates.md`, "A Mac nobody sits at", covers one left on
+its own.
+
 ## 6. A runner on Linux (optional)
 
 Once Threadbear works on the Mac, a Linux server can be a second, always-on

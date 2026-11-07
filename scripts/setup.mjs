@@ -199,7 +199,7 @@ function checkMac() {
   if (desktopSession()) ok('logged in to the desktop');
   else note("Nobody is logged in to this Mac's desktop. Everything up to installing the runner works, then setup stops: log in (in person or with Screen Sharing) and run it again.");
   if (fs.existsSync('/Applications/Tailscale.app') || has('tailscale')) ok('Tailscale');
-  else note("Tailscale isn't installed. Threadbear works without it; with it, a second Mac can run threads too (https://tailscale.com/download).");
+  else note("Tailscale isn't installed. Threadbear works without it, and so does a second Mac; it only adds a direct link between your machines (https://tailscale.com/download).");
 }
 
 function desktopSession() {
