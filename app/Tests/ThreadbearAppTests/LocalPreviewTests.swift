@@ -408,6 +408,10 @@ final class LocalPreviewTests: XCTestCase {
         try write("index.html", Data(("<img src=\"pic.png\">" + String(repeating: "<p>x</p>", count: 400_000)).utf8))
         try write("pic.png", png)
         let handler = LocalPreviewSchemeHandler()
+        let readOnMain = NSLock()
+        nonisolated(unsafe) var reads: [Bool] = []
+        LocalPreviewSchemeHandler.readHook = { readOnMain.withLock { reads.append(Thread.isMainThread) } }
+        defer { LocalPreviewSchemeHandler.readHook = nil }
         let view = WKWebView(frame: .zero)
         let page = try XCTUnwrap(handler.address(for: dir.appendingPathComponent("index.html")))
         let first = FakeTask(page)
@@ -428,5 +432,6 @@ final class LocalPreviewTests: XCTestCase {
         XCTAssertEqual(after.status, 200)
         try await Task.sleep(for: .milliseconds(200))
         XCTAssertEqual(stopped.calls, 0, "a stopped request is never answered")
+        XCTAssertEqual(readOnMain.withLock { reads }, [false, false, false], "each file read off the main thread")
     }
 }

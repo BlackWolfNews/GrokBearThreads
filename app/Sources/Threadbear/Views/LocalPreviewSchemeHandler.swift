@@ -172,6 +172,7 @@ final class LocalPreviewSchemeHandler: NSObject, WKURLSchemeHandler {
     /// many megabytes held the app while it was read for names (Daybreak,
     /// 7 Nov 2026).
     private static func answer(_ url: URL, site: LocalPreviewSite?) -> (response: HTTPURLResponse, data: Data) {
+        readHook?()
         guard let site, let served = site.serve(url.path) else {
             let refused = HTTPURLResponse(url: url, statusCode: 404, httpVersion: "HTTP/1.1",
                                           headerFields: ["Content-Type": "text/plain", "Content-Security-Policy": Self.scriptsPolicy])!
@@ -182,6 +183,9 @@ final class LocalPreviewSchemeHandler: NSObject, WKURLSchemeHandler {
                                                 "Content-Security-Policy": site.pageDigest == nil ? Self.policy : Self.scriptsPolicy])!
         return (ok, served.data)
     }
+
+    /// For tests: called where each file is read, on the thread it's read on.
+    static var readHook: (() -> Void)?
 
     /// Tasks WebKit has started and not stopped (main thread only): an
     /// answer for one it stopped is dropped, as WebKit throws if a stopped
