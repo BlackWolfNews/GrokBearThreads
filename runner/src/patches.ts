@@ -62,6 +62,7 @@ import { automaticCommand, liveCommandProblem, TRUST_ALL, unhashedFiles, worktre
 import { verifiedUrl } from './verified-imports.ts';
 import { inBackground } from './background.ts';
 import { CUT_LOOKAHEAD, dropPartialEnd, safeEnd } from './safe-cut.ts';
+import { groupAlive, killGroup } from './proc.ts';
 
 export const CONVEX_DASHBOARD = 'https://dashboard.convex.dev';
 // `npx convex dev` on an anonymous (no account) deployment serves the
@@ -1188,6 +1189,9 @@ export type CommandOutcome = { ok: boolean; exitCode?: number; text: string; tru
 // How long a command action may run. Long enough for a test suite, short
 // enough that a dev server started by mistake doesn't hold on for ever.
 export const ACTION_TIMEOUT_MS = 10 * 60_000;
+// How long what a live command left running gets after SIGTERM before
+// SIGKILL (runCommand's `killGroup`).
+export const KILL_GRACE_MS = 2000;
 
 // Runs a command action's command in the thread's folder through a login
 // shell (so Mike's PATH, nvm and the like apply, as in a terminal), with the
@@ -1197,7 +1201,13 @@ export function runCommand(
   command: string,
   // `background`: builds and tests (a worktree's setup, turn hooks) run at
   // background priority (background.ts). Buttons Mike presses don't.
-  opts: { cwd: string; env: Record<string, string | undefined>; shell?: string[]; timeoutMs?: number; background?: boolean },
+  // `killGroup`: when the shell exits (or times out), end what it left
+  // running too: SIGTERM to its whole process group, then SIGKILL to
+  // whatever's still there after `killGraceMs`, so a live command's `&`
+  // can't outlive it (shell-allowlist.ts). A program that leaves the group
+  // (setsid, setpgid, a daemon that forks away) isn't reached; none on the
+  // live list does.
+  opts: { cwd: string; env: Record<string, string | undefined>; shell?: string[]; timeoutMs?: number; background?: boolean; killGroup?: boolean; killGraceMs?: number },
 ): Promise<CommandOutcome> {
   const started = Date.now();
   const [shellBin, ...shellArgs] = opts.shell ?? loginShell();
@@ -1234,8 +1244,36 @@ export function runCommand(
     }
     const timeoutMs = opts.timeoutMs ?? ACTION_TIMEOUT_MS;
     let timedOut = false;
+    let ending = false;
+    // SIGTERM to the group, then SIGKILL once the grace is up if any of it
+    // is still there (checked as it goes, so a group that's gone isn't
+    // signalled again).
+    const endGroup = () => {
+      if (ending) return;
+      ending = true;
+      const pgid = child.pid!;
+      // A program that left the group can hold our pipes open for as long
+      // as it lives, and the command's answer would wait on it.
+      const letGo = () => {
+        setTimeout(() => {
+          child.stdout?.destroy();
+          child.stderr?.destroy();
+        }, 500).unref();
+      };
+      if (!killGroup(pgid, 'SIGTERM')) return letGo();
+      const deadline = Date.now() + (opts.killGraceMs ?? KILL_GRACE_MS);
+      const tick = setInterval(() => {
+        const alive = groupAlive(pgid);
+        if (alive && Date.now() < deadline) return;
+        clearInterval(tick);
+        if (alive) killGroup(pgid, 'SIGKILL');
+        letGo();
+      }, 50);
+      tick.unref();
+    };
     const timer = setTimeout(() => {
       timedOut = true;
+      if (opts.killGroup) return endGroup();
       // The whole process group: a shell's children too.
       try {
         process.kill(-child.pid!, 'SIGTERM');
@@ -1270,6 +1308,7 @@ export function runCommand(
       });
     };
     child.on('error', (e) => finish(null, e.message));
+    if (opts.killGroup) child.on('exit', endGroup);
     child.on('close', (code) => finish(code));
   });
 }

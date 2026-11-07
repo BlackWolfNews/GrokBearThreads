@@ -57,6 +57,7 @@ import { atomicWriteFileSync } from './fsutil.ts';
 import { claudeCommands, type ClaudeOptions } from './claude-trust.ts';
 import { looksRunnable, MAX_READ_BYTES, reachOf, reachOfCommand, Reads, type FollowOptions } from './script-trust.ts';
 import { bareImport } from './tracked-packages.ts';
+import { allowCommand } from './shell-allowlist.ts';
 
 export type TrustVerdict =
   // `files`: the local files its hash covered, real paths. Absent when the
@@ -968,16 +969,26 @@ export function commandFiles(command: string, folder: string): { files: string[]
 // nothing it can't follow itself. They ran in the thread's folder, so a
 // relative script resolved to a file in a subfolder that nothing hashed,
 // and a blocked script ran (Gautam's scan, 6 Nov).
+//
+// The command is held to the short list of shell (shell-allowlist.ts):
+// anything outside it is refused, rather than looked over for tricks it
+// knows (Mike's call, 7 Nov). The pattern follower still runs too, for the
+// files it reaches and anything it refuses: both must pass.
 export function liveCommandProblem(command: string, folder: string, files: string[], blocked: Record<string, string> = {}): string | undefined {
   const real = realpath(folder);
   const top = repoTop(real);
-  const reach = reachOfCommand(command, `\`${command.length > 80 ? command.slice(0, 80) + '...' : command}\``, { folder: real, top, scanJs: scriptScan, resolveImport: resolveHelper, namedPaths });
-  const missed = reach.files.find((f) => !files.includes(f) && !PICTURES.includes(path.extname(f).toLowerCase()));
+  const label = `\`${command.length > 80 ? command.slice(0, 80) + '...' : command}\``;
+  const opts = { folder: real, top, scanJs: scriptScan, resolveImport: resolveHelper, namedPaths };
+  const allowed = allowCommand(command, label, { ...opts, live: true });
+  const reach = reachOfCommand(command, label, opts);
+  const reached = [...allowed.files, ...reach.files];
+  // A file named by a string may be a picture, but one that's run isn't,
+  // whatever it's called (`node scripts/report.svg`; Muse's review, 7 Nov).
+  const missed = allowed.ran.find((f) => !files.includes(f)) ?? reached.find((f) => !files.includes(f) && !PICTURES.includes(path.extname(f).toLowerCase()));
   if (missed) return `runs ${path.relative(real, missed)}, which patch trust didn't hash: write the command in the patch as plain text, so trusting the patch covers what it runs.`;
-  const stuck = reach.files.find((f) => Object.hasOwn(blocked, f) && blocked[f]);
+  const stuck = reached.find((f) => Object.hasOwn(blocked, f) && blocked[f]);
   if (stuck) return `runs ${path.relative(real, stuck)}, and patch trust can't follow everything that runs: ${blocked[stuck]}`;
-  if (reach.problem) return reach.problem;
-  return undefined;
+  return allowed.problem ?? reach.problem;
 }
 
 // What script-trust needs to follow a command run from `folder` (a Claude

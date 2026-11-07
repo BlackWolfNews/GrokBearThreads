@@ -16,6 +16,7 @@ import { CLAUDE_PATCH_ID, claudeCommands, claudeOptions, settingsCommands, setti
 import { canonicalPath, runsAsCodeByName } from '../code-writes.ts';
 import type { PatchInfo } from '../protocol.ts';
 import { automaticTrust, EMPTY_PATCH_SET, PATCH_EXTENSIONS, patchDirs, hookApplies, loadPatchSet, applyLive, hasLive, projectPanels, renderListPanel, renderPanel, runCommand, type CommandOutcome, type PanelRender, type PatchSet, type ProjectFolder, projectPatchFiles } from '../patches.ts';
+import { liveCommandEnv } from '../shell-allowlist.ts';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -216,8 +217,11 @@ export const patchesPart = {
 
   // A command a patch's function runs (list panels, live state): in its
   // folder, with the thread's variables, like an action.
+  // Each with liveCommandEnv's git settings, which turn off what a repo's
+  // own .git/config could make git run (shell-allowlist.ts).
   runPatchCommand(this: Runner, threadId: string, command: string, cwd: string) {
-    return runCommand(command, { cwd, env: { ...process.env, ...threadEnv(threadId, this.cfg.home) }, shell: this.actionShell, timeoutMs: this.actionTimeoutMs });
+    const env = { ...process.env, ...threadEnv(threadId, this.cfg.home) };
+    return runCommand(command, { cwd, env: { ...env, ...liveCommandEnv(env) }, shell: this.actionShell, timeoutMs: this.actionTimeoutMs, killGroup: true });
   },
 
   // Reads live state again for the inbox's threads that have any, every

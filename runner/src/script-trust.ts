@@ -196,7 +196,7 @@ const UNFOLLOWABLE: Record<string, string> = {
   fc: 'runs commands from history (`fc`)',
 };
 // Environment that makes a shell, Node or the loader run other code.
-const RISKY_ENV = new Set([
+export const RISKY_ENV = new Set([
   'BASH_ENV', 'ENV', 'ZDOTDIR', 'NODE_PATH', 'LD_PRELOAD', 'LD_LIBRARY_PATH', 'DYLD_INSERT_LIBRARIES',
   'DYLD_LIBRARY_PATH', 'DYLD_FRAMEWORK_PATH', 'PYTHONPATH', 'PYTHONSTARTUP', 'RUBYOPT', 'PERL5OPT',
   'PERL5LIB', 'PROMPT_COMMAND', 'npm_config_script_shell', 'NPM_CONFIG_SCRIPT_SHELL', 'npm_config_node_options',
@@ -1846,7 +1846,7 @@ export function rcConfig(base: string, text: string): { paths: string[]; problem
 
 // An .npmrc line's key as npm's ini reader takes it (quotes off), in one
 // spelling (lower case, `-` for `_`), or '' for a comment.
-function npmKey(line: string): string {
+export function npmKey(line: string): string {
   if (line.startsWith('#') || line.startsWith(';')) return '';
   const eq = line.indexOf('=');
   let key = (eq < 0 ? line : line.slice(0, eq)).trim();
@@ -1981,7 +1981,7 @@ const INPUT_PATH = /^\/(dev\/(stdin|tty|fd\/\d+)|proc\/(self|thread-self|\d+)\/f
 // Whether running or sourcing `p` reads what to run from the process's
 // input: one of those paths, or anything there that isn't a plain file
 // (a link to one, in the repo or not, a fifo, a device).
-function readsInput(p: string): boolean {
+export function readsInput(p: string): boolean {
   if (INPUT_PATH.test(path.normalize(p))) return true;
   try {
     if (INPUT_PATH.test(fs.realpathSync(p))) return true;
@@ -1999,7 +1999,7 @@ function readsInput(p: string): boolean {
 
 // Whether a shell script's #! passes the shell a flag that has it read
 // commands from somewhere other than the script.
-function shebangReadsElsewhere(text: string): boolean {
+export function shebangReadsElsewhere(text: string): boolean {
   const m = /^#![ \t]*(\S+)([^\n]*)/.exec(text);
   if (!m) return false;
   const words = m[2]!.trim().split(/[ \t]+/).filter(Boolean);
@@ -2039,7 +2039,7 @@ function isFile(p: string): boolean {
 
 // How a file runs: by its #! line, else its extension. A file run with no
 // #! goes to sh, so it's a shell script then.
-function kindOf(file: string, text: string, running: boolean): 'shell' | 'js' | 'binary' | 'other' {
+export function kindOf(file: string, text: string, running: boolean): 'shell' | 'js' | 'binary' | 'other' {
   if (text.slice(0, 512).includes('\0')) return 'binary';
   const shebang = /^#!\s*(\S+)(?:\s+(.*))?/.exec(text);
   if (shebang) {

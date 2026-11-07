@@ -3274,12 +3274,161 @@ it runs, the patch is hashed afresh and must still be the version
 trusted, and the command, followed as above (for a tool patch, from its
 own folder too), may reach only files the hash covered, no script patch
 trust can't follow, and nothing it can't follow itself. A function that
-has returned, thrown or timed out can't run another. Otherwise it isn't run: `sh`
+has returned, thrown or timed out can't run another. The command must
+also keep to the short list of shell (below). Otherwise it isn't run: `sh`
 rejects, as for a failed command, with `Not run:` and why, so a `when`
 hides its item, a `badge` gives none, a list panel shows the note and
 the patch's `liveError` says so. They ran in the thread's folder, so a
 badge's `./tools/count.sh` in a thread in `web/` ran `web/tools/count.sh`,
 which nothing had hashed (Gautam's scan, 6 Nov).
+
+**The short list of shell.** A live function's command, and a folder's
+Claude Code hooks and settings commands, run by themselves, and the
+follower above looks for the shell tricks it knows: every review round
+found one it didn't (here-docs, `$'\142ash'`, `sh /dev/stdin`, `env -S`,
+a `}` that zsh reads as the end of a group). So those commands are also
+parsed into a small grammar and held to an explicit list of programs, and
+anything outside it isn't run (`src/shell-allowlist.ts`; Mike's call,
+7 Nov, narrowed the same day after an outside review). A fork whose
+patches run something else adds it to the list there. On the list:
+
+- Grammar, for both: simple commands of literal words, `'...'` and `"..."`
+  strings, `\x`, `$NAME`, `${NAME}`, `$?`, `$!`, `$#`, `$$`, `$0`-`$9`,
+  `$@`, `$*`, `~` and `~/x`, and `$(...)` whose commands are on the list
+  too; pipes, `&&`, `||`, `;` and new lines; `{ ...; }`, `( ... )` and `!`
+  before a pipeline; `name=value` on its own, for a lower-case name that
+  isn't in the environment or one of zsh's own (`path`, `fpath`...).
+  A lone `{` or `}` anywhere but opening or closing a group is refused,
+  after a redirect or as a redirect's target too, as zsh and bash read it
+  differently.
+- Redirects, for both, in every script too: `>` and `>>` only to
+  `/dev/null`, written just so, and `N>&M`. Nothing writes a file. `<`
+  takes a literal path in a hook, and only `/dev/null` in a live command.
+- Program names are compared in lower case, by the name they run as (a
+  path's last part, which must be what the path resolves to), so `GIT`,
+  `/usr/bin/git` and `git` are held to the same, and a link named `cat` to
+  `/bin/sh` is refused. A builtin or reserved word in another case or by a
+  path (`CD`, `/usr/bin/cd`, `IF`) isn't the shell's own, so it's refused.
+- `&`, for a live command only: when its shell exits or times out, its
+  whole process group gets SIGTERM, then SIGKILL 2 s later if any of it is
+  still there (`runCommand`'s `killGroup`). A program that leaves the group
+  (`setsid`, `setpgid`, a daemon that forks away) isn't reached; nothing on
+  the live list does that (`ssh -f` isn't on it,
+  and a fetch's automatic gc is off, below).
+
+**A live command** runs only what Mike's patches run (as of 7 Nov), each
+in the forms they use, and every word literal: known as it's checked, not
+split. There is no fallback for other installed programs.
+
+| Program | Forms |
+|---|---|
+| builtins | `echo`, `true`, `exit <n>`, `test -f\|-d\|-e <path>`, `kill [-signal] <pid>` where the pid is `$!` or a variable only ever set from it |
+| `cat` | `<path>...` |
+| `grep` | `[-c] <pattern>`; the pattern may be worked out as it runs if it's a quoted word starting with literal text that isn't `-` (`"adb-$s"`), so it can't be an option |
+| `sleep` | `<seconds>` |
+| `dns-sd` | `-B <type> <domain>` |
+| `ssh` | `-o ConnectTimeout=<n>`, `-o BatchMode=yes`, `<host>`, then what runs there: read as shell and held to plain commands and pipes of `launchctl list`, `df -h <path>...`, `memory_pressure -Q`, `tail -1`, `readlink <path>`, `echo` |
+| `git` | `fetch [-q] <remote> [<ref>]`, `merge-base --is-ancestor <rev> <rev>`, `rev-list --count <rev or range>`, `branch [-a] [--no-merged <rev>] [--sort=...] [--format=...]` (no operand, as one makes a branch; only the format atoms cannvas uses, not `%(signature)`) |
+| `gh` | `pr list [--state ...] [--limit <n>] [--json <fields>]` |
+| `npx convex` | `data <table> [--component <name>] [--prod] [--format ...] [--limit <n>]`, `run [--prod] stats:overview` or `adminStats:overview`; `convex` must be in `node_modules/.bin` and lead to the convex package, so npx never fetches or is pointed at something else, and not beside an `.npmrc` with a key outside a short list that only say where packages come from |
+| `tandem` | `waiting [--json] <path>...` |
+| `stocks` | `balance`, `positions` |
+| `node` | `<file> <words>`, no options: a file of the repo's, followed and hashed, or `~/dev/me/poddle/scripts/asc-status.mjs <digits>` (below) |
+| a file of the repo's | by its path, a shell script or JavaScript, hashed and followed; what a script runs is held to this same list (it may also use `if`, `while`, `until`, `for`, `case`, comments and `set -e` and the like), and its `#!` must be a shell run plainly |
+
+A live command that runs a file of the repo's may run beside it only what
+changes nothing (`echo`, `true`, `exit`, `kill`, `test`, `cat`, `grep`,
+`sleep`, `dns-sd`), or it could change that file first.
+
+`git` and `gh` (which runs git) run only in a repo whose own config, its
+`.git/config`, a worktree's config and what they include, keeps to settings
+that add nothing git runs: the repository format, remotes reached over
+`https` or `ssh` whose fetch fills remote-tracking refs or tags, branches,
+`user.name` and the like. Any other (`core.hooksPath`, `core.fsmonitor`,
+`core.sshCommand`, `include.path`, `filter.*`, `diff.*`, `alias.*`,
+`protocol.*`, `url.*`, `remote.*.vcs`, `gpg.*`...) and they aren't run.
+That's checked as each command starts, so every live command also runs
+with git settings in its environment (`GIT_CONFIG_COUNT`, which needs git
+2.31; an older git isn't run), which beat the repo's own whatever it says
+by then: `core.fsmonitor=`, `core.hooksPath=/dev/null`,
+`safe.bareRepository=explicit`, only the `https` and `ssh` protocols, no
+submodule fetches, no saved cookies, no alternates command, no automatic gc,
+your own `core.sshCommand` (or `ssh`), every credential helper turned off and
+your own (system, global) put back after, and no askpass program or prompt.
+Filters and diff drivers can't be turned off by name, but the repo's own are
+refused above, and none of those git commands reads the working tree or makes
+a diff, so your own (git-lfs) don't run either.
+
+A script outside the repo runs only if it's on the list above and nobody
+but you or root could have written it, or a live command's chip hides.
+From the path as written, each folder it passes through must be yours or
+root's and not writable by its group or others (a sticky one like `/tmp`
+aside, where only an entry's owner can rename it); each link, followed as
+the system does, yours or root's; the file yours or root's, a plain file,
+and not writable by its group or others; and the whole path must resolve,
+with no `.` or `..` as written. On macOS, `ls -led` must show no access
+list entry that allows anyone else to write, add to or delete from any of
+them (a deny entry, as macOS puts on your home folder, is fine). On Linux an
+access list's mask is the group bits, so the mode covers it; on anything else
+it's refused. What that script imports isn't checked, so it's held to where
+it is. If the check fails, Walkies' and StashIt's App Store chips (which run
+`node ~/dev/me/poddle/scripts/asc-status.mjs`) hide. Threadbear's own
+`app-store.ts` isn't held to any of this, as Threadbear's own patches aren't.
+
+**A Claude Code hook** (or settings command) has a fuller list, as its text
+is fixed by the hash rather than built as it runs, but no `&`:
+
+- The same grammar and redirects; in a script it runs (and a package script)
+  also `if`, `while`, `until`, `for ... in`, `case`, comments, `set -e`, `-u`,
+  `-x`, `-o pipefail` and zsh's `setopt` of those. A script's `#!` must be a
+  shell run plainly (`-e`, `-u`, `-x` at most). A `cd` to a known folder must
+  be able to work now; one through a link, or based on `${BASH_SOURCE[0]}` or
+  a sourced file's `$0`, which differ between shells, loses track of where it
+  is, so a relative path after it is refused.
+- Builtins: `cd`, `echo`, `printf` (a number format only with plain numbers,
+  as zsh's reads them as arithmetic), `true`, `false`, `:`, `test`/`[`
+  (numbers compared only when they're plain), `exit`, `return`, `shift`,
+  `break`, `continue` (a plain number), `read -r`, `wait` and `kill` (`$!`, a
+  variable only ever set from it, a plain number or `%1`), `pwd`, `which`,
+  `type`, `command -v`, and `.`/`source` of a file of the repo's by a path
+  (`./lib.sh`), followed as part of the same shell.
+- A file of the repo's (a shell script or JavaScript, followed, and hashed);
+  `sh`, `bash`, `zsh`, `dash` or `ksh` with a script, and `node`, `bun` or
+  `tsx` with a file (`node` with `--no-warnings` and the like at most; `bun`
+  and `tsx` not beside a `bunfig.toml` or a `tsconfig.json` with `paths`, and
+  `bun` not beside a `.env` that sets `NODE_OPTIONS` and the like); `npm run
+  x`, `npm test`, `pnpm run x`, `yarn run x` and `bun run x` for a script
+  that's in `package.json`, followed (with `pre` and `post`) as a script with
+  the package's `node_modules/.bin` first on PATH, and not beside an `.npmrc`
+  with a key outside that short list, a `.pnpmfile.cjs`, or a Yarn `yarnPath`
+  or plugin; `env`, `nohup`, `nice` and `timeout` only around a script of the
+  repo's.
+- A script outside the repo, run by an interpreter or by its path, only if
+  nobody else could have written it, as above, and not a package's own program
+  (a path through `node_modules`, as `npm-cli.js exec x` runs what it's told).
+- Otherwise only programs that load no code from the folder, run nothing
+  they're handed and write no file, every word literal (`HOOK_PROGRAMS`):
+  `cat`, `head`, `tail`, `ls`, `date`, `sleep`, `say` (`-v` and `-r` only, as
+  `-o` writes), `afplay`, `jq`, `grep`, `tr`, `wc`, `cut`, `uniq` (one file, as
+  a second is written), `basename`, `dirname`, `realpath`, `readlink`, `stat`,
+  `pbcopy`, `pbpaste`, `whoami`, `hostname`, `uname`, `tput`, `notify-send`,
+  `logger`. `find` with literal words and none of `-exec`, `-execdir`, `-ok`,
+  `-okdir`, `-delete`, `-fprint`, `-fprintf`, `-fls`. `awk` with a literal
+  program with no `system`, `getline`, `|`, `>`, `@` or `ENVIRON`, and only
+  `-F` and `-v`. Not `tee`, `cp`, `mv`, `rm`, `mkdir`, `touch`, `ln`, `chmod`,
+  `mktemp`, `curl`, `wget`, `sed`, `sort`, `git`, `gh`, `ssh`, `npx` or `bunx`.
+
+Refused, for both: here-docs and here-strings, process substitution,
+backticks, `$((...))`, `[[`, `((`, globs and brace expansion outside a
+`case` pattern, `~user`, zsh's `=cmd`, `$x[1]` and `$x:h`, `${x:-...}`
+and every other `${...}` form, an unquoted `#`, `^` or `!` in a word, `&>`,
+`>|`, `|&`, `&|`, a redirect with no command, functions, `alias`, `eval`,
+`exec`, `trap`, `export`, `VAR=x cmd`, any other builtin of bash or zsh
+(`emulate`, `zmodload`, `r`...), a command named by a variable whose value
+isn't known, and a word worked out as it runs anywhere a program's words are
+checked. Mike's own live commands all keep to it (as of 7 Nov), except
+walkies-arrow's older Pixel check, which still runs perl and was already
+hidden.
 
 ### Trusting a folder's Claude Code hooks
 
@@ -3327,7 +3476,11 @@ patch trust's store and rules.
   `NODE_OPTIONS=--require ./x.js`, an allow rule's
   `Bash(./scripts/x.sh:*)`), and what each command runs in turn, followed
   as patch trust follows a patch's commands (`src/script-trust.ts`:
-  imports, shell scripts, `npm run`, `make`). Settings with commands and
+  imports, shell scripts, `npm run`, `make`). Each command (a hook's,
+  `statusLine`'s, a helper's, an MCP server's) is also held to the short
+  list of shell a live patch command is ("The short list of shell",
+  under "Trusting a folder's patches"), without `&`; both must pass.
+  Settings with commands and
   no `env` or grants hash as they did before those counted, so trusting
   them holds. It's kept in `patch-trust.json` in the folder's list, as `claude:<hash>`,
   under the same folder key, so a worktree counts as its main checkout and
@@ -3342,7 +3495,8 @@ patch trust's store and rules.
   `git`, which an alias or `core.hooksPath` makes run anything) rather
   than a script, a shell, a JS runner, a package script, a function the
   script defines or a program known to do neither (`echo`, `say`,
-  `afplay`, `jq` and the like, `INERT_PROGRAMS` in `src/script-trust.ts`), a
+  `afplay`, `jq` and the like, `INERT_PROGRAMS` in `src/script-trust.ts`,
+  which the short list narrows to ones that write nothing), a
   file or folder in the repo named in an environment variable, or any
   named there by a relative path (`PATH=./bin`, `PYTHONPATH=.`,
   `BASH_ENV=./startup` or `BASH_ENV=startup`, `NODE_OPTIONS=--require
