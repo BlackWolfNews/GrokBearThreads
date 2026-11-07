@@ -24,9 +24,20 @@ import path from 'node:path';
 import type { Reads } from './script-trust.ts';
 
 // What git tracks under node_modules in one repo: `files`, by path (links
-// too), `links`, the tracked symlinks, and `indexes`, the index files that
-// say so; or `problem` when git couldn't say.
-export type TrackedNodeModules = { files: Set<string>; links: Set<string>; indexes: string[] } | { problem: string };
+// too), `lower` the same compared as the filesystem does, `links`, the
+// tracked symlinks, and `indexes`, what's watched for a change: the index
+// files that say so, and each submodule's .git, there or not (one turning
+// up is a submodule checked out since); or `problem` when git couldn't say.
+export type TrackedNodeModules = { files: Set<string>; links: Set<string>; indexes: string[]; lower: Set<string> } | { problem: string };
+
+// Whether a path's folder names include node_modules. Without case on a
+// Mac or Windows, where Node's `node_modules` finds a committed
+// `NODE_MODULES` (Codex's review, 7 Nov).
+const FOLD = process.platform === 'darwin' || process.platform === 'win32';
+export function inNodeModules(rel: string): boolean {
+  return rel.split(/[\\/]/).some((s) => (FOLD ? s.toLowerCase() : s) === 'node_modules');
+}
+const fold = (p: string) => (FOLD ? p.toLowerCase() : p);
 
 // At most this many tracked files under node_modules are followed, and
 // submodules this deep; a repo that commits more can't be checked.
@@ -34,7 +45,8 @@ export const MAX_TRACKED_PACKAGE_FILES = 100;
 const MAX_SUBMODULE_DEPTH = 8;
 const MAX_SUBMODULES = 50;
 
-const cache = new Map<string, { key: string; out: TrackedNodeModules & { indexes: string[] } }>();
+type Listing = { files: Set<string>; links: Set<string>; indexes: string[]; lower: Set<string> };
+const cache = new Map<string, { key: string; out: Listing }>();
 
 // git, without anything a repo's own config could make it run: a folder
 // from a zip can carry a .git/config with core.fsmonitor set, which `git
@@ -54,23 +66,23 @@ function git(dir: string, args: string[]): string {
 // What the index files look like now: a cached listing holds while this is
 // the same. A pull that starts tracking node_modules/zod over an installed
 // copy writes the files and the index, but none of the files a hash read.
-function indexKey(indexes: string[]): string | undefined {
-  try {
-    return indexes
-      .map((f) => {
+function indexKey(indexes: string[]): string {
+  return indexes
+    .map((f) => {
+      try {
         const st = fs.statSync(f);
         return `${f}:${st.ino}:${st.size}:${st.mtimeMs}:${st.ctimeMs}`;
-      })
-      .join('\n');
-  } catch {
-    return undefined;
-  }
+      } catch {
+        return `${f}:none`;
+      }
+    })
+    .join('\n');
 }
 
 // One repo's tracked entries, and its populated submodules', by git's own
 // listing in each (not `--recurse-submodules`, which skips a submodule its
 // config calls inactive though its files are on disk).
-function list(top: string, dir: string, depth: number, out: { files: Set<string>; links: Set<string>; indexes: string[] }): string | undefined {
+function list(top: string, dir: string, depth: number, out: Listing): string | undefined {
   try {
     out.indexes.push(path.resolve(dir, git(dir, ['rev-parse', '--git-path', 'index']).trim()));
   } catch {
@@ -88,15 +100,19 @@ function list(top: string, dir: string, depth: number, out: { files: Set<string>
     const p = path.join(dir, m[2]!);
     if (m[1] === '160000') {
       // A submodule: what's in it is tracked too, if it's there at all.
+      // Its .git is watched either way, so checking it out later (which
+      // changes no index this has read) shows (Codex's review, 7 Nov).
+      out.indexes.push(path.join(p, '.git'));
       if (!fs.existsSync(path.join(p, '.git'))) continue;
       if (depth >= MAX_SUBMODULE_DEPTH || out.indexes.length >= MAX_SUBMODULES) return `the repo nests more submodules than patch trust follows`;
       const why = list(top, p, depth + 1, out);
       if (why) return why;
       continue;
     }
-    if (!path.relative(top, p).split(path.sep).includes('node_modules')) continue;
+    if (!inNodeModules(path.relative(top, p))) continue;
     if (m[1] === '120000') out.links.add(p);
     out.files.add(p);
+    out.lower.add(fold(p));
   }
   return undefined;
 }
@@ -113,12 +129,11 @@ export function trackedNodeModules(top: string, reads?: Reads): TrackedNodeModul
     for (const f of hit.out.indexes) reads?.watch(f);
     return hit.out;
   }
-  const out = { files: new Set<string>(), links: new Set<string>(), indexes: [] as string[] };
+  const out: Listing = { files: new Set(), links: new Set(), indexes: [], lower: new Set() };
   const why = list(top, top, 0, out);
   for (const f of out.indexes) reads?.watch(f);
   if (why) return { problem: `${why}, so patch trust can't tell a package npm installed from one the repo ships in node_modules.` };
-  const key = indexKey(out.indexes);
-  if (key !== undefined) cache.set(top, { key, out });
+  cache.set(top, { key: indexKey(out.indexes), out });
   return out;
 }
 
@@ -162,8 +177,8 @@ export function bareImport(fromDir: string, spec: string, top: string, reads?: R
 export function unhashedPackageFile(file: string, top: string, served: (file: string) => boolean): string | undefined {
   if (!inside(file, top)) return undefined;
   const tracked = trackedNodeModules(top);
-  if ('problem' in tracked) return path.relative(top, file).split(path.sep).includes('node_modules') ? tracked.problem : undefined;
-  if (tracked.files.has(file) && !served(file)) return `${file} is a file the repo commits under node_modules that patch trust didn't hash`;
+  if ('problem' in tracked) return inNodeModules(path.relative(top, file)) ? tracked.problem : undefined;
+  if (tracked.lower.has(fold(file)) && !served(file)) return `${file} is a file the repo commits under node_modules that patch trust didn't hash`;
   return undefined;
 }
 

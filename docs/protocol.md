@@ -2981,10 +2981,12 @@ helper, and the patch's imports of them are served from those bytes.
 All of them, not only the named package's folder: Node also finds
 `node_modules/payload.js` for `require('payload')`, a package a pull adds
 later, or one in a parent folder, and an installed package may import a
-committed one. Packages npm installed (untracked, ignored) aren't
+committed one, and on a Mac `node_modules` finds a committed
+`NODE_MODULES` too. Packages npm installed (untracked, ignored) aren't
 hashed, so an install never asks again. The index files git keeps (each
-submodule's too) are watched, so a pull that starts tracking
-`node_modules/zod` over an installed copy asks again, and the module hook
+submodule's too, and each submodule's `.git`, so checking one out later
+shows) are watched, so a pull that starts tracking `node_modules/zod`
+over an installed copy asks again, and the module hook
 refuses a committed file under `node_modules` that a patch's import
 reaches but the hash didn't cover. When git can't say what it tracks (it
 fails, or the folder isn't a git checkout but has a `node_modules`, which

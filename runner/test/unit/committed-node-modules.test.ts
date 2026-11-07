@@ -260,3 +260,39 @@ test("Codex 4: require('payload') finding a committed node_modules/payload.js (n
   const covered = patchHash(patchIn(folder)).deps.map((d) => path.relative(folder, d.path));
   assert.ok(covered.includes('node_modules/payload.js'), covered.join(', '));
 });
+
+test('Codex round 2: a submodule left uninitialized when the patch was trusted, checked out later, asks again', async () => {
+  const lib = tmpDir();
+  write(lib, { 'package.json': JSON.stringify({ name: 'zod', type: 'module', exports: './index.mjs' }), 'index.mjs': 'export const list = 1;\n' });
+  git(lib, 'init', '-q');
+  git(lib, 'add', '.');
+  git(lib, 'commit', '-qm', 'lib');
+  const { folder } = repo({});
+  git(folder, 'submodule', '-q', 'add', '-f', lib, 'node_modules/zod');
+  git(folder, 'commit', '-qm', 'sub');
+  // Take its checkout away, as a fresh clone without --recursive has it.
+  git(folder, 'submodule', '-q', 'deinit', '-f', 'node_modules/zod');
+  assert.equal(fs.existsSync(path.join(folder, 'node_modules/zod/index.mjs')), false);
+  write(folder, { '.threadbear/patches/tools.ts': "export default { actions: [{ title: 'Go', run: 'true', when: async () => { if (globalThis.never) await import('zod'); return true; } }] };\n" });
+  git(folder, 'add', '.');
+  git(folder, 'commit', '-qm', 'lazy');
+  const trust = new PatchTrust();
+  assert.equal(trust.trustCurrent([patchIn(folder)]).length, 1);
+  assert.equal((await trust.check(patchIn(folder), 0)).trusted, true);
+  git(folder, 'submodule', '-q', 'update', '--init');
+  assert.ok(fs.existsSync(path.join(folder, 'node_modules/zod/index.mjs')));
+  const verdict = await trust.check(patchIn(folder), 0);
+  assert.equal(verdict.trusted === false && verdict.reason, 'changed');
+});
+
+test('Codex round 2: on a Mac, a package committed under NODE_MODULES (which `node_modules` finds there) is hashed too', { skip: process.platform !== 'darwin' && process.platform !== 'win32' }, () => {
+  const { folder } = repo({ 'NODE_MODULES/zod/package.json': JSON.stringify({ name: 'zod', main: 'index.js' }), 'NODE_MODULES/zod/index.js': 'exports.n = 1;\n' });
+  write(folder, {
+    'scripts/x.cjs': "console.log(require('zod').n);\n",
+    '.threadbear/patches/tools.ts': "export default { panels: [{ title: 'N', url: 'http://localhost:1', badge: async ({ sh }) => Number(await sh('node scripts/x.cjs')) }] };\n",
+  });
+  git(folder, 'add', '.');
+  git(folder, 'commit', '-qm', 'script');
+  const covered = patchHash(patchIn(folder)).deps.map((d) => path.relative(folder, d.path));
+  assert.ok(covered.includes('NODE_MODULES/zod/index.js'), covered.join(', '));
+});
