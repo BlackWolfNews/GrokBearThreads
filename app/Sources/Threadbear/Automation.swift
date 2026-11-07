@@ -617,6 +617,18 @@ enum Automation {
             guard let button = buttons.last else { return "error no button \(title)" }
             button.performClick(nil)
             return "ok"
+        case "click-at":
+            // A click at a point in the main window, in points from its
+            // top left, through the window as a real one goes, without moving
+            // the pointer. For what has no tooltip to find it by.
+            guard let window, let x = c["x"] as? Double, let y = c["y"] as? Double else { return "error needs x and y" }
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                guard let event = NSEvent.mouseEvent(with: type, location: NSPoint(x: x, y: window.frame.height - y), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                     windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+                else { return "error no event" }
+                window.sendEvent(event)
+            }
+            return "ok"
         case "press-button":
             // {"cmd":"press-button","id":"b7k2abcd"} (or "title":"Fill in the
             // form") clicks a reply button in the open thread as its pill

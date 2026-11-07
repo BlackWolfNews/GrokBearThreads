@@ -689,7 +689,8 @@ It files each thread in a project, making one when none fits, keeps each
 project's state up to date, adds a repo to a project's folders once its
 threads work there, and renames threads that have wandered off from their
 title (never one you named). It also looks after the Pocket cards threads
-filed.
+filed. Its picture, and the one on the Scheduled page, say something if you
+poke them.
 
 It looks after a thread's first message and when a turn ends, then catches
 up at most every 20 minutes while the thread keeps going. A catch-up after
