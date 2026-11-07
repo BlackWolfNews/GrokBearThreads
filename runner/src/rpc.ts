@@ -534,6 +534,9 @@ export class RpcServer {
           permissionMode: optMode(p),
           title: optString(p, 'title'),
           ...(p.worktree === false ? { worktree: false } : {}),
+          // Only ever narrows (a draining runner passing on a sandboxed
+          // agent's create_thread), so any client may ask for it.
+          ...(p.confined === true ? { confined: true } : {}),
           ...optStartedBy(p),
         });
         return { thread: res.thread, turnId: res.turnId };
@@ -571,6 +574,10 @@ export class RpcServer {
         }
         if (p.cwd !== undefined) upd.cwd = reqString(p, 'cwd');
         if (p.accountId !== undefined) upd.accountId = reqString(p, 'accountId');
+        // From a client with the runner's token (the app, tb): its move may
+        // take a thread out of a sandbox, unless it says it mayn't (a
+        // draining runner passing on an agent's move: unconfine false).
+        if (p.cwd !== undefined || p.accountId !== undefined || p.poolId !== undefined) upd.unconfine = p.unconfine !== false;
         if (p.poolId !== undefined) upd.poolId = p.poolId === null ? null : reqString(p, 'poolId');
         if (p.model !== undefined) upd.model = p.model === null ? null : reqString(p, 'model');
         if (p.effort !== undefined) upd.effort = p.effort === null ? null : optEffort(p);
@@ -676,6 +683,9 @@ export class RpcServer {
           decision,
           message: optString(p, 'message'),
           answers,
+          // A draining runner passing on the phone's answer (handover.ts):
+          // it only ever narrows what counts, so any client may say it.
+          ...(p.remote === true ? { remote: true } : {}),
         });
       }
       case 'plans.approve':

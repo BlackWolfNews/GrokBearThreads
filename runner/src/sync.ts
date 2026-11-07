@@ -30,8 +30,9 @@ import { extForMediaType, sniffImage } from './media.ts';
 import { makeFunctionReference } from 'convex/server';
 import type { Clock, TimerHandle } from './clock.ts';
 import type { Logger } from './log.ts';
-import { agentsStillWorking, ARCHIVE_VERDICTS, ErrorCode, isEffortLevel } from './protocol.ts';
-import type { Account, ArchiveVerdict, ApprovalDecision, ApprovalOption, AskAnswer, EffortLevel, ImageRef, OpenAsk, PersistedEvent, Project, Question, ReplyButton, Schedule, ThreadSummary } from './protocol.ts';
+import { agentsStillWorking, ARCHIVE_VERDICTS, ErrorCode, isEffortLevel, remoteCreateModeOf } from './protocol.ts';
+import type { Account, ArchiveVerdict, ApprovalDecision, ApprovalOption, AskAnswer, EffortLevel, ImageRef, OpenAsk, PermissionMode, PersistedEvent, Project, Question, ReplyButton, Schedule, ThreadSummary } from './protocol.ts';
+import { REMOTE_ALLOW_REFUSED, remoteCardShowsAll, summaryField } from './tools.ts';
 import type { Notification } from './runner.ts';
 import type { ScheduleBackend, StoredSchedule } from './schedules.ts';
 import { followSchedules } from './schedule-follow.ts';
@@ -505,12 +506,12 @@ type Host = {
 export type CommandHost = {
   // origin: absent for a message Mike sent from the main Mac (a command `from: "mac"`).
   send(threadId: string, text: string, images: ImageRef[], opts: { origin?: 'phone'; answers?: AskAnswer[] }): unknown;
-  respondApproval(p: { threadId: string; approvalId: string; decision: ApprovalDecision; message?: string; answers?: Record<string, string> }): unknown;
+  respondApproval(p: { threadId: string; approvalId: string; decision: ApprovalDecision; message?: string; answers?: Record<string, string>; remote?: boolean }): unknown;
   answerSecret(p: { threadId: string; approvalId: string; secret?: string; decline?: boolean }): unknown;
   update(p: { threadId: string; title?: string; snoozedUntil?: string | null; archived?: boolean; verdict?: ArchiveVerdict; starred?: boolean }): unknown;
   // Seen up to the last event it has.
   markSeen(threadId: string): unknown;
-  create(p: { text: string; images?: ImageRef[]; cwd?: string; accountId?: string; model?: string; effort?: EffortLevel; permissionMode?: 'ask' | 'full' | 'auto'; origin?: 'phone' }): { thread: ThreadSummary };
+  create(p: { text: string; images?: ImageRef[]; cwd?: string; accountId?: string; model?: string; effort?: EffortLevel; permissionMode?: PermissionMode; origin?: 'phone' }): { thread: ThreadSummary };
   // Stops the thread's turn (a command from the main Mac, API 44).
   interrupt?(threadId: string): unknown;
   share(threadId: string, p: { access: 'off' | 'link'; newLink?: boolean }): unknown;
@@ -937,12 +938,8 @@ export function toolLine(e: { name: string; kind: string; title: string; input: 
 // One line of a tool's input for the approval card: the command, the
 // path, or the first short string in it. Never the whole input.
 export function inputSummary(input: Record<string, unknown>, scrub: (text: string) => string = (t) => t): string | undefined {
-  for (const k of ['command', 'file_path', 'path', 'url', 'pattern', 'query']) {
-    const v = input[k];
-    if (typeof v === 'string' && v.trim()) return shortLine(scrub(v));
-  }
-  for (const v of Object.values(input)) if (typeof v === 'string' && v.trim()) return shortLine(scrub(v));
-  return undefined;
+  const v = summaryField(input);
+  return v === undefined ? undefined : shortLine(scrub(v));
 }
 
 function shortLine(s: string): string {
@@ -1906,7 +1903,21 @@ export class ConvexSync {
       // card has no buttons and says so, as one too big for the row does.
       this.pending.set(threadId, { approvalId: e.approvalId, kind: 'approval', seq: e.seq, name: e.name, title: `${e.title} Answer it on the Mac.`, options: [] });
     } else if (e.type === 'approval.requested') {
-      this.pending.set(threadId, { approvalId: e.approvalId, kind: 'approval', seq: e.seq, name: e.name, title: e.title, options: e.options, ...(inputSummary(e.input, this.scrubber.safeText) ? { inputSummary: inputSummary(e.input, this.scrubber.safeText) } : {}) });
+      // One whose line can't show all it allows offers only Deny there,
+      // and says why; the runner refuses an allow from there anyway
+      // (Runner.respondApproval). An older phone draws the options it's given.
+      const summary = inputSummary(e.input, this.scrubber.safeText);
+      // Scrubbing can take out what a call does (`token="touch x"; eval
+      // "$token"`), so what the line is made from must go up as it is (Codex review).
+      const raw = summaryField(e.input);
+      const shownAsIs = raw === undefined || this.scrubber.safeText(raw) === raw;
+      const whole = shownAsIs && remoteCardShowsAll(e.name, e.input, this.threadCwd(threadId), e.title);
+      this.pending.set(threadId, {
+        approvalId: e.approvalId, kind: 'approval', seq: e.seq, name: e.name,
+        title: whole ? e.title : `${e.title}. ${REMOTE_ALLOW_REFUSED}`,
+        options: whole ? e.options : e.options.filter((o) => o !== 'allow' && o !== 'allowAlways'),
+        ...(summary ? { inputSummary: summary } : {}),
+      });
     } else if (e.type === 'question.requested') {
       this.pending.set(threadId, { approvalId: e.approvalId, kind: 'question', seq: e.seq, questions: e.questions });
     } else if (e.type === 'secret.requested') {
@@ -1933,6 +1944,15 @@ export class ConvexSync {
   }
 
   // Only a change the phone would see makes a write.
+  // The thread's folder, for whether a card's line shows all of it.
+  private threadCwd(threadId: string): string | undefined {
+    try {
+      return this.deps.runner.get(threadId).cwd;
+    } catch {
+      return undefined;
+    }
+  }
+
   private mark(t: ThreadSummary, now_ = false): void {
     this.missing.delete(t.id);
     if (this.removedFromFile.delete(t.id)) {
@@ -3508,10 +3528,18 @@ export class ConvexSync {
         }
         const decision = a.decision as ApprovalDecision;
         if (!['allow', 'allowAlways', 'deny', 'answered'].includes(decision)) throw new Error(`bad decision ${String(a.decision)}`);
+        // Only what the card that went up offered, whoever sends it. A
+        // request for a thread elsewhere (START_CARD) goes up with no options
+        // and is answered by the main Mac's runner, which checks it itself.
+        const card = this.pending.get(needThread());
+        if (card?.kind === 'approval' && card.approvalId === String(a.approvalId) && card.name !== START_CARD && !card.options.includes(decision as ApprovalOption)) {
+          throw new Error(REMOTE_ALLOW_REFUSED);
+        }
         await host.respondApproval({
           threadId: needThread(),
           approvalId: String(a.approvalId),
           decision,
+          remote: true,
           ...(typeof a.message === 'string' ? { message: a.message } : {}),
           ...(a.answers && typeof a.answers === 'object' ? { answers: this.realAnswers(needThread(), a.answers as Record<string, string>) } : {}),
         });
@@ -3538,6 +3566,9 @@ export class ConvexSync {
       }
       case 'create': {
         const text = commandText(a);
+        // Before anything is made: a mode it can't read refuses the
+        // command rather than starting on full access.
+        const mode = remoteCreateModeOf(a);
         const { thread } = await this.withPhoneImages(a.images, (images) => host.create({
           text,
           ...(images.length ? { images } : {}),
@@ -3545,7 +3576,7 @@ export class ConvexSync {
           ...(typeof a.accountId === 'string' ? { accountId: a.accountId } : {}),
           ...(typeof a.model === 'string' ? { model: a.model } : {}),
           ...(isEffortLevel(a.effort) ? { effort: a.effort } : {}),
-          ...(a.permissionMode === 'ask' || a.permissionMode === 'full' || a.permissionMode === 'auto' ? { permissionMode: a.permissionMode } : {}),
+          ...(mode ? { permissionMode: mode } : {}),
           ...origin,
         }));
         return { threadId: thread.id };

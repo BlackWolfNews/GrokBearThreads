@@ -109,6 +109,8 @@ export class CodexAdapter implements AgentAdapter {
   }
 
   start(opts: StartSessionOptions, sink: SessionSink): AgentSession {
+    // Codex never runs in the sandbox (sandbox.ts), so a thread shut in one can't run here.
+    if (opts.confined) throw new Error("This thread runs in a sandbox, and Codex can't, so it wasn't started. Move it to a Claude login.");
     const s = new CodexSession(opts, sink, this.deps, {
       track: (p, live) => this.track(p, live),
       child: (parent, child) => {

@@ -320,8 +320,16 @@ any thread or schedule to more access, starting a thread with more access
 than its own (the threads it starts get its mode), messaging or moving a
 thread that has more, changing the brief of a project such a thread is in,
 or adding a schedule check all show a card for that one call, with
-no Always allow. On a Codex thread, Always allow on a command allows that
-exact command again in that folder, not anything that starts the same way.
+no Always allow. The card shows the whole message or brief, and the
+folder where it really is. On a Codex thread, Always allow on a command allows that
+exact command again in that folder, not anything that starts the same way,
+and it's only offered for simple commands like `ls` or `grep`: one that
+runs the repo's own code (`npm test`, `make`, `cargo run`) asks every
+time, as the repo can change what it runs.
+
+A card shows the whole command. On the phone, one that's too long to read
+there in full (or one asking for more access) has only Deny: allow it in
+the Mac app.
 
 ### When an agent needs a password or a key
 

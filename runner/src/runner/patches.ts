@@ -31,6 +31,8 @@ import { safeStart } from '../safe-cut.ts';
 // command reaches from the thread's folder isn't in that hash.
 type CodeScan = { at: number; h: PatchHash; all: boolean; files: Set<string> };
 const scans = new Map<string, CodeScan>();
+// The files in a Claude login's folder that hold its user settings.
+const LOGIN_SETTINGS = /^(settings(\..*)?\.json|\.claude\.json)$/i;
 const SCAN_TTL_MS = 10_000;
 function codeOfUnhashedPatch(file: string, cwd: string, now: number): CodeScan {
   const key = `${file}\0${cwd}`;
@@ -338,10 +340,16 @@ export const patchesPart = {
       if (rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))) return true;
       if (same(path.join(os.homedir(), '.claude.json'))) return true;
       const logins = new Set([path.join(os.homedir(), '.claude'), ...this.accounts.list().filter((a) => a.provider === 'claude' && a.configDir).map((a) => a.configDir!)]);
+      // A settings file straight in a login's folder by its name, there yet
+      // or not: writing a new one adds hooks as surely as changing one
+      // (Daybreak, 7 Nov 2026: a Token Stats login with no settings.json
+      // yet, outside the data dir and not named .claude, lost this when
+      // the list below became the files that exist).
+      if (LOGIN_SETTINGS.test(path.basename(real)) && [...logins].some((dir) => canonicalPath(dir).toLowerCase() === path.dirname(real))) return true;
       const settings: { file: string; dir: string }[] = [];
       for (const dir of logins) {
         if (!fs.existsSync(dir)) continue;
-        for (const f of fs.readdirSync(dir)) if (/^(settings(\..*)?\.json|\.claude\.json)$/i.test(f)) settings.push({ file: path.join(dir, f), dir });
+        for (const f of fs.readdirSync(dir)) if (LOGIN_SETTINGS.test(f)) settings.push({ file: path.join(dir, f), dir });
       }
       for (const rel of ['.claude/settings.json', '.claude/settings.local.json']) settings.push({ file: path.join(cwd, rel), dir: cwd });
       for (const s of settings) {

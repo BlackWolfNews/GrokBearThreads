@@ -145,8 +145,9 @@ public enum ToolPresentation {
     }
 
     /// The input as `key: value` lines: strings as they are, other values as
-    /// compact JSON, long values cut to a few lines.
-    public static func fields(_ input: JSONValue) -> [Field] {
+    /// compact JSON, long values cut to a few lines unless `whole` (an
+    /// approval card, which shows all of what Allow allows).
+    public static func fields(_ input: JSONValue, whole: Bool = false) -> [Field] {
         guard let object = input.objectValue else {
             let text = input.compactText
             return text.isEmpty || text == "null" ? [] : [Field(key: "input", value: text)]
@@ -159,6 +160,7 @@ public enum ToolPresentation {
             case .null: return nil
             default: text = value.compactText
             }
+            guard !whole else { return Field(key: key, value: text) }
             let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
             if lines.count > 6 { text = lines.prefix(6).joined(separator: "\n") + "\n…" }
             if text.count > 600 { text = String(text.prefix(599)) + "…" }

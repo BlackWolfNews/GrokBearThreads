@@ -1666,7 +1666,21 @@ machine is there (the runner, its data folder and secrets, other repos), so
 an agent with full access can change only its own folder. The runner, its
 transcripts, Convex sync, pools and schedules don't change, and the
 threadbear tools and hooks reach the CLI over its stdin and stdout as
-always. Model and command probes, and Codex threads, run as before.
+always. Model and command probes, and Codex threads, run as before. The
+login's config folder is mounted read-write, and the same login's threads
+outside the sandbox read it: give sandboxed threads a login of their own.
+
+A thread that starts in a sandbox folder, or that a sandboxed thread's
+agent starts in one, is shut in it (`confined` on its record): it never
+starts outside a sandbox again, so a link put in its folder's place, a
+worktree outside, or a Codex login (Codex doesn't run in it) stop it with a
+note rather than run it on the machine; the `docker run` checks the folder
+it mounts once more. Only a move Mike makes (`threads.update` from the app
+or `tb`) or allows on a card takes it out. Its agent counts as restricted
+for the threadbear tools however its mode is set ("Tools for agents",
+"Raising access"), and what it writes in its folder is never trusted as
+written: its patches and Claude settings wait for Mike in Patches, as the
+runner and the Mac app would run them outside the sandbox.
 
 The container lasts as long as the CLI: when the runner stops a thread's
 CLI (idle, a restart, interrupt), the container is killed with it, and the
@@ -3391,8 +3405,8 @@ script it names, one it names that isn't there yet), `.claude/settings*.json`
 (home's too), an `.mcp.json`, a script the thread folder's Claude settings
 name, the runner's own data dir (`patch-trust.json` is the trust itself),
 every Claude login's user settings (`settings*.json` and `.claude.json` in
-its config folder, and `~/.claude.json`, by their names and what a link
-from them points at) and the paths their commands and the thread folder's
+its config folder, and `~/.claude.json`, by their names whether they're
+there yet or not, and what a link from them points at) and the paths their commands and the thread folder's
 settings' name, there yet or not, from the login's folder or the thread's
 (where hooks run), with what each command reaches as a shell runs it (the
 script, quoted names included, and what it imports or runs in turn), and
@@ -4285,9 +4299,15 @@ default).
   link on. A runner the
   list says is offline is `-32000` at once. Commands from here carry `from:
   "mac"`, so the other runner gives the message no `origin`.
-- **New threads there.** `threads.create` with `runnerId` is a `create`
+- **New threads there.** (A request from a runner key, "Asking another
+  runner", files Plan first as `ask`: its row has no room for the flag.)
+  `threads.create` with `runnerId` is a `create`
   command (text, `cwd`, `accountId`, `model`, `effort`, `permissionMode`;
-  pictures are `-32000`), answered with a summary of the new thread once
+  pictures are `-32000`). Every mode goes, as a missing one is full access
+  there: Plan first as `permissionMode: "ask", plan: true`, which a runner or
+  backend from before Plan first reads as Ask. A mode one of them doesn't
+  know is refused, here, in the backend and by that runner, never dropped
+  (Daybreak, 7 Nov 2026). It's answered with a summary of the new thread once
   that runner has made it, which this runner then answers for until the
   sidebar list has it. `remoteThreads.logins { runnerId }` gives that runner's
   logins for the pickers, from the backend's `accounts` rows (no pools;
@@ -4446,7 +4466,15 @@ the mirror back as state. The Mac app doesn't use it.
 - **Approvals.** An `approval.requested` puts `{ approvalId, kind:
   "approval", name, title, options, inputSummary? }` on the thread's row
   (`inputSummary` is one line: the command, the path, or the first string
-  in the input, at most 200 characters, never the whole input); a
+  in the input, at most 200 characters, never the whole input). A card that
+  line can't show all of (a command over 160 characters or on more than one
+  line, in another folder or asking for the network, one scrubbing changed,
+  an MCP tool with more than one short thing to read, an edit of a file that
+  runs as code, a threadbear tool's own card, Codex asking for more access) has
+  only its non-allow options there, and its title says it can only be
+  allowed in the Mac app connected straight to its runner; the runner
+  refuses an allow or allowAlways that comes through the backend for one
+  (Daybreak, 7 Nov 2026); a
   `question.requested` puts `{ approvalId, kind: "question", questions }`.
   `approval.resolved`, or the thread no longer waiting, takes it off.
 - **End-of-turn cards** (API 14, 30 Oct 2026). The open card of asks
@@ -5161,7 +5189,8 @@ commands), and the ones that only read or end the turn
 or archive the thread that's calling it; `tb` inside a thread refuses the
 same.
 
-Raising access. From a thread whose mode isn't `full`, a call that would let
+Raising access. From a thread whose mode isn't `full`, or whose CLI runs in a
+sandbox (see "Sandboxed threads"), a call that would let
 something run with more access than the caller has puts up its own
 `approval.requested` (options `["allow", "deny"]`, the title saying what it
 would do) and waits for it, whatever the CLI's rules or Auto's classifier
@@ -5179,7 +5208,26 @@ has now (`Runner.accessOf`): its mode, or more while a turn that had more is
 still running, as a Codex turn keeps the mode it started with. Setting the
 mode a thread or schedule already has is left out of the write, so it can't
 raise it back if it lands after the mode was lowered. Without a `permissionMode`, a thread such a
-caller starts or schedules gets the caller's mode, not `full`. Denied or
+caller starts or schedules gets the caller's mode, not `full`. For a
+sandboxed caller, outside its sandbox is more access whatever the mode: a
+thread in a folder that isn't in one, on a Codex login or on another
+runner, a message to such a thread, a new-thread schedule (the runner
+starts those), a check, moving a thread out of a sandbox, and `pin`,
+`show_options` and `show_panel` (the Mac app opens what they name). The
+card's title says "outside the sandbox". A folder on a card is where it
+really leads, links followed, and that's the folder used; one that leads
+elsewhere by the time Mike answers is refused (full access callers keep
+the path as written). `join_project`'s card shows the project's whole
+brief (title, folders, goals, state, notes, Notion board and its cards, links), and one
+that changed while the card was up is refused; `update_project` asks for
+the Notion board and links too. A project with a folder that's a link can't
+be joined to such a thread this way at all, as the link can be pointed
+elsewhere after the card; Mike can do it himself. A message's sender line is
+on its card, one line, and goes as shown. From a sandboxed caller, changing the
+login or pool of a thread or schedule outside its sandbox asks as well
+(the login's config folder is mounted in the sandbox). A card shows every argument of the call whole, never a
+first part of one: a string longer than an event takes (16 KB) is refused
+with no card. Denied or
 expired, nothing changes and the tool says so; a message from Mike declines
 it. Lowering a mode never asks, and a `full` thread is never asked. There's no tool for restarting the runner: that's `runner.restart`.
 

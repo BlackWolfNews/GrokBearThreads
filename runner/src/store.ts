@@ -50,6 +50,13 @@ export type ThreadRecord = {
   modelInUse?: string; // full id the CLI ran the last turn on
   effortInUse?: EffortLevel; // the level the CLI reported for the last turn
   permissionMode: PermissionMode;
+  // Its CLI runs in a sandbox (sandbox.ts) and must stay in one: set when it
+  // starts in a sandbox folder or a sandboxed thread's agent starts it
+  // there, and taken off only by a move Mike made or allowed. A thread with
+  // it never starts outside a sandbox, whatever its folder has become
+  // (Daybreak, 7 Nov 2026), and its agent counts as restricted
+  // (threadbear-mcp.ts, "Raising access").
+  confined?: true;
   // "Plan first": the mode approving the plan goes back to, and the plan
   // waiting for Mike (its plan.proposed itemId).
   modeBeforePlan?: PermissionMode;

@@ -100,6 +100,8 @@ export const remoteThread = query({
 // What a command from the main Mac may carry, kind by kind: only what that
 // runner's apply() reads, so nothing else is stored. Each gets `from: "mac"`,
 // so a message it sends isn't marked as the phone's (phone.ts never sets it).
+// The modes a new thread can start on (runner/src/protocol.ts, PERMISSION_MODES).
+const PERMISSION_MODES = ['full', 'ask', 'auto', 'plan'] as const;
 const KINDS = ['send', 'respond', 'update', 'create', 'interrupt', 'call', 'share'] as const;
 type Kind = (typeof KINDS)[number];
 // Methods a `call` may run on the other runner, and nothing else: answers
@@ -142,8 +144,19 @@ export function commandArgs(kind: Kind, raw: unknown): Record<string, unknown> {
     case 'create':
       if (str(a.text) === undefined || !str(a.text)!.trim()) throw bad('a new thread needs text');
       out = pick(a, ['text', 'cwd', 'accountId', 'model', 'effort']);
-      // "Ask before edits" from the composer: left out, the thread gets full access.
-      if (a.permissionMode === 'ask' || a.permissionMode === 'full' || a.permissionMode === 'auto') out.permissionMode = a.permissionMode;
+      // Left out, the thread gets full access, so every mode is kept and an
+      // unknown one refused, never dropped (Daybreak, 7 Nov 2026: Plan first
+      // arrived as Full access). Plan first comes as "ask" with plan: true
+      // (runner/src/protocol.ts, remoteCreateMode), which a runner from
+      // before it reads as Ask.
+      if (a.permissionMode !== undefined) {
+        if (!PERMISSION_MODES.includes(a.permissionMode as never)) throw bad(`permissionMode must be one of ${PERMISSION_MODES.join(', ')}`);
+        out.permissionMode = a.permissionMode;
+      }
+      if (a.plan !== undefined) {
+        if (a.plan !== true || a.permissionMode !== 'ask') throw bad('plan: true goes with permissionMode "ask"');
+        out.plan = true;
+      }
       break;
     case 'interrupt':
       out = {};

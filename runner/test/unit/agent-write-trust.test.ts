@@ -670,3 +670,45 @@ test("F21 for Claude settings: an Edit of settings with untrusted hooks doesn't 
   // A script outside the thread's folder never counts.
   assert.equal(trust.trustClaudeEdit(path.join(dir, 'sub'), settings, sha(settings), null), false);
 });
+
+// Daybreak, 7 Nov 2026 ("New Claude login settings bypass mandatory
+// code-write approval", a regression in 3b2a8fd2): the user settings of a
+// login outside the data dir and not named .claude were matched only once
+// they existed, so a Codex Ask thread with "Always allow" on edits could
+// create one with a SessionStart hook and no card.
+test('a login with no settings.json yet: writing one is code, and a saved edit rule still asks', async () => {
+  const home = tmpDir();
+  const project = tmpDir();
+  // A Token Stats login, as accounts.ts finds them: numbered, outside the data dir.
+  const login = path.join(tmpDir(), 'Accounts', 'claude-9');
+  put(path.join(login, '.claude.json'), '{}');
+  const h = makeHarness(home, {}, {
+    accounts: new FakeAccounts([...ACCOUNTS, { id: 'claude-9', provider: 'claude', title: 'nine', configDir: login }]),
+    patchTrust: new PatchTrust({ file: path.join(home, 'patch-trust.json'), claudeHome: tmpDir() }),
+  });
+  const { thread } = h.runner.create({ text: 'hi', accountId: 'claude-3', cwd: project, permissionMode: 'ask' });
+  await settle(h, thread.id);
+  const runsAsCode = h.adapter.last.opts.runsAsCode!;
+  for (const name of ['settings.json', 'settings.local.json', 'Settings.JSON', 'settings.team.json']) assert.ok(runsAsCode(path.join(login, name)), name);
+  // Through a link to the login's folder, and in a login whose folder isn't there yet.
+  const alias = path.join(tmpDir(), 'login-link');
+  fs.symlinkSync(login, alias);
+  assert.ok(runsAsCode(path.join(alias, 'settings.json')), 'by where the folder really is');
+  assert.ok(!runsAsCode(path.join(login, 'notes.json')), 'other files in it are ordinary');
+  assert.ok(!runsAsCode(path.join(login, 'sub', 'settings.json')), 'only straight in the folder');
+  // The card itself: a saved "Always allow" on edits doesn't answer it, and it has no Always allow.
+  const asked: ToolApprovalRequest[] = [];
+  const replies: unknown[] = [];
+  const { CodexApprovals, FILE_CHANGE_RULE } = await import('../../src/adapters/codex/approvals.ts');
+  const a = new CodexApprovals({
+    log: nullLogger, label: 't', reply: (_id, r) => replies.push(r), replyError: () => {},
+    requestApproval: async (r) => (asked.push(r), { decision: 'allow' }), requestQuestion: async () => ({ answers: null }),
+    rules: () => [FILE_CHANGE_RULE], addRules: () => {}, note: () => {}, cwd: () => project,
+    itemPaths: () => [path.join(login, 'settings.json')], runsAsCode, callTool: async () => ({ contentItems: [], success: true }), now: () => 0,
+  });
+  a.handle(1, 'item/fileChange/requestApproval', { threadId: 'x', turnId: 't', itemId: 'fc' }, { fromChild: false });
+  await tick();
+  assert.equal(asked.length, 1, 'a card, not the saved rule');
+  assert.equal(asked[0]!.canAlwaysAllow, false);
+  assert.match(asked[0]!.title, new RegExp(RUNS_AS_CODE));
+});

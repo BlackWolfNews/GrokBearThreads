@@ -1048,26 +1048,42 @@ enum RowRenderer {
 
     /// The command, the start of what would be written to a file, the page,
     /// or the tool's input, in a monospaced block. The file's name and
-    /// folder are in the title above it.
+    /// folder are in the title above it. A command and a tool's input are
+    /// shown whole, every line and field, as Allow allows all of them: the
+    /// card grows to fit (Daybreak, 7 Nov 2026, a long command's tail was
+    /// cut off after 12 lines). The runner refuses a call too long to show.
     static func approvalPayload(_ request: ApprovalRequest) -> NSAttributedString {
         let input = request.input
         if let command = input["command"]?.stringValue {
-            return mono(clampLines(command, 12), .labelColor)
+            // Where it runs and any network it asks for (a Codex card's)
+            // are part of what Allow allows; a reason or description isn't.
+            let output = NSMutableAttributedString(attributedString: mono(command, .labelColor))
+            let extra = ToolPresentation.fields(input, whole: true).filter { !["command", "description", "reason"].contains($0.key) }
+            if !extra.isEmpty {
+                output.append(mono("\n", .labelColor))
+                output.append(fieldsText(extra))
+            }
+            return output
         }
-        if ApprovalText.filePath(request) != nil {
+        // Another MCP server's tool with a path is shown by all its fields,
+        // below: its content is what Allow allows.
+        if !request.name.hasPrefix("mcp__"), ApprovalText.filePath(request) != nil {
             let call = ToolCall(itemId: request.approvalId, name: request.name, kind: request.name == "Write" ? .write : .edit,
                                 title: request.title, input: input)
             if let diff = DiffBuilder.diff(forTool: call), !diff.hunks.isEmpty {
-                return diffText([diff], maxLines: 8, inset: 0).0
+                // A file Threadbear runs as code shows every line it writes:
+                // a hook past the eighth line is still a hook.
+                let code = request.title.contains("Threadbear runs this file as code")
+                return diffText([diff], maxLines: code ? 1_000_000 : 8, inset: 0).0
             }
             return mono(ToolPresentation.shortTitle(ApprovalText.filePath(request) ?? "", limit: 300), Theme.quietText)
         }
-        if let url = input["url"]?.stringValue {
+        if !request.name.hasPrefix("mcp__"), let url = input["url"]?.stringValue {
             return mono(url, .labelColor)
         }
-        let fields = ToolPresentation.fields(input)
-        if fields.isEmpty { return mono(clampLines(request.title, 10), .labelColor) }
-        return fieldsText(Array(fields.prefix(8)))
+        let fields = ToolPresentation.fields(input, whole: true)
+        if fields.isEmpty { return mono(request.title, .labelColor) }
+        return fieldsText(fields)
     }
 
     /// Another runner asking for a thread (docs/protocol.md, "Asking
@@ -1101,7 +1117,11 @@ enum RowRenderer {
         switch r.permissionMode {
         case "ask": access = "Asks before edits"
         case "auto": access = "Auto"
-        default: access = "Full access"
+        case "plan": access = "Plan first"
+        case nil, "", "full": access = "Full access"
+        // The runner refuses a mode it doesn't know rather than starting
+        // on full access, so the card says what was asked, not "Full".
+        case let other?: access = "Unknown (\(other))"
         }
         var facts = ["Folder: \(r.cwd?.isEmpty == false ? r.cwd! : "the usual one")", "Access: \(access)"]
         if let model = r.model, !model.isEmpty { facts.append("Model: \(model)\(r.effort.map { ", \($0)" } ?? "")") }

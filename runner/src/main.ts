@@ -64,7 +64,7 @@ import { devicesMethods } from './devices.ts';
 import { flushSentry, reportException, reportLoggedError, reportLoggedWarning, startSentry } from './sentry.ts';
 import { ALWAYS_ASK_TOOLS, NEVER_ASK_TOOLS, RICH_BLOCKS_LINE, SERVER_NAME, buildThreadbearTools, threadbearMcpServer, type RemoteControl } from './threadbear-mcp.ts';
 import { CrossRunner } from './cross-runner.ts';
-import { EFFORT_LEVELS, ErrorCode, RpcError, type EffortLevel } from './protocol.ts';
+import { EFFORT_LEVELS, ErrorCode, RpcError, isPermissionMode, type EffortLevel, type PermissionMode } from './protocol.ts';
 
 // Tells launch.mjs this runner calls its listening() hook (release.ts), so
 // it may stop one that hasn't started listening in time.
@@ -623,7 +623,14 @@ async function main(): Promise<void> {
   }));
   // Starting threads on other runners, and a runner key's requests for
   // that (docs/protocol.md, "Asking another runner").
-  const permission = (m: string | undefined) => (m === 'full' || m === 'ask' || m === 'auto' ? m : undefined);
+  // A request's mode as the card showed it: none is the default (full
+  // access, as the card says), and one this runner doesn't know is refused
+  // rather than dropped to that default (Daybreak, 7 Nov 2026).
+  const permission = (m: string | undefined): PermissionMode | undefined => {
+    if (m === undefined || m === '') return undefined;
+    if (!isPermissionMode(m)) throw new RpcError(ErrorCode.badParams, `Unknown permission mode ${JSON.stringify(m)}, so the thread wasn't started.`);
+    return m;
+  };
   const cross = new CrossRunner({
     self: () => ({ id: syncRunnerId, name: cfg.sync.name ?? defaultRunnerName() }),
     backend: () => sync,

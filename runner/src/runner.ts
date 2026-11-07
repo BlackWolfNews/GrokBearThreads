@@ -147,6 +147,7 @@ import { hibernationPart, type HibernationPart } from './runner/hibernation.ts';
 import { newThreadsPart, type NewThreadsPart } from './runner/new-threads.ts';
 import { labReviewPart, type LabReviewPart } from './runner/lab-review.ts';
 import { looseEndsPart, type LooseEndsPart } from './runner/loose-ends.ts';
+import { CONFINED_NO_SANDBOX, sandboxFor } from './sandbox.ts';
 
 export type Notification =
   | { method: 'thread.updated'; params: { thread: ThreadSummary } }
@@ -240,7 +241,10 @@ export type BinaryReporter = { binariesInUse?(): string[] };
 // (no tool call of the agent's to point at) holds up only that subagent.
 export type PendingApproval =
   // plan: the "Plan first" plan (its itemId) this approval is Claude's ExitPlanMode for.
-  | { approvalId: string; kind: 'tool'; main: boolean; plan?: string; resolve: (a: ToolApprovalAnswer) => void }
+  // macOnly: its whole input doesn't fit what the phone or another Mac's
+  // view shows (tools.ts, remoteCardShowsAll), so only an allow from a
+  // client that shows it all counts.
+  | { approvalId: string; kind: 'tool'; main: boolean; plan?: string; macOnly?: boolean; resolve: (a: ToolApprovalAnswer) => void }
   | { approvalId: string; kind: 'question'; main: boolean; questions: Question[]; resolve: (a: QuestionAnswer) => void }
   // An agent's ask_secret (docs/protocol.md, "Secrets"). The value never
   // passes through here: secrets.answer writes the file and hands this the
@@ -1746,6 +1750,11 @@ export class Runner {
     rt.startVersion = this.cliList()?.find((c) => c.provider === rec.provider)?.installedVersion;
     // Read now, not from the patch list's cache: a pull just before this
     // message may have brought hooks.
+    // A thread shut in a sandbox starts in one or not at all (the adapters
+    // check too); one that starts in one is shut in it from now on.
+    const inSandbox = rec.provider === 'claude' && this.sandboxed(rec.cwd);
+    if (rec.confined && !inSandbox) throw new Error(rec.provider === 'claude' ? CONFINED_NO_SANDBOX(rec.cwd) : "This thread runs in a sandbox, and Codex can't, so it wasn't started. Move it to a Claude login.");
+    if (inSandbox) rec.confined = true;
     const claude = rec.provider === 'claude' ? this.patchTrust.checkClaude(rec.cwd, claudeOptions(rec)) : undefined;
     rt.claudeSkipped = claude && !claude.trusted ? claude.hash : undefined;
     rt.claudeHeldGrants = Boolean(claude?.trusted && rec.permissionMode === 'full' && !this.patchTrust.checkClaude(rec.cwd, { grants: true }).trusted);
@@ -1757,6 +1766,7 @@ export class Runner {
         model: rec.model,
         effort: rec.effort,
         permissionMode: rec.permissionMode,
+        ...(rec.confined ? { confined: true } : {}),
         sessionId: rec.nativeSessionId,
         resume,
         ...(resume && rec.resumeAt ? { resumeAt: rec.resumeAt } : {}),
@@ -2010,7 +2020,9 @@ export class Runner {
         // permission to edit a file isn't permission to run it, so what it
         // wrote waits for Mike in Patches (code-writes.ts, Gautam's scan
         // F1 and F4). Only inside the thread's own folder.
-        if (o.mode !== 'full') break;
+        // A sandboxed thread's are its container's, not this machine's: the
+        // runner and the Mac app would run them outside it.
+        if (o.mode !== 'full' || rec.confined) break;
         this.trustAgentPatches(
           o.files.map((f) => ({ ...f, path: path.resolve(rec.cwd, f.path) })),
           rec.cwd,
@@ -2496,6 +2508,10 @@ export class Runner {
     archivedBy?: ArchivedBy;
     verdict?: ArchiveVerdict;
     starred?: boolean;
+    // A move Mike made (the app, tb) or allowed on a card: a thread shut in
+    // a sandbox may leave it. Without it, a move or login change that would
+    // take it out is refused (ThreadRecord.confined).
+    unconfine?: boolean;
   }): { thread: ThreadSummary } {
     const st = this.mustGet(params.threadId);
     const { rec, rt } = st;
@@ -2534,6 +2550,11 @@ export class Runner {
       throw new RpcError(ErrorCode.accountNotFound, `No account called ${toAccountId}`);
     }
     if (newAccount && toAccountId !== rec.accountId) this.checkProvider(newAccount);
+    // Checked before anything changes: where it would run after this.
+    const stillIn = (newAccount?.provider ?? rec.provider) === 'claude' && this.sandboxed(newCwd ?? rec.cwd);
+    if (rec.confined && (newCwd !== undefined || toAccountId !== undefined) && !stillIn && !params.unconfine) {
+      throw new RpcError(ErrorCode.badParams, `"${rec.title}" runs in a sandbox, and this would take it out of it (a folder that isn't in one, or a Codex login). Only the user can do that.`);
+    }
     // Pinned (an account named, or poolId null), or into a pool.
     if (params.accountId !== undefined || params.poolId === null) {
       delete rec.poolId;
@@ -2579,6 +2600,11 @@ export class Runner {
       release = true;
     }
     if (cwdChanged) this.tellActivity({ kind: 'moved', threadId: rec.id, from: fromCwd, to: rec.cwd });
+    // Out of the sandbox, as allowed; into one, shut in it from now.
+    if (cwdChanged || accountChanged) {
+      if (stillIn) rec.confined = true;
+      else delete rec.confined;
+    }
     // The account the settings are checked against, after any change.
     const account = newAccount ?? this.accounts.get(rec.accountId);
     let model = rec.model;
@@ -3147,6 +3173,17 @@ export class Runner {
   accessOf(threadId: string): PermissionMode {
     const { rec, rt } = this.mustGet(threadId);
     return moreAccess(rt.turn?.access, rec.permissionMode);
+  }
+
+  // Whether a thread's CLI is shut in a sandbox (ThreadRecord.confined).
+  confinedOf(threadId: string): boolean {
+    return Boolean(this.mustGet(threadId).rec.confined);
+  }
+
+  // Whether a Claude thread in `cwd` would run in a sandbox (sandbox.ts),
+  // by where the folder really is.
+  sandboxed(cwd: string): boolean {
+    return Boolean(sandboxFor(this.cfg.sandbox, cwd));
   }
 
   mustGet(threadId: string): ThreadState {

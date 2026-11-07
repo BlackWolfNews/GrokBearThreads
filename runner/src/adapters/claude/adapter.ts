@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { sandboxSpawner, type SandboxConfig } from '../../sandbox.ts';
+import { CONFINED_NO_SANDBOX, sandboxSpawner, type SandboxConfig } from '../../sandbox.ts';
 import os from 'node:os';
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import type { HookInput, McpServerConfig, ModelInfo, Options, PermissionResult, Query, SDKUserMessage, PermissionUpdate } from '@anthropic-ai/claude-agent-sdk';
@@ -15,7 +15,7 @@ import { ClaudeNormalizer, fileContext } from './normalize.ts';
 import { groupSpawner, type ProcessRegistry } from '../../proc.ts';
 import { prepareImageForModel } from '../../media.ts';
 import { placePictures } from '../../pictures.ts';
-import { EDIT_TOOLS, toolTitle, truncateInput } from '../../tools.ts';
+import { EDIT_TOOLS, cardInput, toolTitle, tooLongForCard } from '../../tools.ts';
 import { RUNS_AS_CODE, RUNS_AS_CODE_REASON, runsAsCodeByName } from '../../code-writes.ts';
 import path from 'node:path';
 import { RUNNER_VERSION } from '../../config.ts';
@@ -134,6 +134,9 @@ export class ClaudeAdapter implements AgentAdapter {
   }
 
   start(opts: StartSessionOptions, sink: SessionSink): AgentSession {
+    // A thread shut in a sandbox never starts outside one, even if its
+    // folder has stopped being in one since (a link put in its place).
+    if (opts.confined && !this.deps.sandboxFor?.(opts.cwd)) throw new Error(CONFINED_NO_SANDBOX(opts.cwd));
     const s = new ClaudeSession(opts, sink, this.deps);
     s.start();
     return s;
@@ -426,7 +429,7 @@ class ClaudeSession implements AgentSession {
         SessionStart: [{ hooks: [async (input) => this.onCompact(input)] }],
       },
       abortController: this.abort,
-      spawnClaudeCodeProcess: ((spawn, sb) => (sb ? sandboxSpawner(spawn, sb, opts.threadId) : spawn))(
+      spawnClaudeCodeProcess: ((spawn, sb) => (sb ? sandboxSpawner(spawn, sb, opts.threadId) : opts.confined ? () => { throw new Error(CONFINED_NO_SANDBOX(opts.cwd)); } : spawn))(
         groupSpawner(deps.registry, deps.log, (line) => this.stderr(line), opts.threadId),
         deps.sandboxFor?.(opts.cwd),
       ),
@@ -667,13 +670,19 @@ class ClaudeSession implements AgentSession {
     // the card says why (code-writes.ts).
     const target = EDIT_TOOLS.has(name) ? this.editTarget(input) : undefined;
     const code = this.codeWrites.has(o.toolUseID) || (target !== undefined && this.runsAsCode(target));
+    // The card shows the whole command, or every argument of an MCP tool
+    // (what it does elsewhere is in them); one too long for that is refused
+    // rather than allowed from its start (tools.ts, cardInput).
+    // An edit of a file that runs as code shows all it writes, too (Codex review).
+    const card = cardInput(input, name.startsWith('mcp__') || code ? 'all' : ['command']);
+    if (card.tooLong) return { behavior: 'deny', message: tooLongForCard(card.tooLong), toolUseID: o.toolUseID };
     if (!sub) for (const out of this.normalizer.beforeApproval(o.toolUseID, name, input)) this.sink.output(out);
     const title = toolTitle(name, input, this.opts.cwd);
     const ans = await this.sink.requestApproval({
       toolUseId: itemId,
       name,
       title: code ? `${title} (${RUNS_AS_CODE})` : title,
-      input: truncateInput(input),
+      input: card.input,
       // "Always allow" would defeat a tool that's meant to ask every time.
       canAlwaysAllow: !plan && !code && !o.suppressAlwaysAllowRule && !this.deps.alwaysAsk?.has(name),
       signal: o.signal,

@@ -630,6 +630,15 @@ export class ThreadRouter implements ThreadControl {
     return this.away(threadId) ? 'full' : this.runner.accessOf(threadId);
   }
 
+  // Likewise outside any sandbox, which is the most it could have.
+  async confinedOf(threadId: string): Promise<boolean> {
+    return this.away(threadId) ? false : this.runner.confinedOf(threadId);
+  }
+
+  sandboxed(cwd: string): boolean {
+    return this.runner.sandboxed(cwd);
+  }
+
   // Likewise for a threadbear tool's own card (threadbear-mcp.ts, "Raising access").
   requestAgentApproval(threadId: string, req: AgentApprovalRequest): Promise<ToolApprovalAnswer> {
     return this.runner.requestAgentApproval(threadId, req);
@@ -653,7 +662,8 @@ export class ThreadRouter implements ThreadControl {
 
   async update(upd: Parameters<Runner['update']>[0]): Promise<ReturnType<Runner['update']>> {
     const e = this.away(upd.threadId);
-    return e ? e.call('threads.update', { ...upd }) : this.runner.update(upd);
+    // Said either way, as the primary takes a move with neither as Mike's.
+    return e ? e.call('threads.update', { ...upd, unconfine: upd.unconfine === true }) : this.runner.update(upd);
   }
 
   async interrupt(threadId: string): Promise<Record<string, never>> {

@@ -13,6 +13,7 @@ import type { PendingApproval, ThreadState } from '../runner.ts';
 import { matchAnswers } from '../runner.ts';
 import { SECRET_TIMEOUT_DEFAULT_MIN, SECRET_TIMEOUT_MAX_MIN, type SecretFiles } from '../secrets.ts';
 import { START_CARD, type RequestAnswer } from '../cross-runner.ts';
+import { REMOTE_ALLOW_REFUSED, remoteCardShowsAll } from '../tools.ts';
 
 export type SecretRequest = { label: string; reason: string; placeholder?: string; timeoutMinutes?: number; toolUseId?: string; signal?: AbortSignal };
 export type SecretAnswer = ({ status: 'saved' } & SecretFiles) | { status: 'declined' | 'expired'; message?: string };
@@ -36,10 +37,16 @@ export const approvalsPart = {
     decision: ApprovalDecision;
     message?: string;
     answers?: Record<string, string>;
+    // From the phone or another Mac's view of this runner, through the
+    // backend (sync.ts), which show only a line of a card's input.
+    remote?: boolean;
   }): Record<string, never> {
     const st = this.mustGet(params.threadId);
     const pending = st.rt.approvals.get(params.approvalId);
     if (!pending) throw new RpcError(ErrorCode.badParams, 'That approval is no longer pending.');
+    if (params.remote && pending.kind === 'tool' && pending.macOnly && (params.decision === 'allow' || params.decision === 'allowAlways')) {
+      throw new RpcError(ErrorCode.badParams, `${REMOTE_ALLOW_REFUSED} Deny still works from here.`);
+    }
     if (pending.kind === 'secret') {
       // A phone from before secrets draws any card it doesn't know as
       // Allow/Deny: Deny declines, and Allow can't carry a value.
@@ -144,7 +151,8 @@ export const approvalsPart = {
       // A card offered without "Always allow" never answers with it, even
       // if a client sends it: it would save a rule Mike was never offered.
       const answer = req.canAlwaysAllow ? resolve : (a: ToolApprovalAnswer) => resolve(a.decision === 'allowAlways' ? { ...a, decision: 'allow' } : a);
-      this.addApproval(st, { approvalId, kind: 'tool', main: Boolean(req.toolUseId), ...(plan ? { plan } : {}), resolve: answer }, body, req.signal);
+      const macOnly = !remoteCardShowsAll(req.name, req.input, st.rec.cwd, req.title);
+      this.addApproval(st, { approvalId, kind: 'tool', main: Boolean(req.toolUseId), ...(plan ? { plan } : {}), ...(macOnly ? { macOnly } : {}), resolve: answer }, body, req.signal);
     });
   },
 
@@ -159,7 +167,7 @@ export const approvalsPart = {
     const body: EventBody = { type: 'approval.requested', approvalId, name: req.name, title: req.title, input: req.input, options: ['allow', 'deny'] };
     return new Promise((resolve) => {
       const answer = (a: ToolApprovalAnswer) => resolve(a.decision === 'allowAlways' ? { ...a, decision: 'allow' } : a);
-      this.addApproval(st, { approvalId, kind: 'tool', main: true, resolve: answer }, body, req.signal ?? new AbortController().signal);
+      this.addApproval(st, { approvalId, kind: 'tool', main: true, macOnly: true, resolve: answer }, body, req.signal ?? new AbortController().signal);
     });
   },
 

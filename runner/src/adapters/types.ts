@@ -27,6 +27,9 @@ export type StartSessionOptions = {
   model?: string;
   effort?: EffortLevel; // undefined: the model's own level
   permissionMode: PermissionMode;
+  // Its CLI must run in a sandbox (sandbox.ts, ThreadRecord.confined): an
+  // adapter that can't put it in one refuses to start it.
+  confined?: boolean;
   // Native session id. With resume=false it's pre-assigned to a brand new
   // session; with resume=true the CLI loads that session's transcript.
   // Codex assigns its own ids, so it ignores this when resume=false and
