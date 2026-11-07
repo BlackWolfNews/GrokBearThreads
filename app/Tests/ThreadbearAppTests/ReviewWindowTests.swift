@@ -169,7 +169,7 @@ final class ReviewWindowTests: XCTestCase {
         XCTAssertEqual(session.mode, .all)
     }
 
-    func testASentReviewHasNothingToPress() async {
+    func testASentReviewHasNothingToPress() {
         var answered = review()
         answered.status = "answered"
         answered.response = ReviewDraft(pickedIds: ["A", "C"], notes: ["C": "Fainter"], reply: "Both")
@@ -280,6 +280,22 @@ final class ReviewWindowTests: XCTestCase {
         XCTAssertGreaterThan(image.magnification, fit, "natural scrolling's swipe up")
     }
 
+    func testAHeldKeyMakesASwipeZoomInTheDirectionItGoes() {
+        let (_, host, window) = make(tall())
+        defer { window.close() }
+        let image = stage(in: host)
+        let fit = image.magnification
+        image.scrollWheel(with: swipe(.began, 40, held: .maskCommand))
+        image.scrollWheel(with: swipe(.changed, 40, held: .maskCommand))
+        pump()
+        let zoomedIn = image.magnification
+        XCTAssertGreaterThan(zoomedIn, fit)
+        image.scrollWheel(with: swipe(.ended, 0, held: .maskCommand))
+        image.scrollWheel(with: swipe(.began, -20, held: .maskCommand))
+        image.scrollWheel(with: swipe(.changed, -20, held: .maskCommand))
+        XCTAssertLessThan(image.magnification, zoomedIn, "held, it zooms even once zoomed, and down is out")
+    }
+
     func testTheMinimapShowsThePartOnShowAndGoesWhereItsPressed() {
         let (session, host, window) = make(tall())
         defer { window.close() }
@@ -366,12 +382,19 @@ final class ReviewWindowTests: XCTestCase {
 
     /// A notched mouse wheel, as lines with no finer deltas.
     private func wheel(lines: Int32) -> NSEvent {
-        NSEvent(cgEvent: CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: lines, wheel2: 0, wheel3: 0)!)!
+        let event = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: lines, wheel2: 0, wheel3: 0)!
+        event.flags = []
+        return NSEvent(cgEvent: event)!
     }
 
     /// Part of a two-finger swipe on a trackpad.
-    private func swipe(_ phase: RowSwipeEvents.Phase, _ points: Double) -> NSEvent {
+    private func swipe(_ phase: RowSwipeEvents.Phase, _ points: Double, held: CGEventFlags = []) -> NSEvent {
         let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: 0, wheel2: 0, wheel3: 0)!
+        // Set, not left alone: a CGEvent starts with whatever modifier keys
+        // are really down on the machine at that moment. A Command held on
+        // the Mac running the tests turned these into the stage's "held"
+        // zoom, so a swipe down zoomed out instead of moving around (7 Nov).
+        event.flags = held
         event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
         event.setIntegerValueField(.scrollWheelEventScrollPhase, value: phase.rawValue)
         event.setDoubleValueField(.scrollWheelEventPointDeltaAxis1, value: points)
@@ -440,11 +463,45 @@ final class ReviewWindowTests: XCTestCase {
         window.orderFrontRegardless()
         window.makeKey()
         host.layoutSubtreeIfNeeded()
+        shown = window
         pump()
         return (session, host, window)
     }
 
-    private func pump() { RunLoop.main.run(until: Date().addingTimeInterval(0.2)) }
+    /// Lets everything a change sets off land: SwiftUI's update, the layout
+    /// after it, and the stage's zoom report, which it queues for later. It
+    /// goes by what's still to do, not a set time: a fixed 0.2 seconds could
+    /// all go on the layout on a loaded machine, leaving `session.zoomed`
+    /// stale, so Esc left the shot rather than the zoom (6 Nov).
+    private func pump() {
+        let deadline = Date().addingTimeInterval(20)
+        var quiet = 0
+        while quiet < Self.quietTurns, Date() < deadline {
+            // Queued behind whatever's waiting, so that's all been run when it is.
+            var drained = false
+            DispatchQueue.main.async { drained = true }
+            while !drained, Date() < deadline {
+                RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.01))
+            }
+            // A moment idle too, as SwiftUI and AppKit flush just before the
+            // run loop waits.
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+            quiet = (shown?.contentView).map(needsLayout) == true ? 0 : quiet + 1
+        }
+        // The main queue can't drain under a test that is itself running on
+        // it (an `async` one), so such a test fails here rather than every
+        // pump quietly taking the whole 20 seconds.
+        if quiet < Self.quietTurns { XCTFail("the window never settled: is this test async?") }
+    }
+
+    // Each layout can set off one more update, then one more report.
+    private static let quietTurns = 3
+    /// The window `make` put up, which `pump` waits on.
+    private var shown: NSWindow?
+
+    private func needsLayout(_ view: NSView) -> Bool {
+        view.needsLayout || view.subviews.contains { needsLayout($0) }
+    }
 
     private func noteBoxes(in host: NSView) -> Int {
         func boxes(_ view: NSView) -> Int {
