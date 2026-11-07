@@ -2940,7 +2940,13 @@ and the patch, carries the last 8 KB of output in a code block, and asks
 the agent to fix it if it's theirs. One hook is told at most twice in a
 row (a hook that keeps failing is then only posted) and a message from
 anyone else starts the count again, so a hook and an agent can't go round
-for ever.
+for ever. A thread archived as its turn ended (`end_turn`'s `archive`, or
+by hand while the hook runs) keeps its worktree until its hooks finish. A
+failure told then brings the thread back, in that worktree. A pass stays
+quiet, whatever `tell` says, so the thread stays archived and the cleanup
+goes ahead. A hook whose folder has gone by the time it finishes gets a
+`system.note` rather than an `action.run`, and isn't told to the agent, as
+its result says nothing about the code.
 
 Ids are the file's name plus a slug of the title
 (`reseed.reseed-dev-db`), and two entries in one file can't share one.

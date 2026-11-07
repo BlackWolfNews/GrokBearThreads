@@ -113,6 +113,13 @@ deleted. Otherwise both stay, with a `system.note` saying so and how to
 land or drop them. Unarchiving a thread whose worktree was removed starts
 its next turn in the main checkout, with a note.
 
+An archive's cleanup waits for the thread's turn-end hooks, which run in that
+folder: on 7 Nov a typecheck lost its files partway through, "failed", and
+woke the thread just archived. A handover keeps a thread while its hooks run
+for the same reason. A hook that really fails brings the thread back in its
+worktree, so nothing gets removed. Deleting a thread doesn't wait: nothing is
+left to report a hook's result to.
+
 The folder is only removed while it's still a checkout of the thread's own
 branch: slot folders are reused, and a record can miss hearing its worktree
 went (THREADBEAR-16, 6 Nov: a handover saved it while the cleanup ran; a

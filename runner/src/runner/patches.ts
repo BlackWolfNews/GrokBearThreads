@@ -10,6 +10,7 @@ import { ErrorCode, RpcError } from '../protocol.ts';
 import { Projects } from '../projects.ts';
 import { threadEnv } from '../restart.ts';
 import { paths } from '../config.ts';
+import { isDirectory } from '../fsutil.ts';
 import { commandFiles, isPatchFile, namedPaths, patchHash, scanModule, type ClaudeVerdict, type PatchHash } from '../patch-trust.ts';
 import type { AgentWrite } from '../adapters/types.ts';
 import { CLAUDE_PATCH_ID, claudeCommands, claudeOptions, settingsCommands, settingsNamedPaths, type ClaudeOptions } from '../claude-trust.ts';
@@ -539,6 +540,8 @@ export const patchesPart = {
       await this.runHookList(st, hooks);
     } finally {
       st.rt.hooksRunning--;
+      // Before the handover check, which then waits for what this starts.
+      this.archiveWhenGone(st);
       if (this.draining) this.queueHandoverCheck();
     }
   },
@@ -557,14 +560,23 @@ export const patchesPart = {
           continue;
         }
       }
+      const cwd = hook.folder ?? st.rec.cwd;
       const outcome = await runCommand(hook.exec ?? hook.command, {
-        cwd: hook.folder ?? st.rec.cwd,
+        cwd,
         env: { ...process.env, ...threadEnv(st.rec.id, this.cfg.home) },
         shell: this.actionShell,
         timeoutMs: this.actionTimeoutMs,
         background: this.backgroundJobs,
       });
       if (st.rt.deleted || this.stopping) return;
+      // An archive waits for its hooks, but a folder can go other ways (by
+      // hand, say). What ran then failed on missing files, not on the code,
+      // so it isn't a result to act on.
+      if (!isDirectory(cwd)) {
+        this.emit(st, { type: 'system.note', text: `The hook "${hook.title}" had its folder ${cwd} removed while it ran, so its result says nothing about the code.` }, st.rt.turn?.turnId);
+        this.markDirty(st);
+        continue;
+      }
       const body: EventBody = {
         type: 'action.run',
         actionId: hook.id,
@@ -582,6 +594,9 @@ export const patchesPart = {
       this.markDirty(st);
       const tell = hook.tell === 'always' || (hook.tell === 'failures' && !outcome.ok);
       if (!tell) continue;
+      // Telling starts a turn, which brings an archived thread back: worth
+      // it for a failure, not for "passed, nothing to do".
+      if (outcome.ok && st.rec.archivedAt) continue;
       const counts = (st.rt.hookTurns ??= new Map());
       const sofar = counts.get(hook.id) ?? 0;
       if (sofar >= HOOK_TELL_LIMIT) {

@@ -2857,10 +2857,15 @@ export class Runner {
   // ------------------------------------------------------------ CLI updates
 
   // Runs a pending archive once no CLI has the session: none live and none
-  // closing. Skipped if the thread came back meanwhile.
+  // closing. Skipped if the thread came back meanwhile. A turn-end hook still
+  // running holds it too (runHooks comes back here): it's working in the
+  // folder the cleanup would remove or hand on, and on 7 Nov a typecheck
+  // lost its files that way, "failed", and woke the thread just archived.
+  // Waiting also means a real failure finds the worktree still there, as
+  // sendTo brings the thread back before the cleanup looks.
   archiveWhenGone(st: ThreadState): void {
     const { rec, rt } = st;
-    if (!rt.archivePending || rt.session || rt.closing || rt.deleted) return;
+    if (!rt.archivePending || rt.session || rt.closing || rt.deleted || rt.hooksRunning) return;
     rt.archivePending = false;
     if (rec.archivedAt) {
       this.archiveNative(st);
