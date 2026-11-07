@@ -467,8 +467,8 @@ export function buildThreadbearTools(
       'Shows the user design options (mockups, wireframes, screenshots, videos or HTML pages of variants) in a review window to choose between, instead of pinning them, listing them or reading every image into the transcript. Give an option\u2019s other screens or states as its shots, never as options of their own. The window steps through every shot in order, then shows the options side by side; the user can pick any number or none, and reply. Returns a review ID promptly; finish your turn and the answer arrives later as a message. A reference option (today\u2019s version, say) can\u2019t be picked.',
       {
         title: z.string().min(1).max(200).describe('What the user is reviewing.'),
-        note: z.string().max(4000).optional().describe('What to look at, in two or three short sentences; don\u2019t repeat the options or your pick. Markdown: **bold** the part that matters.'),
-        recommended: z.string().max(200).optional().describe('The id of the option you would pick, marked \u201cmy pick\u201d in the window. Say why in that option\u2019s note.'),
+        note: z.string().max(4000).optional().describe('A short lead, markdown: **bold** what matters.'),
+        recommended: z.string().max(200).optional().describe('Id of the option you would pick (why goes in its note).'),
         options: z.array(z.object({
           id: z.string().min(1).max(200).describe('Stable option ID, such as A or B.'),
           title: z.string().min(1).max(200),
@@ -478,7 +478,7 @@ export function buildThreadbearTools(
             title: z.string().max(200).optional().describe('What it shows: "Mid-drag". The same across options.'),
           })).max(8).optional().describe('More images, videos or pages of this option, after path.'),
           url: z.string().max(2000).optional().describe('Where it runs live, http(s).'),
-          note: z.string().max(4000).optional().describe('What sets it apart, a sentence or two. Markdown: **bold** and `code`.'),
+          note: z.string().max(4000).optional(),
           reference: z.boolean().optional().describe('Context to compare against, not to pick.'),
         })).min(1).max(12),
       },
