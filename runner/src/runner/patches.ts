@@ -22,6 +22,7 @@ import path from 'node:path';
 import type { ThreadState, Turn } from '../runner.ts';
 import type { ThreadRecord } from '../store.ts';
 import { FOLDER_CACHE_MS, HOOK_TELL_CHARS, HOOK_TELL_LIMIT, LIVE_POLL_MS, LIVE_SHARE_MS, PATCHES_TTL_MS } from '../runner.ts';
+import { safeStart } from '../safe-cut.ts';
 
 // What a patch that loads without a hash makes code, for a thread in
 // `cwd` (writeRunsAsCode): every file it reaches, as canonical lower-case
@@ -576,7 +577,8 @@ export const patchesPart = {
         continue;
       }
       counts.set(hook.id, sofar + 1);
-      const shown = outcome.text.length > HOOK_TELL_CHARS ? outcome.text.slice(-HOOK_TELL_CHARS) : outcome.text;
+      // Its last part, begun where no secret is cut in two (safe-cut.ts): it goes to Convex as a message.
+      const shown = outcome.text.length > HOOK_TELL_CHARS ? outcome.text.slice(safeStart(outcome.text, outcome.text.length - HOOK_TELL_CHARS)) : outcome.text;
       const verdict = outcome.ok ? 'passed' : `failed${outcome.exitCode !== undefined ? ` (exit ${outcome.exitCode})` : ''}`;
       const text =
         `[Threadbear hook] ${hook.title} (patch ${hook.patch}) ran after your turn and ${verdict}:\n\n` +

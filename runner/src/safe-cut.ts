@@ -15,9 +15,10 @@
 // of titles and conditions) get whole secrets in each part too.
 import { scrubText } from './redaction.ts';
 
-// How much either side of a cut is looked at: more than any secret the rules
-// know (a PEM key is about 3 KB), and it keeps a cut in a huge text cheap.
-const WINDOW = 4096;
+// How much either side of a cut is looked at: far more than any real secret
+// (an 8192-bit RSA key's PEM is about 6.5 KB), so a text up to 64 KB is looked
+// at whole, and a cut in a huge one (a tool's output) stays cheap.
+const WINDOW = 32 * 1024;
 // Ends the text looked at, so the rules for a key cut off at the very end
 // (CUT_SHORT, KnownValues' cut-off values) don't count as having seen it whole:
 // a part that's mid-string once it's put in a longer text has no end there.
@@ -115,6 +116,32 @@ export function cutSafely(text: string, max: number, mark = ''): string {
 export function tailSafely(text: string, max: number, mark = ''): string {
   if (text.length <= max) return text;
   return mark + text.slice(safeStart(text, text.length - Math.max(0, max - mark.length)));
+}
+
+// The first line with anything on it, trimmed and cut to `max`. A line's end
+// is a cut too: a value that goes on to the next line (a key in two lines, a
+// multi-line secret the runner knows) isn't cut at it, and a line that starts
+// inside one is taken from the scrubbed text instead.
+export function firstLineSafely(text: string, max: number, mark = ''): string {
+  let start = 0;
+  while (start <= text.length) {
+    let nl = text.indexOf('\n', start);
+    if (nl < 0) nl = text.length;
+    if (text.slice(start, nl).trim()) {
+      const end = nl < text.length ? safeEnd(text, nl) : nl;
+      const line = text.slice(start, Math.max(start, end)).trim();
+      if (line) return cutSafely(line, max, mark);
+      let clean: string;
+      try {
+        clean = scrub(text);
+      } catch {
+        return mark;
+      }
+      return cutSafely((clean.split('\n').find((l) => l.trim()) ?? '').trim(), max, mark);
+    }
+    start = nl + 1;
+  }
+  return '';
 }
 
 // The start of the run of non-space characters before `at`, or of the space

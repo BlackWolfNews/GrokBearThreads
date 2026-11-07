@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { makeHarness, tmpDir } from '../helpers/fakes.ts';
-import { ConvexSync, BACKEND_API_VERSION, HEARTBEAT_MS, PREVIEW_HOLD_MS, SETTLE_MS, USAGE_COPY_MS, PROJECT_ACTIVITY_MS, type ThreadDoc } from '../../src/sync.ts';
+import { ConvexSync, BACKEND_API_VERSION, HEARTBEAT_MS, MISSING_GRACE_MS, PREVIEW_HOLD_MS, SETTLE_MS, USAGE_COPY_MS, PROJECT_ACTIVITY_MS, type ThreadDoc } from '../../src/sync.ts';
 import { loadSyncCache, SYNC_CACHE_MAX_AGE_MS } from '../../src/sync-cache.ts';
 import { nullLogger } from '../../src/log.ts';
 
@@ -43,6 +43,7 @@ function setup(opts: { apiVersion?: number; firstSeen?: () => boolean; heads?: {
       home: h.home,
       subscriber: { subscribe: () => () => {}, close: async () => {} },
       elsewhere: (id) => elsewhere.has(id),
+      elsewhereIds: () => [...elsewhere],
       post: async (kind, fn, args) => {
         calls.push({ kind, fn, args });
         if (fn === failing.value) throw new Error('down');
@@ -710,6 +711,10 @@ test('a thread deleted while sync was off is taken out of the mirror by a start 
   await settle();
   await again.flushNow();
   await again.flushNow();
+  assert.deepEqual(s.named('sync:removeThreads'), [], 'not straight away: it may be between releases');
+  s.h.clock.advance(MISSING_GRACE_MS);
+  await settle();
+  await again.flushNow();
   assert.ok(s.named('sync:removeThreads').some((c) => (c.args.threadIds as string[]).includes(t.id)), 'its row goes');
   assert.ok(!s.named('sync:removeThreads').some((c) => (c.args.threadIds as string[]).includes(kept.id)));
   await again.stop();
@@ -736,8 +741,54 @@ test("a thread finishing on the release before isn't taken out for not being her
   await again.flushNow();
   assert.deepEqual(s.named('sync:removeThreads'), []);
   assert.deepEqual(s.named('sync:upsertThreads'), []);
+  s.h.clock.advance(MISSING_GRACE_MS);
+  await settle();
+  await again.flushNow();
+  assert.deepEqual(s.named('sync:removeThreads'), []);
   s.h.runner.publish({ method: 'thread.updated', params: { thread: row } });
   await again.stop();
+});
+
+// From the cross-lab review (Codex, 7 Nov 2026): a draining release whose
+// connection drops is let go of a few seconds before its threads are taken in,
+// so a thread can be neither here nor elsewhere for a moment. Its row (and its
+// messages) wait out MISSING_GRACE_MS, and it turning up cancels that.
+test("a thread missing for a moment at a start from the file isn't taken out", async () => {
+  const s = setup();
+  const t = s.h.runner.create({ text: 'between releases', cwd: s.h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  s.h.runner.share(t.id, { access: 'link' });
+  await firstStart(s);
+  const row = s.h.runner.get(t.id);
+  s.h.runner.delete(t.id);
+  s.shared.value = [t.id];
+  s.calls.length = 0;
+  const again = s.make();
+  again.start();
+  await settle();
+  s.h.clock.advance(SETTLE_MS);
+  await settle();
+  await again.flushNow();
+  s.h.clock.advance(10_000);
+  s.h.runner.publish({ method: 'thread.updated', params: { thread: row } });
+  await settle();
+  s.h.clock.advance(MISSING_GRACE_MS);
+  await settle();
+  await again.flushNow();
+  assert.deepEqual(s.named('sync:removeThreads'), []);
+  await again.stop();
+});
+
+test("a full write's prune keeps the threads finishing on the release before", async () => {
+  const s = setup();
+  const here = s.h.runner.create({ text: 'here', cwd: s.h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  s.elsewhere.add('busy-on-the-old-release');
+  const sync = s.make();
+  sync.start();
+  await settle();
+  await sync.flushNow();
+  const keep = s.named('sync:prune')[0]?.args.keep as string[];
+  assert.ok(keep.includes(here.id) && keep.includes('busy-on-the-old-release'), JSON.stringify(keep));
+  await sync.stop();
 });
 
 // The same leak from the other side: the mirror has a link the runner stopped

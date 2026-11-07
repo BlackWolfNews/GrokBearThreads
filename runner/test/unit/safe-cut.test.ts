@@ -10,9 +10,10 @@ import path from 'node:path';
 import { tmpDir } from '../helpers/fakes.ts';
 import { wakeNote, WAKE_NOTE_MAX } from '../../src/wake-note.ts';
 import { toThreadDoc, toMessageDoc, WokeRows, type MessageDoc } from '../../src/sync.ts';
-import { scrubDoc, scrubText } from '../../src/redaction.ts';
+import { redactSecrets, scrubDoc, scrubText } from '../../src/redaction.ts';
 import { Scrubber } from '../../src/scrub.ts';
-import { cutSafely, safeEnd, tailSafely } from '../../src/safe-cut.ts';
+import { cutSafely, safeEnd, tailSafely, useScrubForCuts } from '../../src/safe-cut.ts';
+import { BodyCollector, prepareBody } from '../../src/full-sync.ts';
 import { oneLine, titleFrom } from '../../src/runner.ts';
 import { waitForFromTool, needsFromTool, bylineFromTool } from '../../src/needs.ts';
 import { runCheck } from '../../src/schedule-check.ts';
@@ -133,4 +134,44 @@ test('a title that starts with a key too long to fit still has something to show
   assert.ok(!leaks(scrubText(titleFrom(key)), 'A1b2A1b2A1b2'));
   // Plain text cuts exactly where it did.
   assert.equal(oneLine('a plain line with nothing secret in it whatsoever', 20), 'a plain line with n…');
+});
+
+// From the cross-lab review of this fix (Codex, 7 Nov 2026).
+test('review: a second cut back to a word, or to a sentence, is placed in the whole text too', () => {
+  const action = `${'x'.repeat(400)} password="hunter2hunter2 hunter3hunter3"${'z'.repeat(100)}`;
+  const asks = needsFromTool({ needs: 'you', asks: [{ action, why: action }] })!.asks!;
+  for (const v of [asks[0]!.action, asks[0]!.why!]) assert.ok(!leaks(scrubText(v), 'hunter2hunter2'), v.slice(-60));
+  // A done card's next step is the first sentence of each item.
+  const next = needsFromTool({ needs: 'nothing', next: [`Use password="hunter2hunter2. hunter3hunter3" to log in.`] })?.next ?? [];
+  for (const n of next) assert.ok(!leaks(scrubText(n), 'hunter2hunter2'), n);
+});
+
+test('review: a secret longer than a few KB is seen whole, not past the edge of what is looked at', () => {
+  const long = `postgres://alice:${'p9'.repeat(3000)}@db is the database`;
+  const title = titleFrom(long);
+  assert.ok(!title.includes('p9p9p9'), title.slice(0, 60));
+  assert.ok(!scrubText(oneLine(long, 140)).includes('p9p9p9'));
+});
+
+test("review: a key in two lines the runner knows isn't sent as its first line", () => {
+  const scrubber = new Scrubber({ env: {}, folders: false });
+  const value = 'aB7xD3q9\nrT8vK6z2';
+  scrubber.known.add(value);
+  useScrubForCuts((t) => redactSecrets(scrubber.known.mask(t)).text);
+  try {
+    const title = titleFrom(`${value}\nand some words`);
+    assert.ok(!title.includes('aB7xD3q9'), title);
+    assert.ok(title.length > 0);
+  } finally {
+    useScrubForCuts(scrubText);
+  }
+});
+
+test('review: full sync holds reasoning back cut where no secret is split', () => {
+  const c = new BodyCollector();
+  const text = `sk-${'A'.repeat(65500)} password="hunter2hunter3hunter4hunter5" and on`;
+  c.see('t', { type: 'reasoning', seq: 1, ts: 'x', text } as never);
+  const out = c.see('t', { type: 'assistant.text', seq: 2, ts: 'x', text: 'ok' } as never);
+  const body = prepareBody(out[0]!, scrubText);
+  assert.ok(!JSON.stringify(body).includes('hunter2hunter3'));
 });

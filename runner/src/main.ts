@@ -435,6 +435,7 @@ async function main(): Promise<void> {
     restart: (reason) => void restarter.request({ when: 'idle', reason }),
     scrubber,
     elsewhere: (id) => peers.owns(id),
+    elsewhereIds: () => peers.summaries(['inbox', 'snoozed', 'archived']).map((t) => t.id),
     version: RUNNER_VERSION,
     release: RELEASE.release,
     startedAt,

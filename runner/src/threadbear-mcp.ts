@@ -37,7 +37,7 @@ import { POCKET_ICONS } from './pocket-icons.ts';
 import type { SecretAnswer, SecretRequest } from './runner/approvals.ts';
 import type { StartRequest } from './cross-runner.ts';
 import { SECRET_TIMEOUT_DEFAULT_MIN, SECRET_TIMEOUT_MAX_MIN } from './secrets.ts';
-import { cutSafely } from './safe-cut.ts';
+import { cutSafely, firstLineSafely } from './safe-cut.ts';
 
 // What the tools drive: the Runner itself, or during a handover
 // (docs/protocol.md) a ThreadRouter (handover.ts) that reaches threads on
@@ -1502,7 +1502,7 @@ export function buildThreadbearTools(
         }
         const r = await control.create({
           text: (await from()) + text,
-          title: title?.trim() || cutSafely(text.split('\n').map((l) => l.trim()).find(Boolean) ?? '', 200) || undefined,
+          title: title?.trim() || firstLineSafely(text, 200) || undefined,
           cwd: await folder(f ?? '.'),
           accountId: await account(acc),
           ...(p !== undefined && !acc ? { poolId: pool(p) } : {}),

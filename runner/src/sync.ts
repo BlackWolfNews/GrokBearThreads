@@ -576,9 +576,18 @@ export type SyncDeps = {
   scrubber?: Scrubber;
   // A thread finishing its turn on the release that handed over to this one
   // (handover.ts, peers.owns): not here yet, but not gone either, so its row
-  // isn't taken out of the mirror for being missing. Absent in small tests.
+  // isn't taken out of the mirror for being missing; and all of those, for a
+  // full write's prune. Absent in small tests.
   elsewhere?: (threadId: string) => boolean;
+  elsewhereIds?: () => string[];
 };
+
+// How long a row whose thread isn't here (and that wasn't deleted here) waits
+// before it's taken out of the mirror: a thread between two releases (a
+// draining one whose connection dropped is let go of before its threads are
+// taken in) isn't here for a few seconds, and removing its row takes its
+// messages with it.
+export const MISSING_GRACE_MS = 2 * 60_000;
 
 // What tb status and the app say while the backend turns this runner's
 // key down (keyRejected). Every minute's heartbeat is still tried, so it
@@ -1104,6 +1113,9 @@ export class ConvexSync {
   // remembered) leaves a link anyone with the slug can still read.
   private sharesDue = true;
   private sharesCheckedAt = -Infinity;
+  // Rows whose thread isn't here, since when (dropRow), until MISSING_GRACE_MS says it's gone.
+  private missing = new Map<string, number>();
+  private missingTimer?: TimerHandle;
   private messages: MessageDoc[] = [];
   private woke = new WokeRows();
   // "<threadId> <buttonId>" -> the row that links it, as last sent, so a press
@@ -1318,6 +1330,8 @@ export class ConvexSync {
     this.presenceTimer?.cancel();
     this.settleTimer?.cancel();
     this.settling = false;
+    this.missingTimer?.cancel();
+    this.missingTimer = undefined;
     this.heldTimer?.cancel();
     this.projectsTimer?.cancel();
     this.accountsTimer?.cancel();
@@ -1920,6 +1934,7 @@ export class ConvexSync {
 
   // Only a change the phone would see makes a write.
   private mark(t: ThreadSummary, now_ = false): void {
+    this.missing.delete(t.id);
     if (this.removedFromFile.delete(t.id)) {
       this.removed.delete(t.id);
       this.removing.delete(t.id);
@@ -1973,16 +1988,43 @@ export class ConvexSync {
     this.scheduleFlush();
   }
 
-  // Takes a row out of the mirror that no thread here has: removed with the
-  // next flush (and kept in the file till it is), unless the thread turns up
-  // after all (mark), when it's written again in full.
+  // Takes a row out of the mirror that no thread here has, once it has been
+  // missing for MISSING_GRACE_MS and still is: then removed with the next
+  // flush (and kept in the file till it is), unless the thread turns up after
+  // all (mark), when it's written again in full, history and all.
   private dropRow(threadId: string): void {
-    this.removed.add(threadId);
-    this.removedFromFile.add(threadId);
-    this.sent.delete(threadId);
-    this.heads.delete(threadId);
-    this.lastWrite.delete(threadId);
-    this.noteSent();
+    if (!this.missing.has(threadId)) this.missing.set(threadId, this.deps.clock.now());
+    this.armMissing();
+  }
+
+  private armMissing(): void {
+    if (this.missingTimer || !this.missing.size || !this.running) return;
+    const due = Math.min(...this.missing.values()) + MISSING_GRACE_MS;
+    this.missingTimer = this.deps.clock.setTimeout(() => {
+      this.missingTimer = undefined;
+      this.confirmMissing();
+      this.armMissing();
+    }, Math.max(0, due - this.deps.clock.now()));
+  }
+
+  private confirmMissing(): void {
+    const now = this.deps.clock.now();
+    const here = new Set(this.deps.runner.list(ALL).map((t) => t.id));
+    for (const [id, since] of [...this.missing]) {
+      if (here.has(id) || this.deps.elsewhere?.(id)) {
+        this.missing.delete(id);
+        continue;
+      }
+      if (now - since < MISSING_GRACE_MS) continue;
+      this.missing.delete(id);
+      this.removed.add(id);
+      this.removedFromFile.add(id);
+      this.sent.delete(id);
+      this.heads.delete(id);
+      this.lastWrite.delete(id);
+      this.noteSent();
+    }
+    this.scheduleFlush();
   }
 
   // The mirror's rows shared by link, against this runner's threads: one that
@@ -2158,6 +2200,11 @@ export class ConvexSync {
       if (this.dirty.get(threadId) === doc) this.dirty.delete(threadId);
       this.written++;
     } catch (e) {
+      // It may have landed all the same (an answer lost on the way back), so
+      // what the mirror has is no longer known: the next mark writes, even a
+      // change back to what was sent before (Stop sharing after a link).
+      this.sent.delete(threadId);
+      this.lastWrite.delete(threadId);
       this.deps.log.debug('new thread row not written yet', { threadId, error: String(e) });
     } finally {
       this.doneWriting(threadId, me);
@@ -2376,6 +2423,8 @@ export class ConvexSync {
     if (this.flushing || !this.running) return;
     this.flushing = true;
     const me = Symbol('flush');
+    // The rows of a batch on its way when it failed: they may have landed.
+    let unsure: string[] = [];
     // Before taking the rows, so none is older than one writeRowNow wrote.
     const rowsDone = await this.rowTurn();
     this.lastFlushAt = this.deps.clock.now();
@@ -2396,7 +2445,9 @@ export class ConvexSync {
       for (let i = 0; i < docs.length; i += SYNC_BATCH) {
         const batch = docs.slice(i, i + SYNC_BATCH).map((d) => forBackend(d, v, this.deps.clock.now()));
         for (const d of batch) this.writing.set(d.threadId, { digest: digest(JSON.stringify(d)), by: me });
+        unsure = batch.map((d) => d.threadId);
         const left = await this.writeRows('sync:upsertThreads', 'threads', batch, (d) => d.threadId, { key });
+        unsure = [];
         // A row left out isn't remembered as sent (nor in the cache kept
         // across starts), so its next change, or the next start, tries it again.
         for (const d of batch) {
@@ -2417,6 +2468,8 @@ export class ConvexSync {
         for (const id of removed) {
           this.removing.delete(id);
           this.removedFromFile.delete(id);
+          // Its messages went with it: one that turns up again gets its whole history.
+          this.filledThreads().delete(id);
         }
         this.noteSent();
       }
@@ -2448,7 +2501,8 @@ export class ConvexSync {
       }
       if (this.picturesDue && (this.backendApiVersion ?? 0) >= ICONS_API_VERSION) await this.sendPictures();
       if (this.full) {
-        const keep = this.deps.runner.list(ALL).map((t) => t.id);
+        // And those finishing on the release before: their rows aren't stale.
+        const keep = [...new Set([...this.deps.runner.list(ALL).map((t) => t.id), ...(this.deps.elsewhereIds?.() ?? [])])];
         await this.post('mutation', 'sync:prune', { key, runnerId: this.runnerId, keep });
         messages.unshift(...(await this.catchUp()));
         this.full = false;
@@ -2490,6 +2544,13 @@ export class ConvexSync {
       // not here any more keeps its row as it was, for the retry.
       // Only this flush's: another writer's may be on its way (above).
       for (const d of docs) this.doneWriting(d.threadId, me);
+      // A batch whose write failed may have landed all the same, so what the
+      // mirror has of those is no longer known: each is written again as it
+      // is now, even if that's back to what was sent before.
+      for (const id of unsure) {
+        this.sent.delete(id);
+        this.lastWrite.delete(id);
+      }
       for (const d of docs) {
         try {
           this.mark(this.deps.runner.get(d.threadId), true);

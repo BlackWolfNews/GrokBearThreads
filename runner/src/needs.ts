@@ -210,9 +210,11 @@ function str(v: unknown, max: number): string | undefined {
 function clipText(v: unknown, max: number): string | undefined {
   const t = str(v, Number.MAX_SAFE_INTEGER);
   if (!t || t.length <= max) return t;
-  const cut = t.slice(0, safeEnd(t, max - 1));
-  const space = cut.lastIndexOf(' ');
-  return `${(space > max * 0.6 ? cut.slice(0, space) : cut).replace(/[\s,;:.-]+$/, '')}…`;
+  const end = safeEnd(t, max - 1);
+  const space = t.lastIndexOf(' ', end - 1);
+  // Back to a word's end is a cut too, and may be inside a value with a space in it.
+  const at = space > max * 0.6 ? safeEnd(t, space) : end;
+  return `${t.slice(0, at).replace(/[\s,;:.-]+$/, '')}…`;
 }
 
 // These read a model's reply, which content it read can steer, so none of
@@ -335,10 +337,14 @@ function nextFrom(item: string): string {
     .replace(/\*\*(.+?)\*\*/g, '$1')
     .replace(/\s+/g, ' ')
     .trim();
-  const first = (/^.+?[.!?](?=\s|$)/.exec(t)?.[0] ?? t).replace(/\.$/, '');
+  // Each cut (the first sentence, the length, back to a word) is placed in
+  // the whole text, so none is inside a secret (safe-cut.ts).
+  const sentence = safeEnd(t, /^.+?[.!?](?=\s|$)/.exec(t)?.[0].length ?? t.length);
+  const first = t.slice(0, sentence).replace(/\.$/, '');
   if (first.length <= MAX_NEXT_CHARS) return first;
-  const cut = first.slice(0, safeEnd(first, MAX_NEXT_CHARS));
-  return cut.slice(0, Math.max(cut.lastIndexOf(' '), 1)).replace(/[,;:]$/, '');
+  const end = safeEnd(t, MAX_NEXT_CHARS);
+  const space = t.lastIndexOf(' ', end - 1);
+  return t.slice(0, space > 0 ? safeEnd(t, space) : Math.max(end, 1)).replace(/[,;:]$/, '');
 }
 
 // "Open X, add Y, then reply 'done'" names the words to send back.

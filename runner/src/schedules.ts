@@ -25,7 +25,7 @@ import { EFFORT_LEVELS, ErrorCode, RpcError, isEffortLevel } from './protocol.ts
 import { atomicWriteFileSync, isDirectory, readJsonSync } from './fsutil.ts';
 import { expandHome } from './config.ts';
 import { CronError, checkZone, describeAt, describeCron, localZone, nextRun, nextRuns, parseCron } from './cron.ts';
-import { cutSafely } from './safe-cut.ts';
+import { cutSafely, firstLineSafely } from './safe-cut.ts';
 
 // What a check printed, carried by a run: kept (when it was kept) and the
 // command, so a sent run drops that command's kept file.
@@ -1220,7 +1220,7 @@ function bad(message: string): RpcError {
 }
 
 function firstLine(text: string): string {
-  return cutSafely(text.split('\n').map((l) => l.trim()).find(Boolean) ?? 'Scheduled message', 80);
+  return firstLineSafely(text, 80) || 'Scheduled message';
 }
 
 function checkedTimeout(secs: number): number {

@@ -123,7 +123,7 @@ import {
   projectPatchFiles,
   webPage,
 } from './patches.ts';
-import { cutSafely } from './safe-cut.ts';
+import { cutSafely, firstLineSafely } from './safe-cut.ts';
 import { FolderCache } from './folder-cache.ts';
 import { worktreesPart, type WorktreesPart } from './runner/worktrees.ts';
 import { networkPart, type NetworkPart } from './runner/network.ts';
@@ -3369,9 +3369,8 @@ function sortByActivity(list: ThreadSummary[]): ThreadSummary[] {
 }
 
 export function titleFrom(text: string): string {
-  const line = (text ?? '').split('\n').map((l) => l.trim()).find(Boolean) ?? '';
-  if (!line) return 'Image';
-  return cutSafely(line, LIMITS.titleChars);
+  if (!(text ?? '').trim()) return 'Image';
+  return firstLineSafely(text, LIMITS.titleChars);
 }
 
 // What the runner asks a small model for a thread's title. The examples

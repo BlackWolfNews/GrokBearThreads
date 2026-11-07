@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { Hunk, PlanEntry, ToolKind } from './protocol.ts';
 import { LIMITS } from './protocol.ts';
 import { applyReplace, diffLines } from './diff.ts';
-import { cutSafely, safeEnd } from './safe-cut.ts';
+import { firstLineSafely, safeEnd } from './safe-cut.ts';
 
 const KINDS: Record<string, ToolKind> = {
   Bash: 'command',
@@ -70,10 +70,8 @@ function str(v: unknown): string {
 }
 
 function firstLine(s: string, max = 100): string {
-  const line = s.split('\n').find((l) => l.trim() !== '') ?? '';
-  const t = line.trim();
   // Never through a secret: a title goes to Convex (safe-cut.ts).
-  return cutSafely(t, max, '…');
+  return firstLineSafely(s, max, '…');
 }
 
 const realpaths = new Map<string, string>();

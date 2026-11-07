@@ -844,6 +844,57 @@ test("a flush failing after its rows doesn't lose a share row another write has 
   assert.equal(rows.at(-1)?.share?.access, 'off', 'the last row written for it says off');
 });
 
+// From the cross-lab review (Codex, 7 Nov 2026): a share row that landed but
+// whose answer was lost, and Stop sharing while it was on its way. The failed
+// write's row may be in Convex, so what was sent before is no longer known.
+for (const via of ['flush', 'writeRowNow'] as const) {
+  test(`a share row that landed with its answer lost doesn't make Stop sharing look like nothing (${via})`, async () => {
+    let landedRef: Call[] = [];
+    let lose: (() => void) | undefined;
+    let holding = false;
+    const fake = setupFull({
+      apiVersion: BACKEND_API_VERSION,
+      hold: (fn, args) => {
+        if (!holding || fn !== 'sync:upsertThreads' || lose) return undefined;
+        if (!(args.threads as ThreadDoc[]).some((r) => r.share?.access === 'link')) return undefined;
+        return new Promise<void>((_r, reject) => (lose = () => {
+          landedRef.push({ kind: 'mutation', fn, args });
+          reject(new Error('fetch failed'));
+        }));
+      },
+    });
+    const { h, sync, push, landed } = fake;
+    landedRef = landed;
+    sync.start();
+    await sync.flushNow();
+    const t = h.runner.create({ text: 'hello', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+    h.runner.share(t.id, { access: 'link' });
+    h.runner.share(t.id, { access: 'off' });
+    await sync.flushNow();
+    holding = true;
+    let flushing: Promise<void> | undefined;
+    if (via === 'flush') {
+      h.runner.share(t.id, { access: 'link' });
+      flushing = sync.flushNow();
+    } else push([{ commandId: 'on', kind: 'share', threadId: t.id, args: { access: 'link' }, createdAt: 1 }]);
+    await tick(10);
+    assert.ok(lose, 'the link row is on its way');
+    // Stopped while the flush's row is out; the phone's one fails first, then he stops.
+    if (via === 'flush') h.runner.share(t.id, { access: 'off' });
+    await tick(10);
+    lose!();
+    await flushing;
+    await tick(10);
+    if (via === 'writeRowNow') h.runner.share(t.id, { access: 'off' });
+    await tick(10);
+    holding = false;
+    await sync.flushNow();
+    await tick(10);
+    const rows = landed.filter((c) => c.fn === 'sync:upsertThreads').flatMap((c) => c.args.threads as ThreadDoc[]).filter((r) => r.threadId === t.id);
+    assert.equal(rows.at(-1)?.share?.access, 'off', 'the last row in Convex says off');
+  });
+}
+
 test('commands: the website pauses, resumes and runs a schedule, and nonsense fails with a note', async () => {
   const { sync, calls, push, applied } = setupFull();
   sync.start();

@@ -4418,16 +4418,21 @@ the mirror back as state. The Mac app doesn't use it.
   (`sync-sent.json` in the data folder), so a start writes only what changed
   (comparing 20 seconds in, once patch links have loaded);
   every 3 days, with no such file, or when `sync:heartbeat` answers
-  `firstSeen`, it writes everything and prunes. A start from the file
+  `firstSeen`, it writes everything and prunes (keeping the threads still
+  finishing on the release that handed over). A start from the file
   removes, once it has settled, the rows the file has for threads that
   aren't here (deleted while sync was off), unless they're finishing on
-  the release that handed over. On every start, from the file or not, and
-  every hour after, it asks `sync:sharedThreads` (API 60) which of its
-  rows are shared by link, and removes any whose thread is gone and writes
+  the release that handed over, and only after two minutes still missing,
+  as a thread between releases isn't here for a few seconds. On every
+  start, from the file or not, and every hour after, it asks
+  `sync:sharedThreads` (API 60) which of its rows are shared by link, and
+  removes any whose thread is gone (after the same two minutes) and writes
   again any it has stopped sharing, so a stop or a delete the mirror never
   got (a write lost after it landed, a crash) can't leave a link readable.
   Each write in flight is tracked as that write's own, so a flush that
-  fails after its rows went never forgets another write's row on its way.
+  fails after its rows went never forgets another write's row on its way,
+  and a row write that fails may have landed, so the next change to that
+  thread is written even if it's back to what was sent before.
 - **Messages.** Each persisted `user.message` and `assistant.text` goes
   up as a `messages` row (`threadId, seq, role, text, origin?, at`), text
   cut at 8,000 characters with a note; never a delta, with one row per tool

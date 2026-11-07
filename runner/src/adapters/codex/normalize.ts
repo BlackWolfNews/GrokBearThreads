@@ -16,7 +16,7 @@ import { truncateResultText, type NormalizerContext } from '../context.ts';
 import { displayPath, toolTitle, truncateInput } from '../../tools.ts';
 import type { Logger } from '../../log.ts';
 import { isSpace } from '../../linear-text.ts';
-import { cutSafely } from '../../safe-cut.ts';
+import { cutSafely, firstLineSafely } from '../../safe-cut.ts';
 
 type AnyMsg = Record<string, any>;
 
@@ -1096,9 +1096,7 @@ function diffTotals(a: Totals, b: Totals): Totals {
 }
 
 function firstLine(s: string, max = 100): string {
-  const line = s.split('\n').find((l) => l.trim() !== '') ?? '';
-  const t = line.trim();
-  return cutSafely(t, max, '…');
+  return firstLineSafely(s, max, '…');
 }
 
 function ev(event: EventBody): AdapterOutput {

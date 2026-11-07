@@ -688,8 +688,9 @@ first. The lessons are Agent Archive's:
   `postgres://alice:password@host` with the password intact. So a cut never
   lands inside anything the scrub would take out (`runner/src/safe-cut.ts`,
   with the runner's known values too); it moves back to before it, leaving the
-  runner's own copy unscrubbed. The wake note is scrubbed whole on the way up
-  and only then cut.
+  runner's own copy unscrubbed. Taking a first line, a first sentence or the
+  last part of something counts as a cut too. The wake note is scrubbed whole
+  on the way up and only then cut.
 
 Not scrubbed, on purpose: a command's words while it's on its way (a message from
 the phone or another Mac has to reach the runner as typed). Once a command is over,
