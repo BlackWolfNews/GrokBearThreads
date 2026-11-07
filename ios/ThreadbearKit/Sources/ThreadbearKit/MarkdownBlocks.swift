@@ -175,7 +175,9 @@ private struct Parser {
                 blocks.append(.quote(MarkdownBlock.parse(quoteLines().joined(separator: "\n"), depth: depth + 1)))
                 continue
             }
-            if let match = line.firstMatch(of: /^(#{1,6})\s+(.*)$/) {
+            // Each regex only for a line it could match: on the main thread
+            // a reply of thousands of short lines paid for all of them on each.
+            if line.first == "#", let match = line.firstMatch(of: /^(#{1,6})\s+(.*)$/) {
                 flush()
                 blocks.append(.heading(level: match.1.count, text: Self.withoutClosingHashes(match.2)))
                 i += 1
@@ -189,7 +191,8 @@ private struct Parser {
                     continue
                 }
             }
-            if let match = line.firstMatch(of: /^([-*+]|\d{1,9}[.)])\s+(.*)$/) {
+            if let first = line.first, first == "-" || first == "*" || first == "+" || first.isNumber,
+               let match = line.firstMatch(of: /^([-*+]|\d{1,9}[.)])\s+(.*)$/) {
                 flush()
                 // "- ```slack": the item is the fenced block. Its line goes
                 // back as the fence alone, indented as the item's words are,
@@ -224,12 +227,17 @@ private struct Parser {
             }
             // A wrapped line of a list item, or an indented paragraph under
             // one after a blank line: it stays with the item.
-            if case let .listItem(text, marker, depth, task) = blocks.last, paragraph.isEmpty,
-               lastWasListItem || indent >= 2 {
+            if case .listItem = blocks.last, paragraph.isEmpty, lastWasListItem || indent >= 2 {
                 let joiner = lastWasListItem ? " " : "\n\n"
                 let (words, images) = Self.wordsAndImages(line)
-                if !words.isEmpty {
-                    blocks[blocks.count - 1] = .listItem(text: text + joiner + words, marker: marker, depth: depth, task: task)
+                // Taken out and put back, so the words are added to the item's
+                // own text in place: building a new string for every line
+                // copied it all each time, quadratic on a long item
+                // (cross-lab review, 7 Nov 2026).
+                if !words.isEmpty, case .listItem(var text, let marker, let depth, let task) = blocks.removeLast() {
+                    text += joiner
+                    text += words
+                    blocks.append(.listItem(text: text, marker: marker, depth: depth, task: task))
                 }
                 blocks.append(contentsOf: images)
                 lastWasListItem = true
@@ -359,7 +367,7 @@ private struct Parser {
     }
 
     static func fence(_ line: String) -> String? {
-        guard let match = line.firstMatch(of: /^(`{3,}|~{3,})/) else { return nil }
+        guard line.first == "`" || line.first == "~", let match = line.firstMatch(of: /^(`{3,}|~{3,})/) else { return nil }
         // A backtick fence's info string has no backtick (CommonMark), so
         // "```literal``` and more" is a code span in words, not a fence.
         if match.1.first == "`", line[match.range.upperBound...].contains("`") { return nil }
@@ -367,7 +375,8 @@ private struct Parser {
     }
 
     static func isRule(_ line: String) -> Bool {
-        line.wholeMatch(of: /(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}/) != nil
+        guard let first = line.first, first == "-" || first == "*" || first == "_" else { return false }
+        return line.wholeMatch(of: /(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}/) != nil
     }
 
     /// `| --- | :-: | --: |`, with or without the outer pipes.

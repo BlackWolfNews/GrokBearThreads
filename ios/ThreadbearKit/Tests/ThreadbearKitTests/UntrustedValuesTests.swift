@@ -77,6 +77,11 @@ import Testing
             let seconds = cpuSeconds(run)
             #expect(seconds < 0.1, "input \(n): \(seconds) s")
         }
+        // One list item of many lines, as a long ask's why could be: grows
+        // with the text, not its square (copying it all for every line).
+        func item(_ lines: Int) -> Double { cpuSeconds { _ = MarkdownBlock.parse("- x\n" + String(repeating: "x\n", count: lines)) } }
+        let small = item(10_000), big = item(40_000)
+        #expect(big < small * 8 + 0.05, "\(small) s, then \(big) s")
         // What they found before, they still find.
         #expect(MarkdownBlock.parse("## Title ##") == [.heading(level: 2, text: "Title")])
         #expect(MarkdownBlock.parse("## Title#") == [.heading(level: 2, text: "Title#")])

@@ -52,7 +52,7 @@ enum ScheduledStats {
         let repeating = active.filter { !$0.isOneOff }.count
         let byAgents = active.filter { $0.createdBy != nil }.count
         let paused = schedules.filter { $0.paused && !$0.isFinished }.count
-        let runs = schedules.reduce(0) { $0 + $1.runs }
+        let runs = schedules.reduce(0) { $0.adding(saturating: $1.runs) }
         return [
             HomeStat(value: "\(active.count)", label: "On",
                      help: "Schedules that will still run: not paused and not finished"),

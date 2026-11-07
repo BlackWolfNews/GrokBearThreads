@@ -137,7 +137,9 @@ enum MarkdownRenderer {
     static let maxInlineMarks = 4_000
 
     static func renderBlock(_ block: String) -> NSAttributedString {
-        let marks = MarkdownNesting.inlineMarks(block)
+        // Counted in what the parser gets: escaping work: links decodes
+        // `%2A` into `*` (cross-lab review, 7 Nov 2026).
+        let marks = MarkdownNesting.inlineMarks(WorkLinks.escapeDestinations(block))
         guard marks > inlineMarksOnWorkerStack, marks <= maxInlineMarks else { return renderBlockHere(block) }
         // 256 MB holds 4,000 levels with room to spare (each takes a few KB
         // between swift-markdown and the Builder); a worker's is 512 KB.
@@ -169,7 +171,8 @@ enum MarkdownRenderer {
         // drawing them recurse once a level, on worker threads with small
         // stacks, and 8,000 `>`s from a reply ran one out (Daybreak, 7 Nov
         // 2026). Nothing anyone writes nests this deep.
-        if MarkdownNesting.bound(block) > maxNesting || MarkdownNesting.inlineMarks(block) > maxInlineMarks {
+        let source = WorkLinks.escapeDestinations(block)
+        if MarkdownNesting.bound(source) > maxNesting || MarkdownNesting.inlineMarks(source) > maxInlineMarks {
             let start = builder.output.length
             builder.append(block, Context())
             builder.finishParagraph(from: start, style: builder.paragraphStyle(Context()))
@@ -178,7 +181,7 @@ enum MarkdownRenderer {
             cache.setObject(result, forKey: key, cost: block.utf16.count)
             return result
         }
-        let document = Document(parsing: WorkLinks.escapeDestinations(block), options: [.disableSmartOpts])
+        let document = Document(parsing: source, options: [.disableSmartOpts])
         // Split where cmark ends lines: "\n", "\r" and "\r\n" (one
         // Character), not U+2028 and the other separators Swift counts.
         if rich || DraftBlock.mayHold(block) {

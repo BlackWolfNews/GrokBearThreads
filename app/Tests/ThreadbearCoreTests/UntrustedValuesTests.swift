@@ -172,6 +172,12 @@ import Testing
         #expect(Decisions.paragraph(Ask(action: "Merge\n  it\r\n now ")) == "Merge it now")
     }
 
+    @Test func aRestartNoticesCountsAddWithoutTrapping() {
+        // A runner's notice: each number an Int, their sum not.
+        let notice = RunnerRestart.parse("The runner will restart when 9223372036854775807 threads finish and you answer 1")
+        #expect(notice != nil)
+    }
+
     @Test func usageSumsHoldAtIntMax() {
         // Each hour in range, a quarter of a million of them not.
         let hour = TokenHour(start: Date(), input: 10_000_000_000_000, output: 10_000_000_000_000, cacheRead: 10_000_000_000_000, cacheWrite: 10_000_000_000_000)

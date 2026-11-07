@@ -137,7 +137,7 @@ public struct RunnerRestart: Sendable, Equatable {
         let numbers = rest.split { !$0.isNumber }.compactMap { Int($0) }
         let answerAt = rest.range(of: "you answer ")
         let onYou = answerAt.map { rest[$0.upperBound...].prefix { $0.isNumber } }.flatMap { Int($0) } ?? 0
-        return .pending(max(1, numbers.reduce(0, +)), onYou: onYou)
+        return .pending(max(1, numbers.reduce(0) { $0.adding(saturating: $1) }), onYou: onYou)
     }
 
     /// Returns true when the notice was about a restart, so the caller can

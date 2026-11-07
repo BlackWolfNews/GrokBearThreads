@@ -344,7 +344,7 @@ private struct HoverNote: View {
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let total = bars.reduce(0) { $0 + $1.tokens }
+        let total = bars.reduce(0) { $0.adding(saturating: $1.tokens) }
         VStack(alignment: .leading, spacing: zoomed(3)) {
             Text((byDay ? TokensChart.dayLabel(start, now: now) : AccountUsageText.clock(start)) + "  " + UsageStatsMath.tokens(total))
                 .font(.system(size: zoomed(11), weight: .semibold))
