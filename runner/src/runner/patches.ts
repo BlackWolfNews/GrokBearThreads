@@ -15,7 +15,7 @@ import type { AgentWrite } from '../adapters/types.ts';
 import { CLAUDE_PATCH_ID, claudeCommands, claudeOptions, settingsCommands, settingsNamedPaths, type ClaudeOptions } from '../claude-trust.ts';
 import { canonicalPath, runsAsCodeByName } from '../code-writes.ts';
 import type { PatchInfo } from '../protocol.ts';
-import { automaticTrust, EMPTY_PATCH_SET, PATCH_EXTENSIONS, patchDirs, hookApplies, loadPatchSet, applyLive, hasLive, projectPanels, renderListPanel, renderPanel, runCommand, type CommandOutcome, type PanelRender, type PatchSet, type ProjectFolder, projectPatchFiles } from '../patches.ts';
+import { actionRunProblem, automaticTrust, EMPTY_PATCH_SET, PATCH_EXTENSIONS, patchDirs, hookApplies, loadPatchSet, applyLive, hasLive, projectPanels, renderListPanel, renderPanel, runCommand, type CommandOutcome, type PanelRender, type PatchSet, type ProjectFolder, projectPatchFiles } from '../patches.ts';
 import { liveCommandEnv } from '../shell-allowlist.ts';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -610,7 +610,8 @@ export const patchesPart = {
   // time per thread.
   async runAction(this: Runner, threadId: string, actionId: string): Promise<{ turnId?: string; ok?: boolean; exitCode?: number; durationMs?: number; seq?: number }> {
     const st = this.mustGet(threadId);
-    const action = this.actionsOf(st, this.patchSet(st)).find((a) => a.id === actionId);
+    const set = this.patchSet(st);
+    const action = this.actionsOf(st, set).find((a) => a.id === actionId);
     if (!action) throw new RpcError(ErrorCode.badParams, `This thread has no action called ${actionId}`);
     if (action.kind === 'prompt') return this.send(threadId, action.prompt ?? '');
     if (action.kind === 'url') {
@@ -624,6 +625,14 @@ export const patchesPart = {
     }
     const running = (st.rt.runningActions ??= new Set());
     if (running.has(actionId)) throw new RpcError(ErrorCode.busy, `${action.title} is already running.`);
+    // It runs from the folder, so what the patch's hash covered must still
+    // be what's there as it starts, read afresh, however long ago the patch
+    // was last looked at; what changed then asks in Patches.
+    const refused = actionRunProblem(action, set.patches.find((p) => p.id === action.patch), (file, hash) => this.patchTrust.verify(file, hash), (dir) => this.patchTrust.loadsUnhashed(dir));
+    if (refused) {
+      this.rereadAllPatches();
+      throw new RpcError(ErrorCode.other, `Didn't run ${action.title}: ${refused}`);
+    }
     running.add(actionId);
     try {
       const outcome = await runCommand(action.command ?? '', {

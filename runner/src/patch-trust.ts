@@ -50,12 +50,13 @@
 // one hashed script and plain words (automaticCommand).
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseSync } from 'oxc-parser';
 import { atomicWriteFileSync } from './fsutil.ts';
 import { claudeCommands, type ClaudeOptions } from './claude-trust.ts';
-import { looksRunnable, MAX_READ_BYTES, reachOf, reachOfCommand, Reads, type FollowOptions } from './script-trust.ts';
+import { isBinary, looksRunnable, MAX_READ_BYTES, reachOf, reachOfCommand, Reads, type FollowOptions, type ScriptReach } from './script-trust.ts';
 import { bareImport } from './tracked-packages.ts';
 import { allowCommand } from './shell-allowlist.ts';
 
@@ -90,6 +91,10 @@ export type ClaudeVerdict =
 // with this in front, so a runner from before them keeps them when it
 // saves (they're strings it never matches) and they can be told apart.
 export const CLAUDE_PREFIX = 'claude:';
+// A schedule's check, as approved (checkDigest), in that folder's list too:
+// the same store, the same rules for a worktree, and only the runner's own
+// file to write it in, never the backend's row.
+export const CHECK_PREFIX = 'check:';
 // A patch hash from a trust file before version 3, kept only to say the
 // folder had something trusted: it never matches (see TrustFile).
 const LEGACY_PREFIX = 'legacy:';
@@ -173,6 +178,12 @@ export interface PatchTrustStore extends PatchGate {
   // from is bytes trusted before or another such edit's. Only a file
   // inside `cwd`. True when they were.
   trustClaudeEdit(cwd: string, file: string, sha256: string, base: string | null): boolean;
+  // A schedule's check, run in `cwd`: approve it as it is now (what it runs,
+  // hashed), and whether that's what's there now, read afresh. `card`: it's
+  // a card's approval, from a thread that asks first, which throws unless
+  // that's what's there now and it can all be followed.
+  approveCheck(command: string, cwd: string, card?: CheckCard): void;
+  checkApproved(command: string, cwd: string): { approved: boolean; hash: string };
   save(): void;
 }
 
@@ -190,6 +201,8 @@ export const TRUST_ALL: PatchTrustStore = {
   checkClaude: () => ({ trusted: true }),
   trustClaude: () => true,
   trustClaudeEdit: () => false,
+  approveCheck: () => {},
+  checkApproved: () => ({ approved: true, hash: '' }),
   save: () => {},
 };
 
@@ -272,7 +285,7 @@ export class PatchTrust implements PatchTrustStore {
       return { trusted: true, files: deps.map((d) => d.path), hash, root: entry.root, code: entry.code, edges: entry.edges, ...(entry.blocked ? { blocked: entry.blocked } : {}) };
     }
     const helpers = deps.map((d) => d.path);
-    const before = known?.some((h) => !h.startsWith(CLAUDE_PREFIX));
+    const before = known?.some((h) => !h.startsWith(CLAUDE_PREFIX) && !h.startsWith(CHECK_PREFIX));
     return { trusted: false, reason: before ? 'changed' : 'new', hash, ...(helpers.length ? { helpers } : {}) };
   }
 
@@ -342,6 +355,30 @@ export class PatchTrust implements PatchTrustStore {
       return true;
     }
     return false;
+  }
+
+  approveCheck(command: string, cwd: string, card?: CheckCard): void {
+    if (card) {
+      const now = checkDigest(command, cwd);
+      if (now.problem) throw new Error(`A schedule's check runs by itself, so what it runs must be something Threadbear can hash, and it can't follow this: ${now.problem} Nothing changed. Put it in a shell script or JavaScript it can follow.`);
+      const same = card.hash === now.hash && card.folder !== undefined && folderKeyOfDir(card.folder) === folderKeyOfDir(cwd);
+      if (!same) throw new Error('What the check runs, or the folder it runs in, changed while the approval card was up (or could not be read when it went up), so nothing changed. Look at it again and ask again.');
+    }
+    this.add(folderKeyOfDir(cwd), [CHECK_PREFIX + this.digestOf(command, cwd).hash]);
+  }
+
+  // A stored approval only ever comes from approveCheck, on this runner, so
+  // a row the backend (or another runner) wrote finds nothing here.
+  checkApproved(command: string, cwd: string): { approved: boolean; hash: string } {
+    this.load();
+    const { hash } = this.digestOf(command, cwd);
+    return { approved: (this.folders.get(folderKeyOfDir(cwd)) ?? []).includes(CHECK_PREFIX + hash), hash };
+  }
+
+  // Threadbear's own checkout runs whatever it holds, so there only the
+  // command is bound, not what it reaches, or every landing would ask.
+  private digestOf(command: string, cwd: string): CheckDigest {
+    return checkDigest(command, cwd, this.always.some((d) => isInside(folderKeyOfDir(cwd), d)));
   }
 
   // Trusts one version of a patch file, by the hash the app showed. False
@@ -937,14 +974,91 @@ export function automaticCommand(command: string, folder: string, files: string[
   return { run: `cd ${quote(realpath(folder))} && ${[real, ...args].map(quote).join(' ')}` };
 }
 
-// The files of the repo's a command an action runs reaches that the
-// patch's hash didn't cover (`files`), for one worked out in code: the hash
-// only saw its pieces. Empty when all are covered.
-export function unhashedFiles(command: string, folder: string, files: string[]): string[] {
+// Why a command a trusted-by-hash patch's action runs mustn't run, or
+// undefined when it may: followed from `folder` as the hash followed it, it
+// may reach only files the hash covered (one worked out in code: the hash
+// only saw its pieces), no script patch trust can't follow (`blocked`), and
+// nothing it can't follow itself. The follow stops at the first thing it
+// can't read, so what comes after that wasn't seen, and an empty list of
+// files it did see vouched for nothing: a repo put a malicious script after
+// an `eval`, and a press ran it (Daybreak, 7 Nov). A problem is no answer,
+// so it's a refusal. Pictures count too, as what's run isn't a picture
+// whatever it's called (liveCommandProblem).
+export function actionCommandProblem(command: string, folder: string, files: string[], blocked: Record<string, string> = {}): string | undefined {
   const real = realpath(folder);
-  const top = repoTop(real);
-  const reach = reachOfCommand(command, 'the action', { folder: real, top, scanJs: scriptScan, resolveImport: resolveHelper, namedPaths });
-  return reach.files.filter((f) => !files.includes(f) && !PICTURES.includes(path.extname(f).toLowerCase())).map((f) => path.relative(real, f));
+  const reach = reachOfCommand(command, 'the action', { folder: real, top: repoTop(real), scanJs: scriptScan, resolveImport: resolveHelper, namedPaths });
+  const missed = reach.files.find((f) => !files.includes(f));
+  if (missed) return `runs ${path.relative(real, missed)}, which patch trust didn't hash: write the command in the patch as plain text, so trusting the patch covers what it runs.`;
+  const stuck = reach.files.find((f) => Object.hasOwn(blocked, f) && blocked[f]);
+  if (stuck) return `runs ${path.relative(real, stuck)}, and patch trust can't follow everything that runs: ${blocked[stuck]}`;
+  if (reach.problem) return `can't be checked, so trusting the patch couldn't cover what it runs: ${reach.problem}`;
+  return undefined;
+}
+
+// What a schedule's check runs, for binding its approval to (a card, or an
+// owner's or Full thread's call): the command, and every file it reaches
+// from `cwd` by its bytes. Its scripts outside the repo too, as a check is
+// often one by its absolute path, each followed from its own folder and
+// repo. A file a command names after something the follow can't read is
+// hashed as well, since the follow stopped there (`problem`), though what
+// that runs in turn isn't: a thread that asks first can't approve one
+// (threadbear-mcp.ts). Programs on PATH and installed packages aren't
+// followed, as for patches. `commandOnly`: nothing but the command counts.
+export type CheckDigest = { hash: string; files: string[]; problem?: string };
+// What a card was put up for (threadbear-mcp.ts, checkGuard): the digest and
+// folder as it went up, neither when they couldn't be read here.
+export type CheckCard = { hash?: string; folder?: string };
+const CHECK_TAG = 'threadbear-check-1';
+
+export function checkDigest(command: string, cwd: string, commandOnly = false): CheckDigest {
+  if (commandOnly) return { hash: sha256(Buffer.from(JSON.stringify([CHECK_TAG, command, []]))), files: [] };
+  const reads = new Reads();
+  const start = followOptions(cwd, reads);
+  const files = new Set<string>();
+  const seen = new Set<string>();
+  const queue: { file: string; dir: string }[] = [];
+  let problem: string | undefined;
+  const take = (reach: ScriptReach) => {
+    for (const f of reach.files) files.add(f);
+    for (const { file, dirs } of reach.outside ?? []) for (const dir of dirs) queue.push({ file, dir });
+    problem ??= reach.problem;
+  };
+  take(reachOfCommand(command, 'the check', { ...start, outside: true }));
+  while (queue.length) {
+    const { file: script, dir } = queue.shift()!;
+    const key = `${script}\0${dir}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (seen.size > MAX_HELPERS) {
+      problem ??= `the check reaches more than ${MAX_HELPERS} scripts outside its repo, more than patch trust follows.`;
+      break;
+    }
+    files.add(script);
+    // The script's own repo bounds what's followed as part of it, from the
+    // folder it runs in: its `./x` is there, not beside it.
+    take(reachOf(script, { ...followOptions(path.dirname(script), reads), folder: dir, outside: true }));
+  }
+  if (problem) {
+    for (const word of command.split(/[\s'"`;&|()<>=]+/)) {
+      if (!word || word.length > MAX_PATH) continue;
+      const p = path.resolve(start.folder, word.startsWith('~/') ? path.join(os.homedir(), word.slice(2)) : word);
+      if (word.includes('/') && isFile(p) && !isBinary(p)) files.add(realpath(p));
+    }
+  }
+  // From the folder inside its repo, so a worktree and its main checkout
+  // agree; by the whole path outside it.
+  const name = (f: string) => (isInside(f, start.top) ? path.relative(start.folder, f) : f);
+  const pairs = [...files]
+    .map((f): [string, string] => {
+      const bytes = isFile(f) ? reads.read(f) : undefined;
+      return [name(f), bytes ? sha256(bytes) : 'missing'];
+    })
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  const huge = [...reads.tooBig][0];
+  if (huge) problem ??= `the check reaches ${huge}, over ${MAX_READ_BYTES / 1024 / 1024} MB, more than patch trust reads.`;
+  // Whether it stopped, not its wording: the bytes say what changed, and a
+  // reworded message shouldn't hold every such check.
+  return { hash: sha256(Buffer.from(JSON.stringify([CHECK_TAG, command, pairs, Boolean(problem)]))), files: pairs.map(([f]) => f), ...(problem ? { problem } : {}) };
 }
 
 // The files a shell command run in `folder` reaches, as patch trust

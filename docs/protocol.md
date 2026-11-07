@@ -3111,7 +3111,33 @@ All of them, not only the named package's folder: Node also finds
 later, or one in a parent folder, and an installed package may import a
 committed one, and on a Mac `node_modules` finds a committed
 `NODE_MODULES` too. Packages npm installed (untracked, ignored) aren't
-hashed, so an install never asks again. The index files git keeps (each
+hashed, so an install never asks again (Mike's call, 7 Nov). A package
+manager finds them without any import naming one, so `npm run`, `yarn x`,
+`npm install`, `npm rebuild`, `npx x`, `npx -c x`, `node --import x` (a `#`
+mapping or a URL there can't be followed) and a package's
+`node_modules/.bin` put on `PATH` by hand count as a bare import does, once a
+`node_modules` is on the way up from where they run. An install's and a
+rebuild's lifecycle scripts run from a committed package's own folder, so
+they're followed from there, past `node_modules` too, and a file committed
+under `.bin` is followed as what runs, as a shell would. A workspace or `file:` package isn't
+under `node_modules` at all: npm links it there, so its files are the
+repo's. A script a command runs that has any bare import hashes and follows
+every such package linked into a `node_modules` on the way up, not only one
+it names, as an installed package may import one (and a package script or
+`npx` running its bin follows that), each file of it but its own
+`node_modules`, up to 300, as its `package.json` decides which an import
+loads. One holding a link or a native addon can't be followed, nor a
+committed or linked package whose `exports`, `main`, `module` or `bin`, or a
+bare import itself (`wsp/payload`, or `payload` for a file of that name in
+`node_modules`), names a file that isn't
+JavaScript, or a pattern that doesn't end in it, and nor can a script that
+`require`s a file of the repo's by a name that isn't JavaScript or JSON:
+Node runs any of those as CommonJS, and what it loads wouldn't be followed.
+Nor can a script that imports its own package by name, where the
+nearest `package.json` has that `name` and an `exports`: that `package.json`
+is noticed, not hashed, as an install writes it, so a pull that renames the
+repo's package shows the next time the patch is looked at or a chip pressed.
+(A patch's own import of one is refused, above.) The index files git keeps (each
 submodule's too, and each submodule's `.git`, so checking one out later
 shows) are watched, so a pull that starts tracking `node_modules/zod`
 over an installed copy asks again, and the module hook
@@ -3183,7 +3209,8 @@ scripts deep:
 - Package scripts by a literal name: `npm run x`, `npm test`,
   `yarn x`, `pnpm x`, `bun run x` hash the nearest `package.json` and
   follow that script (and its `pre`/`post`) as shell from the package's
-  folder; `npm ci`/`install` (any package manager) follows the
+  folder, a program in it that `node_modules/.bin` leads to a file of the
+  repo's included; `npm ci`/`install` (any package manager) follows the
   lifecycle scripts (`preinstall`, `postinstall`, `prepare`...) of the
   package, its workspaces and its `file:` dependencies; `npx x`/`bunx x`
   hash `package.json`. `.npmrc`, `.yarnrc(.yml)`, `bunfig.toml`,
@@ -3236,13 +3263,15 @@ of a module worked out as it runs, a file that isn't there yet
 shell or Node), an awk program that runs commands, `$(shell ...)` or
 `SHELL` or `.SHELLFLAGS` set in a Makefile (after `export` or
 `override`, or for a target), and setting `PATH` to a folder in the repo,
-`BASH_ENV`, `NODE_OPTIONS` that loads code and the like. A worktree
+`BASH_ENV`, `NODE_OPTIONS` that loads code and the like. (An empty `PATH`
+entry, a leading or trailing `:` or `::`, is the current folder, so that's in
+the repo too; a package's `node_modules/.bin` is followed instead.) A worktree
 `setup` or hook that names such a script fails closed: the patch isn't
 loaded, trusted or not, and its `error` starts `Not run:` with the file,
-line and what it couldn't follow. An action naming one still loads, as
-an action runs only when pressed.
+line and what it couldn't follow. So does an action whose command reaches
+one, though it runs only when pressed ("Commands a patch writes" below).
 
-Programs on PATH and packages aren't followed, as installed: what one
+Programs on PATH and installed packages aren't followed: what one
 loads from the repo by its own rules (a test runner's tests, a linter's
 config, `npx bddgen`'s config) is the folder's to change, as
 `node_modules` is for patch files. So a script should run only tools
@@ -3257,13 +3286,24 @@ fixed parts of a template) is followed as a shell command from the
 folder holding `.threadbear/`, as above, and every file of the repo's it
 runs or loads goes in the hash (a data file it only names doesn't), so `node scripts/deploy.mjs` asks again when
 only `scripts/deploy.mjs` or one of its imports changes (Daybreak
-verify-fix, 5 Nov). A command that can't be followed (`eval`, say)
-still loads; what it names is hashed. A trusted-by-hash patch's command
-actions run from the folder holding `.threadbear/` (the action's
-`folder`), where they were followed from, and one whose command is
-worked out in code (`'node ' + f`) and reaches a file the hash didn't
-cover refuses the whole patch: its `error` starts `Not run: its action`,
-names the file and says to write the command as plain text. Nor is
+verify-fix, 5 Nov). A trusted-by-hash patch's command actions run from
+the folder holding `.threadbear/` (the action's `folder`), where they
+were followed from. Each is followed again as the patch loads, and one
+the hash can't vouch for refuses the whole patch, its `error` starting
+`Not run: its action`: one worked out in code (`'node ' + f`) that reaches
+a file the hash didn't cover, or one that can't be followed all the way
+(`eval`, `python3 x.py`, a script that isn't there yet, a dynamic import
+in a script it runs), as the follow stops at the first of those and what
+comes after was never seen (Daybreak, 7 Nov). A string in a patch that
+isn't an action's command can't stop anything: it may not be a command at
+all. Pressing the chip checks again: the patch is hashed afresh as the
+action starts, and must still be the version trusted, with the command
+reaching only files that covers, from the folder it runs in (for a tool
+patch, its own folder too), as a script runs from the folder and not from
+the bytes that were hashed. Otherwise `actions.run` fails with `Didn't run
+<title>: ...` and nothing runs, and the patch is looked at again, so it
+shows waiting in Patches. Home's patches and Threadbear's own checkout
+aren't hashed, so theirs run as written. Nor is
 `check` held to the one-script rule, which runs when `tb land` does (the
 Land chip, or an agent that could run anything anyway); it's followed
 the same way. A live function (`items`, `when`, `badge`, `summary`) is
@@ -3492,8 +3532,9 @@ patch trust's store and rules.
   command that runs code it can't follow (`python -m x`, `node .`, `curl
   ... | sh`, a command in a variable, a dynamic `import()` in a script it
   runs), a package run by name (`npx`, `bunx`, `pnpm dlx`, `npm exec`), a
-  test runner finding its own tests (`node --test`, `bun test`), a program
-  on PATH, anywhere in what a command runs, that may load or run code from
+  test runner finding its own tests (`node --test`, `bun test`), an MCP
+  server that sets its own `cwd` (its files are followed from the folder), a
+  program on PATH, anywhere in what a command runs, that may load or run code from
   the folder by its own rules (a formatter, a test runner, a build tool,
   `git`, which an alias or `core.hooksPath` makes run anything) rather
   than a script, a shell, a JS runner, a package script, a function the
@@ -4271,6 +4312,38 @@ kept in `schedules.json` in the data dir.
   gone (`scheduleGone`, kept a day), asking again from 5 seconds before the
   newest row it heard. A claim doesn't count as a write for this. An older
   runner goes on using `sync:schedules`.
+- **Checks** (an experiment, `scheduleChecks`). A schedule's `check` is a
+  shell command run first, in its folder, each time it's due
+  (`src/schedule-check.ts`). It runs by itself from then on, so it's bound to
+  what was approved: `checkDigest` in `src/patch-trust.ts` follows the command
+  from its folder, as patch trust follows an action's, and hashes the command
+  and every file it reaches, scripts outside the repo that it runs by a path
+  included (each from the folder it runs in, so its `./x` is there, with its
+  own repo for what's the script's own; one it sources is hashed but can't be
+  followed, as it can change the shell it's sourced into). The hash goes in
+  `patch-trust.json`, as `check:<hash>` in that folder's list (so a worktree
+  counts as its main checkout), written only by the runner the check runs on:
+  making a schedule with a check, passing `check` to an update, or moving the
+  schedule's folder approves it as it is then. The backend's row says what
+  to run, never that it was approved. Before each run it's worked out afresh,
+  and the check doesn't run unless that hash is stored and its folder is
+  there. A script changed, a link retargeted, a file that turned up, a thread
+  moved, a row another client changed, or a check made for this runner from
+  another all count. The first run then goes ahead without the check,
+  saying so, and later ones are skipped (`lastRun.note`) until that version
+  of what it runs is approved: `update_schedule` with the same check, which
+  from a thread that asks first is a card as any check is. From such a
+  thread a check that can't be followed all the way (`python3 x.py`, `eval`)
+  is refused before any card. The card's hash and folder go with the save,
+  which binds that or nothing, so scripts changed or a thread moved while the
+  card was up change nothing. `schedules.create` and `schedules.update` take
+  them as `checkCard`, for a draining runner's tool call: it can only refuse.
+  A check that turns out to be this runner's with no folder to compare (a
+  `runner` naming this one, with no `folder`) is refused too. A Full thread, the app or `tb` may still set one, as it can run
+  anything anyway: it's bound to what could be followed, and what the check
+  loads past that isn't. Programs on PATH and installed packages aren't
+  followed, as for patches. Threadbear's own checkout binds only the command.
+  A change another process makes while the check runs isn't caught.
 - **Agents** make and change schedules with the `threadbear` tools
   (`schedule_message`, `list_schedules`, `update_schedule`,
   `delete_schedule`); `createdBy` is their thread. By default an agent's

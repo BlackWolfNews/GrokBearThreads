@@ -18,6 +18,7 @@ import { findPool, poolLine } from './pools.ts';
 import { AGENT_MESSAGE_PREFIX, EFFORT_LEVELS, MOVE_MESSAGE_PREFIX, sentByAgent } from './protocol.ts';
 import type { Scheduler } from './schedules.ts';
 import { MAX_CHECK_TIMEOUT_SECS } from './schedule-check.ts';
+import { checkDigest, type CheckCard } from './patch-trust.ts';
 import type { Projects } from './projects.ts';
 import { parseWhen, relativeFuture, relativeTime } from './when.ts';
 import { SAID_MAX } from './wake-when.ts';
@@ -221,7 +222,7 @@ export function buildThreadbearTools(
       ? {
           check: (update ? z.string().nullable() : z.string())
             .optional()
-            .describe(`A shell command run first, in its folder, before each run${update ? ' (null takes it off)' : ''}. If it prints nothing the run is skipped and no agent starts; what it prints is added to the message. For pollers: check for something new cheaply here. $THREADBEAR_CHECK_STATE is a file it can keep state in.`),
+            .describe(`A shell command run first, in its folder, before each run${update ? ' (null takes it off)' : ''}. If it prints nothing the run is skipped and no agent starts; what it prints is added to the message. For pollers: check for something new cheaply here. $THREADBEAR_CHECK_STATE is a file it can keep state in. It's bound to what it runs: after a change to its scripts it doesn't run until you pass the same check again.`),
           checkTimeoutSecs: (update ? z.number().int().min(1).max(MAX_CHECK_TIMEOUT_SECS).nullable() : z.number().int().min(1).max(MAX_CHECK_TIMEOUT_SECS))
             .optional()
             .describe(`Seconds the check may take before it counts as failed. Default 60${update ? ' (null)' : ''}.`),
@@ -420,6 +421,36 @@ export function buildThreadbearTools(
     if (!caller || id === selfId) return [];
     const t = await accessOf(id);
     return above(t, caller) ? [`${verb} "${t.title}", which has ${accessName(t, caller)}`] : [];
+  };
+  // What a card for a schedule's check approves, from a thread that asks
+  // first: a check runs by itself from then on, bound to what it runs (the
+  // answer goes to the Scheduler, which binds it as it saves, or refuses if
+  // what it runs or its folder moved on while the card was up: a card
+  // mustn't approve bytes nobody was shown). One whose scripts can't all be
+  // followed is refused before any card, as it couldn't vouch for them. With
+  // no folder here to look in, there's nothing to compare: a schedule that
+  // turns out to be another runner's is held there until it's approved there
+  // (schedules.ts, heldCheck), and one that turns out to be this runner's is
+  // refused. A thread with full access isn't asked, and its check is bound
+  // to as much as can be followed.
+  const checkGuard = (check: string | null | undefined, cwd: string | undefined, caller: Authority | undefined): { checkCard?: CheckCard } => {
+    const command = check?.trim() ? check : undefined;
+    if (!caller || !command) return {};
+    if (!cwd || !fs.existsSync(cwd)) return { checkCard: {} };
+    const seen = checkDigest(command, cwd);
+    if (seen.problem) throw new Error(`A schedule's check runs by itself, so what it runs must be something Threadbear can hash, and it can't follow this: ${seen.problem} Nothing changed. Put it in a shell script or JavaScript it can follow.`);
+    // Its real path: a link in the path retargeted while the card is up
+    // would mean somewhere else by then.
+    return { checkCard: { hash: seen.hash, folder: fs.realpathSync(cwd) } };
+  };
+  // The folder a thread's schedule's check runs in, when it's a thread here.
+  const threadFolder = async (id: string | undefined): Promise<string | undefined> => {
+    if (!id) return undefined;
+    try {
+      return (await control.get(id)).cwd;
+    } catch {
+      return undefined;
+    }
   };
   // The card says the whole command (cardInput shows it in full below).
   const checkReason = (check: string | null | undefined, caller: Authority | undefined): string[] =>
@@ -768,6 +799,7 @@ export function buildThreadbearTools(
           ...(toThread ? await sendReason(toThread, caller, 'Schedule a message to') : []),
           ...checkReason(check, caller),
         ];
+        const card = checkGuard(check, toThread ? await threadFolder(toThread) : runner ? (f ? path.resolve(expandHome(f)) : undefined) : where, caller);
         // Its title goes into the message each run, so it's on the card too.
         await confirm('schedule_message', reasons, { text, ...(title ? { title } : {}), ...(when ? { when } : { cron }), ...(toThread ? { threadId: toThread } : { new_thread, folder: where, permissionMode: mode ?? 'full', ...(runner ? { runner } : {}), ...(acc ? { account: acc } : {}), ...(pl ? { pool: pl } : {}) }), ...(check ? { check } : {}) }, extra?.signal);
         if (reasons.length && new_thread && !runner) await sameFolder(f ?? '.', where!);
@@ -784,7 +816,7 @@ export function buildThreadbearTools(
           ...(when !== undefined ? { at: parseWhen(when, now()) } : { cron }),
           timezone,
           ...target,
-          ...(check?.trim() ? { check } : {}),
+          ...(check?.trim() ? { check, ...card } : {}),
           ...(checkTimeoutSecs !== undefined ? { checkTimeoutSecs } : {}),
           createdBy: selfId,
         });
@@ -830,6 +862,7 @@ export function buildThreadbearTools(
         // Renaming and pausing never do.
         const caller = await restricted();
         const newFolder = f === undefined ? undefined : await folder(f);
+        let card: { checkCard?: CheckCard } = {};
         if (caller) {
           // What its runs reach: the thread it sends to, or new threads the
           // runner starts (outside any sandbox this caller is in).
@@ -852,6 +885,9 @@ export function buildThreadbearTools(
           // Setting the mode it already has is left out, so a write that
           // lands after someone else lowers it can't raise it back.
           if (permissionMode !== undefined && !current.threadId && permissionMode === was.mode) permissionMode = undefined;
+          // Moving it re-approves its check there too (Scheduler.update).
+          const checkNow = typeof check === 'string' ? check : newFolder !== undefined ? current.check : undefined;
+          card = checkGuard(checkNow, current.threadId ? await threadFolder(current.threadId) : (newFolder ?? (current.cwd ? path.resolve(expandHome(current.cwd)) : undefined)), caller);
           await confirm('update_schedule', reasons, { scheduleId: current.id, ...Object.fromEntries(Object.entries({ text, title, when, cron, timezone, paused, folder: newFolder, account: acc, pool: pl, model, effort, permissionMode, check, checkTimeoutSecs }).filter(([, v]) => v !== undefined)) }, extra?.signal);
           if (reasons.length && f !== undefined) await sameFolder(f, newFolder!);
         }
@@ -883,6 +919,7 @@ export function buildThreadbearTools(
           effort,
           permissionMode,
           ...(check !== undefined ? { check } : {}),
+          ...card,
           ...(checkTimeoutSecs !== undefined ? { checkTimeoutSecs } : {}),
         });
         return await scheduleLine(sc);

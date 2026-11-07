@@ -124,7 +124,7 @@ File references are where to look.
   `scheduleChecks`, off by default): a schedule's check command runs in
   `/bin/sh` before each run, as you, for at most a minute (or up to five,
   if the schedule says). Each keeps a
-  state file in `schedule-checks/` in Threadbear's data folder, and
+  state file (and a note that a held check was told about, `<id>.held`) in `schedule-checks/` in Threadbear's data folder, and
   beside it what the check last printed (`<id>.<hash>.kept.json`, readable
   only by you) until a run carrying it has been sent, and, while a check
   runs, which runner process is running it (`<id>.running.json`).

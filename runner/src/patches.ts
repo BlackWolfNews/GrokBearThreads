@@ -58,7 +58,7 @@ import { LIMITS } from './protocol.ts';
 import { imageRefFor } from './media.ts';
 import { FolderCache } from './folder-cache.ts';
 import { hasLineBreak, stripEnvComment } from './linear-text.ts';
-import { automaticCommand, liveCommandProblem, TRUST_ALL, unhashedFiles, worktreeOf, type PatchGate } from './patch-trust.ts';
+import { actionCommandProblem, automaticCommand, liveCommandProblem, TRUST_ALL, worktreeOf, type PatchGate } from './patch-trust.ts';
 import { verifiedUrl } from './verified-imports.ts';
 import { inBackground } from './background.ts';
 import { CUT_LOOKAHEAD, dropPartialEnd, safeEnd } from './safe-cut.ts';
@@ -436,11 +436,47 @@ export function automaticTrust(run: string): { file: string; hash: string } | un
 type LiveBinding = { folder: string; files: string[]; blocked?: Record<string, string>; hash: string; tool: boolean };
 const liveBindings = new Map<string, LiveBinding>();
 
+// The patch version a trusted-by-hash patch's command action was approved
+// by. On the action itself, as an action outlives its patch's next look (a
+// thread's patch set is cached), and that look can drop what's kept by file.
+// A symbol, as this is the runner's and not the protocol's: copying an
+// action keeps it (`{...a}`), and JSON leaves it out. runAction refuses a
+// project patch's command without one (actionRunProblem).
+const ACTION_TRUST = Symbol('actionTrust');
+type BoundAction = Action & { [ACTION_TRUST]?: { file: string; hash: string } };
+
+// Why an action of a trusted-by-hash patch mustn't run now, or undefined
+// when it may: what the hash covered may have changed since the patch was
+// last looked at, and an action runs from the folder, not from the bytes
+// that were hashed, so the patch is hashed afresh as the action starts, as
+// for a hook (Daybreak, 7 Nov). `loadsUnhashed`: whether this patch runs
+// whatever it holds (home's, Threadbear's own), which has no hash to check.
+export function actionRunProblem(action: Action, info: PatchInfo | undefined, verify: (file: string, hash: string) => boolean, loadsUnhashed: (patchesDir: string) => boolean): string | undefined {
+  if (action.kind !== 'command') return undefined;
+  const by = (action as BoundAction)[ACTION_TRUST];
+  if (!by) {
+    const open = !info?.file || info.source !== 'project' || loadsUnhashed(path.dirname(info.file));
+    return open ? undefined : "patch trust has no version of its patch to check it against.";
+  }
+  const bound = liveBindings.get(by.file);
+  if (!bound || bound.hash !== by.hash || !verify(by.file, by.hash)) return 'its patch, or a file it runs, changed since it was trusted.';
+  // A tool patch runs in the folder it applies in, and is checked from both,
+  // as a live command is (liveSh).
+  const command = action.command ?? '';
+  for (const dir of new Set([action.folder ?? bound.folder, bound.folder])) {
+    const problem = actionCommandProblem(command, dir, bound.files, bound.blocked);
+    if (problem) return problem;
+  }
+  return undefined;
+}
+
 // A trusted-by-hash patch's commands that run by themselves (its hooks and
 // worktree setup) as they'll run: each must be one hashed script and plain
 // words (automaticCommand), or the whole patch is refused with why, as a
 // patch whose code can't all be checked is. A copy, as `loaded` is cached.
-// Actions aren't held to it: one runs only when it's pressed.
+// Actions aren't held to it, as one runs only when it's pressed, but what
+// each runs must be followable and hashed (actionCommandProblem), checked
+// again when it's pressed (actionRunProblem).
 function bindAutomatic(loaded: LoadedPatch, file: string, files: string[], blocked?: Record<string, string>, hash?: string): LoadedPatch {
   liveBindings.delete(file);
   if (loaded.info.error) return loaded;
@@ -460,16 +496,15 @@ function bindAutomatic(loaded: LoadedPatch, file: string, files: string[], block
     hooks.push({ ...hook, exec: note(bound.run) });
   }
   // Actions run from the folder holding .threadbear/, where their commands
-  // were followed for the hash from, and one worked out in code mustn't
-  // reach a file the hash didn't cover.
-  const actions: Action[] = [];
+  // were followed for the hash from. One whose command reaches a file the
+  // hash didn't cover (it's worked out in code), or that can't be followed
+  // all the way, can't be vouched for, so it refuses the patch as a hook does.
+  const actions: BoundAction[] = [];
   for (const action of loaded.actions) {
     if (action.kind === 'command' && action.command) {
-      const missed = unhashedFiles(action.command, folder, [file, ...files]);
-      if (missed.length) {
-        return refuse(`action "${action.title}"`, `runs ${missed[0]}, which patch trust didn't hash: write the command in the patch as plain text, so trusting the patch covers what it runs.`);
-      }
-      actions.push({ ...action, folder: action.folder ?? fs.realpathSync(folder) });
+      const problem = actionCommandProblem(action.command, folder, [file, fs.realpathSync(file), ...files], blocked);
+      if (problem) return refuse(`action "${action.title}"`, problem);
+      actions.push({ ...action, folder: action.folder ?? fs.realpathSync(folder), ...(hash ? { [ACTION_TRUST]: { file, hash } } : {}) });
     } else actions.push(action);
   }
   let worktree = loaded.worktree;

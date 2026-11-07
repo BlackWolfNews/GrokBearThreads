@@ -83,8 +83,32 @@ export function dropKeptCheck(home: string, scheduleId: string, check?: string):
   } catch {
     return;
   }
-  for (const n of names) if (n.startsWith(`${scheduleId}.`) && n.endsWith('.kept.json')) fs.rmSync(path.join(dir, n), { force: true });
+  for (const n of names) if (n.startsWith(`${scheduleId}.`) && (n.endsWith('.kept.json') || n.endsWith('.held'))) fs.rmSync(path.join(dir, n), { force: true });
 }
+
+// A check whose approval no longer holds (schedules.ts, `held`): the digest
+// of what it'd run that a thread has been told about, so that's said once
+// and later runs are skipped until it's approved again, rather than an agent
+// starting every five minutes to hear the same thing.
+function heldCheckFile(home: string, scheduleId: string): string {
+  return path.join(home, 'schedule-checks', `${scheduleId}.held`);
+}
+
+export function heldToldAbout(home: string, scheduleId: string): string | undefined {
+  try {
+    return fs.readFileSync(heldCheckFile(home, scheduleId), 'utf8');
+  } catch {
+    return undefined;
+  }
+}
+
+export function noteHeldTold(home: string, scheduleId: string, hash: string): void {
+  fs.mkdirSync(path.join(home, 'schedule-checks'), { recursive: true });
+  atomicWriteFileSync(heldCheckFile(home, scheduleId), hash);
+}
+
+export const HELD_EXTRA = "\n\nIts check wasn't run, as what it runs has changed since it was approved (or it was never approved on this runner). So this run went ahead without it, and later runs are skipped until it's approved again. Look at what it runs, and if that's fine, call update_schedule with the same check to approve it as it is now.";
+export const HELD_SKIP = "Its check is waiting to be approved again, as what it runs has changed: update_schedule with the same check approves it.";
 
 // A check under way in some runner process, so another one (the next
 // release, in a handover) waits for it rather than running it again: the

