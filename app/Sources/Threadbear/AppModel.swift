@@ -106,6 +106,9 @@ final class AppModel {
     /// its draft stays in the box, greyed and locked, with a spinner for
     /// Send, so the click visibly did something however slow the runner is.
     var creatingThread = false
+    /// This Mac's runner's experiments that are on (hello's `experiments`),
+    /// for the ones that live in the app: Voice mode.
+    var experiments: Set<String> = []
     /// How long a thread may sit idle with one of Mike's messages still
     /// queued before the app gives up on it showing.
     static let queuedGrace: Double = 10

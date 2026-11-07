@@ -1378,6 +1378,9 @@ volume, and press Play to hear it again.
 
 ### Talking with a thread
 
+This is an experiment, off until you turn it on (see Experiments): there's
+no button, no download and no microphone prompt while it's off.
+
 Press the waveform button beside Send to talk with the thread out loud.
 It's on a new thread's composer too: there, what you say first starts the
 thread, and you carry on talking in it.
@@ -1389,7 +1392,11 @@ you talk over it, it stops to listen. It's the same thread with the same
 memory, tools and approvals. When it needs your OK it asks out loud, and
 you can just say "yes", "go ahead", "no" or "always allow"; anything
 longer ("no, use the other folder") goes to it as your message, as
-typing would. A question card you answer on screen.
+typing would. Your answer only counts for the request it has finished
+reading out: if another one comes in first, or you answer before it has
+got that far, nothing is answered and it reads the newest one to you.
+Question cards, plans and another Mac asking to start a thread you answer
+on screen.
 While Voice is on, the bear sits over the message box with what you're
 saying beside it: it perks up while it listens, nods along as you talk,
 looks up with thought dots while it works, and talks along with its
@@ -1403,7 +1410,7 @@ twenty more), how fast it talks, the language, and the microphone. Play
 a Sample tries a voice. The first time you use Voice, Threadbear
 downloads its voice engine (Kyutai's pocket-tts) and a voice model of
 about 240 MB, and macOS asks to let it use the microphone. Listening is
-done on your Mac by macOS; nothing you say is recorded. On headphones
+done on your Mac by macOS; nothing you say is recorded or kept in a log. On headphones
 (AirPods and the like) you can talk over it any time. On the Mac's
 speakers you can too, as long as macOS's echo cancellation starts; when
 it won't, Voice stops listening while it speaks, so it doesn't hear

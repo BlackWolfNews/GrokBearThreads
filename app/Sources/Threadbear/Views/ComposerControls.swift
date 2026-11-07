@@ -172,7 +172,7 @@ struct ComposerControls: View {
             }
             // Voice for the thread, or on a new thread's composer, where
             // what's said first starts it (Settings > Voice can hide it).
-            if voiceEnabled, !draftAway {
+            if voiceEnabled, VoiceMode.available, !draftAway {
                 VoiceButton(threadId: thread?.id ?? VoiceMode.newThread, size: SendButton.size)
                     .layoutPriority(1)
             }

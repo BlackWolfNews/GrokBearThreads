@@ -80,6 +80,7 @@ import { cleanUpWorktree, makeWorktree, sameSubfolder, worktreeInstructions } fr
 import { stripModelSuffix, type AccountRegistry, type LearnedAccountInfo } from './accounts.ts';
 import { pickAccount as pickByRoom, resetTime, type UsageReading } from './usage.ts';
 import { DEFAULT_POOL_FOLDERS, RUNNER_VERSION, expandHome, paths, readRunnerJson, writeRunnerJson, type Config } from './config.ts';
+import { experimentsOn } from './experiments.ts';
 import { WAIT_SLACK_MS, blockedUntil, limitWhy, loginOk, nextLogin, pickInPool, poolAccounts, poolForFolder, poolProviders, readPools, roomWait, validatePools } from './pools.ts';
 import { copyImageInto, imageRefFor } from './media.ts';
 import { isDirectory } from './fsutil.ts';
@@ -1161,7 +1162,7 @@ export class Runner {
 
   // --------------------------------------------------------------- queries
 
-  hello(): { runnerVersion: string; protocol: number; accounts: Account[]; pools: Pool[]; defaults: RunnerDefaults; clis?: CliStatus[] } {
+  hello(): { runnerVersion: string; protocol: number; accounts: Account[]; pools: Pool[]; defaults: RunnerDefaults; clis?: CliStatus[]; experiments?: string[] } {
     const accounts = this.accounts.list();
     const pools = this.pools(accounts);
     const defaults: RunnerDefaults = { cwd: this.cfg.defaults.cwd, accountId: this.defaultAccountId(accounts) };
@@ -1172,7 +1173,8 @@ export class Runner {
     if (claudeModel) defaults.model = claudeModel;
     if (this.cfg.defaults.models) defaults.models = { ...this.cfg.defaults.models };
     if (this.cfg.defaults.efforts) defaults.efforts = { ...this.cfg.defaults.efforts };
-    const out: ReturnType<Runner['hello']> = { runnerVersion: RUNNER_VERSION, protocol: PROTOCOL_VERSION, accounts, pools, defaults };
+    // Experiments on here, for the ones that live in the app (Voice mode).
+    const out: ReturnType<Runner['hello']> = { runnerVersion: RUNNER_VERSION, protocol: PROTOCOL_VERSION, accounts, pools, defaults, experiments: experimentsOn(this.cfg.home) };
     const clis = this.cliList();
     if (clis) out.clis = clis;
     return out;

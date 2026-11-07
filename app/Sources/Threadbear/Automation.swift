@@ -1077,6 +1077,8 @@ enum Automation {
             // Shows Voice mode's bear in a phase, with no microphone or
             // engine (screenshots of the avatar); "off" puts it away.
             guard let id = app.selection else { return "error no thread is open" }
+            // The experiment, for this look only: the mock's hello hasn't it.
+            app.experiments.insert(VoiceMode.experiment)
             let words = c["text"] as? String ?? ""
             let level = Float(number(c["level"]) ?? 0)
             switch c["phase"] as? String {
