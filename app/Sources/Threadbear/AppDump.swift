@@ -464,7 +464,7 @@ struct AppDump: Encodable {
     /// pick, its links and the answer picked.
     @MainActor
     static func decisions(_ thread: ThreadSummary, app: AppModel) -> [String]? {
-        guard Decisions.isOpen(thread) else { return nil }
+        guard Decisions.isOpen(thread, card: app.sessions[thread.id]?.openCard) else { return nil }
         let picks = app.picks(for: thread)
         let notes = app.notes(for: thread)
         var lines = ["\(picks.count) picked"]

@@ -29,7 +29,7 @@ extension AppModel {
     /// The answers picked on the thread's open card (ask index to option
     /// index), none for a card he hasn't touched.
     func picks(for thread: ThreadSummary) -> [Int: Int] {
-        guard Decisions.isOpen(thread), let seq = thread.asksSeq, let mine = askPicks[thread.id], mine.asksSeq == seq else { return [:] }
+        guard Decisions.isOpen(thread, card: sessions[thread.id]?.openCard), let seq = thread.asksSeq, let mine = askPicks[thread.id], mine.asksSeq == seq else { return [:] }
         return mine.picks
     }
 
@@ -37,7 +37,7 @@ extension AppModel {
     /// by ask. A box that's closed again keeps what was in it until the
     /// card is answered.
     func notes(for thread: ThreadSummary) -> [Int: AskNote] {
-        guard Decisions.isOpen(thread), let seq = thread.asksSeq, let mine = askPicks[thread.id], mine.asksSeq == seq else { return [:] }
+        guard Decisions.isOpen(thread, card: sessions[thread.id]?.openCard), let seq = thread.asksSeq, let mine = askPicks[thread.id], mine.asksSeq == seq else { return [:] }
         return mine.notes
     }
 
@@ -47,7 +47,7 @@ extension AppModel {
     /// the ask, which the transcript puts the cursor in, so the composer
     /// doesn't take it.
     func pickAnswer(thread: ThreadSummary, ask: Int, option: Int) {
-        guard Decisions.isOpen(thread), let seq = thread.asksSeq else { return }
+        guard Decisions.isOpen(thread, card: sessions[thread.id]?.openCard), let seq = thread.asksSeq else { return }
         var picks = picks(for: thread)
         picks[ask] = picks[ask] == option ? nil : option
         setAnswers(picks: picks, notes: notes(for: thread), seq: seq, threadId: thread.id)
@@ -56,7 +56,7 @@ extension AppModel {
 
     /// Mike wrote in an ask's Something else box.
     func setNote(thread: ThreadSummary, ask: Int, note: AskNote) {
-        guard Decisions.isOpen(thread), let seq = thread.asksSeq else { return }
+        guard Decisions.isOpen(thread, card: sessions[thread.id]?.openCard), let seq = thread.asksSeq else { return }
         var notes = notes(for: thread)
         notes[ask] = note.text.isEmpty && note.images.isEmpty ? nil : note
         setAnswers(picks: picks(for: thread), notes: notes, seq: seq, threadId: thread.id)

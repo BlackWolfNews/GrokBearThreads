@@ -1485,7 +1485,7 @@ extension Automation {
     @MainActor
     static func decide(_ c: [String: Any], app: AppModel) -> String {
         guard let thread = app.selectedThread else { return "error no thread open" }
-        guard Decisions.isOpen(thread) else { return "error the open thread has no card of asks to answer" }
+        guard Decisions.isOpen(thread, card: app.sessions[thread.id]?.openCard) else { return "error the open thread has no card of asks to answer" }
         if c["clear"] as? Bool == true {
             for (ask, option) in app.picks(for: thread) { app.pickAnswer(thread: thread, ask: ask, option: option) }
         }

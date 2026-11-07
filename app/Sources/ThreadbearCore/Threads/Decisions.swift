@@ -184,10 +184,23 @@ public enum Decisions {
         return rest.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Whether the open card can be answered: a completed turn that said
-    /// it needs Mike, with asks, and nothing running.
-    public static func isOpen(_ thread: ThreadSummary) -> Bool {
-        thread.needs == "you" && thread.asksSeq != nil && !thread.asks.isEmpty && !thread.status.isBusy
+    /// Whether the open card can be answered: the last completed turn said
+    /// it needs Mike, with asks, and nothing running, or else a running
+    /// turn whose transcript still has that card open (`card`, the
+    /// session's TranscriptModel.openCard). A background job the agent
+    /// left (a script waiting for his phone to unlock) wakes it with a
+    /// runner message, which leaves the card open, and while that turn
+    /// ran every click on it did nothing (Mike, 7 Nov); his answer now
+    /// goes into the running turn like anything he sends mid-turn. The
+    /// summary keeps its asks until the turn ends, even after his own
+    /// reply (from the phone too) closed the card, so a running thread
+    /// takes the card's word for it: an unsent pick on a card he'd
+    /// already answered mustn't go with his next message.
+    public static func isOpen(_ thread: ThreadSummary, card openCard: TranscriptRow? = nil) -> Bool {
+        guard thread.needs == "you", let seq = thread.asksSeq, !thread.asks.isEmpty else { return false }
+        guard thread.status.isBusy else { return true }
+        guard case .asks(let card)? = openCard?.content else { return false }
+        return card.isOpen && !card.isDone && card.seq == seq
     }
 
     /// The summary with the card the transcript has open, for a summary
