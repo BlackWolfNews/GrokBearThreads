@@ -116,7 +116,9 @@ final class VoiceMode {
                 }
                 audio.onSpeaking = { [weak self] on in
                     guard let self, self.isOn else { return }
-                    if !on { self.quietUntil = CACurrentMediaTime() + 0.8 }
+                    // A moment for sound still on its way out, longer
+                    // when the microphone can hear it.
+                    if !on { self.quietUntil = CACurrentMediaTime() + ((self.audio?.echoCancels ?? false) ? 0.4 : 0.8) }
                     if on { self.phase = .speaking } else if case .speaking = self.phase { self.phase = self.working ? .thinking : .listening }
                 }
                 self.audio = audio
@@ -155,7 +157,8 @@ final class VoiceMode {
         // A start still under way gives way, whatever else is going on.
         startId = UUID()
         guard isOn || audio != nil else { return }
-        if let threadId, let text = tracker.flush() { send(text, to: threadId) }
+        let flushedAt = spokenAt()
+        if let threadId, let text = tracker.flush() { send(text, to: threadId, spokenAt: flushedAt) }
         endpointTimer?.invalidate()
         endpointTimer = nil
         audio?.stop()
@@ -197,7 +200,12 @@ final class VoiceMode {
         // Without echo cancellation the microphone hears the agent: what
         // it hears while speaking, and just after, is its own voice.
         // Headphones don't leak, so he can still talk over it there.
-        if let audio, !audio.echoCancels, !VoiceAudio.outputIsHeadphones(), audio.isSpeaking || CACurrentMediaTime() < quietUntil { return }
+        // By when the words were captured as well as now: the recogniser can
+        // hand over what the microphone heard a while ago.
+        if let audio, !audio.echoCancels, !VoiceAudio.outputIsHeadphones() {
+            let capturedAt = audio.hostTime(ofAudio: result.start)
+            if audio.isSpeaking || CACurrentMediaTime() < quietUntil || capturedAt.map({ $0 < quietUntil }) ?? true { return }
+        }
         if tracker.add(result, now: CACurrentMediaTime()) {
             // He's talking: the agent stops.
             if audio?.isSpeaking == true { audio?.stopSpeaking() }
@@ -206,19 +214,29 @@ final class VoiceMode {
     }
 
     private func checkPause() {
+        let at = spokenAt()
         guard let threadId, let text = tracker.take(now: CACurrentMediaTime()) else { return }
-        send(text, to: threadId)
+        send(text, to: threadId, spokenAt: at)
     }
 
-    private func send(_ text: String, to threadId: String) {
+    /// When he started saying what's waiting, on the clock approvals use.
+    /// Not known counts as long ago, which can't answer a card.
+    private func spokenAt() -> Double {
+        tracker.pendingStart.flatMap { audio?.hostTime(ofAudio: $0) } ?? -.infinity
+    }
+
+    private func send(_ text: String, to threadId: String, spokenAt: Double) {
         // A new thread's composer: the first words start the thread.
         if threadId == Self.newThread {
             working = true
             phase = .thinking
             if makingThread { waitingWords.append(text); return }
             makingThread = true
+            let startId = self.startId
             AppModel.shared.startThreadSpoken(text) { [weak self] id in
-                guard let self else { return }
+                // Only the Voice that asked: stopped and started again since,
+                // this thread is nothing to do with what's on now.
+                guard let self, self.startId == startId else { return }
                 self.makingThread = false
                 guard self.threadId == Self.newThread else { return }
                 guard let id else {
@@ -238,7 +256,8 @@ final class VoiceMode {
         }
         // A yes or a no on its own answers the card he heard, and only that
         // one (SpokenApprovals says why).
-        switch approvals.take(text) {
+        let quietSince = audio?.isSpeaking == true ? Double.infinity : quietUntil
+        switch approvals.take(text, spokenAt: spokenAt, quietSince: quietSince) {
         case .answer(let card, let decision):
             let session = AppModel.shared.session(for: threadId)
             // Last look at what the thread itself shows: live events can't
@@ -314,19 +333,17 @@ final class VoiceMode {
         }
     }
 
-    /// A card's question, then what to say to it. The card can be answered
-    /// from when the question has played to its end, not before, so a card
-    /// he talked over or hasn't got to yet can't take his yes. The "say yes
-    /// or no" is apart from it, so he needn't wait through that to answer.
+    /// A card's request, whole, then what to say to it. It can be answered
+    /// from when all that has played to its end, so one he talked over or
+    /// hasn't got to yet can't take his yes. A card the words can't cover is
+    /// named, and left for the screen.
     private func readOut(_ card: ApprovalRequest) {
-        guard SpokenApprovals.answerable(card) else {
-            speakNow("There's a request on screen for you to answer.")
+        guard let reading = SpokenApprovals.reading(of: card) else {
+            speak(SpokenText.sentences("I need your OK on screen: \(card.title)."))
             return
         }
-        // Only the words that are read: SpokenText leaves code out, so a
-        // command in the title gets its "on screen" line, as a reply's does.
-        speak(SpokenText.sentences("I need your OK: \(card.title)."), played: { [weak self] in self?.approvals.readOut(card) })
-        speak([card.options.contains(.allowAlways) ? "Say yes, no, or always allow." : "Say yes or no."])
+        let ask = card.options.contains(.allowAlways) ? "Say yes, no, or always allow." : "Say yes or no."
+        speak(["I need your OK.", reading, ask], played: { [weak self] in self?.approvals.readOut(card, at: CACurrentMediaTime()) })
     }
 
     /// A short line of its own, said straight away (an answer's "OK").

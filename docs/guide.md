@@ -1392,11 +1392,13 @@ you talk over it, it stops to listen. It's the same thread with the same
 memory, tools and approvals. When it needs your OK it asks out loud, and
 you can just say "yes", "go ahead", "no" or "always allow"; anything
 longer ("no, use the other folder") goes to it as your message, as
-typing would. Your answer only counts for the request it has finished
-reading out: if another one comes in first, or you answer before it has
-got that far, nothing is answered and it reads the newest one to you.
-Question cards, plans and another Mac asking to start a thread you answer
-on screen.
+typing would. Your answer only counts once it has finished reading the
+request out and stopped talking: if another one comes in first, or you
+answer before it's done, nothing is answered and it reads the newest one
+to you. It only takes an answer by voice for a request it can read out
+whole, like a one-line command. Anything more (a longer command, an edit,
+a plan, another Mac asking to start a thread) it names and leaves for you
+to answer on screen, as you do question cards.
 While Voice is on, the bear sits over the message box with what you're
 saying beside it: it perks up while it listens, nods along as you talk,
 looks up with thought dots while it works, and talks along with its

@@ -42,6 +42,12 @@ public struct UtteranceTracker: Sendable {
         Self.join((finals + [volatile].compactMap { $0 }).map(\.text))
     }
 
+    /// Where in the audio what's waiting starts (seconds), to tell when he
+    /// said it: results can reach us well after the words.
+    public var pendingStart: Double? {
+        (finals + [volatile].compactMap { $0 }).map(\.start).min()
+    }
+
     /// Whether anything is waiting to go.
     public var hasWords: Bool { !pending.isEmpty }
 

@@ -39,6 +39,14 @@ final class VoiceAudio {
     var onSpeaking: ((Bool) -> Void)?
 
     private(set) var isSpeaking = false
+    private let audioClock = AudioClock()
+
+    /// The clock time (CACurrentMediaTime's) that a time in the audio stream
+    /// was captured: the recogniser counts from the first buffer it was fed.
+    /// Nil before there's been one.
+    func hostTime(ofAudio seconds: Double) -> Double? {
+        audioClock.start.map { $0 + seconds }
+    }
 
     // MARK: Listening
 
@@ -64,7 +72,10 @@ final class VoiceAudio {
                 for try await result in transcriber.results {
                     let text = String(result.text.characters)
                     let range = result.range
-                    let r = UtteranceTracker.Result(text: text, start: range.start.seconds.finite, end: range.end.seconds.finite, isFinal: result.isFinal)
+                    // Its first word's time if it says: a result's range can
+                    // begin with the silence before him.
+                    let firstWord = result.text.runs.compactMap { $0.audioTimeRange }.first?.start.seconds
+                    let r = UtteranceTracker.Result(text: text, start: (firstWord ?? range.start.seconds).finite, end: range.end.seconds.finite, isFinal: result.isFinal)
                     self?.onResult?(r)
                 }
             } catch {
@@ -119,7 +130,9 @@ final class VoiceAudio {
         // The converter is made from the first buffer, on the audio thread.
         let converter = ConverterBox(to: analyzerFormat)
         let gate = LevelGate()
-        engine.inputNode.installTap(onBus: 0, bufferSize: 2048, format: nil) { [weak self] buffer, _ in
+        let clock = audioClock
+        engine.inputNode.installTap(onBus: 0, bufferSize: 2048, format: nil) { [weak self] buffer, when in
+            clock.begin(at: when)
             if let converted = converter.convert(buffer) {
                 feed.yield(AnalyzerInput(buffer: converted))
             }
@@ -145,7 +158,11 @@ final class VoiceAudio {
         address.mSelector = kAudioDevicePropertyTransportType
         if AudioObjectGetPropertyData(device, &address, 0, nil, &size, &transport) == noErr,
            transport == kAudioDeviceTransportTypeBluetooth || transport == kAudioDeviceTransportTypeBluetoothLE {
-            return true
+            // With a microphone of its own: a Bluetooth speaker's sound is in
+            // the room for this Mac's microphone to hear.
+            var input = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyStreams, mScope: kAudioDevicePropertyScopeInput, mElement: kAudioObjectPropertyElementMain)
+            var inputSize: UInt32 = 0
+            return AudioObjectGetPropertyDataSize(device, &input, 0, nil, &inputSize) == noErr && inputSize > 0
         }
         var source: UInt32 = 0
         address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyDataSource, mScope: kAudioDevicePropertyScopeOutput, mElement: kAudioObjectPropertyElementMain)
@@ -197,7 +214,10 @@ final class VoiceAudio {
             for sentence in sentences {
                 guard let self, !Task.isCancelled, self.speakRound == round else { return }
                 do {
-                    try await self.stream(sentence, voice: voice, base: base, round: round)
+                    let samples = try await self.stream(sentence, voice: voice, base: base, round: round)
+                    // A 200 with little or no sound in it isn't that sentence
+                    // said, and "played" mustn't say it was.
+                    if samples < Self.fewestSamples(for: sentence) { whole = false }
                 } catch {
                     if !Task.isCancelled { VoiceLog.write("couldn't speak: \(error.localizedDescription)") }
                     whole = false
@@ -224,17 +244,28 @@ final class VoiceAudio {
         setSpeaking(false)
     }
 
-    private func stream(_ text: String, voice: String, base: URL, round: Int) async throws {
+    /// Far fewer than any voice takes over it (about 30 ms a letter, when
+    /// speech is around 70), to catch a reply that came back cut short.
+    static func fewestSamples(for sentence: String) -> Int {
+        sentence.count * 720
+    }
+
+    /// Plays it as it arrives. The samples scheduled.
+    @discardableResult
+    private func stream(_ text: String, voice: String, base: URL, round: Int) async throws -> Int {
         var request = URLRequest(url: base.appendingPathComponent("tts"))
         request.httpMethod = "POST"
         let boundary = "tb-\(UUID().uuidString)"
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         request.httpBody = Self.form(["text": text, "voice_url": voice], boundary: boundary)
+        var samples = 0
         for try await piece in Self.speech(request) {
             try Task.checkCancellation()
-            guard speakRound == round else { return }
+            guard speakRound == round else { return samples }
             schedule(piece, round: round)
+            samples += piece.samples.count
         }
+        return samples
     }
 
     /// A stretch of speech, ready to play.
@@ -414,6 +445,26 @@ final class VoiceAudio {
         var device = device
         let status = AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &device, UInt32(MemoryLayout<AudioDeviceID>.size))
         if status != noErr { VoiceLog.write("couldn't pick that microphone (\(status)); using the default") }
+    }
+}
+
+/// When the microphone's first buffer was captured, from the audio thread,
+/// read on the main one.
+final class AudioClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var first: Double?
+
+    func begin(at when: AVAudioTime) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard first == nil, when.isHostTimeValid else { return }
+        first = AVAudioTime.seconds(forHostTime: when.hostTime)
+    }
+
+    var start: Double? {
+        lock.lock()
+        defer { lock.unlock() }
+        return first
     }
 }
 

@@ -102,8 +102,8 @@ and macOS never asks for the microphone. On, the first time you use it
 (Settings > Voice, or the waveform button beside Send), it downloads Kyutai's pocket-tts (v4.0.1, its
 Apple silicon build, checked against its SHA-256 before it's used) from
 its GitHub release into `~/Library/Application Support/Threadbear/voice/`,
-with its log `serve.log` and `serve.pid` (which process to stop if the app
-crashed) beside it. pocket-tts then downloads its English
+with its log `serve.log` and a `serve.<app's pid>.pid` (which process to
+stop if the app crashed) beside it. pocket-tts then downloads its English
 model and voices from Hugging Face into `~/.cache/huggingface` (about
 240 MB; another language is another model). macOS asks once for the
 microphone, and may download its own speech recognition files for the
@@ -206,7 +206,7 @@ started, errors), never what was said, and is started afresh past 256 KB.
   `pocket-tts serve` on a free port on 127.0.0.1 (not reachable from other
   machines), sends it each reply's sentences and plays what comes back.
   It stops when the app quits. If the app crashed instead, the next launch
-  reads `serve.pid` and stops it, once it's checked that process really is
+  reads that pid file and stops it, once it's checked that process really is
   this pocket-tts. While Voice is on, the microphone is on,
   and what you say is turned into text on this Mac by macOS's own speech
   recognition (SpeechAnalyzer); the audio isn't saved or sent anywhere.

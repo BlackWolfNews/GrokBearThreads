@@ -9,7 +9,7 @@ import ThreadbearCore
 /// into ~/Library/Application Support/Threadbear/voice/, and run there as
 /// `pocket-tts serve` on a free port on 127.0.0.1 for as long as Voice is
 /// in use (it stops a few minutes after, and when the app quits; if the app
-/// crashes, the next launch stops it, from serve.pid). Its
+/// crashes, the next launch stops it, from its serve.*.pid file). Its
 /// model and voices come from Hugging Face on first use, into the usual
 /// ~/.cache/huggingface (about 240 MB). docs/on-your-mac.md lists all of it.
 @MainActor
@@ -87,41 +87,45 @@ final class VoiceServer {
         process = nil
         port = nil
         language = nil
-        try? FileManager.default.removeItem(at: Self.pidFile)
+        try? FileManager.default.removeItem(at: Self.pidFile(owner: getpid()))
     }
 
     // MARK: A server left behind by a crash
 
-    /// The running server's process id, and the app's that started it. The
-    /// app quitting stops the server, but a crash can't, and one nobody talks
-    /// to would hold its model in memory until the Mac restarts.
-    static var pidFile: URL { folder.appendingPathComponent("serve.pid") }
+    /// The running server's process id, in a file named for the app that
+    /// started it, as a debug build shares this folder. The app quitting stops
+    /// the server, but a crash can't, and one nobody talks to would hold its
+    /// model in memory until the Mac restarts.
+    private static func pidFile(owner: pid_t) -> URL { folder.appendingPathComponent("serve.\(owner).pid") }
 
     /// Stops a server an earlier run of the app left going, checking it's
     /// really ours first: pids get reused. On launch, whether or not Voice is
     /// on, so turning the experiment off can't strand one, and before a start.
-    /// One whose app is still running is left alone: a debug build shares this
-    /// folder, and mustn't end Mike's conversation in the real app.
+    /// One whose app is still running is left alone: a debug build mustn't
+    /// end Mike's conversation in the real app.
     static func reapLeftover() {
-        guard let text = try? String(contentsOf: pidFile, encoding: .utf8) else { return }
-        let parts = text.split(whereSeparator: \.isWhitespace).compactMap { pid_t($0) }
-        guard parts.count == 2, parts[0] > 1 else {
-            try? FileManager.default.removeItem(at: pidFile)
-            return
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+        for name in files where name.hasPrefix("serve.") && name.hasSuffix(".pid") {
+            let file = folder.appendingPathComponent(name)
+            guard let owner = pid_t(name.dropFirst("serve.".count).dropLast(".pid".count)) else { continue }
+            if owner != getpid(), kill(owner, 0) == 0 { continue }
+            if let text = try? String(contentsOf: file, encoding: .utf8),
+               let pid = pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines)), pid > 1,
+               // The real path of what's running against ours as written, so
+               // a symlink swapped in at our path can't point this at another
+               // program.
+               executablePath(of: pid) == binary.standardizedFileURL.path {
+                kill(pid, SIGTERM)
+                VoiceLog.write("stopped pocket-tts left over from an earlier run")
+            }
+            try? FileManager.default.removeItem(at: file)
         }
-        let (pid, owner) = (parts[0], parts[1])
-        if owner != getpid(), kill(owner, 0) == 0 { return }
-        if executablePath(of: pid) == binary.resolvingSymlinksInPath().path {
-            kill(pid, SIGTERM)
-            VoiceLog.write("stopped pocket-tts left over from an earlier run")
-        }
-        try? FileManager.default.removeItem(at: pidFile)
     }
 
     private static func executablePath(of pid: pid_t) -> String? {
         var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
         guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
-        return URL(fileURLWithPath: String(cString: buffer)).resolvingSymlinksInPath().path
+        return String(cString: buffer)
     }
 
     // MARK: Starting
@@ -148,7 +152,7 @@ final class VoiceServer {
         do { try process.run() } catch { throw Failure.start(error.localizedDescription) }
         self.process = process
         self.port = port
-        try? "\(process.processIdentifier) \(getpid())".write(to: Self.pidFile, atomically: true, encoding: .utf8)
+        try? String(process.processIdentifier).write(to: Self.pidFile(owner: getpid()), atomically: true, encoding: .utf8)
         let base = URL(string: "http://127.0.0.1:\(port)")!
         // The first start downloads the model, which can take a minute.
         onStatus?(FileManager.default.fileExists(atPath: Self.hubCache.path) ? "Starting the voice engine…" : "Downloading the voice model (about 240 MB)…")
