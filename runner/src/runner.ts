@@ -2,6 +2,8 @@
 // release and snoozes. Providers plug in through AgentAdapter; the WebSocket
 // server in rpc.ts is a thin layer over the public methods here.
 import { RELEASE } from './release.ts';
+import type { UserInput } from './adapters/types.ts';
+import { INSTRUCTIONS_CLEARED } from './instructions.ts';
 import { reachable, type Reachable } from './net-probe.ts';
 import type { UpstreamStatus } from './upstream.ts';
 import fs from 'node:fs';
@@ -1503,7 +1505,9 @@ export class Runner {
     // more thing" shouldn't send the thread away. It can ask again.
     if (turn.endTurn?.archive) turn.endTurn = { ...turn.endTurn, archive: false };
     this.markDirty(st);
-    rt.session!.send({ id: msg.turnId, text: this.forAgent(msg), images: msg.images });
+    // A change reaches a running turn too, or a clear could wait out as many
+    // messages as were sent into it (Codex review).
+    this.sendWithInstructionsNews(st, { id: msg.turnId, text: this.forAgent(msg), images: msg.images });
   }
 
   // A turn that had its end_turn, opened again once the agent has read a
@@ -1659,21 +1663,15 @@ export class Runner {
     // Kept for the next message when this one is a command.
     const news = command ? undefined : this.projectNews(rec);
     if (news) text = `${news}\n\n${text}`;
-    // Kept for the next message when this one is a command, as the news is.
-    const standing = command ? undefined : this.instructionsNews(rec);
-    if (standing) {
-      text = `${standing}\n\n${text}`;
-      // In the transcript too: a change anything made reaches every thread,
-      // so it shouldn't only be something the agents can see.
-      this.emit(st, { type: 'system.note', text: "Told this thread's agent about a change to your standing instructions." }, msg.turnId);
-    }
     if (rec.moved) {
       // A CLI that moves folders itself: the live session got setCwd, or a
       // released one resumes in the new folder (startSession passes it).
       this.emit(st, { type: 'system.note', text: `Moved to ${rec.cwd}. The session carries on there.` }, msg.turnId);
       delete rec.moved;
     }
-    rt.session!.send({ id: msg.turnId, text, images: msg.images });
+    // Kept for the next message when this one is a command, as the news is.
+    if (command) rt.session!.send({ id: msg.turnId, text, images: msg.images });
+    else this.sendWithInstructionsNews(st, { id: msg.turnId, text, images: msg.images });
     if (msg.reviewId && !rec.reviewDeliveries?.includes(msg.reviewId)) {
       (rec.reviewDeliveries ??= []).push(msg.reviewId);
       // A persisted transcript row is not proof of dispatch: both initial
@@ -3256,14 +3254,33 @@ export class Runner {
     if (!standing) {
       // Nothing written while it never held any: with the experiment off a
       // thread record doesn't change at all.
-      if (before === undefined) return undefined;
-      delete rec.instructionsTold;
+      if (before === undefined || before === INSTRUCTIONS_CLEARED) return undefined;
+      rec.instructionsTold = INSTRUCTIONS_CLEARED;
       return 'Note from Threadbear: the user cleared their standing instructions; earlier ones no longer apply.';
     }
     const hash = instructionsHash(standing);
     if (before === hash) return undefined;
     rec.instructionsTold = hash;
-    return `Note from Threadbear: the user's standing instructions${before === undefined ? '' : ' have changed, and replace any earlier ones'}.\n\n${standingText(standing)}`;
+    return `Note from Threadbear: the user's standing instructions${before === undefined || before === INSTRUCTIONS_CLEARED ? '' : ' have changed, and replace any earlier ones'}.\n\n${standingText(standing)}`;
+  }
+
+  // Sends a message with any change to the standing instructions in front.
+  // They count as told only once the CLI has taken it: a send that throws
+  // (a picture gone from the queue) would otherwise use up a clear that never
+  // arrived (Codex review). In the transcript too, as a change anything made
+  // reaches every thread, so it shouldn't only be something agents can see.
+  sendWithInstructionsNews(st: ThreadState, message: UserInput): void {
+    const { rec, rt } = st;
+    const before = rec.instructionsTold;
+    const standing = this.instructionsNews(rec);
+    try {
+      rt.session!.send(standing ? { ...message, text: `${standing}\n\n${message.text}` } : message);
+    } catch (e) {
+      if (before === undefined) delete rec.instructionsTold;
+      else rec.instructionsTold = before;
+      throw e;
+    }
+    if (standing) this.emit(st, { type: 'system.note', text: "Told this thread's agent about a change to your standing instructions." }, message.id);
   }
 
   // The thread's projects its session hasn't been told about, as lines to

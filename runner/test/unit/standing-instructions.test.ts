@@ -91,3 +91,72 @@ test('a command keeps the news for the next message', async () => {
   await tick();
   assert.match(h.adapter.last.sent.at(-1)!.text, /Be brief\.\n\nnext$/);
 });
+
+// What the review by another lab found (7 Nov): three ways a session could keep
+// instructions it should have been told about.
+test('a change reaches a message sent into a running turn', async () => {
+  let standing = 'Be brief.';
+  const h = makeHarness(tmpDir(), {}, { standingInstructions: () => standing });
+  const { thread } = h.runner.create({ text: 'Start', cwd: tmpDir(), accountId: 'claude-3' });
+  await tick();
+  h.adapter.last.init();
+  standing = '';
+  h.runner.send(thread.id, 'one more thing');
+  await tick();
+  assert.match(h.adapter.last.sent.at(-1)!.text, /^Note from Threadbear: the user cleared their standing instructions[\s\S]*one more thing$/);
+});
+
+test("a send that fails doesn't use up the news", async () => {
+  let standing = 'Be brief.';
+  const h = makeHarness(tmpDir(), {}, { standingInstructions: () => standing });
+  const { thread } = h.runner.create({ text: 'Start', cwd: tmpDir(), accountId: 'claude-3' });
+  await tick();
+  h.adapter.last.init();
+  h.adapter.last.result('completed');
+  await tick();
+  standing = '';
+  const session = h.adapter.last;
+  const send = session.send.bind(session);
+  session.send = () => {
+    throw new Error('a picture went missing');
+  };
+  const st = h.runner.threads.get(thread.id)!;
+  assert.throws(() => h.runner.sendWithInstructionsNews(st, { id: 'x', text: 'lost', images: [] }), /picture/);
+  assert.notEqual(st.rec.instructionsTold, 'cleared');
+  assert.equal(h.events(thread.id).filter((e: { text?: string }) => /standing instructions/.test(e.text ?? '')).length, 0);
+  session.send = send;
+  h.runner.send(thread.id, 'again');
+  await tick();
+  assert.match(h.adapter.last.sent.at(-1)!.text, /^Note from Threadbear: the user cleared their standing instructions/);
+});
+
+test('going back past a clear says it again, and a session that never had any hears nothing', async () => {
+  const run = async (first: string) => {
+    let standing = first;
+    const h = makeHarness(tmpDir(), {}, { standingInstructions: () => standing });
+    h.adapter.rewind = async () => ({ resumeAt: 'entry-1' });
+    const { thread } = h.runner.create({ text: 'Start', cwd: tmpDir(), accountId: 'claude-3' });
+    await tick();
+    const finish = async () => {
+      h.adapter.last.init();
+      h.adapter.last.result('completed');
+      await tick();
+    };
+    await finish();
+    standing = '';
+    const { turnId } = h.runner.send(thread.id, 'second');
+    await tick();
+    const told = h.adapter.last.sent.at(-1)!.text;
+    await finish();
+    const seq = h.store.log(thread.id).read(1, h.store.log(thread.id).lastSeq).find((e) => e.type === 'user.message' && e.turnId === turnId)!.seq;
+    await h.runner.editMessage(thread.id, seq, 'second, edited');
+    await tick();
+    return { told, edited: h.adapter.last.sent.at(-1)!.text };
+  };
+  const held = await run('Be brief.');
+  assert.match(held.told, /cleared their standing instructions/);
+  assert.match(held.edited, /^Note from Threadbear: the user cleared their standing instructions[\s\S]*second, edited$/);
+  const never = await run('');
+  assert.equal(never.told, 'second');
+  assert.equal(never.edited, 'second, edited');
+});

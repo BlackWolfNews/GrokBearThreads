@@ -149,7 +149,8 @@ export type ThreadRecord = {
   // line when it joined one), so it hears about each once.
   projectsTold?: string[];
   // The hash of Mike's standing instructions the native session was last
-  // told, so it hears each change once.
+  // told, so it hears each change once; 'cleared' or 'rewound' (instructions.ts).
+  // Absent while it has never held any.
   instructionsTold?: string;
   // Highlights (highlights.ts): what's been found and pinned, and the
   // event it had read up to. Brought up to date when a client asks.

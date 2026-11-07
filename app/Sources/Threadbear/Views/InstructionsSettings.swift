@@ -98,12 +98,21 @@ private struct InstructionsEditor: View {
 }
 
 /// The file isn't what was saved here. Keeping it sends the words shown, not
-/// "trust the file", so a file changed again while he reads doesn't get signed.
+/// "trust the file". Those stay as they were when he started reading, whatever
+/// the file does next: a new version swapped in under him could otherwise have
+/// its first lines changed above where he'd scrolled to (Codex review). A newer
+/// one waits behind a button, and starts from the top.
 private struct InstructionsChangedOutside: View {
     @Environment(AppModel.self) private var app
     let file: String
+    @State private var reviewed: String
     @State private var busy = false
     @State private var error: String?
+
+    init(file: String) {
+        self.file = file
+        _reviewed = State(initialValue: file)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -111,22 +120,27 @@ private struct InstructionsChangedOutside: View {
                 .foregroundStyle(.orange)
                 .fixedSize(horizontal: false, vertical: true)
             ScrollView {
-                Text(file.isEmpty ? "The file is gone, or can't be read." : file)
-                    .foregroundStyle(file.isEmpty ? .secondary : .primary)
+                Text(reviewed.isEmpty ? "The file is gone, or can't be read." : reviewed)
+                    .foregroundStyle(reviewed.isEmpty ? .secondary : .primary)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(maxHeight: 160)
+            .id(reviewed)
             if let error {
                 Text(error).font(.caption).foregroundStyle(.red)
             }
             HStack {
                 if busy { ProgressView().controlSize(.small) }
+                if file != reviewed {
+                    Button("Show Newer Version") { reviewed = file }
+                        .tip("The file has changed again. Show what it holds now")
+                }
                 Spacer()
                 Button("Clear") { resolve("") }
                     .tip("Delete these, so agents are given no standing instructions")
-                Button("Use These") { resolve(file) }
-                    .disabled(file.isEmpty)
+                Button("Use These") { resolve(reviewed) }
+                    .disabled(reviewed.isEmpty)
                     .tip("Give every agent exactly the text shown here")
             }
             .disabled(busy)

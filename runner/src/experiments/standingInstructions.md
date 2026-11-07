@@ -13,7 +13,7 @@ An Instructions box in Settings > General, for what every agent should always ke
 
 ## Lives in
 
-`runner/src/instructions.ts`, built in `main.ts`; `instructionsNews`, `briefFor` and `standingText` in `runner.ts`, `instructionsTold` in `store.ts`; app `Views/InstructionsSettings.swift`, `InstructionsModel.swift`, Core `Protocol/Instructions.swift`, the `standingInstructions` case in `RPCClient.swift` and `AppModel+Connection.swift`, `InstructionsSection()` in `SettingsView.swift`
+`runner/src/instructions.ts`, built in `main.ts`; `instructionsNews`, `sendWithInstructionsNews`, `briefFor` and `standingText` in `runner.ts`, its line in `runner/editing.ts`, `instructionsTold` in `store.ts`; app `Views/InstructionsSettings.swift`, `InstructionsModel.swift`, Core `Protocol/Instructions.swift`, the `standingInstructions` case in `RPCClient.swift` and `AppModel+Connection.swift`, `InstructionsSection()` in `SettingsView.swift`
 
 ## Taking it out
 

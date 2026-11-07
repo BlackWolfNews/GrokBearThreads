@@ -235,7 +235,7 @@ async function main(): Promise<void> {
   // message gets (Runner.forAgent). Only phone messages read it, and they
   // only come through that mirror.
   let atMac: boolean | undefined;
-  const instructions = new InstructionsStore({ home: cfg.home, publish: (n) => runner.publish(n) });
+  const instructions = new InstructionsStore({ home: cfg.home, token, publish: (n) => runner.publish(n) });
   runner = new Runner({
     standingInstructions: () => instructions.given(),
     projects,

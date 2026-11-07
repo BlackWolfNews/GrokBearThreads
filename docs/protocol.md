@@ -1603,13 +1603,17 @@ type StandingInstructions = {
 - **Who's told.** A fresh session gets them first in its instructions
   (Claude's appended system prompt, Codex's developer instructions). A live
   or resumed one is told a change once, before Mike's next message that isn't
-  a command, as a resumed Claude session keeps its first system prompt, and
-  the thread gets a `system.note` saying so. `instructionsTold` on the thread
-  record is the hash it last heard; absent when it holds none. With the
-  experiment off, or nothing set, nothing is added and the field isn't written.
+  a command, sent into a running turn too, as a resumed Claude session keeps
+  its first system prompt, and the thread gets a `system.note` saying so.
+  `instructionsTold` on the thread record is the hash it last heard (`cleared`
+  once told they've gone, `rewound` after going back in the session, when the
+  next message says what's current), set once the CLI has taken the message,
+  and absent while it has never held any. With the experiment off, or nothing
+  ever set, nothing is added and the field isn't written.
 - **Where.** `instructions.md` in the data dir, and beside it
   `instructions.sig`: the hex HMAC-SHA-256 of the file's bytes, after the line
-  `threadbear-standing-instructions-v1`, keyed by the runner's RPC token.
+  `threadbear-standing-instructions-v1`, keyed by the runner's RPC token as
+  it was when the runner started, never the file read again.
 - **Only `instructions.set` makes them count.** They reach every future
   session in every folder, Ask and Auto threads included, so a thread that can
   write a file mustn't be able to brief all the others. Each read is one read
@@ -1619,8 +1623,9 @@ type StandingInstructions = {
   `outside` says so. The runner says it once per version with a `runner.notice`
   (`warning`, and after `hello` while it lasts) and `instructions.updated`, and
   live sessions hear they no longer apply. Nothing comes back until Mike saves
-  in Settings, which sends the text he read, not "trust the file", so a file
-  changed while he reads isn't what gets signed.
+  in Settings, which sends the text on his screen, not "trust the file". That
+  text stays as it was while he reads, with a button for a newer version, so
+  a file changed while he reads isn't what gets signed.
 - **Agent edits.** Both files are in the data dir, so outside Full access an
   Edit, MultiEdit, Write or Codex patch of either always asks, with no "Always
   allow" ("Agent writes that run as code"). A shell write that gets past Auto's
@@ -1633,8 +1638,10 @@ type StandingInstructions = {
   `secrets/runner-token` and call `instructions.set` or sign a file, as it can
   call `patches.trust`. That's the line Full access already draws: this stops
   a write that doesn't know the token, and makes it a deliberate act against
-  the credential. It also doesn't stop an older signed pair being put back:
-  those are Mike's own words from before.
+  the credential. Replacing `secrets/runner-token` picks the key only from the
+  runner's next start, when every client has to hold that token too. Nor does
+  it stop an older signed pair being put back: those are Mike's own words from
+  before.
 
 ## Explain
 

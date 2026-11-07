@@ -6,15 +6,17 @@
 // threads that ask before they do anything, so writing them is a way for one
 // thread to steer all the others. So the file alone doesn't count: only what
 // instructions.set saved does, bound by an HMAC keyed by the runner's RPC
-// token. A plain hash beside the file would only catch a careless edit, as
+// token, as it was when the runner started. A plain hash beside the file would only catch a careless edit, as
 // anything that can write the file can write the hash; with the token,
 // signing a file takes exactly what calling instructions.set takes, so
 // there's one thing to protect and one line to draw (the protocol doc has
-// where it stops, on Full access).
+// where it stops, on Full access). It's the token the RPC server took at
+// startup, never the file read again: a thread that can write but not read
+// could otherwise replace secrets/runner-token and pick the key (Codex
+// review), or leave a FIFO there and hang the runner on the next message.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { readToken } from './config.ts';
 import { experimentOn } from './experiments.ts';
 import { atomicWriteFileSync } from './fsutil.ts';
 import { ErrorCode, RpcError } from './protocol.ts';
@@ -26,6 +28,14 @@ export type StandingInstructions = {
   outside?: true;
 };
 
+// instructionsTold on a thread (Runner.instructionsNews). A session was told
+// they've gone, which isn't the same as never having any: going back past
+// that message (Runner.editMessage) leaves it holding them again.
+export const INSTRUCTIONS_CLEARED = 'cleared';
+// Going back in a session can undo what it was told, so what it holds isn't
+// known and the next message says what's current.
+export const INSTRUCTIONS_REWOUND = 'rewound';
+
 const MAX_CHARS = 20_000;
 // What 20,000 characters can come to, and well past anything saved here.
 const MAX_BYTES = 64 * 1024;
@@ -36,12 +46,14 @@ export class InstructionsStore {
   private home: string;
   private file: string;
   private sig: string;
+  private token: string;
   private publish: (n: Notification) => void;
   // The version of an outside change last said, so it's said once.
   private noticed?: string;
 
-  constructor(opts: { home: string; publish: (n: Notification) => void }) {
+  constructor(opts: { home: string; token: string; publish: (n: Notification) => void }) {
     this.home = opts.home;
+    this.token = opts.token;
     this.file = path.join(opts.home, 'instructions.md');
     this.sig = path.join(opts.home, 'instructions.sig');
     this.publish = opts.publish;
@@ -118,16 +130,11 @@ export class InstructionsStore {
   }
 
   private mac(bytes: Buffer): string {
-    return crypto.createHmac('sha256', readToken(this.home)).update(SIGNING_CONTEXT).update(bytes).digest('hex');
+    return crypto.createHmac('sha256', this.token).update(SIGNING_CONTEXT).update(bytes).digest('hex');
   }
 
   private signedBy(bytes: Buffer, sig: Buffer): boolean {
-    let want: Buffer;
-    try {
-      want = Buffer.from(this.mac(bytes));
-    } catch {
-      return false; // no token to check with
-    }
+    const want = Buffer.from(this.mac(bytes));
     const got = Buffer.from(sig.toString('utf8').trim());
     return got.length === want.length && crypto.timingSafeEqual(got, want);
   }
