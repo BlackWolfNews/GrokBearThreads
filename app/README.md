@@ -471,7 +471,7 @@ app has quit (another thread's once it has been quiet for 30 minutes).
 Tools/dev-app.sh start --mock                    # the demo threads; prints the instance id
 Tools/dev-app.sh start --mock --fixtures .fixtures/threads/<id>   # a tb export
 Tools/dev-app.sh start --home <dev runner home>  # runner/scripts/dev-runner.sh
-Tools/dev-app.sh start --mock --bear-date 2026-12-24T23:00   # the date the bear goes by: bedtime under an empty Inbox
+Tools/dev-app.sh start --mock --bear-date 2026-12-24T23:00   # the date the bear goes by: its Santa hat (1 to 26 December), bedtime under an empty Inbox
 TB_MOCK_NO_REMOTE=1 Tools/dev-app.sh start --mock --fixtures Tools/mock-runner/fixtures/demo-keep-awake   # archive that one and the inbox is empty: bruce's demo threads can't be
 Tools/dev-app.sh do '{"cmd":"open","id":"demo_upload"}' '{"cmd":"expand","row":"g:"}'
 Tools/dev-app.sh do '{"cmd":"collapse","highlightSection":"subagents"}'   # a Highlights heading; see HighlightFold

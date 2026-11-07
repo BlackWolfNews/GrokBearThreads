@@ -12,7 +12,7 @@ struct BearView: View {
         Canvas { context, canvas in
             let side = min(canvas.width, canvas.height)
             context.scaleBy(x: side / 24, y: side / 24)
-            Self.draw(BearGeometry.inks(pose, side: side), in: &context)
+            Self.draw(BearGeometry.inks(pose, side: side, hat: BearGeometry.wearsHat()), in: &context)
         }
         .frame(width: size, height: size)
         .accessibilityLabel(pose == .sleep ? "The bear, asleep" : pose == .wave ? "The bear, waving" : "The bear")
@@ -50,7 +50,7 @@ struct WavingBear: View {
             BearView(pose: .wave, size: size)
         } else {
             let feet = UnitPoint(x: BearGeometry.feet.x / 24, y: BearGeometry.feet.y / 24)
-            let face = BearGeometry.waveFace(small: size < BearGeometry.smallSide)
+            let face = BearGeometry.waveFace(small: size < BearGeometry.smallSide, hat: BearGeometry.wearsHat())
             let eye = face.blinkingEyes?.boundingBox ?? .zero
             let shoulder = UnitPoint(x: BearGeometry.shoulder.x / 24, y: BearGeometry.shoulder.y / 24)
             ZStack {
@@ -66,6 +66,26 @@ struct WavingBear: View {
                 // The eye blinks on its own; the other one's a button, and
                 // buttons don't.
                 part(face.stillInks)
+                // The Santa hat's pom-pom in December, a beat behind the paw.
+                part(face.pomInks)
+                    .keyframeAnimator(initialValue: 0.0, repeating: true) { pom, angle in
+                        let tip = face.hatTip ?? .zero
+                        return pom.rotationEffect(.degrees(angle), anchor: UnitPoint(x: tip.x / 24, y: tip.y / 24))
+                    } keyframes: { _ in
+                        KeyframeTrack {
+                            LinearKeyframe(0, duration: 0.1)
+                            CubicKeyframe(-42, duration: 0.16)
+                            CubicKeyframe(-9, duration: 0.22)
+                            CubicKeyframe(-42, duration: 0.22)
+                            CubicKeyframe(-9, duration: 0.22)
+                            CubicKeyframe(-30, duration: 0.22)
+                            CubicKeyframe(0, duration: 0.26)
+                            CubicKeyframe(18, duration: 0.12)
+                            CubicKeyframe(-7.5, duration: 0.14)
+                            CubicKeyframe(0, duration: 0.14)
+                            LinearKeyframe(0, duration: 4.2)
+                        }
+                    }
                 part(face.blinkingEyes.map { [BearGeometry.Ink(path: $0, width: nil)] } ?? [])
                     .keyframeAnimator(initialValue: 1.0, repeating: true) { eyes, open in
                         eyes.scaleEffect(y: open, anchor: UnitPoint(x: eye.midX / 24, y: eye.midY / 24))

@@ -196,8 +196,13 @@ struct InboxZero: View {
     }
 
     private var waving: some View {
-        Image(nsImage: Bear.image(.wave, side: zoomed(30)))
-            .renderingMode(.template)
+        // In December the hat's pom-pom is its own picture, to swing behind.
+        let hat = BearGeometry.wearsHat(), side = zoomed(30)
+        return ZStack {
+            Image(nsImage: Bear.image(.wave, side: side, hat: hat, pom: false))
+                .renderingMode(.template)
+            if hat { swingingPom(side: side) }
+        }
             .foregroundStyle(.secondary)
             // A couple of quick tilts from its feet, like a wave.
             .keyframeAnimator(initialValue: 0.0, trigger: waves) { bear, angle in
@@ -212,6 +217,28 @@ struct InboxZero: View {
                 }
             }
             .accessibilityHidden(true)
+    }
+}
+
+extension InboxZero {
+    /// A beat behind the tilts and the other way, with a settle at the end.
+    private func swingingPom(side: CGFloat) -> some View {
+        let tip = BearGeometry.waveFace(small: side < BearGeometry.smallSide, hat: true).hatTip ?? .zero
+        return Image(nsImage: Bear.wavePom(side: side))
+            .renderingMode(.template)
+            .keyframeAnimator(initialValue: 0.0, trigger: waves) { pom, angle in
+                pom.rotationEffect(.degrees(angle), anchor: UnitPoint(x: tip.x / 24, y: tip.y / 24))
+            } keyframes: { _ in
+                KeyframeTrack {
+                    CubicKeyframe(0, duration: 0.35)
+                    CubicKeyframe(31.5, duration: 0.14)
+                    CubicKeyframe(-24.5, duration: 0.16)
+                    CubicKeyframe(17.5, duration: 0.14)
+                    CubicKeyframe(0, duration: 0.2)
+                    CubicKeyframe(-10.5, duration: 0.13)
+                    CubicKeyframe(0, duration: 0.13)
+                }
+            }
     }
 }
 

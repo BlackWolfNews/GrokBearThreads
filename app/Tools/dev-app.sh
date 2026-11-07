@@ -525,7 +525,7 @@ cmd_start() {
       --automation-idle-quit "$IDLE_QUIT_SECONDS"
     [ -z "$appearance" ] || printf '%s\n' --appearance "$appearance"
     [ -z "$size" ] || printf '%s\n' --window-size "$size"
-    # The date the bear goes by: bedtime under an empty Inbox.
+    # The date the bear goes by: its Santa hat, and bedtime under an empty Inbox.
     [ -z "$bear_date" ] || printf '%s\n' -ThreadbearBearDate "$bear_date"
   } >"$dir/app.args"
   launch_app

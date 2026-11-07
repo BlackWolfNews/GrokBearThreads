@@ -379,6 +379,7 @@ final class TextRowCell: RowCellView {
         }()
         bear.isHidden = false
         bear.tint = Theme.quietText
+        bear.hat = BearGeometry.wearsHat()
         let side = RowMetrics.wokenBearSide
         // Level with the first line, whatever the row's grown to.
         let line = TypeScale.scaled(17)
@@ -1121,6 +1122,7 @@ final class WorkingRowCell: RowCellView {
 
     private func startIfVisible() {
         guard window != nil else { return }
+        bear.hat = BearGeometry.wearsHat()
         // A turn that's only just begun gets the bear popping up; scrolling
         // back to one that's been going a while doesn't.
         bear.start(fresh: startedAt.map { Date().timeIntervalSince($0) < 2 } ?? false)

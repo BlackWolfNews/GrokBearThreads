@@ -20,11 +20,11 @@ enum Bear {
     /// drawing is redone at whatever resolution it's shown at, so the
     /// lines stay crisp on any screen and at any zoom.
     @MainActor
-    static func image(_ pose: Pose, side: CGFloat = 24) -> NSImage {
-        let key = "\(pose.rawValue)@\(side)"
+    static func image(_ pose: Pose, side: CGFloat = 24, hat: Bool = BearGeometry.wearsHat(), pom: Bool = true) -> NSImage {
+        let key = "\(pose.rawValue)@\(side)\(hat ? "+hat" : "")\(pom ? "" : "-pom")"
         if let cached = cache[key] { return cached }
         let image = NSImage(size: NSSize(width: side, height: side), flipped: true) { rect in
-            draw(pose, in: rect)
+            draw(BearGeometry.inks(pose, side: side, hat: hat, pom: pom), in: rect)
             return true
         }
         image.isTemplate = true
@@ -44,9 +44,28 @@ enum Bear {
 
     // MARK: Drawing
 
-    /// Draws the pose from BearGeometry, scaled to the rect. It's in black, as
-    /// the image is a template and takes its colour from around it.
-    static func draw(_ pose: Pose, in rect: NSRect) {
+    /// The waving bear's Santa-hat pom-pom on its own, in the same square, for
+    /// InboxZero to swing beside `image(.wave, pom: false)`.
+    @MainActor
+    static func wavePom(side: CGFloat) -> NSImage {
+        let key = "wavePom@\(side)"
+        if let cached = cache[key] { return cached }
+        let image = NSImage(size: NSSize(width: side, height: side), flipped: true) { rect in
+            draw(BearGeometry.wavePom(small: side < BearGeometry.smallSide), in: rect)
+            return true
+        }
+        image.isTemplate = true
+        cache[key] = image
+        return image
+    }
+
+    /// Draws the pose from BearGeometry, scaled to the rect.
+    static func draw(_ pose: Pose, in rect: NSRect, hat: Bool = BearGeometry.wearsHat()) {
+        draw(BearGeometry.inks(pose, side: min(rect.width, rect.height), hat: hat), in: rect)
+    }
+
+    /// It's in black, as the image is a template and takes its colour from around it.
+    static func draw(_ inks: [BearGeometry.Ink], in rect: NSRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
         let side = min(rect.width, rect.height)
         let scale = side / 24
@@ -57,7 +76,7 @@ enum Bear {
         context.setStrokeColor(.black)
         context.setLineCap(.round)
         context.setLineJoin(.round)
-        for ink in BearGeometry.inks(pose, side: side) {
+        for ink in inks {
             context.saveGState()
             if let outside = ink.outside {
                 context.addRect(CGRect(x: -24, y: -24, width: 72, height: 72))

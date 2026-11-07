@@ -12,13 +12,7 @@ import QuartzCore
 ///
 /// A secret, with no tip to give it away: rest the pointer on it and it waves
 /// back straight away, and click it and it hops.
-final class WavingBearView: NSView {
-    /// The line colour. A plain layer can't be a template image, so this
-    /// is resolved by hand whenever the appearance changes.
-    var tint: NSColor = .secondaryLabelColor {
-        didSet { applyTint() }
-    }
-
+final class WavingBearView: InkLayersView {
     /// One full run of each movement. The lengths don't divide evenly into
     /// each other, so the wave, breath and blink never settle into one
     /// obvious repeating loop.
@@ -33,6 +27,13 @@ final class WavingBearView: NSView {
         static let paw: [(at: Double, degrees: Double)] = [
             (0, 0), (0.16, 14), (0.38, 3), (0.6, 14), (0.82, 3), (1.04, 10), (1.3, 0), (wave, 0),
         ]
+        /// The Santa hat's pom-pom, a beat behind the paw with more swing, the
+        /// other way, and a settle at the end. Starts and ends at rest too.
+        static let pomLag: Double = 0.1
+        static let pom: [(at: Double, degrees: Double)] = [
+            (0, 0), (pomLag, 0), (0.26, -42), (0.48, -9), (0.7, -42), (0.92, -9), (1.14, -30), (1.4, 0),
+            (1.52, 18), (1.66, -7.5), (1.8, 0), (wave, 0),
+        ]
         /// How long the paw is up in each wave.
         static let burst: CFTimeInterval = 1.3
         /// Wiggling the pointer over it shouldn't make it flap.
@@ -45,30 +46,21 @@ final class WavingBearView: NSView {
         ]
     }
 
-    /// Holds the grid's y-down coordinates, as the static pose has.
-    private let stage = CALayer()
     /// The pop on arrival. A layer of its own so it can't fight the breath.
     private let arrival = CALayer()
     /// Everything that sways and breathes.
     private let figure = CALayer()
-    private let ears = CAShapeLayer()
-    private let earMask = CAShapeLayer()
-    private let head = CAShapeLayer()
+    /// The face and any hat, which only ever move with the figure.
+    private let stills = CALayer()
     /// The eye that blinks. The other one's a button, and buttons don't.
-    private let eyes = CAShapeLayer()
-    private let buttonRing = CAShapeLayer()
-    private let buttonPip = CAShapeLayer()
-    private let stitch = CAShapeLayer()
-    private let nose = CAShapeLayer()
-    private let mouth = CAShapeLayer()
+    private let eyes = CALayer()
+    /// The Santa hat's pom-pom, swinging about the hat's tip.
+    private let pom = CALayer()
     /// Shows the arm only outside the head, so it hugs it as it swings. It
     /// doesn't turn itself, or the head's shape would turn with the arm.
     private let armClip = CALayer()
-    private let armMask = CAShapeLayer()
     /// The arm and pad, swinging about the shoulder.
     private let paw = CALayer()
-    private let arm = CAShapeLayer()
-    private let pad = CAShapeLayer()
 
     private var builtSide: CGFloat = 0
     /// Between start and stop: the pointer can't wake a finished line's bear.
@@ -84,6 +76,7 @@ final class WavingBearView: NSView {
 
     private enum Key {
         static let paw = "bear.paw"
+        static let pom = "bear.pom"
         static let sway = "bear.sway"
         static let breath = "bear.breath"
         static let blink = "bear.blink"
@@ -94,42 +87,16 @@ final class WavingBearView: NSView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        wantsLayer = true
-        // The paw swings a little past the grid's right edge.
-        clipsToBounds = false
-        stage.isGeometryFlipped = true
-        layer?.addSublayer(stage)
         stage.addSublayer(arrival)
         arrival.addSublayer(figure)
-        ears.mask = earMask
-        armClip.mask = armMask
-        figure.addSublayer(armClip)
         armClip.addSublayer(paw)
-        for part in [arm, pad] { paw.addSublayer(part) }
-        for part in [ears, head, eyes, buttonRing, buttonPip, stitch, nose, mouth] { figure.addSublayer(part) }
-        setAccessibilityRole(.image)
+        for part in [armClip, stills, pom, eyes] { figure.addSublayer(part) }
         setAccessibilityLabel(Bear.description(.wave))
-        applyTint()
         // init(frame:) doesn't go through setFrameSize.
-        rebuild()
+        redraw()
     }
 
     required init?(coder: NSCoder) { fatalError() }
-
-    override func setFrameSize(_ newSize: NSSize) {
-        super.setFrameSize(newSize)
-        rebuild()
-    }
-
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        applyTint()
-    }
-
-    override func viewDidChangeBackingProperties() {
-        super.viewDidChangeBackingProperties()
-        applyScale()
-    }
 
     // MARK: Moving
 
@@ -161,6 +128,7 @@ final class WavingBearView: NSView {
     func stop() {
         live = false
         paw.removeAnimation(forKey: Key.paw)
+        pom.removeAnimation(forKey: Key.pom)
         figure.removeAnimation(forKey: Key.sway)
         figure.removeAnimation(forKey: Key.breath)
         eyes.removeAnimation(forKey: Key.blink)
@@ -179,6 +147,9 @@ final class WavingBearView: NSView {
         // The whole bear leans with the wave, a fraction as far.
         figure.add(Self.loop("transform.rotation.z", length: Timing.wave, begin: time,
                              keys: Timing.paw.map { ($0.at, -$0.degrees * 0.16 * .pi / 180) }), forKey: Key.sway)
+        // Only there to see in December, but cheap enough to always run with the wave.
+        pom.add(Self.loop("transform.rotation.z", length: Timing.wave, begin: time,
+                          keys: Timing.pom.map { ($0.at, $0.degrees * .pi / 180) }), forKey: Key.pom)
     }
 
     /// Whether the paw is up now. Starting a wave then would snap it down.
@@ -274,98 +245,30 @@ final class WavingBearView: NSView {
 
     // MARK: Drawing
 
-    private func applyTint() {
-        var ink: CGColor = tint.cgColor
-        effectiveAppearance.performAsCurrentDrawingAppearance { ink = self.tint.cgColor }
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        for line in [ears, head, arm, buttonRing, stitch, mouth] {
-            line.strokeColor = ink
-            line.fillColor = nil
-        }
-        for solid in [eyes, buttonPip, nose, pad] {
-            solid.fillColor = ink
-            solid.strokeColor = nil
-        }
-        CATransaction.commit()
-    }
-
-    private func applyScale() {
-        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        for part in [stage, arrival, figure, armClip, armMask, paw, ears, earMask, head, eyes, buttonRing, buttonPip, stitch, nose, mouth, arm, pad] {
-            part.contentsScale = scale
-        }
-        CATransaction.commit()
-    }
-
-    /// Lays the parts out for this size. Paths are made at the real size,
-    /// not scaled afterwards, so the lines stay sharp at any zoom.
-    private func rebuild() {
-        let side = min(bounds.width, bounds.height)
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        defer { CATransaction.commit() }
-        stage.frame = bounds
-        guard side > 0, side != builtSide else { return }
+    /// Paths are made at the real size, not scaled afterwards, so the lines
+    /// stay sharp at any zoom. Small bears drop the stitch, pip and pad.
+    override func layOut(side: CGFloat, drawing: Drawing) {
         builtSide = side
-        let unit = side / 24
-        let scale = CGAffineTransform(scaleX: unit, y: unit)
         let square = CGRect(x: 0, y: 0, width: side, height: side)
-        /// A path from the grid at this size. Paths are nil where the face
-        /// has none: small bears drop the stitch, pip and pad.
-        func sized(_ path: CGPath?) -> CGPath? {
-            var transform = scale
-            return path?.copy(using: &transform)
-        }
-        /// Pins a layer so it turns and scales about this spot on the grid.
-        func pin(_ part: CALayer, about point: CGPoint) {
-            part.bounds = square
-            part.anchorPoint = CGPoint(x: point.x / 24, y: point.y / 24)
-            part.position = CGPoint(x: point.x * unit, y: point.y * unit)
-        }
-        /// A mask that shows only what's outside the head, so outlines don't cross.
-        func outsideHead(_ mask: CAShapeLayer, _ head: CGPath) {
-            let outside = CGMutablePath()
-            outside.addRect(square.insetBy(dx: -side, dy: -side))
-            if let sized = sized(head) { outside.addPath(sized) }
-            mask.frame = square
-            mask.path = outside
-            mask.fillRule = .evenOdd
-            mask.fillColor = NSColor.black.cgColor
-        }
-
         let small = side < BearGeometry.smallSide
-        let face = BearGeometry.waveFace(small: small)
+        let face = BearGeometry.waveFace(small: small, hat: hat)
         let eyeBox = face.blinkingEyes?.boundingBox ?? .zero
 
-        pin(arrival, about: BearGeometry.feet)
-        pin(figure, about: BearGeometry.feet)
-        pin(eyes, about: CGPoint(x: eyeBox.midX, y: eyeBox.midY))
-        pin(paw, about: BearGeometry.shoulder)
+        Self.pin(arrival, about: BearGeometry.feet, square: square)
+        Self.pin(figure, about: BearGeometry.feet, square: square)
+        Self.pin(eyes, about: CGPoint(x: eyeBox.midX, y: eyeBox.midY), square: square)
+        Self.pin(paw, about: BearGeometry.shoulder, square: square)
+        Self.pin(pom, about: face.hatTip ?? .zero, square: square)
+        stills.frame = square
         armClip.frame = square
-        for part in [ears, head, buttonRing, buttonPip, stitch, nose, mouth, arm, pad] { part.frame = square }
+        armClip.mask = Self.mask(outside: face.head, square: square, drawing)
 
-        head.path = sized(face.head)
-        ears.path = sized(face.ears)
-        outsideHead(earMask, face.head)
-        outsideHead(armMask, face.head)
-        eyes.path = sized(face.blinkingEyes)
-        buttonRing.path = sized(face.buttonRing)
-        buttonPip.path = sized(face.buttonPip)
-        stitch.path = sized(face.stitch)
-        nose.path = sized(face.nose)
-        mouth.path = sized(face.mouth)
-        arm.path = sized(BearGeometry.arm)
-        pad.path = sized(BearGeometry.pawPad(small: small))
-
-        for line in [ears, head, arm] { line.lineWidth = BearGeometry.line * unit }
-        buttonRing.lineWidth = BearGeometry.Face.buttonWidth * unit
-        stitch.lineWidth = BearGeometry.Face.stitchWidth * unit
-        mouth.lineWidth = face.mouthWidth * unit
-        for line in [stitch, mouth] { line.lineCap = .round }
-        applyScale()
+        var arm = [BearGeometry.Ink(path: BearGeometry.arm, width: BearGeometry.line)]
+        if let pad = BearGeometry.pawPad(small: small) { arm.append(BearGeometry.Ink(path: pad, width: nil)) }
+        Self.fill(paw, arm, square: square, drawing)
+        Self.fill(stills, face.stillInks, square: square, drawing)
+        Self.fill(pom, face.pomInks, square: square, drawing)
+        Self.fill(eyes, face.blinkingEyes.map { [BearGeometry.Ink(path: $0, width: nil)] } ?? [], square: square, drawing)
     }
 
     /// The layers as they stand, for BearTests to compare with the pose.
@@ -378,7 +281,7 @@ final class WavingBearView: NSView {
     /// tracks, for BearTests' BEAR_FRAMES. Core Animation can't be sampled
     /// to a bitmap, least of all with the screen locked.
     func renderFrame(at seconds: Double, in context: CGContext) {
-        let moved: [(CALayer, String)] = [(paw, Key.paw), (figure, Key.sway), (figure, Key.breath), (eyes, Key.blink)]
+        let moved: [(CALayer, String)] = [(paw, Key.paw), (figure, Key.sway), (figure, Key.breath), (eyes, Key.blink), (pom, Key.pom)]
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for (part, key) in moved {
@@ -405,7 +308,7 @@ final class WavingBearView: NSView {
         layer?.render(in: context)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        for part in [paw, figure, eyes, arrival] { part.setAffineTransform(.identity) }
+        for part in [paw, figure, eyes, arrival, pom] { part.setAffineTransform(.identity) }
         CATransaction.commit()
     }
     #endif

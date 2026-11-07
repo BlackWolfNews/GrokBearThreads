@@ -41,6 +41,7 @@ shot approval -ThreadbearOpen a1
 shot question -ThreadbearOpen a2
 shot reply -ThreadbearOpen a3
 shot running -ThreadbearOpen a5
+shot december -ThreadbearOpen a5 -ThreadbearBearDate 2026-12-24T12:00
 shot dictating -ThreadbearOpen a3 -ThreadbearDictating
 shot typing-out -ThreadbearOpen a3 -ThreadbearTypingOut
 shot pictures -ThreadbearPictures -ThreadbearOpen pics

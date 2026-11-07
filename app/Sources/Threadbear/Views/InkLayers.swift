@@ -7,8 +7,7 @@ import QuartzCore
 /// the main thread is busy (AGENTS.md, "Animations").
 ///
 /// Subclasses put layers on `stage` and fill them in `layOut`, which runs
-/// again for a new size, appearance or screen. Clicks go through to what's
-/// behind: nothing here is a control.
+/// again for a new size, appearance or screen.
 class InkLayersView: NSView {
     /// The line colour. A plain layer can't be a template image, so this is
     /// resolved by hand whenever the appearance changes.
@@ -30,8 +29,6 @@ class InkLayersView: NSView {
     }
 
     required init?(coder: NSCoder) { fatalError() }
-
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
@@ -59,12 +56,24 @@ class InkLayersView: NSView {
         var screen: CGFloat
     }
 
+    /// Whether it's in its Santa hat. A transcript's cells set it each time,
+    /// as a bear can sit in a pooled cell across midnight on the 30th.
+    var hat = BearGeometry.wearsHat() {
+        didSet { if hat != oldValue { drawn = nil; redraw() } }
+    }
+
+    /// What it was last drawn for: a row's cell sets the same frame and
+    /// tint again and again, and new layers for each would be a waste.
+    private var drawn: (side: CGFloat, ink: CGColor, screen: CGFloat)?
+
     final func redraw() {
         let side = min(bounds.width, bounds.height)
         guard side > 0 else { return }
         var ink = tint.cgColor
         effectiveAppearance.performAsCurrentDrawingAppearance { ink = self.tint.cgColor }
         let screen = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        if let drawn, drawn.side == side, drawn.ink == ink, drawn.screen == screen { return }
+        drawn = (side, ink, screen)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         stage.frame = bounds
@@ -158,6 +167,9 @@ final class SleepingBearView: InkLayersView {
     private let head = CALayer()
     private let zs = [CALayer(), CALayer()]
 
+    // Nothing here's a control: clicks go through to the sidebar.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
     var isDrifting: Bool { zs[0].animation(forKey: "bear.drift") != nil }
 
     override init(frame frameRect: NSRect) {
@@ -212,7 +224,7 @@ final class SleepingBearView: InkLayersView {
         let square = CGRect(x: 0, y: 0, width: side, height: side)
         Self.pin(figure, about: BearGeometry.sleepingFeet, square: square)
         head.frame = square
-        Self.fill(head, BearGeometry.sleepingHead(small: side < BearGeometry.smallSide), square: square, drawing)
+        Self.fill(head, BearGeometry.sleepingHead(small: side < BearGeometry.smallSide, hat: hat), square: square, drawing)
         let wasDrifting = isDrifting
         for (z, path) in zip(zs, BearGeometry.sleepZs) {
             z.frame = square
@@ -252,6 +264,9 @@ final class WokenBearView: InkLayersView {
     /// doesn't turn itself, or the outline would turn with the arm.
     private let armClip = CALayer()
     private let arm = CALayer()
+
+    // Nothing here's a control: clicks go through to the note's text.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     /// Whether it's partway through waking up.
     var isWaking: Bool { figure.animation(forKey: "bear.stretchY") != nil }
@@ -313,22 +328,22 @@ final class WokenBearView: InkLayersView {
         let square = CGRect(x: 0, y: 0, width: side, height: side)
         let small = side < BearGeometry.smallSide
         Self.pin(sleeping, about: BearGeometry.sleepingCentre, square: square)
-        Self.fill(sleeping, BearGeometry.sleepingHead(small: small), square: square, drawing)
+        Self.fill(sleeping, BearGeometry.sleepingHead(small: small, hat: hat), square: square, drawing)
         for (z, path) in zip(zs, BearGeometry.sleepZs) {
             z.frame = square
             Self.fill(z, [BearGeometry.Ink(path: path, width: BearGeometry.Face.shutWidth)], square: square, drawing)
         }
         Self.pin(figure, about: BearGeometry.sitFeet, square: square)
-        let shut = BearGeometry.sitFace(small: small, eyes: .shut), open = BearGeometry.sitFace(small: small)
+        let shut = BearGeometry.sitFace(small: small, eyes: .shut, hat: hat), open = BearGeometry.sitFace(small: small, hat: hat)
         satShut.frame = square
         Self.fill(satShut, BearGeometry.sitBody(face: shut) + shut.inks, square: square, drawing)
         sat.frame = square
-        Self.fill(sat, BearGeometry.sitBody(face: open) + open.stillInks, square: square, drawing)
+        Self.fill(sat, BearGeometry.sitBody(face: open) + open.stillInks + open.pomInks, square: square, drawing)
         let eyeBox = open.blinkingEyes?.boundingBox ?? .zero
         Self.pin(eye, about: CGPoint(x: eyeBox.midX, y: eyeBox.midY), square: square)
         Self.fill(eye, open.blinkingEyes.map { [BearGeometry.Ink(path: $0, width: nil)] } ?? [], square: square, drawing)
         armClip.frame = square
-        armClip.mask = Self.mask(outside: BearGeometry.sitOutline, square: square, drawing)
+        armClip.mask = Self.mask(outside: BearGeometry.sitOutline(hat: hat), square: square, drawing)
         Self.pin(arm, about: BearGeometry.stretchShoulder, square: square)
         var parts = [BearGeometry.Ink(path: BearGeometry.stretchArm, width: BearGeometry.line)]
         if let pad = BearGeometry.stretchPad(small: small) { parts.append(BearGeometry.Ink(path: pad, width: nil)) }

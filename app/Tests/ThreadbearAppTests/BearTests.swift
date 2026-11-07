@@ -10,11 +10,13 @@ final class BearTests: XCTestCase {
     func testEveryPoseIsATemplateWithInk() {
         for pose in Bear.Pose.allCases {
             for side: CGFloat in [16, 24, 48] {
-                let image = Bear.image(pose, side: side)
-                XCTAssertTrue(image.isTemplate, "\(pose) \(side)")
-                XCTAssertEqual(image.size, NSSize(width: side, height: side))
-                XCTAssertGreaterThan(ink(in: image, side: side), 0.03, "\(pose) at \(side) is nearly blank")
-                XCTAssertLessThan(ink(in: image, side: side), 0.5, "\(pose) at \(side) is a blob")
+                for hat in [false, true] {
+                    let image = Bear.image(pose, side: side, hat: hat)
+                    XCTAssertTrue(image.isTemplate, "\(pose) \(side)")
+                    XCTAssertEqual(image.size, NSSize(width: side, height: side))
+                    XCTAssertGreaterThan(ink(in: image, side: side), 0.03, "\(pose) at \(side) is nearly blank")
+                    XCTAssertLessThan(ink(in: image, side: side), 0.5, "\(pose) at \(side) is a blob")
+                }
             }
             XCTAssertFalse(Bear.description(pose).isEmpty)
         }
@@ -25,8 +27,13 @@ final class BearTests: XCTestCase {
     /// at rest the two have to look the same, or the bear jumps between the
     /// working line and everywhere else.
     func testTheMovingBearAtRestMatchesTheStillPose() {
+        for hat in [false, true] { checkMovingBearMatchesStill(hat: hat) }
+    }
+
+    private func checkMovingBearMatchesStill(hat: Bool) {
         let side: CGFloat = 96
         let view = WavingBearView(frame: NSRect(x: 0, y: 0, width: side, height: side))
+        view.hat = hat
         view.tint = .black
         let moving = inkMap(side: Int(side)) { view.renderStill(in: $0) }
         let still = inkMap(side: Int(side)) { context in
@@ -34,7 +41,7 @@ final class BearTests: XCTestCase {
             NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: true)
             context.translateBy(x: 0, y: side)
             context.scaleBy(x: 1, y: -1)
-            Bear.draw(.wave, in: NSRect(x: 0, y: 0, width: side, height: side))
+            Bear.draw(.wave, in: NSRect(x: 0, y: 0, width: side, height: side), hat: hat)
             NSGraphicsContext.restoreGraphicsState()
         }
         let inked = still.filter { $0 }.count
@@ -86,6 +93,46 @@ final class BearTests: XCTestCase {
         XCTAssertEqual(keys.map(\.at), keys.map(\.at).sorted())
         let lastMove = keys.dropLast().last!.at
         XCTAssertLessThan(lastMove / WavingBearView.Timing.wave, 0.5, "the bear should rest more than it waves")
+    }
+
+    /// 1 to 26 December, on the Mac's own calendar, and gone on the 27th.
+    func testTheHatIsForDecemberUpToBoxingDay() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Australia/Perth")!
+        func on(_ month: Int, _ day: Int) -> Date {
+            calendar.date(from: DateComponents(year: 2026, month: month, day: day, hour: 23, minute: 59))!
+        }
+        for (month, day, wears) in [(11, 30, false), (12, 1, true), (12, 25, true), (12, 26, true), (12, 27, false), (1, 1, false), (6, 15, false)] {
+            XCTAssertEqual(BearGeometry.wearsHat(on: on(month, day), calendar: calendar), wears, "\(month)/\(day)")
+        }
+    }
+
+    /// Every bear in a hat stays inside its square, where an image would
+    /// clip it, apart from the moving pom-pom's swing.
+    func testTheHatStaysInTheSquare() {
+        for pose in Bear.Pose.allCases {
+            for ink in BearGeometry.inks(pose, side: 48, hat: true) {
+                let box = ink.path.boundingBoxOfPath.insetBy(dx: -(ink.width ?? 0) / 2, dy: -(ink.width ?? 0) / 2)
+                XCTAssertGreaterThanOrEqual(box.minX, -0.1, "\(pose) off the left")
+                XCTAssertGreaterThanOrEqual(box.minY, -0.1, "\(pose) off the top")
+            }
+        }
+    }
+
+    /// The hat's the bear's own grey: template ink only, whatever it's on, and
+    /// the pom-pom's part of it on a still bear and apart from it on a moving one.
+    func testThePomPomComesAndGoes() {
+        let with = BearGeometry.inks(.wave, side: 48, hat: true)
+        let without = BearGeometry.inks(.wave, side: 48, hat: true, pom: false)
+        XCTAssertEqual(with.count, without.count + 1)
+        XCTAssertFalse(BearGeometry.wavePom(small: false).isEmpty)
+        XCTAssertTrue(BearGeometry.waveFace(small: false).pomInks.isEmpty, "no hat, no pom-pom")
+        let keys = WavingBearView.Timing.pom
+        XCTAssertEqual(keys.first?.degrees, 0)
+        XCTAssertEqual(keys.last?.degrees, 0)
+        XCTAssertEqual(keys.last?.at, WavingBearView.Timing.wave)
+        XCTAssertEqual(keys.map(\.at), keys.map(\.at).sorted())
+        XCTAssertEqual(keys.dropFirst().first?.at, WavingBearView.Timing.pomLag, "a beat behind the paw")
     }
 
     /// Rest the pointer on the bear and it waves back at once, but only every
@@ -232,6 +279,7 @@ final class BearTests: XCTestCase {
         let hopping = ProcessInfo.processInfo.environment["BEAR_FRAMES_HOP"] != nil
         let side = 192, pad = hopping ? 96 : 32, canvas = side + 2 * pad
         let view = WavingBearView(frame: NSRect(x: 0, y: 0, width: side, height: side))
+        view.hat = ProcessInfo.processInfo.environment["BEAR_HAT"] != nil
         view.tint = .black
         view.start(fresh: false, reduceMotion: false)
         if hopping { view.hop() }
@@ -251,13 +299,14 @@ final class BearTests: XCTestCase {
         guard let path = ProcessInfo.processInfo.environment["BEAR_SHEET"] else { throw XCTSkip("BEAR_SHEET not set") }
         let sizes: [CGFloat] = [14, 18, 26, 48, 96]
         let cell: CGFloat = 110
+        let hat = ProcessInfo.processInfo.environment["BEAR_HAT"] != nil
         let sheet = NSImage(size: NSSize(width: cell * CGFloat(Bear.Pose.allCases.count), height: cell * CGFloat(sizes.count)))
         sheet.lockFocus()
         NSColor.white.setFill()
         NSRect(origin: .zero, size: sheet.size).fill()
         for (column, pose) in Bear.Pose.allCases.enumerated() {
             for (row, side) in sizes.enumerated() {
-                let image = Bear.image(pose, side: side)
+                let image = Bear.image(pose, side: side, hat: hat)
                 let tinted = image.copy() as! NSImage
                 tinted.isTemplate = false
                 let origin = NSPoint(x: cell * CGFloat(column) + (cell - side) / 2, y: cell * CGFloat(row) + (cell - side) / 2)
