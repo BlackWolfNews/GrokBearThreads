@@ -241,6 +241,12 @@ final class AppModel {
     @ObservationIgnored var nextErrorThread: String?
     @ObservationIgnored var nextErrorDoing: String?
     var continuingRefusals: Set<String> = []
+    /// Patch versions whose Trust is on its way, as "file hash". The runner
+    /// answers only once it has read every thread's patches again, which
+    /// takes seconds, so the row shows a spinner and its button stops taking
+    /// clicks until then (AGENTS.md, "Assume every action is slow to land").
+    /// By version, so a file that changes again gets its button back.
+    var trustingPatches: Set<String> = []
     /// Bumped to put the cursor in a composer, by its draft key (a thread's
     /// id, or "new"): with threads open in several panels, only that one's.
     var focusRequests: [String: Int] = [:]
