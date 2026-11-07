@@ -1248,9 +1248,11 @@ restart wait for busy threads. It hands over instead:
   port, so for those few seconds a client's request about one of them
   there answers `-32020` "The runner is handing over to a new one; try
   again in a moment." rather than "Thread not found". The Mac app sends a
-  `threads.send` or `threads.update` turned away like that (or with
-  "Thread not found" from an older runner, while a restart is on) again
-  once it's connected to the new runner, in the order they were made.
+  `threads.send` or `threads.update` (archive included) turned away like
+  that (or with "Thread not found" from an older runner, while a restart
+  is on) again once it's connected to the new runner, and holds back any
+  it makes meanwhile until those have gone, so they land in the order
+  they were made.
 - The threadbear tools in a kept thread's session reach the primary over
   the runner's port for anything about other threads, its schedules and
   its projects.

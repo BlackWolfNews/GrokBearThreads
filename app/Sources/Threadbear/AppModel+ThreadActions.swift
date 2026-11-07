@@ -303,20 +303,13 @@ extension AppModel {
         session?.addPending(id: pendingId, text: text, images: images, answers: answers, summarySeq: threads[threadId]?.lastSeq ?? 0)
         Task {
             do {
-                do {
+                // Sent in the moment a restarting runner lets go of its idle
+                // threads, before the new one is up, the old one turns it
+                // away (Mike saw "Thread not found", 5 Nov). It goes again,
+                // still showing as on its way through the dropped
+                // connection, once the new runner is connected.
+                _ = try await inRestartOrder(threadId, sentOn: client, waiting: { session?.holdForResend(pendingId) }) { client in
                     try await client.send(threadId: threadId, text: text, images: images, answers: answers)
-                } catch {
-                    // Sent in the moment a restarting runner lets go of its
-                    // idle threads, before the new one is up: the old one
-                    // turns it away (Mike saw "Thread not found", 5 Nov). It
-                    // goes again, still showing as on its way through the
-                    // dropped connection, once the new runner is connected.
-                    guard Self.turnedAwayByRestart(error), !isRemote(threadId),
-                          restart.isPending || restart.isRestarting(now: Date()) else { throw error }
-                    session?.holdForResend(pendingId)
-                    guard let next = await clientAfterRestart(sentOn: client) else { throw error }
-                    AppLog.write("rpc", "sending again after the restart: \(threadId)")
-                    try await next.send(threadId: threadId, text: text, images: images, answers: answers)
                 }
                 // Taken but not shown: it's queued behind the running
                 // turn. Its user.message usually comes just before this
@@ -348,6 +341,49 @@ extension AppModel {
         case RPCError.server(RPCError.busy, let message): return message.hasPrefix("The runner is handing over to a new one")
         default: return false
         }
+    }
+
+    /// Sends `request` for a local thread. One a restarting runner turns
+    /// away goes again on the new runner once it's connected, and while any
+    /// is waiting there, later ones go behind it instead of straight out, so
+    /// everything lands in the order Mike made it: a pick made once the new
+    /// runner is up can't be undone by an older one going again after it,
+    /// and a message can't start its turn before the model he picked first
+    /// (Codex's review, 7 Nov). `waiting` runs if it has to wait.
+    func inRestartOrder<T: Sendable>(_ threadId: String, sentOn client: RPCClient, waiting: () -> Void = {},
+                                     _ request: @escaping @MainActor (RPCClient) async throws -> T) async throws -> T {
+        if isRemote(threadId) { return try await request(client) }
+        if restartQueued > 0 {
+            waiting()
+            return try await behindRestart {
+                // The connection by the time its turn comes.
+                try await request(self.client ?? client)
+            }
+        }
+        do {
+            return try await request(client)
+        } catch {
+            guard Self.turnedAwayByRestart(error), restart.isPending || restart.isRestarting(now: Date()) else { throw error }
+            waiting()
+            return try await behindRestart {
+                guard let next = await self.clientAfterRestart(sentOn: client) else { throw error }
+                AppLog.write("rpc", "sending again after the restart: \(threadId)")
+                return try await request(next)
+            }
+        }
+    }
+
+    /// Runs `step` once everything already in `restartQueue` has gone.
+    private func behindRestart<T: Sendable>(_ step: @escaping @MainActor () async throws -> T) async throws -> T {
+        let earlier = restartQueue
+        restartQueued += 1
+        let task = Task { @MainActor in
+            defer { self.restartQueued -= 1 }
+            await earlier?.value
+            return try await step()
+        }
+        restartQueue = Task { _ = try? await task.value }
+        return try await task.value
     }
 
     /// The new runner's client once it's connected, or nil if there's none
@@ -428,27 +464,13 @@ extension AppModel {
         if let guess, guess != before { threads[threadId] = guess }
         Task {
             do {
+                // Made as a restarting runner lets go of its idle threads,
+                // as a send can be: Mike saw "Thread not found" picking an
+                // effort (7 Nov). It goes again on the new runner, still
+                // showing.
                 let client = try await rowClient(for: threadId)
-                do {
-                    threads[threadId] = try await client.updateThread(threadId, update)
-                } catch {
-                    // Made as a restarting runner lets go of its idle
-                    // threads, before the new one is up, as a send can be
-                    // (`post`): the old one turns it away, and Mike saw
-                    // "Thread not found" picking an effort (7 Nov). It goes
-                    // again on the new runner, still showing, after any
-                    // earlier one turned away like it, so the last pick wins.
-                    guard Self.turnedAwayByRestart(error), !isRemote(threadId),
-                          restart.isPending || restart.isRestarting(now: Date()) else { throw error }
-                    let earlier = updateAfterRestart
-                    let again = Task { @MainActor in
-                        await earlier?.value
-                        guard let next = await self.clientAfterRestart(sentOn: client) else { throw error }
-                        AppLog.write("rpc", "updating again after the restart: \(threadId)")
-                        self.threads[threadId] = try await next.updateThread(threadId, update)
-                    }
-                    updateAfterRestart = Task { _ = try? await again.value }
-                    try await again.value
+                threads[threadId] = try await inRestartOrder(threadId, sentOn: client) { client in
+                    try await client.updateThread(threadId, update)
                 }
             } catch {
                 if let before, let guess, threads[threadId] == guess { threads[threadId] = before }
@@ -529,7 +551,9 @@ extension AppModel {
             guard archivesNotSent.remove(threadId) != nil else { return }
             do {
                 let client = try await rowClient(for: threadId)
-                threads[threadId] = try await client.updateThread(threadId, ThreadUpdate(archived: true))
+                threads[threadId] = try await inRestartOrder(threadId, sentOn: client) { client in
+                    try await client.updateThread(threadId, ThreadUpdate(archived: true))
+                }
                 await endSlide(threadId)
             } catch {
                 // Still in the inbox: bring the row back.

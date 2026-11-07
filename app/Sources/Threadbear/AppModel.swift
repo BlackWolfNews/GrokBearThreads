@@ -583,9 +583,11 @@ final class AppModel {
     /// A runner restart that's waiting for threads to finish or under way,
     /// for the quiet banner (see `banner`).
     var restart = RunnerRestart()
-    /// The last `threads.update` a restart turned away, going again on the
-    /// new runner (`update`): the next waits for it, so picks keep their order.
-    @ObservationIgnored var updateAfterRestart: Task<Void, Never>?
+    /// Requests a restart turned away, going again on the new runner, and
+    /// any made while they wait, each behind the one before
+    /// (`inRestartOrder`), with how many are in it.
+    @ObservationIgnored var restartQueue: Task<Void, Never>?
+    @ObservationIgnored var restartQueued = 0
     /// The website's root, from runner.status (nil while sync is off).
     var websiteURL: URL?
     /// The runner's own update (protocol "Runner updates"), for the rail's
