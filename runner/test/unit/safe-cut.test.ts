@@ -17,6 +17,7 @@ import { BodyCollector, prepareBody } from '../../src/full-sync.ts';
 import { cleanTitle, oneLine, titleFrom } from '../../src/runner.ts';
 import { waitForFromTool, needsFromTool, bylineFromTool } from '../../src/needs.ts';
 import { runCheck } from '../../src/schedule-check.ts';
+import { runCommand } from '../../src/patches.ts';
 import type { ThreadSummary } from '../../src/protocol.ts';
 
 const PASSWORD = 'Sup3rSecretPassw0rd';
@@ -205,4 +206,17 @@ test('review round 2: taking punctuation off the end is checked too, and a model
   } finally {
     useScrubForCuts(scrubText);
   }
+});
+
+test('review round 3: output read only up to a limit drops the run it stopped in, and a tail its first', async () => {
+  const dir = tmpDir('tb-safe-cut-cmd-');
+  const file = path.join(dir, 'long.txt');
+  fs.writeFileSync(file, `start postgres://alice:${'p9'.repeat(60_000)}@db\n`);
+  const r = await runCommand(`cat ${JSON.stringify(file)}`, { cwd: dir, env: { ...process.env }, shell: ['/bin/sh', '-c'] });
+  assert.equal(r.truncated, true);
+  assert.ok(!scrubText(r.text).includes('p9p9p9'), r.text.slice(0, 40));
+  // A schedule check whose output's start is cut inside a long password.
+  fs.writeFileSync(file, `postgres://alice:${'p9'.repeat(10_000)}@db`);
+  const c = await runCheck({ command: `cat ${JSON.stringify(file)}`, cwd: dir, home: dir, scheduleId: 'long', timeoutMs: 10_000 });
+  assert.ok(!scrubText(c.output).includes('p9p9p9'), c.output.slice(0, 40));
 });

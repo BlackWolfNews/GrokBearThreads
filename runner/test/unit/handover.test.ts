@@ -671,3 +671,48 @@ test('Peers: the threads of a draining runner that went are arriving until they 
   assert.deepEqual(adopted, ['t-old']);
   assert.equal(peers.isArriving('t-old'), false);
 });
+
+test("Peers: a thread that can't be taken in stays arriving, and one being handed over itself stops nothing", async () => {
+  const h = makeHarness();
+  const { writeDrainInfo, removeDrainInfo, Peers } = await import('../../src/handover.ts');
+  const make = (pid: number, threads: string[], adopt: (id: string) => void, staysUp = false) => {
+    writeDrainInfo(h.home, { pid, port: 1, version: 'old', since: new Date().toISOString(), threads });
+    let closed!: () => void;
+    let gone = false;
+    const swept: number[] = [];
+    const peers = new Peers({
+      home: h.home, token: 't', log: nullLogger, goneWaitMs: staysUp ? 400 : 50, alive: () => staysUp || !gone,
+      sweep: async (p) => void swept.push(p),
+      runner: { adopt: (id) => (adopt(id), undefined), publish: () => {}, waitedOnDeleted: () => {} },
+      connect: async () => ({
+        call: async (method: string) => (method === 'drain.hello' ? { threads } : method === 'threads.list' ? { threads: threads.map((id) => ({ id, title: id, lastActivityAt: '' })) } : {}),
+        onNotification: () => () => {},
+        waitClosed: () => new Promise<void>((r) => (closed = r)),
+        close: () => {},
+      }) as any,
+    });
+    return { peers, close: () => ((gone = true), closed()), swept };
+  };
+  const adopted: string[] = [];
+  const a = make(424250, ['bad', 'good'], (id) => {
+    if (id === 'bad') throw new Error('disk full');
+    adopted.push(id);
+  });
+  await a.peers.connectAll();
+  a.close();
+  await new Promise((r) => setTimeout(r, 300));
+  assert.deepEqual(adopted, ['good'], 'the rest are still taken in');
+  assert.deepEqual(a.peers.arrivingIds(), ['bad']);
+  removeDrainInfo(h.home, 424250);
+
+  // Handing over itself while it waits: the draining runner isn't stopped from here.
+  const took: string[] = [];
+  const b = make(424251, ['t'], (id) => took.push(id), true);
+  await b.peers.connectAll();
+  b.close();
+  await new Promise((r) => setTimeout(r, 100));
+  b.peers.close();
+  await new Promise((r) => setTimeout(r, 700));
+  assert.deepEqual(b.swept, []);
+  assert.deepEqual(took, []);
+});

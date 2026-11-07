@@ -45,7 +45,8 @@ export function useScrubForCuts(fn: (text: string) => string): void {
 export function safeEnd(text: string, end: number): number {
   if (end >= text.length) return text.length;
   if (end <= 0) return 0;
-  const [from, to] = around(text, end);
+  const [from, to, before] = around(text, end);
+  if (before !== undefined) return before;
   const win = text.slice(from, to);
   let whole: string;
   try {
@@ -73,7 +74,8 @@ export function safeEnd(text: string, end: number): number {
 export function safeStart(text: string, start: number): number {
   if (start <= 0) return 0;
   if (start >= text.length) return text.length;
-  const [from, to] = around(text, start);
+  const [from, to, before] = around(text, start);
+  if (before !== undefined) return nextSpace(text, start);
   const win = text.slice(from, to);
   let whole: string;
   try {
@@ -120,6 +122,20 @@ export function tailSafely(text: string, max: number, mark = ''): string {
   return mark + text.slice(safeStart(text, text.length - Math.max(0, max - mark.length)));
 }
 
+// Text read only up to a limit (a command's output) ends wherever the limit
+// fell, perhaps in a secret whose end was never read: its last run of
+// non-space characters goes, and a tail kept from the end of a longer output
+// loses its first run likewise (dropPartialStart).
+export function dropPartialEnd(text: string): string {
+  const at = lastSpace(text, text.length, Infinity);
+  return at < 0 ? '' : text.slice(0, at + 1);
+}
+
+export function dropPartialStart(text: string): string {
+  const at = nextSpace(text, 0);
+  return at >= text.length ? '' : text.slice(at);
+}
+
 // Whether text.slice(start, end), a part taken out of `text` some other way
 // (a model's title tidied, punctuation taken off the end), has no secret cut
 // at either end.
@@ -154,28 +170,43 @@ export function firstLineSafely(text: string, max: number, mark = ''): string {
 }
 
 // What's looked at around a cut at `at`: WINDOW either side, and all of the
-// run of non-space characters the cut is in, however long, so a long token or
-// a URL's password has its start and end in sight (Codex's review, 7 Nov: a
-// 40 KB password ran past a fixed window). Longer secrets with spaces in them
-// (a PEM key over 32 KB) are the one shape a window this size can't see whole.
-function around(text: string, at: number): [number, number] {
+// run of non-space characters the cut is in, so a long token or a URL's
+// password has its start and end in sight (Codex's review, 7 Nov: a 40 KB
+// password ran past a fixed window). A run longer than RUN_MAX is no secret
+// anyone has (a minified file, a base64 blob), and looking at all of it on the
+// event loop costs too much, so a cut in one goes before it (`before`). Longer
+// secrets with spaces in them (a PEM key over 32 KB) are the one shape a window
+// this size can't see whole.
+const RUN_MAX = 256 * 1024;
+
+function around(text: string, at: number): [number, number, number?] {
   let from = Math.max(0, at - WINDOW);
   let to = Math.min(text.length, at + WINDOW);
-  if (at > 0 && at < text.length && /\S/.test(text[at - 1]!) && /\S/.test(text[at]!)) {
-    let runStart = at;
-    while (runStart > 0 && runStart > from - 1 && /\S/.test(text[runStart - 1]!)) runStart--;
-    if (runStart <= from && from > 0) {
-      while (runStart > 0 && /\S/.test(text[runStart - 1]!)) runStart--;
-      from = Math.max(0, runStart - 256);
-    }
-    let runEnd = at;
-    while (runEnd < text.length && runEnd < to + 1 && /\S/.test(text[runEnd]!)) runEnd++;
-    if (runEnd >= to && to < text.length) {
-      while (runEnd < text.length && /\S/.test(text[runEnd]!)) runEnd++;
-      to = Math.min(text.length, runEnd + 256);
-    }
-  }
+  if (at <= 0 || at >= text.length || !/\S/.test(text[at - 1]!) || !/\S/.test(text[at]!)) return [from, to];
+  const runEnd = nextSpace(text, at);
+  const runStart = lastSpace(text, at) + 1;
+  if (runEnd - runStart > RUN_MAX) return [from, to, lastSpace(text, at, Infinity) + 1];
+  from = Math.min(from, Math.max(0, runStart - 256));
+  to = Math.max(to, Math.min(text.length, runEnd + 256));
   return [from, to];
+}
+
+// The first whitespace at or after `at` (or the end), and the last before `at` (or -1).
+function nextSpace(text: string, at: number): number {
+  const re = /\s/g;
+  re.lastIndex = at;
+  return re.exec(text)?.index ?? text.length;
+}
+
+// Looks back at most `max` + 1 characters (RUN_MAX: further is a run too long
+// anyway), and says -1 or the place it stopped when there's none.
+function lastSpace(text: string, at: number, max = RUN_MAX): number {
+  const stop = Math.max(0, at - max - 1);
+  for (let i = at - 1; i >= stop; i--) {
+    const c = text.charCodeAt(i);
+    if (c === 32 || (c >= 9 && c <= 13) || (c > 127 && /\s/.test(text[i]!))) return i;
+  }
+  return stop > 0 ? stop - 1 : -1;
 }
 
 // The start of the run of non-space characters before `at`, or of the space

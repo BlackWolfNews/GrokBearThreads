@@ -61,7 +61,7 @@ import { hasLineBreak, stripEnvComment } from './linear-text.ts';
 import { automaticCommand, liveCommandProblem, TRUST_ALL, unhashedFiles, worktreeOf, type PatchGate } from './patch-trust.ts';
 import { verifiedUrl } from './verified-imports.ts';
 import { inBackground } from './background.ts';
-import { CUT_LOOKAHEAD, safeEnd } from './safe-cut.ts';
+import { CUT_LOOKAHEAD, dropPartialEnd, safeEnd } from './safe-cut.ts';
 
 export const CONVEX_DASHBOARD = 'https://dashboard.convex.dev';
 // `npx convex dev` on an anonymous (no account) deployment serves the
@@ -1248,6 +1248,8 @@ export function runCommand(
     const finish = (code: number | null, error?: string) => {
       clearTimeout(timer);
       let text = Buffer.concat(chunks).toString('utf8');
+      // Stopped reading part way: what was cut there was never seen whole.
+      if (truncated) text = dropPartialEnd(text);
       if (Buffer.byteLength(text, 'utf8') > LIMITS.toolResultText) {
         truncated = true;
         const kept = Buffer.from(text, 'utf8').subarray(0, LIMITS.toolResultText).toString('utf8').replace(/\uFFFD$/, '');

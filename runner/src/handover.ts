@@ -274,11 +274,7 @@ export class Peers {
       this.deps.log.info('a draining runner finished', { pid: peer.info.pid });
       return;
     }
-    try {
-      await this.takeIn(peer, left);
-    } finally {
-      for (const id of left) this.arriving.delete(id);
-    }
+    await this.takeIn(peer, left);
   }
 
   private async takeIn(peer: Peer, left: string[]): Promise<void> {
@@ -286,6 +282,9 @@ export class Peers {
     // to finish exiting before stopping what it left.
     const until = Date.now() + (this.deps.goneWaitMs ?? 10_000);
     while (this.alive(peer.info.pid) && Date.now() < until) await new Promise((r) => setTimeout(r, 200));
+    // This runner is handing over itself now: the next one takes the draining
+    // runner on, and stopping it here would stop work that one has.
+    if (this.closing) return;
     if (this.alive(peer.info.pid)) {
       this.deps.log.error('a draining runner stopped answering; stopping it', { pid: peer.info.pid });
       try {
@@ -296,7 +295,15 @@ export class Peers {
     }
     this.deps.log.warn('a draining runner went away with threads on it; taking them as after a crash', { pid: peer.info.pid, threads: left });
     await this.cleanUp(peer.info.pid);
-    for (const id of left) this.deps.runner.adopt(id, { crashed: true });
+    // One that can't be taken in stays arriving, so its row isn't taken for stale.
+    for (const id of left) {
+      try {
+        this.deps.runner.adopt(id, { crashed: true });
+        this.arriving.delete(id);
+      } catch (e) {
+        this.deps.log.error('could not take in a thread a draining runner left', { threadId: id, error: String((e as Error)?.message ?? e) });
+      }
+    }
   }
 
   private async cleanUp(pid: number): Promise<void> {

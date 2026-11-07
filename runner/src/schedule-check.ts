@@ -23,7 +23,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { atomicWriteFileSync } from './fsutil.ts';
-import { safeStart } from './safe-cut.ts';
+import { dropPartialStart, safeStart } from './safe-cut.ts';
 
 // How long a check may run unless its schedule says (checkTimeoutSecs),
 // and the most it can say: a Slack read through `codex exec` took 77 s by
@@ -156,7 +156,11 @@ export function runCheck(p: { command: string; cwd: string; home: string; schedu
     });
     const take = (b: Buffer) => {
       // Keep the end: the last lines of a long output say the most.
-      out = (out + b.toString('utf8')).slice(-CHECK_OUTPUT_CHARS * 2);
+      const all = out + b.toString('utf8');
+      if (all.length > CHECK_OUTPUT_CHARS * 2) {
+        // Its start is cut, maybe in a secret whose start is gone: that run goes too.
+        out = dropPartialStart(all.slice(-CHECK_OUTPUT_CHARS * 2));
+      } else out = all;
     };
     child.stdout?.on('data', take);
     child.stderr?.on('data', take);
