@@ -333,6 +333,33 @@ final class PendingSendTests: XCTestCase {
         XCTAssertNil(app.errorMessage)
     }
 
+    /// One that queued behind a pick whose wait ran out, while the old
+    /// runner still answers, gets a wait of its own rather than failing
+    /// at once (Codex's second review, 7 Nov).
+    func testAMessageBehindAPickThatGaveUpWaitsForTheNewRunnerItself() async throws {
+        let wait = AppModel.restartResendWait
+        AppModel.restartResendWait = .milliseconds(600)
+        defer { AppModel.restartResendWait = wait }
+        let (app, old) = try await turnedAwayPick()
+        let session = app.session(for: "th1")
+        try await Task.sleep(for: .milliseconds(300))
+        app.drafts["th1"] = Draft(text: "go on")
+        app.send(threadId: "th1")
+        // The pick gives up; the message goes to the old runner, which
+        // still turns it away.
+        try await until { old.waiting("threads.send") }
+        old.fail("threads.send", code: RPCError.busy, message: "The runner is handing over to a new one; try again in a moment.")
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(session.pending.map(\.text), ["go on"], "still on its way")
+        XCTAssertNil(app.drafts["th1"])
+        let new = try await newRunner(app)
+        try await until { new.waiting("threads.send") }
+        new.answer("threads.send", ["turnId": "turn_1"])
+        try await until { session.pending.first?.queued == true }
+        XCTAssertEqual(session.pending.first?.queued, true)
+        XCTAssertNil(app.drafts["th1"])
+    }
+
     /// Archive turned away by a restart goes again too, rather than coming
     /// back with an error (Codex's review, 7 Nov).
     func testAnArchiveTurnedAwayByARestartGoesAgain() async throws {

@@ -327,7 +327,8 @@ extension AppModel {
     }
 
     /// How long a send bounced by a restart waits for the new runner.
-    static let restartResendWait: Duration = .seconds(30)
+    /// A var only so tests can make it short.
+    static var restartResendWait: Duration = .seconds(30)
 
     /// A send (or `threads.update`) the restarting runner refused before
     /// taking it, so sending again can't make two: "Thread not found" from
@@ -356,8 +357,17 @@ extension AppModel {
         if restartQueued > 0 {
             waiting()
             return try await behindRestart {
-                // The connection by the time its turn comes.
-                try await request(self.client ?? client)
+                // The connection by the time its turn comes. The one ahead
+                // may have given up waiting while the old runner still
+                // answers, so this one gets its own wait.
+                var now = self.client
+                if now == nil { now = await self.clientAfterRestart(sentOn: client) }
+                guard let now else { throw RPCError.disconnected(nil) }
+                do {
+                    return try await request(now)
+                } catch {
+                    return try await self.againAfterRestart(threadId, error, sentOn: now, request)
+                }
             }
         }
         do {
@@ -365,12 +375,20 @@ extension AppModel {
         } catch {
             guard Self.turnedAwayByRestart(error), restart.isPending || restart.isRestarting(now: Date()) else { throw error }
             waiting()
-            return try await behindRestart {
-                guard let next = await self.clientAfterRestart(sentOn: client) else { throw error }
-                AppLog.write("rpc", "sending again after the restart: \(threadId)")
-                return try await request(next)
-            }
+            return try await behindRestart { try await self.againAfterRestart(threadId, error, sentOn: client, request) }
         }
+    }
+
+    /// `request` once more on the new runner, if `error` is a restart's
+    /// refusal and the new runner connects within `restartResendWait`;
+    /// otherwise `error`. Inside the queue's step, never through it again,
+    /// which would wait on itself.
+    private func againAfterRestart<T: Sendable>(_ threadId: String, _ error: Error, sentOn client: RPCClient,
+                                                _ request: @MainActor (RPCClient) async throws -> T) async throws -> T {
+        guard Self.turnedAwayByRestart(error), restart.isPending || restart.isRestarting(now: Date()),
+              let next = await clientAfterRestart(sentOn: client) else { throw error }
+        AppLog.write("rpc", "sending again after the restart: \(threadId)")
+        return try await request(next)
     }
 
     /// Runs `step` once everything already in `restartQueue` has gone.
