@@ -176,7 +176,10 @@ export type ToolApprovalRequest = {
 
 // mode: the permission mode to switch to as the call goes ahead (approving
 // a "Plan first" plan takes the thread out of plan mode).
-export type ToolApprovalAnswer = { decision: 'allow' | 'allowAlways' | 'deny' | 'expired'; message?: string; mode?: PermissionMode };
+// stopped: an expired card that Mike pressed Stop on (the Mac app or the
+// phone), as opposed to one that closed unanswered for any other reason. Only then may an agent be told
+// the user stopped it (docs/protocol.md, "Who stopped it").
+export type ToolApprovalAnswer = { decision: 'allow' | 'allowAlways' | 'deny' | 'expired'; message?: string; mode?: PermissionMode; stopped?: boolean };
 
 export type QuestionRequest = {
   toolUseId?: string;
@@ -185,7 +188,8 @@ export type QuestionRequest = {
 };
 
 // answers: question text -> chosen label(s); null when dismissed or expired.
-export type QuestionAnswer = { answers: Record<string, string> | null; message?: string };
+// stopped: as ToolApprovalAnswer's.
+export type QuestionAnswer = { answers: Record<string, string> | null; message?: string; stopped?: boolean };
 
 export interface SessionSink {
   output(o: AdapterOutput): void;

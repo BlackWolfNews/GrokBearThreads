@@ -25,7 +25,7 @@ import { SAID_MAX } from './wake-when.ts';
 
 export { parseWhen, relativeFuture, relativeTime };
 import { RUNNER_VERSION, expandHome } from './config.ts';
-import { ALREADY_ENDED, ARCHIVE_ADDED, MAX_UNTIL, MAX_WAIT_FOR, SNOOZE_ADDED, snoozeFromTool, endTurnDescription, endTurnForm, endTurnMisfit, END_TURN_TOOL, BULLETS_ONLY, ENDED, takenEndTurn, MAX_BYLINE, NARRATION_ONLY, NO_REPLY, needsFromTool, oneReplyAccepted, offersToTakeItBack, oneReplyAlreadyWritten, summaryFromTool, triedFirstNudged, tryFirstNudge, turnReply, type TurnReply } from './needs.ts';
+import { ALREADY_ENDED, ARCHIVE_ADDED, MAX_UNTIL, MAX_WAIT_FOR, SNOOZE_ADDED, snoozeFromTool, endTurnDescription, endTurnForm, endTurnMisfit, endTurnTaken, openCardsNote, END_TURN_TOOL, BULLETS_ONLY, ENDED, takenEndTurn, MAX_BYLINE, NARRATION_ONLY, NO_REPLY, needsFromTool, oneReplyAccepted, offersToTakeItBack, oneReplyAlreadyWritten, summaryFromTool, triedFirstNudged, tryFirstNudge, turnReply, type TurnReply } from './needs.ts';
 import { asksForAppRestart, type AppRestarts } from './app-restarts.ts';
 import { PANEL_PLACES } from './panel-requests.ts';
 import { nudgedThisTurn, signInNudge, turnSignIns, uncovered, type ConnectorService } from './connectors.ts';
@@ -53,6 +53,8 @@ export type ThreadControl = {
   unpin?: (...args: Parameters<Runner['unpin']>) => Aw<ReturnType<Runner['unpin']>>;
   showPanel?: (threadId: string, ask: Parameters<Runner['showPanel']>[1]) => ReturnType<Runner['showPanel']>;
   endTurnNudged?: (threadId: string) => boolean;
+  // What this thread's subagents are parked on (approvals.ts).
+  openSubagentCards?: (threadId: string) => string[];
   requestSecret?: (threadId: string, req: SecretRequest) => Promise<SecretAnswer>;
   // A card a threadbear tool puts up itself, with no "Always allow": for a
   // call from a thread not in full mode that would raise access (below).
@@ -1182,6 +1184,14 @@ export function buildThreadbearTools(
   // archive gets through, as it's the one thing nothing else can do from
   // inside a turn (update_thread refuses). Not for a card waiting on Mike,
   // which archiving would hide. Undefined when this isn't a repeat.
+  // An accepted end_turn says what its subagents are parked on: the agent
+  // can't see their cards, and on 7 Nov 2026 one told Mike two were still
+  // working when they had been waiting on him for half an hour (7a98a6fd).
+  const sayingOpenCards = <A>(fn: (args: A) => Promise<string>) => async (args: A): Promise<string> => {
+    const text = await fn(args);
+    return endTurnTaken({ ok: true, text }) ? text + openCardsNote(control.openSubagentCards?.(selfId) ?? []) : text;
+  };
+
   const repeatEndTurn = (events: PersistedEvent[], input: { needs?: unknown; archive?: unknown; snooze?: unknown }): string | undefined => {
     const taken = takenEndTurn(events, SERVER_NAME);
     if (!taken) return undefined;
@@ -1279,7 +1289,7 @@ export function buildThreadbearTools(
           .describe('Hibernates this thread once the turn is over, until 2h, 1d, tomorrow, an ISO time with its offset, "restart" (the runner next starting), "release" (it starting on a new release) or words saying when ("when the phone arrives"), with needs "nothing": when the user asked for that, or when the rest waits on a message (one wakes it), until it should have come. Asked after you called end_turn? Call it again with this.'),
         waitFor: waitForArg,
       },
-      handle(async (input) => {
+      handle(sayingOpenCards(async (input) => {
         checkSnooze(input.snooze);
         const parsed = needsFromTool(input);
         const needs = parsed?.needs ?? 'nothing';
@@ -1312,7 +1322,7 @@ export function buildThreadbearTools(
         // as having written nothing: its turn can't be read.
         const before = codex ? undefined : await replied();
         return oneReplyAccepted(needs === 'you', restart, Boolean(before?.landed && before.replied));
-      }),
+      })),
     );
 
   // Says what the turn needs from Mike. The runner reads it from the
@@ -1373,7 +1383,7 @@ export function buildThreadbearTools(
           .describe('Hibernate this thread once the turn is over, until 30m, 2h, 1d, tomorrow, an ISO time with its offset, "restart" (until the runner next starts), "release" (until it starts on a new release), or words saying when ("when the phone arrives"). Only with needs "nothing": when the user has asked for this thread to be snoozed or hibernated, or when the rest waits on a message (one wakes it), until it should have come. If they ask after you have called end_turn, call it again with this.'),
         waitFor: waitForArg,
       },
-      handle(async (args) => {
+      handle(sayingOpenCards(async (args) => {
         checkSnooze(args.snooze);
         await checkWaitFor(args.waitFor, needsFromTool(args)?.needs ?? 'nothing');
         // Archive wins over snooze in the runner, so only one is said.
@@ -1448,7 +1458,7 @@ export function buildThreadbearTools(
         return needs === 'you'
           ? `${ENDED} will wait in Needs you${archive ? ', and stays in the inbox, as it needs something from the user' : ''}.${restart} Stop here, with no more text: the user has your reply, the asks go in a card under it, and nothing written now reaches them.`
           : `${ENDED} is done${archive ? `, and will be ${away} once the turn is over` : ''}. Stop here, with no more text: the user has your reply, and nothing written now reaches them.`;
-      }),
+      })),
     );
 
   // The form today's setting picks, which a new thread is shown. A thread

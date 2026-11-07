@@ -575,7 +575,8 @@ export class RpcServer {
       case 'threads.edit':
         return r.editMessage(reqString(p, 'threadId'), reqNumber(p, 'seq'), optString(p, 'text') ?? '', optImages(p) ?? [], { stopBackground: p.stopBackground === true });
       case 'threads.interrupt':
-        return r.interrupt(reqString(p, 'threadId'));
+        // Sent on for an agent's interrupt_thread (handover.ts), it isn't his Stop.
+        return r.interrupt(reqString(p, 'threadId'), { byMike: p.byAgent !== true });
       case 'threads.update': {
         const upd: Parameters<Runner['update']>[0] = { threadId: reqString(p, 'threadId') };
         if (p.title !== undefined) upd.title = reqString(p, 'title');

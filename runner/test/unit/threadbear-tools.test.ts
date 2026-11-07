@@ -1456,6 +1456,18 @@ test('one reply: an end_turn the Stop hook asked for keeps the message already w
   assert.equal(h.runner.get(thread.id).needs, 'nothing');
 });
 
+test("end_turn tells the agent which sub-agents are parked on a card", async () => {
+  const h = makeHarness();
+  const { thread, s } = start(h);
+  const one = tools(h, thread.id, undefined, () => true);
+  void s.sink.requestApproval({ name: 'Write', title: 'Write a.ts', input: {}, canAlwaysAllow: false, signal: new AbortController().signal });
+  toolCall(s, 'e1', END_TURN, {});
+  const said = (await one.call('end_turn', {})).text;
+  assert.match(said, /^Noted: this thread/);
+  assert.match(said, /Now write your reply/);
+  assert.match(said, /A sub-agent of yours is parked until the user answers an approval card in this thread, not working: "Write a\.ts"/);
+});
+
 test('one reply: a nudged end_turn with no message to keep still asks for the reply', async () => {
   const h = makeHarness();
   // No words since its last step.

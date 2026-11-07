@@ -369,6 +369,27 @@ test("a subagent's approval is asked at once, with no itemId and no diff", async
   state.close!();
 });
 
+// The CLI words an `interrupt` answer as the user's own decision and kills the
+// subagent, dropping our message (checked on CLI 2.1.319, 7 Nov 2026).
+test('a card closed unanswered is a plain denial saying so; only Stop interrupts', async () => {
+  for (const [answer, interrupt] of [
+    [{ decision: 'expired', message: 'The turn ended.' }, undefined],
+    [{ decision: 'expired' }, undefined],
+    [{ decision: 'expired', message: 'Interrupted.', stopped: true }, true],
+  ] as const) {
+    const { state, fn } = fakeQuery();
+    const sink: SessionSink = { output: () => {}, requestApproval: async () => answer, requestQuestion: async () => ({ answers: null }), exited: () => {} };
+    const adapter = new ClaudeAdapter({ claudePath: '/nonexistent', registry: new ProcessRegistry(tmpDir(), nullLogger), log: nullLogger, queryFn: fn });
+    const dir = tmpDir();
+    adapter.start({ threadId: 't', sessionId: 's', resume: false, cwd: dir, account: { id: 'a', provider: 'claude', configDir: dir } as never, permissionMode: 'ask', tmpDir: dir } as never, sink);
+    const res = await state.options.canUseTool('Write', { file_path: '/tmp/x.txt', content: 'hi' }, { signal: new AbortController().signal, toolUseID: 'toolu_sub', agentID: 'agent-1' });
+    assert.equal(res.behavior, 'deny');
+    assert.equal(res.interrupt, interrupt);
+    if (!interrupt) assert.match(res.message, /Threadbear closed this permission request.*did not decline/);
+    state.close!();
+  }
+});
+
 // In "Ask before edits" end_turn stopped for an Allow card, so every turn
 // waited on Mike with no reply written yet (6 Nov 2026, thread c3e52aa6).
 test('the threadbear tools that only read or end the turn never ask, in any mode; the rest still do', async () => {

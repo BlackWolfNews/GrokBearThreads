@@ -87,6 +87,10 @@ At the right of the row:
   off.
 - A grey spinner with something like "2 sub-agents": the turn has ended
   but helpers or jobs it started are still going.
+- The blue dot, with an approval card at the end of the thread and no
+  grey line: a sub-agent is waiting on your answer. It waits as long as it
+  takes, whatever the agent does in the meantime, and carries on when you
+  answer. Stop closes the card and stops that sub-agent.
 - A time: the thread is idle, or the blue dot on the left says it's
   waiting on you. After a while Threadbear stops an idle
   thread's agent to save memory, and your next message starts it again

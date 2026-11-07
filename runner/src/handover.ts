@@ -581,6 +581,10 @@ export class ThreadRouter implements ThreadControl {
     return this.runner.endTurnNudged(threadId);
   }
 
+  openSubagentCards(threadId: string): string[] {
+    return this.runner.openSubagentCards(threadId);
+  }
+
   async list(include: Bucket[] = ['inbox']): Promise<ThreadSummary[]> {
     const local = this.runner.list(include);
     const e = this.elsewhere();
@@ -678,7 +682,8 @@ export class ThreadRouter implements ThreadControl {
 
   async interrupt(threadId: string): Promise<Record<string, never>> {
     const e = this.away(threadId);
-    return e ? e.call('threads.interrupt', { threadId }) : this.runner.interrupt(threadId);
+    // The router is what agents' tools go through, so this isn't Mike's Stop.
+    return e ? e.call('threads.interrupt', { threadId, byAgent: true }) : this.runner.interrupt(threadId);
   }
 
   async delete(threadId: string): Promise<Record<string, never>> {
@@ -711,7 +716,7 @@ export function phoneCommands(runner: Runner, remote?: Pick<Peers, 'owns' | 'cal
     markSeen: (id) => at(id, 'threads.markSeen', { seq: Number.MAX_SAFE_INTEGER }, () => runner.markSeen(id, runner.get(id).lastSeq)),
     create: (p) => runner.create(p),
     share: (id, p) => at(id, 'threads.share', { ...p }, () => runner.share(id, p)),
-    interrupt: (id) => at(id, 'threads.interrupt', {}, () => runner.interrupt(id)),
+    interrupt: (id) => at(id, 'threads.interrupt', {}, () => runner.interrupt(id, { byMike: true })),
     quickAsk: (p) => runner.quickAsk(p),
     pressButton: (id, buttonId) => at(id, 'buttons.press', { buttonId }, () => runner.pressButton(id, buttonId)),
   };

@@ -1144,6 +1144,9 @@ export class ConvexSync {
   // sends that row again with the new state (onButton). Newest kept.
   private buttonRows = new Map<string, MessageDoc>();
   private pending = new Map<string, PendingApproval>(); // threadId -> what it waits on
+  // The row has room for one card, the newest. Subagents' can be open
+  // together and for a long time, so the rest wait here for it to close.
+  private cardsBehind = new Map<string, PendingApproval[]>();
   private earliest = new Map<string, number | null>(); // threadId -> seq of its first text message (null: none yet)
   private nexts = new Map<string, { lastSeq: number; next?: string[] }>(); // threadId -> its done card's next steps, as of lastSeq
   private lists: { projects?: Project[]; schedules?: Schedule[]; accounts?: Account[] } = {};
@@ -1895,7 +1898,7 @@ export class ConvexSync {
         this.lastWrite.delete(id);
         this.heads.delete(id);
         this.noteSent();
-        this.pending.delete(id);
+        this.forgetCards(id);
         this.earliest.delete(id);
         this.nexts.delete(id);
         for (const k of [...this.buttonRows.keys()]) if (k.startsWith(`${id} `)) this.buttonRows.delete(k);
@@ -1994,7 +1997,7 @@ export class ConvexSync {
       // A request for a thread on another runner (cross-runner.ts) is
       // answered only on the main Mac, whose runner starts it: the phone's
       // card has no buttons and says so, as one too big for the row does.
-      this.pending.set(threadId, { approvalId: e.approvalId, kind: 'approval', seq: e.seq, name: e.name, title: `${e.title} Answer it on the Mac.`, options: [] });
+      this.addCard(threadId, { approvalId: e.approvalId, kind: 'approval', seq: e.seq, name: e.name, title: `${e.title} Answer it on the Mac.`, options: [] });
     } else if (e.type === 'approval.requested') {
       // One whose line can't show all it allows offers only Deny there,
       // and says why; the runner refuses an allow from there anyway
@@ -2005,14 +2008,14 @@ export class ConvexSync {
       const raw = summaryField(e.input);
       const shownAsIs = raw === undefined || this.scrubber.safeText(raw) === raw;
       const whole = shownAsIs && remoteCardShowsAll(e.name, e.input, this.threadCwd(threadId), e.title);
-      this.pending.set(threadId, {
+      this.addCard(threadId, {
         approvalId: e.approvalId, kind: 'approval', seq: e.seq, name: e.name,
         title: whole ? e.title : `${e.title}. ${REMOTE_ALLOW_REFUSED}`,
         options: whole ? e.options : e.options.filter((o) => o !== 'allow' && o !== 'allowAlways'),
         ...(summary ? { inputSummary: summary } : {}),
       });
     } else if (e.type === 'question.requested') {
-      this.pending.set(threadId, { approvalId: e.approvalId, kind: 'question', seq: e.seq, questions: e.questions });
+      this.addCard(threadId, { approvalId: e.approvalId, kind: 'question', seq: e.seq, questions: e.questions });
     } else if (e.type === 'secret.requested') {
       // forBackend drops it for a backend older than SECRETS_API_VERSION.
       const box = this.deps.secretBox;
@@ -2024,9 +2027,9 @@ export class ConvexSync {
         this.deps.log.warn('no key for secrets from the phone', { error: String(err) });
         return;
       }
-      this.pending.set(threadId, { approvalId: e.approvalId, kind: 'secret', seq: e.seq, label: e.label, reason: e.reason, ...(e.placeholder ? { placeholder: e.placeholder } : {}), key });
+      this.addCard(threadId, { approvalId: e.approvalId, kind: 'secret', seq: e.seq, label: e.label, reason: e.reason, ...(e.placeholder ? { placeholder: e.placeholder } : {}), key });
     } else if (e.type === 'approval.resolved') {
-      if (this.pending.get(threadId)?.approvalId === e.approvalId) this.pending.delete(threadId);
+      this.closeCard(threadId, e.approvalId);
     } else return;
     try {
       this.mark(this.deps.runner.get(threadId));
@@ -2034,6 +2037,28 @@ export class ConvexSync {
     } catch {
       // The thread went between the event and now; its row goes with it.
     }
+  }
+
+  private addCard(threadId: string, card: PendingApproval): void {
+    const shown = this.pending.get(threadId);
+    if (shown) this.cardsBehind.set(threadId, [...(this.cardsBehind.get(threadId) ?? []), shown]);
+    this.pending.set(threadId, card);
+  }
+
+  private closeCard(threadId: string, approvalId: string): void {
+    const behind = (this.cardsBehind.get(threadId) ?? []).filter((c) => c.approvalId !== approvalId);
+    if (this.pending.get(threadId)?.approvalId === approvalId) {
+      const next = behind.pop();
+      if (next) this.pending.set(threadId, next);
+      else this.pending.delete(threadId);
+    }
+    if (behind.length) this.cardsBehind.set(threadId, behind);
+    else this.cardsBehind.delete(threadId);
+  }
+
+  private forgetCards(threadId: string): void {
+    this.pending.delete(threadId);
+    this.cardsBehind.delete(threadId);
   }
 
   // Only a change the phone would see makes a write.
@@ -2060,7 +2085,7 @@ export class ConvexSync {
     if (!t.archivedAt) this.scrubber.known.noteFolder(t.cwd);
     // A thread that isn't waiting any more lost its approval some other
     // way (the turn ended, the runner restarted); the row mustn't keep it.
-    if (t.status === 'idle' || t.status === 'error' || t.status === 'stopped') this.pending.delete(t.id);
+    if (t.status === 'idle' || t.status === 'error' || t.status === 'stopped') this.forgetCards(t.id);
     this.noteShared(t);
     const doc = toThreadDoc(t, this.runnerId, this.deps.clock.now(), this.pending.get(t.id), this.earliestSeq(t), this.nextSteps(t), this.scrubber.safeText);
     const now = this.deps.clock.now();
@@ -3589,8 +3614,9 @@ export class ConvexSync {
 
   // The phone saw a question as it was scrubbed, so its answer may name the
   // question, or pick an option, in scrubbed words. The CLI wants the real ones.
-  private realAnswers(threadId: string, answers: Record<string, string>): Record<string, string> {
-    const pending = this.pending.get(threadId);
+  private realAnswers(threadId: string, approvalId: unknown, answers: Record<string, string>): Record<string, string> {
+    // The card it answers, which a newer one may have pushed off the row.
+    const pending = [this.pending.get(threadId), ...(this.cardsBehind.get(threadId) ?? [])].find((c) => c?.approvalId === approvalId);
     if (pending?.kind !== 'question') return answers;
     const out = { ...answers };
     for (const q of pending.questions) {
@@ -3660,7 +3686,7 @@ export class ConvexSync {
           decision,
           remote: true,
           ...(typeof a.message === 'string' ? { message: a.message } : {}),
-          ...(a.answers && typeof a.answers === 'object' ? { answers: this.realAnswers(needThread(), a.answers as Record<string, string>) } : {}),
+          ...(a.answers && typeof a.answers === 'object' ? { answers: this.realAnswers(needThread(), a.approvalId, a.answers as Record<string, string>) } : {}),
         });
         return undefined;
       }

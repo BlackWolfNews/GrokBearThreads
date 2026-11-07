@@ -320,6 +320,12 @@ export function modelChoices(rows: ModelInfo[]): ModelChoice[] {
   return out;
 }
 
+// What an agent is told when its permission request closes without an
+// answer from anyone. In its result, so it reads it at the call it made.
+export function cardClosedMessage(why: string | undefined): string {
+  return `Threadbear closed this permission request before anyone answered it${why ? ` (${why.replace(/\.$/, '')})` : ''}. The user did not decline it, so don't tell them they did. The tool didn't run.`;
+}
+
 class ClaudeSession implements AgentSession {
   private opts: StartSessionOptions;
   private sink: SessionSink;
@@ -656,6 +662,8 @@ class ClaudeSession implements AgentSession {
       const questions = normaliseQuestions(input.questions);
       const ans = await this.sink.requestQuestion({ toolUseId: itemId, questions, signal: o.signal });
       if (ans.answers) return { behavior: 'allow', updatedInput: { ...input, answers: ans.answers }, toolUseID: o.toolUseID };
+      // Stop stops whoever's asking, as with a tool's card below.
+      if (ans.stopped) return { behavior: 'deny', message: ans.message || 'Interrupted.', interrupt: true, toolUseID: o.toolUseID };
       return { behavior: 'deny', message: ans.message || 'The user dismissed the question without answering.', toolUseID: o.toolUseID };
     }
     if (this.deps.neverAsk?.has(name) && !this.deps.alwaysAsk?.has(name)) return { behavior: 'allow', updatedInput: input, toolUseID: o.toolUseID };
@@ -715,7 +723,12 @@ class ClaudeSession implements AgentSession {
         };
       }
       case 'expired':
-        return { behavior: 'deny', message: ans.message || 'The request expired.', interrupt: true, toolUseID: o.toolUseID };
+        // `interrupt` makes the CLI say "The user doesn't want to proceed"
+        // and "stopped by user", whatever message goes with it, and kill a
+        // subagent. So it's only for Stop: anything else closing a card isn't
+        // Mike's decision, and agents repeat those words to him as if it were.
+        if (ans.stopped) return { behavior: 'deny', message: ans.message || 'Interrupted.', interrupt: true, toolUseID: o.toolUseID };
+        return { behavior: 'deny', message: cardClosedMessage(ans.message), toolUseID: o.toolUseID };
       default:
         return {
           behavior: 'deny',

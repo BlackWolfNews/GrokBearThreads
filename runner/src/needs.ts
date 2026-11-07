@@ -832,6 +832,14 @@ export function endTurnAccepted(result: { ok: boolean; text: string }): boolean 
   return result.ok && result.text.startsWith(ENDED);
 }
 
+// Added to an accepted end_turn's result while subagents wait on Mike's cards.
+export function openCardsNote(titles: string[]): string {
+  if (!titles.length) return '';
+  const shown = titles.slice(0, 3).map((t) => `"${t.slice(0, 120)}"`).join(', ');
+  const more = titles.length > 3 ? ` and ${titles.length - 3} more` : '';
+  return ` ${titles.length === 1 ? 'A sub-agent of yours is' : `${titles.length} of your sub-agents are`} parked until the user answers an approval card in this thread, not working: ${shown}${more}. Say so in your reply, rather than calling them running.`;
+}
+
 // An end_turn the handler took, Claude's (ENDED) or Codex's ("Noted. Now
 // write your final answer"), as opposed to one it refused.
 export function endTurnTaken(result: { ok: boolean; text: string }): boolean {

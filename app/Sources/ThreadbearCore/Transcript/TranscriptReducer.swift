@@ -1263,6 +1263,24 @@ public struct TranscriptModel: Sendable {
     /// (the poster it was asked for is the answer), the footer and the card.
     /// The runner's messages fold in: they're how the work carried on. The
     /// note an edit of Mike's leaves stays, as it says what he did.
+    /// A background subagent's card still waiting (no tool of the agent's to
+    /// point at). It's drawn at the end of the transcript rather than where
+    /// it came in: it stays open across turns, so that spot can be folded
+    /// into a finished turn or scrolled far above the latest reply, and the
+    /// thread would sit in Needs you with nothing to answer in sight (7 Nov
+    /// 2026). Once answered it goes back to its place. In the turn it came
+    /// in, while that's running, its place is fine, and floating it would
+    /// split the run of work around it.
+    private func isFloatingCard(_ k: Int) -> Bool {
+        guard pendingCards[items[k].id] != nil else { return false }
+        if let turn = items[k].turnId, turn == openTurn { return false }
+        switch items[k].content {
+        case .approval(let item): return (item.request.itemId ?? "").isEmpty
+        case .question(let item): return (item.request.itemId ?? "").isEmpty
+        default: return false
+        }
+    }
+
     private func staysOut(_ k: Int, replies: Set<Int>) -> Bool {
         if replies.contains(k) || items[k].id.hasPrefix("rw:") { return true }
         switch items[k].content {
@@ -1445,7 +1463,7 @@ public struct TranscriptModel: Sendable {
                 // Every row of a finished turn starts at its first item, so
                 // a change anywhere in it rebuilds it whole (runStart).
                 let replies = replies(in: turn)
-                let folded = turn.filter { !staysOut($0, replies: replies) }
+                let folded = turn.filter { !staysOut($0, replies: replies) && !isFloatingCard($0) }
                 // The line of work goes above the reply, even when the reply
                 // came first: a turn that only answered has its summary
                 // folded under it (reply(of:)).
@@ -1462,6 +1480,7 @@ public struct TranscriptModel: Sendable {
                 let gaps = dividers(in: turn, replies: replies)
                 for k in turn {
                     let row = items[k]
+                    if isFloatingCard(k) { continue }
                     if k == groupAt, let first = folded.first {
                         let lead = items[first]
                         let id = "g:" + lead.id
@@ -1523,6 +1542,10 @@ public struct TranscriptModel: Sendable {
                 i = turn.upperBound
                 continue
             }
+            if isFloatingCard(i) {
+                i += 1
+                continue
+            }
             if isWork(item) {
                 let runEnd = runEnd(i)
                 // A summarized turn's one message still folds away: the
@@ -1566,14 +1589,20 @@ public struct TranscriptModel: Sendable {
                 i += 1
             }
         }
+        let floating = workingLine ? pendingCards.keys.compactMap { itemIndex[$0] }.filter(isFloatingCard).sorted() : []
+        for k in floating {
+            out.append(items[k])
+            starts.append(items.count)
+        }
         if workingLine, let turn = openTurn, !pendingCards.values.contains(turn) {
             let status = WorkingStatus(turnId: turn, startedAt: turnStarts[turn])
             out.append(derived("w:" + turn, seq: lastSeq, turnId: turn, .working(status)))
             starts.append(items.count)
-        } else if workingLine, openTurn == nil, !background.isEmpty {
+        } else if workingLine, openTurn == nil, !background.isEmpty, floating.isEmpty {
             // Between turns with sub-agents or jobs still going: the thread
             // is still being worked on, and this says so where the working
-            // line would be.
+            // line would be. Not under a card a sub-agent is waiting on,
+            // where "working" would be wrong.
             out.append(derived("bg:", seq: lastSeq, turnId: nil, .background(BackgroundStatus(tasks: background))))
             starts.append(items.count)
         }

@@ -248,8 +248,9 @@ export type PendingApproval =
   // macOnly: its whole input doesn't fit what the phone or another Mac's
   // view shows (tools.ts, remoteCardShowsAll), so only an allow from a
   // client that shows it all counts.
-  | { approvalId: string; kind: 'tool'; main: boolean; plan?: string; macOnly?: boolean; resolve: (a: ToolApprovalAnswer) => void }
-  | { approvalId: string; kind: 'question'; main: boolean; questions: Question[]; resolve: (a: QuestionAnswer) => void }
+  // title: what it's asking, for telling the agent about a subagent's.
+  | { approvalId: string; kind: 'tool'; main: boolean; title?: string; plan?: string; macOnly?: boolean; resolve: (a: ToolApprovalAnswer) => void }
+  | { approvalId: string; kind: 'question'; main: boolean; title?: string; questions: Question[]; resolve: (a: QuestionAnswer) => void }
   // An agent's ask_secret (docs/protocol.md, "Secrets"). The value never
   // passes through here: secrets.answer writes the file and hands this the
   // paths.
@@ -934,14 +935,27 @@ export class Runner {
     const { rec } = st;
     // A sub-agent can't outlive the runner that started its CLI.
     this.stopSubagents(st);
+    // Waiting with no turn is only a subagent's card, and that subagent is
+    // gone: there's no turn to pick up again.
+    const onlyCards = rec.status === 'waiting' && !rec.turnId;
+    if (onlyCards) rec.status = 'idle';
     const midTurn = rec.status === 'starting' || rec.status === 'running' || rec.status === 'waiting';
     if (!midTurn && rec.pendingApprovals.length === 0 && rec.queue.length === 0) return false;
     // The turn may have ended on disk just before a crash stopped
     // thread.json being saved; then it only needs its status back.
     const ended = midTurn && rec.turnId ? this.findTurnCompleted(rec.id, rec.turnId) : undefined;
+    // thread.json can be behind the log (a crash before it was saved): a card
+    // may have been answered there, and a later "expired" would replace the
+    // answer. A turn that ended there closed its own cards, but a subagent's
+    // outlives its turn, so go by what the log says (Codex review).
+    const resolved = new Set<string>();
+    if (rec.pendingApprovals.length) {
+      const log = this.store.log(rec.id);
+      for (const e of log.read(1, log.lastSeq)) if (e.type === 'approval.resolved') resolved.add(e.approvalId);
+    }
     for (const approvalId of rec.pendingApprovals) {
-      if (ended) break;
-      this.emit(st, { type: 'approval.resolved', approvalId, decision: 'expired', message: 'The runner restarted.' }, rec.turnId);
+      if (resolved.has(approvalId)) continue;
+      this.emit(st, { type: 'approval.resolved', approvalId, decision: 'expired', message: 'The runner restarted.' }, ended ? undefined : rec.turnId);
     }
     rec.pendingApprovals = [];
     if (midTurn && ended) {
@@ -1469,8 +1483,8 @@ export class Runner {
   // CLI is still starting or leaving, not behind messages already waiting,
   // not once a move or a fresh CLI is due on the next turn (the message is
   // meant for that), not after Stop was pressed (the CLI would cancel it
-  // with the rest), and not into a turn opened only for a background
-  // subagent's approval, where there's no CLI turn to join.
+  // with the rest), and not into a turn opened only for a card, where
+  // there's no CLI turn to join.
   canSteer(st: ThreadState): boolean {
     const { rec, rt } = st;
     const turn = rt.turn;
@@ -1584,7 +1598,8 @@ export class Runner {
     delete rec.waitingForNetwork;
     if (rec.netCarryOn && rec.netCarryOn.turnId !== msg.turnId) delete rec.netCarryOn;
     this.beforeTurn(st);
-    rec.status = rt.session && !rt.closing ? 'running' : 'starting';
+    // A subagent's card can still be open (docs/protocol.md, "A subagent's card").
+    rec.status = rt.session && !rt.closing ? (rt.approvals.size ? 'waiting' : 'running') : 'starting';
     this.markDirty(st);
     // A message to the thread (not a turn the CLI opened by itself), so the
     // librarian can file a new thread before its first turn is over.
@@ -2147,7 +2162,11 @@ export class Runner {
     this.settleInstructionsNews(st, r.outcome === 'completed' && !turn.interruptRequested);
     this.flushDeltas(st);
     rt.inProgress.clear();
-    this.expireApprovals(st, 'The turn ended.');
+    // Not a subagent's card: it's waiting on Mike, not on this turn, and the
+    // subagent carries on after it. Expiring them here killed two subagents
+    // when their parent's next turn ended, while Mike was away, and the CLI
+    // told the parent he had stopped them (7 Nov 2026, thread 7a98a6fd).
+    this.expireApprovals(st, 'The turn ended.', { mainOnly: true });
     let turnCost: number | undefined;
     if (r.totalCostUsd !== undefined) {
       // total_cost_usd is a running total for the native session (resume
@@ -2226,7 +2245,7 @@ export class Runner {
     // Judged before endTurn, which starts any queued message.
     const finished = outcome === 'completed' && said?.needs === 'nothing' && !rec.queue.length && !archive &&
       !snoozeFromTool(turn.endTurn) && !waitForFromTool(turn.endTurn) &&
-      !rec.subagents?.some((a) => a.status === 'running') && !rt.tasks.length &&
+      !rec.subagents?.some((a) => a.status === 'running') && !rt.tasks.length && !rt.approvals.size &&
       // A job that ended mid-turn: the CLI's turn reading its result is next.
       !rt.taskEndedInTurn && !rt.finished.length;
     this.endTurn(st, ev.seq, outcome === 'failed' ? 'error' : 'idle', outcome, limitHit, netLost);
@@ -2341,7 +2360,9 @@ export class Runner {
     rt.activeAt = this.clock.now();
     rec.turnId = undefined;
     rec.lastTurnCompletedSeq = completedSeq;
-    rec.status = status;
+    // A subagent's card outlives the turn (completeTurn), so the thread is
+    // still waiting on Mike.
+    rec.status = rt.approvals.size ? 'waiting' : status;
     rec.lastActivityAt = this.isoNow();
     this.markDirty(st);
     const waiters = rt.turnEndWaiters ?? [];
@@ -2422,6 +2443,9 @@ export class Runner {
     if (err && !rt.started && !missing && rt.releasedGen !== gen) this.tellStarted(rec.provider, rt.startVersion, false);
     rt.session = undefined;
     rt.frozen = false;
+    // Nothing's left to answer them: a subagent's card can be open with no
+    // turn running, and no turn ending would close it.
+    this.expireApprovals(st, 'The CLI stopped.');
     rt.tasks = [];
     rt.finished = [];
     rt.taskEndedInTurn = false;
@@ -2510,13 +2534,21 @@ export class Runner {
     this.archiveWhenGone(st);
   }
 
-  interrupt(threadId: string): Record<string, never> {
+  // byMike: his Stop, in the app or on the phone. Everything else that stops
+  // a turn (an agent's interrupt_thread, an archive, a move) mustn't reach
+  // the agent as his decision (docs/protocol.md, "Who stopped it").
+  interrupt(threadId: string, opts: { byMike?: boolean } = {}): Record<string, never> {
     const st = this.mustGet(threadId);
     const { rt } = st;
     const turn = rt.turn;
-    if (!turn) return {};
+    const closing = { stopped: opts.byMike === true };
+    // Stop with only a subagent's card open: that card is what's waiting.
+    if (!turn) {
+      this.expireApprovals(st, 'Interrupted.', closing);
+      return {};
+    }
     turn.interruptRequested = true;
-    this.expireApprovals(st, 'Interrupted.');
+    this.expireApprovals(st, 'Interrupted.', closing);
     const session = rt.session;
     // Nothing is running in the CLI for a turn that was only opened for a
     // background subagent's approval, so nothing would end it.

@@ -220,20 +220,24 @@ public struct Question: Sendable, Hashable, Decodable {
 
 public struct QuestionRequest: Sendable, Hashable, Decodable {
     public var approvalId: String
+    /// Absent for a background subagent's.
+    public var itemId: String?
     public var questions: [Question]
 
-    public init(approvalId: String, questions: [Question]) {
+    public init(approvalId: String, itemId: String? = nil, questions: [Question]) {
         self.approvalId = approvalId
+        self.itemId = itemId
         self.questions = questions
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         approvalId = (try? c.decodeIfPresent(String.self, forKey: .approvalId)) ?? ""
+        itemId = try? c.decodeIfPresent(String.self, forKey: .itemId)
         questions = c.lossyArray(Question.self, forKey: .questions)
     }
 
-    enum CodingKeys: String, CodingKey { case approvalId, questions }
+    enum CodingKeys: String, CodingKey { case approvalId, itemId, questions }
 }
 
 /// An agent's `ask_secret` (docs/protocol.md, "Secrets"): a card asking

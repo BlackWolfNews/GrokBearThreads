@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { phoneCommands, ThreadRouter } from '../../src/handover.ts';
 import { FakeAccounts, FakeAdapter, makeHarness, testConfig, tick, type Harness } from '../helpers/fakes.ts';
 import { Runner, type Notification } from '../../src/runner.ts';
 import { ThreadStore } from '../../src/store.ts';
@@ -715,4 +716,23 @@ test("Peers: a thread that can't be taken in stays arriving, and one being hande
   await new Promise((r) => setTimeout(r, 700));
   assert.deepEqual(b.swept, []);
   assert.deepEqual(took, []);
+});
+
+// docs/protocol.md, "Who stopped it": his Stop on the phone says so; an agent's
+// interrupt_thread, which goes through the router, doesn't.
+test("only the phone's Stop counts as Mike's, not an agent's interrupt_thread", async () => {
+  const h = makeHarness();
+  const ask = () => {
+    const { thread } = h.runner.create({ text: 'go', cwd: h.cfg.defaults.cwd, accountId: 'claude-3', permissionMode: 'ask' });
+    const s = h.adapter.last;
+    s.init();
+    s.result();
+    return { id: thread.id, answer: s.sink.requestApproval({ name: 'Write', title: 'Write a', input: {}, canAlwaysAllow: false, signal: new AbortController().signal }) };
+  };
+  const phone = ask();
+  await phoneCommands(h.runner).interrupt!(phone.id);
+  assert.equal((await phone.answer).stopped, true);
+  const agent = ask();
+  await new ThreadRouter(h.runner, () => undefined).interrupt(agent.id);
+  assert.equal((await agent.answer).stopped, undefined);
 });

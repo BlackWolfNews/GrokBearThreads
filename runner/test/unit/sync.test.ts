@@ -2511,17 +2511,21 @@ test('status says whether the backend checks too', async () => {
 
 test('a phone answer in scrubbed words reaches the CLI in the real ones', async () => {
   const { sync } = setup();
-  const internals = sync as unknown as { pending: Map<string, unknown>; realAnswers(id: string, a: Record<string, string>): Record<string, string> };
+  const internals = sync as unknown as { pending: Map<string, unknown>; cardsBehind: Map<string, unknown[]>; realAnswers(id: string, approvalId: string, a: Record<string, string>): Record<string, string> };
   const q = `Use ${FAKE_KEY} here?`;
   const label = `The key ${FAKE_KEY}`;
   internals.pending.set('t', { approvalId: 'a', kind: 'question', questions: [{ question: q, multiSelect: false, options: [{ label }, { label: 'No' }] }, { question: 'Plain?', multiSelect: false, options: [{ label: 'Yes' }] }] });
-  const real = internals.realAnswers('t', { 'Use [REDACTED] here?': 'The key [REDACTED]', 'Plain?': 'Yes' });
+  const real = internals.realAnswers('t', 'a', { 'Use [REDACTED] here?': 'The key [REDACTED]', 'Plain?': 'Yes' });
   assert.deepEqual(real, { [q]: label, 'Plain?': 'Yes' });
-  assert.deepEqual(internals.realAnswers('t', { 'Use [REDACTED] here?': 'The key [REDACTED], No' }), { [q]: `${label}, No` });
-  assert.deepEqual(internals.realAnswers('other', { x: 'y' }), { x: 'y' });
+  assert.deepEqual(internals.realAnswers('t', 'a', { 'Use [REDACTED] here?': 'The key [REDACTED], No' }), { [q]: `${label}, No` });
+  assert.deepEqual(internals.realAnswers('other', 'z', { x: 'y' }), { x: 'y' });
   const comma = `Key ${FAKE_KEY}, prod`;
   internals.pending.set('c', { approvalId: 'b', kind: 'question', questions: [{ question: 'Which?', multiSelect: true, options: [{ label: comma }, { label: 'No' }] }] });
-  assert.deepEqual(internals.realAnswers('c', { 'Which?': 'Key [REDACTED], prod, No' }), { 'Which?': `${comma}, No` });
+  assert.deepEqual(internals.realAnswers('c', 'b', { 'Which?': 'Key [REDACTED], prod, No' }), { 'Which?': `${comma}, No` });
+  // Asked while another card came and took the row (Codex review).
+  internals.cardsBehind.set('t', [internals.pending.get('t')]);
+  internals.pending.set('t', { approvalId: 'newer', kind: 'approval', title: 'x', options: [] });
+  assert.deepEqual(internals.realAnswers('t', 'a', { 'Use [REDACTED] here?': 'The key [REDACTED]', 'Plain?': 'Yes' }), { [q]: label, 'Plain?': 'Yes' });
 });
 
 test("an archived thread's folder is looked at for its history", async () => {
@@ -3020,6 +3024,39 @@ test('commands: a create keeps Plan first, and one with an unknown mode starts n
   // And the session started in plan mode, not with permissions skipped.
   const planThread = h.runner.list().find((t) => t.title === 'flagged')!;
   assert.equal(h.adapter.sessions.find((s) => s.opts.threadId === planThread.id)?.opts.permissionMode, 'plan');
+});
+
+// Codex review, 7 Nov 2026: a subagent's card with no turn running was dropped
+// from the row as it came, and an older one lost when a newer one closed.
+test("a subagent's cards reach the phone between turns, and an older one comes back when a newer closes", async () => {
+  const f = setupFull();
+  const docs = () => f.calls.filter((c) => c.fn === 'sync:upsertThreads').flatMap((c) => c.args.threads as ThreadDoc[]);
+  const { h, sync } = f;
+  sync.start();
+  await sync.flushNow();
+  const t = h.runner.create({ text: 'go', cwd: h.cfg.defaults.cwd, accountId: 'claude-3', permissionMode: 'ask' }).thread;
+  const s = session(h, t.id);
+  s.init();
+  s.result();
+  const row = async () => {
+    h.clock.advance(SYNC_COALESCE_MS);
+    await tick();
+    return docs().filter((d) => d.threadId === t.id).at(-1)!.pendingApproval as { approvalId: string; title: string } | undefined;
+  };
+  const ask = (title: string) => void s.sink.requestApproval({ name: 'Write', title, input: {}, canAlwaysAllow: false, signal: new AbortController().signal });
+  ask('Write a');
+  const a = await row();
+  assert.ok(a, 'it reaches the row with no turn running');
+  ask('Write b');
+  const b = await row();
+  assert.notEqual(b!.approvalId, a!.approvalId);
+  s.out({ kind: 'cliTurn' });
+  s.out({ kind: 'result', result: { outcome: 'completed', durationMs: 5, own: true } });
+  assert.equal((await row())!.approvalId, b!.approvalId, 'a turn ending leaves it');
+  h.runner.respondApproval({ threadId: t.id, approvalId: b!.approvalId, decision: 'deny' });
+  assert.equal((await row())!.approvalId, a!.approvalId, 'the older one is back');
+  h.runner.respondApproval({ threadId: t.id, approvalId: a!.approvalId, decision: 'deny' });
+  assert.equal(await row(), undefined);
 });
 
 // Daybreak, 7 Nov 2026 ("approval cards can hide the executable payload
