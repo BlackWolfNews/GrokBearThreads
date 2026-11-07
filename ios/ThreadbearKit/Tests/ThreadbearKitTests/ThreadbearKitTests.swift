@@ -455,7 +455,11 @@ import UniformTypeIdentifiers
     @Test func sendRunsATurnAndReplies() async throws {
         let backend = FakeBackend(turnDelay: .milliseconds(10))
         _ = try await backend.send(threadId: "a3", text: "thanks")
-        try await Task.sleep(for: .milliseconds(100))
+        try await eventually {
+            var it = backend.thread("a3").makeAsyncIterator()
+            guard let d = try await it.next() ?? nil else { return false }
+            return d.messages.suffix(2).map(\.role) == [.user, .assistant] && d.thread.status == .idle
+        }
         var iterator = backend.thread("a3").makeAsyncIterator()
         let detail = try #require(try await iterator.next() ?? nil)
         #expect(detail.messages.suffix(2).map(\.role) == [.user, .assistant])
@@ -555,7 +559,10 @@ struct FailingTransport: ConvexTransport {
     @Test func fakeLoadEarlierPrependsOlderMessages() async throws {
         let backend = FakeBackend(turnDelay: .milliseconds(20))
         _ = try await backend.loadEarlier(threadId: "a3", beforeSeq: 120)
-        try await Task.sleep(for: .milliseconds(100))
+        try await eventually {
+            var it = backend.thread("a3").makeAsyncIterator()
+            return try await it.next()??.messages.first?.seq == 70
+        }
         var iterator = backend.thread("a3").makeAsyncIterator()
         let detail = try #require(try await iterator.next() ?? nil)
         #expect(detail.messages.first?.seq == 70)
