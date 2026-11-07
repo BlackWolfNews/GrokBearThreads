@@ -463,19 +463,6 @@ final class TranscriptTextView: NSTextView {
     /// drawn in `linkTextAttributes`) and needs no URL scheme.
     var onAction: ((String) -> Void)?
 
-    /// The thread whose transcript this text is in, from the table it sits
-    /// in. A reply button is only pressed from its own thread's transcript:
-    /// an agent copying another thread's `button:` link into its reply must
-    /// not get that thread's button pressed (Codex's review, 7 Nov 2026).
-    var transcriptThreadId: String? {
-        var view: NSView? = superview
-        while let v = view {
-            if let table = v as? NSTableView, let controller = table.delegate as? TranscriptController { return controller.session?.threadId }
-            view = v.superview
-        }
-        return nil
-    }
-
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         // A ```mermaid or ```html box's buttons. Elsewhere in the box a
@@ -1195,7 +1182,9 @@ final class TranscriptTextView: NSTextView {
     }
 
     /// The thread whose transcript this text is in: the main panel's, or
-    /// one open in a panel of its own.
+    /// one open in a panel of its own. A reply button is only pressed from
+    /// its own thread's transcript, so a `button:` link an agent copied
+    /// from another thread can't press that thread's (Codex's review, 7 Nov).
     private var transcriptThreadId: String? {
         var view = superview
         while let v = view, !(v is TranscriptTableView) { view = v.superview }
