@@ -595,11 +595,11 @@ within a second or two while it's online (state `taken`, then `done` or
 `pending`:
 
 - `phone:send({ token, threadId, text, answers? })` (`answers`, API 14: the card's asks it answers, `{ action, answer }[]`)
-- `phone:press({ token, threadId, buttonId })` (API 58) → commandId: a
+- `phone:press({ token, threadId, buttonId })` (API 59) → commandId: a
   reply button's press (docs/protocol.md, "Reply buttons"), queued as a
   `press` command with `{ buttonId }`. Its `resultThreadId` is the thread
   the button started or messaged. `phone:messages` rows carry `buttons`,
-  the state of the buttons an assistant message links, since API 58.
+  the state of the buttons an assistant message links, since API 59.
 - `phone:respond({ token, threadId, approvalId, decision: "allow" |
   "allowAlways" | "deny", message? })`
 - `phone:answer({ token, threadId, approvalId, answers: Record<string,

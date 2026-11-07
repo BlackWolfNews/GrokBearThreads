@@ -1,6 +1,6 @@
 import Foundation
 
-/// A reply button as a message row carries it (backend API 58, docs/protocol.md
+/// A reply button as a message row carries it (backend API 59, docs/protocol.md
 /// "Reply buttons"): what it says and where it goes, never the brief or
 /// message behind it, which stay on the Mac.
 public struct MessageButton: Codable, Sendable, Hashable, Identifiable {

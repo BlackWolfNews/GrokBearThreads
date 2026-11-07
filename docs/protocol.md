@@ -849,7 +849,7 @@ access can't make a button for more than it has: a new thread's
 message to a thread with more access is refused (send_message, which
 asks first, is for that). A thread keeps its last 200 buttons.
 
-On the phone and the website (Sync, backend API 58), pressing calls
+On the phone and the website (Sync, backend API 59), pressing calls
 `phone:press({ threadId, buttonId })`, which queues a `press` command with
 `{ buttonId }` for the thread's runner; the runner calls `buttons.press`
 and finishes the command with the thread it started or messaged as

@@ -13,7 +13,7 @@ export type TurnMessage = {
   toolKind?: string;
   summary?: boolean;
   turn?: string;
-  // The reply buttons its text links (API 58, reply-buttons.ts).
+  // The reply buttons its text links (API 59, reply-buttons.ts).
   buttons?: MessageButton[];
   at: string;
 };

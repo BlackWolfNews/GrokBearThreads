@@ -19,7 +19,7 @@ export const shareField = v.object({
 
 // The phone's view of a thread, named as in docs/protocol.md's
 // ThreadSummary. Written on change, coalesced, never per token.
-// A reply button as a message row carries it (API 58, docs/protocol.md
+// A reply button as a message row carries it (API 59, docs/protocol.md
 // "Reply buttons"): what the phone and website need to draw it, never the
 // brief or message behind it, which stay on the runner. target is the new
 // thread's folder name or the title of the thread it messages.
@@ -373,7 +373,7 @@ export default defineSchema({
     summary: v.optional(v.boolean()), // end_turn's bullets, the turn's reply (since API 14)
     turn: v.optional(v.string()), // the start of its turn's id (since API 26)
     wokeBy: v.optional(v.array(v.object({ kind: v.string(), description: v.string() }))), // what finished and woke this turn, on its first row (since API 33)
-    buttons: v.optional(v.array(messageButton)), // the reply buttons its text links, as they are now (since API 58)
+    buttons: v.optional(v.array(messageButton)), // the reply buttons its text links, as they are now (since API 59)
     at: v.string(),
     pagedAt: v.optional(v.number()),
     // The runner key's runner that wrote it, so past its message budget its

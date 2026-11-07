@@ -115,7 +115,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 58;
+export const BACKEND_API_VERSION = 59;
 // From this one a runner key's archived threads stay in the sidebar table, so
 // those an older backend dropped go again, once (thread-index.ts resendArchived).
 export const ARCHIVED_INDEX_API_VERSION = 54;
@@ -265,7 +265,7 @@ export const WOKE_BY_API_VERSION = 33;
 // buttons' state (docs/protocol.md, "Reply buttons"), sent again when one is
 // pressed, and the phone can queue a `press` command. An older backend's
 // validator would turn the row down, so it goes without.
-export const BUTTONS_API_VERSION = 58;
+export const BUTTONS_API_VERSION = 59;
 // From this one a thread row's pendingApproval can be a secret (docs/protocol.md,
 // "Secrets"), answered with phone:secret. An older backend's validator would
 // turn the whole row down, so it goes without the card.
@@ -381,7 +381,7 @@ export type PhoneAsk = { action: string; why?: string; reply?: string; options?:
 // API 2): what the phone and the website show of a thread.
 export type WokeByDoc = { kind: string; description: string };
 export type MessageDoc = { threadId: string; seq: number; role: 'user' | 'assistant' | 'tool'; text: string; origin?: string; toolKind?: string; summary?: true; turn?: string; wokeBy?: WokeByDoc[]; buttons?: MessageButton[]; at: string; pagedAt?: number };
-// A reply button as a message row carries it (API 58): enough to draw it
+// A reply button as a message row carries it (API 59): enough to draw it
 // and say where it goes, never its brief or message, which stay on the Mac.
 // target: the new thread's folder name, or the title of the thread it messages.
 export type MessageButton = { id: string; title: string; kind: 'start' | 'send'; target?: string; pressedThreadId?: string; failed?: string };
@@ -509,7 +509,7 @@ export type CommandHost = {
   quickAsk(p: { question: string; answer: string; sources?: { title: string; url: string }[]; askedAt?: number }): { thread: ThreadSummary };
   // The website's Pause, Resume and Run now (API 45). Absent in small tests.
   schedule?: (p: { scheduleId: string; action: 'pause' | 'resume' | 'run' }) => unknown;
-  // A reply button's press from the phone or website (API 58), buttons.press.
+  // A reply button's press from the phone or website (API 59), buttons.press.
   pressButton?: (threadId: string, buttonId: string) => unknown;
 };
 
@@ -3445,7 +3445,7 @@ export class ConvexSync {
         return undefined;
       }
       case 'press': {
-        // A reply button (API 58). Pressing twice is harmless: a pressed
+        // A reply button (API 59). Pressing twice is harmless: a pressed
         // button comes back as it is (buttons.ts pressButton).
         if (!host.pressButton) throw new Error("This runner can't press a button from the phone.");
         if (typeof a.buttonId !== 'string' || !/^[a-z0-9]{8}$/.test(a.buttonId)) throw new Error('no button');

@@ -62,7 +62,7 @@ public protocol Backend: Sendable {
     /// Takes back a photo that was uploaded and then never sent (backend API 25).
     func discardPhoto(_ storageId: String) async throws
     func respond(threadId: String, approvalId: String, decision: ApprovalOption) async throws -> String
-    /// Presses a reply button (backend API 58): queues it for the thread's
+    /// Presses a reply button (backend API 59): queues it for the thread's
     /// runner, which presses it once however many times it's asked.
     func press(threadId: String, buttonId: String) async throws -> String
     /// Answers keyed by question text, several choices joined with ", ",

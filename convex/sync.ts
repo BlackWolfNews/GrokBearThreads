@@ -1062,7 +1062,7 @@ const messageDoc = v.object({
   summary: v.optional(v.boolean()), // API 14
   turn: v.optional(v.string()), // API 26
   wokeBy: v.optional(v.array(v.object({ kind: v.string(), description: v.string() }))), // API 33
-  buttons: v.optional(v.array(messageButton)), // API 58
+  buttons: v.optional(v.array(messageButton)), // API 59
   at: v.string(),
   pagedAt: v.optional(v.number()), // an old phone asked for it (loadEarlier): phone:thread shows it for a day
 });
@@ -1128,9 +1128,9 @@ export const appendMessages = mutation({
       // reached) is written over when the runner sends it again.
       else if (caller.owner && (existing.text !== m.text || existing.role !== m.role)) await ctx.db.replace(existing._id, { ...m, ...(m.pagedAt ?? existing.pagedAt ? { pagedAt: m.pagedAt ?? existing.pagedAt } : {}) });
       else {
-        // A row sent again for its buttons (API 58: one was pressed) changes
+        // A row sent again for its buttons (API 59: one was pressed) changes
         // only them, so what woke the turn and an old phone's paged mark stay.
-        // From before API 58 no row carries any, and an older runner never
+        // From before API 59 no row carries any, and an older runner never
         // sends one again, so nothing here clears them.
         const patch: Partial<Doc<'messages'>> = {};
         if (m.pagedAt && !existing.pagedAt) patch.pagedAt = m.pagedAt;
@@ -2153,7 +2153,7 @@ export const finishCommand = mutation({
     // before finishing): never another runner's id, which the main Mac would
     // then open as this runner's new thread.
     let made: string | undefined;
-    // A press (API 58) names the thread its button started or messaged, also the runner's own.
+    // A press (API 59) names the thread its button started or messaged, also the runner's own.
     if (resultThreadId && (c.kind === 'create' || c.kind === 'quickAsk' || c.kind === 'press')) {
       const t = await ctx.db.query('threads').withIndex('by_threadId', (q) => q.eq('threadId', resultThreadId)).unique();
       if (t && (c.runnerId === 'any' ? caller.owner || t.runnerId === (caller as { runnerId?: string }).runnerId : t.runnerId === c.runnerId)) made = resultThreadId;

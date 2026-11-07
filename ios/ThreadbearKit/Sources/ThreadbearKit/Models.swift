@@ -526,7 +526,7 @@ public struct PhoneMessage: Codable, Sendable, Hashable, Identifiable {
     /// sub-agents and jobs whose finishing woke it (backend API 33).
     public var wokeBy: [WokeTask]?
     /// The reply buttons its text links as `[title](button:<id>)`, as they
-    /// are now (backend API 58, ReplyButtons.swift).
+    /// are now (backend API 59, ReplyButtons.swift).
     public var buttons: [MessageButton]?
     @FlexibleDate public var at: Date
 

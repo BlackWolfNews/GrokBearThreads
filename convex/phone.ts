@@ -649,7 +649,7 @@ export const cancel = mutation({
   },
 });
 
-// A reply button's press (API 58, docs/protocol.md "Reply buttons"): queued
+// A reply button's press (API 59, docs/protocol.md "Reply buttons"): queued
 // for the thread's runner, which calls buttons.press. A button already
 // pressed comes back as it is there, so a second tap starts nothing.
 export const press = mutation({

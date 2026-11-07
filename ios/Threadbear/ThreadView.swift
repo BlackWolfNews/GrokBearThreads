@@ -853,7 +853,7 @@ struct MarkdownText: View {
     let blocks: [MarkdownBlock]
     /// The message's seq, which says which upload a picture's address means.
     var seq: Int?
-    /// The reply buttons the message links (backend API 58). Nil: its button
+    /// The reply buttons the message links (backend API 59). Nil: its button
     /// links are just their titles.
     var buttons: [MessageButton]?
     @Environment(\.threadPictures) private var pictures
