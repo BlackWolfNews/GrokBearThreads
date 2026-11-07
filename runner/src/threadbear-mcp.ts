@@ -37,6 +37,7 @@ import { POCKET_ICONS } from './pocket-icons.ts';
 import type { SecretAnswer, SecretRequest } from './runner/approvals.ts';
 import type { StartRequest } from './cross-runner.ts';
 import { SECRET_TIMEOUT_DEFAULT_MIN, SECRET_TIMEOUT_MAX_MIN } from './secrets.ts';
+import { cutSafely } from './safe-cut.ts';
 
 // What the tools drive: the Runner itself, or during a handover
 // (docs/protocol.md) a ThreadRouter (handover.ts) that reaches threads on
@@ -1486,7 +1487,7 @@ export function buildThreadbearTools(
           await confirm('create_thread', [`Start a thread with ${MODE_NAMES[permissionMode]}${f ? ` in ${f}` : ''}${runner?.trim() ? ` on ${runner.trim()}` : ''}`], { text, folder: f, permissionMode, ...(runner ? { runner } : {}) }, extra?.signal);
         }
         if (runner?.trim() && control.startOn) {
-          const cleanWhy = why?.trim() ? why.replace(/\s+/g, ' ').trim().slice(0, MAX_BYLINE) : undefined;
+          const cleanWhy = why?.trim() ? cutSafely(why.replace(/\s+/g, ' ').trim(), MAX_BYLINE) : undefined;
           const there = await control.startOn(selfId, {
             runner: runner.trim(),
             text,
@@ -1501,14 +1502,14 @@ export function buildThreadbearTools(
         }
         const r = await control.create({
           text: (await from()) + text,
-          title: title?.trim() || text.split('\n').map((l) => l.trim()).find(Boolean)?.slice(0, 200),
+          title: title?.trim() || cutSafely(text.split('\n').map((l) => l.trim()).find(Boolean) ?? '', 200) || undefined,
           cwd: await folder(f ?? '.'),
           accountId: await account(acc),
           ...(p !== undefined && !acc ? { poolId: pool(p) } : {}),
           model,
           effort,
           permissionMode,
-          startedBy: { kind: 'thread', label: 'Agent', threadId: selfId, ...(why?.trim() ? { why: why.replace(/\s+/g, ' ').trim().slice(0, MAX_BYLINE) } : {}) },
+          startedBy: { kind: 'thread', label: 'Agent', threadId: selfId, ...(why?.trim() ? { why: cutSafely(why.replace(/\s+/g, ' ').trim(), MAX_BYLINE) } : {}) },
         });
         const where = r.thread.poolId ? ` It's in the ${r.thread.poolId} pool, so it moves to another login if this one runs dry.` : '';
         const inherited = caller && asked === undefined ? ` It's in ${MODE_NAMES[caller]}, as this thread is.` : '';

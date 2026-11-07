@@ -123,6 +123,7 @@ import {
   projectPatchFiles,
   webPage,
 } from './patches.ts';
+import { cutSafely } from './safe-cut.ts';
 import { FolderCache } from './folder-cache.ts';
 import { worktreesPart, type WorktreesPart } from './runner/worktrees.ts';
 import { networkPart, type NetworkPart } from './runner/network.ts';
@@ -2521,7 +2522,7 @@ export class Runner {
       toAccountId = id ?? poolAccounts(pool, accounts)[0]?.id;
     }
     if (params.title !== undefined) {
-      rec.title = params.title.trim().slice(0, 200) || rec.title;
+      rec.title = cutSafely(params.title.trim(), 200) || rec.title;
       rec.titleSet = true;
       if (params.titleBy !== 'agent') rec.titleByMike = true;
     }
@@ -3276,7 +3277,7 @@ export const STOPPED_WORK_WAKE_MAX_AGE_MS = 24 * 60 * 60_000;
 
 export function stoppedWorkMessage(what: string[], last: boolean): string {
   const one = what.length === 1;
-  const lines = what.map((w) => `- ${w.length > 200 ? `${w.slice(0, 200)}...` : w}`);
+  const lines = what.map((w) => `- ${cutSafely(w, 203, '...')}`);
   return [
     `Threadbear stopped ${one ? 'this background job' : 'these background jobs'} of yours when the runner restarted onto a new release, so nothing more will come from ${one ? 'it' : 'them'}:`,
     '',
@@ -3370,7 +3371,7 @@ function sortByActivity(list: ThreadSummary[]): ThreadSummary[] {
 export function titleFrom(text: string): string {
   const line = (text ?? '').split('\n').map((l) => l.trim()).find(Boolean) ?? '';
   if (!line) return 'Image';
-  return line.length > LIMITS.titleChars ? line.slice(0, LIMITS.titleChars).trimEnd() : line;
+  return cutSafely(line, LIMITS.titleChars);
 }
 
 // What the runner asks a small model for a thread's title. The examples
@@ -3436,7 +3437,8 @@ export function askedLine(m: { text: string; origin?: MessageOrigin; reviewId?: 
 
 export function oneLine(text: string, max: number): string {
   const s = text.replace(/\s+/g, ' ').trim();
-  return s.length > max ? s.slice(0, max - 1).trimEnd() + '…' : s;
+  // Never through a secret: these lines go to Convex (safe-cut.ts).
+  return cutSafely(s, max, '…');
 }
 
 // A provider's name in notes.

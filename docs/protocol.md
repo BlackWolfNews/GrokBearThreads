@@ -4058,7 +4058,12 @@ kept in `schedules.json` in the data dir.
   as above; before sending it takes the run with `sync:claimSchedule`,
   which says no unless the row is still due at that `nextRunAt` and
   nobody holds it (a claim lasts 2 minutes), so a run is sent once even
-  while two runner processes share a `runnerId` in a handover. Then
+  while two runner processes share a `runnerId` in a handover. What it
+  sends is the claimed schedule as it is once the claim (and its check)
+  come back: still there, still this runner's, and the same schedule
+  (`createdAt`), or nothing is sent and the claim is let go. The main Mac
+  reads every runner's rows, so a row another runner's key saved under a
+  deleted id must never be sent in place of the one it claimed. Then
   `sync:scheduleRan` records it and the next time. Making, changing and
   deleting go straight to the backend and answer once it has them; with
   no backend reachable they fail with `-32000` saying so. Nothing fires
@@ -4413,7 +4418,16 @@ the mirror back as state. The Mac app doesn't use it.
   (`sync-sent.json` in the data folder), so a start writes only what changed
   (comparing 20 seconds in, once patch links have loaded);
   every 3 days, with no such file, or when `sync:heartbeat` answers
-  `firstSeen`, it writes everything and prunes.
+  `firstSeen`, it writes everything and prunes. A start from the file
+  removes, once it has settled, the rows the file has for threads that
+  aren't here (deleted while sync was off), unless they're finishing on
+  the release that handed over. On every start, from the file or not, and
+  every hour after, it asks `sync:sharedThreads` (API 60) which of its
+  rows are shared by link, and removes any whose thread is gone and writes
+  again any it has stopped sharing, so a stop or a delete the mirror never
+  got (a write lost after it landed, a crash) can't leave a link readable.
+  Each write in flight is tracked as that write's own, so a flush that
+  fails after its rows went never forgets another write's row on its way.
 - **Messages.** Each persisted `user.message` and `assistant.text` goes
   up as a `messages` row (`threadId, seq, role, text, origin?, at`), text
   cut at 8,000 characters with a note; never a delta, with one row per tool
@@ -4959,6 +4973,7 @@ anyone's); "any runner" is any good key. Anything not sorted is owner only.
 | `upsertThreads` | its own | each row's `runnerId` is the key's, and so is the row it replaces: no taking or moving another runner's thread, its secret card's key or where its commands go. A new row only under an id that's had nothing but its runner (Thread ids, above) |
 | `removeThreads` | its own | the row's runner; for an id with no row a runner key leaves what's there alone |
 | `prune` | its own | `runnerId`; each pruned thread's messages and pictures go too, and it gets a tombstone |
+| `sharedThreads` | its own | `runnerId`: the ids of its rows shared by link (API 60) |
 | `threadsOf` | its own | `runnerId` |
 | `appendMessages` | its own | each message's thread row is the key's runner's; one for an id with no row is dropped |
 | `messageHeads` | its own | `runnerId` |
@@ -4983,7 +4998,7 @@ anyone's); "any runner" is any good key. Anything not sorted is owner only.
 | `setSchedules` | owner only | mirrored rows, for a runner on a pre-API 9 schedules.json: no runner key's runner needs it, and it could shadow another runner's ids (its runner stops mirroring, quietly) |
 | `schedules` | its own | lists only its runner's schedules; the owner sees all |
 | `schedulesSince` | its own | as `schedules`, and hears of only its own runner's rows and ids gone |
-| `saveSchedule` | its own | the schedule's `runnerId`, and every row with that id, mirrored ones too: no schedule on another runner; a runner key's ids are UUIDs |
+| `saveSchedule` | its own | the schedule's `runnerId`, and every row with that id, mirrored ones too: no schedule on another runner, nor an id gone from another runner within the day (`scheduleGone`, API 60); a runner key's ids are UUIDs |
 | `deleteSchedule` | its own | the schedule's runner |
 | `adoptSchedules` | its own | `runnerId`: replaces only its own old mirrored rows; for a runner key all or nothing (UUID ids no other runner has, within its caps), saying which it held back |
 | `claimSchedule` | its own | `runnerId` |

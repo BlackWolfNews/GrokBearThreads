@@ -349,6 +349,9 @@ export default defineSchema({
     .index('by_threadId', ['threadId'])
     .index('by_share_slug', ['share.slug'])
     .index('by_runnerId', ['runnerId'])
+    // sync:sharedThreads: a runner's rows anyone with the link can read, which
+    // it checks against its own threads on every start and every hour.
+    .index('by_runner_share', ['runnerId', 'share.access'])
     // How many of a runner key's threads are in a view the phone reads whole (its cap).
     .index('by_runner_view', ['runnerId', 'view', 'lastActivityMs'])
     // setPresence finds held pushes with this, rather than reading every
@@ -700,6 +703,8 @@ export default defineSchema({
   // whole table when it's back anyway.
   scheduleGone: defineTable({ id: v.string(), runnerId: v.string(), at: v.number() })
     .index('by_at', ['at'])
+    // A gone id stays its runner's while this lasts (scheduleIdTaken).
+    .index('by_scheduleId', ['id'])
     .index('by_runner_at', ['runnerId', 'at']),
 
   // Pools shared by every runner (API 38, docs/protocol.md, "Pools"): one

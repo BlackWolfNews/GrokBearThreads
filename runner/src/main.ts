@@ -51,6 +51,8 @@ import { SettingsService, modelMethods, settingsMethods } from './settings.ts';
 import { ConvexSync, defaultRunnerName, ensureRunnerId, readSyncKey } from './sync.ts';
 import { pushFailingText } from './push-failing.ts';
 import { Scrubber } from './scrub.ts';
+import { useScrubForCuts } from './safe-cut.ts';
+import { redactSecrets } from './redaction.ts';
 import { SecretCheck } from './secret-check.ts';
 import { SharedPools } from './shared-pools.ts';
 import { sandboxFor } from './sandbox.ts';
@@ -385,6 +387,10 @@ async function main(): Promise<void> {
     runner.sharedPools = sharedPools;
   }
   const scrubber = new Scrubber({ secretsDir: paths.secrets(cfg.home), log });
+  // Text cut short anywhere in the runner is cut where none of these values
+  // (nor anything the rules know) is split in two (safe-cut.ts). Not counted
+  // in the scrubber's status: nothing is taken out here.
+  useScrubForCuts((text) => redactSecrets(scrubber.known.mask(text)).text);
   runner.secrets.onWritten = (value) => scrubber.known.add(value);
   // Set once the relay is made, further down; sync's list goes through it.
   let relayRef: Relay | undefined;
@@ -428,6 +434,7 @@ async function main(): Promise<void> {
     readKey: () => readSyncKey(cfg.home),
     restart: (reason) => void restarter.request({ when: 'idle', reason }),
     scrubber,
+    elsewhere: (id) => peers.owns(id),
     version: RUNNER_VERSION,
     release: RELEASE.release,
     startedAt,

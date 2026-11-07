@@ -21,6 +21,7 @@ import type {
   RequestId,
   ToolRequestUserInputParams,
 } from './types.ts';
+import { cutSafely } from '../../safe-cut.ts';
 
 // ---- Refusals, for a request no session is there to answer
 
@@ -584,7 +585,7 @@ function editTitle(paths: string[], cwd: string): string {
 
 function firstLine(s: string, max = 200): string {
   const line = (s.split('\n').find((l) => l.trim()) ?? '').trim();
-  return line.length > max ? line.slice(0, max - 1) + '…' : line;
+  return cutSafely(line, max, '…');
 }
 
 function quoteWord(w: string): string {

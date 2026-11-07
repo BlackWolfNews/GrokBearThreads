@@ -681,6 +681,16 @@ first. The lessons are Agent Archive's:
   exports, and the keys had been to the AI providers already. So the docs say to
   rotate, and never that the data is secret-free.
 
+- **Scrub before cutting.** Titles, previews, ask lines, the wake note, tool
+  titles, quoted replies and check output are cut short on the runner, and a
+  rule that needs a secret's end (a connection URL's `@`, a closing quote, a
+  length) misses half of one: on 6 Nov Daybreak found a wake note cut through
+  `postgres://alice:password@host` with the password intact. So a cut never
+  lands inside anything the scrub would take out (`runner/src/safe-cut.ts`,
+  with the runner's known values too); it moves back to before it, leaving the
+  runner's own copy unscrubbed. The wake note is scrubbed whole on the way up
+  and only then cut.
+
 Not scrubbed, on purpose: a command's words while it's on its way (a message from
 the phone or another Mac has to reach the runner as typed). Once a command is over,
 however it ended, its words are dropped from the row rather than scrubbed, so a

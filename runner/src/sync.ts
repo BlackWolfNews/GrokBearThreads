@@ -44,6 +44,7 @@ import { Scrubber, type ScrubStatus } from './scrub.ts';
 import { scrubEveryString } from './redaction.ts';
 import { withholdReason } from './withhold.ts';
 import { BodyCollector, prepareBody, type BodyDoc, type RawBody } from './full-sync.ts';
+import { cutSafely } from './safe-cut.ts';
 // A `call` for files.list answers with at most this many entries (the backend keeps it a day).
 const CALL_ENTRIES = 500;
 
@@ -115,7 +116,14 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 59;
+export const BACKEND_API_VERSION = 60;
+// From this one sync:sharedThreads lists a runner's rows shared by link, which
+// it checks against its own threads on every start and every
+// SHARE_RECONCILE_MS (reconcileShares).
+export const SHARED_THREADS_API_VERSION = 60;
+// How often the shared rows are checked again while the runner keeps running:
+// a stop or a delete the mirror missed doesn't wait for the next start.
+export const SHARE_RECONCILE_MS = 60 * 60_000;
 // From this one a runner key's archived threads stay in the sidebar table, so
 // those an older backend dropped go again, once (thread-index.ts resendArchived).
 export const ARCHIVED_INDEX_API_VERSION = 54;
@@ -414,7 +422,7 @@ export class WokeRows {
   see(e: PersistedEvent): void {
     if (e.type === 'turn.started' && e.wokeBy?.length) {
       // A few short lines: a shell's description can be its whole command.
-      this.pending.set(e.turnId, e.wokeBy.slice(0, 5).map((t) => ({ kind: t.kind, description: t.description.slice(0, 200) })));
+      this.pending.set(e.turnId, e.wokeBy.slice(0, 5).map((t) => ({ kind: t.kind, description: cutSafely(t.description, 200) })));
     } else if (e.type === 'turn.completed') {
       this.pending.delete(e.turnId);
     }
@@ -566,6 +574,10 @@ export type SyncDeps = {
   // What takes secrets out of everything sent (src/scrub.ts). Left out, the
   // shape rules alone: there's always a scrubber on the way up.
   scrubber?: Scrubber;
+  // A thread finishing its turn on the release that handed over to this one
+  // (handover.ts, peers.owns): not here yet, but not gone either, so its row
+  // isn't taken out of the mirror for being missing. Absent in small tests.
+  elsewhere?: (threadId: string) => boolean;
 };
 
 // What tb status and the app say while the backend turns this runner's
@@ -721,7 +733,9 @@ function threadView(t: Pick<ThreadSummary, 'archivedAt' | 'snoozedUntil' | 'star
   return t.snoozedUntil && Date.parse(t.snoozedUntil) > now ? 'hibernating' : 'inbox';
 }
 
-export function toThreadDoc(t: ThreadSummary, runnerId: string, now: number, pending?: PendingApproval, earliestSeq?: number, next?: string[]): ThreadDoc {
+// `scrub`: the sync's scrubber, for what's made here from longer text and cut
+// (the wake note), which is scrubbed whole before it's cut.
+export function toThreadDoc(t: ThreadSummary, runnerId: string, now: number, pending?: PendingApproval, earliestSeq?: number, next?: string[], scrub?: (text: string) => string): ThreadDoc {
   const doc: ThreadDoc = {
     threadId: t.id,
     runnerId,
@@ -742,7 +756,7 @@ export function toThreadDoc(t: ThreadSummary, runnerId: string, now: number, pen
   if (t.snoozedUntil) doc.snoozedUntil = t.snoozedUntil;
   if (t.snoozedUntilRestart) doc.snoozedUntilRestart = true;
   // What it waits for, when it's more than a time (wake-note.ts): the row says it.
-  const note = wakeNote(t);
+  const note = wakeNote(t, scrub);
   if (note) doc.wakeNote = note;
   if (t.woke) doc.woke = { ...t.woke };
   // Not the thread it came from: the phone's row has no tooltip to name it.
@@ -1076,8 +1090,20 @@ export class ConvexSync {
   // Rows on their way, by digest: a row marked meanwhile is compared with what
   // it's about to be, not what it was. Otherwise X, then back to what `sent`
   // has while X is on its way, looks like nothing to do and leaves X there.
-  private writing = new Map<string, string>();
+  // Each says which write it's for, and a write takes out only its own: a
+  // flush that failed after letting go of the row writer (rowTurn) used to
+  // clear them all, a share link writeRowNow had on its way among them, and
+  // Stop sharing straight after looked like nothing new, so the link stayed
+  // public (Daybreak, 6 Nov).
+  private writing = new Map<string, { digest: string; by: symbol }>();
   private seeded = false;
+  // The mirror's shared rows are checked against this runner's threads
+  // (reconcileShares) on every start, cached or not, and every
+  // SHARE_RECONCILE_MS: a stop or a delete it never got (written while sync
+  // was off, or lost to a crash between the write landing and it being
+  // remembered) leaves a link anyone with the slug can still read.
+  private sharesDue = true;
+  private sharesCheckedAt = -Infinity;
   private messages: MessageDoc[] = [];
   private woke = new WokeRows();
   // "<threadId> <buttonId>" -> the row that links it, as last sent, so a press
@@ -1241,6 +1267,7 @@ export class ConvexSync {
           return at && deps.clock.now() - at.at < SYNC_CACHE_MAX_AGE_MS ? at : undefined;
         },
         onSent: () => this.noteSent(),
+        ...(deps.elsewhere ? { elsewhere: deps.elsewhere } : {}),
         ...(deps.appConnected ? { appConnected: deps.appConnected } : {}),
       });
     }
@@ -1253,6 +1280,7 @@ export class ConvexSync {
     this.projectsSent = undefined;
     this.accountsSent = undefined;
     this.full = true;
+    this.sharesDue = true;
     this.seedFromCache();
     this.unsub = this.deps.runner.onNotification((n) => this.onNotification(n));
     if (this.seeded) {
@@ -1906,13 +1934,13 @@ export class ConvexSync {
     // way (the turn ended, the runner restarted); the row mustn't keep it.
     if (t.status === 'idle' || t.status === 'error' || t.status === 'stopped') this.pending.delete(t.id);
     this.noteShared(t);
-    const doc = toThreadDoc(t, this.runnerId, this.deps.clock.now(), this.pending.get(t.id), this.earliestSeq(t), this.nextSteps(t));
+    const doc = toThreadDoc(t, this.runnerId, this.deps.clock.now(), this.pending.get(t.id), this.earliestSeq(t), this.nextSteps(t), this.scrubber.safeText);
     const now = this.deps.clock.now();
     // Against the row as this backend took it: `sent` holds that, without
     // the fields an older one doesn't know, which would otherwise make every
     // summary of a thread with one look new.
     const row = forBackend(doc, this.backendApiVersion ?? 0, now);
-    if ((this.writing.get(t.id) ?? this.sent.get(t.id)) === digest(JSON.stringify(row))) {
+    if ((this.writing.get(t.id)?.digest ?? this.sent.get(t.id)) === digest(JSON.stringify(row))) {
       this.dirty.delete(t.id);
       this.held.delete(t.id);
       return;
@@ -1934,8 +1962,58 @@ export class ConvexSync {
     this.settleTimer?.cancel();
     this.settleTimer = undefined;
     this.settling = false;
+    // A row the file says the mirror has, for a thread that isn't here (or
+    // finishing on the release before): deleted while this runner wasn't
+    // listening, as with sync turned off. A start from the file skips the
+    // prune a full write does, so it goes now (Daybreak, 6 Nov: a shared
+    // thread deleted with sync off stayed public).
+    const here = new Set(this.deps.runner.list(ALL).map((t) => t.id));
+    for (const id of [...this.sent.keys()]) if (!here.has(id) && !this.deps.elsewhere?.(id)) this.dropRow(id);
     for (const t of this.deps.runner.list(ALL)) this.mark(t);
     this.scheduleFlush();
+  }
+
+  // Takes a row out of the mirror that no thread here has: removed with the
+  // next flush (and kept in the file till it is), unless the thread turns up
+  // after all (mark), when it's written again in full.
+  private dropRow(threadId: string): void {
+    this.removed.add(threadId);
+    this.removedFromFile.add(threadId);
+    this.sent.delete(threadId);
+    this.heads.delete(threadId);
+    this.lastWrite.delete(threadId);
+    this.noteSent();
+  }
+
+  // The mirror's rows shared by link, against this runner's threads: one that
+  // isn't here goes, and one here that isn't shared is written again, so
+  // anyone with its slug stops being able to read it whatever went wrong
+  // with the write that stopped it.
+  private async reconcileShares(key: string | undefined): Promise<void> {
+    const ids = await this.post('query', 'sync:sharedThreads', { key, runnerId: this.runnerId });
+    this.sharesDue = false;
+    this.sharesCheckedAt = this.deps.clock.now();
+    for (const id of Array.isArray(ids) ? ids : []) {
+      if (typeof id !== 'string' || this.deps.elsewhere?.(id)) continue;
+      let t: ThreadSummary | undefined;
+      try {
+        t = this.deps.runner.get(id);
+      } catch {
+        t = undefined;
+      }
+      if (!t) {
+        this.dropRow(id);
+        continue;
+      }
+      if (t.share?.access === 'link') continue;
+      this.sent.delete(id);
+      this.lastWrite.delete(id);
+      this.mark(t, true);
+    }
+  }
+
+  private sharesCheckDue(): boolean {
+    return this.sharesDue && !this.settling && (this.backendApiVersion ?? 0) >= SHARED_THREADS_API_VERSION;
   }
 
   private recordSent(row: ThreadDoc): void {
@@ -2064,6 +2142,7 @@ export class ConvexSync {
   // row still waiting for the next flush (SYNC_COALESCE_MS) reads to it as
   // a deleted thread. If this write fails, the next flush tries again.
   private async writeRowNow(threadId: string): Promise<void> {
+    const me = Symbol('writeRowNow');
     const done = await this.rowTurn();
     try {
       this.mark(this.deps.runner.get(threadId), true);
@@ -2073,7 +2152,7 @@ export class ConvexSync {
       // As a flush's batch is: a change while it's on its way is weighed
       // against this row, not the one before, or one back to that (a share
       // stopped again at once) was dropped as nothing new.
-      this.writing.set(threadId, digest(JSON.stringify(row)));
+      this.writing.set(threadId, { digest: digest(JSON.stringify(row)), by: me });
       await this.post('mutation', 'sync:upsertThreads', { key: this.deps.key, threads: [row] });
       this.recordSent(row);
       if (this.dirty.get(threadId) === doc) this.dirty.delete(threadId);
@@ -2081,9 +2160,13 @@ export class ConvexSync {
     } catch (e) {
       this.deps.log.debug('new thread row not written yet', { threadId, error: String(e) });
     } finally {
-      this.writing.delete(threadId);
+      this.doneWriting(threadId, me);
       done();
     }
+  }
+
+  private doneWriting(threadId: string, by: symbol): void {
+    if (this.writing.get(threadId)?.by === by) this.writing.delete(threadId);
   }
 
   /** Waits for the threads-row writer before this one; call what it returns when done (twice is fine). */
@@ -2279,7 +2362,7 @@ export class ConvexSync {
     // Project pictures waiting (picturesDue) count too: one an upload
     // allowance held back goes once its pause is over, idle or not.
     const picturesWaiting = this.picturesDue && (this.backendApiVersion ?? 0) >= ICONS_API_VERSION && !this.picturesPaused();
-    if (!picturesWaiting && !this.bodies.length && !this.dirty.size && !this.removed.size && !this.messages.length && !this.dirtyLists.size && !this.full && !this.catchUpDue && !this.imagesDue.size && !this.imagesDrop.size && !this.pendingImages.length && !this.replyDue.size && !this.pendingReplyImages.length) return;
+    if (!picturesWaiting && !this.bodies.length && !this.dirty.size && !this.removed.size && !this.messages.length && !this.dirtyLists.size && !this.full && !this.catchUpDue && !this.imagesDue.size && !this.imagesDrop.size && !this.pendingImages.length && !this.replyDue.size && !this.pendingReplyImages.length && !this.sharesCheckDue()) return;
     const now = this.deps.clock.now();
     let delay = Math.max(0, this.lastFlushAt + SYNC_COALESCE_MS - now);
     if (this.retryAt !== undefined) delay = Math.max(delay, this.retryAt - now);
@@ -2292,6 +2375,7 @@ export class ConvexSync {
   private async flush(): Promise<void> {
     if (this.flushing || !this.running) return;
     this.flushing = true;
+    const me = Symbol('flush');
     // Before taking the rows, so none is older than one writeRowNow wrote.
     const rowsDone = await this.rowTurn();
     this.lastFlushAt = this.deps.clock.now();
@@ -2311,12 +2395,12 @@ export class ConvexSync {
       const v = this.backendApiVersion ?? 0;
       for (let i = 0; i < docs.length; i += SYNC_BATCH) {
         const batch = docs.slice(i, i + SYNC_BATCH).map((d) => forBackend(d, v, this.deps.clock.now()));
-        for (const d of batch) this.writing.set(d.threadId, digest(JSON.stringify(d)));
+        for (const d of batch) this.writing.set(d.threadId, { digest: digest(JSON.stringify(d)), by: me });
         const left = await this.writeRows('sync:upsertThreads', 'threads', batch, (d) => d.threadId, { key });
         // A row left out isn't remembered as sent (nor in the cache kept
         // across starts), so its next change, or the next start, tries it again.
         for (const d of batch) {
-          this.writing.delete(d.threadId);
+          this.doneWriting(d.threadId, me);
           if (!left.has(d.threadId)) this.recordSent(d);
           else {
             this.sent.delete(d.threadId);
@@ -2374,6 +2458,8 @@ export class ConvexSync {
         messages.unshift(...this.catchUpFromHeads());
         this.catchUpDue = false;
       }
+      // What it finds is written with the next flush (scheduleFlush, below).
+      if (this.sharesCheckDue()) await this.reconcileShares(key);
       const { docs: history, threadIds: filling } = this.histories();
       // A new thread's first messages are both live and its history: once each.
       const seen = new Set<string>();
@@ -2402,7 +2488,8 @@ export class ConvexSync {
       // Not written after all: what's due is the thread as it is now, which may
       // have moved on from what failed, or back to what the mirror has. A thread
       // not here any more keeps its row as it was, for the retry.
-      this.writing.clear();
+      // Only this flush's: another writer's may be on its way (above).
+      for (const d of docs) this.doneWriting(d.threadId, me);
       for (const d of docs) {
         try {
           this.mark(this.deps.runner.get(d.threadId), true);
@@ -2899,6 +2986,9 @@ export class ConvexSync {
     void this.post('mutation', 'sync:heartbeat', { key: this.deps.key, runner }).then(
       (r) => {
         this.sawBackend(r);
+        // A start whose first flush went before a heartbeat said the
+        // backend can list the shared rows checks them now.
+        if (this.sharesCheckDue()) this.scheduleFlush();
         this.keyRejected = false;
         this.ownerKeyRotating = (r as { ownerKeyRotating?: unknown } | null)?.ownerKeyRotating === true;
         this.notePushFailing(asPushFailing((r as { pushFailing?: unknown } | null)?.pushFailing));
@@ -2929,6 +3019,10 @@ export class ConvexSync {
         if (!this.backendHeard && /validat/i.test(String(e))) this.backendApiVersion = undefined;
       },
     );
+    if (this.deps.clock.now() - this.sharesCheckedAt >= SHARE_RECONCILE_MS && !this.sharesDue) {
+      this.sharesDue = true;
+      this.scheduleFlush();
+    }
     this.heartbeatTimer = this.deps.clock.setTimeout(() => this.heartbeat(), HEARTBEAT_MS);
   }
 

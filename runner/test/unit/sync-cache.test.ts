@@ -25,6 +25,10 @@ function setup(opts: { apiVersion?: number; firstSeen?: () => boolean; heads?: {
   const icon: { value?: string } = {};
   const rejectIcon = { value: false };
   const apiVersion = { value: opts.apiVersion ?? BACKEND_API_VERSION };
+  // The mirror's rows shared by link (sync:sharedThreads), and the threads
+  // still finishing on the release before (a handover).
+  const shared = { value: [] as string[] };
+  const elsewhere = new Set<string>();
   const make = () =>
     new ConvexSync({
       config: { enabled: true, url: 'https://x.convex.cloud', name: 'TestMac', runnerId: 'r1', ...(icon.value ? { icon: icon.value } : {}) },
@@ -38,6 +42,7 @@ function setup(opts: { apiVersion?: number; firstSeen?: () => boolean; heads?: {
       statePath,
       home: h.home,
       subscriber: { subscribe: () => () => {}, close: async () => {} },
+      elsewhere: (id) => elsewhere.has(id),
       post: async (kind, fn, args) => {
         calls.push({ kind, fn, args });
         if (fn === failing.value) throw new Error('down');
@@ -49,12 +54,13 @@ function setup(opts: { apiVersion?: number; firstSeen?: () => boolean; heads?: {
           return { apiVersion: apiVersion.value, ...(firstSeen.value || opts.firstSeen?.() ? { firstSeen: true } : {}) };
         }
         if (fn === 'sync:messageHeads') return opts.heads ?? [];
+        if (fn === 'sync:sharedThreads') return shared.value;
         return null;
       },
     });
   const named = (fn: string) => calls.filter((c) => c.fn === fn);
   const docs = () => named('sync:upsertThreads').flatMap((c) => c.args.threads as ThreadDoc[]);
-  return { h, make, calls, named, docs, cachePath, firstSeen, failing, holdRemove, holdUpsert, failUpsert, icon, rejectIcon, apiVersion };
+  return { h, make, calls, named, docs, cachePath, firstSeen, failing, holdRemove, holdUpsert, failUpsert, icon, rejectIcon, apiVersion, shared, elsewhere };
 }
 
 const settle = async () => {
@@ -681,3 +687,88 @@ test('a row with a secret in it is not written again by a restart', async () => 
   assert.deepEqual(s.named('sync:appendMessages'), []);
   await again.stop();
 });
+
+// Daybreak, 6 Nov 2026 ("Cached restarts leave deleted shared threads publicly
+// accessible"): a shared thread deleted while sync was off never reached the
+// mirror's removals, and a start from the file skipped the prune, so its link
+// stayed readable by anyone with the slug.
+test('a thread deleted while sync was off is taken out of the mirror by a start from the file', async () => {
+  const s = setup();
+  const t = s.h.runner.create({ text: 'private', cwd: s.h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  const kept = s.h.runner.create({ text: 'kept', cwd: s.h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  s.h.runner.share(t.id, { access: 'link' });
+  await firstStart(s);
+  assert.ok(s.docs().some((d) => d.threadId === t.id && d.share?.access === 'link'));
+  // Sync off (nothing listening), the thread deleted.
+  s.h.runner.delete(t.id);
+  s.shared.value = [t.id];
+  s.calls.length = 0;
+  const again = s.make();
+  again.start();
+  await settle();
+  s.h.clock.advance(SETTLE_MS);
+  await settle();
+  await again.flushNow();
+  await again.flushNow();
+  assert.ok(s.named('sync:removeThreads').some((c) => (c.args.threadIds as string[]).includes(t.id)), 'its row goes');
+  assert.ok(!s.named('sync:removeThreads').some((c) => (c.args.threadIds as string[]).includes(kept.id)));
+  await again.stop();
+  const c = loadSyncCache(s.cachePath, { url: 'https://x.convex.cloud', runnerId: 'r1', now: s.h.clock.now() })!;
+  assert.equal(c.threads[t.id], undefined, 'and the file no longer says the mirror has it');
+});
+
+test("a thread finishing on the release before isn't taken out for not being here yet", async () => {
+  const s = setup();
+  const t = s.h.runner.create({ text: 'busy', cwd: s.h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  s.h.runner.share(t.id, { access: 'link' });
+  await firstStart(s);
+  const row = s.h.runner.get(t.id);
+  s.h.runner.delete(t.id);
+  s.elsewhere.add(t.id);
+  s.shared.value = [t.id];
+  s.calls.length = 0;
+  const again = s.make();
+  again.start();
+  await settle();
+  s.h.clock.advance(SETTLE_MS);
+  await settle();
+  await again.flushNow();
+  await again.flushNow();
+  assert.deepEqual(s.named('sync:removeThreads'), []);
+  assert.deepEqual(s.named('sync:upsertThreads'), []);
+  s.h.runner.publish({ method: 'thread.updated', params: { thread: row } });
+  await again.stop();
+});
+
+// The same leak from the other side: the mirror has a link the runner stopped
+// (its write lost after it landed, or never sent), and the file says "off" went.
+for (const start of ['from the file', 'in full'] as const) {
+  test(`a share the mirror still has is stopped by the next start, ${start}, and every hour after`, async () => {
+    const s = setup();
+    const t = s.h.runner.create({ text: 'private', cwd: s.h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+    s.h.runner.share(t.id, { access: 'link' });
+    s.h.runner.share(t.id, { access: 'off' });
+    await firstStart(s);
+    if (start === 'in full') fs.rmSync(s.cachePath);
+    s.shared.value = [t.id];
+    s.calls.length = 0;
+    const again = s.make();
+    again.start();
+    await settle();
+    s.h.clock.advance(SETTLE_MS);
+    await settle();
+    await again.flushNow();
+    await again.flushNow();
+    const offs = () => s.docs().filter((d) => d.threadId === t.id && d.share?.access === 'off').length;
+    assert.ok(offs() >= 1, 'its row goes again, off');
+    // Still running, it happens again (a write lost meanwhile): the hourly check finds it.
+    s.calls.length = 0;
+    s.h.clock.advance(61 * 60_000);
+    await settle();
+    await again.flushNow();
+    await again.flushNow();
+    assert.equal(s.named('sync:sharedThreads').length, 1, 'checked again within the hour');
+    assert.ok(offs() >= 1, "written off again");
+    await again.stop();
+  });
+}

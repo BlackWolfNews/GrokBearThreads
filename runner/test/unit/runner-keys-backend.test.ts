@@ -923,3 +923,36 @@ test('audit cards and pruneOld read few rows at a time, for old rows that could 
   await call(s.ctx, sync.pruneOld, {});
   assert.ok(s.reads() - before <= 60, String(s.reads() - before));
 });
+
+// Daybreak, 6 Nov 2026: Mike deletes one of the M5's schedules while the M5
+// has a run of it claimed, and Bruce's key saves one of its own under the
+// gone id, which the M5's subscription (every runner's rows) then has under
+// the id it claimed. While the id's tombstone lasts it stays the M5's.
+test("a schedule id gone from the M5 lately isn't Bruce's to take, nor to adopt", async () => {
+  const s = await setup();
+  await call(s.ctx, sync.saveSchedule, { key: OWNER, schedule: sched(UUID(31), M5, { check: 'news-check' }) });
+  assert.equal(await call(s.ctx, sync.deleteSchedule, { key: OWNER, scheduleId: UUID(31) }), true);
+  const evil = sched(UUID(31), BRUCE, { title: 'ATTACKER JOB', text: 'ATTACKER INSTRUCTIONS', check: 'news-check', permissionMode: 'full' });
+  assert.equal(await outcome(call(s.ctx, sync.saveSchedule, { key: BRUCE_KEY, schedule: evil })), 'forbidden');
+  const adopted = (await call(s.ctx, sync.adoptSchedules, { key: BRUCE_KEY, runnerId: BRUCE, schedules: [evil] })) as { held: { why: string }[] };
+  assert.equal(adopted.held.length, 1);
+  assert.equal(s.rows('schedules').length, 0);
+  // Bruce's own gone ids are still its own to use again, and one moved to
+  // Bruce by Mike is Bruce's to change, the M5's tombstone for it or not.
+  await call(s.ctx, sync.saveSchedule, { key: BRUCE_KEY, schedule: sched(UUID(32), BRUCE) });
+  await call(s.ctx, sync.deleteSchedule, { key: BRUCE_KEY, scheduleId: UUID(32) });
+  await call(s.ctx, sync.saveSchedule, { key: BRUCE_KEY, schedule: sched(UUID(32), BRUCE) });
+  await call(s.ctx, sync.saveSchedule, { key: OWNER, schedule: sched(UUID(33), M5) });
+  await call(s.ctx, sync.saveSchedule, { key: OWNER, schedule: sched(UUID(33), BRUCE) });
+  await call(s.ctx, sync.saveSchedule, { key: BRUCE_KEY, schedule: sched(UUID(33), BRUCE, { title: 'renamed' }) });
+  assert.equal(s.rows('schedules').find((r) => r.id === UUID(33))?.title, 'renamed');
+});
+
+test("sync:sharedThreads lists a runner's link-shared rows only, and a runner key only its own", async () => {
+  const s = await setup();
+  await s.owner.upsert(thread('ON', M5, { share: { access: 'link', slug: 'on-slug' } }), thread('OFF', M5, { share: { access: 'off', slug: 'off-slug' } }), thread('NEVER', M5));
+  await s.bruce.upsert(thread('BRUCE-ON', BRUCE, { share: { access: 'link', slug: 'b-slug' } }));
+  assert.deepEqual(await call(s.ctx, sync.sharedThreads, { key: OWNER, runnerId: M5 }), ['ON']);
+  assert.deepEqual(await call(s.ctx, sync.sharedThreads, { key: BRUCE_KEY, runnerId: BRUCE }), ['BRUCE-ON']);
+  assert.equal(await outcome(call(s.ctx, sync.sharedThreads, { key: BRUCE_KEY, runnerId: M5 })), 'forbidden');
+});

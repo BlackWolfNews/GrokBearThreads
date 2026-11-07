@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { Hunk, PlanEntry, ToolKind } from './protocol.ts';
 import { LIMITS } from './protocol.ts';
 import { applyReplace, diffLines } from './diff.ts';
+import { cutSafely, safeEnd } from './safe-cut.ts';
 
 const KINDS: Record<string, ToolKind> = {
   Bash: 'command',
@@ -71,7 +72,8 @@ function str(v: unknown): string {
 function firstLine(s: string, max = 100): string {
   const line = s.split('\n').find((l) => l.trim() !== '') ?? '';
   const t = line.trim();
-  return t.length > max ? t.slice(0, max - 1) + '…' : t;
+  // Never through a secret: a title goes to Convex (safe-cut.ts).
+  return cutSafely(t, max, '…');
 }
 
 const realpaths = new Map<string, string>();
@@ -200,7 +202,7 @@ function threadbearTitle(tool: string, input: Record<string, unknown>): string {
 export function truncateInput(input: unknown): Record<string, unknown> {
   const walk = (v: unknown, depth: number): unknown => {
     if (typeof v === 'string') {
-      return v.length > LIMITS.toolInputString ? v.slice(0, LIMITS.toolInputString) + '\n[truncated]' : v;
+      return v.length > LIMITS.toolInputString ? v.slice(0, safeEnd(v, LIMITS.toolInputString)) + '\n[truncated]' : v;
     }
     if (depth > 8 || v === null || typeof v !== 'object') return v;
     if (Array.isArray(v)) return v.map((x) => walk(x, depth + 1));

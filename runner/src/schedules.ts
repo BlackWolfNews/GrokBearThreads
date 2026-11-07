@@ -25,6 +25,7 @@ import { EFFORT_LEVELS, ErrorCode, RpcError, isEffortLevel } from './protocol.ts
 import { atomicWriteFileSync, isDirectory, readJsonSync } from './fsutil.ts';
 import { expandHome } from './config.ts';
 import { CronError, checkZone, describeAt, describeCron, localZone, nextRun, nextRuns, parseCron } from './cron.ts';
+import { cutSafely } from './safe-cut.ts';
 
 // What a check printed, carried by a run: kept (when it was kept) and the
 // command, so a sent run drops that command's kept file.
@@ -391,9 +392,15 @@ export class Scheduler {
 
   private onRows(rows: StoredSchedule[]): void {
     if (this.stopped) return;
+    const before = new Map(this.items);
     this.items.clear();
     for (const r of rows) {
       const { whenText: _w, ...rec } = r;
+      // Another schedule under the same id (gone and made again, or moved
+      // to another runner): what the old one's check printed isn't this
+      // one's to send (stillClaimed).
+      const was = before.get(rec.id);
+      if (was && (was.createdAt !== rec.createdAt || was.runnerId !== rec.runnerId)) this.dropKept(rec.id);
       this.items.set(rec.id, rec);
       if (!this.names.has(rec.runnerId)) this.namesDue = true;
     }
@@ -546,7 +553,7 @@ export class Scheduler {
     const now = this.iso();
     const rec: ScheduleRecord = {
       id: crypto.randomUUID(),
-      title: p.title?.trim() ? p.title.trim().slice(0, 200) : firstLine(text),
+      title: p.title?.trim() ? cutSafely(p.title.trim(), 200) : firstLine(text),
       text,
       paused: Boolean(p.paused),
       createdAt: now,
@@ -603,7 +610,7 @@ export class Scheduler {
     const rec: ScheduleRecord = structuredClone(this.mustGet(p.scheduleId));
     const away = !this.mine(rec);
     let replan = false;
-    if (p.title !== undefined) rec.title = p.title.trim() ? p.title.trim().slice(0, 200) : firstLine(rec.text);
+    if (p.title !== undefined) rec.title = p.title.trim() ? cutSafely(p.title.trim(), 200) : firstLine(rec.text);
     if (p.text !== undefined) {
       if (!p.text.trim()) throw bad('text cannot be empty');
       rec.text = p.text.trim();
@@ -820,19 +827,13 @@ export class Scheduler {
         // The record as it is now: the subscription may have brought a
         // newer one (its check changed) or none (deleted, maybe by another
         // runner) while the claim was out, and again while it checked.
-        const fresh = this.items.get(rec.id);
-        if (!fresh) {
-          this.dropKept(rec.id);
-          continue;
-        }
+        const fresh = this.stillClaimed(backend, rec);
+        if (!fresh) continue;
         rec = fresh;
         const checked = await this.checked(rec);
         if (this.stopped) continue;
-        const after = this.items.get(rec.id);
-        if (!after) {
-          this.dropKept(rec.id);
-          continue;
-        }
+        const after = this.stillClaimed(backend, rec);
+        if (!after) continue;
         rec = after;
         if (checked === 'later') {
           await backend.release(rec.id).catch(() => {});
@@ -872,8 +873,9 @@ export class Scheduler {
     const request = row.runRequestedAt!;
     const claimed = await backend.claim(row.id, 'request', request).catch(() => false);
     if (!claimed || this.stopped) return;
-    // As it is now (backendTick says why): deleted meanwhile, it isn't sent.
-    const rec = this.items.get(row.id);
+    // As it is now (backendTick says why): deleted meanwhile, or no longer
+    // the one claimed, it isn't sent.
+    const rec = this.stillClaimed(backend, row);
     if (!rec) return;
     let res: ReturnType<Scheduler['send']>;
     try {
@@ -891,6 +893,28 @@ export class Scheduler {
     if (res.outcome === 'sent' && rec.at) this.finish(rec);
     delete rec.runRequestedAt;
     await this.recordRun(rec, res.outcome === 'sent', request);
+  }
+
+  // The schedule a claim was taken for, as the subscription has it now, or
+  // undefined when that one isn't there to send any more: deleted, moved to
+  // another runner, or a different schedule under the same id. The claim
+  // was the backend saying this runner may send that row; a row that came in
+  // under its id meanwhile wasn't claimed. Daybreak's finding (6 Nov): the
+  // owner deletes a schedule while its check runs, a runner key saves one
+  // of its own under the gone id (same check, its own text, Full access),
+  // and the main Mac's subscription, which has every runner's rows, handed
+  // the new row to send() in place of the claimed one. So it must still be
+  // this runner's (only the owner key or this runner's own can write a row
+  // with our runnerId) and the same schedule (createdAt, which update
+  // keeps). Its kept check output went with the old one (onRows).
+  private stillClaimed(backend: ScheduleBackend, claimed: ScheduleRecord): ScheduleRecord | undefined {
+    const now = this.items.get(claimed.id);
+    if (now && this.mine(now) && now.createdAt === claimed.createdAt) return now;
+    // Let go, in case the claim is still on a row of ours (moved away keeps
+    // it): only the holder's is cleared.
+    if (now) void backend.release(claimed.id).catch(() => {});
+    else this.dropKept(claimed.id);
+    return undefined;
   }
 
   // Its check, when it has one and checks are on (schedule-check.ts):
@@ -1196,7 +1220,7 @@ function bad(message: string): RpcError {
 }
 
 function firstLine(text: string): string {
-  return (text.split('\n').map((l) => l.trim()).find(Boolean) ?? 'Scheduled message').slice(0, 80);
+  return cutSafely(text.split('\n').map((l) => l.trim()).find(Boolean) ?? 'Scheduled message', 80);
 }
 
 function checkedTimeout(secs: number): number {

@@ -784,6 +784,23 @@ export const prune = mutation({
   },
 });
 
+// The ids of a runner's rows that are shared by link, so anyone with the slug
+// can read them (share.ts). The runner checks them against its own threads on
+// every start and every hour after (runner/src/sync.ts reconcileShares): one
+// it has deleted goes, and one it has stopped sharing is written again. Only
+// the shared rows are read, by index (API 60).
+export const sharedThreads = query({
+  args: { key: v.string(), runnerId: v.string() },
+  returns: v.array(v.string()),
+  handler: async (ctx, { key, runnerId }) => {
+    const caller = await runnerAuth(ctx, key, 'sharedThreads');
+    await actAs(ctx, caller, runnerId);
+    const out: string[] = [];
+    for await (const row of ctx.db.query('threads').withIndex('by_runner_share', (q) => q.eq('runnerId', runnerId).eq('share.access', 'link'))) out.push(row.threadId);
+    return out;
+  },
+});
+
 export const heartbeat = mutation({
   args: {
     key: v.string(),
@@ -1536,9 +1553,20 @@ function visibleTo<T extends { runnerId: string }>(caller: Caller, row: T | unde
 // Whether any row with this schedule id, owned or an old mirrored one (from
 // before API 9), is another runner's: a runner key may not take that id,
 // or the other runner's adoption would find it taken and drop its own.
+// And one with no row now that went from another runner lately (scheduleGone,
+// a day): that runner may still have a run of it claimed or its check going,
+// and the main Mac reads every runner's rows, so a row of this runner's under
+// the gone id must not turn up there as the one it claimed (Daybreak, 6 Nov;
+// the runner checks that too, Scheduler.stillClaimed).
 async function scheduleIdTaken(ctx: { db: MutationCtx['db'] }, caller: Caller, scheduleId: string): Promise<boolean> {
   if (caller.owner) return false;
-  for await (const row of ctx.db.query('schedules').withIndex('by_scheduleId', (q) => q.eq('id', scheduleId))) if (row.runnerId !== caller.runnerId) return true;
+  let live = false;
+  for await (const row of ctx.db.query('schedules').withIndex('by_scheduleId', (q) => q.eq('id', scheduleId))) {
+    if (row.runnerId !== caller.runnerId) return true;
+    live = true;
+  }
+  if (live) return false;
+  for await (const gone of ctx.db.query('scheduleGone').withIndex('by_scheduleId', (q) => q.eq('id', scheduleId))) if (gone.runnerId !== caller.runnerId) return true;
   return false;
 }
 

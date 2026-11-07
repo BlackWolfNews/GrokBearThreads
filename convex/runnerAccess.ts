@@ -144,6 +144,7 @@ export const ACCESS: Record<string, Access> = {
   addShareImage: 'own',
   dropShareImages: 'own',
   prune: 'own',
+  sharedThreads: 'own',
   heartbeat: 'own',
   bye: 'own',
   threadsOf: 'own',

@@ -23,6 +23,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { atomicWriteFileSync } from './fsutil.ts';
+import { safeStart } from './safe-cut.ts';
 
 // How long a check may run unless its schedule says (checkTimeoutSecs),
 // and the most it can say: a Slack read through `codex exec` took 77 s by
@@ -178,7 +179,8 @@ export function runCheck(p: { command: string; cwd: string; home: string; schedu
 
 function clip(s: string): string {
   const t = s.trim();
-  return t.length > CHECK_OUTPUT_CHARS ? '…' + t.slice(-CHECK_OUTPUT_CHARS) : t;
+  // Its last part, begun where no secret is cut in two (safe-cut.ts).
+  return t.length > CHECK_OUTPUT_CHARS ? '…' + t.slice(safeStart(t, t.length - CHECK_OUTPUT_CHARS)) : t;
 }
 
 // What goes under the scheduled message, or that the run is skipped.

@@ -17,6 +17,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import type { ThreadState } from '../runner.ts';
 import { checkImages, effortTitle, isClaudeModel, modelRow, modelTitle, newRuntime, oneLine, providerName, titleFrom, userMessage } from '../runner.ts';
+import { cutSafely } from '../safe-cut.ts';
 
 export const newThreadsPart = {
   create(this: Runner, params: {
@@ -176,7 +177,7 @@ export const newThreadsPart = {
     const id = crypto.randomUUID();
     const rec: ThreadRecord = {
       id,
-      title: params.title?.trim() ? params.title.trim().slice(0, 200) : titleFrom(params.text),
+      title: params.title?.trim() ? cutSafely(params.title.trim(), 200) : titleFrom(params.text),
       titleSet: Boolean(params.title?.trim()),
       cwd,
       accountId,

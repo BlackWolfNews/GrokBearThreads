@@ -792,6 +792,58 @@ test("commands: a share stopped while its row is on its way isn't lost", async (
   assert.equal(rows.at(-1)?.share?.access, 'off');
 });
 
+// Daybreak, 6 Nov 2026 ("Flush failure can leave a revoked share publicly
+// readable"): a flush's rows are written and it has let go of the row writer
+// when a later step of it fails; meanwhile the phone's Share again is writing
+// its row at once. The failed flush used to forget every row on its way, that
+// one too, so Stop sharing on the Mac straight after matched the "off" sent
+// before and was dropped, and the link row landed and stayed, a retry or not.
+test("a flush failing after its rows doesn't lose a share row another write has on its way", async () => {
+  let failRemove: (() => void) | undefined;
+  let releaseLink: (() => void) | undefined;
+  let holding = false;
+  const { h, sync, push, landed } = setupFull({
+    apiVersion: BACKEND_API_VERSION,
+    hold: (fn, args) => {
+      if (!holding) return undefined;
+      if (fn === 'sync:removeThreads' && !failRemove) return new Promise<void>((_r, reject) => (failRemove = () => reject(new Error('fetch failed'))));
+      const link = fn === 'sync:upsertThreads' && (args.threads as ThreadDoc[]).some((r) => r.share?.access === 'link');
+      if (link && !releaseLink) return new Promise<void>((r) => (releaseLink = r));
+      return undefined;
+    },
+  });
+  sync.start();
+  await sync.flushNow();
+  const t = h.runner.create({ text: 'hello', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  const other = h.runner.create({ text: 'other', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  // Shared once, stopped: the mirror has "off" and the slug.
+  h.runner.share(t.id, { access: 'link' });
+  h.runner.share(t.id, { access: 'off' });
+  await sync.flushNow();
+  holding = true;
+  // A flush with a row to write and a removal after it, which will fail.
+  h.runner.update({ threadId: other.id, title: 'Renamed' });
+  h.runner.delete(other.id);
+  const flushing = sync.flushNow();
+  await tick(10);
+  assert.ok(failRemove, 'the flush is past its rows, at the removal');
+  push([{ commandId: 'on', kind: 'share', threadId: t.id, args: { access: 'link' }, createdAt: 1 }]);
+  await tick(10);
+  assert.ok(releaseLink, "the phone's share row is on its way");
+  failRemove!();
+  await flushing;
+  // Stop sharing on the Mac, before the link row has landed.
+  h.runner.share(t.id, { access: 'off' });
+  await tick(10);
+  releaseLink!();
+  await tick(10);
+  await sync.flushNow();
+  await tick(10);
+  const rows = landed.filter((c) => c.fn === 'sync:upsertThreads').flatMap((c) => c.args.threads as ThreadDoc[]).filter((r) => r.threadId === t.id);
+  assert.equal(h.runner.get(t.id).share?.access, 'off');
+  assert.equal(rows.at(-1)?.share?.access, 'off', 'the last row written for it says off');
+});
+
 test('commands: the website pauses, resumes and runs a schedule, and nonsense fails with a note', async () => {
   const { sync, calls, push, applied } = setupFull();
   sync.start();

@@ -5,6 +5,7 @@
 
 import type { Ask, AskLink, NeedsWho, PersistedEvent } from './protocol.ts';
 import { hasLineBreak, replaceLinks } from './linear-text.ts';
+import { cutSafely, safeEnd } from './safe-cut.ts';
 
 export type Needs = { needs: NeedsWho; asks?: Ask[]; next?: string[] };
 
@@ -117,7 +118,7 @@ export function summaryFromTool(input: unknown): string[] | undefined {
   for (const b of v) {
     // The app draws them as a list, so a bullet of its own would be doubled.
     const t = typeof b === 'string' ? b.trim().replace(/^[-*•]\s+/, '').trim() : '';
-    if (t) out.push(t.slice(0, MAX_BULLET));
+    if (t) out.push(cutSafely(t, MAX_BULLET));
     if (out.length === MAX_SUMMARY) break;
   }
   return out.length ? out : undefined;
@@ -166,7 +167,7 @@ export function waitForFromTool(input: unknown): WaitFor[] | undefined {
   for (const x of w) {
     const o = x && typeof x === 'object' ? (x as Record<string, unknown>) : undefined;
     const id = (typeof x === 'string' ? x : typeof o?.thread === 'string' ? o.thread : '').trim();
-    const until = typeof o?.until === 'string' ? o.until.replace(/\s+/g, ' ').trim().slice(0, MAX_UNTIL) : '';
+    const until = typeof o?.until === 'string' ? cutSafely(o.until.replace(/\s+/g, ' ').trim(), MAX_UNTIL) : '';
     if (!id || out.some((y) => y.id === id)) continue;
     out.push(until ? { id, until } : { id });
     if (out.length === MAX_WAIT_FOR) break;
@@ -180,7 +181,7 @@ export function bylineFromTool(input: unknown): string | undefined {
   if (!input || typeof input !== 'object') return undefined;
   const v = (input as Record<string, unknown>).byline;
   if (typeof v !== 'string') return undefined;
-  return v.replace(/\s+/g, ' ').trim().slice(0, MAX_BYLINE) || undefined;
+  return cutSafely(v.replace(/\s+/g, ' ').trim(), MAX_BYLINE) || undefined;
 }
 
 function linksFrom(v: unknown): AskLink[] {
@@ -200,7 +201,7 @@ function linksFrom(v: unknown): AskLink[] {
 function str(v: unknown, max: number): string | undefined {
   if (typeof v !== 'string') return undefined;
   const t = v.trim();
-  return t ? t.slice(0, max) : undefined;
+  return t ? cutSafely(t, max) : undefined;
 }
 
 // Words Mike reads on the card, kept to max but cut at a word with an
@@ -209,7 +210,7 @@ function str(v: unknown, max: number): string | undefined {
 function clipText(v: unknown, max: number): string | undefined {
   const t = str(v, Number.MAX_SAFE_INTEGER);
   if (!t || t.length <= max) return t;
-  const cut = t.slice(0, max - 1);
+  const cut = t.slice(0, safeEnd(t, max - 1));
   const space = cut.lastIndexOf(' ');
   return `${(space > max * 0.6 ? cut.slice(0, space) : cut).replace(/[\s,;:.-]+$/, '')}…`;
 }
@@ -336,7 +337,7 @@ function nextFrom(item: string): string {
     .trim();
   const first = (/^.+?[.!?](?=\s|$)/.exec(t)?.[0] ?? t).replace(/\.$/, '');
   if (first.length <= MAX_NEXT_CHARS) return first;
-  const cut = first.slice(0, MAX_NEXT_CHARS);
+  const cut = first.slice(0, safeEnd(first, MAX_NEXT_CHARS));
   return cut.slice(0, Math.max(cut.lastIndexOf(' '), 1)).replace(/[,;:]$/, '');
 }
 
@@ -347,11 +348,13 @@ const REPLY = /\b(?:reply|send(?: back)?|say|answer|respond)(?: with)?\s+["'“�
 const MORE = /^\s*(?:,\s*(?:or\s+)?|or\s+|\/\s*)["'“‘`]([^"'”’`\n]{1,40})["'”’`]/i;
 
 function askFrom(item: string): Ask {
-  const action = item
-    .replace(/\*\*(.+?)\*\*/g, '$1')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, MAX_ACTION);
+  const action = cutSafely(
+    item
+      .replace(/\*\*(.+?)\*\*/g, '$1')
+      .replace(/\s+/g, ' ')
+      .trim(),
+    MAX_ACTION,
+  );
   const ask: Ask = { action };
   const reply = REPLY.exec(action);
   if (!reply) return ask;

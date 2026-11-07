@@ -11,6 +11,7 @@ import type { ArchiveVerdict, ApprovalDecision, AskAnswer, CliPolicy, EffortLeve
 import { MAX_BYLINE } from './needs.ts';
 import { isMoved, mergeSummaries, type Bucket } from './handover.ts';
 import { AUTH_VERSION, authProof, isNonce, newNonce, proofMatches, type AuthChannel } from './rpc-auth.ts';
+import { cutSafely } from './safe-cut.ts';
 
 type Conn = {
   id: number;
@@ -817,7 +818,7 @@ function optStartedBy(p: Record<string, unknown>): { startedBy?: ThreadStartedBy
   if (typeof v !== 'object') throw bad('startedBy must be an object');
   const o = v as Record<string, unknown>;
   if (typeof o.kind !== 'string' || !STARTED_BY_KINDS.has(o.kind)) throw bad('startedBy.kind must be tool, thread, schedule, librarian or runner');
-  const words = (x: unknown, max: number) => (typeof x === 'string' ? x.replace(/\s+/g, ' ').trim().slice(0, max) : '');
+  const words = (x: unknown, max: number) => (typeof x === 'string' ? cutSafely(x.replace(/\s+/g, ' ').trim(), max) : '');
   const label = words(o.label, 40);
   if (!label) throw bad('startedBy.label required');
   const icon = words(o.icon, 60);
