@@ -120,8 +120,10 @@ private struct InboxList: View {
                         // a schedule don't stop it: there's still nothing
                         // for Mike to do.
                         // Nor do starred threads, unless one needs him.
-                        // It comes once the last archived page has landed.
-                        if section == .inbox && !searching && sections.inbox.isEmpty && sections.running.isEmpty && sections.needsYou.isEmpty && app.flyingToArchive.isEmpty {
+                        // It comes once the last archived or hibernated page
+                        // has landed: arriving under the heading mid-flight
+                        // pushes it down, and the page lands short.
+                        if section == .inbox && !searching && sections.inbox.isEmpty && sections.running.isEmpty && sections.needsYou.isEmpty && app.flyingToArchive.isEmpty && app.flyingToHibernate.isEmpty {
                             InboxZero()
                         }
                     }

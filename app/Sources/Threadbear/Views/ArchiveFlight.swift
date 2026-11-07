@@ -33,16 +33,6 @@ enum ArchiveFlight {
     enum Destination {
         case archive, hibernate
 
-        /// Where the card aims first. With no Hibernating heading yet (this
-        /// is the first thread in it), its moon will turn up where Archived's
-        /// box is now, pushing that down, so it aims there.
-        @MainActor fileprivate var boxes: [NSView?] {
-            switch self {
-            case .archive: return [archiveBox]
-            case .hibernate: return [hibernateBox, archiveBox]
-            }
-        }
-
         var duration: Double { self == .archive ? 0.44 : 0.52 }
         fileprivate var style: ArchiveFlightPath.Style { self == .archive ? .drop : .tuck }
         fileprivate var swing: Double { self == .archive ? 40 : 16 }
@@ -55,10 +45,10 @@ enum ArchiveFlight {
 
     /// The Archived heading's box, Hibernating's moon, the inbox list and
     /// the open thread's row, while they're drawn (`FlightMarker`).
-    fileprivate(set) static weak var archiveBox: NSView?
-    fileprivate(set) static weak var hibernateBox: NSView?
-    fileprivate(set) static weak var inboxList: NSView?
-    fileprivate(set) static weak var openRow: NSView?
+    static var archiveBox: NSView? { marker(.archiveBox) }
+    static var hibernateBox: NSView? { marker(.hibernateBox) }
+    static var inboxList: NSView? { marker(.inboxList) }
+    static var openRow: NSView? { marker(.openRow) }
 
     /// How long the last flight's picture took, for the perf run.
     private(set) static var lastPictureMs = 0.0
@@ -216,8 +206,29 @@ enum ArchiveFlight {
 
     /// Where the card is headed, in window coordinates, and whether that's
     /// the heading itself or just the bottom of the list.
-    fileprivate static func target(in window: NSWindow, to destination: Destination) -> (point: CGPoint, onHeading: Bool)? {
-        if let box = destination.boxes.lazy.compactMap({ $0 }).first(where: { $0.window === window && !$0.visibleRect.isEmpty }) {
+    /// Whether any of the view shows. `visibleRect` alone doesn't say: with
+    /// views no longer clipping to their bounds it reaches past the view's
+    /// own edges, so a marker scrolled well out of sight still had one, and
+    /// the flight aimed off the list rather than falling off its bottom.
+    private static func isInSight(_ view: NSView) -> Bool {
+        !view.visibleRect.intersection(view.bounds).isEmpty
+    }
+
+    static func target(in window: NSWindow, to destination: Destination) -> (point: CGPoint, onHeading: Bool)? {
+        let shown = { (view: NSView?) in view.flatMap { $0.window === window && isInSight($0) ? $0 : nil } }
+        let box: NSView?
+        switch destination {
+        case .archive:
+            box = shown(archiveBox)
+        case .hibernate:
+            // With no Hibernating heading yet (this is the first thread in
+            // it), its moon will turn up where Archived's box is now, pushing
+            // that down, so it aims there. A heading that's there but
+            // scrolled out of sight isn't Archived's, so then it falls off
+            // the list like an archive with its heading out of sight.
+            if let moon = hibernateBox, moon.window === window { box = shown(moon) } else { box = shown(archiveBox) }
+        }
+        if let box {
             let frame = box.convert(box.bounds, to: nil)
             var point = CGPoint(x: frame.midX, y: frame.midY)
             // The archived thread's row closes up above the heading as the
@@ -229,7 +240,7 @@ enum ArchiveFlight {
             }
             return (point, true)
         }
-        if let list = inboxList, list.window === window, !list.visibleRect.isEmpty {
+        if let list = inboxList, list.window === window, isInSight(list) {
             let frame = list.convert(list.visibleRect, to: nil)
             // Where the heading's box would be, at the list's bottom edge.
             return (CGPoint(x: frame.minX + SidebarMetrics.leading + zoomed(7), y: frame.minY), false)
@@ -298,29 +309,55 @@ struct FlightMarker: NSViewRepresentable {
     let kind: Kind
 
     func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        ArchiveFlight.mark(view, as: kind, new: true)
+        let view = FlightMarkerView(kind: kind)
+        ArchiveFlight.register(view)
         return view
     }
 
-    func updateNSView(_ view: NSView, context: Context) {
-        ArchiveFlight.mark(view, as: kind, new: false)
+    func updateNSView(_ view: NSView, context: Context) {}
+}
+
+/// A marker that notes when it lands in a window, so the newest one wins.
+final class FlightMarkerView: NSView {
+    let kind: FlightMarker.Kind
+    fileprivate(set) var arrived = 0
+
+    init(kind: FlightMarker.Kind) {
+        self.kind = kind
+        super.init(frame: .zero)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil { ArchiveFlight.arrived(self) }
     }
 }
 
 extension ArchiveFlight {
-    /// A marker going away is still updated while its row animates the
-    /// change, after the next row's has registered. If that took the slot
-    /// back, it emptied when the old one went, so the flight stopped allowing
-    /// for the row closing up above the heading, and landed a row short. So
-    /// an update only fills an empty slot; a new marker always takes it.
-    static func mark(_ view: NSView, as kind: FlightMarker.Kind, new: Bool) {
-        switch kind {
-        case .archiveBox: if new || archiveBox?.window == nil { archiveBox = view }
-        case .hibernateBox: if new || hibernateBox?.window == nil { hibernateBox = view }
-        case .inboxList: if new || inboxList?.window == nil { inboxList = view }
-        case .openRow: if new || openRow?.window == nil { openRow = view }
-        }
+    /// Every marker still alive. While a row animates away its marker is
+    /// still in the window, next to the one replacing it, and SwiftUI makes
+    /// and updates the two in no fixed order. A single slot that the last
+    /// one to touch it took ended up holding the old one, or nothing once
+    /// it went, and the flight stopped allowing for the row closing up and
+    /// landed a row short (7 Nov). So the newest marker in a window wins,
+    /// whichever order they were made and updated in.
+    private static let markers = NSHashTable<FlightMarkerView>.weakObjects()
+    private static var arrivals = 0
+
+    static func register(_ view: FlightMarkerView) {
+        markers.add(view)
+        if view.window != nil { arrived(view) }
+    }
+
+    fileprivate static func arrived(_ view: FlightMarkerView) {
+        arrivals += 1
+        view.arrived = arrivals
+    }
+
+    static func marker(_ kind: FlightMarker.Kind) -> NSView? {
+        markers.allObjects.filter { $0.kind == kind && $0.window != nil }.max { $0.arrived < $1.arrived }
     }
 }
 

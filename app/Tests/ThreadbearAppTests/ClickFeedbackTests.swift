@@ -177,23 +177,60 @@ final class ClickFeedbackTests: XCTestCase {
         XCTAssertEqual(app.hibernateLandings, 0)
     }
 
-    /// The old row's marker, updated on its way out, doesn't take the slot
-    /// from the new one: it would empty when the old row goes, and the
-    /// flight would land a row short of its heading.
-    func testAMarkerOnItsWayOutDoesntTakeTheSlot() {
+    /// While a row animates away its marker is still in the window beside
+    /// the new one, and SwiftUI makes, updates and attaches the two in no
+    /// fixed order. The newest in the window wins whatever the order: the
+    /// old one holding on, or nothing once it goes, landed the flight a row
+    /// short of its heading.
+    func testTheNewestMarkerInTheWindowWins() {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 200), styleMask: [], backing: .buffered, defer: true)
         window.isReleasedWhenClosed = false
         defer { window.close() }
-        let old = NSView(), new = NSView()
+        let old = FlightMarkerView(kind: .openRow)
         window.contentView?.addSubview(old)
+        ArchiveFlight.register(old)
+        XCTAssertTrue(ArchiveFlight.openRow === old)
+        // The new one is made before it has a window, then the old one is
+        // updated, then the new one goes on screen.
+        let new = FlightMarkerView(kind: .openRow)
+        ArchiveFlight.register(new)
+        XCTAssertTrue(ArchiveFlight.openRow === old, "not in a window yet")
         window.contentView?.addSubview(new)
-        ArchiveFlight.mark(old, as: .openRow, new: true)
-        ArchiveFlight.mark(new, as: .openRow, new: true)
-        ArchiveFlight.mark(old, as: .openRow, new: false)
+        XCTAssertTrue(ArchiveFlight.openRow === new)
+        old.removeFromSuperview()
         XCTAssertTrue(ArchiveFlight.openRow === new)
         new.removeFromSuperview()
-        ArchiveFlight.mark(old, as: .openRow, new: false)
-        XCTAssertTrue(ArchiveFlight.openRow === old, "an update fills a slot whose view has left the window")
+        XCTAssertNil(ArchiveFlight.openRow)
+    }
+
+    /// Hibernating aims at Archived's box only when there's no Hibernating
+    /// heading yet. One that's there but scrolled out of sight sends the
+    /// page off the bottom of the list, not into the wrong heading.
+    func testHibernatingWithItsHeadingOutOfSightDoesntAimAtArchived() {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 400), styleMask: [], backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        // A sidebar that scrolls, its top in view: what's below 400 isn't.
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 200, height: 400))
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 1200))
+        scroll.documentView = content
+        window.contentView?.addSubview(scroll)
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: 800))
+        let list = FlightMarkerView(kind: .inboxList), archived = FlightMarkerView(kind: .archiveBox)
+        list.frame = NSRect(x: 0, y: 0, width: 200, height: 1200)
+        archived.frame = NSRect(x: 10, y: 1100, width: 14, height: 14)
+        for view in [list, archived] {
+            content.addSubview(view)
+            ArchiveFlight.register(view)
+        }
+        XCTAssertEqual(ArchiveFlight.target(in: window, to: .hibernate)?.onHeading, true, "no Hibernating heading yet, so its moon will come where Archived's box is")
+        let moon = FlightMarkerView(kind: .hibernateBox)
+        moon.frame = NSRect(x: 10, y: 200, width: 14, height: 14)
+        content.addSubview(moon)
+        ArchiveFlight.register(moon)
+        XCTAssertEqual(ArchiveFlight.target(in: window, to: .hibernate)?.onHeading, false)
+        XCTAssertEqual(ArchiveFlight.target(in: window, to: .archive)?.onHeading, true)
+        scroll.removeFromSuperview()
     }
 
     // MARK: Inbox zero in the pane
