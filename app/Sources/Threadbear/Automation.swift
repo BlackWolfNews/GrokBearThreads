@@ -716,9 +716,16 @@ enum Automation {
             // "close":true} goes back to the section. Over a text file,
             // "edit" true or false is the bar's pencil or Done, "insert"
             // types text at the end of the editor (and waits for the
-            // save, unless "wait" is false), and "resolve" ("file" or
-            // "mine") is the conflict bar's button.
+            // save, unless "wait" is false), "save" true is ⌘S, and
+            // "resolve" ("file" or "mine") is the conflict bar's button.
             guard let thread = app.selectedThread else { return "error no thread selected" }
+            if c["save"] as? Bool == true {
+                guard let controller = TextFileController.current, app.panePreview[thread.id]?.editing == true else {
+                    return "error nothing is being edited"
+                }
+                controller.saveNow()
+                return "ok \(controller.conflict != nil ? "changed on disk, so not saved; " : "")file ends \(((try? String(contentsOf: controller.url, encoding: .utf8)) ?? "").suffix(40).debugDescription)"
+            }
             if c["close"] as? Bool == true {
                 app.closePreview(in: thread.id)
             } else if c["back"] as? Bool == true {

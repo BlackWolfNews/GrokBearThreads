@@ -52,6 +52,19 @@ final class TextFileDocumentTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "x")
     }
 
+    /// Read just before a save: someone else's write the watch hasn't
+    /// reported yet shows up, its own write doesn't.
+    func testChangedOnDiskSeesSomeoneElsesWrite() throws {
+        let url = try file("notes.txt", "a")
+        let doc = TextFileDocument(url: url)
+        try doc.load()
+        XCTAssertNil(doc.changedOnDisk())
+        try doc.save("b")
+        XCTAssertNil(doc.changedOnDisk(), "its own save")
+        try Data("c".utf8).write(to: url)
+        XCTAssertEqual(doc.changedOnDisk(), "c")
+    }
+
     func testBinaryAndCutOffFilesAreReadOnly() throws {
         let url = try file("blob.txt", "")
         try Data([0x68, 0x69, 0xFF, 0xFE]).write(to: url)

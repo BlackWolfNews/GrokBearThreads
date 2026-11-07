@@ -82,6 +82,14 @@ public final class TextFileDocument: @unchecked Sendable {
         saved = text
     }
 
+    /// The file's text if it no longer says what was last read or written
+    /// (someone else wrote it), else nil. Read just before a save, so an
+    /// edit the watch hasn't reported yet isn't written over.
+    public func changedOnDisk() -> String? {
+        guard let read = try? read() else { return nil }
+        return read.text == saved ? nil : read.text
+    }
+
     // MARK: Deciding what a change on disk means
 
     /// What to do when the file on disk has changed: `onDisk` is its text

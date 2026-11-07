@@ -248,6 +248,13 @@ Mac's files have thumbnails and Quick Look.
 Files, the folder on a thread's right-hand rail, opens the thread's own
 folder that way, without a link to it. Click it again to close it.
 
+A text file in the side pane opens for reading. The pencil in its bar
+switches to the raw text for editing, with line numbers down the side.
+What you type is saved a moment after you stop, and ⌘S saves it straight
+away. If the file changes on disk while you have unsaved edits (an agent
+rewrote it), nothing is written over: a bar asks whether to take the
+file's version or keep yours.
+
 An HTML file opens in the side pane as a static page, with the styles,
 pictures, fonts and media beside it that its markup names. Script files,
 SVGs and other pages beside it don't load, so a mockup made of several

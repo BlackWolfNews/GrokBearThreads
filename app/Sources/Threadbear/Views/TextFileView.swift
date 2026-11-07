@@ -8,10 +8,11 @@ import UniformTypeIdentifiers
 /// it, code coloured (highlight.js through Highlightr, Xcode's colours),
 /// plain text plain, all selectable. Quick Look showed these as text
 /// nobody could select (Mike, 28 Oct). The bar's pencil switches to the
-/// raw text, editable: what's typed is saved into the file a moment
-/// after the typing stops, and when Done. The file is watched, so an
-/// agent's rewrite shows up by itself; if it lands while there are
-/// unsaved edits, a bar asks which to keep rather than losing either.
+/// raw text, editable, with line numbers: what's typed is saved into the
+/// file a moment after the typing stops, on ⌘S, and when Done. The file
+/// is watched, so an agent's rewrite shows up by itself; if it lands
+/// while there are unsaved edits, a bar asks which to keep rather than
+/// losing either.
 struct TextFileView: View {
     let url: URL
     /// Bumped by each open, so the same file opened again is read again.
@@ -208,6 +209,11 @@ final class TextFileController: NSObject, NSTextViewDelegate {
         scroll.documentView = textView
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
+        // Line numbers, for the raw text while editing (not rendered Markdown).
+        scroll.verticalRulerView = LineNumberRuler(textView: textView)
+        scroll.hasVerticalRuler = true
+        scroll.rulersVisible = false
+        textView.onSave = { [weak self] in self?.saveNow() }
     }
 
     // MARK: Lifecycle
@@ -223,6 +229,9 @@ final class TextFileController: NSObject, NSTextViewDelegate {
             return
         }
         show(document.saved, keepPlace: false)
+        // Opened again while it was being edited (Back to it, another
+        // thread and back): it takes typing again.
+        if editing { applyEditing() }
         document.watch(shown: { [weak self] in self?.shownText ?? "" }) { [weak self] change in
             self?.fileChanged(change)
         }
@@ -348,22 +357,30 @@ final class TextFileController: NSObject, NSTextViewDelegate {
         guard self.editing != editing else { return }
         if !editing { saveNow() }
         self.editing = editing
-        if editing && !document.isEditable {
-            // Shown, but never written back: it would change what's there.
-            note = document.truncated ? "Only the start of this file is shown, so it can't be edited here."
-                : "This file isn't UTF-8 text, so it can't be edited here."
-        }
-        textView.isEditable = editing && document.isEditable
+        applyEditing()
         // Markdown changes shape; code and text only change whether they
         // take typing.
         if isMarkdown { show(document.saved, keepPlace: true) }
         if editing { textView.window?.makeFirstResponder(textView) }
     }
 
+    /// The view's side of `editing`: whether it takes typing, the line
+    /// numbers, and why a file that can't be written back can't.
+    private func applyEditing() {
+        if editing && !document.isEditable {
+            // Shown, but never written back: it would change what's there.
+            note = document.truncated ? "Only the start of this file is shown, so it can't be edited here."
+                : "This file isn't UTF-8 text, so it can't be edited here."
+        }
+        textView.isEditable = editing && document.isEditable
+        scroll.rulersVisible = editing
+    }
+
     func textDidChange(_ notification: Notification) {
         guard editing else { return }
         generation += 1
         scheduleSave()
+        scroll.verticalRulerView?.needsDisplay = true
         colourTimer?.cancel()
         let item = DispatchWorkItem { [weak self] in self?.colour() }
         colourTimer = item
@@ -377,13 +394,21 @@ final class TextFileController: NSObject, NSTextViewDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.saveDelay, execute: item)
     }
 
-    /// Writes what's typed, unless a conflict is waiting on Mike.
+    /// Writes what's typed, unless a conflict is waiting on Mike. If the
+    /// file changed on disk since it was read (an agent's edit the watch
+    /// hasn't reported yet), it isn't written over: the conflict bar asks.
     func saveNow() {
         saveTimer?.cancel()
         saveTimer = nil
         guard editing, conflict == nil, document.isEditable else { return }
+        let typed = textView.string
+        guard typed != document.saved else { return }
+        if let onDisk = document.changedOnDisk(), onDisk != typed {
+            conflict = onDisk
+            return
+        }
         do {
-            try document.save(textView.string)
+            try document.save(typed)
         } catch {
             note = "Couldn't save: \(error.localizedDescription)"
         }
@@ -413,8 +438,11 @@ final class TextFileController: NSObject, NSTextViewDelegate {
         show(text, keepPlace: true)
     }
 
-    /// Its "Keep mine": what's typed is written over the file.
+    /// Its "Keep mine": what's typed is written over the file. The file's
+    /// text is taken as read first, so the save doesn't find it changed
+    /// and ask again.
     func keepMine() {
+        if let onDisk = conflict { document.adopt(onDisk) }
         conflict = nil
         saveNow()
     }
@@ -436,6 +464,17 @@ final class FileTextView: NSTextView {
 
     /// The file's folder, which relative links are from.
     var base: URL?
+    /// ⌘S while it's being edited: save now rather than after the pause.
+    var onSave: (() -> Void)?
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if isEditable, window?.firstResponder === self, flags == .command, event.charactersIgnoringModifiers == "s", let onSave {
+            onSave()
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
 
     override func clicked(onLink link: Any, at charIndex: Int) {
         let commandKey = NSApp.currentEvent?.modifierFlags.contains(.command) ?? false
