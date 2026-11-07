@@ -31,6 +31,8 @@ extension AppModel {
             // Its runner's connection closed while it was away.
             reconnectRemote(for: threadId)
         }
+        // Looked at now, so `woke` is on its way out: the note's bear needs telling first.
+        if threads[threadId]?.woke != nil { session.wakeUpPending = true }
         if let thread = threads[threadId], thread.needsYou || thread.lastSeq > thread.lastSeenSeq {
             scheduleMarkSeen(threadId)
         }

@@ -19,6 +19,9 @@ enum RowMetrics {
     /// One line of work: a group summary, a tool call, a thinking block.
     static var workHeight: CGFloat { zoomed(32) }
     static var workingHeight: CGFloat { zoomed(34) }
+    /// The bear beside a "Woke up" note, and all the room it takes.
+    static var wokenBearSide: CGFloat { zoomed(18) }
+    static var wokenBearRoom: CGFloat { wokenBearSide + zoomed(6) }
     static var bubblePadH: CGFloat { zoomed(14) }
     static var bubblePadV: CGFloat { zoomed(10) }
     static var bubbleRadius: CGFloat { zoomed(18) }
@@ -490,8 +493,11 @@ enum RowRenderer {
                 return RowRender(height: RowMetrics.workHeight, text: header, textSize: header.size())
             }
             let text = NSAttributedString(string: note, attributes: Theme.text(Theme.smallFont, color: Theme.quietText, line: TypeScale.scaled(17), alignment: .center))
-            let size = measurer.measure(text, width: width)
-            return RowRender(height: vertical + size.height, text: text, textSize: size)
+            // A wake note's bear sits left of the words, and they stay
+            // centred, so they leave its room on both sides.
+            let woke = row.content.isWakeNote
+            let size = measurer.measure(text, width: woke ? width - 2 * RowMetrics.wokenBearRoom : width)
+            return RowRender(height: vertical + (woke ? max(size.height, RowMetrics.wokenBearSide) : size.height), text: text, textSize: size)
 
         case .error(let message, let kind):
             let text = NSMutableAttributedString(string: message, attributes: Theme.text(color: .systemRed))

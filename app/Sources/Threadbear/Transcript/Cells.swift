@@ -38,6 +38,9 @@ protocol RowCellDelegate: AnyObject {
     /// (⌘Return, or nothing left unanswered).
     func answerBoxReturn(_ card: AsksCard, ask: Int, command: Bool)
     func openReview(_ review: DesignReview)
+    /// Whether a "Woke up" note should play its bear waking up: only the
+    /// thread's newest, once, the first time it's seen after waking.
+    func claimWakeUp(rowId: String) -> Bool
     /// The pencil by one of Mike's messages: edit it and carry on from
     /// there (docs/protocol.md, "Editing a message").
     func editMessage(rowId: String)
@@ -69,6 +72,7 @@ extension RowCellDelegate {
     func sendAnswers(_ card: AsksCard) {}
     func answerBoxReturn(_ card: AsksCard, ask: Int, command: Bool) {}
     func openReview(_ review: DesignReview) {}
+    func claimWakeUp(rowId: String) -> Bool { false }
     func editMessage(rowId: String) {}
     func openThreadLink(_ url: URL, fromRow rowId: String) {}
     func approvePlan(itemId: String) {}
@@ -278,6 +282,9 @@ final class TextRowCell: RowCellView {
     let phoneMark = NSButton()
     private var editable = false
     private var pointerInside = false
+    /// Left of the words of a "Woke up" note. Made the first time one's
+    /// shown, as hardly any text rows ever need it.
+    private var wokenBear: WokenBearView?
     /// The open card's Something else boxes, by ask, over the room its
     /// text leaves for them; kept while the cell is, so typing in one
     /// survives the card being laid out again around it.
@@ -354,6 +361,30 @@ final class TextRowCell: RowCellView {
         super.prepareForReuse()
         pointerInside = false
         updateEdit()
+    }
+
+    private func placeWokenBear(_ row: TranscriptRow, x: CGFloat, width: CGFloat, textSize: NSSize, changedRow: Bool) {
+        guard row.content.isWakeNote else {
+            if let wokenBear, !wokenBear.isHidden {
+                wokenBear.settle()
+                wokenBear.isHidden = true
+            }
+            return
+        }
+        let bear = wokenBear ?? {
+            let bear = WokenBearView()
+            addSubview(bear)
+            wokenBear = bear
+            return bear
+        }()
+        bear.isHidden = false
+        bear.tint = Theme.quietText
+        let side = RowMetrics.wokenBearSide
+        // Level with the first line, whatever the row's grown to.
+        let line = TypeScale.scaled(17)
+        bear.frame = NSRect(x: x + (width - textSize.width) / 2 - RowMetrics.wokenBearRoom, y: RowMetrics.rowTop + (line - side) / 2, width: side, height: side)
+        if changedRow { bear.settle() }
+        if delegate?.claimWakeUp(rowId: row.id) == true { bear.wakeUp() }
     }
 
     private func updateEdit() {
@@ -486,6 +517,7 @@ final class TextRowCell: RowCellView {
             textView.place(NSRect(x: x, y: top, width: width, height: render.textSize.height))
         }
 
+        placeWokenBear(row, x: x, width: width, textSize: render.textSize, changedRow: previousRowId != row.id)
         updateEdit()
         // A message the runner hasn't shown yet is drawn faded.
         let alpha: CGFloat = pending == nil ? 1 : 0.5

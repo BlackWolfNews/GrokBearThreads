@@ -22,6 +22,28 @@ final class TranscriptModelTests: XCTestCase {
         XCTAssertEqual(model.lastSeq, 7)
     }
 
+    /// "Woke up after hibernating for 2 days." is what Mike opened the thread
+    /// to read, so it has a row of its own under the turn before, rather than
+    /// going into that turn's "Worked for" group. Other notes still fold.
+    func testAWakeNoteStaysOutOfTheGroupAbove() {
+        let model = TranscriptModel(events: [
+            E.event(1, "turn.started", ["turnId": "t1"]),
+            E.user(2, "Fix the test"),
+            E.call(3, "c1", title: "npm test"),
+            E.result(4, "c1", text: "ok"),
+            E.text(5, "m1", "Fixed it."),
+            E.done(6),
+            E.event(7, "system.note", ["text": "Put in Threadbear"], turn: nil),
+            E.event(8, "system.note", ["text": "Woke up after hibernating for 2 days."], turn: nil),
+        ])
+        XCTAssertEqual(model.rows.map(\.id), ["u:2", "g:t:c1", "a:m1", "f:t1", "n:8"])
+        XCTAssertEqual(model.rows.last?.inGroup, false)
+        for note in ["Woke up after hibernating for 2 days.", "Woke up from hibernating.", "Woke up after 3 hours, as the runner restarted.", "Woke up: Mike mentioned woodworking."] {
+            XCTAssertTrue(RowContent.note(note).isWakeNote, note)
+        }
+        XCTAssertFalse(RowContent.note("Put in Threadbear").isWakeNote)
+    }
+
     /// The summary's background work is the last row while no turn runs:
     /// it comes and goes in place, and a running turn's working line takes
     /// its place.

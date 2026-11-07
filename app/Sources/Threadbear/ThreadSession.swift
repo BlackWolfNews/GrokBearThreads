@@ -21,6 +21,9 @@ final class ThreadSession {
     nonisolated static let eventsPage = 500
 
     let threadId: String
+    /// Mike opened this thread with it still saying "Woke up", so the bear on
+    /// its newest wake note plays its waking up, the first time it's shown.
+    @ObservationIgnored var wakeUpPending = false
     /// Set for a sub-agent's transcript: read-only, read whole from
     /// `threads.subagent` (again for more while it runs), never subscribed.
     let subagentId: String?

@@ -1048,6 +1048,7 @@ public struct TranscriptModel: Sendable {
     static func isWork(_ row: TranscriptRow) -> Bool {
         switch row.content {
         case .tool(let tool): return !isTakenEndTurn(tool)
+        case .note where row.content.isWakeNote: return false
         case .reasoning, .note: return true
         case .approval(let item): return item.isAllowed
         default: return false
@@ -1282,7 +1283,7 @@ public struct TranscriptModel: Sendable {
     }
 
     private func staysOut(_ k: Int, replies: Set<Int>) -> Bool {
-        if replies.contains(k) || items[k].id.hasPrefix("rw:") { return true }
+        if replies.contains(k) || items[k].id.hasPrefix("rw:") || items[k].content.isWakeNote { return true }
         switch items[k].content {
         case .user(let message): return !message.isFromRunner
         case .error, .footer, .asks, .review, .gap, .planCard: return true

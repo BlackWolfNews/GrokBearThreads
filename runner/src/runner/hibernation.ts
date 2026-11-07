@@ -341,6 +341,7 @@ export const hibernationPart = {
       : cause === 'restart'
         ? `Woke up${away}, as the runner restarted.`
         : away ? `Woke up after hibernating for ${awayFor(ms)}.` : 'Woke up from hibernating.';
+    // Starting "Woke up" is what gives it the bear in the app (RowContent.isWakeNote).
     this.emit(st, { type: 'system.note', text });
     rec.woke = { at: new Date(now).toISOString(), ...(since ? { since } : {}) };
     delete rec.snoozedAt;

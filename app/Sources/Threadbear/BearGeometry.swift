@@ -190,6 +190,33 @@ enum BearGeometry {
     /// The small Z, then the big one.
     static var sleepZs: [CGPath] { [z(CGPoint(x: 18.4, y: 6.4), 2.2), z(CGPoint(x: 21, y: 1), 2.9)] }
 
+    // MARK: Sat, and stretching
+
+    /// The sat bear's head. `eyes` is `.shut` for a moment as it wakes up.
+    static func sitFace(small: Bool, eyes: Eyes = .button) -> Face {
+        Face(centre: CGPoint(x: 12, y: 8.9), scale: 0.72, eyes: eyes, small: small)
+    }
+    static func sitBody(face: Face) -> [Ink] {
+        body(centre: sitBodyCentre, rx: 6, ry: 5, feetApart: 5.5, feetY: 21.7, footRx: 2.5, footRy: 1.8, face: face)
+    }
+    private static let sitBodyCentre = CGPoint(x: 12, y: 17.8)
+    /// The spot on the grid the sat bear stretches up from.
+    static let sitFeet = CGPoint(x: 12, y: 23.5)
+    /// Where the stretching arm leaves the body; it turns about this.
+    static let stretchShoulder = CGPoint(x: 16.6, y: 14.6)
+    /// One arm up past the ear, for the stretch on waking. It only ever shows
+    /// for a moment, from behind the bear (`sitOutline`).
+    static var stretchArm: CGPath { capsule(from: stretchShoulder, to: stretchPaw, halfWidth: 1.75) }
+    /// The pad on its paw. Nil when small.
+    static func stretchPad(small: Bool) -> CGPath? { small ? nil : ellipse(stretchPaw, 0.8, 0.8) }
+    private static let stretchPaw = CGPoint(x: 21.8, y: 5.6)
+    /// The sat bear's head, ears and body, which the stretching arm goes behind.
+    static var sitOutline: CGPath {
+        // Joined, not just added: where two overlap they'd count as outside.
+        let face = sitFace(small: false)
+        return face.head.union(face.ears).union(ellipse(sitBodyCentre, 6, 5))
+    }
+
     // MARK: Poses
 
     /// Everything in a pose, in drawing order. `side` is the size it's shown at.
@@ -204,8 +231,8 @@ enum BearGeometry {
         case .sleep:
             return sleepingHead(small: small) + sleepZs.map { Ink(path: $0, width: Face.shutWidth) }
         case .sit:
-            let face = Face(centre: CGPoint(x: 12, y: 8.9), scale: 0.72, small: small)
-            return body(centre: CGPoint(x: 12, y: 17.8), rx: 6, ry: 5, feetApart: 5.5, feetY: 21.7, footRx: 2.5, footRy: 1.8, face: face) + face.inks
+            let face = sitFace(small: small)
+            return sitBody(face: face) + face.inks
         case .cub:
             // Small and new: big ears, both its eyes, nothing stitched yet.
             let face = Face(centre: CGPoint(x: 12, y: 11.2), scale: 0.62, eyes: .plain, bigEars: true, stitched: false, small: small)

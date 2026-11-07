@@ -485,7 +485,7 @@ the moon, or use the Thread menu or the ... menu. Pick when it should
 come back: in an hour, this evening, tomorrow, next Monday, or a day on a calendar and a
 time of your own. It leaves the list, its agent stops, and it comes back marked unread
 when the time comes. Its row says Woke up until you open it, and the
-thread says how long it was away. Hibernating threads wait in the Hibernating section at
+thread says how long it was away, beside a bear that's only just got up. Hibernating threads wait in the Hibernating section at
 the foot of the list, soonest to wake first. Hibernate the thread you have
 open and its page sinks into the moon on that heading as the next thread
 comes in.

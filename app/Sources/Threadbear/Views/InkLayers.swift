@@ -222,3 +222,148 @@ final class SleepingBearView: InkLayersView {
         if wasDrifting { stop(); start() }
     }
 }
+
+/// The bear beside a transcript's "Woke up after hibernating for 2 days.":
+/// sat, once it's up. The first time the note's seen it's asleep, then the
+/// Zs go, its head comes up, it sits up with its eyes shut, opens them and
+/// has one stretch with a paw in the air, about a second all told and all of
+/// it Core Animation. Under Reduce Motion it's sat from the start.
+final class WokenBearView: InkLayersView {
+    enum Timing {
+        /// Asleep for a beat first, as the thread comes up.
+        static let asleep: CFTimeInterval = 0.35
+        static let headUp = asleep + 0.15
+        static let satUp = headUp + 0.12
+        static let eyesOpen = satUp + 0.06
+        static let eyesOpened = eyesOpen + 0.1
+        static let stretch = eyesOpened + 0.08
+        static let stretchLength: CFTimeInterval = 0.42
+        static let total = stretch + stretchLength
+    }
+
+    private let sleeping = CALayer()
+    private let zs = [CALayer(), CALayer()]
+    /// Everything that stretches. At rest, the sat bear.
+    private let figure = CALayer()
+    private let satShut = CALayer()
+    private let sat = CALayer()
+    private let eye = CALayer()
+    /// Shows the arm only outside the bear, so it comes from behind it. It
+    /// doesn't turn itself, or the outline would turn with the arm.
+    private let armClip = CALayer()
+    private let arm = CALayer()
+
+    /// Whether it's partway through waking up.
+    var isWaking: Bool { figure.animation(forKey: "bear.stretchY") != nil }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        [sleeping, zs[0], zs[1], figure].forEach(stage.addSublayer)
+        figure.addSublayer(armClip)
+        armClip.addSublayer(arm)
+        [satShut, sat, eye].forEach(figure.addSublayer)
+        // Where they end up. The tracks hold them elsewhere until then, so
+        // anything that stops a track leaves the bear sat.
+        for hidden in [sleeping, zs[0], zs[1], satShut, arm] { hidden.opacity = 0 }
+        setAccessibilityLabel(Bear.description(.sit))
+        redraw()
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    func wakeUp(reduceMotion: Bool? = nil) {
+        guard !(reduceMotion ?? Juice.reduceMotion) else { return }
+        settle()
+        let now = CACurrentMediaTime(), end = Timing.total
+        func play(_ part: CALayer, _ keyPath: String, _ key: String, _ keys: [(Double, Double)]) {
+            part.add(Self.track(keyPath, length: end, begin: now, keys: keys + [(end, keys.last!.1)]), forKey: key)
+        }
+        let unit = min(bounds.width, bounds.height) / 24
+        // Its Zs, gone as it stirs.
+        for (index, z) in zs.enumerated() {
+            let peak = Timing.asleep * (index == 0 ? 0.4 : 0.8)
+            play(z, "opacity", "bear.z", [(0, 0.3), (peak, 1), (Timing.asleep, 1), (Timing.headUp, 0)])
+            play(z, "transform.translation.y", "bear.zUp", [(0, 0.5 * unit), (Timing.headUp, -1.5 * unit)])
+        }
+        // The head comes up off its side, and then it's sat, eyes still shut...
+        let upright = -BearGeometry.sleepingTilt * .pi / 180
+        play(sleeping, "transform.rotation.z", "bear.headUp", [(0, 0), (Timing.asleep, 0), (Timing.headUp, upright)])
+        play(sleeping, "opacity", "bear.asleep", [(0, 1), (Timing.headUp, 1), (Timing.satUp, 0)])
+        play(satShut, "opacity", "bear.satUp", [(0, 0), (Timing.headUp, 0), (Timing.satUp, 1), (Timing.eyesOpen, 1), (Timing.eyesOpen + 0.001, 0)])
+        // ...then it opens them...
+        play(sat, "opacity", "bear.sat", [(0, 0), (Timing.eyesOpen, 0), (Timing.eyesOpen + 0.001, 1)])
+        play(eye, "opacity", "bear.eye", [(0, 0), (Timing.eyesOpen, 0), (Timing.eyesOpen + 0.001, 1)])
+        play(eye, "transform.scale.y", "bear.eyeOpen", [(0, 0.1), (Timing.eyesOpen, 0.1), (Timing.eyesOpened, 1)])
+        // ...and stretches up from its feet with a paw in the air.
+        let start = Timing.stretch, length = Timing.stretchLength
+        let tall = start + length * 0.45, held = start + length * 0.6
+        play(figure, "transform.scale.x", "bear.stretchX", [(0, 1), (start, 1), (tall, 0.97), (start + length, 1)])
+        play(figure, "transform.scale.y", "bear.stretchY", [(0, 1), (start, 1), (tall, 1.08), (start + length, 1)])
+        let down = 110 * Double.pi / 180
+        play(arm, "transform.rotation.z", "bear.arm", [(0, down), (start, down), (tall, -6 * .pi / 180), (held, 0), (start + length, down)])
+        play(arm, "opacity", "bear.armShown", [(0, 0), (start, 0), (tall, 1), (held, 1), (start + length, 0)])
+    }
+
+    /// Straight to sat, for a pooled cell getting another row.
+    func settle() {
+        for part in [sleeping, zs[0], zs[1], figure, satShut, sat, eye, arm] { part.removeAllAnimations() }
+    }
+
+    override func layOut(side: CGFloat, drawing: Drawing) {
+        let square = CGRect(x: 0, y: 0, width: side, height: side)
+        let small = side < BearGeometry.smallSide
+        Self.pin(sleeping, about: BearGeometry.sleepingCentre, square: square)
+        Self.fill(sleeping, BearGeometry.sleepingHead(small: small), square: square, drawing)
+        for (z, path) in zip(zs, BearGeometry.sleepZs) {
+            z.frame = square
+            Self.fill(z, [BearGeometry.Ink(path: path, width: BearGeometry.Face.shutWidth)], square: square, drawing)
+        }
+        Self.pin(figure, about: BearGeometry.sitFeet, square: square)
+        let shut = BearGeometry.sitFace(small: small, eyes: .shut), open = BearGeometry.sitFace(small: small)
+        satShut.frame = square
+        Self.fill(satShut, BearGeometry.sitBody(face: shut) + shut.inks, square: square, drawing)
+        sat.frame = square
+        Self.fill(sat, BearGeometry.sitBody(face: open) + open.stillInks, square: square, drawing)
+        let eyeBox = open.blinkingEyes?.boundingBox ?? .zero
+        Self.pin(eye, about: CGPoint(x: eyeBox.midX, y: eyeBox.midY), square: square)
+        Self.fill(eye, open.blinkingEyes.map { [BearGeometry.Ink(path: $0, width: nil)] } ?? [], square: square, drawing)
+        armClip.frame = square
+        armClip.mask = Self.mask(outside: BearGeometry.sitOutline, square: square, drawing)
+        Self.pin(arm, about: BearGeometry.stretchShoulder, square: square)
+        var parts = [BearGeometry.Ink(path: BearGeometry.stretchArm, width: BearGeometry.line)]
+        if let pad = BearGeometry.stretchPad(small: small) { parts.append(BearGeometry.Ink(path: pad, width: nil)) }
+        Self.fill(arm, parts, square: square, drawing)
+    }
+
+    #if DEBUG
+    /// Draws the bear `seconds` into waking up, from the real tracks, for
+    /// BearTests' BEAR_FRAMES_WOKEN. Core Animation can't be sampled to a
+    /// bitmap, least of all with the screen locked.
+    func renderFrame(at seconds: Double, in context: CGContext) {
+        let parts = [sleeping, zs[0], zs[1], figure, satShut, sat, eye, arm]
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        var opacities: [ObjectIdentifier: Float] = [:]
+        for part in parts {
+            opacities[ObjectIdentifier(part)] = part.opacity
+            for key in part.animationKeys() ?? [] {
+                guard let track = part.animation(forKey: key) as? CAKeyframeAnimation, let keyPath = track.keyPath,
+                      let values = track.values as? [Double], let times = track.keyTimes?.map(\.doubleValue) else { continue }
+                let t = min(1, seconds / track.duration)
+                let i = times.lastIndex { $0 <= t } ?? 0, j = min(i + 1, values.count - 1)
+                let f = min(1, (t - times[i]) / max(0.000_001, times[j] - times[i]))
+                part.setValue(values[i] + (values[j] - values[i]) * f, forKeyPath: keyPath)
+            }
+        }
+        CATransaction.commit()
+        layer?.render(in: context)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for part in parts {
+            part.opacity = opacities[ObjectIdentifier(part)] ?? 1
+            part.setAffineTransform(.identity)
+        }
+        CATransaction.commit()
+    }
+    #endif
+}

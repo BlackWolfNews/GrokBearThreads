@@ -326,6 +326,15 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
 
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { false }
 
+    func claimWakeUp(rowId: String) -> Bool {
+        guard let session, session.wakeUpPending else { return false }
+        // An older thread's older wake note can come on screen first.
+        let newest = (0..<session.displayCount).reversed().lazy.map { session.displayRow($0) }.first { $0.content.isWakeNote }
+        guard newest?.id == rowId else { return false }
+        session.wakeUpPending = false
+        return true
+    }
+
     func tableView(_ tableView: NSTableView, didRemove rowView: NSTableRowView, forRow row: Int) {
         for case let cell as RowCellView in rowView.subviews { cell.releaseContent() }
     }

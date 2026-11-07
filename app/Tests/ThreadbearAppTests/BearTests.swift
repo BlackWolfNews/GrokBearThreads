@@ -173,6 +173,56 @@ final class BearTests: XCTestCase {
         XCTAssertEqual(BearGeometry.inks(.sleep, side: 48).count, BearGeometry.sleepingHead(small: false).count + zs)
     }
 
+    /// At rest, and whenever a track stops early, the woken bear is the sat bear.
+    func testTheWokenBearAtRestIsTheSatBear() {
+        let side: CGFloat = 96
+        let view = WokenBearView(frame: NSRect(x: 0, y: 0, width: side, height: side))
+        view.tint = .black
+        let moving = inkMap(side: Int(side)) { view.layer?.render(in: $0) }
+        let still = inkMap(side: Int(side)) { context in
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: true)
+            context.translateBy(x: 0, y: side)
+            context.scaleBy(x: 1, y: -1)
+            Bear.draw(.sit, in: NSRect(x: 0, y: 0, width: side, height: side))
+            NSGraphicsContext.restoreGraphicsState()
+        }
+        let inked = still.filter { $0 }.count
+        XCTAssertGreaterThan(inked, 500)
+        let different = zip(moving, still).filter { $0 != $1 }.count
+        XCTAssertLessThan(Double(different) / Double(inked), 0.03, "\(different) of \(inked) pixels differ")
+    }
+
+    func testWakingUpIsAboutASecondAndSkippedUnderReduceMotion() {
+        XCTAssertEqual(WokenBearView.Timing.total, 1.28, accuracy: 0.2)
+        let view = WokenBearView(frame: NSRect(x: 0, y: 0, width: 18, height: 18))
+        view.wakeUp(reduceMotion: true)
+        XCTAssertFalse(view.isWaking)
+        view.wakeUp(reduceMotion: false)
+        XCTAssertTrue(view.isWaking)
+        view.settle()
+        XCTAssertFalse(view.isWaking)
+    }
+
+    /// Set BEAR_FRAMES_WOKEN to a folder to get the waking bear as numbered PNGs.
+    func testWokenFramesWhenAsked() throws {
+        guard let folder = ProcessInfo.processInfo.environment["BEAR_FRAMES_WOKEN"] else { throw XCTSkip("BEAR_FRAMES_WOKEN not set") }
+        let side = 192, pad = 32, canvas = side + 2 * pad
+        let view = WokenBearView(frame: NSRect(x: 0, y: 0, width: side, height: side))
+        view.tint = .black
+        view.wakeUp(reduceMotion: false)
+        for frame in 0..<Int(WokenBearView.Timing.total * 15) + 2 {
+            let context = CGContext(data: nil, width: canvas, height: canvas, bitsPerComponent: 8, bytesPerRow: canvas * 4,
+                                    space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            context.setFillColor(.white)
+            context.fill(CGRect(x: 0, y: 0, width: canvas, height: canvas))
+            context.translateBy(x: CGFloat(pad), y: CGFloat(pad))
+            view.renderFrame(at: Double(frame) / 15, in: context)
+            let png = NSBitmapImageRep(cgImage: context.makeImage()!).representation(using: .png, properties: [:])!
+            try png.write(to: URL(fileURLWithPath: folder).appendingPathComponent(String(format: "f%04d.png", frame)))
+        }
+    }
+
     /// Set BEAR_FRAMES to a folder to get the moving bear as numbered PNGs,
     /// to look at or turn into a GIF. Drawn 8pt in from each edge, so a paw
     /// swinging past the frame shows.
