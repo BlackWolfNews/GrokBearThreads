@@ -293,6 +293,11 @@ public final class FakeBackend: Backend, @unchecked Sendable {
         changed()
     }
 
+    /// Only these sample threads, for screenshots of a short inbox.
+    public func keepOnly(_ ids: Set<String>) {
+        mutate { s in s.threadsById = s.threadsById.filter { ids.contains($0.key) } }
+    }
+
     public func me() async throws -> PhoneIdentity {
         // Always a current backend, so the demo never says the Mac needs updating.
         PhoneIdentity(name: "iphone", expiresAt: Date.now.addingTimeInterval(90 * 86_400),

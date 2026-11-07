@@ -75,7 +75,7 @@ struct ThreadView: View {
                 menu(thread)
             }
         }
-        .hibernateDialog(for: $hibernateTarget)
+        .hibernateDialog(for: $hibernateTarget, leaving: { dismiss() })
         // model.connection in each id: a fresh Convex client after the app
         // comes back from the background, so these follow it, not the old one.
         .task(id: "\(threadId):\(model.connection)") { await follow() }

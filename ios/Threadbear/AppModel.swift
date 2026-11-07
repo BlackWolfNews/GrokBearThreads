@@ -35,6 +35,13 @@ final class AppModel {
     /// Archived from this phone, kept out of the lists until Convex says the
     /// runner has done it, which waits for the Mac if it's asleep.
     private var archiving: Set<String> = []
+    /// Whether a thread's page is over the inbox (InboxView says).
+    @ObservationIgnored var threadOpen = false
+    /// Rows sinking towards the Hibernating heading on their way out (`hibernate`).
+    private(set) var sinking: Set<String> = []
+    /// Hibernated from this phone, kept out of the lists and on the heading's
+    /// count until Convex catches up.
+    private(set) var tucks = Tucks()
     private(set) var hibernating: [PhoneThread] = []
     private(set) var den: [PhoneThread] = []
     /// For each thread a schedule will message, the one due soonest: the
@@ -342,6 +349,8 @@ final class AppModel {
             let fake = FakeBackend(runnerOnline: !offline, listDelay: args.contains("-ThreadbearSlowLoad") ? .seconds(6) : .zero, pictures: args.contains("-ThreadbearPictures"), long: args.contains("-ThreadbearLong"), secret: args.contains("-ThreadbearSecret"), diagrams: args.contains("-ThreadbearDiagrams"), runners: args.contains("-ThreadbearRunners"), queued: offline)
             // -ThreadbearSlowStart: a new thread takes a minute to start, so its Starting row stays.
             if args.contains("-ThreadbearSlowStart") { fake.startDelay = .seconds(60) }
+            // -ThreadbearShortInbox: one thread in the inbox, one running, one of each put away.
+            if args.contains("-ThreadbearShortInbox") { fake.keepOnly(["a4", "a5", "a6", "a7"]) }
             connect(fake, pairing: nil)
         } else if let saved = PairingStore.load() {
             connect(ConvexBackend(deploymentURL: saved.deploymentURL, token: saved.token), pairing: saved)
@@ -384,7 +393,7 @@ final class AppModel {
     var isPaired: Bool { backend != nil && authProblem == nil }
 
     var sections: InboxSections {
-        InboxSections.build(inbox.filter { !archiving.contains($0.threadId) }, now: now, wakes: wakes)
+        InboxSections.build(inbox.filter { !archiving.contains($0.threadId) && !tucks.hidden.contains($0.threadId) }, now: now, wakes: wakes)
     }
 
     /// A pasted thread id as the `[title](thread:<id>)` link it goes in as,
@@ -432,6 +441,55 @@ final class AppModel {
         }
     }
 
+    /// Hibernates a thread, as `archive` archives one, but the row sinks rather
+    /// than slides: archive goes sideways, this goes down towards its heading,
+    /// whose count rolls on and whose moon bounces as the row leaves. A starred
+    /// thread stays under Starred with a moon, and one only waiting on a schedule
+    /// is under Hibernating already, so neither has anywhere to sink to.
+    func hibernate(_ threadId: String, _ change: ThreadChange, leavingThread: Bool = false) {
+        guard let backend, !archiving.contains(threadId), !slidingOff.contains(threadId),
+              !sinking.contains(threadId), !tucks.hidden.contains(threadId) else { return }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        func hasRow() -> Bool { (sections.inbox + sections.running).contains { $0.threadId == threadId } }
+        let sinks = hasRow()
+        Task {
+            if sinks {
+                try? await Task.sleep(for: .milliseconds(280))
+                if leavingThread {
+                    // SwiftUI holds the page's dismiss until the dialog has
+                    // gone, which can be half a second, so the wait for the
+                    // page to clear starts when it really starts to leave.
+                    let giveUp = Date.now.addingTimeInterval(1.5)
+                    while threadOpen, Date.now < giveUp { try? await Task.sleep(for: .milliseconds(30)) }
+                    try? await Task.sleep(for: .milliseconds(420))
+                }
+                withAnimation(.easeIn(duration: 0.24)) { _ = sinking.insert(threadId) }
+                try? await Task.sleep(for: .milliseconds(240))
+                // The Mac may have moved it during the wait; `tucks` only
+                // lets go of an id when a list update says so.
+                if hasRow() {
+                    withAnimation(.snappy(duration: 0.25)) { tucks.tuck(threadId) }
+                }
+                // Not until it's collapsed: back at full opacity, the row
+                // going away would show again on its way out.
+                Task {
+                    try? await Task.sleep(for: .milliseconds(300))
+                    sinking.remove(threadId)
+                }
+            }
+            do {
+                let command = try await backend.update(threadId: threadId, change: change)
+                for try await status in backend.command(command) {
+                    if status?.state == .failed { throw TransportError.server(status?.note ?? "The runner couldn't hibernate that thread.") }
+                    if status?.state == .done { return }
+                }
+            } catch {
+                withAnimation(.snappy(duration: 0.25)) { tucks.undo(threadId) }
+                report(error)
+            }
+        }
+    }
+
     func toggle(_ section: PhoneSection) {
         folds.toggle(section)
         UserDefaults.standard.set(folds.saved, forKey: "foldedSections")
@@ -453,7 +511,7 @@ final class AppModel {
         case .running: sections.running.count
         // Folded, the snoozed ones aren't loaded, but the scheduled ones come
         // from the inbox list, so they're added to phone:counts' number.
-        case .hibernating: loaded.contains(.hibernating) ? hibernatingRows.count : (counts?.hibernating).map { $0 + sections.scheduled.count }
+        case .hibernating: (loaded.contains(.hibernating) ? hibernatingRows.count : (counts?.hibernating).map { $0 + sections.scheduled.count }).map { $0 + tucks.uncounted }
         // The den list is capped at 100; the count isn't.
         case .archived: counts?.den ?? (loaded.contains(.den) ? den.count : nil)
         }
@@ -499,6 +557,7 @@ final class AppModel {
                     model.inbox = list
                     // Gone from the list means it's done, so a later unarchive shows.
                     model.archiving.formIntersection(list.map(\.threadId))
+                    model.tucks.inboxArrived(list, now: .now)
                 case .hibernating: model.hibernating = list
                 case .den: model.den = list
                 }
@@ -598,6 +657,7 @@ final class AppModel {
         projects = [:]
         accounts = []
         inbox = []
+        tucks = Tucks()
         hibernating = []
         den = []
         wakes = [:]
@@ -646,6 +706,7 @@ final class AppModel {
         projects = [:]
         accounts = []
         inbox = []
+        tucks = Tucks()
         hibernating = []
         den = []
         wakes = [:]
@@ -709,7 +770,10 @@ final class AppModel {
             // An older backend has no phone:counts, and asking would only
             // fail and retry.
             if (identity.apiVersion ?? 0) >= BackendCompatibility.countsAPIVersion, !Task.isCancelled, let self {
-                self.tasks.append(self.follow(backend.counts()) { $0.counts = $1 })
+                self.tasks.append(self.follow(backend.counts()) { model, counts in
+                    model.tucks.countsArrived(old: model.counts?.hibernating, new: counts.hibernating)
+                    model.counts = counts
+                })
             }
             if (identity.apiVersion ?? 0) >= BackendCompatibility.pocketAPIVersion, !Task.isCancelled, let self {
                 self.tasks.append(self.follow(backend.pocket()) { model, cards in

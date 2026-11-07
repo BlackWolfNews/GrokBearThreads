@@ -224,6 +224,7 @@ struct InboxView: View {
                 query = text
                 model.searchText = nil
             }
+            .onChange(of: path.isEmpty, initial: true) { _, empty in model.threadOpen = !empty }
             .onChange(of: model.openThreadId, initial: true) { _, id in
                 guard let id else { return }
                 path = [id]
@@ -263,7 +264,8 @@ struct InboxView: View {
             } header: {
                 // A tap rather than a Button: a button in a list header
                 // is drawn dimmed, so the heading looked disabled.
-                SectionHeading(title: section.title, icon: section.icon, fold: .init(folded: folded, count: count))
+                SectionHeading(title: section.title, icon: section.icon, fold: .init(folded: folded, count: count),
+                               bounce: section == .hibernating && !reduceMotion ? model.tucks.bounces : 0)
                     .onTapGesture { withAnimation(.snappy(duration: 0.2)) { model.toggle(section) } }
                     .accessibilityAction { model.toggle(section) }
                     .accessibilityHint(folded ? "Shows these threads" : "Hides these threads")
@@ -353,7 +355,10 @@ struct InboxView: View {
             ThreadRow(thread: thread, underRunning: running, wake: scheduled ? model.wakes[thread.threadId] : nil, asleep: asleep)
                 // Off to the left, the way a swipe to archive goes.
                 .offset(x: model.slidingOff.contains(thread.threadId) && !reduceMotion ? -500 : 0)
-                .opacity(model.slidingOff.contains(thread.threadId) ? 0 : 1)
+                // Hibernating goes down instead, towards its heading.
+                .offset(y: model.sinking.contains(thread.threadId) && !reduceMotion ? 14 : 0)
+                .scaleEffect(model.sinking.contains(thread.threadId) && !reduceMotion ? 0.96 : 1)
+                .opacity(model.slidingOff.contains(thread.threadId) || model.sinking.contains(thread.threadId) ? 0 : 1)
         }
         .buttonStyle(.plain)
         .listRowInsets(ThreadRow.insets)
@@ -654,15 +659,18 @@ struct ConnectionToast: View {
 }
 
 extension View {
-    /// The Hibernate presets as a dialog, for a swipe or a menu.
-    func hibernateDialog(for target: Binding<PhoneThread?>) -> some View {
-        modifier(HibernateDialog(target: target))
+    /// The Hibernate presets as a dialog, for a swipe or a menu. `leaving` is
+    /// for a thread's own page: picking one goes back to the inbox, as archive
+    /// does, rather than leaving him on a thread he's just put to sleep.
+    func hibernateDialog(for target: Binding<PhoneThread?>, leaving: (() -> Void)? = nil) -> some View {
+        modifier(HibernateDialog(target: target, leaving: leaving))
     }
 }
 
 private struct HibernateDialog: ViewModifier {
     @Environment(AppModel.self) private var model
     @Binding var target: PhoneThread?
+    var leaving: (() -> Void)?
 
     func body(content: Content) -> some View {
         content.confirmationDialog("Hibernate until", isPresented: Binding(get: { target != nil }, set: { if !$0 { target = nil } }),
@@ -675,10 +683,8 @@ private struct HibernateDialog: ViewModifier {
     }
 
     private func change(_ thread: PhoneThread, _ change: ThreadChange) {
-        Task {
-            guard let backend = model.backend else { return }
-            do { _ = try await backend.update(threadId: thread.threadId, change: change) } catch { model.report(error) }
-        }
+        model.hibernate(thread.threadId, change, leavingThread: leaving != nil)
+        leaving?()
     }
 }
 
