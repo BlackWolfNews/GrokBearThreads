@@ -223,14 +223,27 @@ final class ClickFeedbackTests: XCTestCase {
             content.addSubview(view)
             ArchiveFlight.register(view)
         }
-        XCTAssertEqual(ArchiveFlight.target(in: window, to: .hibernate)?.onHeading, true, "no Hibernating heading yet, so its moon will come where Archived's box is")
+        XCTAssertEqual(ArchiveFlight.target(in: window, to: .hibernate, headingThere: false)?.onHeading, true, "no Hibernating heading yet, so its moon will come where Archived's box is")
+        XCTAssertEqual(ArchiveFlight.target(in: window, to: .hibernate, headingThere: true)?.onHeading, false, "there, but the lazy list hasn't drawn it")
         let moon = FlightMarkerView(kind: .hibernateBox)
         moon.frame = NSRect(x: 10, y: 200, width: 14, height: 14)
         content.addSubview(moon)
         ArchiveFlight.register(moon)
-        XCTAssertEqual(ArchiveFlight.target(in: window, to: .hibernate)?.onHeading, false)
+        XCTAssertEqual(ArchiveFlight.target(in: window, to: .hibernate, headingThere: true)?.onHeading, false, "drawn, but scrolled out of sight")
         XCTAssertEqual(ArchiveFlight.target(in: window, to: .archive)?.onHeading, true)
         scroll.removeFromSuperview()
+    }
+
+    /// The empty-inbox bear waits for a page leaving the Inbox, but not for a
+    /// starred thread's, which leaves a bear that's already there alone.
+    func testOnlyAFlightLeavingTheInboxHoldsUpTheBear() async throws {
+        let (app, _) = try await connected()
+        app.threads["th2"] = ThreadSummary(id: "th2", title: "Starred")
+        app.threads["th2"]?.starredAt = Date()
+        app.flyingToArchive = ["th2"]
+        XCTAssertFalse(app.flightLeavingTheInbox)
+        app.flyingToHibernate = ["th1"]
+        XCTAssertTrue(app.flightLeavingTheInbox)
     }
 
     // MARK: Inbox zero in the pane

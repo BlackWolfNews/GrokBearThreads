@@ -123,7 +123,7 @@ private struct InboxList: View {
                         // It comes once the last archived or hibernated page
                         // has landed: arriving under the heading mid-flight
                         // pushes it down, and the page lands short.
-                        if section == .inbox && !searching && sections.inbox.isEmpty && sections.running.isEmpty && sections.needsYou.isEmpty && app.flyingToArchive.isEmpty && app.flyingToHibernate.isEmpty {
+                        if section == .inbox && !searching && sections.inbox.isEmpty && sections.running.isEmpty && sections.needsYou.isEmpty && !app.flightLeavingTheInbox {
                             InboxZero()
                         }
                     }

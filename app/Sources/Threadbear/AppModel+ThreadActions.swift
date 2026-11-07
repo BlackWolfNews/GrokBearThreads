@@ -716,7 +716,9 @@ extension AppModel {
     private func tuckIn(_ threadId: String) {
         guard let thread = threads[threadId], !thread.isStarred, !thread.isArchived else { return }
         let showing = selection == threadId && transcript.session?.threadId == threadId && transcript.session?.subagentId == nil
-        let started = showing && ArchiveFlight.launch(from: transcript.scrollView, to: .hibernate) { [weak self] in
+        // Asked before it goes, so this thread isn't one of them yet.
+        let headingThere = !flyingToHibernate.isEmpty || sections.hibernating.contains { $0.id != threadId }
+        let started = showing && ArchiveFlight.launch(from: transcript.scrollView, to: .hibernate, headingThere: headingThere) { [weak self] in
             self?.flyingToHibernate.remove(threadId)
             self?.moonStirs()
         }

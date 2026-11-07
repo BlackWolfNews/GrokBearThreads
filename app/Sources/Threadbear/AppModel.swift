@@ -143,6 +143,15 @@ final class AppModel {
     /// The same for Hibernating: threads whose panel is still sinking into
     /// its heading, and how many have landed for the moon to dip.
     var flyingToHibernate: Set<String> = []
+
+    /// Whether a page is flying away from an Inbox (or Running) row. The
+    /// empty-inbox bear waits for those to land, as arriving under the
+    /// heading mid-flight would push it down and the page would land short.
+    /// A starred thread's flight doesn't hold it up: it never left the
+    /// Inbox, so a bear already there stays put rather than blinking off.
+    var flightLeavingTheInbox: Bool {
+        flyingToArchive.union(flyingToHibernate).contains { threads[$0]?.isStarred != true }
+    }
     var hibernateLandings = 0
     /// The note at the top of the thread panel after Mike archives a thread
     /// here, with Undo; a click on it opens the thread (Mike asked 30 Oct).

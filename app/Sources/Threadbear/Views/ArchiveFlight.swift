@@ -56,7 +56,9 @@ enum ArchiveFlight {
     /// Starts a flight from `view` as it looks now, and fades `view` back
     /// in for the thread that replaces it. Calls `landed` at the end.
     /// False, with nothing started, when there's nothing to picture.
-    static func launch(from view: NSView, to destination: Destination = .archive, landed: @escaping @MainActor () -> Void) -> Bool {
+    /// `headingThere` says, for a hibernate, whether the Hibernating heading
+    /// is already in the list (another thread is asleep or on its way).
+    static func launch(from view: NSView, to destination: Destination = .archive, headingThere: Bool = true, landed: @escaping @MainActor () -> Void) -> Bool {
         let pictureStart = CACurrentMediaTime()
         guard let window = view.window, !view.isHiddenOrHasHiddenAncestor, view.bounds.width > 1, view.bounds.height > 1,
               let picture = picture(of: view) else { return false }
@@ -83,7 +85,7 @@ enum ArchiveFlight {
                 landed()
             }
         }
-        let target = Juice.reduceMotion ? nil : target(in: window, to: destination)
+        let target = Juice.reduceMotion ? nil : target(in: window, to: destination, headingThere: headingThere)
         if let target {
             let path = ArchiveFlightPath(start: card.position, end: target.point, swing: zoomed(destination.swing), onHeading: target.onHeading, style: destination.style)
             card.add(flight(along: path, duration: destination.duration), forKey: "flight")
@@ -214,7 +216,7 @@ enum ArchiveFlight {
         !view.visibleRect.intersection(view.bounds).isEmpty
     }
 
-    static func target(in window: NSWindow, to destination: Destination) -> (point: CGPoint, onHeading: Bool)? {
+    static func target(in window: NSWindow, to destination: Destination, headingThere: Bool = true) -> (point: CGPoint, onHeading: Bool)? {
         let shown = { (view: NSView?) in view.flatMap { $0.window === window && isInSight($0) ? $0 : nil } }
         let box: NSView?
         switch destination {
@@ -223,10 +225,12 @@ enum ArchiveFlight {
         case .hibernate:
             // With no Hibernating heading yet (this is the first thread in
             // it), its moon will turn up where Archived's box is now, pushing
-            // that down, so it aims there. A heading that's there but
-            // scrolled out of sight isn't Archived's, so then it falls off
-            // the list like an archive with its heading out of sight.
-            if let moon = hibernateBox, moon.window === window { box = shown(moon) } else { box = shown(archiveBox) }
+            // that down, so it aims there. A heading that's there but out of
+            // sight isn't Archived's, so then it falls off the list like an
+            // archive with its heading out of sight. Whether it's there comes
+            // from the threads, not the moon's marker: the list is lazy, and
+            // a heading scrolled far enough away has no marker at all.
+            box = headingThere ? shown(hibernateBox) : shown(archiveBox)
         }
         if let box {
             let frame = box.convert(box.bounds, to: nil)
