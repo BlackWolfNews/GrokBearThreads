@@ -62,8 +62,10 @@ struct ThreadbearApp: App {
                         .shortcut(.settings)
                 }
             }
-            CommandGroup(after: .appInfo) {
+            // The Den, in place of the stock About panel.
+            CommandGroup(replacing: .appInfo) {
                 IconMenuItems {
+                    Button("About Threadbear", systemImage: "pawprint") { DenWindow.show(app: app) }
                     // Only while a newer build is staged (AppUpdater).
                     if let staged = updater.staged {
                         Button("Restart to Update to \(staged.short)", systemImage: "arrow.clockwise") { updater.restartToUpdate() }

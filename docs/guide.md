@@ -1483,6 +1483,8 @@ you turn it on, and it stays on your Mac.
 - `threadbear` in Terminal opens the app, and quitting it with ⌘Q is always
   safe, since your threads keep running without it. If the app says it
   can't reach the runner, click Start runner.
+- Threadbear > About Threadbear says which commit your copy was built from,
+  along with a few numbers about your threads.
 
 ## The tour and Finish setting up
 <!-- slug: finish-setting-up -->

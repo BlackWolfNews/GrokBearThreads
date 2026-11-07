@@ -1222,6 +1222,14 @@ enum Automation {
             return composer.debugHoverChip(number).map { "ok window \($0)" } ?? "error no chip \(number) with a card"
         case "select-text":
             return select(c, app: app)
+        case "den":
+            // Threadbear > About Threadbear, through the menu item itself.
+            guard let menu = NSApp.mainMenu?.items.first?.submenu,
+                  let index = menu.items.firstIndex(where: { $0.title == "About Threadbear" }) else { return "error no About Threadbear in the app menu" }
+            menu.update()
+            menu.performActionForItem(at: index)
+            try? await Task.sleep(for: .milliseconds(200))
+            return DenWindow.current?.isVisible == true ? "ok " + menu.items.prefix(3).map(\.title).joined(separator: " | ") : "error the Den didn't open"
         case "room":
             // Every login's room, as the honey pot and Usage see it:
             // {"percent": 44}. Lasts until the runner next says otherwise.
@@ -1279,6 +1287,8 @@ enum Automation {
             guard let path = c["path"] as? String, path.hasPrefix("/") else { return "error path must be absolute" }
             if let refused = refusesToWrite(path) { return refused }
             guard var window else { return "error no window" }
+            // {"den": true}: About Threadbear (open it with `den`).
+            if c["den"] as? Bool == true, let den = DenWindow.current { window = den }
             // {"review": id}: its own window.
             if let id = c["review"] as? String {
                 if let review = app.reviewWindows.values.first(where: { $0.session.review.id == id })?.window {
