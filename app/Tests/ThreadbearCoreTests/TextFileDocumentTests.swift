@@ -94,13 +94,21 @@ final class TextFileDocumentTests: XCTestCase {
         let doc = TextFileDocument(url: url)
         try doc.load()
         var seen: [TextFileDocument.Change] = []
-        doc.watch(shown: { "hi typed" }) { seen.append($0) }
+        var shown = "hi typed"
+        doc.watch(shown: { shown }) { seen.append($0) }
         defer { doc.stopWatching() }
         try Data([0x68, 0x69, 0xFF]).write(to: url)
         doc.check()
-        guard case .conflict = seen.last else { return XCTFail("\(seen)") }
+        XCTAssertEqual(seen.last, .conflict("hi\u{FFFD}"))
         XCTAssertFalse(doc.isEditable)
+        // Checked again before anyone picks: the edits still aren't dropped.
+        seen = []
+        doc.check()
+        XCTAssertEqual(seen.last ?? .same, .conflict("hi\u{FFFD}"))
+        XCTAssertFalse(doc.isEditable)
+        // Take the file's, then it's put back as UTF-8 with the same text.
         doc.adopt("hi\u{FFFD}")
+        shown = "hi\u{FFFD}"
         try Data("hi\u{FFFD}".utf8).write(to: url)
         doc.check()
         XCTAssertEqual(seen.last, .reload("hi\u{FFFD}"))

@@ -160,6 +160,10 @@ final class TextFileController: NSObject, NSTextViewDelegate {
     /// Which text was sent off to be rendered or coloured; a result for an
     /// older one is dropped.
     @ObservationIgnored private var generation = 0
+    /// Typed since the last save or load: the view holds text the file
+    /// doesn't. (Not just the view differing from the file: a cut-off
+    /// file's view has a line saying so at the end.)
+    @ObservationIgnored private var drafted = false
 
     /// The newest one, for the automation's `preview` command.
     nonisolated(unsafe) static weak var current: TextFileController?
@@ -268,10 +272,10 @@ final class TextFileController: NSObject, NSTextViewDelegate {
 
     // MARK: Showing
 
-    /// What the view holds now, as the file's text: the raw text while
-    /// editing, else what was loaded (a rendered view can't be typed in).
+    /// What the view holds now, as the file's text: what's typed while
+    /// there's any, else what was loaded (a rendered view can't be typed in).
     private var shownText: String {
-        editing ? textView.string : document.saved
+        editing && drafted ? textView.string : document.saved
     }
 
     /// Puts `text` in the view the way the mode wants it, keeping the
@@ -367,6 +371,9 @@ final class TextFileController: NSObject, NSTextViewDelegate {
     func setEditing(_ editing: Bool) {
         guard self.editing != editing else { return }
         if !editing, !saveNow() { return }
+        // Leaving: nothing typed is waiting any more (saved, or a file that
+        // never took typing).
+        if !editing { drafted = false }
         self.editing = editing
         applyEditing()
         // Markdown changes shape; code and text only change whether they
@@ -389,6 +396,7 @@ final class TextFileController: NSObject, NSTextViewDelegate {
 
     func textDidChange(_ notification: Notification) {
         guard editing else { return }
+        drafted = true
         generation += 1
         scheduleSave()
         scroll.verticalRulerView?.needsDisplay = true
@@ -413,17 +421,27 @@ final class TextFileController: NSObject, NSTextViewDelegate {
     func saveNow() -> Bool {
         saveTimer?.cancel()
         saveTimer = nil
-        // Read only: nothing it could write, so nothing to keep editing for.
-        guard editing, document.isEditable else { return true }
+        guard editing, drafted else { return true }
         guard conflict == nil else { return false }
+        // Typed, but the file can't take it now (too big, not UTF-8): it
+        // stays on screen, read only, rather than go.
+        guard document.isEditable else {
+            applyEditing()
+            note = cantSave
+            return false
+        }
         let typed = textView.string
-        guard typed != document.saved else { return true }
+        guard typed != document.saved else {
+            drafted = false
+            return true
+        }
         do {
             let onDisk = try document.changedOnDisk()
             // It turned too big or not UTF-8: never written back. What's
             // typed stays on screen, read only, to copy out.
             guard document.isEditable else {
                 applyEditing()
+                note = cantSave
                 return false
             }
             if let onDisk, onDisk != typed {
@@ -436,6 +454,7 @@ final class TextFileController: NSObject, NSTextViewDelegate {
         }
         do {
             try document.save(typed)
+            drafted = false
             return true
         } catch {
             note = "Couldn't save: \(error.localizedDescription)"
@@ -451,11 +470,14 @@ final class TextFileController: NSObject, NSTextViewDelegate {
             break
         case .reload(let text):
             conflict = nil
+            drafted = false
             // It may have turned read only, or back.
             applyEditing()
             show(text, keepPlace: true)
         case .conflict(let text):
             conflict = text
+            // It may have turned read only: no more typing it can't take.
+            applyEditing()
         case .gone:
             conflict = nil
             note = "This file isn't there any more."
@@ -465,6 +487,7 @@ final class TextFileController: NSObject, NSTextViewDelegate {
     /// The conflict bar's "Use the file's": the file wins.
     func useFile(_ text: String) {
         conflict = nil
+        drafted = false
         document.adopt(text)
         // It may have become read only (too big, not UTF-8).
         applyEditing()
@@ -480,11 +503,15 @@ final class TextFileController: NSObject, NSTextViewDelegate {
         conflict = nil
         guard document.isEditable else {
             applyEditing()
-            note = document.truncated ? "The file is now too big to edit here, so what you typed wasn't saved."
-                : "The file is no longer UTF-8 text, so what you typed wasn't saved."
+            note = cantSave
             return
         }
         saveNow()
+    }
+
+    private var cantSave: String {
+        (document.truncated ? "The file is now too big to edit here" : "The file is no longer UTF-8 text")
+            + ", so what you typed can't be saved into it. Copy it out, or go Back to leave it."
     }
 
     /// For the automation: types `text` at the end, as a keystroke would.

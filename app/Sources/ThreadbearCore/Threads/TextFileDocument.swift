@@ -196,28 +196,29 @@ public final class TextFileDocument: @unchecked Sendable {
             onChange(.gone)
             return
         }
+        let shown = shownText()
+        // Whether it can be written changed, even with the same text (a
+        // binary file put back as UTF-8).
+        let flagsChanged = read.truncated != truncated || read.lossy != lossy
         var change: Change
-        if !isEditable {
-            // A file that can't be edited has no unsaved edits to keep.
-            change = read.text == saved ? .same : .reload(read.text)
-        } else if read.truncated || read.lossy {
-            // Turned too big or not UTF-8 under unsaved edits: they aren't
-            // thrown away, but can't be saved over it either (the bar asks,
-            // and Keep mine says why it can't).
-            let shown = shownText()
-            if shown != saved, read.text != shown {
-                truncated = read.truncated
-                lossy = read.lossy
-                change = .conflict(read.text)
-            } else {
+        if shown == saved {
+            // No unsaved edits: show the file as it is now.
+            change = read.text == saved && !flagsChanged ? .same : .reload(read.text)
+        } else if !isEditable || read.truncated || read.lossy {
+            // Unsaved edits, and a file that can't take them now (too big,
+            // not UTF-8) or couldn't before: they're never thrown away by
+            // the watch. Whether it can be written follows this read, so
+            // no save writes it back cut off or mangled.
+            truncated = read.truncated
+            lossy = read.lossy
+            if read.text == shown {
                 change = .reload(read.text)
+            } else {
+                change = read.text == saved && !flagsChanged ? .same : .conflict(read.text)
             }
         } else {
-            change = Self.change(onDisk: read.text, saved: saved, shown: shownText())
+            change = Self.change(onDisk: read.text, saved: saved, shown: shown)
         }
-        // Whether it can be written changed with the same text (a binary
-        // file put back as UTF-8): reload, so the view follows.
-        if change == .same, read.truncated != truncated || read.lossy != lossy { change = .reload(read.text) }
         if case .reload = change {
             truncated = read.truncated
             lossy = read.lossy

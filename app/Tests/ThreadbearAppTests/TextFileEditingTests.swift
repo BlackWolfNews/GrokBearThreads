@@ -125,7 +125,11 @@ final class TextFileEditingTests: XCTestCase {
         XCTAssertFalse(controller.saveNow())
         XCTAssertFalse(controller.textView.isEditable)
         XCTAssertEqual(controller.textView.string, "let a = 1;\n// mine\n")
+        // Done again: still there, still not written.
         controller.setEditing(false)
+        XCTAssertTrue(controller.editing)
+        XCTAssertFalse(controller.saveNow())
+        XCTAssertEqual(controller.textView.string, "let a = 1;\n// mine\n")
         XCTAssertEqual(try Data(contentsOf: file), bytes)
     }
 
