@@ -994,6 +994,6 @@ function describe(method: string): string {
     case 'threads.delete':
       return 'Deleting it';
     default:
-      return method.startsWith('panels.') || method.startsWith('actions.') || method.startsWith('patches.') ? 'Its patches' : method.startsWith('reviews.') ? 'Design reviews' : 'That';
+      return method.startsWith('panels.') || method.startsWith('actions.') || method.startsWith('patches.') ? 'Its patches' : method.startsWith('reviews.') ? 'Design reviews' : method.startsWith('buttons.') ? 'Reply buttons' : 'That';
   }
 }

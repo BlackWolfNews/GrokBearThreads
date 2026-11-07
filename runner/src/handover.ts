@@ -582,6 +582,12 @@ export class ThreadRouter implements ThreadControl {
     return e ? e.call('reviews.create', {threadId, ...input}) : this.runner.createReview(threadId, input);
   }
 
+  // Only a thread's own agent makes its buttons, from its CLI on the
+  // runner that has the thread, so this never goes elsewhere either.
+  createButton(threadId: string, input: Parameters<Runner['createButton']>[1]): ReturnType<Runner['createButton']> {
+    return this.runner.createButton(threadId, input);
+  }
+
   // Only a thread's own agent asks, from its CLI on the runner that has the
   // thread, so this never goes elsewhere.
   requestSecret(threadId: string, req: SecretRequest): Promise<SecretAnswer> {

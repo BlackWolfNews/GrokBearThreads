@@ -46,6 +46,7 @@ type Async<T, K extends keyof T> = { [P in K]: T[P] extends (...a: infer A) => i
 export type ThreadControl = {
   hello: Runner['hello'];
   createReview?: (...args: Parameters<Runner['createReview']>) => Aw<ReturnType<Runner['createReview']>>;
+  createButton?: (...args: Parameters<Runner['createButton']>) => Aw<ReturnType<Runner['createButton']>>;
   pin?: (...args: Parameters<Runner['pin']>) => Aw<ReturnType<Runner['pin']>>;
   unpin?: (...args: Parameters<Runner['unpin']>) => Aw<ReturnType<Runner['unpin']>>;
   showPanel?: (threadId: string, ask: Parameters<Runner['showPanel']>[1]) => ReturnType<Runner['showPanel']>;
@@ -98,8 +99,9 @@ export const raises = (to: PermissionMode, from: PermissionMode): boolean => ACC
 // the one thing here that's hard to take back.
 export const ALWAYS_ASK_TOOLS = new Set([`mcp__${SERVER_NAME}__delete_thread`]);
 // Never asked about, whatever the mode: they read, end the turn, take a
-// pin out of this thread's Highlights, or ask Mike for a secret (his
-// typing it is the yes). "Ask before edits" asking for end_turn held every
+// pin out of this thread's Highlights, ask Mike for a secret (his
+// typing it is the yes), or make a reply button (his press is the yes, and
+// the runner keeps it within this thread's access: runner/buttons.ts). "Ask before edits" asking for end_turn held every
 // turn on an Allow card with no reply under it yet (6 Nov 2026). The rest
 // still ask outside full access, as they change something or act
 // elsewhere: other threads, schedules, projects, this thread's own mode,
@@ -111,7 +113,7 @@ export const ALWAYS_ASK_TOOLS = new Set([`mcp__${SERVER_NAME}__delete_thread`]);
 // Restart to Update asks only wake or file this thread, with the runner's
 // words, and the turn they start runs in its mode then, so they stay in.
 export const NEVER_ASK_TOOLS = new Set(
-  ['end_turn', 'list_threads', 'read_thread', 'list_accounts', 'list_schedules', 'list_projects', 'read_project', 'unpin', 'ask_secret'].map(
+  ['end_turn', 'list_threads', 'read_thread', 'list_accounts', 'list_schedules', 'list_projects', 'read_project', 'unpin', 'ask_secret', 'add_button'].map(
     (n) => `mcp__${SERVER_NAME}__${n}`,
   ),
 );
@@ -196,6 +198,9 @@ export function buildThreadbearTools(
     // handed an argument that does nothing.
     scheduleChecks?: () => boolean;
     remote?: () => RemoteControl | undefined;
+    // The replyButtons experiment (runner/buttons.ts): add_button is only
+    // handed out while it's on.
+    replyButtons?: () => boolean;
   } = {},
 ) {
   const codex = opts.provider === 'codex';
@@ -489,6 +494,59 @@ export function buildThreadbearTools(
       }),
     ),
   ];
+
+  // docs/protocol.md, "Reply buttons".
+  const buttonTools = opts.replyButtons?.() === true && control.createButton
+    ? [
+        tool(
+          'add_button',
+          "Makes a button for your reply that the user can press while reading it, to start a new thread with a brief you write (start) or send a message to another thread (send). Nothing runs until they press it, and it runs once. Returns a button:<id> link: put [title](button:<id>) in your reply on the line it belongs to. Offer one where there's a clear next job they'd otherwise have to type out, not for everything.",
+          {
+            title: z.string().min(1).max(60).describe('What the button says, a few words starting with a verb: "Fill in the form".'),
+            start: z.object({
+              text: z.string().min(1).max(20000).describe('The brief: complete, since the new thread knows nothing else.'),
+              title: z.string().optional().describe("The new thread's title. Default: the button's."),
+              folder: z.string().optional().describe("Its folder. Default: this thread's. Relative paths are from this thread's folder."),
+              account: z.string().optional().describe('Account id or email (list_accounts). Default: a pool picks.'),
+              pool: z.string().optional(),
+              model: z.string().optional(),
+              effort: effortEnum.optional(),
+              permissionMode: z.enum(['full', 'ask', 'auto']).optional().describe("Default: this thread's."),
+              why: z.string().optional().describe('About 6 words on why it exists, for the sidebar.'),
+            }).optional(),
+            send: z.object({
+              threadId: z.string().min(1).describe('Thread id or a unique prefix, on this machine.'),
+              text: z.string().min(1).max(20000),
+            }).optional(),
+          },
+          handle(async ({ title, start, send }) => {
+            if (!control.createButton) throw new Error("This runner can't make buttons.");
+            const input: Parameters<Runner['createButton']>[1] = { title };
+            if (start) {
+              input.start = {
+                text: start.text,
+                ...(start.title ? { title: start.title } : {}),
+                cwd: await folder(start.folder ?? '.'),
+                ...(start.account ? { accountId: await account(start.account) } : {}),
+                ...(start.pool && !start.account ? { poolId: pool(start.pool) } : {}),
+                ...(start.model ? { model: start.model } : {}),
+                ...(start.effort ? { effort: start.effort } : {}),
+                ...(start.permissionMode ? { permissionMode: start.permissionMode } : {}),
+                ...(start.why ? { why: start.why } : {}),
+              };
+            }
+            if (send) {
+              const hit = await find(send.threadId);
+              if (hit.other) throw new Error(`"${hit.other.t.title}" runs on ${hit.other.runner}; a button here can only message this machine's threads. Use send_message.`);
+              input.send = { threadId: hit.id, text: send.text };
+            }
+            const { button } = await control.createButton(selfId, input);
+            const what = button.start ? `starts a thread in ${button.start.cwd}` : `messages "${button.send!.threadTitle}"`;
+            return `Made button:${button.id}, which ${what} when pressed. Put [${button.title}](button:${button.id}) in your reply where it belongs; a button the reply doesn't link isn't shown.`;
+          }),
+        ),
+      ]
+    : [];
 
   // One tool for filing, replacing, removing and listing, as Mike wants the
   // agents' tool list kept short (29 Oct). Titles are the ids, so a thread
@@ -1291,6 +1349,7 @@ export function buildThreadbearTools(
         ]
       : []),
     ...reviewTools,
+    ...buttonTools,
     ...highlightTools,
     ...secretTools,
     ...pocketTools,
@@ -1734,13 +1793,13 @@ export function serverInstructions(selfId: string, o: { one: boolean; bulletRepl
   );
 }
 
-export function threadbearMcpServer(control: ThreadControl, selfId: string, schedules?: ScheduleControl, projects?: ProjectControl, appRestarts?: AppRestartControl, bulletReplies: () => boolean = () => true, pocket?: () => PocketControl | undefined, oneReply: () => boolean = () => false, gateway?: () => string | undefined, gatewayHealth?: () => Promise<ConnectorService[] | undefined>, scheduleChecks?: () => boolean, remote?: () => RemoteControl | undefined, richBlocks: () => boolean = () => false): McpSdkServerConfigWithInstance {
+export function threadbearMcpServer(control: ThreadControl, selfId: string, schedules?: ScheduleControl, projects?: ProjectControl, appRestarts?: AppRestartControl, bulletReplies: () => boolean = () => true, pocket?: () => PocketControl | undefined, oneReply: () => boolean = () => false, gateway?: () => string | undefined, gatewayHealth?: () => Promise<ConnectorService[] | undefined>, scheduleChecks?: () => boolean, remote?: () => RemoteControl | undefined, richBlocks: () => boolean = () => false, replyButtons?: () => boolean): McpSdkServerConfigWithInstance {
   const one = oneReply();
   const server = createSdkMcpServer({
     name: SERVER_NAME,
     version: RUNNER_VERSION,
     instructions: serverInstructions(selfId, { one, bulletReplies: bulletReplies(), pocket: Boolean(pocket?.()), projects: Boolean(projects), richBlocks: richBlocks() }),
-    tools: buildThreadbearTools(control, selfId, Date.now, schedules, projects, appRestarts, { bulletReplies, pocket, oneReply: () => one, gateway, gatewayHealth, scheduleChecks, remote }),
+    tools: buildThreadbearTools(control, selfId, Date.now, schedules, projects, appRestarts, { bulletReplies, pocket, oneReply: () => one, gateway, gatewayHealth, scheduleChecks, remote, replyButtons }),
   });
   server.tools = [...ALWAYS_ASK_TOOLS].map((name) => ({ name: name.split('__').at(-1)!, permission_policy: 'always_ask' as const }));
   return server;

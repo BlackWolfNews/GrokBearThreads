@@ -53,6 +53,8 @@ const THREAD_METHODS = new Set([
   'reviews.save',
   'reviews.respond',
   'reviews.cancel',
+  'buttons.list',
+  'buttons.press',
   'threads.send',
   'threads.edit',
   'threads.interrupt',
@@ -549,6 +551,10 @@ export class RpcServer {
         return r.respondReview(reqString(p, 'threadId'), reqString(p, 'reviewId'), p.revision as number, p.draft as Parameters<Runner['respondReview']>[3]);
       case 'reviews.cancel':
         return r.cancelReview(reqString(p, 'threadId'), reqString(p, 'reviewId'), p.revision as number);
+      case 'buttons.list':
+        return r.listButtons(reqString(p, 'threadId'));
+      case 'buttons.press':
+        return r.pressButton(reqString(p, 'threadId'), reqString(p, 'buttonId'));
       case 'threads.send':
         return r.send(reqString(p, 'threadId'), optString(p, 'text') ?? '', optImages(p) ?? [], { ...optAnswers(p), ...optPhoneOrigin(p) });
       case 'threads.edit':

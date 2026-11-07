@@ -631,9 +631,36 @@ export type DesignReview = {
   replyTurnId?: string;
 };
 
+// A button an agent put in its reply (docs/protocol.md, "Reply buttons"):
+// pressing it starts a thread with the brief, or sends a message to a
+// thread. Exactly one of start and send.
+export type ReplyButtonStart = {
+  text: string;
+  title?: string;
+  cwd: string;
+  accountId?: string;
+  poolId?: string;
+  model?: string;
+  effort?: EffortLevel;
+  permissionMode: PermissionMode;
+  why?: string;
+};
+export type ReplyButtonSend = { threadId: string; threadTitle: string; text: string };
+export type ReplyButton = {
+  id: string;
+  title: string;
+  createdAt: string;
+  turnId?: string;
+  start?: ReplyButtonStart;
+  send?: ReplyButtonSend;
+  pressed?: { at: string; threadId: string };
+  failed?: { at: string; error: string };
+};
+
 // Persisted event bodies, without the envelope.
 export type EventBody =
   | { type: 'review.updated'; review: DesignReview }
+  | { type: 'button.updated'; button: ReplyButton }
   // origin is set only on messages the runner sent by itself (the resume
   // after a restart).
   | { type: 'user.message'; text: string; images: ImageRef[]; origin?: MessageOrigin; scheduleId?: string; reviewId?: string; reviewResponse?: ReviewDraft; answers?: AskAnswer[]; editOf?: number }
@@ -755,6 +782,7 @@ export type AnyEvent = PersistedEvent | TransientEvent;
 
 export const PERSISTED_TYPES = new Set<string>([
   'review.updated',
+  'button.updated',
   'user.message',
   'assistant.text',
   'reasoning',

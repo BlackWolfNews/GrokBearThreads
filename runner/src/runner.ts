@@ -24,6 +24,7 @@ import type {
   DeltaBody,
   DeltaType,
   DesignReview,
+  ReplyButton,
   ReviewDraft,
   EffortLevel,
   EventBody,
@@ -133,6 +134,7 @@ import { approvalsPart, settleDeclined, type ApprovalsPart, type SecretAnswer } 
 import type { RequestAnswer } from './cross-runner.ts';
 import { SecretStore } from './secrets.ts';
 import { reviewsPart, type ReviewsPart } from './runner/reviews.ts';
+import { buttonsPart, type ButtonsPart } from './runner/buttons.ts';
 import { clisPart, type ClisPart } from './runner/clis.ts';
 import { editingPart, type EditingPart } from './runner/editing.ts';
 import { patchesPart, type PatchesPart } from './runner/patches.ts';
@@ -569,7 +571,7 @@ export const UNTIL_RESTART = '9999-12-31T00:00:00.000Z';
 export const NO_WAKE_TIME = UNTIL_RESTART;
 
 // Parts of the Runner that live in runner/ (see each file's top).
-export interface Runner extends LooseEndsPart, LabReviewPart, NewThreadsPart, HibernationPart, TitlesPart, HighlightsPart, PatchesPart, EditingPart, ClisPart, ReviewsPart, ApprovalsPart, ProjectsHostPart, StoppedWorkPart, HandoversPart, PoolsPart, NetworkPart, WorktreesPart, CommandsPart {}
+export interface Runner extends LooseEndsPart, LabReviewPart, NewThreadsPart, HibernationPart, TitlesPart, HighlightsPart, PatchesPart, EditingPart, ClisPart, ReviewsPart, ButtonsPart, ApprovalsPart, ProjectsHostPart, StoppedWorkPart, HandoversPart, PoolsPart, NetworkPart, WorktreesPart, CommandsPart {}
 export class Runner {
   // While main.ts is still starting up: waking a thread for its waits
   // (reconcileWaits) would start a CLI whose tools aren't ready, so they
@@ -889,6 +891,9 @@ export class Runner {
     const reviews = new Map<string, DesignReview>();
     for (const event of events) if (event.type === 'review.updated') reviews.set(event.review.id, event.review);
     if (reviews.size) rec.reviews = [...reviews.values()];
+    const buttons = new Map<string, ReplyButton>();
+    for (const event of events) if (event.type === 'button.updated') buttons.set(event.button.id, event.button);
+    if (buttons.size) rec.buttons = [...buttons.values()];
     if (rewinds.length) rec.rewinds = rewinds;
     if (open && lastStarted) rec.turnId = lastStarted.turnId;
     this.log.warn('thread.json was unreadable; rebuilt it from the event log', { threadId: id });
@@ -3228,7 +3233,7 @@ export class Runner {
 
 // The Runner's other methods live in parts under runner/, one area each;
 // they go onto its prototype here, as the class's own methods would be.
-for (const part of [looseEndsPart, labReviewPart, newThreadsPart, hibernationPart, titlesPart, highlightsPart, patchesPart, editingPart, clisPart, reviewsPart, approvalsPart, projectsHostPart, stoppedWorkPart, handoversPart, poolsPart, networkPart, worktreesPart, commandsPart]) {
+for (const part of [looseEndsPart, labReviewPart, newThreadsPart, hibernationPart, titlesPart, highlightsPart, patchesPart, editingPart, clisPart, reviewsPart, buttonsPart, approvalsPart, projectsHostPart, stoppedWorkPart, handoversPart, poolsPart, networkPart, worktreesPart, commandsPart]) {
   for (const [key, d] of Object.entries(Object.getOwnPropertyDescriptors(part))) {
     Object.defineProperty(Runner.prototype, key, { ...d, enumerable: false });
   }

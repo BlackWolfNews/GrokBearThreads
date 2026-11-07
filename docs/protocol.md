@@ -781,6 +781,81 @@ patch panels are independent of these review windows. Reviews take
 pictures, videos and pages, with a live `url` per option opened in the
 browser; overlays are deferred.
 
+### Reply buttons
+
+An experiment (`replyButtons`, off by default). Mike asked on 7 Nov 2026
+for buttons partway through a long reply (the Daily brief's "Needs
+attention" lines) that start a background thread with a brief the agent
+wrote, or send a message to a thread that's already going, so he can set
+jobs off as he reads without typing. He picked a tool that makes the
+button over a link that carries the brief: the runner checks the folder,
+login and target thread when the button is made, so a mistake reaches the
+agent while it can still fix it, not Mike as a dead button the next
+morning, and the brief lives in the thread rather than in the reply's
+text.
+
+The thread's agent calls `add_button` (only while the experiment is on),
+which stores a `ReplyButton` on the thread and returns its link,
+`button:<id>`. The agent puts `[title](button:<id>)` in its reply where
+it belongs; the apps draw that link as a button. A button the reply never
+links isn't shown anywhere. Nothing runs until Mike presses it.
+
+```ts
+type ReplyButton = {
+  id: string            // 8 lower-case letters and digits, unique in the thread
+  title: string         // what the button says, at most 60 characters
+  createdAt: string
+  turnId?: string       // the turn that made it
+  // Exactly one of start and send.
+  start?: {             // a new thread, as create_thread would make it
+    text: string        // the brief, at most 20,000 characters
+    title?: string
+    cwd: string         // checked to be a folder when made
+    accountId?: string  // checked to be a login when made
+    poolId?: string     // checked to be a pool when made
+    model?: string
+    effort?: EffortLevel
+    permissionMode: PermissionMode
+    why?: string
+  }
+  send?: {              // a message to a thread of this runner's
+    threadId: string    // checked to exist, and not to be this thread
+    threadTitle: string // its title when made
+    text: string        // at most 20,000 characters
+  }
+  pressed?: { at: string, threadId: string } // the thread it started, or the one it messaged
+  failed?: { at: string, error: string }     // the last press failed; it can be pressed again
+}
+```
+
+| method | params | result |
+|---|---|---|
+| `buttons.press` | `{ threadId, buttonId }` | `{ button: ReplyButton }` Starts the thread or sends the message, once. A button already pressed returns as it is, with nothing run again, so a dropped reply or a second click (or a press from the phone and the Mac) never fires twice. A press that fails (the folder has gone, the target thread was deleted) is saved as `failed`, and the error comes back as `-32602` |
+| `buttons.list` | `{ threadId }` | `{ buttons: ReplyButton[] }` every button the thread has, oldest first |
+
+Every change persists a `button.updated` event with `{ button }`; clients
+keep the latest per id, as for reviews, and redraw any link to it. A
+press marks the started thread as started by this thread (`startedBy`
+`{ kind: "thread", label: "Button" }`) and its first message, or the message
+sent, begins with the usual `[Sent by the agent in the thread ...]` line,
+as the agent wrote the words and Mike only chose to send them.
+
+Safety. Only a thread's own agent can make its buttons: `add_button` is
+bound to the calling thread like the other threadbear tools, and there's
+no RPC that makes one. Pressing (Mike's click on the Mac, phone or
+website) is the only thing that runs one. A thread that isn't in full
+access can't make a button for more than it has: a new thread's
+`permissionMode` defaults to the maker's and can't be above it, and a
+message to a thread with more access is refused (send_message, which
+asks first, is for that). A thread keeps its last 200 buttons.
+
+On the phone and the website (Sync), pressing queues a `press` command
+with `{ buttonId }` for the thread's runner, which calls `buttons.press`.
+Each mirrored message carries the state of the buttons its text links
+(`buttons?: { id, title, kind: "start" | "send", target?: string,
+pressedThreadId?: string, failed?: string }[]`), so a pressed button
+shows as pressed there too.
+
 Every persisted event has an envelope:
 
 ```ts
