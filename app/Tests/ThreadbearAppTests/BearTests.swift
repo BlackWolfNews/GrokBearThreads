@@ -137,6 +137,42 @@ final class BearTests: XCTestCase {
         XCTAssertFalse(view.isAnimating)
     }
 
+    /// Bedtime is 10 pm up to 5 am, on the Mac's own clock.
+    func testBedtimeIsTenUntilFive() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Australia/Perth")!
+        func at(_ hour: Int, _ minute: Int) -> Date {
+            calendar.date(from: DateComponents(year: 2026, month: 11, day: 7, hour: hour, minute: minute))!
+        }
+        for (hour, minute, asleep) in [(21, 59, false), (22, 0, true), (23, 59, true), (0, 0, true), (4, 59, true), (5, 0, false), (12, 0, false)] {
+            XCTAssertEqual(InboxZero.isBedtime(at(hour, minute), calendar: calendar), asleep, "\(hour):\(minute)")
+        }
+    }
+
+    /// The Zs drift while it's on screen, stop when it isn't, and sit still
+    /// under Reduce Motion.
+    func testTheSleepingBearDriftsOnlyWhileItCan() {
+        let view = SleepingBearView(frame: NSRect(x: 0, y: 0, width: 30, height: 30))
+        view.start(reduceMotion: true)
+        XCTAssertFalse(view.isDrifting)
+        view.start(reduceMotion: false)
+        XCTAssertTrue(view.isDrifting)
+        view.stop()
+        XCTAssertFalse(view.isDrifting)
+        let keys = SleepingBearView.Timing.zKeys
+        XCTAssertEqual(keys.first?.shown, 0, "fades in from nothing")
+        XCTAssertEqual(keys.last?.shown, 0, "and out to nothing, so the repeat doesn't show")
+        XCTAssertEqual(keys.last?.at, SleepingBearView.Timing.drift)
+        XCTAssertEqual(keys.map(\.up), keys.map(\.up).sorted(), "only ever up")
+    }
+
+    /// The sleeping pose is still the head and its Zs, however it's cut up.
+    func testTheSleepPoseIsItsHeadAndZs() {
+        let zs = BearGeometry.sleepZs.count
+        XCTAssertEqual(zs, 2)
+        XCTAssertEqual(BearGeometry.inks(.sleep, side: 48).count, BearGeometry.sleepingHead(small: false).count + zs)
+    }
+
     /// Set BEAR_FRAMES to a folder to get the moving bear as numbered PNGs,
     /// to look at or turn into a GIF. Drawn 8pt in from each edge, so a paw
     /// swinging past the frame shows.

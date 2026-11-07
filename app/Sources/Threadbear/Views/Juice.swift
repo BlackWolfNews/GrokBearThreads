@@ -156,32 +156,28 @@ extension View {
 }
 
 /// The inbox with nothing in it: the bear, waving once as it rises into
-/// place, over the usual note. A small reward for clearing everything.
+/// place, over the usual note. A small reward for clearing everything. After
+/// bedtime it's asleep and says so, rather than waving at you at midnight.
 struct InboxZero: View {
     @State private var shown = false
     @State private var waves = 0
 
+    /// 10 pm until 5 am, on the Mac's own clock.
+    nonisolated static func isBedtime(_ date: Date, calendar: Calendar = .current) -> Bool {
+        let hour = calendar.component(.hour, from: date)
+        return hour >= 22 || hour < 5
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: zoomed(6)) {
-            Image(nsImage: Bear.image(.wave, side: zoomed(30)))
-                .renderingMode(.template)
-                .foregroundStyle(.secondary)
-                // A couple of quick tilts from its feet, like a wave.
-                .keyframeAnimator(initialValue: 0.0, trigger: waves) { bear, angle in
-                    bear.rotationEffect(.degrees(angle), anchor: .bottom)
-                } keyframes: { _ in
-                    KeyframeTrack {
-                        CubicKeyframe(0, duration: 0.25)
-                        CubicKeyframe(-9, duration: 0.14)
-                        CubicKeyframe(7, duration: 0.16)
-                        CubicKeyframe(-5, duration: 0.14)
-                        CubicKeyframe(0, duration: 0.2)
-                    }
-                }
-                .accessibilityHidden(true)
-            Text("Nothing in the inbox.")
-                .font(.system(size: TypeScale.sidebarPreview))
-                .foregroundStyle(.secondary)
+        // Asks once a minute, so a bear left on screen does nod off at 10.
+        TimelineView(.everyMinute) { context in
+            let bedtime = Self.isBedtime(BearGeometry.date(context.date))
+            VStack(alignment: .leading, spacing: zoomed(6)) {
+                if bedtime { asleep } else { waving }
+                Text(bedtime ? "Nothing in the inbox. Off to bed." : "Nothing in the inbox.")
+                    .font(.system(size: TypeScale.sidebarPreview))
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(.leading, SidebarMetrics.leading)
         .padding(.top, zoomed(14))
@@ -192,4 +188,34 @@ struct InboxZero: View {
             if !Juice.reduceMotion { waves += 1 }
         }
     }
+
+    private var asleep: some View {
+        SleepingBear()
+            .frame(width: zoomed(30), height: zoomed(30))
+            .accessibilityHidden(true)
+    }
+
+    private var waving: some View {
+        Image(nsImage: Bear.image(.wave, side: zoomed(30)))
+            .renderingMode(.template)
+            .foregroundStyle(.secondary)
+            // A couple of quick tilts from its feet, like a wave.
+            .keyframeAnimator(initialValue: 0.0, trigger: waves) { bear, angle in
+                bear.rotationEffect(.degrees(angle), anchor: .bottom)
+            } keyframes: { _ in
+                KeyframeTrack {
+                    CubicKeyframe(0, duration: 0.25)
+                    CubicKeyframe(-9, duration: 0.14)
+                    CubicKeyframe(7, duration: 0.16)
+                    CubicKeyframe(-5, duration: 0.14)
+                    CubicKeyframe(0, duration: 0.2)
+                }
+            }
+            .accessibilityHidden(true)
+    }
+}
+
+private struct SleepingBear: NSViewRepresentable {
+    func makeNSView(context: Context) -> SleepingBearView { SleepingBearView() }
+    func updateNSView(_ view: SleepingBearView, context: Context) {}
 }

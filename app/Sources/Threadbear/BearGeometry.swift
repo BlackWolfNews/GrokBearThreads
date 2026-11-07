@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 
 /// The line bear as paths on a 24 by 24 grid (y down): the one drawing behind
 /// every pose, on the Mac and the iPhone. It was redrawn on 7 Nov 2026 to look
@@ -19,6 +20,20 @@ enum BearGeometry {
         /// A smaller bear with big ears: sub-agents out in the background.
         case cub
     }
+
+    /// The date and time the bear goes by when it's choosing what to do:
+    /// `date`, unless a launch argument says otherwise, to see December in
+    /// November or bedtime in the afternoon: `-ThreadbearBearDate
+    /// 2026-12-24T23:00` (local time; `dev-app.sh start --bear-date`).
+    static func date(_ date: Date = Date()) -> Date { pretendDate ?? date }
+
+    private static let pretendDate: Date? = {
+        guard let text = UserDefaults.standard.string(forKey: "ThreadbearBearDate") else { return nil }
+        let format = DateFormatter()
+        format.locale = Locale(identifier: "en_US_POSIX")
+        format.dateFormat = "yyyy-MM-dd'T'HH:mm"
+        return format.date(from: text)
+    }()
 
     /// The main line's weight on the grid, about an SF Symbol's at this size.
     static let line: CGFloat = 1.6
@@ -151,15 +166,29 @@ enum BearGeometry {
     /// A stubby capsule coming out from behind the head, drawn only outside
     /// it so it hugs the head. A stick and a ring read as a lollipop, an arm
     /// joined at both ends as a teacup handle, and a paw on its own as a blob.
-    static var arm: CGPath {
-        let tip = CGPoint(x: 21, y: 9.8), w: CGFloat = 2.2
-        let dx = tip.x - shoulder.x, dy = tip.y - shoulder.y
-        let length = (dx * dx + dy * dy).squareRoot()
-        var place = CGAffineTransform(translationX: shoulder.x, y: shoulder.y).rotated(by: atan2(dy, dx))
-        return CGPath(roundedRect: CGRect(x: -w, y: -w, width: length + 2 * w, height: 2 * w), cornerWidth: w, cornerHeight: w, transform: &place)
-    }
+    static var arm: CGPath { capsule(from: shoulder, to: CGPoint(x: 21, y: 9.8), halfWidth: 2.2) }
     /// The pad on the paw. Nil when small.
     static func pawPad(small: Bool) -> CGPath? { small ? nil : ellipse(CGPoint(x: 21.05, y: 9.9), 0.95, 0.85) }
+
+    // MARK: Asleep
+
+    /// The sleeping pose's head, without its Zs, which drift on their own on
+    /// the moving bears.
+    static func sleepingHead(small: Bool) -> [Ink] {
+        let face = Face(centre: sleepingCentre, scale: 0.8, eyes: .shut, small: small)
+        // The head tips over, as it drops off.
+        var tip = CGAffineTransform(translationX: sleepingCentre.x, y: sleepingCentre.y).rotated(by: sleepingTilt * .pi / 180).translatedBy(x: -sleepingCentre.x, y: -sleepingCentre.y)
+        return face.inks.map { ink in
+            Ink(path: ink.path.copy(using: &tip) ?? ink.path, width: ink.width, outside: ink.outside?.copy(using: &tip))
+        }
+    }
+    static let sleepingCentre = CGPoint(x: 8.5, y: 15.4)
+    /// How far over the head tips, in degrees.
+    static let sleepingTilt: CGFloat = 8
+    /// The spot on the grid the sleeping bear breathes about.
+    static let sleepingFeet = CGPoint(x: 8.5, y: 21.8)
+    /// The small Z, then the big one.
+    static var sleepZs: [CGPath] { [z(CGPoint(x: 18.4, y: 6.4), 2.2), z(CGPoint(x: 21, y: 1), 2.9)] }
 
     // MARK: Poses
 
@@ -173,14 +202,7 @@ enum BearGeometry {
             if let pad = pawPad(small: small) { all.append(Ink(path: pad, width: nil)) }
             return all + face.inks
         case .sleep:
-            let centre = CGPoint(x: 8.5, y: 15.4)
-            let face = Face(centre: centre, scale: 0.8, eyes: .shut, small: small)
-            // The head tips over, as it drops off.
-            var tip = CGAffineTransform(translationX: centre.x, y: centre.y).rotated(by: 8 * .pi / 180).translatedBy(x: -centre.x, y: -centre.y)
-            let tipped = face.inks.map { ink in
-                Ink(path: ink.path.copy(using: &tip) ?? ink.path, width: ink.width, outside: ink.outside?.copy(using: &tip))
-            }
-            return tipped + [Ink(path: z(CGPoint(x: 18.4, y: 6.4), 2.2), width: Face.shutWidth), Ink(path: z(CGPoint(x: 21, y: 1), 2.9), width: Face.shutWidth)]
+            return sleepingHead(small: small) + sleepZs.map { Ink(path: $0, width: Face.shutWidth) }
         case .sit:
             let face = Face(centre: CGPoint(x: 12, y: 8.9), scale: 0.72, small: small)
             return body(centre: CGPoint(x: 12, y: 17.8), rx: 6, ry: 5, feetApart: 5.5, feetY: 21.7, footRx: 2.5, footRy: 1.8, face: face) + face.inks
@@ -201,6 +223,13 @@ enum BearGeometry {
         inFront.addPath(face.head)
         inFront.addPath(feet)
         return [Ink(path: ellipse(centre, rx, ry), width: line, outside: inFront), Ink(path: feet, width: line)]
+    }
+
+    private static func capsule(from: CGPoint, to: CGPoint, halfWidth w: CGFloat) -> CGPath {
+        let dx = to.x - from.x, dy = to.y - from.y
+        let length = (dx * dx + dy * dy).squareRoot()
+        var place = CGAffineTransform(translationX: from.x, y: from.y).rotated(by: atan2(dy, dx))
+        return CGPath(roundedRect: CGRect(x: -w, y: -w, width: length + 2 * w, height: 2 * w), cornerWidth: w, cornerHeight: w, transform: &place)
     }
 
     private static func z(_ origin: CGPoint, _ size: CGFloat) -> CGPath {
