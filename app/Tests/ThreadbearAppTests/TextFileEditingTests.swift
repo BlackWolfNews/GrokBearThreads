@@ -151,6 +151,23 @@ final class TextFileEditingTests: XCTestCase {
         XCTAssertEqual(onDisk(), "let a = 99;\n")
     }
 
+    /// A conflict, then what was typed is taken back out: Done takes the
+    /// file's rather than staying stuck in editing.
+    func testUndoingBackClearsAConflict() throws {
+        let (controller, window) = editor(editing: true)
+        defer { controller.stop(); window.close() }
+        controller.insertAtEnd("// mine\n")
+        try "let a = 99;\n".write(to: file, atomically: false, encoding: .utf8)
+        XCTAssertFalse(controller.saveNow())
+        XCTAssertNotNil(controller.conflict)
+        controller.textView.selectAll(nil)
+        controller.textView.insertText("let a = 1;\n", replacementRange: controller.textView.selectedRange())
+        controller.setEditing(false)
+        XCTAssertFalse(controller.editing)
+        XCTAssertNil(controller.conflict)
+        XCTAssertEqual(onDisk(), "let a = 99;\n")
+    }
+
     /// The save as you type still lands by itself.
     func testTypingIsStillSavedAfterThePause() {
         let (controller, window) = editor(editing: true)

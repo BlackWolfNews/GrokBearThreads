@@ -422,7 +422,13 @@ final class TextFileController: NSObject, NSTextViewDelegate {
         saveTimer?.cancel()
         saveTimer = nil
         guard editing, drafted else { return true }
-        guard conflict == nil else { return false }
+        if let fileText = conflict {
+            // Undone back to what was saved: nothing of Mike's left to keep,
+            // so the file's side wins without asking.
+            guard textView.string == document.saved else { return false }
+            useFile(fileText)
+            return true
+        }
         // Typed, but the file can't take it now (too big, not UTF-8): it
         // stays on screen, read only, rather than go.
         guard document.isEditable else {
