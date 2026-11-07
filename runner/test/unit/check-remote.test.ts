@@ -6,7 +6,7 @@
 // Runs the real script from a temp checkout, with a fake ssh that answers
 // the probe and the lock from files and runs everything else locally, and
 // an rsync that copies to "host:path" as plain local paths.
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -28,7 +28,7 @@ args=()
 while [ $# -gt 0 ]; do
   case "$1" in
     -e) shift ;;
-    *:/*) h="\${1%%:*}"; p="\${1#*:}"; case "$p" in */mirror/*) echo "$h" >>"$FAKE/copies.log" ;; esac; args+=("$p") ;;
+    *:/*) h="\${1%%:*}"; p="\${1#*:}"; case "$p" in */mirror/*) echo "$h" >>"$FAKE/copies.log"; [ -z "$RSYNC_PEEK" ] || bash -c "$RSYNC_PEEK" >>"$FAKE/rsync-peek" ;; esac; args+=("$p") ;;
     *) args+=("$1") ;;
   esac
   shift
@@ -37,7 +37,7 @@ exec /usr/bin/rsync "\${args[@]}"
 `;
 
 const FAKE_SSH = `#!/bin/bash
-while [ "$1" = -o ]; do shift 2; done
+while [ "$1" = -o ]; do echo "$2" >>"$FAKE/ssh-opts.log"; shift 2; done
 host="$1"; shift
 cmd="$*"
 d="$FAKE/$host"
@@ -47,10 +47,21 @@ run_copy() {
   if [ -n "$script" ] && [ -f "$script" ] && [ -f "$(dirname "$script")/../.check-changed" ]; then
     echo "ran on $host $1 from $script"
     [ -z "$PEEK" ] || (cd "$(dirname "$script")/.." && bash -c "$PEEK") >"$FAKE/peek"
+    # A failed step's log path, as check.sh prints it there, and one that
+    # only looks like it.
+    if [ -n "$PRINT_LOG" ]; then
+      id="$(printf '%s' "$cmd" | grep -oE 'runs/[0-9]+-[0-9]+-[0-9]+/' | head -1 | cut -d/ -f2)"
+      b="$d/home/.cache/threadbear-check"
+      echo "log at $b/tmp-$id/threadbear-check.Ab12/step.log"
+      echo "near $d/home/Xcache/threadbear-check/tmp-$id/threadbear-check.Ab12/step.log"
+    fi
   else echo "no copy on $host for: $cmd"; exit 1; fi
 }
 case "$cmd" in
-  *"uname -s"*) printf '%s\\n%s\\n%s\\n' "$d/home/.cache/threadbear-check" Darwin "$(cat "$d/state")" ;;
+  *"uname -s"*)
+    # A host's "base" file says what folder it reports, if not its own.
+    b="$d/home/.cache/threadbear-check"; [ -f "$d/base" ] && b="$(cat "$d/base")"
+    printf '%s\\n%s\\n%s\\n' "$b" Darwin "$(cat "$d/state")" ;;
   *"lockf -t 0 -k"*)
     n="$(cat "$d/lose" 2>/dev/null || echo 0)"
     if [ "$n" -gt 0 ]; then echo $((n - 1)) >"$d/lose"; [ -f "$d/looks-free" ] || echo busy >"$d/state"; exit 75; fi
@@ -62,8 +73,23 @@ esac
 
 // looksFree: the probe still says free after each lost race (another check
 // keeps grabbing it between the probe and the lock).
-function setup(hosts: Record<string, { state: string; lose?: number; looksFree?: boolean }>) {
+// This Mac's home for the run: short and under /tmp, so the ssh socket's
+// folder fits (a socket's path is short), and never the real one. Its
+// TMPDIR is a folder of the test's own, to see what's left there.
+const homes: string[] = [];
+after(() => homes.forEach((h) => fs.rmSync(h, { recursive: true, force: true })));
+function shortHome(): string {
+  const h = fs.mkdtempSync('/tmp/tbcr-');
+  homes.push(h);
+  return h;
+}
+
+type Host = { state: string; lose?: number; looksFree?: boolean; base?: string };
+function setup(hosts: Record<string, Host>, opts: { home?: string } = {}) {
   const tmp = tmpDir('check-remote-');
+  const home = opts.home ?? shortHome();
+  const tmpdir = path.join(tmp, 'tmpdir');
+  fs.mkdirSync(tmpdir);
   const fake = path.join(tmp, 'fake');
   const bin = path.join(tmp, 'bin');
   const repo = path.join(tmp, 'repo');
@@ -77,6 +103,7 @@ function setup(hosts: Record<string, { state: string; lose?: number; looksFree?:
     fs.writeFileSync(path.join(fake, h, 'state'), s.state);
     if (s.lose) fs.writeFileSync(path.join(fake, h, 'lose'), String(s.lose));
     if (s.looksFree) fs.writeFileSync(path.join(fake, h, 'looks-free'), '');
+    if (s.base !== undefined) fs.writeFileSync(path.join(fake, h, 'base'), s.base);
   }
   fs.copyFileSync(SCRIPT, path.join(repo, 'scripts', 'check-remote.sh'));
   const git = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { stdio: 'ignore' });
@@ -86,11 +113,16 @@ function setup(hosts: Record<string, { state: string; lose?: number; looksFree?:
   return {
     fake,
     repo,
+    home,
+    tmpdir,
     // peek: a command run in the copy as its check starts, its output kept.
-    run(hostList: string, staySecs: number, peek = '') {
+    // env: more for the script's environment (PRINT_LOG, RSYNC_PEEK).
+    run(hostList: string, staySecs: number, peek = '', env: Record<string, string> = {}) {
+      const base: NodeJS.ProcessEnv = { ...process.env };
+      delete base.XDG_CACHE_HOME;
       const r = spawnSync('bash', [path.join(repo, 'scripts', 'check-remote.sh'), hostList, '--quick'], {
         encoding: 'utf8',
-        env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, FAKE: fake, PEEK: peek, THREADBEAR_CHECK_STAY_SECS: String(staySecs) },
+        env: { ...base, HOME: home, TMPDIR: tmpdir, PATH: `${bin}:${process.env.PATH}`, FAKE: fake, PEEK: peek, THREADBEAR_CHECK_STAY_SECS: String(staySecs), ...env },
       });
       const read = (f: string) => (fs.existsSync(path.join(fake, f)) ? fs.readFileSync(path.join(fake, f), 'utf8') : '');
       // The copies left on each host afterwards.
@@ -98,7 +130,7 @@ function setup(hosts: Record<string, { state: string; lose?: number; looksFree?:
         const runs = path.join(fake, h, 'home', '.cache', 'threadbear-check', 'runs');
         return fs.existsSync(runs) ? fs.readdirSync(runs) : [];
       };
-      return { ...r, ssh: read('ssh.log'), copies: read('copies.log').trim().split('\n').filter(Boolean), left, peek: read('peek') };
+      return { ...r, ssh: read('ssh.log'), sshOpts: read('ssh-opts.log'), rsyncPeek: read('rsync-peek'), copies: read('copies.log').trim().split('\n').filter(Boolean), left, peek: read('peek') };
     },
   };
 }
@@ -182,4 +214,132 @@ test('a .check-changed in the checkout never has the real one written through it
   assert.match(r.peek, /^shared\.sh$/m);
   // Modes as they are here, not as the receiver's umask would leave them.
   assert.match(r.peek, /-rwxrwxr-x/);
+});
+
+// Daybreak, 7 Nov 2026. The folder a host reports for its cache is that
+// host's word: it's used only if it's a plain absolute path (letters,
+// digits, . _ / -, no . or .. parts) ending in .cache/threadbear-check, and
+// it's never part of a program run here.
+test("a host whose reported folder isn't a plain absolute path is passed over", () => {
+  const s = setup({ h1: { state: 'free' } });
+  const odd = ['relative/.cache/threadbear-check', `${s.fake}/x y/.cache/threadbear-check`, `${s.fake}/x'y/.cache/threadbear-check`,
+    `${s.fake}/a#b/.cache/threadbear-check`, `${s.fake}/a/../.cache/threadbear-check`, `${s.fake}/a/./.cache/threadbear-check`, `${s.fake}/é/.cache/threadbear-check`];
+  for (const base of odd) {
+    fs.writeFileSync(path.join(s.fake, 'h1', 'base'), base);
+    fs.rmSync(path.join(s.fake, 'copies.log'), { force: true });
+    const r = s.run('h1', 3600);
+    assert.equal(r.status, 255, `${base}: ${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /Unexpected folder on h1/, base);
+    assert.deepEqual(r.copies, [], base);
+  }
+});
+
+test('a host passed over for its folder leaves the next one to run the check', () => {
+  const s = setup({ h1: { state: 'free', base: '/x y/.cache/threadbear-check' }, h2: { state: 'free' } });
+  const r = s.run('h1,h2', 3600);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /ran on h2 now/);
+  assert.deepEqual(r.copies, ['h2']);
+});
+
+test("a failed step's log path is changed to this Mac's copy as plain text", () => {
+  const s = setup({ h1: { state: 'free' } });
+  const r = s.run('h1', 3600, '', { PRINT_LOG: '1' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const local = path.join(s.tmpdir, 'threadbear-check-remote.');
+  const log = r.stdout.split('\n').find((l) => l.startsWith('log at '));
+  assert.ok(log?.startsWith(`log at ${local}`) && log.endsWith('/step.log'), r.stdout);
+  // Only that exact folder: one that differs where a pattern's "." would
+  // have matched anything is left as it is.
+  const near = r.stdout.split('\n').find((l) => l.startsWith('near '));
+  assert.match(near ?? '', /\/Xcache\/threadbear-check\/tmp-[0-9-]+\/threadbear-check\.Ab12\/step\.log$/, r.stdout);
+});
+
+// The copy lock: its file in a folder of this user's own, mode 700, and the
+// helper's ready and release files in a folder mktemp -d made for this run,
+// never names made up in the shared TMPDIR.
+const LIST_LOCKS = 'for f in "$TMPDIR"/* "$HOME/.cache/threadbear-check-locks" "$HOME/.cache/threadbear-check-locks"/* "$TMPDIR"/tb-check-lock.*/*; do [ -e "$f" ] || [ -L "$f" ] || continue; ls -ld "$f" | awk \'{print $1}\' | tr "\\n" " "; echo "$f"; done';
+
+test("the copy lock's files are in folders only this user can use", () => {
+  const s = setup({ h1: { state: 'free' } });
+  const r = s.run('h1', 3600, '', { RSYNC_PEEK: LIST_LOCKS });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const held = r.rsyncPeek.trim().split('\n').filter(Boolean).map((l) => {
+    const [mode, ...rest] = l.split(' ');
+    return { mode, file: rest.join(' ') };
+  });
+  const lockDir = path.join(s.home, '.cache', 'threadbear-check-locks');
+  assert.ok(held.some((h) => h.file === lockDir && h.mode.startsWith('drwx------')), r.rsyncPeek);
+  assert.ok(held.some((h) => h.file.startsWith(`${lockDir}/copy-`) && h.file.endsWith('-h1.lock')), r.rsyncPeek);
+  // Everything of the lock's in TMPDIR is a private folder of this run's.
+  for (const h of held.filter((x) => x.file.startsWith(`${s.tmpdir}/tb-check`))) {
+    if (path.dirname(h.file) === s.tmpdir) {
+      assert.match(path.basename(h.file), /^tb-check-lock\.[A-Za-z0-9]+$/, r.rsyncPeek);
+      assert.ok(h.mode.startsWith('drwx------'), r.rsyncPeek);
+    } else assert.match(path.dirname(h.file), /\/tb-check-lock\.[A-Za-z0-9]+$/, r.rsyncPeek);
+  }
+  assert.ok(held.some((h) => /\/tb-check-lock\.[A-Za-z0-9]+$/.test(h.file)), r.rsyncPeek);
+  // And the run's folder goes with it.
+  assert.deepEqual(fs.readdirSync(s.tmpdir).filter((f) => f.startsWith('tb-check')), []);
+});
+
+test("a lock folder that isn't this user's own, mode 700, is never used or repaired", () => {
+  for (const make of ['open', 'link'] as const) {
+    const s = setup({ h1: { state: 'free' } });
+    const lockDir = path.join(s.home, '.cache', 'threadbear-check-locks');
+    fs.mkdirSync(path.dirname(lockDir), { recursive: true });
+    const elsewhere = path.join(s.home, 'elsewhere');
+    fs.mkdirSync(elsewhere, { mode: 0o700 });
+    if (make === 'open') {
+      fs.mkdirSync(lockDir);
+      fs.chmodSync(lockDir, 0o755);
+    } else fs.symlinkSync(elsewhere, lockDir);
+    const r = s.run('h1', 3600);
+    assert.equal(r.status, 1, `${make}: ${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /Couldn't take the lock on this checkout's copy/, make);
+    assert.deepEqual(r.copies, [], make);
+    if (make === 'open') assert.equal(fs.statSync(lockDir).mode & 0o777, 0o755, 'left as it was');
+    assert.deepEqual(fs.readdirSync(elsewhere), []);
+  }
+});
+
+// ssh's shared connection: its socket in ~/.ssh/tbc, a folder of this
+// user's own, never a name in /tmp another account could make first.
+test("ssh shares a connection through a socket in this user's own folder", () => {
+  const s = setup({ h1: { state: 'free' } });
+  const r = s.run('h1', 3600);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const dir = path.join(s.home, '.ssh', 'tbc');
+  assert.ok(r.sshOpts.split('\n').includes(`ControlPath=${dir}/%C`), r.sshOpts);
+  assert.ok(r.sshOpts.split('\n').includes('ControlMaster=auto'), r.sshOpts);
+  assert.doesNotMatch(r.sshOpts, /\/tmp\/tbc-/);
+  const st = fs.lstatSync(dir);
+  assert.ok(st.isDirectory() && (st.mode & 0o777) === 0o700 && st.uid === process.getuid!());
+});
+
+test('without a short private folder for the socket, each ssh connects on its own', () => {
+  const longHome = path.join(shortHome(), 'a-folder-name-long-enough-for-the-socket-path');
+  fs.mkdirSync(longHome);
+  const cases: [string, (home: string) => void][] = [
+    ['open', (home) => fs.mkdirSync(path.join(home, '.ssh', 'tbc'), { recursive: true, mode: 0o755 })],
+    ['link', (home) => {
+      fs.mkdirSync(path.join(home, '.ssh'), { mode: 0o700 });
+      fs.mkdirSync(path.join(home, 'real'), { mode: 0o700 });
+      fs.symlinkSync(path.join(home, 'real'), path.join(home, '.ssh', 'tbc'));
+    }],
+    ['long', () => undefined],
+  ];
+  for (const [what, make] of cases) {
+    const home = what === 'long' ? longHome : shortHome();
+    make(home);
+    const s = setup({ h1: { state: 'free' } }, { home });
+    const r = s.run('h1', 3600);
+    assert.equal(r.status, 0, `${what}: ${r.stdout}${r.stderr}`);
+    const opts = r.sshOpts.split('\n');
+    assert.ok(opts.includes('ControlMaster=no') && opts.includes('ControlPath=none'), `${what}: ${r.sshOpts}`);
+    assert.ok(!opts.some((o) => o.startsWith('ControlPath=/')), `${what}: ${r.sshOpts}`);
+    assert.match(r.stderr, /Not sharing one ssh connection per host/, what);
+    if (what === 'open') assert.equal(fs.statSync(path.join(home, '.ssh', 'tbc')).mode & 0o777, 0o755, 'left as it was');
+    if (what === 'long') assert.ok(!fs.existsSync(path.join(home, '.ssh', 'tbc')));
+  }
 });

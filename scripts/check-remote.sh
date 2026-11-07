@@ -115,11 +115,45 @@ HOST_LIST="${1:?usage: check-remote.sh <ssh host>[,<ssh host>...] [check.sh opti
 shift
 read -ra HOSTS <<<"$(printf '%s' "$HOST_LIST" | tr ',' ' ')"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# A folder only this account can use: it exists (made here if not, mode
+# 0700), isn't a symlink, is owned by this user and has mode 0700 exactly.
+# One that's anything else is never repaired or used (Daybreak, 7 Nov: a
+# name in a shared folder like /tmp can be taken by another account first).
+MY_UID="$(id -u)"
+owner_mode() {
+  if [ "$(uname -s)" = Darwin ]; then stat -f '%u %Lp' "$1" 2>/dev/null; else stat -c '%u %a' "$1" 2>/dev/null; fi
+}
+private_dir() {
+  [ -e "$1" ] || [ -L "$1" ] || mkdir -m 700 "$1" 2>/dev/null
+  [ -d "$1" ] && [ ! -L "$1" ] && [ "$(owner_mode "$1")" = "$MY_UID 700" ]
+}
+# Only these characters in a path this script builds commands from: ssh
+# and rsync's -e split on spaces, and the host's commands quote with '.
+plain_path() {
+  case "$1" in /*) ;; *) return 1 ;; esac
+  # Byte by byte, in the C locale: a bracket range in a UTF-8 locale
+  # took é for a letter on Linux.
+  [ -z "$(printf '%s' "$1" | LC_ALL=C tr -d 'A-Za-z0-9._/-')" ] || return 1
+  case "/$1/" in */../*|*/./*) return 1 ;; esac
+}
+
 # One connection per host, shared by every ssh and rsync this run makes:
 # a run makes half a dozen, and on a congested link (6 Nov, 2 s pings) each
-# new one took 20 s to set up. A short path, as a socket's can't be long.
-SSH=(ssh -o BatchMode=yes -o ConnectTimeout=8 -o ServerAliveInterval=30 -o ServerAliveCountMax=4
-  -o ControlMaster=auto -o "ControlPath=/tmp/tbc-$(id -u)-%C" -o ControlPersist=60)
+# new one took 20 s to set up. Its socket is in ~/.ssh/tbc, a folder of this
+# user's own (above): it was /tmp/tbc-<uid>-%C, a name another account on
+# the Mac could make first and so answer for the host (Daybreak, 7 Nov).
+# A socket's path can't be long: ssh binds <path>.<16 random> first, %C is
+# 40 characters, and macOS allows 103 (Linux 107). Too long, or no private
+# folder, and each ssh makes its own connection instead.
+SSH=(ssh -o BatchMode=yes -o ConnectTimeout=8 -o ServerAliveInterval=30 -o ServerAliveCountMax=4)
+sock_dir="${HOME:-}/.ssh/tbc"
+if plain_path "$sock_dir" && [ $(( ${#sock_dir} + 1 + 40 + 17 )) -le 103 ] \
+  && { [ -d "$HOME/.ssh" ] || mkdir -m 700 "$HOME/.ssh" 2>/dev/null; } && private_dir "$sock_dir"; then
+  SSH+=(-o ControlMaster=auto -o "ControlPath=$sock_dir/%C" -o ControlPersist=60)
+else
+  echo "Not sharing one ssh connection per host: $sock_dir isn't a short folder of this user's own (mode 700)." >&2
+  SSH+=(-o ControlMaster=no -o ControlPath=none)
+fi
 
 ARGS=()
 SHOTS=""
@@ -169,7 +203,11 @@ choose() {
     case " $SKIP " in *" $h "*) continue ;; esac
     out="$("${SSH[@]}" "$h" "$probe" 2>/dev/null)" || { echo "Couldn't reach $h over ssh." >&2; continue; }
     { read -r b; read -r os; read -r state; } <<<"$out"
-    # Every rm -rf over there is under this, so never let it be empty.
+    # Every rm -rf over there is under this, so never let it be empty. It's
+    # the host's word, so it's only ever data: an absolute path of plain
+    # characters ending in the folder asked for, else the host is passed
+    # over (Daybreak, 7 Nov: it went into a sed program here).
+    if ! plain_path "$b"; then echo "Unexpected folder on $h (not a plain absolute path); passing it over." >&2; continue; fi
     case "$b" in */$BASE_REL) ;; *) echo "Unexpected folder on $h: '$b'" >&2; continue ;; esac
     case "$os" in
       Darwin) ;;
@@ -195,11 +233,22 @@ tries=0
 # helper until this run lets go or ends, so one a killed run held frees
 # itself. The helper looks every second for its release file and for
 # this script.
-holder="" release=""
+#
+# The lock file is shared by every run from this checkout, so it lives in a
+# folder of this user's own (private_dir); the helper's ready and release
+# files are this run's alone, in a folder mktemp -d makes (0700, atomically).
+# Both were names in $TMPDIR that mktemp -u only made up, not made, which
+# another account could have put a link at first (Daybreak, 7 Nov).
+holder="" release="" sentinels=""
+lock_dir="${XDG_CACHE_HOME:-${HOME:-}/.cache}/threadbear-check-locks"
 take_copylock() {
   local ready
-  ready="$(mktemp -u "${TMPDIR:-/tmp}/tb-check-ready.XXXXXX")"
-  release="$(mktemp -u "${TMPDIR:-/tmp}/tb-check-release.XXXXXX")"
+  if [ -z "$sentinels" ]; then
+    sentinels="$(mktemp -d "${TMPDIR:-/tmp}/tb-check-lock.XXXXXX")" || { sentinels=""; return 1; }
+  fi
+  ready="$sentinels/ready"
+  release="$sentinels/release"
+  rm -f "$ready" "$release"
   local hold=': >"$1"; while kill -0 "$2" 2>/dev/null && [ ! -e "$3" ]; do sleep 1; done'
   if command -v flock >/dev/null 2>&1; then flock "$1" /bin/sh -c "$hold" sh "$ready" "$$" "$release" &
   else /usr/bin/lockf -k "$1" /bin/sh -c "$hold" sh "$ready" "$$" "$release" & fi
@@ -222,7 +271,31 @@ drop_copylock() {
   rm -f "$release"
   holder="" release=""
 }
-trap drop_copylock EXIT
+finish() {
+  drop_copylock
+  [ -z "$sentinels" ] || rm -rf "$sentinels"
+}
+trap finish EXIT
+# Each line with `from` and the letters and digits after it (a log folder's
+# mktemp suffix) changed to `to`, as the check runs, line by line. Both are
+# plain text, read from the environment so neither is ever part of a
+# program: this was a sed program with the host's folder spliced into it
+# (Daybreak, 7 Nov). ENVIRON, not -v, which would read backslashes.
+rewrite_logs() {
+  LC_ALL=C REWRITE_FROM="$1" REWRITE_TO="$2" awk '
+    BEGIN { from = ENVIRON["REWRITE_FROM"]; to = ENVIRON["REWRITE_TO"]; n = length(from) }
+    {
+      line = $0; out = ""
+      while (n > 0 && (i = index(line, from)) > 0) {
+        out = out substr(line, 1, i - 1) to
+        line = substr(line, i + n)
+        match(line, /^[A-Za-z0-9]*/)
+        line = substr(line, RLENGTH + 1)
+      }
+      print out line
+      fflush()
+    }'
+}
 # The host that has this run's copy, and how long it took. A run that loses
 # the race for a free host keeps its copy: copying again is what costs, as
 # over a slow uplink a first copy took 22 minutes (6 Nov), and one thread's
@@ -259,10 +332,11 @@ while :; do
     # Two checks from this checkout at once take turns at the mirror, from
     # the upload until the run's copy is made, so neither copies the other's
     # files.
-    if ! take_copylock "${TMPDIR:-/tmp}/tb-check-copy-$key-$HOST.lock"; then
+    copylock="$lock_dir/copy-$key-$(printf '%s' "$HOST" | tr -c 'A-Za-z0-9._-' '_').lock"
+    if ! { [ -d "$(dirname "$lock_dir")" ] || mkdir -p "$(dirname "$lock_dir")"; } || ! private_dir "$lock_dir" || ! take_copylock "$copylock"; then
       rm -f "$files" "$changed"
       # Not 255: running it here instead isn't the answer to a broken lock.
-      echo "Couldn't take the lock on this checkout's copy (${TMPDIR:-/tmp}/tb-check-copy-$key-$HOST.lock)." >&2
+      echo "Couldn't take the lock on this checkout's copy ($copylock; its folder must be this user's own, mode 700)." >&2
       exit 1
     fi
     # By content (-c), not size and time: an edit that keeps both would
@@ -315,7 +389,7 @@ while :; do
   # A failed step's log path is on the host: its logs come back here, and the
   # path in the output is changed to match.
   local_logs="$(mktemp -d "${TMPDIR:-/tmp}/threadbear-check-remote.XXXXXX")"
-  "${SSH[@]}" "$HOST" "$remote_cmd" 2>&1 | sed -u "s#$remote_base/tmp-$id/threadbear-check\.[A-Za-z0-9]*#$local_logs#g"
+  "${SSH[@]}" "$HOST" "$remote_cmd" 2>&1 | rewrite_logs "$remote_base/tmp-$id/threadbear-check." "$local_logs"
   code=${PIPESTATUS[0]}
   if [ "$now" = 1 ] && [ "$code" = 75 ]; then
     # Never started. Its copy stays for the next go (above).
