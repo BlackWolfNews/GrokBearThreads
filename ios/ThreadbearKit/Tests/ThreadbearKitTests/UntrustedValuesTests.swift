@@ -9,7 +9,10 @@ import Testing
 /// and a pasted picture comes from anywhere: none of it may trap, run out
 /// of stack or take seconds. Daybreak's findings of 7 Nov 2026, each played
 /// here.
-@Suite struct UntrustedValuesTests {
+// One at a time: several of these are heavy on purpose and don't suspend, and
+// all together they held every pool thread, so the other suites' short
+// sleeps and fake turns ran late and their tests failed.
+@Suite(.serialized) struct UntrustedValuesTests {
     /// CPU time, as the Mac running these is often busy.
     private func cpuSeconds(_ work: () -> Void) -> Double {
         // This thread's own time: Swift Testing runs other tests alongside,
@@ -91,6 +94,28 @@ import Testing
         let review = try #require(ReviewAnswer.parse("Review: T (00000000-0000-0000-0000-000000000000)\n\nPicked B. Calm, as it reads quickest.\n\nNotes on A (Loud): too much. Really (yes)."))
         #expect(review.lines.map(\.text) == ["Picked B: Calm, as it reads quickest", "too much. Really (yes)."])
         #expect(review.lines.last?.label == "Notes on A: Loud")
+    }
+
+    @Test func tablesHaveACellBudget() {
+        func cells(_ blocks: [MarkdownBlock]) -> Int {
+            blocks.reduce(0) { sum, block in
+                switch block {
+                case let .table(header, _, rows): sum + header.count * (rows.count + 1)
+                case let .quote(inner): sum + cells(inner)
+                default: sum
+                }
+            }
+        }
+        // 9 KB asking for 1.6 million cells.
+        let wide = String(repeating: "x|", count: 800) + "\n" + String(repeating: "-|", count: 800) + "\n" + String(repeating: "x|\n", count: 2_000)
+        #expect(cells(MarkdownBlock.parse(wide)) <= MarkdownBlock.maxTableCells)
+        // Many small tables, in quotes or not, share it.
+        let one = String(repeating: "x|", count: 45) + "\n" + String(repeating: "-|", count: 45) + "\n" + String(repeating: "x|\n", count: 44) + "\n"
+        #expect(cells(MarkdownBlock.parse(String(repeating: one, count: 29))) <= MarkdownBlock.maxTableCells)
+        #expect(cells(MarkdownBlock.parse(String(repeating: one.split(separator: "\n").map { "> " + $0 }.joined(separator: "\n") + "\n\n", count: 29))) <= MarkdownBlock.maxTableCells)
+        // A real one is all there.
+        let real = "| a | b |\n|---|---|\n| 1 | 2 |\n| 3 |"
+        #expect(MarkdownBlock.parse(real) == [.table(header: ["a", "b"], alignments: [.leading, .leading], rows: [["1", "2"], ["3", ""]])])
     }
 
     @Test func codeSpansAreAskedAboutOnce() {

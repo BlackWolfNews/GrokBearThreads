@@ -6,7 +6,10 @@ import Testing
 /// refused or held in range, never reach a Swift trap (`Int(1e100)`, a
 /// UInt8 below "0" minus 48, `Int.max + 1`) or superlinear work on the
 /// main thread. Daybreak's findings of 7 Nov 2026, each played here.
-@Suite struct UntrustedValuesTests {
+// One at a time: several of these are heavy on purpose and don't suspend, and
+// all together they held every pool thread, so the other suites' short
+// sleeps and fake turns ran late and their tests failed.
+@Suite(.serialized) struct UntrustedValuesTests {
     private func decode<T: Decodable>(_ type: T.Type, _ json: String) throws -> T {
         try JSONDecoder().decode(type, from: Data(json.utf8))
     }
@@ -205,6 +208,15 @@ import Testing
             #expect(new(text) == old(text), "\(text.debugDescription)")
             if new(text) != old(text) { break }
         }
+    }
+
+    @Test func tableCellsAreBounded() {
+        let wide = String(repeating: "x|", count: 800) + "\n" + String(repeating: "-|", count: 800) + "\n" + String(repeating: "x|\n", count: 2_000)
+        #expect(MarkdownNesting.tableCells(wide) >= 1_600_000)
+        #expect(MarkdownNesting.tableCells("> | a | b |\n> |---|:-:|\n> | 1 | 2 |") >= 6)
+        // A long code block or paragraph with pipes and no delimiter row isn't one.
+        #expect(MarkdownNesting.tableCells(String(repeating: "a | b | c\n", count: 5_000)) == 0)
+        #expect(MarkdownNesting.tableCells("| a | b |\n|---|---|\n| 1 | 2 |") < 100)
     }
 
     // MARK: Card mentions

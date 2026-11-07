@@ -41,6 +41,12 @@ public indirect enum MarkdownBlock: Sendable, Hashable {
     /// few.
     public static let maxQuoteDepth = 8
 
+    /// The cells one reply's tables may come to; rows past it are words.
+    /// Short rows are padded to the header's width, and every cell is a view,
+    /// so 9 KB of text could ask for 1.6 million (cross-lab review, 7 Nov
+    /// 2026). A real table is tens of rows of a few columns.
+    public static let maxTableCells = 2_000
+
     public enum RichKind: String, Sendable, Hashable {
         case mermaid, html
 
@@ -52,13 +58,17 @@ public indirect enum MarkdownBlock: Sendable, Hashable {
     }
 
     public static func parse(_ text: String) -> [MarkdownBlock] {
-        parse(text, depth: 0)
+        var cellsLeft = maxTableCells
+        return parse(text, depth: 0, cellsLeft: &cellsLeft)
     }
 
-    /// `depth` is how many quotes this text is inside.
-    fileprivate static func parse(_ text: String, depth: Int) -> [MarkdownBlock] {
-        var parser = Parser(lines: text.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n"), depth: depth)
-        return parser.run()
+    /// `depth` is how many quotes this text is inside; `cellsLeft` is shared
+    /// with the quotes around it.
+    fileprivate static func parse(_ text: String, depth: Int, cellsLeft: inout Int) -> [MarkdownBlock] {
+        var parser = Parser(lines: text.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n"), depth: depth, cellsLeft: cellsLeft)
+        let blocks = parser.run()
+        cellsLeft = parser.cellsLeft
+        return blocks
     }
 }
 
@@ -127,10 +137,13 @@ private struct Parser {
     var lastWasListItem = false
     /// How many quotes these lines are inside.
     let depth: Int
+    /// Table cells this reply can still have (MarkdownBlock.maxTableCells).
+    var cellsLeft: Int
 
-    init(lines: [String], depth: Int) {
+    init(lines: [String], depth: Int, cellsLeft: Int) {
         self.lines = lines
         self.depth = depth
+        self.cellsLeft = cellsLeft
     }
 
     mutating func run() -> [MarkdownBlock] {
@@ -172,7 +185,8 @@ private struct Parser {
             // Past the deepest quote, the line is words like any other.
             if line.hasPrefix(">"), depth < MarkdownBlock.maxQuoteDepth {
                 flush()
-                blocks.append(.quote(MarkdownBlock.parse(quoteLines().joined(separator: "\n"), depth: depth + 1)))
+                let inner = quoteLines().joined(separator: "\n")
+                blocks.append(.quote(MarkdownBlock.parse(inner, depth: depth + 1, cellsLeft: &cellsLeft)))
                 continue
             }
             // Each regex only for a line it could match: on the main thread
@@ -185,7 +199,8 @@ private struct Parser {
             }
             if i + 1 < lines.count, line.contains("|"), let alignments = Self.delimiterRow(lines[i + 1]) {
                 let header = Self.cells(line)
-                if header.count == alignments.count {
+                // With no room for the header and a row, it's words.
+                if header.count == alignments.count, header.count * 2 <= cellsLeft {
                     flush()
                     blocks.append(table(header: header, alignments: alignments))
                     continue
@@ -333,14 +348,16 @@ private struct Parser {
 
     mutating func table(header: [String], alignments: [MarkdownBlock.Alignment]) -> MarkdownBlock {
         i += 2
+        cellsLeft -= header.count
         var rows: [[String]] = []
-        while i < lines.count {
+        while i < lines.count, cellsLeft >= header.count {
             let line = lines[i].trimmingCharacters(in: .whitespaces)
             guard !line.isEmpty, line.contains("|") else { break }
             var row = Self.cells(line)
             // GitHub pads short rows and drops extra cells.
             if row.count < header.count { row += Array(repeating: "", count: header.count - row.count) }
             rows.append(Array(row.prefix(header.count)))
+            cellsLeft -= header.count
             i += 1
         }
         return .table(header: header, alignments: alignments, rows: rows)

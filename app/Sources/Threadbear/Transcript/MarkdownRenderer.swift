@@ -135,6 +135,9 @@ enum MarkdownRenderer {
     /// it's words.
     static let inlineMarksOnWorkerStack = 48
     static let maxInlineMarks = 4_000
+    /// Short rows are padded to a table's header, so 9 KB can ask for 1.6
+    /// million cells (cross-lab review, 7 Nov 2026). Past this it's words.
+    static let maxTableCells = 20_000
 
     static func renderBlock(_ block: String) -> NSAttributedString {
         // Counted in what the parser gets: escaping work: links decodes
@@ -172,7 +175,7 @@ enum MarkdownRenderer {
         // stacks, and 8,000 `>`s from a reply ran one out (Daybreak, 7 Nov
         // 2026). Nothing anyone writes nests this deep.
         let source = WorkLinks.escapeDestinations(block)
-        if MarkdownNesting.bound(source) > maxNesting || MarkdownNesting.inlineMarks(source) > maxInlineMarks {
+        if MarkdownNesting.bound(source) > maxNesting || MarkdownNesting.inlineMarks(source) > maxInlineMarks || MarkdownNesting.tableCells(source) > maxTableCells {
             let start = builder.output.length
             builder.append(block, Context())
             builder.finishParagraph(from: start, style: builder.paragraphStyle(Context()))

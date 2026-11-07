@@ -74,6 +74,41 @@ public enum MarkdownNesting {
         return most
     }
 
+    /// An upper bound on the cells a block's tables could come to: its
+    /// widest delimiter row (`-|-|`, maybe after quote and list marks) by its
+    /// lines, as short rows are padded to the width. Nothing in a table's
+    /// own rows can make it wider.
+    public static func tableCells(_ text: String) -> Int {
+        var widest = 0
+        var lines = 1
+        var pipes = 0
+        var dashes = false
+        var delimiter = true
+        func endLine() {
+            if delimiter, dashes { widest = max(widest, pipes + 1) }
+            pipes = 0
+            dashes = false
+            delimiter = true
+        }
+        for byte in text.utf8 {
+            switch byte {
+            case 0x0A, 0x0D:
+                lines += 1
+                endLine()
+            case UInt8(ascii: "|"):
+                pipes += 1
+            case UInt8(ascii: "-"):
+                dashes = true
+            case UInt8(ascii: ":"), 0x20, 0x09, UInt8(ascii: ">"), UInt8(ascii: "*"), UInt8(ascii: "+"), UInt8(ascii: "."), UInt8(ascii: ")"), UInt8(ascii: "0")...UInt8(ascii: "9"):
+                break
+            default:
+                delimiter = false
+            }
+        }
+        endLine()
+        return widest * lines
+    }
+
     /// The marks inline Markdown nests with (`*`, `_`, `~`, `[`): emphasis
     /// and strikethrough take two a level and a link or picture one (its
     /// `[`), so these bound how deep a paragraph's tree can go.

@@ -30,6 +30,8 @@ final class MarkdownNestingRenderTests: XCTestCase {
             ((0..<1_000).map { String(repeating: "  ", count: $0) + "-" }.joined(separator: "\r") + "\r" + String(repeating: "  ", count: 1_000) + "x", "-"),
             (String(repeating: "> - 1. ", count: 1_000) + "x", "> - 1."),
             (String(repeating: "*a ", count: 3_000) + String(repeating: "a* ", count: 3_000) + "x", "*a"),
+            // A table padded to 1.6 million cells.
+            (String(repeating: "x|", count: 800) + "\n" + String(repeating: "-|", count: 800) + "\n" + String(repeating: "x|\n", count: 2_000), "-|-|"),
             // Escaping work: links decodes %2A into `*` before the parser
             // sees it, so the marks are counted after (cross-lab review).
             ("](work:" + String(repeating: "%2Aa/", count: 2_500) + String(repeating: "a%2A/", count: 2_500) + ")", "%2Aa/"),
