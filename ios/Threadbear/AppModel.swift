@@ -356,6 +356,8 @@ final class AppModel {
             if args.contains("-ThreadbearShortInbox") { fake.keepOnly(["a4", "a5", "a6", "a7"]) }
             // -ThreadbearEmptyInbox: nothing in the inbox from the start, one running.
             if args.contains("-ThreadbearEmptyInbox") { fake.keepOnly(["a5", "a6", "a7"]) }
+            // -ThreadbearFinishSoon: the running thread's turn ends after a while, to see its row move.
+            if args.contains("-ThreadbearFinishSoon") { fake.finishRunningThread(after: .seconds(14)) }
             connect(fake, pairing: nil)
         } else if let saved = PairingStore.load() {
             connect(ConvexBackend(deploymentURL: saved.deploymentURL, token: saved.token), pairing: saved)
@@ -397,8 +399,10 @@ final class AppModel {
 
     var isPaired: Bool { backend != nil && authProblem == nil }
 
-    var sections: InboxSections {
-        InboxSections.build(inbox.filter { !archiving.contains($0.threadId) && !tucks.hidden.contains($0.threadId) }, now: now, wakes: wakes)
+    var sections: InboxSections { sections(of: inbox) }
+
+    private func sections(of list: [PhoneThread]) -> InboxSections {
+        InboxSections.build(list.filter { !archiving.contains($0.threadId) && !tucks.hidden.contains($0.threadId) }, now: now, wakes: wakes)
     }
 
     /// A pasted thread id as the `[title](thread:<id>)` link it goes in as,
@@ -553,6 +557,17 @@ final class AppModel {
         }
     }
 
+    /// Rows on their way to a new heading, whose tick or dot waits until they're
+    /// there: it's the row arriving that says the thread's finished.
+    private(set) var landing: Set<String> = []
+
+    private func popMarksAfterLanding() {
+        Task {
+            try? await Task.sleep(for: Juice.landing)
+            withAnimation(Juice.pop) { landing = [] }
+        }
+    }
+
     /// Starts a subscription for each list now wanted and stops the rest,
     /// dropping what a stopped one had so it isn't shown stale later.
     private func followLists() {
@@ -574,10 +589,20 @@ final class AppModel {
                 model.pinRunners(list)
                 switch view {
                 case .inbox:
-                    model.inbox = list
-                    // Gone from the list means it's done, so a later unarchive shows.
-                    model.archiving.formIntersection(list.map(\.threadId))
-                    model.tucks.inboxArrived(list, now: .now)
+                    // Watching the phone while the Mac works, a row gliding up is
+                    // a thread finishing. Only for a change of heading, and not
+                    // the first answer, so a title or a working line changing
+                    // leaves the list still under his thumb.
+                    let (old, new) = (model.sections, model.sections(of: list))
+                    let glides = model.loaded.contains(.inbox) && old.changedHeadings(to: new)
+                    withAnimation(glides ? Juice.rows : nil) {
+                        model.inbox = list
+                        // Gone from the list means it's done, so a later unarchive shows.
+                        model.archiving.formIntersection(list.map(\.threadId))
+                        model.tucks.inboxArrived(list, now: .now)
+                        if glides { model.landing.formUnion(old.landed(in: new)) }
+                    }
+                    if glides { model.popMarksAfterLanding() }
                 case .hibernating: model.hibernating = list
                 case .den: model.den = list
                 }

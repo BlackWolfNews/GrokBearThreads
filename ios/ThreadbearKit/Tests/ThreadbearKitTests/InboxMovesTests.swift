@@ -41,4 +41,37 @@ import Testing
         #expect(before.inbox.map(\.threadId) != after.inbox.map(\.threadId))
         #expect(!before.changedHeadings(to: after))
     }
+
+    @Test func theRowsThatLandedAreTheOnesInANewHeading() {
+        let before = sections(thread("a", status: .running, working: "Busy"), thread("b"), thread("c", starred: true))
+        let after = sections(thread("a"), thread("b"), thread("c", starred: true), thread("d"))
+        #expect(before.landed(in: after) == ["a", "d"])
+        #expect(after.landed(in: after).isEmpty)
+    }
+
+    /// The first three headings and their rows are one flat run of list rows, so
+    /// a row's id is the same under any heading and the List moves it, rather
+    /// than fading it out of one section and into another.
+    @Test func linesKeepARowsIdAcrossHeadings() {
+        let before = sections(thread("a", status: .running, working: "Busy"), thread("b"))
+        let after = sections(thread("a"), thread("b"))
+        let unfolded: (PhoneSection) -> Bool = { _ in false }
+        #expect(before.lines(folded: unfolded).map(\.id) == ["heading:inbox", "b", "heading:running", "a"])
+        #expect(after.lines(folded: unfolded).map(\.id).contains("a"))
+        #expect(!after.lines(folded: unfolded).map(\.id).contains("heading:running"))
+    }
+
+    @Test func aFoldedHeadingKeepsItsLineAndHidesItsRows() {
+        let list = sections(thread("a", status: .running, working: "Busy"), thread("b", starred: true), thread("c"))
+        let lines = list.lines(folded: { $0 == .running })
+        #expect(lines.map(\.id) == ["heading:starred", "b", "heading:inbox", "c", "heading:running"])
+    }
+
+    @Test func anEmptyInboxHasTheEmptyLineWhereItsHeadingWas() {
+        let list = sections(thread("a", status: .running, working: "Busy"))
+        #expect(list.lines(folded: { _ in false }).map(\.id) == ["inbox-zero", "heading:running", "a"])
+        // Under a star that needs him, nothing says the inbox is empty.
+        let starred = sections(PhoneThread(threadId: "s", title: "s", needsYou: true, lastActivityAt: now, starredAt: now))
+        #expect(starred.lines(folded: { _ in false }).map(\.id) == ["heading:starred", "s"])
+    }
 }

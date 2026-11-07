@@ -298,6 +298,20 @@ public final class FakeBackend: Backend, @unchecked Sendable {
         mutate { s in s.threadsById = s.threadsById.filter { ids.contains($0.key) } }
     }
 
+    /// The running sample thread's turn ends by itself after a while, to watch
+    /// its row move to the inbox.
+    public func finishRunningThread(after delay: Duration) {
+        Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            self?.mutate { s in
+                s.threadsById["a5"]?.status = .idle
+                s.threadsById["a5"]?.working = nil
+                s.threadsById["a5"]?.unread = true
+                s.threadsById["a5"]?.lastActivityAt = .now
+            }
+        }
+    }
+
     public func me() async throws -> PhoneIdentity {
         // Always a current backend, so the demo never says the Mac needs updating.
         PhoneIdentity(name: "iphone", expiresAt: Date.now.addingTimeInterval(90 * 86_400),

@@ -79,7 +79,9 @@ struct InboxView: View {
                     LoadingRows()
                 }
                 if query.trimmingCharacters(in: .whitespaces).isEmpty, model.loaded.contains(.inbox) {
-                    ForEach(PhoneSection.allCases, id: \.self) { section($0) }
+                    ForEach(sections.lines(folded: { model.folds.isFolded($0) })) { line(for: $0) }
+                    section(.hibernating)
+                    section(.archived)
                 }
             }
             // A flat list with the Mac sidebar's headings, not grouped cards.
@@ -227,49 +229,67 @@ struct InboxView: View {
         .environment(\.pushThread) { path.append($0) }
     }
 
-    /// A heading and its rows, as on the Mac's sidebar: tap the heading to
-    /// fold it away, and folded it says how many it hides. Empty sections
-    /// are left out, Inbox aside, which has the empty view above instead.
+    /// One line of the flat top of the list: Starred, Inbox and Running, where
+    /// a row keeps its identity under any heading, so the List can glide it to
+    /// another (`InboxSections.lines`).
+    @ViewBuilder private func line(for line: InboxLine) -> some View {
+        switch line {
+        case let .heading(section):
+            heading(section)
+                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+        case let .thread(thread, under):
+            row(thread, running: under == .running, starred: under == .starred)
+        case .inboxZero:
+            // In the Inbox's place, so anything still running sits under it.
+            InboxZeroView(celebrating: model.inboxJustCleared)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+        }
+    }
+
+    /// As on the Mac's sidebar: tap a heading to fold it away, and folded it says
+    /// how many it hides. The Inbox never folds.
+    @ViewBuilder private func heading(_ section: PhoneSection) -> some View {
+        if section == .inbox {
+            SectionHeading(title: section.title, icon: section.icon)
+        } else {
+            let folded = model.folds.isFolded(section)
+            // A tap rather than a Button: a button in a list header
+            // is drawn dimmed, so the heading looked disabled.
+            SectionHeading(title: section.title, icon: section.icon, fold: .init(folded: folded, count: model.count(section)),
+                           bounce: section == .hibernating && !reduceMotion ? model.tucks.bounces : 0)
+                .onTapGesture { withAnimation(.snappy(duration: 0.2)) { model.toggle(section) } }
+                .accessibilityAction { model.toggle(section) }
+                .accessibilityHint(folded ? "Shows these threads" : "Hides these threads")
+        }
+    }
+
+    /// Hibernating or Archived: a real section, loaded only once it's opened.
+    /// A folded one with no count (an older backend) still shows its heading, so
+    /// there's a way to open it. Empty, it's left out.
     @ViewBuilder private func section(_ section: PhoneSection) -> some View {
-        let folded = model.folds.isFolded(section)
         let count = model.count(section)
-        let threads = model.threads(section)
-        // A folded put-away section with no count (an older backend) still
-        // shows its heading, so there's a way to open it.
-        if section != .inbox, count != 0 || (count == nil && section.view != nil) {
+        if count != 0 {
             Section {
-                if !folded {
+                if !model.folds.isFolded(section) {
                     if section == .hibernating {
                         // The scheduled ones are in the inbox list already;
                         // the snoozed ones load once it's opened.
-                        hibernatingRows(threads)
+                        hibernatingRows(model.threads(section))
                         if !model.loaded.contains(.hibernating) { LoadingRows(count: 3) }
                     } else if let view = section.view {
                         if !model.loaded.contains(view) {
                             LoadingRows(count: 3)
                         } else {
-                            putAwayRows(threads, from: view)
+                            putAwayRows(model.threads(section), from: view)
                         }
-                    } else {
-                        rows(threads, running: section == .running, starred: section == .starred)
                     }
                 }
             } header: {
-                // A tap rather than a Button: a button in a list header
-                // is drawn dimmed, so the heading looked disabled.
-                SectionHeading(title: section.title, icon: section.icon, fold: .init(folded: folded, count: count),
-                               bounce: section == .hibernating && !reduceMotion ? model.tucks.bounces : 0)
-                    .onTapGesture { withAnimation(.snappy(duration: 0.2)) { model.toggle(section) } }
-                    .accessibilityAction { model.toggle(section) }
-                    .accessibilityHint(folded ? "Shows these threads" : "Hides these threads")
+                heading(section)
             }
-        } else if section == .inbox, !threads.isEmpty {
-            Section { rows(threads) } header: { SectionHeading(title: section.title, icon: section.icon) }
-        } else if section == .inbox, model.sections.isInboxZero {
-            // In the Inbox's place, so anything still running sits under it.
-            InboxZeroView(celebrating: model.inboxJustCleared)
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
         }
     }
 
@@ -512,7 +532,9 @@ struct ThreadRow: View {
         HStack(alignment: .center, spacing: 10) {
             ProjectTiles(projects: thread.projects ?? [])
                 .overlay(alignment: .leading) {
-                    if done {
+                    if model.landing.contains(thread.threadId) {
+                        // On its way to a new heading: the mark pops in as it lands.
+                    } else if done {
                         // Finished with nothing needed: a tick where the
                         // unread dot would be.
                         Image(systemName: "checkmark")
@@ -521,12 +543,14 @@ struct ThreadRow: View {
                             .frame(width: 10, height: 10)
                             .offset(x: -19)
                             .accessibilityLabel("Done, unread")
+                            .transition(Juice.popIn)
                     } else if unread {
                         Circle()
                             .fill(Color.accentColor)
                             .frame(width: 7, height: 7)
                             .offset(x: -17)
                             .accessibilityLabel("Needs you")
+                            .transition(Juice.popIn)
                     }
                 }
             VStack(alignment: .leading, spacing: 3) {
