@@ -607,7 +607,10 @@ class ClaudeSession implements AgentSession {
   // The calls after `toolUseId` in its reply that will ask too, as their
   // own cards would show them, leaving out any already answered or too
   // long for a card (that one is refused when it comes up).
-  private queueAfter(toolUseId: string): QueuedCall[] {
+  // `shown`: calls already on the card, left as they were listed (Codex
+  // review: listing one again could change what an allow covers, after
+  // the card had shown it otherwise).
+  private queueAfter(toolUseId: string, shown?: Set<string>): QueuedCall[] {
     const out: QueuedCall[] = [];
     let after = false;
     for (const [id, call] of this.openCalls) {
@@ -615,7 +618,7 @@ class ClaudeSession implements AgentSession {
         after = true;
         continue;
       }
-      if (!after || this.queuedAnswers.has(id) || this.checkedCalls.has(id) || !this.wouldAsk(call.name, call.input)) continue;
+      if (!after || shown?.has(id) || this.queuedAnswers.has(id) || this.checkedCalls.has(id) || !this.wouldAsk(call.name, call.input)) continue;
       const target = EDIT_TOOLS.has(call.name) ? this.editTarget(call.input) : undefined;
       const code: CodeWrite = target !== undefined && this.runsAsCode(target);
       const card = cardInput(call.input, call.name.startsWith('mcp__') || code ? 'all' : ['command']);
@@ -644,10 +647,11 @@ class ClaudeSession implements AgentSession {
     while (this.openCalls.size > 200) this.openCalls.delete(this.openCalls.keys().next().value!);
     const card = this.waitingCard;
     if (!added || !card) return;
-    const queued = this.queueAfter(card.toolUseId);
-    if (queued.map((c) => c.itemId).join() === card.queued.map((c) => c.itemId).join()) return;
-    card.queued = queued;
-    this.sink.output({ kind: 'approvalQueue', toolUseId: card.toolUseId, calls: queued });
+    // Only new calls join; the ones already shown stay as they were.
+    const more = this.queueAfter(card.toolUseId, new Set(card.queued.map((c) => c.itemId)));
+    if (!more.length) return;
+    card.queued = [...card.queued, ...more];
+    this.sink.output({ kind: 'approvalQueue', toolUseId: card.toolUseId, calls: card.queued });
   }
 
   // Keeps the strictest mode a call was seen on.

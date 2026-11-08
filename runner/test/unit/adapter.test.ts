@@ -580,3 +580,37 @@ test('a queued allow asks again if the input changed or the file now runs as cod
   assert.equal((await asCode).behavior, 'allow');
   state.close!();
 });
+
+// Codex review, round two: a call joining the queue mustn't relist one
+// already shown, which could change what its allow covers.
+test('more calls joining a waiting card leave the ones it shows as they were', async () => {
+  let release!: (a: ToolApprovalAnswer) => void;
+  const codeFiles = new Set<string>();
+  const { state, approvals, outputs } = start([], { runsAsCode: (f: string) => codeFiles.has(f) }, {}, () => new Promise((r) => (release = r)));
+  const opts = (id: string) => ({ signal: new AbortController().signal, toolUseID: id });
+  const call = (id: string, name: string, input: Record<string, unknown>) =>
+    state.frame!({ type: 'assistant', session_id: 's', message: { id: 'm', role: 'assistant', content: [{ type: 'tool_use', id, name, input }] } });
+  const dir = state.options.cwd;
+  const helper = { file_path: `${dir}/helper.txt`, content: 'x\n'.repeat(20) };
+  await call('e1', 'Edit', { file_path: `${dir}/a.txt`, old_string: 'a', new_string: 'b' });
+  await call('w1', 'Write', helper);
+  const first = state.options.canUseTool('Edit', { file_path: `${dir}/a.txt`, old_string: 'a', new_string: 'b' }, opts('e1'));
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(approvals[0].queued?.map((c) => c.itemId), ['w1']);
+  // The helper becomes code while the card waits, then more calls stream in.
+  codeFiles.add(helper.file_path);
+  await call('r1', 'Read', { file_path: `${dir}/a.txt` });
+  await call('b1', 'Bash', { command: 'ls' });
+  const grown = outputs.filter((o) => o.kind === 'approvalQueue').at(-1);
+  assert.deepEqual(grown?.kind === 'approvalQueue' ? grown.calls.map((c) => [c.itemId, c.title]) : [], [['w1', approvals[0].queued![0].title], ['b1', 'ls']]);
+  release({ decision: 'allow', queued: { w1: 'allow', b1: 'allow' } });
+  await first;
+  // Shown as ordinary text, now code: it asks again, with every line.
+  const cards = approvals.length;
+  const again = state.options.canUseTool('Write', helper, opts('w1'));
+  await new Promise((r) => setImmediate(r));
+  assert.equal(approvals.length, cards + 1, 'asked again');
+  release({ decision: 'deny' });
+  await again;
+  state.close!();
+});
