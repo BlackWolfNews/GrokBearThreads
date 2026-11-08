@@ -11,9 +11,10 @@ Threadbear is MIT, Copyright (c) 2026 Mike Cann. This fork keeps his
 copyright and the MIT notice. The Grok adapter is additional work on
 top of his.
 
-Status on 2026-11-08: the runner can start a Grok thread and give it
-Threadbear's tools. One live `grok` 1.0.77 turn completed through the
-adapter. The Mac app is not installed. See "Tried against the real CLI".
+Status on 2026-11-08: the runner can start a Grok thread, give it
+Threadbear's tools, and open a Grok session that is already on disk.
+One live `grok` 1.0.77 turn completed through the adapter. The Mac app
+is not installed. See "Tried against the real CLI".
 
 ## What this is
 
@@ -28,17 +29,17 @@ inbox can file the thread.
 
 A thread Threadbear starts is a new Grok session. It does not attach to
 a terminal that is already open. The process also loads the MCP servers
-already configured for that CLI. Resuming a session Grok already has on
-disk is the same `session/load` call, and the adapter sends it. There
-is no picker yet that lists `~/.grok/sessions/` and turns one into a
-Threadbear thread.
+already configured for that CLI. A session Grok already has on disk can
+be opened as a thread. The next message is `session/load`. See "Opening
+a session already on disk".
 
 ## How hard, so far
 
 Wiring the name "grok" through the runner was an evening. The adapter
 that speaks the protocol was a day against a fake process, then one live
 turn. The tools were the hard part, and they are the part that will be
-hard for the next agent too.
+hard for the next agent too. Opening a session already on disk was the
+resume flag the runner already had, plus a read of each `summary.json`.
 
 The Mac app did not need a change. It stores `provider` as a string, and
 an unknown provider is shown with a capital letter, so "grok" reads as
@@ -58,6 +59,10 @@ conflict. Keep the edits small.
 | `runner/src/pools.ts` | `PROVIDER_TITLES.grok` is `Grok`. |
 | `runner/src/net-probe.ts` | Grok's host is `api.x.ai`. |
 | `runner/src/runner.ts` | A thread marked confined is refused with a Grok-specific sentence. Grok is not started inside Threadbear's sandbox. |
+| `runner/src/runner/new-threads.ts` | `threads.create` takes `grokSessionId` and makes a thread that resumes that session. |
+| `runner/src/rpc.ts` | `grok.sessions`, and `threads.create` passes `grokSessionId`. |
+| `runner/src/cli.ts` | `tb grok sessions` and `tb grok open`. |
+| `docs/protocol.md` | The same two: `grok.sessions`, and `grokSessionId` on `threads.create`. |
 | `runner/src/updates/manager.ts` | Threadbear does not install or replace Grok. The policy stays off. A bare `grok` on `PATH` is reported as `unknown`, not `missing`, because `existsSync` cannot see a `PATH` command. |
 | `runner/src/adapters/types.ts` | Comment only. The seam was already `AgentAdapter`. |
 
@@ -75,8 +80,10 @@ Grok.
 | `adapter.ts` | Spawns the process, speaks JSON-RPC, streams text and tool calls, answers permission requests. |
 | `mcp-bridge.mjs` | The stdio MCP server Grok spawns. It has no tools of its own. |
 | `tools.ts` | Listens on a unix socket, runs `buildThreadbearTools`'s handlers, records the call. |
+| `sessions.ts` | Reads `summary.json` for each session under `~/.grok/sessions`. Does not read the conversation. |
 | `runner/test/fixtures/fake-grok.mjs` | Stand-in process for the tests. |
-| `runner/test/unit/grok-adapter.test.ts` | The contract. Seven tests. |
+| `runner/test/unit/grok-adapter.test.ts` | The connector. Seven tests. |
+| `runner/test/unit/grok-sessions.test.ts` | The on-disk list, and opening one as a thread. |
 
 ## The connector
 
@@ -180,12 +187,38 @@ arrives on its own channel.
 `erasableSyntaxOnly` rejects parameter properties (`constructor(private
 x)`). Assign the fields in the body. Run
 `./node_modules/.bin/tsc --noEmit -p .` from `runner/`, and
-`node --test test/unit/grok-adapter.test.ts`.
+`node --test test/unit/grok-adapter.test.ts test/unit/grok-sessions.test.ts`.
+
+## Opening a session already on disk
+
+`grok sessions list` only shows the folder it was started in. The
+sessions themselves live under `~/.grok/sessions/<encoded-cwd>/<id>/`.
+`sessions.ts` reads each `summary.json` and nothing else. `updates.jsonl`
+is the conversation, and it stays unread. The title is `generated_title`,
+or else `session_summary`. The folder is `info.cwd`, or else the `.cwd`
+file beside the session folders, or else the decoded directory name.
+A symlink that leaves the sessions directory is skipped.
+
+`tb grok sessions` prints that list without a running runner.
+`grok.sessions` is the same list on the socket. `tb grok open <id>` and
+`threads.create` with `grokSessionId` make a thread whose folder, title,
+and native session id are the ones in the summary, and whose
+`sessionUsed` is set, so the next message is `session/load`. With no
+text the thread waits. The account is `grok-main` when none is named.
+A pool is refused. A `cwd` that is not the session's folder is refused.
+A thread that already has that session id is refused.
+
+The turns from before the open stay in Grok. Threadbear's window starts
+empty. Inbox buttons apply to turns after the thread exists. A session
+that is still open in a terminal fails that load. The error does not
+look like "session not found", so the runner does not start a second
+copy. Nothing here imports every session on its own. The Mac app has
+no list of its own yet.
 
 ## Still open
 
 - The full Threadbear tool list on a live CLI. One stub `end_turn` has been called for real. `session/set_config_option` has not.
-- A list of sessions already on disk, so an existing terminal session can be opened as a thread. `session/load` is implemented. The picker is not. Sessions are grouped by the folder they were started in, and Grok refuses a second open of one that is still open in a terminal.
+- Copying the earlier turns out of `updates.jsonl` into the thread, so the window is not empty until the next message. The Mac app's own session list.
 - The librarian. It still runs as `claude -p`. Leave `models.pool` null until it can call Grok.
 - `./threadbear setup`. It still expects `claude` or `codex` on `PATH`.
 - Building the Mac app. `xcode-select` on the machine this was written on still points at the Command Line Tools, not Xcode.

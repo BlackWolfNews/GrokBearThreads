@@ -1,6 +1,7 @@
 // WebSocket JSON-RPC 2.0 server at ws://127.0.0.1:<port>/rpc.
 import http from 'node:http';
 import crypto from 'node:crypto';
+import path from 'node:path';
 import type { Duplex } from 'node:stream';
 import { awakeTimeout, type AwakeTimer } from './awake-timer.ts';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -12,6 +13,7 @@ import { MAX_BYLINE } from './needs.ts';
 import { isMoved, mergeSummaries, type Bucket } from './handover.ts';
 import { AUTH_VERSION, authProof, isNonce, newNonce, proofMatches, type AuthChannel } from './rpc-auth.ts';
 import { cutSafely } from './safe-cut.ts';
+import { listGrokSessions } from './adapters/grok/sessions.ts';
 
 type Conn = {
   id: number;
@@ -534,6 +536,7 @@ export class RpcServer {
           });
         }
         if (p.worktree !== undefined && typeof p.worktree !== 'boolean') throw bad('worktree must be a boolean');
+        const grokSessionId = optString(p, 'grokSessionId')?.trim();
         const res = r.create({
           text: optString(p, 'text') ?? '',
           images: optImages(p),
@@ -544,6 +547,7 @@ export class RpcServer {
           effort: optEffort(p),
           permissionMode: optMode(p),
           title: optString(p, 'title'),
+          ...(grokSessionId ? { grokSessionId } : {}),
           ...(p.worktree === false ? { worktree: false } : {}),
           // Only ever narrows (a draining runner passing on a sandboxed
           // agent's create_thread), so any client may ask for it.
@@ -551,8 +555,10 @@ export class RpcServer {
           ...optStartedBy(p),
           ...optProjectIds(p),
         });
-        return { thread: res.thread, turnId: res.turnId };
+        return res.turnId ? { thread: res.thread, turnId: res.turnId } : { thread: res.thread };
       }
+      case 'grok.sessions':
+        return { sessions: listGrokSessions(path.join(r.cfg.grokMainDir, 'sessions')) };
       case 'threads.samples':
         return r.samples({ cwd: reqString(p, 'cwd'), remove: p.remove === true });
       case 'reviews.list':

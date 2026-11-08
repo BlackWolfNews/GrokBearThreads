@@ -16,6 +16,7 @@ import { land, landTargetFromGit, type LandTarget } from './worktrees.ts';
 import { activityCommand } from './activity.ts';
 import { pairCommand } from './pair.ts';
 import { runnerKeysCommand } from './runner-keys.ts';
+import { listGrokSessions } from './adapters/grok/sessions.ts';
 
 const OPTIONS = {
   cwd: { type: 'string' },
@@ -99,6 +100,15 @@ const HELP = `tb: talk to the Threadbear runner
   tb archive <threadId>      tb unarchive <threadId>
   tb move <threadId> <folder>
   tb delete <threadId>
+  tb grok sessions [--json]       Grok sessions already on disk. No runner needed. One line
+                                  is the id, when it last changed, and its title; the next
+                                  line is the folder it was started in
+  tb grok open <id> ["text"] [--cwd DIR] [--account ID] [--title T] [--model M] [--effort L]
+              [--ask | --auto | --plan] [--wait]
+                                  opens that session as a thread, in the folder it already
+                                  uses. With no text the thread waits. Earlier turns stay
+                                  in Grok. A session still open in a terminal fails when
+                                  the next message loads it
   tb accounts                     the Claude and Codex logins (* new threads start on it)
   tb accounts <account> [--json]  that account's models and its default
   tb pools [--json]               the pools, their logins and room (* new threads start on it)
@@ -181,6 +191,7 @@ const COMMAND_FLAGS: Record<string, string[]> = {
   move: [],
   delete: [],
   accounts: ['json'],
+  grok: ['json', 'cwd', 'account', 'model', 'effort', 'ask', 'auto', 'plan', 'full', 'title', 'wait'],
   pools: ['json'],
   schedule: ['at', 'cron', 'tz', 'title', 'thread', 'cwd', 'account', 'pool', 'model', 'effort', 'ask', 'auto', 'json'],
   schedules: ['json', 'text', 'title', 'at', 'cron', 'tz', 'cwd', 'account', 'pool', 'model', 'effort', 'ask', 'auto', 'full'],
@@ -255,6 +266,8 @@ async function main(argv: string[]): Promise<number> {
   if (cmd === 'land') return landCommand(cfg, Boolean(values['dry-run']));
   // Read from runner.json alone, on the Mac being paired.
   if (cmd === 'pair') return pairCommand(cfg);
+  // The list is files under the Grok home. Opening one needs the runner.
+  if (cmd === 'grok' && args[0] !== 'open') return grokSessionsCommand(cfg, args, Boolean(values.json));
   // Straight to the backend with this Mac's key, so no runner needed either.
   if (cmd === 'runner') {
     const flags = { ...(typeof values.ssh === 'string' ? { ssh: values.ssh } : {}), ...(typeof values.out === 'string' ? { out: values.out } : {}), ...(typeof values.id === 'string' ? { id: values.id } : {}), json: Boolean(values.json), finish: Boolean(values.finish), replace: Boolean(values.replace), ...(Array.isArray(values.drop) ? { remove: values.drop as string[] } : {}), ...(typeof values.snapshot === 'string' ? { snapshot: values.snapshot } : {}), keysChecked: Boolean(values['keys-checked']), ...(Array.isArray(values['lock-out']) ? { lockOut: values['lock-out'] as string[] } : {}), purge: Boolean(values.purge) };
@@ -291,6 +304,30 @@ async function main(argv: string[]): Promise<number> {
 }
 
 type Flags = Record<string, string | boolean | string[] | undefined>;
+
+// Grok sessions on disk. `tb grok open` is in run(), because it needs the runner.
+function grokSessionsCommand(cfg: ReturnType<typeof loadConfig>, args: string[], json: boolean): number {
+  const [sub, ...rest] = args;
+  if (sub !== 'sessions' || rest.length) {
+    console.error('tb grok sessions [--json], or tb grok open <sessionId> ["text"]\nSee tb grok --help.');
+    return 2;
+  }
+  const sessions = listGrokSessions(path.join(cfg.grokMainDir, 'sessions'));
+  if (json) {
+    console.log(JSON.stringify({ sessions }, null, 2));
+    return 0;
+  }
+  if (!sessions.length) {
+    console.log('No Grok sessions on disk.');
+    return 0;
+  }
+  for (const s of sessions) {
+    const when = s.updatedAt ? s.updatedAt.slice(0, 16).replace('T', ' ') : '';
+    console.log(`${s.id}  ${when}  ${s.title}`);
+    console.log(`  ${s.cwd}`);
+  }
+  return 0;
+}
 
 // `tb land` (docs/thread-worktrees.md, worktrees.ts). Inside a thread
 // (THREADBEAR_THREAD_ID) the runner says where the thread's worktree is;
@@ -356,6 +393,30 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
     return out;
   };
   switch (cmd) {
+    case 'grok': {
+      const id = args[1];
+      if (args[0] !== 'open' || !id) throw new Error('tb grok open <sessionId> ["text"]');
+      const text = args.slice(2).join(' ');
+      const params: Record<string, unknown> = { grokSessionId: id, text };
+      if (f.cwd) params.cwd = path.resolve(String(f.cwd));
+      if (f.account) params.accountId = f.account;
+      if (f.title) params.title = f.title;
+      if (f.model) params.model = f.model;
+      if (f.effort) params.effort = f.effort;
+      if (f.ask) params.permissionMode = 'ask';
+      else if (f.auto) params.permissionMode = 'auto';
+      else if (f.plan) params.permissionMode = 'plan';
+      else if (f.full) params.permissionMode = 'full';
+      const r = await client.call<{ thread: ThreadSummary; turnId?: string }>('threads.create', params);
+      if (f.json) console.log(JSON.stringify(r, null, 2));
+      else console.log(r.thread.id);
+      if (!text.trim() && !f.json) console.error(`Waiting in ${r.thread.cwd}. Earlier turns stay in Grok.`);
+      if (f.wait) {
+        if (!r.turnId) throw new Error('Nothing was sent, so there is no turn to wait for.');
+        return tail(client, r.thread.id, { from: 0, json: Boolean(f.json), untilTurn: r.turnId });
+      }
+      return 0;
+    }
     case 'new': {
       const params: Record<string, unknown> = { text: args[0] ?? '', images: await images() };
       if (f.cwd) params.cwd = path.resolve(String(f.cwd));

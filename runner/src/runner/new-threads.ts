@@ -6,7 +6,8 @@ import type { Runner } from '../runner.ts';
 import type { RunnerPart } from './part.ts';
 import { SAMPLE_THREADS, WELCOME_PATCH } from '../samples.ts';
 import type { Account, EffortLevel, ImageRef, MessageOrigin, PermissionMode, ThreadStartedBy, ThreadSummary } from '../protocol.ts';
-import { ErrorCode, LIMITS, RpcError } from '../protocol.ts';
+import { ErrorCode, LIMITS, RpcError, isEffortLevel } from '../protocol.ts';
+import { readGrokSession } from '../adapters/grok/sessions.ts';
 import type { Schedule } from '../protocol.ts';
 import type { ThreadRecord } from '../store.ts';
 import { expandHome, readRunnerJson } from '../config.ts';
@@ -42,8 +43,13 @@ export const newThreadsPart = {
     // Projects it starts in (New Thread on a project's page), joined
     // before its first turn, so that turn already has the project's brief.
     projectIds?: string[];
+    // A Grok session already on disk (docs/grok-adapter.md). The thread
+    // takes that session's folder and id. With no text it waits, and the
+    // first message loads the session instead of starting a new one.
+    grokSessionId?: string;
   }): { thread: ThreadSummary; turnId: string } {
-    if (!params.text && !params.images?.length) throw new RpcError(ErrorCode.badParams, 'text or images required');
+    const adopting = params.grokSessionId?.trim() || undefined;
+    if (!adopting && !params.text && !params.images?.length) throw new RpcError(ErrorCode.badParams, 'text or images required');
     checkImages(params.images ?? []);
     const projectIds = params.projectIds ?? [];
     if (projectIds.length) {
@@ -52,8 +58,15 @@ export const newThreadsPart = {
       // Every one checked before the thread exists: a bad id makes nothing.
       for (const p of projectIds) projects.get(p);
     }
-    const { st, notes } = this.makeThread(params);
+    const { st, notes } = adopting ? this.adoptedGrokSession(adopting, params) : this.makeThread(params);
     if (projectIds.length) this.projects!.changeMembership(st.rec.id, { add: projectIds, by: 'mike' });
+    // Nothing to send yet: the thread is the session, and the window is
+    // empty until the next message. The earlier turns stay in Grok.
+    if (!params.text && !params.images?.length) {
+      for (const text of notes) this.emit(st, { type: 'system.note', text });
+      // No turn was started. Callers treat an empty id as "nothing running".
+      return { thread: this.summary(st), turnId: '' };
+    }
     const turnId = this.sendTo(st, params.text ?? '', params.images ?? [], { origin: params.origin, scheduleId: params.scheduleId });
     // Under the first turn, so they read as part of starting it.
     for (const text of notes) this.emit(st, { type: 'system.note', text }, st.rt.turn?.turnId ?? turnId);
@@ -168,6 +181,14 @@ export const newThreadsPart = {
     worktree?: boolean;
     startedBy?: ThreadStartedBy;
     confined?: boolean;
+    // Set when the thread is a Grok session that already has a transcript.
+    nativeSessionId?: string;
+    sessionUsed?: boolean;
+    // A title taken from that session counts as named, so the first
+    // message does not replace it. False leaves the usual rule.
+    titleSet?: boolean;
+    // Opening an old session must not move which login new threads use.
+    remember?: boolean;
   }): { st: ThreadState; notes: string[] } {
     this.checkAccepting();
     // New threads belong on the new release.
@@ -200,7 +221,7 @@ export const newThreadsPart = {
     const rec: ThreadRecord = {
       id,
       title: params.title?.trim() ? cutSafely(params.title.trim(), 200) : titleFrom(params.text),
-      titleSet: Boolean(params.title?.trim()),
+      titleSet: params.titleSet ?? Boolean(params.title?.trim()),
       cwd,
       accountId,
       ...(poolId ? { poolId } : {}),
@@ -214,8 +235,8 @@ export const newThreadsPart = {
       preview: '',
       lastSeq: 0,
       lastSeenSeq: 0,
-      nativeSessionId: crypto.randomUUID(),
-      sessionUsed: false,
+      nativeSessionId: params.nativeSessionId ?? crypto.randomUUID(),
+      sessionUsed: params.sessionUsed ?? false,
       lastTurnCompletedSeq: 0,
       queue: [],
       pendingApprovals: [],
@@ -240,11 +261,71 @@ export const newThreadsPart = {
     this.threads.set(id, st);
     // What Mike picked last is what the next thread starts on, so a
     // schedule's own login or pool (a 9:00 standup's) doesn't move it.
-    if (params.origin === 'schedule') {
-      /* keep the last pick */
+    if (params.origin === 'schedule' || params.remember === false) {
+      /* keep the last pick: a schedule's login, or an opened Grok session */
     } else if (!poolId) this.rememberAccount(accountId);
     else if (params.poolId !== undefined) this.rememberPool(poolId);
     return { st, notes: checked.notes };
+  },
+
+  // A thread for a Grok session that is already on disk. The folder and
+  // the session id come from summary.json. The first message resumes it
+  // (sessionUsed), rather than starting a new Grok session.
+  adoptedGrokSession(this: Runner, id: string, params: {
+    text: string;
+    cwd?: string;
+    accountId?: string;
+    poolId?: string;
+    model?: string;
+    effort?: EffortLevel;
+    permissionMode?: PermissionMode;
+    title?: string;
+    origin?: MessageOrigin;
+    scheduleId?: string;
+    startedBy?: ThreadStartedBy;
+    confined?: boolean;
+  }): { st: ThreadState; notes: string[] } {
+    if (params.poolId) throw new RpcError(ErrorCode.badParams, 'A Grok session stays on its Grok login, so it is not put in a pool.');
+    const session = readGrokSession(path.join(this.cfg.grokMainDir, 'sessions'), id);
+    if (!session) throw new RpcError(ErrorCode.badParams, `No Grok session ${id}.`);
+    const sessionCwd = path.resolve(expandHome(session.cwd));
+    if (params.cwd?.trim() && !sameFolder(params.cwd, sessionCwd)) {
+      throw new RpcError(ErrorCode.badParams, `That session is in ${sessionCwd}.`);
+    }
+    for (const st of this.threads.values()) {
+      if (st.rec.nativeSessionId === session.id) {
+        throw new RpcError(ErrorCode.badParams, `That Grok session is already thread "${st.rec.title}" (${st.rec.id}).`);
+      }
+    }
+    let accountId = params.accountId?.trim();
+    if (!accountId) {
+      const grok = this.accounts.list().filter((a) => a.provider === 'grok');
+      accountId = grok.find((a) => a.id === 'grok-main')?.id ?? grok[0]?.id;
+    }
+    if (!accountId) throw new RpcError(ErrorCode.badParams, 'No Grok login on this runner.');
+    const account = this.accounts.get(accountId);
+    if (!account) throw new RpcError(ErrorCode.accountNotFound, `No account called ${accountId}`);
+    if (account.provider !== 'grok') throw new RpcError(ErrorCode.badParams, `${accountId} is a ${providerName(account.provider)} login. A Grok session needs a Grok login.`);
+    const named = Boolean(params.title?.trim());
+    const fromSession = session.title !== session.id;
+    return this.makeThread({
+      text: params.text,
+      cwd: sessionCwd,
+      accountId,
+      model: params.model || session.model,
+      effort: params.effort ?? (isEffortLevel(session.effort) ? session.effort : undefined),
+      permissionMode: params.permissionMode,
+      title: named ? params.title : fromSession ? session.title : session.id,
+      titleSet: named || fromSession,
+      origin: params.origin,
+      scheduleId: params.scheduleId,
+      worktree: false,
+      startedBy: params.startedBy,
+      confined: params.confined,
+      nativeSessionId: session.id,
+      sessionUsed: true,
+      remember: false,
+    });
   },
 
   // An account whose CLI this runner can't drive (a Codex login found
@@ -297,5 +378,19 @@ export const newThreadsPart = {
     return !model.startsWith('gpt-') && !codexIds;
   },
 };
+
+// The same folder, including when one path is the other's symlink
+// (`/var` and `/private/var` on macOS). A missing folder is only the same
+// when the paths already match.
+function sameFolder(a: string, b: string): boolean {
+  const left = path.resolve(expandHome(a));
+  const right = path.resolve(expandHome(b));
+  if (left === right) return true;
+  try {
+    return fs.realpathSync(left) === fs.realpathSync(right);
+  } catch {
+    return false;
+  }
+}
 
 export type NewThreadsPart = RunnerPart<typeof newThreadsPart>;
