@@ -478,6 +478,9 @@ a.video-card:hover .video-play { scale: 1.06; }
 .docs-nav a:hover { background: rgba(31, 28, 24, .05); color: var(--ink); }
 .docs-nav a[aria-current="page"] { background: var(--well); color: var(--ink); font-weight: 500; }
 .docs-nav .docs-home { font-weight: 600; color: var(--ink); }
+/* A video in a docs page (docs.mjs, "video:" comments in the guide). */
+.docs-video { margin: var(--s-300) 0; }
+.docs-video video { display: block; width: 100%; height: auto; border-radius: var(--r-lg); background: #1a1511; }
 .doc h3 { font-size: 18px; line-height: 28px; font-weight: 600; margin-top: var(--s-300); }
 .doc > p, .doc-intro p { font-size: 16px; line-height: 24px; color: var(--body); margin-top: var(--s-100); }
 .doc h1 + p { margin-top: var(--s-200); }

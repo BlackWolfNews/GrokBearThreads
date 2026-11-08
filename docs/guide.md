@@ -1178,6 +1178,8 @@ which keeps working while your Mac is asleep, sends your phone
 notifications, and needs nothing else installed. The free plan is enough
 for one Mac's ordinary use.
 
+<!-- video: /video/self-hosting.mp4 poster: /video/self-hosting.webp title: Setting up a self-hosted backend, read out by the Threadbear bear -->
+
 If you'd rather keep everything on your own machine, setup can run
 Convex's open source backend in Docker on your Mac instead, and reach it
 over Tailscale. It's the same backend and the same features, with these
