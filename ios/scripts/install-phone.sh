@@ -8,6 +8,7 @@
 #   ios/scripts/install-phone.sh                       # the 15 Pro Max
 #   DEVICE=<udid> ios/scripts/install-phone.sh         # another phone (xcrun devicectl list devices)
 #   BUILD_ONLY=1 ios/scripts/install-phone.sh          # just prove signing works
+#   TRIES=40 ios/scripts/install-phone.sh              # keep at an unreachable phone longer (30 s apart)
 #
 # "developer disk image could not be mounted ... cryptexd": restart the phone.
 set -euo pipefail
@@ -44,5 +45,19 @@ xcodebuild -project Threadbear.xcodeproj -scheme Threadbear -configuration "$CON
   THREADBEAR_APS_ENVIRONMENT=development build | grep -E "(^| )error:|BUILD (SUCCEEDED|FAILED)"
 APP="$DD/Build/Products/$CONFIG-iphoneos/Threadbear.app"
 [[ "${BUILD_ONLY:-0}" == 1 ]] && { echo "Built $APP"; exit 0; }
-xcrun devicectl device install app --device "$DEVICE" "$APP"
-xcrun devicectl device process launch --device "$DEVICE" --terminate-existing com.mikecann.threadbear
+# Away from home the phone's link to the Mac is slow and comes and goes, so
+# "unavailable" or a timeout usually means try again, not give up. Mike, 8 Nov:
+# don't serve the build from a page for him to tap instead, "you just have to
+# keep trying really". TRIES (default 20) at 30 s apart is about ten minutes.
+tries=${TRIES:-20}
+attempt() {
+  local what=$1; shift
+  for ((i = 1; i <= tries; i++)); do
+    "$@" && return 0
+    (( i < tries )) && { echo "$what didn't reach the phone (try $i of $tries), trying again in 30 s" >&2; sleep 30; }
+  done
+  echo "$what still couldn't reach the phone after $tries tries" >&2
+  return 1
+}
+attempt "Installing" xcrun devicectl device install app --device "$DEVICE" "$APP"
+attempt "Launching" xcrun devicectl device process launch --device "$DEVICE" --terminate-existing com.mikecann.threadbear
