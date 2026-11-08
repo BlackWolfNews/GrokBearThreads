@@ -337,6 +337,9 @@ const ASKS_IN_ASK = new Set([...EDIT_TOOLS, 'NotebookEdit', 'Bash', 'WebFetch'])
 // queue (wouldAsk). A regex, as the CLI reads it.
 const QUEUE_HOOK_MATCHER = [...ASKS_IN_ASK, 'mcp__.*'].join('|');
 
+// A queued call as it was listed on a card (ClaudeSession.listed).
+type QueuedGrant = { name: string; input: string; code: CodeWrite };
+
 // What the agent is told about a queued call Mike denied on the card.
 export const QUEUED_DENIED = 'The user denied this. Ask them how to proceed.';
 
@@ -369,8 +372,14 @@ class ClaudeSession implements AgentSession {
   private openCalls = new Map<string, { name: string; input: Record<string, unknown> }>();
   // The card the agent's own call is waiting on, and what's queued on it.
   private waitingCard?: { toolUseId: string; queued: QueuedCall[] };
+  // What each queued call was listed as: its tool, its whole input and
+  // whether it wrote code then. An allow holds only for exactly that.
+  private listed = new Map<string, QueuedGrant>();
   // Mike's answers to queued calls, by tool use id, until each comes up.
-  private queuedAnswers = new Map<string, 'allow' | 'deny'>();
+  private queuedAnswers = new Map<string, { decision: 'allow' | 'deny' } & QueuedGrant>();
+  // Calls that have reached the CLI's checks (the PreToolUse hook): they
+  // may already be running, so a tick on a card could no longer stop them.
+  private checkedCalls = new Set<string>();
   private toolWaiters = new Map<string, (() => void)[]>();
   // Whether this session has the threadbear server's end_turn, and whether
   // the turn now ending called it (a taken call, from the PostToolUse hook).
@@ -561,9 +570,23 @@ class ClaudeSession implements AgentSession {
 
   private onQueuedCall(input: HookInput): { hookSpecificOutput: { hookEventName: 'PreToolUse'; permissionDecision: 'deny'; permissionDecisionReason: string } } | undefined {
     const id = (input as { tool_use_id?: string }).tool_use_id;
-    if (typeof id !== 'string' || this.queuedAnswers.get(id) !== 'deny') return undefined;
+    if (typeof id !== 'string') return undefined;
+    this.callChecked(id);
+    if (this.queuedAnswers.get(id)?.decision !== 'deny') return undefined;
     this.queuedAnswers.delete(id);
     return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: QUEUED_DENIED } };
+  }
+
+  // A call past the point a card's tick could stop it (Codex review: a
+  // parallel MCP call an allow rule let through, listed on a card while it
+  // ran). It's no longer listed, and comes off a waiting card.
+  private callChecked(id: string): void {
+    this.checkedCalls.add(id);
+    while (this.checkedCalls.size > 500) this.checkedCalls.delete(this.checkedCalls.values().next().value!);
+    const card = this.waitingCard;
+    if (!card || !card.queued.some((c) => c.itemId === id)) return;
+    card.queued = card.queued.filter((c) => c.itemId !== id);
+    this.sink.output({ kind: 'approvalQueue', toolUseId: card.toolUseId, calls: card.queued });
   }
 
   // Whether a call would come to a card in this mode, roughly (ASKS_IN_ASK).
@@ -592,12 +615,14 @@ class ClaudeSession implements AgentSession {
         after = true;
         continue;
       }
-      if (!after || this.queuedAnswers.has(id) || !this.wouldAsk(call.name, call.input)) continue;
+      if (!after || this.queuedAnswers.has(id) || this.checkedCalls.has(id) || !this.wouldAsk(call.name, call.input)) continue;
       const target = EDIT_TOOLS.has(call.name) ? this.editTarget(call.input) : undefined;
       const code: CodeWrite = target !== undefined && this.runsAsCode(target);
       const card = cardInput(call.input, call.name.startsWith('mcp__') || code ? 'all' : ['command']);
       if (card.tooLong) continue;
       const title = toolTitle(call.name, call.input, this.opts.cwd);
+      this.listed.set(id, { name: call.name, input: JSON.stringify(call.input), code });
+      while (this.listed.size > 200) this.listed.delete(this.listed.keys().next().value!);
       out.push({ itemId: id, name: call.name, title: code ? `${title} (${codeWriteNote(code)})` : title, input: card.input });
     }
     return out;
@@ -620,7 +645,7 @@ class ClaudeSession implements AgentSession {
     const card = this.waitingCard;
     if (!added || !card) return;
     const queued = this.queueAfter(card.toolUseId);
-    if (queued.length === card.queued.length) return;
+    if (queued.map((c) => c.itemId).join() === card.queued.map((c) => c.itemId).join()) return;
     card.queued = queued;
     this.sink.output({ kind: 'approvalQueue', toolUseId: card.toolUseId, calls: queued });
   }
@@ -666,6 +691,8 @@ class ClaudeSession implements AgentSession {
           this.owedReply = undefined;
           this.endTurnAsks.clear();
           this.openCalls.clear();
+          this.listed.clear();
+          this.checkedCalls.clear();
         }
         this.noteCalls(msg as Record<string, unknown>);
         for (let out of this.normalizer.handle(msg as Record<string, unknown>)) {
@@ -678,6 +705,8 @@ class ClaudeSession implements AgentSession {
             this.codeWrites.delete(out.event.itemId);
             this.openCalls.delete(out.event.itemId);
             this.queuedAnswers.delete(out.event.itemId);
+            this.listed.delete(out.event.itemId);
+            this.checkedCalls.delete(out.event.itemId);
           }
           this.sink.output(out);
           // Words after end_turn's result, by the events' own order: the
@@ -766,9 +795,16 @@ class ClaudeSession implements AgentSession {
     const answered = sub ? undefined : this.queuedAnswers.get(o.toolUseID);
     if (answered) {
       this.queuedAnswers.delete(o.toolUseID);
-      if (answered === 'deny') return { behavior: 'deny', message: QUEUED_DENIED, toolUseID: o.toolUseID, decisionClassification: 'user_reject' };
-      if (EDIT_TOOLS.has(name)) this.noteWriteMode(o.toolUseID, this.mode);
-      return { behavior: 'allow', updatedInput: input, toolUseID: o.toolUseID, decisionClassification: 'user_temporary' };
+      if (answered.decision === 'deny') return { behavior: 'deny', message: QUEUED_DENIED, toolUseID: o.toolUseID, decisionClassification: 'user_reject' };
+      // Allowed only as it was shown (Codex review): a hook that changed
+      // its input, or an earlier call that made its file run as code (and
+      // so need every line shown), and it gets a card of its own.
+      const file = EDIT_TOOLS.has(name) ? this.editTarget(input) : undefined;
+      const codeNow = (file !== undefined && this.runsAsCode(file)) || this.codeWrites.has(o.toolUseID);
+      if (answered.name === name && answered.input === JSON.stringify(input) && (!codeNow || answered.code)) {
+        if (EDIT_TOOLS.has(name)) this.noteWriteMode(o.toolUseID, this.mode);
+        return { behavior: 'allow', updatedInput: input, toolUseID: o.toolUseID, decisionClassification: 'user_temporary' };
+      }
     }
     if (this.deps.neverAsk?.has(name) && !this.deps.alwaysAsk?.has(name)) return { behavior: 'allow', updatedInput: input, toolUseID: o.toolUseID };
     if (this.mode === 'full' && !this.deps.alwaysAsk?.has(name)) return { behavior: 'allow', updatedInput: input, toolUseID: o.toolUseID };
@@ -857,7 +893,8 @@ class ClaudeSession implements AgentSession {
   private keepQueuedAnswers(listed: QueuedCall[], answers: QueuedAnswers): void {
     for (const call of listed) {
       const a = answers[call.itemId];
-      if (a === 'allow' || a === 'deny') this.queuedAnswers.set(call.itemId, a);
+      const shown = this.listed.get(call.itemId);
+      if (shown && (a === 'allow' || a === 'deny')) this.queuedAnswers.set(call.itemId, { decision: a, ...shown });
     }
   }
 
