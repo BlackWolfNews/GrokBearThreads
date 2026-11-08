@@ -133,7 +133,7 @@ block shows as the diagram (drawn with [Pele](https://pele.run/), in
 Threadbear's colours, light or dark), and an ```` ```html ```` block as the
 page, each in a box with the language on the left. Its Diagram / Source
 switch (Preview / Source for a page) flips it to the code, the copy button
-copies the code, and the arrows open it full size in the side pane. A
+copies the code, and the arrows open it full size in a window of its own. A
 diagram that can't be drawn says why above its code. A page is only shown,
 never run: its scripts are off, it can't reach the internet or your files,
 and it can't open anything, so only its own styles, SVG and `data:`

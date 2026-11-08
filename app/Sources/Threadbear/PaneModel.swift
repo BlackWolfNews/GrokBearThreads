@@ -183,13 +183,6 @@ extension AppModel {
         show(PanePreview(target: target, title: title ?? (path as NSString).lastPathComponent, from: paneSection(for: thread)), in: thread.id)
     }
 
-    /// A ```mermaid or ```html box opened beside its thread: the page the
-    /// app wrote for it on this Mac, whichever runner the thread is on.
-    func previewRichBlock(_ file: URL, title: String) {
-        guard let thread = selectedThread, openProjectId == nil else { return }
-        show(PanePreview(target: .file(file.path), title: title, from: paneSection(for: thread)), in: thread.id)
-    }
-
     func preview(page url: URL, title: String, in thread: ThreadSummary) {
         show(PanePreview(target: .page(url), title: title, from: paneSection(for: thread)), in: thread.id)
     }

@@ -654,7 +654,7 @@ final class TranscriptTextView: NSTextView {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(block.source, forType: .string)
         case .open:
-            RichRenderer.shared.openBeside(block)
+            RichRenderer.shared.openWindow(block)
         }
     }
 
