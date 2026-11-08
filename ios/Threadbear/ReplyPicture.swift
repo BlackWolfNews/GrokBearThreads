@@ -167,7 +167,10 @@ struct ReplyPicture: View {
                     .accessibilityHint(loaded?.isVideo == true ? "Plays it full screen" : "Shows it full screen")
             }
         }
-        .onScrollVisibilityChange { visible in
+        // Any sliver counts as on screen. The default is half, so a picture
+        // partly up under the top bar, or pushed there by the bounce past the
+        // end of the thread, was let go and left blank while still in sight.
+        .onScrollVisibilityChange(threshold: 0.01) { visible in
             if visible { seen = true }
             // Not while it's open full screen, which shows this one first.
             offscreen = !visible && !fullScreen
