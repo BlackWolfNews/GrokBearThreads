@@ -495,6 +495,11 @@ export async function landTargetFromGit(cwd: string): Promise<{ target?: Omit<La
   const top = await gitOut(cwd, ['rev-parse', '--show-toplevel']);
   if (!top) return { reason: `${cwd} isn't in a git checkout. Run tb land in a thread's worktree.` };
   const branch = await gitOut(top, ['rev-parse', '--abbrev-ref', 'HEAD']);
+  if (branch === 'HEAD') {
+    // A worktree borrowed before borrow-worktree.sh made a branch, or one
+    // detached by hand.
+    return { reason: `${top} is detached, not on a thread/ branch. tb land runs in a thread's own worktree; to land from this one, git checkout -b thread/<name> in it first.` };
+  }
   if (!branch?.startsWith('thread/')) {
     return { reason: `${top} is on ${branch ?? 'no branch'}, not a thread/ branch. tb land runs in a thread's own worktree.` };
   }

@@ -165,10 +165,13 @@ With `keep`:
   folder is still there: it's another thread's now.
 
 A thread started outside the repo borrows one by hand with
-`./borrow-worktree.sh` and gives it back with `--give-back <dir>`.
+`./borrow-worktree.sh` and gives it back with `--give-back <dir>`. The
+borrowed one is on a branch of its own, `thread/borrow-<slot>-<time>`,
+so `tb land` in it lands it like any thread's (it only lands a `thread/`
+branch); giving it back deletes that branch.
 
-A hand-merge from a borrowed worktree holds the same landing lock. From
-that worktree, on a Mac:
+A hand-merge, landing without `tb land`, holds the same landing lock.
+From the worktree, on a Mac:
 
 ```sh
 /usr/bin/lockf -k "$(git rev-parse --git-common-dir)/threadbear-land.lock" /bin/sh /path/to/landing-script

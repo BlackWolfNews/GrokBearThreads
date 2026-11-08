@@ -9,7 +9,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { makeHarness, tmpDir, type Harness } from '../helpers/fakes.ts';
 import { checkSequence, checkSummary } from '../helpers/protocol-check.ts';
 import { findWorktreePatch, readPatchModule } from '../../src/patches.ts';
-import { cleanUpWorktree, land, makeWorktree, MAX_SPARES, overwrittenFiles, type LandTarget } from '../../src/worktrees.ts';
+import { cleanUpWorktree, land, landTargetFromGit, makeWorktree, MAX_SPARES, overwrittenFiles, type LandTarget } from '../../src/worktrees.ts';
 import { RpcServer } from '../../src/rpc.ts';
 import { RunnerClient } from '../../src/client.ts';
 import { readToken } from '../../src/config.ts';
@@ -685,6 +685,36 @@ test('tb land outside a thread goes by git: the thread/ branch, main\'s checkout
   const wrongFlag = await runTb(['land', '--json'], t.path, env);
   assert.equal(wrongFlag.code, 2);
   assert.match(wrongFlag.out, /tb land doesn't take --json\. It takes --dry-run\./);
+});
+
+test('borrow-worktree.sh hands out a thread/ branch tb land takes, and --give-back deletes it and makes a spare', async () => {
+  const { main } = makeRepo(PATCH(`{ check: "true" }`));
+  fs.copyFileSync(path.join(import.meta.dirname, '..', '..', '..', 'borrow-worktree.sh'), path.join(main, 'borrow-worktree.sh'));
+  write(main, { 'worktree-setup.sh': '#!/bin/sh\n' });
+  sh(main, 'chmod +x borrow-worktree.sh worktree-setup.sh && git add -A && git commit -qm scripts');
+  const wt = sh(main, './borrow-worktree.sh 2>/dev/null');
+  assert.equal(wt, path.join(path.dirname(main), 'proj-threads', 'slot-1'));
+  const branch = sh(wt, 'git rev-parse --abbrev-ref HEAD');
+  assert.match(branch, /^thread\/borrow-slot-1-\d{8}-\d{6}$/);
+
+  commit(wt, { 'runner/b.ts': '2\n' }, 'Add b');
+  const found = await landTargetFromGit(wt);
+  assert.deepEqual(found.target, { path: wt, branch, mainCheckout: main });
+  const c = capture();
+  const landed = await land({ ...found.target!, check: 'true' }, c.opts);
+  assert.equal(landed, 0, c.err.join('\n'));
+  assert.equal(sh(main, 'git log -1 --format=%s'), 'Add b');
+
+  assert.match(sh(main, `./borrow-worktree.sh --give-back ${wt}`), /is a spare again/);
+  assert.equal(sh(main, `git branch --list '${branch}'`), '');
+  assert.match(sh(main, 'git worktree list --porcelain'), /locked threadbear spare/);
+  // The next borrow takes that spare, on a branch of its own.
+  assert.equal(sh(main, './borrow-worktree.sh 2>/dev/null'), wt);
+  assert.match(sh(wt, 'git rev-parse --abbrev-ref HEAD'), /^thread\/borrow-slot-1-/);
+
+  // A worktree detached by hand is refused with what to do.
+  sh(wt, 'git checkout -q --detach');
+  assert.match((await landTargetFromGit(wt)).reason ?? '', /is detached.*git checkout -b thread\/<name>/);
 });
 
 test('tb land inside a thread asks the runner where its worktree is, wherever it runs', async () => {
