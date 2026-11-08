@@ -799,7 +799,9 @@ means one is offline or updating. Click a runner's name to see its CPU,
 memory and disk, what machine it is and how long that machine has been
 up. A bar turns orange when memory is 90% used or disk is under 10 GB free.
 The figures come every 10 seconds while the details are open and the
-window can be seen; a runner too old to send them says so.
+window can be seen; a runner too old to send them says so. The runners are
+in your order, the same as in Settings > Runners and on the phone: drag one
+to change it.
 
 ## Accounts, pools and Usage
 <!-- slug: accounts -->

@@ -1160,7 +1160,8 @@ async function dispatch(client, method, p) {
           ...(r.self
             ? { version: '0.1.0+20261105T064853Z-c4d90ca', release: '20261105T064853Z-c4d90ca', startedAt: iso(-16 * 60_000) }
             : { version: '0.1.0+20261104T221010Z-51ae514', release: '20261104T221010Z-51ae514', startedAt: iso(-26 * 3_600_000) }),
-        })),
+        })).concat(MORE_RUNNERS.map((r) => ({ id: r.id, name: r.name, icon: r.icon, online: true, lastSeenAt: iso(), self: false,
+          version: '0.1.0+20261104T221010Z-51ae514', release: '20261104T221010Z-51ae514', startedAt: iso(-3 * 3_600_000) }))),
       };
     case 'runners.stats': {
       // Each runner's machine figures, a little different each ask.

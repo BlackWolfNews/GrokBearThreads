@@ -414,6 +414,9 @@ final class AppModel {
     /// Screenshots only: holds the top runner mid-drag by this much, as a
     /// script can't hold a real drag still to photograph it.
     @ObservationIgnored var runnerDragPreview: CGSize?
+    /// The same for the Runners panel's top card. Watched, as the panel stays
+    /// put while it's hidden, so it never appears afresh to pick it up.
+    var runnerPanelDragPreview: CGSize?
     /// Each runner's machine figures by runner id (`runners.stats`), asked
     /// every 10 s while a runner's details are open in the Runners panel.
     var runnerStats: [String: RunnerMachineStats] = [:]

@@ -660,7 +660,8 @@ streams) and text typed into the composer reaching the draft.
 controls, but a SwiftUI gesture ignores a window that isn't key (a `DragGesture`
 never fires, 7 Nov). For those, on Tinker Desk's desktop and never Mike's:
 `{"cmd":"settings","tab":"runners","front":true}` floats the Settings window
-on top and says its number and top left, and `Tools/realdrag.swift` (compile it
+on top and says its number and top left (`{"cmd":"runners-front"}` does the
+same for the main window with the Runners panel open), and `Tools/realdrag.swift` (compile it
 with `swiftc`, run it through `desk`) posts a real drag. Click a blank part of
 the window with it first to make the window key. Look at the whole desktop
 once if nothing happens: other threads' windows and permission dialogs sit

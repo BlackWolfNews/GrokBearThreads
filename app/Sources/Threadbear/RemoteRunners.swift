@@ -89,6 +89,28 @@ extension AppModel {
         return all.enumerated().sorted { (rank($0.element), $0.offset) < (rank($1.element), $1.offset) }.map(\.element)
     }
 
+    /// `runners.list` in the same order, for the Runners panel.
+    var orderedRunners: [RunnerInfo] {
+        let order = runnerOrder ?? []
+        // Unplaced ones after, this Mac first, as runners.list has them.
+        let rank = { (r: RunnerInfo) in order.firstIndex(of: r.id) ?? order.count + (r.isSelf ? 0 : 1) }
+        return runners.enumerated().sorted { (rank($0.element), $0.offset) < (rank($1.element), $1.offset) }.map(\.element)
+    }
+
+    /// The order can be changed once the backend has one (API 58) and this
+    /// Mac's own runner is known: without it a move would save an order
+    /// that leaves this Mac out.
+    var canOrderRunners: Bool {
+        runnerOrder != nil && !remoteRunners.isEmpty && runners.contains(where: \.isSelf)
+    }
+
+    /// A drop in a list of only some runners (the panel lists runners.list's):
+    /// they swap places among themselves, and the rest of the order stays.
+    func setRunnerOrder(part ids: [String]) {
+        let full = orderedRunnerIds + ids.filter { !orderedRunnerIds.contains($0) }
+        setRunnerOrder(ReorderDrag.merged(ids, into: full))
+    }
+
     /// One place up or down, for VoiceOver's actions on a runner's row (a
     /// drag saves the whole order itself).
     func moveRunner(_ id: String, by offset: Int) {

@@ -1338,6 +1338,20 @@ enum Automation {
             return "ok \(window.windowNumber) \(Int(size.width))x\(Int(size.height))"
         case "settings":
             return await settings(c, app: app)
+        case "runners-front":
+            // The Runners panel open and the main window floating in front
+            // and key, for real events on a desktop nobody's using (Tinker
+            // Desk, app/README.md "A real drag"). Says the window's number
+            // and top left in screen points.
+            guard let window else { return "error no window" }
+            app.runnersShown = true
+            window.level = .floating
+            NSApp.activate()
+            window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
+            try? await Task.sleep(for: .milliseconds(400))
+            let top = (NSScreen.screens.first?.frame.height ?? 0) - window.frame.maxY
+            return "ok \(window.windowNumber) \(Int(window.frame.minX)) \(Int(top))"
         case "shortcuts":
             return await shortcuts(c)
         case "focus":
