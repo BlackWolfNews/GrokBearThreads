@@ -396,7 +396,7 @@ extension AppModel {
                 // relayed one waits for the sidebar table's row.
                 if directRemoteLink { liveRemote.insert(made.id) } else { madeRemote.insert(made.id) }
                 threads[made.id] = made
-                select(made.id)
+                showStartedThread(made.id)
                 applyDefaultRunner()
             } catch let unreachable as RemoteUnreachable {
                 // The draft never left the box.

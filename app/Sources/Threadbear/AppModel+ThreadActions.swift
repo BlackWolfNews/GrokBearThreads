@@ -279,7 +279,7 @@ extension AppModel {
                     newThreadPool = nil
                     newThreadProvider = nil
                     threads[thread.id] = thread
-                    select(thread.id)
+                    showStartedThread(thread.id)
                     // "This Mac" was for this thread; the next starts on
                     // the default runner again.
                     newThreadRunnerPicked = false

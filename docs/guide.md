@@ -519,7 +519,9 @@ Back and left for Forward, and the other way round without it. A card in the
 middle of the window says which thread or page you'll land on, and its bar fills
 and turns blue once letting go will go. A swipe that starts mostly up or down is a scroll, so a long thread still
 scrolls. It follows Swipe between pages in System Settings > Trackpad (two or
-three fingers). Over a thread's row a swipe left still archives it.
+three fingers). Over a thread's row a swipe left still archives it. A thread
+you start takes the place of the new-thread screen, so Back from it goes to
+wherever you were before you pressed New thread.
 
 Hibernating or archiving a thread that's partway through a turn stops
 that turn. From the row's hover buttons, Threadbear asks first.

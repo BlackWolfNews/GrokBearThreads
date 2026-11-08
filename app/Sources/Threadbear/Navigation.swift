@@ -13,6 +13,11 @@ struct NavigationPlace: Equatable, Sendable {
     var librarianHome = false
     /// The Scheduled page (`showsScheduledHome`).
     var scheduledHome = false
+
+    /// The new-thread screen: no thread, sub-agent or page open.
+    var isNewThreadScreen: Bool {
+        threadId == nil && subagent == nil && projectId == nil && !projectsHome && !librarianHome && !scheduledHome
+    }
 }
 
 /// Back and forward, like a browser's: ⌘[ and ⌘] in the Go menu, the
@@ -44,6 +49,20 @@ extension AppModel {
         navigationPending = false
         history.record(place)
         ActivityRecorder.shared.view(place)
+    }
+
+    /// Opens a thread just started from the composer. Started from the
+    /// new-thread screen, the thread takes that screen's place in the
+    /// history, so Back goes to wherever Mike was before he pressed New
+    /// thread rather than to an empty composer he's done with (8 Nov).
+    func showStartedThread(_ id: String) {
+        flushNavigation()
+        let fromNewThreadScreen = place.isNewThreadScreen
+        select(id)
+        guard fromNewThreadScreen else { return }
+        // select's own step is still queued; once this has the place, that
+        // finds it already current and adds nothing.
+        history.replaceCurrent(with: place)
     }
 
     var canGoBack: Bool { history.canGoBack }
