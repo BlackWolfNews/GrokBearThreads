@@ -272,4 +272,9 @@
 //    runner key can't save a schedule under an id gone from another runner
 //    within the day (scheduleGone). An older runner never asks, and does
 //    as before.
-export const API_VERSION = 60;
+// 61: an open card's asks can carry `optionNotes`, what each answer does,
+//    so a Mac reading another runner's thread through the relay draws the
+//    card as its own runner's (rows with a line under each answer), not
+//    plain buttons (Mike, 8 Nov, on a Hetzner thread). An older runner sends
+//    none, and an older backend gets the asks without them.
+export const API_VERSION = 61;

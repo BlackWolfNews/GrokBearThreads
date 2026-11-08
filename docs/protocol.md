@@ -2257,6 +2257,10 @@ the thread if a sub-agent stalls, so an ask can't stay hidden for good.
   `options`, their `does` notes `optionNotes` in the same order ("" for
   none); the card draws an ask with notes as rows, a circle, the label,
   "my pick" on the suggested one and the note under it, in a box. The
+  notes go up with the thread's row too (backend API 61), so a Mac
+  reading another runner's thread through the relay draws the same rows;
+  an older backend gets the asks without them, and the card falls back to
+  plain buttons. The
   preview is `headline`, else the reply's first line. A reply that ends
   in a "What I need from you" section (a heading, bold or bare) or a
   "Nothing needed from you" line, under an `end_turn` with no asks or

@@ -95,7 +95,7 @@ export type RelayThreadRow = {
   status: string;
   needs?: 'you' | 'nothing';
   pendingApproval?: Pending;
-  asks?: { action: string; why?: string; reply?: string; options?: string[]; suggested?: number; links?: { title: string; url: string }[]; ticked?: boolean }[];
+  asks?: { action: string; why?: string; reply?: string; options?: string[]; optionNotes?: string[]; suggested?: number; links?: { title: string; url: string }[]; ticked?: boolean }[];
   asksSeq?: number;
   next?: string[];
   lastActivityAt?: string;

@@ -83,6 +83,10 @@ export const threadFields = {
         why: v.optional(v.string()),
         reply: v.optional(v.string()),
         options: v.optional(v.array(v.string())),
+        // What each option does if Mike picks it (end_turn's { label, does }),
+        // one per option: the Mac's relay card draws the answers as rows with
+        // these under them, as it does for its own runner's threads. Since API 61.
+        optionNotes: v.optional(v.array(v.string())),
         suggested: v.optional(v.number()),
         links: v.optional(v.array(v.object({ title: v.string(), url: v.string() }))),
         ticked: v.optional(v.boolean()),

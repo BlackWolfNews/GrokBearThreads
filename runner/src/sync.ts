@@ -125,7 +125,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 60;
+export const BACKEND_API_VERSION = 61;
 // From this one sync:sharedThreads lists a runner's rows shared by link, which
 // it checks against its own threads on every start and every
 // SHARE_RECONCILE_MS (reconcileShares).
@@ -188,6 +188,10 @@ export function sharedUsageArgs<K>(key: K, runnerId: string | undefined, backend
 // bullets), so the phone shows end-of-turn cards. An older backend's
 // validators would turn the write down, so it gets them without.
 export const ASKS_API_VERSION = 14;
+// From this one an ask on that card keeps its optionNotes (what each answer
+// does), so the relay's card on a Mac draws them; an older backend's
+// validator doesn't know the field, so it gets the asks without.
+export const OPTION_NOTES_API_VERSION = 61;
 // From this backend version a project's picture goes up to file storage
 // (sync:iconUploadUrl, sync:setProjectIcon); an older backend gets the
 // project without it and the phone shows its symbol or first letter.
@@ -396,7 +400,7 @@ export type ThreadDoc = {
 // An open ask as the phone sees it (convex/schema.ts): no `where`, which the
 // paragraph already says, and only web links, as a file on the Mac can't
 // be opened from the phone.
-export type PhoneAsk = { action: string; why?: string; reply?: string; options?: string[]; suggested?: number; links?: { title: string; url: string }[]; ticked?: boolean };
+export type PhoneAsk = { action: string; why?: string; reply?: string; options?: string[]; optionNotes?: string[]; suggested?: number; links?: { title: string; url: string }[]; ticked?: boolean };
 
 // A text message, or one line for a tool call (role "tool", since backend
 // API 2): what the phone and the website show of a thread.
@@ -844,6 +848,8 @@ export function toPhoneAsk(a: OpenAsk): PhoneAsk {
   if (a.reply) out.reply = a.reply;
   if (a.options?.length) {
     out.options = a.options;
+    // One per option, or none: the app drops a list that doesn't line up.
+    if (a.optionNotes?.length === a.options.length && a.optionNotes.some(Boolean)) out.optionNotes = a.optionNotes;
     if (a.suggested !== undefined) out.suggested = a.suggested;
   }
   const links = a.links?.filter((l) => /^https?:\/\//i.test(l.url));
@@ -871,7 +877,7 @@ function phoneAnswers(raw: unknown): AskAnswer[] | undefined {
 export function forBackend(d: ThreadDoc, v: number, now: number): ThreadDoc {
   const asks = d.asks !== undefined || d.asksSeq !== undefined || d.next !== undefined;
   const sections = d.needs !== undefined || d.pendingReviews !== undefined || d.waitingForRoom !== undefined;
-  if ((v >= SHARE_API_VERSION || !d.share) && (v >= WOKE_API_VERSION || !d.woke) && (v >= ASKS_API_VERSION || !asks) && (v >= SECTIONS_API_VERSION || !sections) && (v >= STARTED_BY_API_VERSION || !d.startedBy) && (v >= STARS_API_VERSION || !d.starredAt) && (v >= LINKS_API_VERSION || !d.links) && (v >= ASKED_API_VERSION || !d.asked) && (v >= WAKE_NOTE_API_VERSION || !d.wakeNote) && (v >= NETWORK_WAIT_API_VERSION || !d.waitingForNetwork) && (v >= SECRETS_API_VERSION || d.pendingApproval?.kind !== 'secret') && (v >= RELAY_API_VERSION || d.pendingApproval?.seq === undefined)) return d;
+  if ((v >= SHARE_API_VERSION || !d.share) && (v >= WOKE_API_VERSION || !d.woke) && (v >= ASKS_API_VERSION || !asks) && (v >= OPTION_NOTES_API_VERSION || !d.asks?.some((a) => a.optionNotes)) && (v >= SECTIONS_API_VERSION || !sections) && (v >= STARTED_BY_API_VERSION || !d.startedBy) && (v >= STARS_API_VERSION || !d.starredAt) && (v >= LINKS_API_VERSION || !d.links) && (v >= ASKED_API_VERSION || !d.asked) && (v >= WAKE_NOTE_API_VERSION || !d.wakeNote) && (v >= NETWORK_WAIT_API_VERSION || !d.waitingForNetwork) && (v >= SECRETS_API_VERSION || d.pendingApproval?.kind !== 'secret') && (v >= RELAY_API_VERSION || d.pendingApproval?.seq === undefined)) return d;
   const out = { ...d };
   if (v < SECTIONS_API_VERSION) {
     delete out.needs;
@@ -894,6 +900,9 @@ export function forBackend(d: ThreadDoc, v: number, now: number): ThreadDoc {
     // That backend's phones have no Starred section to show it in.
     delete out.starredAt;
     out.view = threadView(out, now);
+  }
+  if (v < OPTION_NOTES_API_VERSION && out.asks?.some((a) => a.optionNotes)) {
+    out.asks = out.asks.map(({ optionNotes: _notes, ...a }) => a);
   }
   if (v < ASKS_API_VERSION) {
     delete out.asks;

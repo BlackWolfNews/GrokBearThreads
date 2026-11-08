@@ -456,6 +456,11 @@ function fitThread<T extends Record<string, any>>(t: T): T | undefined {
   // thread waiting, and its push goes, with shorter text.
   const card = out.pendingApproval;
   if (card) out.pendingApproval = fitApproval(card, 150);
+  // What each answer does goes before the whole card: without it the Mac
+  // draws the answers as buttons, which still work.
+  if (docBytes(out) > CAP.threadDoc && Array.isArray(out.asks) && out.asks.some((a: any) => a?.optionNotes)) {
+    out.asks = out.asks.map(({ optionNotes: _notes, ...a }: any) => a);
+  }
   for (const f of ['asks', 'next', 'links', 'projects']) {
     if (docBytes(out) <= CAP.threadDoc) break;
     delete out[f];

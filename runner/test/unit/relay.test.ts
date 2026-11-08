@@ -63,6 +63,11 @@ test("the open card is the last turn's end, and an approval sits at its own seq"
   const end = ev.find((e) => e.seq === 119)!;
   assert.equal(end.needs, 'you');
   assert.deepEqual(end.asks, [{ action: 'Pick one', options: ['A', 'B'], ticked: true }]);
+  // What each answer does comes through, so the Mac draws rows as it does
+  // for its own runner's threads, not plain buttons (8 Nov).
+  const noted = relayEvents(T, rows, { ...asksRow, asks: [{ action: 'Pick one', options: ['A', 'B'], optionNotes: ['Does A', 'Does B'] }] }, [], false, 'bruce');
+  const notedEnd = noted.filter((e) => e.type === 'turn.completed').at(-1) as { asks?: unknown };
+  assert.deepEqual(notedEnd.asks, [{ action: 'Pick one', options: ['A', 'B'], optionNotes: ['Does A', 'Does B'] }]);
   const ap = ev.find((e) => e.type === 'approval.requested')!;
   assert.equal(ap.seq, 13 * SCALE + 1);
   assert.equal(ap.turnId, 'bbbb2222');
