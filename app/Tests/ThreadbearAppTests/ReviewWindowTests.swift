@@ -123,7 +123,7 @@ final class ReviewWindowTests: XCTestCase {
         XCTAssertNotNil(anchor("Try A running live: http://localhost:5190/a", in: host))
         click("C. Option C", in: host, window)
         XCTAssertNil(anchor("Try A running live: http://localhost:5190/a", in: host))
-        XCTAssertEqual(session.focusedShot?.image.path, "/tmp/C.png", "one image is one shot")
+        XCTAssertEqual(session.focusedShot?.image.path, Self.images + "C.png", "one image is one shot")
     }
 
     func testTodayCanBeFlickedToByItsButtonOrHoldingSpace() {
@@ -133,7 +133,7 @@ final class ReviewWindowTests: XCTestCase {
         pump()
         click("Flick to Today: click, or hold Space", in: host, window)
         XCTAssertEqual(session.shownOption?.id, "Today")
-        XCTAssertEqual(session.shownShot?.image.path, "/tmp/today2.png", "today's shot of the same name")
+        XCTAssertEqual(session.shownShot?.image.path, Self.images + "today2.png", "today's shot of the same name")
         XCTAssertEqual(at(session), ["A", "1"], "flicking isn't moving")
         click("Back to A (or let go of Space)", in: host, window)
         XCTAssertEqual(session.shownOption?.id, "A")
@@ -149,7 +149,7 @@ final class ReviewWindowTests: XCTestCase {
         session.enlarge(1, shot: 1)
         XCTAssertEqual(session.peeking, false)
         session.peeking = true
-        XCTAssertEqual(session.shownShot?.image.path, "/tmp/today.png", "no shot of that name: today's first")
+        XCTAssertEqual(session.shownShot?.image.path, Self.images + "today.png", "no shot of that name: today's first")
         session.browse(1)
         XCTAssertFalse(session.peeking, "moving turns it off")
         session.enlarge(3)
@@ -357,10 +357,28 @@ final class ReviewWindowTests: XCTestCase {
         XCTAssertEqual(session.mode, .all)
     }
 
+    /// Where the shots are said to be: nowhere, so each test's geometry is
+    /// the sizes given here. Under /tmp, a picture another program left as
+    /// A.png would be decoded and change the page's shape mid-test.
+    private static let images = "/nonexistent/ReviewWindowTests-\(UUID().uuidString)/"
+
+    func testEscStraightAfterAZoomComesOutOfTheZoom() {
+        let (session, host, window) = make(tall(), native: true)
+        defer { window.close() }
+        let image = stage(in: host)
+        image.scrollWheel(with: wheel(lines: 5))
+        // No pump: the session hasn't heard about the zoom yet, as when
+        // the app is busy and the keys are queued behind the wheel.
+        window.keyDown(with: key("\u{1B}", modifiers: [], code: 53))
+        pump()
+        XCTAssertEqual(session.mode, .single, "Esc comes out of the zoom first")
+        XCTAssertTrue(image.isFittedForTests)
+    }
+
     /// A page as long as the phone shots that prompted zooming, with today's
     /// version of the same size to flick to, and a shot after it to move to.
     private func tall(width: Int = 780) -> DesignReview {
-        func image(_ name: String) -> ImageRef { ImageRef(path: "/tmp/\(name).png", mediaType: "image/png", width: width, height: 20852) }
+        func image(_ name: String) -> ImageRef { ImageRef(path: Self.images + "\(name).png", mediaType: "image/png", width: width, height: 20852) }
         var page = ReviewOption(id: "A", title: "Option A", image: image("A"))
         page.shots = [ReviewShot(title: "Phone", image: image("A")), ReviewShot(title: "Top", image: image("A2"))]
         return DesignReview(id: "review", title: "Page", options: [
@@ -372,7 +390,7 @@ final class ReviewWindowTests: XCTestCase {
     /// Too big for the stage both ways, so zooming has room in every direction.
     private func wide() -> DesignReview {
         DesignReview(id: "review", title: "Page", options: [
-            ReviewOption(id: "A", title: "Option A", image: ImageRef(path: "/tmp/A.png", mediaType: "image/png", width: 6000, height: 6000)),
+            ReviewOption(id: "A", title: "Option A", image: ImageRef(path: Self.images + "A.png", mediaType: "image/png", width: 6000, height: 6000)),
         ])
     }
 
@@ -414,7 +432,7 @@ final class ReviewWindowTests: XCTestCase {
     }
 
     private func review() -> DesignReview {
-        func image(_ name: String) -> ImageRef { ImageRef(path: "/tmp/\(name).png", mediaType: "image/png") }
+        func image(_ name: String) -> ImageRef { ImageRef(path: Self.images + "\(name).png", mediaType: "image/png") }
         var options = ["A", "B", "C"].map {
             ReviewOption(id: $0, title: "Option \($0)", note: "Why \($0)", image: image($0))
         }
