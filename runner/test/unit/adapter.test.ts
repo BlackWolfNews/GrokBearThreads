@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { ClaudeAdapter, alwaysAllow, modelChoices, sdkPermissionMode, terminalMcpTools } from '../../src/adapters/claude/adapter.ts';
-import type { SessionSink, AdapterOutput, ToolApprovalRequest } from '../../src/adapters/types.ts';
+import type { SessionSink, AdapterOutput, ToolApprovalAnswer, ToolApprovalRequest } from '../../src/adapters/types.ts';
 import { ProcessRegistry } from '../../src/proc.ts';
 import { nullLogger } from '../../src/log.ts';
 import { tmpDir } from '../helpers/fakes.ts';
@@ -72,7 +72,7 @@ function fakeQuery() {
   return { fn, state };
 }
 
-function start(allowRules: string[] = [], extra: Record<string, unknown> = {}, deps: Record<string, unknown> = {}) {
+function start(allowRules: string[] = [], extra: Record<string, unknown> = {}, deps: Record<string, unknown> = {}, answer?: (req: ToolApprovalRequest) => Promise<ToolApprovalAnswer>) {
   const { fn, state } = fakeQuery();
   const outputs: AdapterOutput[] = [];
   const approvals: ToolApprovalRequest[] = [];
@@ -80,7 +80,7 @@ function start(allowRules: string[] = [], extra: Record<string, unknown> = {}, d
     output: (o) => outputs.push(o),
     requestApproval: async (req) => {
       approvals.push(req);
-      return { decision: 'allowAlways' };
+      return answer ? answer(req) : { decision: 'allowAlways' };
     },
     requestQuestion: async () => ({ answers: null }),
     exited: () => {},
@@ -123,6 +123,7 @@ test("a folder's own settings load normally; with untrusted Claude settings, onl
 test("F2/F8: a session started in Full with a folder's untrusted permission rules can make every tool ask once the thread leaves Full", async () => {
   const plain = start();
   assert.equal(plain.state.options.hooks.PreToolUse.length, 1, "only the edit check's hook, and no round trip per tool, where none is needed");
+  assert.doesNotMatch('Read', new RegExp(`^(${plain.state.options.hooks.PreToolUse[0].matcher})$`), 'not for tools that never queue');
   plain.state.close!();
   const held = start([], { permissionMode: 'full', heldGrants: true });
   assert.ok(held.state.options.hooks.PreToolUse[0].matcher, 'the edit check stays');
@@ -478,4 +479,58 @@ test('a command goes on its card whole, and one too long to show is refused with
   await state.options.canUseTool('Write', { file_path: '/tmp/x.txt', content: 'z'.repeat(20_000) }, opts('t5'));
   assert.match(String(approvals.at(-1)!.input.content), /\[truncated\]$/);
   state.close!();
+});
+
+// Eight edits in one reply asked one card at a time, each taking the last
+// one's place, and looked like the same card coming back (8 Nov 2026).
+test("a reply's other calls that will ask queue on the first one's card, and Mike's answers to them apply when each comes up", async () => {
+  let release!: (a: ToolApprovalAnswer) => void;
+  const { state, approvals, outputs } = start([], {}, {}, () => new Promise((r) => (release = r)));
+  const opts = (id: string) => ({ signal: new AbortController().signal, toolUseID: id });
+  const call = (id: string, name: string, input: Record<string, unknown>) =>
+    state.frame!({ type: 'assistant', session_id: 's', message: { id: 'm', role: 'assistant', content: [{ type: 'tool_use', id, name, input }] } });
+  const edit = { file_path: '/tmp/a.txt', old_string: 'a', new_string: 'b' };
+  await call('e1', 'Edit', edit);
+  await call('r1', 'Read', { file_path: '/tmp/a.txt' });
+  await call('w1', 'Write', { file_path: '/tmp/b.txt', content: 'hi' });
+  const first = state.options.canUseTool('Edit', edit, opts('e1'));
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(approvals[0].queued?.map((c) => c.itemId), ['w1'], 'the Write, not the Read, which never asks');
+  // A command streams in while the card waits: it joins the queue.
+  await call('b1', 'Bash', { command: 'rm -rf build' });
+  const grown = outputs.filter((o) => o.kind === 'approvalQueue').at(-1);
+  assert.deepEqual(grown?.kind === 'approvalQueue' ? [grown.toolUseId, grown.calls.map((c) => c.itemId)] : [], ['e1', ['w1', 'b1']]);
+  assert.equal(grown?.kind === 'approvalQueue' && grown.calls[1].input.command, 'rm -rf build', 'shown as its own card would show it');
+  release({ decision: 'allow', queued: { w1: 'allow', b1: 'deny', other: 'allow' } });
+  assert.equal((await first).behavior, 'allow');
+  // The Write goes through with no card of its own.
+  const cards = approvals.length;
+  assert.equal((await state.options.canUseTool('Write', { file_path: '/tmp/b.txt', content: 'hi' }, opts('w1'))).behavior, 'allow');
+  assert.equal(approvals.length, cards, 'no card for the allowed one');
+  // The command is refused before it runs, whatever rule would let it through.
+  const hook = state.options.hooks.PreToolUse[0].hooks[0];
+  const refused = await hook({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_use_id: 'b1', tool_input: { command: 'rm -rf build' } });
+  assert.equal(refused.hookSpecificOutput.permissionDecision, 'deny');
+  assert.match(state.options.hooks.PreToolUse[0].matcher, /Bash/);
+  // An id the card never listed gets nothing.
+  assert.deepEqual(await hook({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_use_id: 'other' }), {});
+  state.close!();
+});
+
+test('in Auto only edits of files that run as code queue, and in Full nothing does', async () => {
+  for (const [mode, expected] of [['auto', ['c1']], ['full', []]] as const) {
+    let release!: (a: ToolApprovalAnswer) => void;
+    const { state, approvals } = start([], { permissionMode: mode }, { alwaysAsk: ALWAYS_ASK_TOOLS, neverAsk: NEVER_ASK_TOOLS }, () => new Promise((r) => (release = r)));
+    const call = (id: string, name: string, input: Record<string, unknown>) =>
+      state.frame!({ type: 'assistant', session_id: 's', message: { id: 'm', role: 'assistant', content: [{ type: 'tool_use', id, name, input }] } });
+    await call('h1', 'mcp__threadbear__delete_thread', { threadId: 'x' });
+    await call('w1', 'Write', { file_path: '/tmp/notes.txt', content: 'hi' });
+    await call('c1', 'Write', { file_path: '/tmp/.threadbear/patches/x.ts', content: 'export default {}' });
+    const first = state.options.canUseTool('mcp__threadbear__delete_thread', { threadId: 'x' }, { signal: new AbortController().signal, toolUseID: 'h1' });
+    await new Promise((r) => setImmediate(r));
+    assert.deepEqual(approvals[0].queued?.map((c) => c.itemId) ?? [], expected, mode);
+    release({ decision: 'deny' });
+    await first;
+    state.close!();
+  }
 });

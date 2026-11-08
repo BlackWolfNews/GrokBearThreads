@@ -308,7 +308,11 @@ shown on the composer (the box you type in) and changed by clicking it.
   it does anything to Threadbear itself: messaging or starting another
   thread, changing this one, schedules, projects, pins, panels and the
   Pocket. Reading threads, asking you for a secret and ending its turn
-  never ask.
+  never ask. When a Claude agent sends several things that ask at once
+  (say four edits), they come on one card, each with a tick and a cross:
+  Allow lets through the ticked ones and refuses the rest, and Deny all
+  refuses them all. The iPhone shows the first and asks about the rest one
+  at a time.
 - **Auto** (Claude threads only): a separate safety check approves or blocks
   each action, and a card shows only when it can't decide. It's for work on
   text you didn't write, like an error report or a web page. It catches a lot

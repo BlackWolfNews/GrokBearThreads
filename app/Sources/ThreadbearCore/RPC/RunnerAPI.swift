@@ -227,7 +227,9 @@ public extension RPCClient {
         ]), as: ThreadResult.self).thread
     }
 
-    func respond(threadId: String, approvalId: String, decision: ApprovalDecision, message: String? = nil, answers: [String: String]? = nil) async throws {
+    /// `queued`: answers to the calls queued on the card, by item id
+    /// (docs/protocol.md, "Queued calls").
+    func respond(threadId: String, approvalId: String, decision: ApprovalDecision, message: String? = nil, answers: [String: String]? = nil, queued: [String: ApprovalDecision]? = nil) async throws {
         var params: [String: JSONValue] = [
             "threadId": .string(threadId),
             "approvalId": .string(approvalId),
@@ -235,6 +237,7 @@ public extension RPCClient {
         ]
         if let message { params["message"] = .string(message) }
         if let answers { params["answers"] = .object(answers.mapValues { .string($0) }) }
+        if let queued, !queued.isEmpty { params["queued"] = .object(queued.mapValues { .string($0.rawValue) }) }
         _ = try await call("approvals.respond", .object(params), as: EmptyResult.self)
     }
 

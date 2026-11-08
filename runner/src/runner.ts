@@ -248,7 +248,9 @@ export type PendingApproval =
   // view shows (tools.ts, remoteCardShowsAll), so only an allow from a
   // client that shows it all counts.
   // title: what it's asking, for telling the agent about a subagent's.
-  | { approvalId: string; kind: 'tool'; main: boolean; title?: string; plan?: string; macOnly?: boolean; resolve: (a: ToolApprovalAnswer) => void }
+  // itemId and queued: the agent's call and the calls waiting behind it
+  // on the same card (docs/protocol.md, "Queued calls"), by itemId.
+  | { approvalId: string; kind: 'tool'; main: boolean; title?: string; plan?: string; macOnly?: boolean; itemId?: string; queued?: Set<string>; resolve: (a: ToolApprovalAnswer) => void }
   | { approvalId: string; kind: 'question'; main: boolean; title?: string; questions: Question[]; resolve: (a: QuestionAnswer) => void }
   // An agent's ask_secret (docs/protocol.md, "Secrets"). The value never
   // passes through here: secrets.answer writes the file and hands this the
@@ -2083,6 +2085,13 @@ export class Runner {
         this.emit(st, { type: 'plan.proposed', itemId: o.itemId, text: o.text }, rt.turn?.turnId);
         this.markDirty(st);
         break;
+      case 'approvalQueue': {
+        const pending = [...rt.approvals.values()].find((p) => p.kind === 'tool' && p.itemId === o.toolUseId);
+        if (pending?.kind !== 'tool') break;
+        pending.queued = new Set(o.calls.map((c) => c.itemId));
+        this.emit(st, { type: 'approval.queued', approvalId: pending.approvalId, calls: o.calls }, rt.turn?.turnId);
+        break;
+      }
       case 'allowRules': {
         const rules = new Set(rec.allowRules ?? []);
         for (const r of o.rules) rules.add(r);

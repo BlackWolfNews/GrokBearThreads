@@ -387,6 +387,28 @@ test('ask mode: approval card, waiting status, allow resolves the CLI callback',
   assert.throws(() => h.runner.respondApproval({ threadId: thread.id, approvalId: req.approvalId, decision: 'allow' }), /no longer pending/);
 });
 
+// docs/protocol.md, "Queued calls".
+test('calls queued on a card: listed by approval.queued, grown, and answered in the same click, only those it listed', async () => {
+  const h = makeHarness();
+  const { thread } = create(h, { permissionMode: 'ask' });
+  const s = h.adapter.last;
+  s.init();
+  const w1 = { itemId: 'w1', name: 'Write', title: 'Write b.txt', input: { file_path: '/tmp/b.txt', content: 'hi' } };
+  const b1 = { itemId: 'b1', name: 'Bash', title: 'rm -rf build', input: { command: 'rm -rf build' } };
+  const answer = s.sink.requestApproval({ toolUseId: 'e1', name: 'Edit', title: 'Edit a.txt', input: {}, canAlwaysAllow: true, signal: new AbortController().signal, queued: [w1] });
+  const req = h.events(thread.id).find((e) => e.type === 'approval.requested');
+  assert.deepEqual(h.events(thread.id).filter((e) => e.type === 'approval.queued').map((e) => [e.approvalId, e.calls.map((c: { itemId: string }) => c.itemId)]), [[req.approvalId, ['w1']]]);
+  s.sink.output({ kind: 'approvalQueue', toolUseId: 'e1', calls: [w1, b1] });
+  assert.deepEqual(h.events(thread.id).filter((e) => e.type === 'approval.queued').at(-1).calls.map((c: { itemId: string }) => c.itemId), ['w1', 'b1']);
+  h.runner.respondApproval({ threadId: thread.id, approvalId: req.approvalId, decision: 'deny', queued: { w1: 'allow', b1: 'deny', x9: 'allow' } });
+  assert.deepEqual(await answer, { decision: 'deny', message: undefined, queued: { w1: 'allow', b1: 'deny' } });
+  // From the phone, which never saw the list, only the card's own call counts.
+  const again = s.sink.requestApproval({ toolUseId: 'e2', name: 'Edit', title: 'Edit a.txt', input: {}, canAlwaysAllow: true, signal: new AbortController().signal, queued: [w1] });
+  const req2 = h.events(thread.id).filter((e) => e.type === 'approval.requested').at(-1);
+  h.runner.respondApproval({ threadId: thread.id, approvalId: req2.approvalId, decision: 'allow', queued: { w1: 'allow' }, remote: true });
+  assert.deepEqual(await again, { decision: 'allow', message: undefined });
+});
+
 test('questions are answered by question text, header or index', async () => {
   const h = makeHarness();
   const { thread } = create(h);

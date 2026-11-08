@@ -896,6 +896,7 @@ Persisted event types (stored in `events.ndjson`, returned by `threads.events`):
 | `approval.requested` | `approvalId`, `itemId?` (absent for a subagent's tools, which have no `tool.call`), `name`, `title`, `input`, `options: ("allow" \| "allowAlways" \| "deny")[]`. A subagent's card (no `itemId`) needs no turn: it can come with no `turnId`, and it outlives the turn it came in ("A subagent's card") |
 | `question.requested` | `approvalId`, `itemId?` (absent for a subagent's), `questions: {question, header?, multiSelect, options: {label, description?}[]}[]` |
 | `secret.requested` | `approvalId`, `itemId?`, `label`, `reason`, `placeholder?`: an agent's `ask_secret` (Secrets). Answered with `secrets.answer`, never `approvals.respond` |
+| `approval.queued` | `approvalId`, `calls: {itemId, name, title, input}[]`: the agent's other tool calls from the same reply that are waiting behind this card and expected to ask too, in order, each with its input as a card would show it. A later one replaces the list (it grows as more calls stream in). A client that doesn't know it shows the card on its own, and each queued call asks with a card of its own later ("Queued calls") |
 | `approval.resolved` | `approvalId`, `decision` (`allow` \| `allowAlways` \| `deny` \| `answered` \| `expired`), `message?` |
 | `plan.updated` | `entries: {text, status: "pending" \| "in_progress" \| "completed"}[]` |
 | `plan.proposed` | `itemId`, `text` (Markdown): a "Plan first" plan waiting for Mike (see "Plan first") |
@@ -964,7 +965,7 @@ the summary and then the reply.
 | `threads.markSeen` | `{ threadId, seq }` | `{ thread: ThreadSummary }` |
 | `threads.tickAsk` | `{ threadId, asksSeq, index, ticked: boolean }` | `{ thread: ThreadSummary }`. Ticks or unticks one of the open card's asks (Needs you), with an `asks.ticked` event. Sends nothing to the agent. `-32602` when `asksSeq` isn't the open card's or `index` is out of range |
 | `threads.share` | `{ threadId, access: "off" \| "link", newLink?: boolean }` | `{ thread: ThreadSummary }`. Whether anyone with the link can read the thread on the website (see Sharing). `newLink` makes a fresh slug, which stops the old link. Another access is `-32602` |
-| `approvals.respond` | `{ threadId, approvalId, decision: "allow" \| "allowAlways" \| "deny" \| "answered", message?: string, answers?: Record<string, string> }` | `{}`. `allowAlways` on a card that didn't offer it counts as `allow`. `allowAlways` allows matching requests for the rest of this thread only; it never changes the thread's permission mode or saves anything in the project. With `answered`, the app sends the chosen answers in one line as `message` too: the runner keeps it in `approval.resolved` (only `answers` goes to the CLI), so the transcript can show what was chosen |
+| `approvals.respond` | `{ threadId, approvalId, decision: "allow" \| "allowAlways" \| "deny" \| "answered", message?: string, answers?: Record<string, string>, queued?: Record<string, "allow" \| "deny"> }` | `{}`. `queued` answers calls from the card's `approval.queued` list, by `itemId`, in the same click ("Queued calls"); ids not on the list are ignored, as is the whole of it from the phone or another Mac's view (`remote`). `allowAlways` on a card that didn't offer it counts as `allow`. `allowAlways` allows matching requests for the rest of this thread only; it never changes the thread's permission mode or saves anything in the project. With `answered`, the app sends the chosen answers in one line as `message` too: the runner keeps it in `approval.resolved` (only `answers` goes to the CLI), so the transcript can show what was chosen |
 | `plans.approve` | `{ threadId, itemId }` | `{}`. Go ahead on a waiting plan (see "Plan first"); `-32602` if that plan isn't waiting |
 | `secrets.answer` | `{ threadId, approvalId, secret?: string, decline?: true }` | `{}`. Answers a `secret.requested` card (Secrets). The runner never logs, emits or mirrors `secret` |
 | `media.import` | `{ path: string }` | `{ image: ImageRef }` copies a file into `inbox/` and reads its size; HEIC becomes JPEG and TIFF or BMP becomes PNG |
@@ -1936,6 +1937,37 @@ order.
 
 An older runner hands the agent the markers as words, with every picture
 before them; an older app shows them as words.
+
+## Queued calls
+
+Claude Code asks about one tool call at a time, and only asks about the
+next once the last is answered. A reply with eight edits that all ask
+meant eight cards in a row, each taking the last one's place half a
+second after Allow, which looked like the same card coming back (Mike,
+8 Nov 2026). So one card shows them all.
+
+- **What's queued.** While a card waits for the agent's own call, the
+  runner lists the calls that came after it in the same reply, have no
+  result yet and are expected to ask: in Ask mode edits, writes,
+  commands, web fetches and other servers' tools; in Auto mode only
+  edits of files that run as code; in Full only tools that always ask.
+  The threadbear tools that never ask, questions and plans are never
+  queued, nor is a call too long for a card. `approval.queued` carries
+  the list, and again whenever a call joins it (they stream in while the
+  card waits). Claude only: Codex asks about its own calls one at a time.
+- **Answering.** `approvals.respond` with `queued` answers them in the
+  same click. The card's own call takes `decision`; each queued one its
+  entry, `allow` or `deny`. A queued call left out of `queued` asks with
+  a card of its own when its turn comes, as before. A card with a queue
+  offers no Always allow for the queue: only the card's own call can
+  make a rule.
+- **When the call comes up.** An allowed one goes through with no card.
+  A denied one is refused before it runs (a PreToolUse hook, so even a
+  call that wouldn't have asked, an allow rule's or Auto's classifier's,
+  doesn't run), and the agent is told Mike denied it.
+- **Other clients.** The phone and another Mac's view of the runner
+  don't get the list: they answer the card's own call, and the rest ask
+  one by one.
 
 ## Plan first
 

@@ -1471,6 +1471,32 @@ async function fakeTurn(threadId, text, images, turnId = 'turn_' + crypto.random
   const thinkId = 'r_' + crypto.randomBytes(4).toString('hex');
   persist(threadId, { type: 'reasoning', itemId: thinkId, text: 'Checking what the message asks for before answering.' }, turnId);
 
+  // "queued" in a message: an edit's card with the reply's other calls
+  // queued on it (docs/protocol.md, "Queued calls").
+  if (/queued/i.test(text)) {
+    const approvalId = 'ap_' + crypto.randomBytes(4).toString('hex');
+    const root = t.summary.cwd || '/Users/mike/dev/photo-sync';
+    const edit = (id, file, oldText, newText) => ({ itemId: id, name: 'Edit', title: `Edit ${file}`, input: { file_path: `${root}/${file}`, old_string: oldText, new_string: newText } });
+    const head = edit('q1', 'Tests/PreviewTests.swift', '        let started = Date()\n        _ = Preview.references(in: text)\n        XCTAssertLessThan(Date().timeIntervalSince(started), 10)', '        let seconds = cpuSeconds {\n            _ = Preview.references(in: text)\n        }\n        XCTAssertLessThan(seconds, 30)');
+    const calls = [
+      edit('q2', 'Tests/DraftTests.swift', '        let start = Date()', '        let seconds = cpuSeconds {\n            _ = Draft.parse(text)\n        }'),
+      { itemId: 'q3', name: 'Write', title: 'Write Tests/CPUTime.swift', input: { file_path: `${root}/Tests/CPUTime.swift`, content: 'import Darwin\n\n/// CPU time the block took, not wall time: a loaded machine\n/// doesn\'t fail the test.\nfunc cpuSeconds(_ body: () -> Void) -> Double {\n    let before = clock()\n    body()\n    return Double(clock() - before) / Double(CLOCKS_PER_SEC)\n}\n' } },
+      { itemId: 'q4', name: 'Bash', title: 'swift test --filter PreviewTests', input: { command: 'swift test --filter PreviewTests' } },
+    ];
+    for (const c of [head, ...calls]) persist(threadId, { type: 'tool.call', itemId: c.itemId, name: c.name, kind: c.name === 'Bash' ? 'command' : 'edit', title: c.title, input: c.input }, turnId);
+    persist(threadId, { type: 'approval.requested', approvalId, itemId: head.itemId, name: head.name, title: head.title, input: head.input, options: ['allow', 'allowAlways', 'deny'] }, turnId);
+    persist(threadId, { type: 'approval.queued', approvalId, calls }, turnId);
+    setStatus(threadId, 'waiting', true);
+    t.approvalWaiters ??= new Map();
+    const answer = await new Promise((resolve) => t.approvalWaiters.set(approvalId, resolve));
+    setStatus(threadId, 'running', false);
+    const answers = { [head.itemId]: answer.decision, ...(answer.queued ?? {}) };
+    for (const c of [head, ...calls]) persist(threadId, { type: 'tool.result', itemId: c.itemId, ok: answers[c.itemId] === 'allow', text: answers[c.itemId] === 'allow' ? 'Done.' : 'The user denied this.', truncated: false, images: [] }, turnId);
+    const allowed = Object.values(answers).filter((d) => d === 'allow').length;
+    persist(threadId, { type: 'assistant.text', itemId: 'm_' + crypto.randomBytes(4).toString('hex'), text: `Allowed ${allowed} of ${calls.length + 1}.` }, turnId);
+    return finishTurn(threadId, turnId, started, 'completed');
+  }
+
   if (/approval|ask me/i.test(text) || t.summary.permissionMode === 'ask') {
     const approvalId = 'ap_' + crypto.randomBytes(4).toString('hex');
     persist(threadId, { type: 'approval.requested', approvalId, name: 'Bash', title: 'ls -la', input: { command: 'ls -la' }, options: ['allow', 'allowAlways', 'deny'] }, turnId);

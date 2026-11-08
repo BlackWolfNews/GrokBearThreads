@@ -831,6 +831,14 @@ public struct TranscriptModel: Sendable {
             pendingCards[id] = turnId ?? ""
             tailDirty = true
 
+        case .approvalQueued(let queue):
+            let id = "ap:\(queue.approvalId)"
+            update(id) { content in
+                guard case .approval(var item) = content, item.resolution == nil else { return }
+                item.queued = queue.calls
+                content = .approval(item)
+            }
+
         case .questionRequested(let request):
             let id = "q:\(request.approvalId)"
             append(TranscriptRow(id: id, seq: seq, turnId: turnId, content: .question(QuestionItem(request: request))))

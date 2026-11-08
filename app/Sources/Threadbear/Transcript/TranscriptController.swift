@@ -910,6 +910,12 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
 
     func isAnswering(_ approvalId: String) -> Bool { session?.answering.contains(approvalId) == true }
 
+    func untickedCalls(_ approvalId: String) -> Set<String> { session?.untickedCalls[approvalId] ?? [] }
+
+    func toggleQueuedCall(approvalId: String, itemId: String) {
+        session?.toggleQueuedCall(approvalId: approvalId, itemId: itemId)
+    }
+
     /// Lays out an approval or question card again as its answer goes
     /// (ThreadSession.answering). Its height doesn't change.
     func refreshCard(_ approvalId: String) {

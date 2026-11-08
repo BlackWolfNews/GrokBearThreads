@@ -263,6 +263,9 @@ public struct ApprovalItem: Sendable, Hashable {
     /// Another runner asking for a thread: the request as it was filed,
     /// once this Mac's runner has read it (nil until then).
     public var startRequest: StartRequest?
+    /// The agent's other calls waiting behind this one, shown on the same
+    /// card (docs/protocol.md, "Queued calls"). Empty for most cards.
+    public var queued: [ApprovalRequest] = []
 
     public init(request: ApprovalRequest, resolution: ApprovalResolution? = nil, root: String? = nil, toolShown: Bool = false, startRequest: StartRequest? = nil) {
         self.request = request
