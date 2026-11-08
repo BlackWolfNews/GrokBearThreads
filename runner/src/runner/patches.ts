@@ -745,9 +745,11 @@ export const patchesPart = {
       // What a command did is often what its chips' `when` and badges ask
       // (a Run that starts a server swaps for its Stop): read them now,
       // rather than at the next poll up to LIVE_POLL_MS later. The live
-      // commands' shared output is from before it ran, so it goes too.
+      // commands' finished output is from before it ran, so it goes too;
+      // one still running is kept, so a slow command shared by many
+      // threads isn't started again beside itself.
       if (st.rt.patches) {
-        this.liveRuns.clear();
+        for (const [key, run] of this.liveRuns) if (run.doneAt !== undefined) this.liveRuns.delete(key);
         this.rereadPatches(st);
       }
       return { ok: outcome.ok, exitCode: outcome.exitCode, durationMs: outcome.durationMs, seq: event.seq };

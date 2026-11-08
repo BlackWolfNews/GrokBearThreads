@@ -26,13 +26,13 @@ extension AppModel {
     func newThread(in project: Project) {
         newThread()
         guard selection == nil else { return }
+        // A project is this Mac's runner's: back to it the way the machine
+        // menu goes, so another Mac's login and folder don't come along.
+        if newThreadRunnerId != nil { chooseNewThreadRunner(nil) }
         newThreadProjectId = project.id
-        if let folder = project.folders.first { newThreadCwd = folder }
-        // A project is this Mac's runner's.
-        if newThreadRunnerId != nil {
-            newThreadRunnerPicked = true
-            newThreadRunnerId = nil
-        }
+        // Its first folder, or the default one: never a folder left from
+        // another draft.
+        newThreadCwd = project.folders.first
     }
 
     /// Collapses the thread's card of asks, or brings it back. The cursor

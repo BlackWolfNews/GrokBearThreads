@@ -296,6 +296,9 @@ extension AppModel {
         newThreadRunnerId = runnerId
         newThreadRunnerProblem = nil
         newThreadCwd = nil
+        // Projects are this Mac's: another Mac's thread starts outside one,
+        // so the In chip goes rather than promising what won't happen.
+        if runnerId != nil { newThreadProjectId = nil }
         newThreadAccount = nil
         newThreadPool = nil
         newThreadProvider = nil

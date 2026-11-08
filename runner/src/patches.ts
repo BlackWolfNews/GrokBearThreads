@@ -1164,7 +1164,9 @@ function summaryText(v: unknown): string | undefined {
 // A label function's answer as the chip's title for now: a string, or
 // nothing to keep the title the patch gave.
 function labelText(v: unknown): string | undefined {
-  return typeof v === 'string' && v.trim() ? v.trim().slice(0, 60) : undefined;
+  // One line: a chip is one line tall, and newlines would stack it.
+  const s = typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : '';
+  return s ? s.slice(0, 60).trim() : undefined;
 }
 
 // A badge function's answer as a count: a number, a numeric string or a

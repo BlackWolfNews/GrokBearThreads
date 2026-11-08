@@ -880,8 +880,18 @@ export class Relay {
         const said = typeof p.said === 'string' ? p.said.trim() : '';
         if (!said) throw new RpcError(ErrorCode.badParams, 'Say when it should wake.');
         if (said.length > 300) throw new RpcError(ErrorCode.badParams, 'Say it in 300 characters or fewer.');
+        const before = this.find(threadId)?.snoozedUntil;
         await this.command(w.runnerId, threadId, 'update', { snooze: { said, untilRestart: true } }, { done: true, ms: HIBERNATE_MS });
-        return { thread: this.summary(threadId) };
+        // Done can come before the row with its wake time: wait a little
+        // for it, and failing that answer it as put away, in this reply
+        // only, so the app doesn't put an awake row over its own guess.
+        // The row's real time replaces it when it comes.
+        for (let i = 0; i < SHARE_READS && this.find(threadId)?.snoozedUntil === before; i++) {
+          await new Promise<void>((r) => this.deps.clock.setTimeout(() => r(), SHARE_READ_MS / 4));
+        }
+        const thread = this.summary(threadId);
+        if (!thread.snoozedUntil) Object.assign(thread, { snoozedUntil: UNTIL_RESTART, snoozedUntilRestart: true });
+        return { thread };
       }
       case 'threads.share': {
         const access = p.access;

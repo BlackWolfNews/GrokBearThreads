@@ -491,3 +491,18 @@ test("hibernating in words goes as an update with the words, and answers the row
   await assert.rejects(bad, /Couldn't work out when/);
   await assert.rejects(h.relay.call(T, 'threads.hibernateWhen', { threadId: T, said: '  ' }), /Say when/);
 });
+
+test('hibernating in words: done before the row has its time still answers it as put away', async () => {
+  // Codex's review: done can beat the row, and the app then put an awake row over its guess.
+  const h = harness();
+  const p = h.relay.call(T, 'threads.hibernateWhen', { threadId: T, said: 'tomorrow morning' });
+  await new Promise((r) => setImmediate(r));
+  h.subs.get('relay:commandState')![0]!.onUpdate({ state: 'done' });
+  for (let i = 0; i < 10; i++) {
+    await new Promise((r) => setImmediate(r));
+    h.clock.advance(1000);
+  }
+  const { thread } = (await p) as { thread: Record<string, unknown> };
+  assert.equal(thread.snoozedUntilRestart, true);
+  assert.ok(thread.snoozedUntil);
+});

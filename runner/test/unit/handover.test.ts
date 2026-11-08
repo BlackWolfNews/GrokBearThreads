@@ -836,3 +836,25 @@ test('a save that fails while the runner stops leaves no timer behind', async ()
   assert.equal(h.runner.saveRetryTimer, undefined);
   assert.notEqual(JSON.parse(fs.readFileSync(threadFile(h, t.id), 'utf8')).title, 'Renamed');
 });
+
+test('a kept thread whose wake time in words is still being worked out stays until it is', async () => {
+  // Codex's review: it crossed with wakeWhen.pending, so the new runner woke
+  // it and this runner's answer went nowhere.
+  const h = makeHarness();
+  const t = create(h).thread;
+  h.adapter.last.init();
+  h.adapter.last.result('completed');
+  await tick();
+  const rec = (h.runner as any).threads.get(t.id).rec;
+  rec.wakeWhen = { said: 'tomorrow', pending: true };
+  const handed: string[] = [];
+  await h.runner.beginDrain([t.id], { onHandedOver: (id) => handed.push(id), backgroundMs: 30 * MIN });
+  (h.runner as any).checkHandovers();
+  await tick();
+  assert.deepEqual(handed, []);
+  assert.deepEqual(h.runner.keeping(), [t.id]);
+  rec.wakeWhen = { said: 'tomorrow' };
+  (h.runner as any).checkHandovers();
+  await tick();
+  assert.deepEqual(handed, [t.id]);
+});
