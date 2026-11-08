@@ -1112,6 +1112,7 @@ enum RowRenderer {
         let output = NSMutableAttributedString(string: "\(info.request.runnerName) wants to start a thread on \(place)", attributes: titleAttributes)
         var notes: [String] = []
         if info.target == nil { notes.append("It asked for \u{201C}\(info.request.target)\u{201D}, which isn't one of your machines.") }
+        if let folder = info.missingFolder { notes.append("\(folder) isn't a folder on this Mac. Start it sends the request back, to ask again with one that is.") }
         if let why = info.request.why?.trimmingCharacters(in: .whitespacesAndNewlines), !why.isEmpty { notes.append(why) }
         if !notes.isEmpty { output.append(NSAttributedString(string: "\n" + notes.joined(separator: "\n"), attributes: quiet)) }
         return output

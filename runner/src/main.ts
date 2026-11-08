@@ -3,6 +3,7 @@
 // THREADBEAR_PORT pointing at temp places.
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { loadConfig, ensureHome, readToken, paths, recordListening, defaultHome, DEFAULT_CWD, RUNNER_VERSION } from './config.ts';
 import { startHousekeeping } from './housekeeping.ts';
 import { RELEASE, markGoodLater, onSupervisorGone, ownCheckout, readRelease, readState, requestHandover, supervised, takeRollbackNotice, tellLaunchListening } from './release.ts';
@@ -45,7 +46,7 @@ import { Relay } from './relay.ts';
 import { RpcServer } from './rpc.ts';
 import { realClock } from './clock.ts';
 import { acquireLock } from './lock.ts';
-import { removeTempFiles } from './fsutil.ts';
+import { isDirectory, removeTempFiles } from './fsutil.ts';
 import { Models } from './models/index.ts';
 import { SettingsService, modelMethods, settingsMethods } from './settings.ts';
 import { InstructionsStore, instructionsMethods } from './instructions.ts';
@@ -662,6 +663,8 @@ async function main(): Promise<void> {
     respondThere: async (threadId, approvalId, decision, message) => {
       await relay.call(threadId, 'approvals.respond', { threadId, approvalId, decision, ...(message ? { message } : {}) });
     },
+    home: () => os.homedir(),
+    isDirectory,
   });
   crossHooks = {
     start: (threadId, req) => cross.start(threadId, req),

@@ -12,6 +12,7 @@
 // backend's row, never the answer's words, so a phone or an old app that
 // says "allow" without starting anything changes nothing.
 import crypto from 'node:crypto';
+import path from 'node:path';
 import { ErrorCode, RpcError } from './protocol.ts';
 import type { RunnerRequestInput, RunnerRequestRow } from './sync.ts';
 import { wasNotSent } from './relay.ts';
@@ -52,6 +53,9 @@ export type CrossRunnerDeps = {
   openCard: (threadId: string) => Promise<string | undefined>;
   // Answers another runner's card through the relay.
   respondThere: (threadId: string, approvalId: string, decision: 'allow' | 'deny', message?: string) => Promise<void>;
+  // This Mac's home folder and disk, for the folder a request names.
+  home: () => string;
+  isDirectory: (p: string) => boolean;
 };
 
 const bad = (m: string) => new RpcError(ErrorCode.badParams, m);
@@ -74,6 +78,28 @@ export function askedHeader(row: Pick<RunnerRequestRow, 'threadId' | 'runnerName
 export function fingerprint(row: RunnerRequestRow): string {
   const fields = [row.docId, row.requestId, row.runnerId, row.threadId, row.target, row.text, row.title, row.cwd, row.model, row.effort, row.permissionMode, row.why, row.createdAt];
   return crypto.createHash('sha256').update(JSON.stringify(fields)).digest('hex');
+}
+
+// A folder another machine's agent named, as a folder on this Mac, or
+// undefined when it isn't one. That agent can't see this disk, so it
+// guesses, and gets the home folder wrong: on 8 Nov the cloud's agent asked
+// for /Users/mike/dev/me/threadbear on a Mac whose home is /Users/m5-mike.
+// So one that isn't here is tried again under this Mac's home, with its own
+// (~, /Users/<name>, /home/<name>) taken off. Never one outside the home:
+// what the card shows is where it starts, but `..` shouldn't climb out.
+export function folderHere(cwd: string, home: string, isDir: (p: string) => boolean): string | undefined {
+  const asked = cwd.trim();
+  const tilde = /^~(\/.*)?$/.exec(asked);
+  if (!tilde) {
+    if (!path.isAbsolute(asked)) return undefined;
+    const exact = path.resolve(asked);
+    if (isDir(exact)) return exact;
+  }
+  const homed = tilde ?? /^\/(?:Users|home)\/[^/]+(\/.*)?$/.exec(asked);
+  if (!homed) return undefined;
+  const here = path.resolve(home, '.' + (homed[1] ?? ''));
+  if (here !== home && !here.startsWith(home + path.sep)) return undefined;
+  return isDir(here) ? here : undefined;
 }
 
 export class CrossRunner {
@@ -141,16 +167,29 @@ export class CrossRunner {
     // so it stops counting against this runner's few, and can't be started late.
     if (answer.status !== 'started') await backend.closeRequest(approvalId).catch(() => {});
     if (answer.status === 'started') return `The user allowed it: started thread ${answer.threadId} on ${answer.runnerName}. It can report back here with send_message; this thread can't read or message it.`;
-    if (answer.status === 'declined') return `The user said no${answer.message ? `: ${answer.message}` : ''}. Don't ask again unless they say so.`;
+    // A reason with it (the main Mac's runner couldn't start it, or Mike
+    // wrote one) is the agent's to act on; a plain no is final.
+    if (answer.status === 'declined') return answer.message ? `It wasn't started: ${answer.message}` : "The user said no. Don't ask again unless they say so.";
     return `Nobody answered in ${REQUEST_WAIT_MIN} minutes, so nothing was started.`;
   }
 
   /** requests.get, on the main Mac: the request as it was filed, and where it would start. */
-  async get(threadId: string, approvalId: string): Promise<{ request: RunnerRequestRow; target?: RunnerRef; runners: RunnerRef[]; fingerprint: string }> {
+  async get(threadId: string, approvalId: string): Promise<{ request: RunnerRequestRow; target?: RunnerRef; runners: RunnerRef[]; fingerprint: string; missingFolder?: string }> {
     const row = await this.row(threadId, approvalId);
     const runners = await this.deps.runners();
     const target = await this.resolve(row.target);
-    return { request: row, ...(target ? { target } : {}), runners, fingerprint: fingerprint(row) };
+    // One starting here shows the folder it would really start in (the
+    // app starts a request naming a machine it doesn't know here too).
+    // The fingerprint is still the row's: answer() works the folder out
+    // the same way.
+    const here = (!target || target.self) && row.cwd ? this.folder(row.cwd) : undefined;
+    const request = here ? { ...row, cwd: here } : row;
+    const missing = (!target || target.self) && row.cwd && !here ? { missingFolder: row.cwd } : {};
+    return { request, ...(target ? { target } : {}), runners, fingerprint: fingerprint(row), ...missing };
+  }
+
+  private folder(cwd: string): string | undefined {
+    return folderHere(cwd, this.deps.home(), this.deps.isDirectory);
   }
 
   /** requests.answer, on the main Mac: start it (on `runnerId`, or the one it asked for) or say no. */
@@ -174,7 +213,22 @@ export class CrossRunner {
       if (!target) throw bad(`No runner called ${runnerId ?? row.target}. Pick one.`);
       // Said before claiming, so it can be tried again once that Mac is back.
       if (!target.self && target.online === false) throw other(`${target.name} is offline. Try again once it's back.`);
-      const { text, title, cwd, model, effort, permissionMode, why } = row;
+      const { text, title, model, effort, permissionMode, why } = row;
+      let cwd = row.cwd;
+      if (target.self && cwd) {
+        const here = this.folder(cwd);
+        if (!here) {
+          // Nothing Mike can pick here would make it right, and the agent
+          // waits an hour for a card that can't start: it's told why
+          // instead, so it can ask again with a folder that's here.
+          const s = this.deps.self();
+          const why = `There's no folder ${cwd} on ${s.name}, the main Mac. Its home folder is ${this.deps.home()}. Ask again with a folder there.`;
+          await backend.decideRequest({ requestId: approvalId, docId: row.docId, state: 'denied' });
+          await this.deps.respondThere(threadId, approvalId, 'deny', why).catch(() => {});
+          throw bad(`${cwd} isn't a folder on this Mac, so nothing was started. The thread that asked has been told, so it can ask again with one that is.`);
+        }
+        cwd = here;
+      }
       const p: RunnerRequestInput = { text: askedHeader(row) + text, ...(title ? { title } : {}), ...(cwd ? { cwd } : {}), ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(permissionMode ? { permissionMode } : {}) };
       // Claimed in the backend before anything starts, so a retry, a second
       // click or this runner restarting midway can't start it twice.

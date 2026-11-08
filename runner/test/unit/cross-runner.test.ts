@@ -4,7 +4,7 @@
 // filed, only while the card is open, and marks it before answering.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CrossRunner, askedHeader, fingerprint, type CrossRunnerDeps, type RequestAnswer, type RunnerRef } from '../../src/cross-runner.ts';
+import { CrossRunner, askedHeader, fingerprint, folderHere, type CrossRunnerDeps, type RequestAnswer, type RunnerRef } from '../../src/cross-runner.ts';
 import type { RunnerRequestRow } from '../../src/sync.ts';
 import { ErrorCode, RpcError } from '../../src/protocol.ts';
 import { notSent } from '../../src/relay.ts';
@@ -14,6 +14,10 @@ const RUNNERS: RunnerRef[] = [
   { id: 'cloud1', name: 'Hetzner Cloud', self: false },
   { id: 'bruce1', name: 'bruce', self: false },
 ];
+
+// This Mac's home and the folders on it, for a request's folder.
+const HOME = '/Users/m5-mike';
+const DIRS = new Set([HOME, `${HOME}/dev/me/threadbear`, '/opt/work']);
 
 function fake(opts: { owner: boolean; self?: { id: string; name: string }; failCreate?: Error; failThere?: unknown; runners?: RunnerRef[]; beforeOpen?: () => void }) {
   const log: string[] = [];
@@ -66,9 +70,11 @@ function fake(opts: { owner: boolean; self?: { id: string; name: string }; failC
       opts.beforeOpen?.();
       return open;
     },
-    respondThere: async (threadId, approvalId, decision) => {
-      log.push(`respond ${threadId} ${approvalId} ${decision}`);
+    respondThere: async (threadId, approvalId, decision, message) => {
+      log.push(`respond ${threadId} ${approvalId} ${decision}${message ? ` ${message}` : ''}`);
     },
+    home: () => HOME,
+    isDirectory: (p) => DIRS.has(p),
   };
   return { cross: new CrossRunner(deps), log, rows, setOpen: (id: string | undefined) => (open = id), check: () => cardCheck!(), settle: (a: RequestAnswer) => settle!(a), input: () => cardInput };
 }
@@ -170,7 +176,7 @@ test('answering on the main Mac: starts exactly what was filed, with a header sa
   f.log.shift();
   const made = JSON.parse(f.log[0]!.slice('here '.length));
   assert.equal(made.text, askedHeader({ threadId: 'cloud-thread', runnerName: 'Hetzner Cloud' }) + 'Open both apps.');
-  assert.equal(made.cwd, '~/dev/me/threadbear');
+  assert.equal(made.cwd, `${HOME}/dev/me/threadbear`);
   assert.deepEqual(made.startedBy, { kind: 'thread', label: 'Hetzner Cloud', threadId: 'cloud-thread', why: 'see both builds' });
   // Marked before the card is answered, so the asking runner's check finds it.
   assert.deepEqual(f.log.slice(1), ['decide req-1 allowed m5/new-here', 'respond cloud-thread req-1 allow']);
@@ -239,4 +245,74 @@ test('on a runner key: Plan first is filed as Ask', async () => {
   await new Promise((r) => setImmediate(r));
   assert.equal([...f.rows.values()][0]!.permissionMode, 'ask');
   assert.equal(f.input()!.permissionMode, 'ask', 'and the card says so');
+});
+
+// 8 Nov 2026: the cloud's agent asked for /Users/mike/dev/me/threadbear, a
+// guess at the main Mac's home, which is /Users/m5-mike. Start it failed
+// with "Folder not found" and left the card open, with nothing Mike or the
+// agent could do about the folder.
+test("a request's folder: one guessed from another machine's home is read from this Mac's", () => {
+  const isDir = (p: string) => DIRS.has(p);
+  assert.equal(folderHere('/Users/mike/dev/me/threadbear', HOME, isDir), `${HOME}/dev/me/threadbear`);
+  assert.equal(folderHere('/home/mike/dev/me/threadbear', HOME, isDir), `${HOME}/dev/me/threadbear`);
+  assert.equal(folderHere('~/dev/me/threadbear', HOME, isDir), `${HOME}/dev/me/threadbear`);
+  assert.equal(folderHere('~', HOME, isDir), HOME);
+  assert.equal(folderHere('/Users/mike', HOME, isDir), HOME);
+  assert.equal(folderHere(`${HOME}/dev/me/threadbear/`, HOME, isDir), `${HOME}/dev/me/threadbear`);
+  // One that's here is left alone, home or not.
+  assert.equal(folderHere('/opt/work', HOME, isDir), '/opt/work');
+  // Not here either way, or climbing out of the home: not a folder here.
+  assert.equal(folderHere('/Users/mike/dev/elsewhere', HOME, isDir), undefined);
+  assert.equal(folderHere('/srv/threadbear', HOME, isDir), undefined);
+  assert.equal(folderHere('/Users/mike/../../opt/work', '/Volumes/disk/me', (p) => p === '/Volumes/opt/work'), undefined);
+  assert.equal(folderHere('relative/path', HOME, isDir), undefined);
+});
+
+test('answering on the main Mac: a folder guessed from another home shows and starts as the one here', async () => {
+  const f = fake({ owner: true });
+  const row: RunnerRequestRow = { docId: 'doc1', requestId: 'req-10', runnerId: 'cloud1', runnerName: 'Hetzner Cloud', threadId: 'c', target: 'main', text: 'x', cwd: '/Users/mike/dev/me/threadbear', createdAt: 1, state: 'pending' };
+  f.rows.set('req-10', row);
+  f.setOpen('req-10');
+  const got = await f.cross.get('c', 'req-10');
+  // The card shows where it really starts.
+  assert.equal(got.request.cwd, `${HOME}/dev/me/threadbear`);
+  assert.equal(got.missingFolder, undefined);
+  assert.equal(got.fingerprint, fingerprint(row));
+  await f.cross.answer('c', 'req-10', true, undefined, got.fingerprint);
+  assert.equal(JSON.parse(f.log[1]!.slice('here '.length)).cwd, `${HOME}/dev/me/threadbear`);
+});
+
+test("answering on the main Mac: a folder that isn't here goes back to the agent with why, so it can ask again", async () => {
+  const f = fake({ owner: true });
+  const row: RunnerRequestRow = { docId: 'doc1', requestId: 'req-11', runnerId: 'cloud1', runnerName: 'Hetzner Cloud', threadId: 'c', target: 'main', text: 'x', cwd: '/srv/threadbear', createdAt: 1, state: 'pending' };
+  f.rows.set('req-11', row);
+  f.setOpen('req-11');
+  const got = await f.cross.get('c', 'req-11');
+  assert.equal(got.missingFolder, '/srv/threadbear', 'the card says so before Start it');
+  await assert.rejects(f.cross.answer('c', 'req-11', true, undefined, got.fingerprint), (e: unknown) => e instanceof RpcError && e.code === ErrorCode.badParams && /\/srv\/threadbear/.test(e.message) && /ask again/.test(e.message));
+  assert.ok(!f.log.some((l) => l.startsWith('here') || l.includes('claimed')), 'nothing started or claimed');
+  assert.equal(f.log[0], 'decide req-11 denied');
+  assert.match(f.log[1]!, /^respond c req-11 deny .*\/srv\/threadbear.*\/Users\/m5-mike/);
+  // Starting on another machine, the folder is that machine's to check.
+  const g = fake({ owner: true });
+  g.rows.set('req-12', { ...row, requestId: 'req-12', target: 'bruce' });
+  g.setOpen('req-12');
+  const there = await g.cross.get('c', 'req-12');
+  assert.equal(there.missingFolder, undefined);
+  assert.equal(there.request.cwd, '/srv/threadbear');
+});
+
+test("on a runner key: a no with a reason tells the agent why, not to stop asking", async () => {
+  const f = fake({ owner: false, self: { id: 'cloud1', name: 'Hetzner Cloud' } });
+  const said = f.cross.start('cloud-thread', { runner: 'main', text: 'x', cwd: '/srv/threadbear' });
+  await new Promise((r) => setImmediate(r));
+  f.settle({ status: 'declined', message: "There's no folder /srv/threadbear on M5." });
+  const text = (await said)!;
+  assert.match(text, /no folder \/srv\/threadbear/);
+  assert.doesNotMatch(text, /Don't ask again/);
+  const g = fake({ owner: false, self: { id: 'cloud1', name: 'Hetzner Cloud' } });
+  const no = g.cross.start('cloud-thread', { runner: 'main', text: 'x' });
+  await new Promise((r) => setImmediate(r));
+  g.settle({ status: 'declined' });
+  assert.match((await no)!, /said no\. Don't ask again/);
 });

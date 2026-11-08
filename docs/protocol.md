@@ -987,7 +987,7 @@ the summary and then the reply.
 | `schedules.delete` | `{ scheduleId }` | `{}` |
 | `schedules.run` | `{ scheduleId }` | `{ schedule: Schedule, threadId?: string, turnId?: string, queued?: boolean }` runs it now, as if it were due, even when paused. A repeating schedule keeps its `nextRunAt`; a one-off is finished. For a schedule on another runner it answers at once with `queued: true` and no thread: that runner runs it when it next hears (`runRequestedAt` is set until then) |
 | `runners.list` | `{}` | `{ runners: RunnerInfo[] }`, this runner first, then the rest by name. Without a backend, just this runner |
-| `requests.get` | `{ threadId, approvalId }` | `{ request, target?, runners }`: another runner's request for a new thread (Asking another runner), exactly as it was filed (`relay:runnerRequest`), the runner it names if this runner can find it (`{ id, name, self }`), and every runner to pick from instead. Main Mac's runner only; `-32602` for no such request on that thread |
+| `requests.get` | `{ threadId, approvalId }` | `{ request, target?, runners, fingerprint, missingFolder? }`: another runner's request for a new thread (Asking another runner), exactly as it was filed (`relay:runnerRequest`) but for a folder starting on this Mac, which is the folder it would start in here ("The folder" there), the runner it names if this runner can find it (`{ id, name, self }`), and every runner to pick from instead. `missingFolder` is the folder as filed when it would start here and isn't a folder on this Mac. Main Mac's runner only; `-32602` for no such request on that thread |
 | `requests.answer` | `{ threadId, approvalId, allow: boolean, runnerId?: string }` | `{ thread?: { id, runnerId, runnerName } }`. `allow` starts the filed request (on `runnerId` if given, else the runner it named), marks it allowed and answers its card; otherwise marks it denied and declines the card. `-32602` once the card has closed (answered, expired, declined from the phone) or the request was already answered. Main Mac's runner only |
 | `runners.stats` | `{}` | `{ stats: RunnerMachineStats[] }`: each runner's latest machine figures, `{ runnerId, at, cpuPercent, cores, memUsed, memTotal, diskFree, diskTotal, load1?, uptimeSec, machine?, os? }` (bytes; `uptimeSec` is the machine's). Asking marks them wanted (`sync:watchRunnersFromMac`, at most every 20 s), so every runner reports every 10 s until nobody has asked for 45 s. The Mac app asks only while a runner's details are open in the Runners panel and its window can be seen. Empty with sync off, on an older backend, or on a runner key. A runner older than this answers `-32601`. The app leaves out a row with a figure past `setRunnerStats`'s limits, as one stored before those were checked would be |
 | `remoteThreads.list` | `{}` | `RemoteThreads`: other runners' threads for the sidebar (see "Other runners' threads"). Empty with sync off, or before the backend (API 12) has answered. A runner older than this answers `-32601` |
@@ -4725,7 +4725,19 @@ runner that's this one is the usual create.
   model, and the whole brief, with Start it and Don't. Return in an empty
   composer, which allows other cards, never starts one, and Start it does
   nothing until the request has been read. One naming a machine this Mac
-  doesn't know starts on this Mac, and the card says so. Start it is
+  doesn't know starts on this Mac, and the card says so.
+  **The folder.** The asking agent can't see this Mac's disk, so it
+  guesses its paths, usually right but for the home folder (it asked for
+  `/Users/mike/...` on 8 Nov when this Mac's was `/Users/m5-mike`). For
+  one starting on this Mac, a folder that isn't one here but is under
+  this Mac's home once its own home is taken off (`~/x`, `/Users/<name>/x`,
+  `/home/<name>/x`) starts in that one, and `requests.get` gives that
+  folder, so the card shows where it really starts. One that's still not
+  a folder here is `missingFolder` and the card says so; Start it then
+  starts nothing, marks the request denied and declines the card with a
+  message naming the folder and this Mac's home, which the asking agent
+  is told as the reason, so it can ask again with a folder that's here,
+  and answers `-32602` saying so. Start it is
   `requests.answer` with the machine the card showed and the
   `fingerprint` `requests.get` gave (a hash of the whole filed request and
   when it was filed), so a request filed again under the same id with
@@ -4750,7 +4762,8 @@ runner that's this one is the usual create.
   card reads `relay:runnerRequest`: allowed with a result, the tool says
   where the thread started; denied, the user said no; still pending (an
   old phone's Allow, or anyone's), the answer is refused and the card
-  stays open. `deny` from anywhere declines it. A card that closes without
+  stays open. `deny` from anywhere declines it, and a message with it is
+  given to the agent as why it wasn't started. A card that closes without
   starting (declined, expired, Mike wrote instead) closes its request
   (`relay:closeRequest`, its own), so it stops counting against the five
   a runner key may have waiting and can't be started late.

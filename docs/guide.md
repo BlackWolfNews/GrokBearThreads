@@ -777,7 +777,11 @@ An agent on one of those other Macs can still ask for a thread on this
 one (to try something only your Mac can, say): a card in its thread shows
 who's asking, the folder, its access and the whole brief, and Start it
 starts it here, from this Mac. Answer it in the Mac app; the phone shows it
-but can't start it. The new thread is told which thread asked, and can
+but can't start it. The agent can't see this Mac's folders, so a guess
+like `/home/mike/x` or `/Users/mike/x` starts in `x` under your home here
+if that's a folder; if no such folder is here, the card says so, and
+Start it sends the request back for the agent to ask again with one that
+is. The new thread is told which thread asked, and can
 message it back. Agents on this Mac start threads on the other Macs
 without asking.
 With the direct link on, its pictures and files come from that Mac as you open them. To start a
