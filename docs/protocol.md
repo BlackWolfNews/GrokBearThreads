@@ -4042,58 +4042,41 @@ thread, and its `shown` field says whether the app already acknowledged it.
 The Mac app advertises `browserPanel: true` in `hello`; a Browser request
 returns unavailable for older apps that cannot promise this handoff path.
 
-BrowserBear uses this only for `handoff`, after checking that the exact Chrome
-tab/profile can be displayed. It marks the tab Your turn and keeps it in the
-Browser panel, including when the panel wasn't previously open. Without a
-connected Mac app or a displayable profile, it uses Chrome's native window.
-The Mac app also opens Browser when its selected thread has a tab marked Your
-turn. That waiting tab survives the one-shot request being cleared by a message,
-so a later return to the thread still shows the handoff. A new handoff selects
-its tab once; reopening preserves any tab the user picked afterwards.
+BrowserBear uses this only for `handoff` of a page in the agents' browser, which
+has no in-page pill: the page's window comes to the front and the Browser panel
+shows it marked Your turn with Done, including when the panel wasn't previously
+open. The Mac app also opens Browser when its selected thread has a tab marked
+Your turn. That waiting tab survives the one-shot request being cleared by a
+message, so a later return to the thread still shows the handoff.
 
 ### The Browser panel
 
 The Mac app's Browser panel uses BrowserBear's existing private Unix socket
-(`~/Library/Application Support/BrowserBear/browserbear.sock`). Its
-`panelState` command reports connected Chrome profiles and pages associated
-with threads by ordinary BrowserBear commands. Profile names and emails stay
-visible in the panel; choosing one opens a new tab in that exact profile.
-The page keeps its existing Chrome session. No cookies, passwords, OAuth
-tokens, or browser profile files are imported.
+(`~/Library/Application Support/BrowserBear/browserbear.sock`). It lists the
+pages a thread is using, each with a still and a Show window button. It doesn't
+stream pages or send input to them (since 8 Nov 2026): the page is used in its
+own real window, in the agents' browser (Helium) or in one of the user's Chrome
+profiles.
 
-A persistent socket begins with `{id,cmd:"panelAttach",thread,args:{tab,profile}}`.
-BrowserBear verifies the thread owns that tab and, on reconnection, that its
-CDP target identity still matches. `panelCdp` carries the page's input and
-display commands; `panelWindow` pauses the panel for Chrome's native window.
-Replies use `{id,ok,result|error}`. Events use `{method,params}`: page frames,
-dialogs and `panelError`. The tab and its exact profile instance identify the page. `panelResume` is an
-explicit return/reconnect action, and `panelShowChrome` opens its native window
-even when capture failed. Only one panel can control a given tab. Closing the
-connection stops capture and removes the panel's viewport and focus overrides.
-Chrome detaching the debugger stops the panel without reattaching it.
+- `panelState` reports connected Chrome profiles and the pages in them that
+  ordinary BrowserBear commands associated with threads. Pages in the agents'
+  browser come from `agent/tabs.json` in BrowserBear's folder, which also names
+  the browser (`browser`).
+- `{cmd:"panelStill",thread,args:{tab,profile,width}}` returns
+  `{data,at}`: a small base64 JPEG of the page, or `data: null` when there's
+  none just now. BrowserBear refreshes it at most every 3 s in the agents'
+  browser and every 20 s in a Chrome profile (its debugger keeps Chrome's
+  "started debugging" bar up), and never takes one of a page handed to the user
+  in their own Chrome.
+- `{cmd:"panelShow",thread,args:{tab,profile}}` brings the page's real window
+  to the front.
+- `markDone {tab}` is the Done button for a page waiting on `handoff --wait`.
 
-Frames are captured sequentially through the existing extension, with socket
-backpressure; they aren't stored or mirrored to Convex. BrowserBear stores
-thread/tab/profile/target associations and cached page titles in `panel-tabs.json` (0600) so a
-service restart can reconnect a page without trusting a reused tab number.
-Viewport changes and captures are serialized so resizing cannot race a frame;
-input and dialog answers bypass that render queue. Existing profiles render at
-least 360 CSS pixels wide, scaling the picture and input into narrower panels.
-Native-window and debugger Stop states persist across remounts and require an
-explicit return/reconnect. A user-owned tab requires an explicit Show this tab
-here action before the panel changes its viewport. With BrowserBear extension 0.3.6 or newer, popups are associated only by
-Chrome's exact opener tab identity in the same profile. Older extensions keep
-using the panel for ordinary pages, with new windows opening in Chrome.
-Dialogs already open at attach are replayed, and a heartbeat keeps a displayed
-JavaScript dialog attached until it is answered.
-The separate `--profile agent` Chrome retains its existing direct CDP path.
-Its host lists that Chrome's pages in `agent/tabs.json`. A tab's `sheet` is
-set (`{moved, since}`, else null) while one of Chrome's own windows is up
-over the page, such as the passkey sheet or a permission prompt, which the
-page's picture can't show. The host brings the page's window to the middle
-of the screen for it (`moved: true`) and parks it again once it closes.
-While any tab has one, the panel says so with a Show it button and lets
-Chrome keep the focus it takes. Both sides ignore fields they don't know.
+BrowserBear checks that the thread owns the page in that exact profile (the agents'
+browser is `agent-chrome`), as the same tab number can be in two. Replies use
+`{id,ok,result|error}`. No cookies, passwords, OAuth tokens or browser profile
+files are read or imported, and stills stay in memory on this Mac. Both sides
+ignore fields they don't know.
 
 ## Connectors
 

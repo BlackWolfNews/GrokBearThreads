@@ -223,30 +223,21 @@ plain document (a `.command`, an app, a kind Threadbear can't place).
 Another Mac's program never opens here, and its replies never show
 pictures from this Mac.
 
-The Browser panel, the globe on a thread's right-hand rail, can show the pages
-an agent opens through [BrowserBear](https://github.com/mikecann/browserbear) in
-an existing Chrome profile. You can click and type in the same page. The profile's
-name and email appear below the address, and its sign-ins stay in Chrome; nothing
-is imported. The profile menu opens a new page in the profile you choose, and makes
-it the default (starred). An address typed with no page showing opens a new page in
-the default profile. BrowserBear
-and its extension must be connected to that profile. With no profile to
-choose (none connected, or `browserbear agent-only on`), the menu is hidden
-and a typed address opens in the agent's own Chrome.
+The Browser panel, the globe on a thread's right-hand rail, lists the pages a
+thread's agents have open through [BrowserBear](https://github.com/mikecann/browserbear):
+in the agents' own browser ([Helium](https://helium.computer), in real windows
+that open behind yours without taking the focus) or in one of your Chrome
+profiles. Each page has a still of how it looks, what the agent is doing in it,
+and Show window, which brings its real window to the front. The panel doesn't
+draw the live page or take clicks for it: you use the page in its own window.
+An address typed at the top opens a new page in the agents' browser.
 
-When the agent needs you to do something in a page, handoff opens this thread's
-Browser panel with Your turn and Done, even if it was closed. It opens straight
-away when you're looking at that thread, or when you next open it; your selected
-thread stays yours. The agent waits for Done or the page to settle after your step.
-Normal browsing by the agent doesn't open the panel. If Threadbear isn't available
-or can't display that tab, handoff opens Chrome's own window instead.
-A passkey, a file picker or a password manager's popup belongs
-to Chrome itself: press the window button beside the address to use Chrome's
-window. Capture and input pause while you use that window; press the button again
-to return to the panel. Closing the panel restores the page's normal size.
-A page's own alert, confirm or prompt shows over the page under its site's
-name ("example.com says"), and what you type in a prompt goes to that site.
-A page that opens one after another gets no more than three in ten seconds.
+When the agent needs you to do something in a page (sign in, approve, pay),
+handoff brings that page's window to the front. For a page in the agents'
+browser it also opens this thread's Browser panel, with the page marked Your
+turn and a Done button, even if the panel was closed; your selected thread
+stays yours. The agent waits for Done or for the page to settle after your step.
+Normal browsing by the agent doesn't open the panel.
 
 An agent can also use a separate Chrome with `--profile agent`. Its pages show in
 the same panel, with its own sign-ins. When that Chrome asks for a passkey or a

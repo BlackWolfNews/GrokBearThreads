@@ -252,7 +252,7 @@ final class SwipeNavigation {
         // The frame view has no superview, so the window's point is its own.
         var view = (window.contentView?.superview ?? window.contentView)?.hitTest(point)
         while let v = view, !ways.isEmpty {
-            if v is WKWebView || v is AgentSurfaceView { return [] }
+            if v is WKWebView { return [] }
             if scrolls, let scroll = v as? NSScrollView, let document = scroll.documentView {
                 let shown = scroll.contentView.bounds
                 if document.frame.width > shown.width + 1 {

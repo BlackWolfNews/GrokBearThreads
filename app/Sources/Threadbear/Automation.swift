@@ -584,14 +584,6 @@ enum Automation {
             target.concludeDragOperation(drag)
             target.draggingEnded(drag)
             return dropped ? "ok dropped on \(type(of: target))" : "error \(type(of: target)) turned it away"
-        case "browser":
-            // {"cmd":"browser","do":"click|right|scroll|key|type","x":,"y":,...}: real
-            // NSEvents to the Browser panel's page, in the page's own points,
-            // through the window as Mike's would go, without the pointer.
-            guard let window = mainWindow, let content = window.contentView,
-                  let view = all(AgentSurfaceView.self, in: content).last(where: { !$0.isHiddenOrHasHiddenAncestor })
-            else { return "error no browser panel" }
-            return view.automate(c, in: window)
         case "click":
             // A visible, enabled button in the transcript with this title,
             // or this accessibility label for an icon-only one. `tip` instead

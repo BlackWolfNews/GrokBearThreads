@@ -258,21 +258,17 @@ if you have BrowserBear, to ask whether an agent's Chrome tab is already
 on that page (`app/Sources/Threadbear/BrowserBear.swift`). Only the link
 goes there.
 
-The Browser panel also uses that private socket to list connected Chrome profiles
-and the pages agents associate with threads. In an existing profile, frames and
-your mouse and keys go through BrowserBear's extension; the page uses Chrome's
-original sign-ins. Threadbear does not read Chrome's cookie database or copy
-credentials. Frames stay on this Mac, in memory, and are not sent to Convex.
-BrowserBear stores thread/tab/profile/target associations and cached page titles in `panel-tabs.json` in
-its own folder (0600); it verifies the target before reconnecting after a service
-restart. Closing a panel releases its viewport and focus overrides. Chrome's
-native-window button pauses panel capture and input for native dialogs.
+The Browser panel also uses that private socket to list the pages agents
+associate with threads, ask for a small still of each and bring a page's real
+window to the front (`app/Sources/Threadbear/Views/AgentBrowserPanel.swift`).
+Threadbear does not read Chrome's cookie database or copy credentials, and
+stills stay on this Mac, in memory, not sent to Convex. BrowserBear stores
+thread/tab/profile associations in `panel-tabs.json` in its own folder (0600).
 
-The optional separate agent Chrome (`browserbear ... --profile agent`) keeps its
-existing path: the panel reads `agent/tabs.json` in BrowserBear's folder and connects
-to that Chrome's local debugging port. It is real Google Chrome with its own profile
-folder; any program on this Mac could reach that port, so it holds only what you
-sign it in to (`app/Sources/Threadbear/Views/AgentBrowserPanel.swift`).
+The agents' own browser (`browserbear ... --profile agent`) is Helium where it's
+installed, else Google Chrome, with its own profile folder; the panel reads
+`agent/tabs.json` in BrowserBear's folder for its pages. Any program on this Mac
+could reach its local debugging port, so it holds only what you sign it in to.
 
 Nothing else: no analytics, no ads, no tracking.
 
