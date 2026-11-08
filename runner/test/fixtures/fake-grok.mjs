@@ -77,7 +77,7 @@ function mcpCall(server, name, args) {
 rl.on('line', (line) => {
   const msg = JSON.parse(line);
   if (msg.method === 'initialize') {
-    send({ jsonrpc: '2.0', id: msg.id, result: { protocolVersion: 1, agentInfo: { version: 'test' } } });
+    send({ jsonrpc: '2.0', id: msg.id, result: { protocolVersion: 1, _meta: { agentVersion: 'test' } } });
     return;
   }
   if (msg.method === 'session/new' || (msg.method === 'session/load' && msg.params.sessionId !== 'missing')) {
@@ -116,6 +116,11 @@ rl.on('line', (line) => {
         const name = text.includes('DELETE') ? 'delete_thread' : 'end_turn';
         const args = text.includes('DELETE') ? { threadId: 'abc' } : { needs: 'nothing' };
         await mcpCall(server, name, args);
+        send({
+          jsonrpc: '2.0',
+          method: 'session/update',
+          params: { sessionId, update: { sessionUpdate: 'tool_call', toolCallId: 'grok-use-1', title: 'use_tool', kind: 'other', rawInput: { tool_name: name, tool_input: args } } },
+        });
         send({
           jsonrpc: '2.0',
           method: 'session/update',

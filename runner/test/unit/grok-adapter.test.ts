@@ -72,6 +72,8 @@ test('a new Grok session streams the reply and reports the CLI session id', asyn
   await until(bag.out, (o) => o.kind === 'result');
   const sessionOut = bag.out.find((o) => o.kind === 'session');
   assert.equal(sessionOut && sessionOut.kind === 'session' ? sessionOut.nativeSessionId : '', 'grok-sess-1');
+  const version = bag.out.find((o) => o.kind === 'cliVersion');
+  assert.equal(version && version.kind === 'cliVersion' ? version.version : '', 'test');
   const text = bag.out.filter((o) => o.kind === 'delta').map((o) => (o.kind === 'delta' ? o.delta.text : '')).join('');
   assert.equal(text, 'Hello there');
   const result = bag.out.find((o) => o.kind === 'result');

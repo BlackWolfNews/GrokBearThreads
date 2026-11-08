@@ -160,8 +160,11 @@ class GrokSession implements AgentSession {
         protocolVersion: 1,
         clientInfo: { name: 'GrokBearThreads', version: '0.0.0' },
         clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
-      }, 15_000)) as { agentInfo?: { version?: string } };
-      if (init?.agentInfo?.version) this.sink.output({ kind: 'cliVersion', version: init.agentInfo.version });
+      }, 15_000)) as { agentInfo?: { version?: string }; _meta?: { agentVersion?: string } };
+      // The live CLI puts its version on `_meta.agentVersion`. The stand-in
+      // used to send `agentInfo.version`; either one counts.
+      const version = init?.agentInfo?.version || init?._meta?.agentVersion;
+      if (version) this.sink.output({ kind: 'cliVersion', version });
       const meta = sessionMeta(this.mode, this.opts.instructions, Boolean(this.tools));
       if (this.opts.resume) {
         try {
@@ -481,6 +484,15 @@ class GrokSession implements AgentSession {
     if (meta && typeof meta === 'object') {
       const record = meta as Record<string, unknown>;
       for (const key of ['tool', 'name', 'toolName']) {
+        if (typeof record[key] === 'string') bits.push(record[key] as string);
+      }
+    }
+    // Live Grok reaches an MCP tool by calling its own use_tool first, with
+    // the tool name in rawInput. That row is the same call the bridge records.
+    const raw = update.rawInput;
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+      const record = raw as Record<string, unknown>;
+      for (const key of ['tool_name', 'name', 'toolName']) {
         if (typeof record[key] === 'string') bits.push(record[key] as string);
       }
     }
