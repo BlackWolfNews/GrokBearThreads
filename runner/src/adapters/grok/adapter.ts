@@ -1,20 +1,21 @@
 // Grok Build, through `grok agent stdio` (the Agent Client Protocol over
 // newline-delimited JSON-RPC). One process per live thread.
 //
-// What this slice does: start or resume a session, send a prompt, stream
-// the reply and the tool calls, and answer a tool-permission request with
-// the same card the other adapters use.
+// What this does: start or resume a session, send a prompt, stream the
+// reply and the tool calls, answer a tool-permission request with the same
+// card the other adapters use, and give the thread Threadbear's own tools.
+// Grok spawns mcp-bridge.mjs; the handlers run here, and an end_turn call
+// is recorded as mcp__threadbear__end_turn so the runner can build the card.
 //
-// What it does not do yet: Threadbear's own tools (end_turn, show_options
-// and the rest). Those are an in-process MCP server built for Claude.
-// Grok needs that server on stdio before a "needs you" card can come from
-// a tool. Images are named in the prompt text, not sent as image blocks.
-// A folder change starts a new session with a handoff, the same as a CLI
-// that cannot move. Rewind is not implemented.
+// Images are named in the prompt text, not sent as image blocks. A folder
+// change starts a new session with a handoff, the same as a CLI that cannot
+// move. Rewind is not implemented.
 import { spawn, type ChildProcess } from 'node:child_process';
 import readline from 'node:readline';
 import type { Logger } from '../../log.ts';
 import type { ProcessRegistry } from '../../proc.ts';
+import { SERVER_NAME } from '../../threadbear-mcp.ts';
+import { toolTitle, truncateInput } from '../../tools.ts';
 import type { EffortLevel, ImageRef, PermissionMode, ToolKind } from '../../protocol.ts';
 import {
   SessionNotFoundError,
@@ -26,6 +27,7 @@ import {
   type ToolApprovalAnswer,
   type UserInput,
 } from '../types.ts';
+import { GrokToolServer, grokMcpServer, type GrokTool } from './tools.ts';
 
 const quiet: Logger = { info() {}, warn() {}, error() {}, debug() {} };
 
@@ -36,6 +38,10 @@ export type GrokAdapterDeps = {
   // Replaces `grok agent … stdio` in tests. `command` is spawned with `args`.
   command?: string;
   args?: string[];
+  // Threadbear's tools for this thread, and the MCP server instructions
+  // that tell Grok to end every turn with end_turn. Absent: no tools.
+  toolsFor?: (threadId: string) => GrokTool[];
+  instructionsFor?: (threadId: string) => string;
 };
 
 type RpcMsg = {
@@ -82,6 +88,11 @@ class GrokSession implements AgentSession {
   private model?: string;
   private effort?: EffortLevel;
   private log: Logger;
+  private rules: Set<string>;
+  private tools?: GrokToolServer;
+  private toolNames = new Set<string>();
+  private suppressed = new Set<string>();
+  private toolSeq = 0;
 
   private opts: StartSessionOptions;
   private sink: SessionSink;
@@ -94,6 +105,7 @@ class GrokSession implements AgentSession {
     this.mode = opts.permissionMode;
     this.model = opts.model;
     this.effort = opts.effort;
+    this.rules = new Set(opts.allowRules ?? []);
     this.log = deps.log ?? quiet;
     this.ready = this.open();
   }
@@ -103,6 +115,21 @@ class GrokSession implements AgentSession {
     const args = this.deps.args ?? grokArgs(this.opts);
     let child: ChildProcess;
     try {
+      const defs = this.deps.toolsFor?.(this.opts.threadId) ?? [];
+      if (defs.length) {
+        const server = new GrokToolServer(defs, this.deps.instructionsFor?.(this.opts.threadId) ?? '', {
+          requestApproval: (req) => this.sink.requestApproval(req),
+          cwd: () => this.opts.cwd,
+          mode: () => this.mode,
+          rules: () => this.rules,
+          addRules: (rules) => this.addRules(rules),
+          onCall: (name, input) => this.noteCall(name, input),
+          onResult: (itemId, ok, text) => this.noteResult(itemId, ok, text),
+        });
+        await server.listen();
+        this.tools = server;
+        this.toolNames = server.names();
+      }
       child = spawn(command, args, {
         cwd: this.opts.cwd,
         env: { ...process.env, ...this.opts.env },
@@ -127,6 +154,7 @@ class GrokSession implements AgentSession {
     });
     const rl = readline.createInterface({ input: child.stdout! });
     rl.on('line', (line) => this.onLine(line));
+    const mcpServers = this.tools ? [grokMcpServer(this.tools.socketPath)] : [];
     try {
       const init = (await this.request('initialize', {
         protocolVersion: 1,
@@ -134,13 +162,13 @@ class GrokSession implements AgentSession {
         clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
       }, 15_000)) as { agentInfo?: { version?: string } };
       if (init?.agentInfo?.version) this.sink.output({ kind: 'cliVersion', version: init.agentInfo.version });
-      const meta = sessionMeta(this.mode, this.opts.instructions);
+      const meta = sessionMeta(this.mode, this.opts.instructions, Boolean(this.tools));
       if (this.opts.resume) {
         try {
           const loaded = (await this.request('session/load', {
             sessionId: this.opts.sessionId,
             cwd: this.opts.cwd,
-            mcpServers: [],
+            mcpServers,
             ...(meta ? { _meta: meta } : {}),
           }, 20_000)) as { sessionId?: string };
           this.sessionId = loaded.sessionId ?? this.opts.sessionId;
@@ -152,7 +180,7 @@ class GrokSession implements AgentSession {
       } else {
         const created = (await this.request('session/new', {
           cwd: this.opts.cwd,
-          mcpServers: [],
+          mcpServers,
           ...(meta ? { _meta: meta } : {}),
         }, 20_000)) as { sessionId?: string };
         if (!created.sessionId) throw new Error('grok session/new returned no sessionId');
@@ -243,12 +271,19 @@ class GrokSession implements AgentSession {
 
   async end(): Promise<void> {
     this.closed = true;
+    this.tools?.close();
     this.child?.stdin?.end();
     await this.killWait();
   }
 
   kill(): void {
     this.closed = true;
+    this.tools?.close();
+    this.killChild();
+  }
+
+  // The process group, so a bridge Grok spawned for this thread goes too.
+  private killChild(): void {
     const pid = this.child?.pid;
     if (!pid) return;
     try {
@@ -379,7 +414,14 @@ class GrokSession implements AgentSession {
       return;
     }
     if (kind === 'tool_call' || kind === 'tool_call_update') {
-      const id = String(update.toolCallId ?? 'tool');
+      const reported = update.toolCallId === undefined || update.toolCallId === null ? '' : String(update.toolCallId);
+      // The bridge already recorded a Threadbear tool. Grok's own copy of
+      // that call would be a second end_turn, and the card would move.
+      if (this.threadbearUpdate(update) || (reported !== '' && this.suppressed.has(reported))) {
+        if (reported) this.suppressed.add(reported);
+        return;
+      }
+      const id = reported || 'tool';
       const name = String(update.title ?? update.kind ?? 'tool');
       if (kind === 'tool_call') {
         this.sink.output({
@@ -403,9 +445,66 @@ class GrokSession implements AgentSession {
     }
   }
 
+  private addRules(rules: string[]): void {
+    for (const rule of rules) this.rules.add(rule);
+    this.sink.output({ kind: 'allowRules', rules });
+  }
+
+  private noteCall(name: string, args: Record<string, unknown>): { itemId: string } {
+    this.toolSeq += 1;
+    const itemId = `tb-${name}-${this.toolSeq}`;
+    const full = `mcp__${SERVER_NAME}__${name}`;
+    this.sink.output({
+      kind: 'event',
+      event: { type: 'tool.call', itemId, name: full, kind: 'mcp', title: toolTitle(full, args, this.opts.cwd), input: truncateInput(args) },
+    });
+    return { itemId };
+  }
+
+  private noteResult(itemId: string, ok: boolean, text: string): void {
+    this.sink.output({
+      kind: 'event',
+      event: { type: 'tool.result', itemId, ok, text, truncated: false, images: [] },
+    });
+  }
+
+  // Grok's notice of a tool our bridge is already running. Matched on the
+  // tool's own name, since the notice's title is not a fixed string.
+  private threadbearUpdate(update: Record<string, unknown>): boolean {
+    if (!this.toolNames.size) return false;
+    const bits: string[] = [];
+    for (const key of ['title', 'name', 'toolName']) {
+      const value = update[key];
+      if (typeof value === 'string') bits.push(value);
+    }
+    const meta = update._meta;
+    if (meta && typeof meta === 'object') {
+      const record = meta as Record<string, unknown>;
+      for (const key of ['tool', 'name', 'toolName']) {
+        if (typeof record[key] === 'string') bits.push(record[key] as string);
+      }
+    }
+    for (const bit of bits) {
+      if (this.toolNames.has(bit)) return true;
+      for (const name of this.toolNames) {
+        if (
+          bit === `mcp__${SERVER_NAME}__${name}` ||
+          bit === `${SERVER_NAME}__${name}` ||
+          bit === `${SERVER_NAME}: ${name}` ||
+          bit === `${SERVER_NAME}.${name}` ||
+          bit === `${SERVER_NAME}/${name}`
+        ) return true;
+      }
+    }
+    return false;
+  }
+
   private fail(e: Error): void {
+    this.tools?.close();
     if (this.failed || this.closed) return;
     this.failed = e;
+    // Stop the process. Its pipes would keep the runner waiting.
+    this.killChild();
     for (const p of this.pending.values()) p.reject(e);
     this.pending.clear();
     this.sink.exited(e);
@@ -420,14 +519,15 @@ function grokArgs(opts: StartSessionOptions): string[] {
   return args;
 }
 
-function sessionMeta(mode: PermissionMode, instructions?: string): Record<string, unknown> | undefined {
+function sessionMeta(mode: PermissionMode, instructions: string | undefined, withTools: boolean): Record<string, unknown> | undefined {
   const meta: Record<string, unknown> = {};
   if (mode === 'full') meta.yoloMode = true;
   if (mode === 'auto') meta.autoMode = true;
-  const rules = mode === 'plan'
-    ? `Plan only. Do not edit files or run commands that change anything until the plan is approved.${instructions ? `\n\n${instructions}` : ''}`
-    : instructions;
-  if (rules) meta.rules = rules;
+  const lines: string[] = [];
+  if (mode === 'plan') lines.push('Plan only. Do not edit files or run commands that change anything until the plan is approved.');
+  if (instructions) lines.push(instructions);
+  if (withTools) lines.push('End every turn by calling the threadbear tool end_turn. That call is what finishes the turn for the user; a message alone does not.');
+  if (lines.length) meta.rules = lines.join('\n\n');
   return Object.keys(meta).length ? meta : undefined;
 }
 

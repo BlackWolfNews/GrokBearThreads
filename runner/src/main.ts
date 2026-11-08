@@ -65,7 +65,7 @@ import { detectMachineIcon } from './machine.ts';
 import { filesMethods } from './files.ts';
 import { devicesMethods } from './devices.ts';
 import { flushSentry, reportException, reportLoggedError, reportLoggedWarning, startSentry } from './sentry.ts';
-import { ALWAYS_ASK_TOOLS, NEVER_ASK_TOOLS, RICH_BLOCKS_LINE, SERVER_NAME, buildThreadbearTools, threadbearMcpServer, type RemoteControl } from './threadbear-mcp.ts';
+import { ALWAYS_ASK_TOOLS, NEVER_ASK_TOOLS, RICH_BLOCKS_LINE, SERVER_NAME, buildThreadbearTools, serverInstructions, threadbearMcpServer, type RemoteControl } from './threadbear-mcp.ts';
 import { CrossRunner } from './cross-runner.ts';
 import { EFFORT_LEVELS, ErrorCode, RpcError, isPermissionMode, type EffortLevel, type PermissionMode } from './protocol.ts';
 
@@ -222,13 +222,15 @@ async function main(): Promise<void> {
     onNotice: (text) => runner.notice('warning', text),
     extraGuidance: () => (experimentOn(cfg.home, 'richBlocks') ? RICH_BLOCKS_LINE : ''),
   });
-  // One `grok agent stdio` process per live Grok thread. Threadbear's own
-  // tools are not on it yet: those are an in-process MCP server built for
-  // Claude, and Grok needs them as a stdio server.
+  // One `grok agent stdio` process per live Grok thread. The same tools
+  // Claude gets in-process: Grok spawns a stdio bridge, and the handlers
+  // run here. Claude's wording, because the message and end_turn share the turn.
   const grok = new GrokAdapter({
     grokPath: cfg.grokPath,
     registry,
     log,
+    toolsFor: (threadId) => buildThreadbearTools(router(), threadId, Date.now, scheduleControl(), projectControl(), appRestarts, { bulletReplies: () => cfg.bulletReplies, oneReply: () => cfg.oneReply, pocket: pocketControl, gateway: () => cfg.connectorsUrl, gatewayHealth, scheduleChecks: () => experimentOn(cfg.home, 'scheduleChecks'), remote: remoteControl, replyButtons: () => experimentOn(cfg.home, 'replyButtons') }),
+    instructionsFor: (threadId) => serverInstructions(threadId, { one: cfg.oneReply, bulletReplies: cfg.bulletReplies, pocket: Boolean(pocketControl()), projects: Boolean(projectControl()), richBlocks: experimentOn(cfg.home, 'richBlocks') }),
   });
   // The runner's own small-model calls, on the settings' Claude pool.
   const models = new Models({
