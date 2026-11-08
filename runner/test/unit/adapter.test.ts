@@ -614,3 +614,39 @@ test('more calls joining a waiting card leave the ones it shows as they were', a
   await again;
   state.close!();
 });
+
+// Codex review, round three: two cards open at once, each listing the
+// same call; an answer on one covers the call as that one showed it.
+test('two cards listing the same call: each answer holds for the call as its own card showed it', async () => {
+  const releases: ((a: ToolApprovalAnswer) => void)[] = [];
+  const codeFiles = new Set<string>();
+  const { state, approvals } = start([], { runsAsCode: (f: string) => codeFiles.has(f) }, {}, () => new Promise((r) => releases.push(r)));
+  const opts = (id: string) => ({ signal: new AbortController().signal, toolUseID: id });
+  const call = (id: string, name: string, input: Record<string, unknown>) =>
+    state.frame!({ type: 'assistant', session_id: 's', message: { id: 'm', role: 'assistant', content: [{ type: 'tool_use', id, name, input }] } });
+  const dir = state.options.cwd;
+  const helper = { file_path: `${dir}/helper.txt`, content: 'x\n'.repeat(20) };
+  await call('m1', 'mcp__other__a', { q: 1 });
+  await call('m2', 'mcp__other__b', { q: 2 });
+  await call('w1', 'Write', helper);
+  const a = state.options.canUseTool('mcp__other__a', { q: 1 }, opts('m1'));
+  await new Promise((r) => setImmediate(r));
+  assert.ok(!/code/.test(approvals[0].queued!.find((c) => c.itemId === 'w1')!.title), 'card A shows it as text');
+  // The helper becomes code, and a parallel call's card opens listing it too.
+  codeFiles.add(helper.file_path);
+  const b = state.options.canUseTool('mcp__other__b', { q: 2 }, opts('m2'));
+  await new Promise((r) => setImmediate(r));
+  assert.match(approvals[1].queued!.find((c) => c.itemId === 'w1')!.title, /code/, 'card B shows it as code');
+  // Allowed on A, which showed only its preview: it asks again.
+  releases[0]({ decision: 'allow', queued: { w1: 'allow' } });
+  await a;
+  const cards = approvals.length;
+  const again = state.options.canUseTool('Write', helper, opts('w1'));
+  await new Promise((r) => setImmediate(r));
+  assert.equal(approvals.length, cards + 1, 'asked again');
+  releases.at(-1)!({ decision: 'deny' });
+  await again;
+  releases[1]({ decision: 'deny' });
+  await b;
+  state.close!();
+});

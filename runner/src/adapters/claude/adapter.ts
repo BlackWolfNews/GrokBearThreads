@@ -337,8 +337,13 @@ const ASKS_IN_ASK = new Set([...EDIT_TOOLS, 'NotebookEdit', 'Bash', 'WebFetch'])
 // queue (wouldAsk). A regex, as the CLI reads it.
 const QUEUE_HOOK_MATCHER = [...ASKS_IN_ASK, 'mcp__.*'].join('|');
 
-// A queued call as it was listed on a card (ClaudeSession.listed).
+// A queued call as a card listed it: its tool, its whole input and
+// whether it wrote code then. An allow holds only for exactly that.
 type QueuedGrant = { name: string; input: string; code: CodeWrite };
+// A card the agent's own call is waiting on: what it lists, and what each
+// of those was as it listed it (its own, so another card listing the same
+// call can't change what an answer here covers: Codex review).
+type WaitingCard = { toolUseId: string; queued: QueuedCall[]; grants: Map<string, QueuedGrant> };
 
 // What the agent is told about a queued call Mike denied on the card.
 export const QUEUED_DENIED = 'The user denied this. Ask them how to proceed.';
@@ -370,11 +375,9 @@ class ClaudeSession implements AgentSession {
   // them, in order: what can queue behind a card (docs/protocol.md,
   // "Queued calls").
   private openCalls = new Map<string, { name: string; input: Record<string, unknown> }>();
-  // The card the agent's own call is waiting on, and what's queued on it.
-  private waitingCard?: { toolUseId: string; queued: QueuedCall[] };
-  // What each queued call was listed as: its tool, its whole input and
-  // whether it wrote code then. An allow holds only for exactly that.
-  private listed = new Map<string, QueuedGrant>();
+  // The cards the agent's own calls are waiting on (one at a time, but a
+  // parallel call's card can open beside it), and what's queued on each.
+  private waitingCards = new Set<WaitingCard>();
   // Mike's answers to queued calls, by tool use id, until each comes up.
   private queuedAnswers = new Map<string, { decision: 'allow' | 'deny' } & QueuedGrant>();
   // Calls that have reached the CLI's checks (the PreToolUse hook): they
@@ -583,10 +586,11 @@ class ClaudeSession implements AgentSession {
   private callChecked(id: string): void {
     this.checkedCalls.add(id);
     while (this.checkedCalls.size > 500) this.checkedCalls.delete(this.checkedCalls.values().next().value!);
-    const card = this.waitingCard;
-    if (!card || !card.queued.some((c) => c.itemId === id)) return;
-    card.queued = card.queued.filter((c) => c.itemId !== id);
-    this.sink.output({ kind: 'approvalQueue', toolUseId: card.toolUseId, calls: card.queued });
+    for (const card of this.waitingCards) {
+      if (!card.queued.some((c) => c.itemId === id)) continue;
+      card.queued = card.queued.filter((c) => c.itemId !== id);
+      this.sink.output({ kind: 'approvalQueue', toolUseId: card.toolUseId, calls: card.queued });
+    }
   }
 
   // Whether a call would come to a card in this mode, roughly (ASKS_IN_ASK).
@@ -610,7 +614,7 @@ class ClaudeSession implements AgentSession {
   // `shown`: calls already on the card, left as they were listed (Codex
   // review: listing one again could change what an allow covers, after
   // the card had shown it otherwise).
-  private queueAfter(toolUseId: string, shown?: Set<string>): QueuedCall[] {
+  private queueAfter(toolUseId: string, grants: Map<string, QueuedGrant>, shown?: Set<string>): QueuedCall[] {
     const out: QueuedCall[] = [];
     let after = false;
     for (const [id, call] of this.openCalls) {
@@ -624,8 +628,7 @@ class ClaudeSession implements AgentSession {
       const card = cardInput(call.input, call.name.startsWith('mcp__') || code ? 'all' : ['command']);
       if (card.tooLong) continue;
       const title = toolTitle(call.name, call.input, this.opts.cwd);
-      this.listed.set(id, { name: call.name, input: JSON.stringify(call.input), code });
-      while (this.listed.size > 200) this.listed.delete(this.listed.keys().next().value!);
+      grants.set(id, { name: call.name, input: JSON.stringify(call.input), code });
       out.push({ itemId: id, name: call.name, title: code ? `${title} (${codeWriteNote(code)})` : title, input: card.input });
     }
     return out;
@@ -645,13 +648,14 @@ class ClaudeSession implements AgentSession {
       added = true;
     }
     while (this.openCalls.size > 200) this.openCalls.delete(this.openCalls.keys().next().value!);
-    const card = this.waitingCard;
-    if (!added || !card) return;
-    // Only new calls join; the ones already shown stay as they were.
-    const more = this.queueAfter(card.toolUseId, new Set(card.queued.map((c) => c.itemId)));
-    if (!more.length) return;
-    card.queued = [...card.queued, ...more];
-    this.sink.output({ kind: 'approvalQueue', toolUseId: card.toolUseId, calls: card.queued });
+    if (!added) return;
+    for (const card of this.waitingCards) {
+      // Only new calls join; the ones already shown stay as they were.
+      const more = this.queueAfter(card.toolUseId, card.grants, new Set(card.queued.map((c) => c.itemId)));
+      if (!more.length) continue;
+      card.queued = [...card.queued, ...more];
+      this.sink.output({ kind: 'approvalQueue', toolUseId: card.toolUseId, calls: card.queued });
+    }
   }
 
   // Keeps the strictest mode a call was seen on.
@@ -695,7 +699,6 @@ class ClaudeSession implements AgentSession {
           this.owedReply = undefined;
           this.endTurnAsks.clear();
           this.openCalls.clear();
-          this.listed.clear();
           this.checkedCalls.clear();
         }
         this.noteCalls(msg as Record<string, unknown>);
@@ -709,7 +712,6 @@ class ClaudeSession implements AgentSession {
             this.codeWrites.delete(out.event.itemId);
             this.openCalls.delete(out.event.itemId);
             this.queuedAnswers.delete(out.event.itemId);
-            this.listed.delete(out.event.itemId);
             this.checkedCalls.delete(out.event.itemId);
           }
           this.sink.output(out);
@@ -832,8 +834,12 @@ class ClaudeSession implements AgentSession {
     if (!sub) for (const out of this.normalizer.beforeApproval(o.toolUseID, name, input)) this.sink.output(out);
     const title = toolTitle(name, input, this.opts.cwd);
     // The rest of the reply's calls that will ask, on the same card.
-    const waiting = sub || plan ? undefined : { toolUseId: o.toolUseID, queued: this.queueAfter(o.toolUseID) };
-    if (waiting) this.waitingCard = waiting;
+    let waiting: WaitingCard | undefined;
+    if (!sub && !plan) {
+      const grants = new Map<string, QueuedGrant>();
+      waiting = { toolUseId: o.toolUseID, queued: this.queueAfter(o.toolUseID, grants), grants };
+      this.waitingCards.add(waiting);
+    }
     let ans: Awaited<ReturnType<SessionSink['requestApproval']>>;
     try {
       ans = await this.sink.requestApproval({
@@ -847,9 +853,9 @@ class ClaudeSession implements AgentSession {
         ...(waiting?.queued.length ? { queued: waiting.queued } : {}),
       });
     } finally {
-      if (this.waitingCard === waiting) this.waitingCard = undefined;
+      if (waiting) this.waitingCards.delete(waiting);
     }
-    if (waiting && ans.queued && (ans.decision === 'allow' || ans.decision === 'allowAlways' || ans.decision === 'deny')) this.keepQueuedAnswers(waiting.queued, ans.queued);
+    if (waiting && ans.queued && (ans.decision === 'allow' || ans.decision === 'allowAlways' || ans.decision === 'deny')) this.keepQueuedAnswers(waiting, ans.queued);
     // A client that offers it anyway gets this once, never a rule.
     const decision = code && ans.decision === 'allowAlways' ? 'allow' : ans.decision;
     switch (decision) {
@@ -894,10 +900,10 @@ class ClaudeSession implements AgentSession {
   }
 
   // Only for calls that were on the card: an id it never listed is ignored.
-  private keepQueuedAnswers(listed: QueuedCall[], answers: QueuedAnswers): void {
-    for (const call of listed) {
+  private keepQueuedAnswers(card: WaitingCard, answers: QueuedAnswers): void {
+    for (const call of card.queued) {
       const a = answers[call.itemId];
-      const shown = this.listed.get(call.itemId);
+      const shown = card.grants.get(call.itemId);
       if (shown && (a === 'allow' || a === 'deny')) this.queuedAnswers.set(call.itemId, { decision: a, ...shown });
     }
   }
