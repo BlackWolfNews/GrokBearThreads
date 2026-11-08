@@ -664,7 +664,14 @@ async function main(): Promise<void> {
       await relay.call(threadId, 'approvals.respond', { threadId, approvalId, decision, ...(message ? { message } : {}) });
     },
     home: () => os.homedir(),
-    isDirectory,
+    realDir: (p) => {
+      try {
+        const real = fs.realpathSync(p);
+        return isDirectory(real) ? real : undefined;
+      } catch {
+        return undefined;
+      }
+    },
   });
   crossHooks = {
     start: (threadId, req) => cross.start(threadId, req),

@@ -4731,13 +4731,17 @@ runner that's this one is the usual create.
   `/Users/mike/...` on 8 Nov when this Mac's was `/Users/m5-mike`). For
   one starting on this Mac, a folder that isn't one here but is under
   this Mac's home once its own home is taken off (`~/x`, `/Users/<name>/x`,
-  `/home/<name>/x`) starts in that one, and `requests.get` gives that
-  folder, so the card shows where it really starts. One that's still not
-  a folder here is `missingFolder` and the card says so; Start it then
-  starts nothing, marks the request denied and declines the card with a
-  message naming the folder and this Mac's home, which the asking agent
-  is told as the reason, so it can ask again with a folder that's here,
-  and answers `-32602` saying so. Start it is
+  `/home/<name>/x`) starts in that one, as its real path, which must be
+  in this Mac's home with symlinks followed. `requests.get` gives that
+  folder, so the card shows where it really starts, and its fingerprint
+  holds it, so a folder appearing or a link moving before Start it is
+  "changed since the card showed it", never a start somewhere else. One
+  that's still not a folder here is `missingFolder` and the card says so;
+  Start it then starts nothing: it declines the card with a message
+  naming the folder and this Mac's home, which the asking agent is told
+  as the reason, so it can ask again with a folder that's here, then
+  marks the request denied and answers `-32602` saying so. A decline that
+  can't be sent leaves the request pending, to try again. Start it is
   `requests.answer` with the machine the card showed and the
   `fingerprint` `requests.get` gave (a hash of the whole filed request and
   when it was filed), so a request filed again under the same id with
