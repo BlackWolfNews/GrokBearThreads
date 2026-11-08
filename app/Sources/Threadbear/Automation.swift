@@ -1203,6 +1203,14 @@ enum Automation {
             return composer.debugHoverChip(number).map { "ok window \($0)" } ?? "error no chip \(number) with a card"
         case "select-text":
             return select(c, app: app)
+        case "app-menu":
+            // The Threadbear menu's items, as it opens: titles with their
+            // keys, separators as "-".
+            guard let menu = NSApp.mainMenu?.items.first?.submenu else { return "error no app menu" }
+            menu.update()
+            return "ok " + json(menu.items.map { item in
+                item.isSeparatorItem ? "-" : item.title + (item.keyEquivalent.isEmpty ? "" : " [\(item.keyEquivalent)]")
+            })
         case "den":
             // Threadbear > About Threadbear, through the menu item itself.
             guard let menu = NSApp.mainMenu?.items.first?.submenu,
