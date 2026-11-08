@@ -1,8 +1,9 @@
 // Moving a thread to another runner (docs/protocol.md, "Moving a thread to
 // another runner", API 61). The main Mac's runner (the owner key) starts a
 // move; after that each runner watches the moves it's in (`moves`) and
-// takes its step when the state says it's its turn: the runner taking the
-// thread (T) says it can (moveReady), the runner that has it (S) freezes
+// takes its step when the state says it's its turn: the runner that has the
+// thread (S) describes it (moveInfo), the runner taking it (T) says it can
+// (moveReady), the runner that has it (S) freezes
 // it, packs it and uploads it sealed to T's key (moveFrozen, moveChunkUrl,
 // movePacked), and T downloads, unpacks and takes it (moveChunks,
 // moveClaim, moveDone). moveClaim is the one mutation where the thread
@@ -108,6 +109,7 @@ const listedMove = v.object({
   state: v.string(),
   cwd: v.optional(v.string()),
   accountId: v.optional(v.string()),
+  info: v.optional(v.any()),
   plan: v.optional(v.any()),
   key: v.optional(v.string()),
   sha256: v.optional(v.string()),
@@ -194,6 +196,26 @@ export const moves = query({
   },
 });
 
+function smallObject(x: unknown, what: string): void {
+  if (x === null || typeof x !== 'object' || Array.isArray(x) || docBytes(x) > PLAN_MAX_BYTES) throw bad(`${what} must be an object of at most ${PLAN_MAX_BYTES} bytes`);
+}
+
+/** S describes the thread (its folder, repo, login), for T to plan from. */
+export const moveInfo = mutation({
+  args: { key: v.string(), moveId: v.string(), info: v.any() },
+  returns: v.null(),
+  handler: async (ctx, { key, moveId, info }) => {
+    const caller = await runnerAuth(ctx, key, 'moveInfo');
+    const m = await moveRow(ctx, moveId);
+    await mustBe(ctx, caller, m, 'from');
+    mustBeIn(m, ['asking'], 'be described');
+    if (m.info !== undefined) return null;
+    smallObject(info, 'info');
+    await ctx.db.patch(m._id, { info, updatedAt: Date.now() });
+    return null;
+  },
+});
+
 const SEAL_KEY = /^[A-Za-z0-9+/]{43}=$/;
 
 /** T can take the thread: where and on what (`plan`), and the key to seal it to. */
@@ -207,7 +229,8 @@ export const moveReady = mutation({
     if (m.state === 'ready' && m.key === sealKey) return null;
     mustBeIn(m, ['asking'], 'be made ready');
     if (!SEAL_KEY.test(sealKey)) throw bad('sealKey must be a raw X25519 key in base64');
-    if (plan === null || typeof plan !== 'object' || Array.isArray(plan) || docBytes(plan) > PLAN_MAX_BYTES) throw bad(`plan must be an object of at most ${PLAN_MAX_BYTES} bytes`);
+    if (m.info === undefined) throw conflict("The move can't be made ready before its thread is described.");
+    smallObject(plan, 'plan');
     await ctx.db.patch(m._id, { state: 'ready', plan, key: sealKey, updatedAt: Date.now() });
     return null;
   },

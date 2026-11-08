@@ -4772,17 +4772,18 @@ one runner has it at a time. Only the main Mac's runner (the owner key, O)
 starts a move, and O can be S or T. Runners still never talk to each other:
 everything goes through the backend's `threadMoves` row (backend API 61).
 
-**The row.** `{ moveId, threadId, from, to, state, cwd?, accountId?, plan?,
-key?, chunks?, sha256?, bytes?, note?, createdAt, updatedAt, frozenAt? }`.
-`cwd` and `accountId` are what Mike picked (absent: T chooses). `plan` is
-T's answer (below), `key` T's sealing key, `chunks` the sealed bundle's
-storage ids in order. Each runner watches the moves it's in
+**The row.** `{ moveId, threadId, from, to, state, cwd?, accountId?, info?,
+plan?, key?, chunks?, sha256?, bytes?, note?, createdAt, updatedAt,
+frozenAt? }`. `cwd` and `accountId` are what Mike picked (absent: T
+chooses). `info` is S's description of the thread (below), `plan` T's
+answer, `key` T's sealing key, `chunks` the sealed bundle's storage ids in
+order. Each runner watches the moves it's in
 (`moves:moves`: rows with `from` or `to` its own, still going or
 ended in the last day) and acts on the state:
 
 | state | who acts | then |
 |---|---|---|
-| `asking` | T checks it can take the thread: `moves:moveReady { moveId, plan, key }` | `ready` |
+| `asking` | S describes the thread: `moves:moveInfo { moveId, info }`; then T checks it can take it: `moves:moveReady { moveId, plan, sealKey }` | `ready` |
 | `ready` | S waits for the thread's turn and sub-agents to end, then freezes it: `moves:moveFrozen` | `packing` |
 | `packing` | S packs, seals, uploads: `moves:movePacked { moveId, chunks, sha256, bytes }` | `unpacking` |
 | `unpacking` | T downloads (`moves:moveChunks`, T only, the chunks' URLs), checks, opens and unpacks into staging, then `moves:moveClaim` | `claimed` |
@@ -4802,6 +4803,10 @@ again and carries on from the state.
   only): the thread's row must be another runner's or this one's, `to` a
   different runner heard from in the last 3 minutes, and the thread in no
   other move still going. Answers `{ moveId }`.
+- **S's info.** `{ title, cwd, home, provider, accountId, email?, model?,
+  effort?, permissionMode, origin?, repoTop?, subdir?, worktree: boolean,
+  sessionId?, schedules: number }`: what T needs to choose a folder and a
+  login (`home` is S's home folder, for swapping).
 - **T's plan.** `{ cwd, accountId, model?, effort?, worktree?: { repo,
   subdir }, clone?: string, leftBehind: string[] }`. The folder is Mike's
   pick if he made one; else, for a thread with a worktree, a new one of
@@ -5619,6 +5624,7 @@ anyone's); "any runner" is any good key. Anything not sorted is owner only.
 | `startMove` | owner only | starts moving a thread to another runner (`convex/moves.ts`, Moving a thread to another runner) |
 | `cancelMove` | owner only | before anything is unpacked |
 | `moves` | its own | the moves its runner is in, either side |
+| `moveInfo` | its own | the move's old runner: what the thread is (folder, repo, login), once |
 | `moveReady` | its own | the move's new runner: its plan and sealing key |
 | `moveFrozen` | its own | the move's old runner: the thread is frozen |
 | `moveChunkUrl` | its own | the move's old runner: an upload URL for one chunk, outside its picture allowances, 24 a move at most |

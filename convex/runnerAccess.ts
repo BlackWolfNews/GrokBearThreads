@@ -241,6 +241,7 @@ export const ACCESS: Record<string, Access> = {
   startMove: 'owner',
   cancelMove: 'owner',
   moves: 'own',
+  moveInfo: 'own',
   moveReady: 'own',
   moveFrozen: 'own',
   moveChunkUrl: 'own',

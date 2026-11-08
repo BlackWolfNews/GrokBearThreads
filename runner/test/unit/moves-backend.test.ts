@@ -38,6 +38,7 @@ async function setup() {
     start: (threadId: string, to: string, extra: Record<string, unknown> = {}) => fn(moves.startMove, { key, threadId, to, ...extra }),
     cancel: (moveId: string) => fn(moves.cancelMove, { key, moveId }),
     list: (runnerId: string) => fn(moves.moves, { key, runnerId }),
+    info: (moveId: string, info: unknown = { cwd: '/x' }) => fn(moves.moveInfo, { key, moveId, info }),
     ready: (moveId: string, plan: unknown = { cwd: '/x' }, sealKey = SEAL) => fn(moves.moveReady, { key, moveId, plan, sealKey }),
     frozen: (moveId: string) => fn(moves.moveFrozen, { key, moveId }),
     chunkUrl: (moveId: string) => fn(moves.moveChunkUrl, { key, moveId }),
@@ -106,7 +107,11 @@ test('the main Mac to Bruce: each step is its own runner’s, and the switch han
   assert.deepEqual(await s.cloud.list(CLOUD), []);
   assert.equal(await outcome(s.cloud.list(BRUCE)), 'forbidden');
 
-  // Only T says it's ready, with a real key and a small plan.
+  // S describes it first; only S can, and only T says it's ready, with a real key and a small plan.
+  assert.equal(await outcome(s.bruce.ready(moveId)), 'conflict');
+  assert.equal(await outcome(s.bruce.info(moveId)), 'forbidden');
+  assert.equal(await outcome(s.owner.info(moveId, ['x'])), 'badArgs');
+  await s.owner.info(moveId);
   assert.equal(await outcome(s.cloud.ready(moveId)), 'forbidden');
   assert.equal(await outcome(s.bruce.ready(moveId, { cwd: '/x' }, 'short')), 'badArgs');
   assert.equal(await outcome(s.bruce.ready(moveId, { big: 'x'.repeat(20_000) })), 'badArgs');
@@ -163,6 +168,7 @@ test('Bruce to the main Mac: chunks come through /runner/upload outside Bruce’
   await s.bruce.upsert(thread('T2', BRUCE));
   await s.bruce.append('T2', 'from bruce', 1);
   const { moveId } = await s.owner.start('T2', M5);
+  await s.bruce.info(moveId);
   await s.owner.ready(moveId);
   await s.bruce.frozen(moveId);
   // Bruce's stored allowance is spent: a picture would wait, a chunk doesn't.
@@ -202,12 +208,14 @@ test('a move fails or is cancelled only before the switch, and a stuck one fails
   await s.bruce.failed(a); // again is fine
   // A failed move doesn't stop the next.
   const b = (await s.owner.start('T3', BRUCE)).moveId;
+  await s.owner.info(b);
   await s.bruce.ready(b);
   await s.owner.frozen(b);
   await s.owner.cancel(b);
   assert.equal(moveOf(s, b).state, 'cancelled');
 
   const c = (await s.owner.start('T4', BRUCE)).moveId;
+  await s.owner.info(c);
   await s.bruce.ready(c);
   await s.owner.frozen(c);
   await s.owner.packed(c, [s.file('k')]);
@@ -219,6 +227,7 @@ test('a move fails or is cancelled only before the switch, and a stuck one fails
   const d = (await s.owner.start('T5', CLOUD)).moveId;
   moveOf(s, d).updatedAt -= 11 * 60_000;
   const e = (await s.owner.start('T3', BRUCE)).moveId;
+  await s.owner.info(e);
   await s.bruce.ready(e);
   await s.owner.frozen(e);
   moveOf(s, e).frozenAt -= 31 * 60_000;
@@ -233,6 +242,7 @@ test('the switch fails the move if the thread left its runner meanwhile', async 
   const s = await setup();
   await s.bruce.upsert(thread('T6', BRUCE));
   const { moveId } = await s.owner.start('T6', CLOUD);
+  await s.bruce.info(moveId);
   await s.cloud.ready(moveId);
   await s.bruce.frozen(moveId);
   const url = await s.bruce.chunkUrl(moveId);
