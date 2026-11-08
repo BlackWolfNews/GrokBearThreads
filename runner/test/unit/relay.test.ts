@@ -505,4 +505,8 @@ test('hibernating in words: done before the row has its time still answers it as
   const { thread } = (await p) as { thread: Record<string, unknown> };
   assert.equal(thread.snoozedUntilRestart, true);
   assert.ok(thread.snoozedUntil);
+  // Later replies keep it put away until a snoozed row comes, then show the row's time.
+  assert.equal((h.relay as any).summary(T).snoozedUntilRestart, true);
+  h.remote.threads[0]!.snoozedUntil = at(7200);
+  assert.equal((h.relay as any).summary(T).snoozedUntil, at(7200));
 });

@@ -223,7 +223,8 @@ export const patchesPart = {
     this.claudeChecks.clear();
     this.sharedPatchSets.clear();
     // A turn may have changed what they read (comments resolved, a handback).
-    this.liveRuns.clear();
+    // One still running is kept, so it isn't started again beside itself.
+    this.dropFinishedLiveRuns();
   },
 
   // A live state command (when, badge), shared by every thread that runs
@@ -480,6 +481,12 @@ export const patchesPart = {
 
   // Every thread whose patches have been read reads them again now: a
   // trusted file can matter to threads in other folders (a project's).
+  // Forgets the live commands' finished output (it may be out of date),
+  // keeping any still running for the reads that join them.
+  dropFinishedLiveRuns(this: Runner): void {
+    for (const [key, run] of this.liveRuns) if (run.doneAt !== undefined) this.liveRuns.delete(key);
+  },
+
   // Reads one thread's patches again now. A read already under way may have
   // started before whatever asked for this, so it goes again once it ends.
   rereadPatches(this: Runner, st: ThreadState): void {
@@ -749,7 +756,7 @@ export const patchesPart = {
       // one still running is kept, so a slow command shared by many
       // threads isn't started again beside itself.
       if (st.rt.patches) {
-        for (const [key, run] of this.liveRuns) if (run.doneAt !== undefined) this.liveRuns.delete(key);
+        this.dropFinishedLiveRuns();
         this.rereadPatches(st);
       }
       return { ok: outcome.ok, exitCode: outcome.exitCode, durationMs: outcome.durationMs, seq: event.seq };

@@ -51,6 +51,9 @@ const SHARE_READ_MS = 1000;
 // Hibernating until that runner restarts (runner.ts's UNTIL_RESTART, not
 // imported so this module doesn't load the whole runner).
 const UNTIL_RESTART = '9999-12-31T00:00:00.000Z';
+// Hibernated in words on that runner, its time not yet on the row (threads.hibernateWhen):
+// shown put away, and satisfied by any snoozed row.
+const PUT_AWAY = 'put-away';
 const PAGE = 50;
 // A watch nobody has subscribed for this long stops; its rows stay a while,
 // so opening the thread again reads only what's new.
@@ -359,7 +362,7 @@ export class Relay {
     const t: Record<string, unknown> = { ...row };
     for (const [k, c] of kept) {
       if (now - c.at >= CHANGED_MS || (row && shows(k, row[k], c.value))) kept.delete(k);
-      else t[k] = c.value;
+      else t[k] = c.value === PUT_AWAY ? UNTIL_RESTART : c.value;
     }
     if (!kept.size) this.changed.delete(threadId);
     return t as T;
@@ -883,15 +886,16 @@ export class Relay {
         const before = this.find(threadId)?.snoozedUntil;
         await this.command(w.runnerId, threadId, 'update', { snooze: { said, untilRestart: true } }, { done: true, ms: HIBERNATE_MS });
         // Done can come before the row with its wake time: wait a little
-        // for it, and failing that answer it as put away, in this reply
-        // only, so the app doesn't put an awake row over its own guess.
-        // The row's real time replaces it when it comes.
+        // for it, and failing that answer it as put away, so the app
+        // doesn't put an awake row over its own guess. The row's real time
+        // replaces it when it comes.
         for (let i = 0; i < SHARE_READS && this.find(threadId)?.snoozedUntil === before; i++) {
           await new Promise<void>((r) => this.deps.clock.setTimeout(() => r(), SHARE_READ_MS / 4));
         }
-        const thread = this.summary(threadId);
-        if (!thread.snoozedUntil) Object.assign(thread, { snoozedUntil: UNTIL_RESTART, snoozedUntilRestart: true });
-        return { thread };
+        // Kept for the sidebar's list too, until any snoozed row comes (or
+        // CHANGED_MS), so an update of the awake row can't bring it back.
+        if (this.find(threadId)?.snoozedUntil === before) this.remember(threadId, { snoozedUntil: PUT_AWAY });
+        return { thread: this.summary(threadId) };
       }
       case 'threads.share': {
         const access = p.access;
@@ -986,6 +990,7 @@ function toShare(s: RelayThreadRow['share']): Share | undefined {
 // Whether the other runner's row already shows a change made from here:
 // its own times for archiving and starring, so only whether it's set.
 function shows(k: keyof RemoteThread, row: unknown, kept: unknown): boolean {
+  if (kept === PUT_AWAY) return typeof row === 'string';
   if (k === 'archivedAt' || k === 'starredAt') return (row !== undefined) === (kept !== undefined);
   if (k === 'snoozedUntil' && typeof row === 'string' && typeof kept === 'string') return Date.parse(row) === Date.parse(kept);
   return row === kept;

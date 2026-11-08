@@ -27,8 +27,10 @@ extension AppModel {
         newThread()
         guard selection == nil else { return }
         // A project is this Mac's runner's: back to it the way the machine
-        // menu goes, so another Mac's login and folder don't come along.
-        if newThreadRunnerId != nil { chooseNewThreadRunner(nil) }
+        // menu goes, so another Mac's login and folder don't come along. Even
+        // when it's on this Mac already: picked, so a default Mac coming
+        // online doesn't take the draft over.
+        chooseNewThreadRunner(nil)
         newThreadProjectId = project.id
         // Its first folder, or the default one: never a folder left from
         // another draft.

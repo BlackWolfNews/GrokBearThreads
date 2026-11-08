@@ -858,3 +858,15 @@ test('a kept thread whose wake time in words is still being worked out stays unt
   await tick();
   assert.deepEqual(handed, [t.id]);
 });
+
+test('an idle thread hibernating in words is kept by a drain that was not asked to keep it', async () => {
+  // Codex's second round: a restart keeps only busy threads, and beginDrain let this one go at once.
+  const h = makeHarness();
+  const t = create(h).thread;
+  h.adapter.last.init();
+  h.adapter.last.result('completed');
+  await tick();
+  (h.runner as any).threads.get(t.id).rec.wakeWhen = { said: 'tomorrow', pending: true };
+  await h.runner.beginDrain([], { onHandedOver: () => {}, backgroundMs: 30 * MIN });
+  assert.deepEqual(h.runner.keeping(), [t.id]);
+});

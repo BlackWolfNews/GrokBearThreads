@@ -33,7 +33,9 @@ export const handoversPart = {
       // So does one with a turn-end hook running: the restarter doesn't
       // count that as busy, but its result may start a turn, and an archive
       // waiting for it (archiveWhenGone) isn't saved anywhere to pick up.
-      keep: new Set([...keep, ...[...this.threads.values()].filter((st) => st.rt.cleaning || st.rt.hooksRunning).map((st) => st.rec.id)].filter((id) => this.threads.has(id))),
+      // And one hibernating in words whose model is still working out when
+      // (readyToHandOver): the new runner would wake it.
+      keep: new Set([...keep, ...[...this.threads.values()].filter((st) => st.rt.cleaning || st.rt.hooksRunning || st.rec.wakeWhen?.pending).map((st) => st.rec.id)].filter((id) => this.threads.has(id))),
       going: new Set(),
       gone: new Set(),
       onHandedOver: opts.onHandedOver,
