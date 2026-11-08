@@ -682,7 +682,8 @@ struct ThreadRow: View {
             // When its schedule messages it next: "10:42", "Mon 10:42".
             Text(RelativeTime.clock(wake?.nextRunAt ?? model.now, now: model.now))
                 .font(.footnote).monospacedDigit().foregroundStyle(Look.faint)
-                .accessibilityLabel("Scheduled: \(wake?.whenText ?? "")")
+                // phone:wakes has no whenText (backend API 45): the time then.
+                .accessibilityLabel("Scheduled: \(wake.map { $0.whenText.isEmpty ? RelativeTime.clock($0.nextRunAt ?? model.now, now: model.now) : $0.whenText } ?? "")")
         case .time:
             Text(RowStatus.text(thread, now: model.now)).font(.footnote).monospacedDigit().foregroundStyle(Look.faint)
         }

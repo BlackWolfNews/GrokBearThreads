@@ -448,8 +448,10 @@ public struct PhoneWaitingForRoom: Codable, Sendable, Hashable {
     }
 }
 
-/// A row of phone:schedules: a message the runner sends by itself, once or
-/// on a cron. The phone reads only what the inbox's Waiting section needs.
+/// A row of phone:schedules or phone:wakes: a message the runner sends by
+/// itself, once or on a cron. The phone reads only what the inbox's
+/// Hibernating section needs, and from phone:wakes (backend API 45) only the
+/// id, threadId and nextRunAt.
 public struct PhoneSchedule: Codable, Sendable, Hashable, Identifiable {
     public var id: String
     public var runnerId: String?
@@ -840,6 +842,9 @@ public enum BackendCompatibility {
     /// From 43 phone:threadsSince: the inbox's changes rather than the whole
     /// list for every row written.
     public static let threadChangesAPIVersion = 43
+    /// From 45 phone:wakes, a small row per active schedule, for the
+    /// inbox's Hibernating section. Older backends get phone:schedules whole.
+    public static let wakesAPIVersion = 45
     /// From 56 runners have an order (phone:setRunnerOrder) and phone:runners
     /// lists them in it, so the new thread sheet can offer a runner, starting
     /// on the first one online. Older backends get no runner picker.

@@ -892,12 +892,19 @@ final class AppModel {
         loaded = []
         followLists()
         tasks.append(follow(backend.accounts()) { $0.accounts = $1 })
-        tasks.append(follow(backend.schedules()) { $0.wakes = InboxSections.wakes($1) })
         tasks.append(Task { [weak self] in
             for await up in backend.connectionStates() { self?.connected = up }
         })
         tasks.append(Task { [weak self] in
-            guard let identity = try? await backend.me() else { return }
+            guard let identity = try? await backend.me() else {
+                // Can't tell how new the backend is: the whole list works on any.
+                if !Task.isCancelled, let self { self.followWakes(backend, small: false) }
+                return
+            }
+            // Once the version's known, so a backend from before 45 isn't
+            // asked for phone:wakes, and one since never reads every schedule
+            // whole (Backend.wakes says why).
+            if !Task.isCancelled, let self { self.followWakes(backend, small: (identity.apiVersion ?? 0) >= BackendCompatibility.wakesAPIVersion) }
             self?.backendProblem = BackendCompatibility.problem(identity)
             self?.apiVersion = identity.apiVersion ?? 0
             // The inbox started before this was known: over to following its
@@ -924,6 +931,11 @@ final class AppModel {
         })
         for row in starting where row.failed == nil { watchStarting(row.id) }
         if registerPush, let apnsToken { register(apnsToken) }
+    }
+
+    /// Which threads a schedule will message, for the Hibernating section.
+    private func followWakes(_ backend: any Backend, small: Bool) {
+        tasks.append(follow(small ? backend.wakes() : backend.schedules()) { $0.wakes = InboxSections.wakes($1) })
     }
 
     private func stop() {

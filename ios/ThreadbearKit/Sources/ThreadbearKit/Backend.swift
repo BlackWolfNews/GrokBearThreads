@@ -36,9 +36,12 @@ public protocol Backend: Sendable {
     /// (backend API 16), for the search to find ones older than the den's
     /// newest 100. Once, not live: it runs again as the words change.
     func search(_ text: String) async throws -> [PhoneThread]
-    /// Every runner's schedules, for the inbox's Waiting section: which
-    /// threads have booked themselves a message for later.
+    /// Every runner's schedules whole, for a backend older than API 45.
     func schedules() -> AsyncThrowingStream<[PhoneSchedule], Error>
+    /// The active schedules, for the inbox's Hibernating section: which
+    /// threads have booked themselves a message for later (backend API 45,
+    /// phone:wakes). Only id, threadId and nextRunAt are filled in.
+    func wakes() -> AsyncThrowingStream<[PhoneSchedule], Error>
     /// How many threads are hibernating and archived (backend API 16), for
     /// the folded headings, so those lists needn't be loaded.
     func counts() -> AsyncThrowingStream<PhoneCounts, Error>
@@ -242,6 +245,27 @@ public final class ConvexBackend: Backend, @unchecked Sendable {
 
     public func schedules() -> AsyncThrowingStream<[PhoneSchedule], Error> {
         live("phone:schedules", [:], as: [PhoneSchedule].self)
+    }
+
+    /// A small row per active schedule (scheduleWakes), which a claim or a run
+    /// only rewrites when its next time changes. phone:schedules reads every
+    /// schedule's whole message, about 200 KB, and re-runs on every claim and
+    /// run: kept open by every phone, it was 8% of the project's Database I/O.
+    public func wakes() -> AsyncThrowingStream<[PhoneSchedule], Error> {
+        let rows = live("phone:wakes", [:], as: [ScheduleWake].self)
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    for try await list in rows {
+                        continuation.yield(list.map { PhoneSchedule(id: $0.scheduleId, threadId: $0.threadId, nextRunAt: $0.nextRunAt) })
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
     }
 
     public func counts() -> AsyncThrowingStream<PhoneCounts, Error> {
@@ -469,5 +493,22 @@ struct InboxChanges: Sendable {
         }
         for id in answer.gone { byId[id] = nil }
         rows = byId.values.sorted { $0.lastActivityAt > $1.lastActivityAt }
+    }
+}
+
+/// A row of phone:wakes (backend API 45): an active schedule, the thread it
+/// messages, and when.
+struct ScheduleWake: Decodable, Sendable {
+    var scheduleId: String
+    var threadId: String?
+    @OptionalFlexibleDate var nextRunAt: Date?
+
+    private enum Keys: String, CodingKey { case scheduleId, threadId, nextRunAt }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Keys.self)
+        scheduleId = try c.decode(String.self, forKey: .scheduleId)
+        threadId = (try? c.decodeIfPresent(String.self, forKey: .threadId)).flatMap { $0 }
+        _nextRunAt = try c.decode(OptionalFlexibleDate.self, forKey: .nextRunAt)
     }
 }

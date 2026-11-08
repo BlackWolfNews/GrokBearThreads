@@ -384,6 +384,10 @@ public final class FakeBackend: Backend, @unchecked Sendable {
         watch { [unowned self] in lock.withLock { scheduleList } }
     }
 
+    public func wakes() -> AsyncThrowingStream<[PhoneSchedule], Error> {
+        watch { [unowned self] in lock.withLock { scheduleList.filter(\.isActive) } }
+    }
+
     public func counts() -> AsyncThrowingStream<PhoneCounts, Error> {
         watch { [unowned self] in
             let all = lock.withLock { Array(threadsById.values) }
