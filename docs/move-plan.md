@@ -97,32 +97,17 @@ over"), and step 6's Later list has this as `move_thread` with a runner.
 
 ## The steps
 
-States of a `threadMoves` row: `asking` → `packing` → `unpacking` → `done`,
-or `failed` from any of them (with a note), or `cancelled` (Mike, before
-`unpacking`).
+The states and who acts on each are in docs/protocol.md ("Moving a thread
+to another runner"): `asking` (T checks) → `ready` (S waits for the turn,
+then freezes) → `packing` → `unpacking` (T downloads and unpacks into
+staging) → `claimed` (the switch) → `done` (S puts its copy away). Each
+runner watches the moves it's in (`moves:moves`) rather than taking
+commands, so a restart picks up from the state, and O needn't stay online.
 
-1. O: `relay:startMove { threadId, to, cwd?, accountId? }` (owner only; the
-   thread must be S's and S and T online). Queues `moveIn` (prepare) to T.
-2. T: works out folder, login and repo; answers `sync:moveReady { moveId,
-   plan, key }` or `sync:moveFailed`. Ready queues `moveOut` to S.
-3. S: waits for the turn (and sub-agents) to end, freezes the thread (new
-   messages queue, nothing starts), releases the CLI, packs, uploads,
-   `sync:movePacked { moveId, chunks, sha256, bytes }`, and stops mirroring
-   the thread. Packed queues `moveIn` (unpack) to T.
-4. T: `sync:moveChunks` (download URLs, T only), downloads, checks, opens,
-   unpacks into staging, places the worktree, git work and transcript, then
-   `sync:moveClaim { moveId }`: the switch. Then it adopts the thread
-   (`handovers.ts` `adopt`), adds the line, mirrors it, sends any queued
-   messages, and `sync:moveDone`. Done queues `moveFinished` to S and
-   deletes the chunks.
-5. S: moves its folder to `<home>/moved/<id>`, forgets the thread (its
-   clients see it go, and the remote list brings it back as T's), and
-   leaves the old worktree as a spare.
-
-Failed before the claim: S unfreezes and carries on, T throws its staging
-away. A move not done in 30 minutes fails by itself (a cron). After the
-claim T has the thread, so a failure there is T's to finish on its next
-start (the staging is kept until then).
+Failed or cancelled before the claim: S unfreezes and carries on, T throws
+its staging away. A move frozen 30 minutes ago and not claimed fails by
+itself. After the claim T has the thread, so anything left is T's to finish
+on its next start (the staging is kept until then).
 
 ## Protocol and code
 
@@ -131,12 +116,12 @@ start (the staging is kept until then).
   `moves.preview` on the relay's allow-list); `threads.move { threadId,
   runnerId, cwd?, accountId? }` → `{ move }`; `threads.moveCancel`;
   `ThreadSummary.moving?: { to, toName, state, note? }`.
-- Backend (API 61): `threadMoves` table, the mutations above, `moveIn`,
-  `moveOut` and `moveFinished` command kinds, `claimable` and `mayWrite`
-  letting T write a thread a `done`-or-later move gave it.
+- Backend (API 61): the `threadMoves` table, `moves:startMove` and
+  `cancelMove` (owner), `moves:moves` and the step mutations (`own`), and the
+  switch handing the thread's rows over in runs of their own.
 - Runner: `move-pack.ts` (bundle in and out, pure), `move-git.ts` (git
   bundle out, apply in), `moves.ts` (the steps on each side, freeze,
-  recovery on start), commands in `sync.ts`, `tb move`.
+  recovery on start), the watch in `sync.ts`, `tb move`.
 - Mac app: the menu, the sheet, the row's moving state, and the row passing
   from this runner's list to the remote list without losing its place or
   selection.

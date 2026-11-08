@@ -236,6 +236,19 @@ export const ACCESS: Record<string, Access> = {
   closeRequest: 'own',
   appendBodies: 'own',
   addHeldPicture: 'own',
+  // moves.ts (API 61): only the main Mac starts or cancels a move; each
+  // step is the move's own runner on that side, which the function checks.
+  startMove: 'owner',
+  cancelMove: 'owner',
+  moves: 'own',
+  moveReady: 'own',
+  moveFrozen: 'own',
+  moveChunkUrl: 'own',
+  movePacked: 'own',
+  moveChunks: 'own',
+  moveClaim: 'own',
+  moveDone: 'own',
+  moveFailed: 'own',
 };
 
 // A runner name as lists show it, for a runner key's heartbeat: folded to

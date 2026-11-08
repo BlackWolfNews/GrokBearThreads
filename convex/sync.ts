@@ -250,7 +250,7 @@ async function checkCost(ctx: MutationCtx, budget: Budget): Promise<number> {
 
 // What a row was charged as when it went in (appendMessages): without the
 // fields Convex adds, so taking it out gives back exactly that.
-function storedBytes(row: Record<string, unknown>): number {
+export function storedBytes(row: Record<string, unknown>): number {
   const { _id, _creationTime, ...rest } = row;
   return docBytes(rest);
 }
@@ -535,7 +535,7 @@ function fitProject<T extends Record<string, any>>(p: T): T | undefined {
 
 // A runner key's pushes: at most CAP.pushesPerMinute a minute, so flipping
 // threads to "needs you" can't flood the phone.
-async function countMessageBytes(ctx: MutationCtx, runnerId: string, delta: number): Promise<void> {
+export async function countMessageBytes(ctx: MutationCtx, runnerId: string, delta: number): Promise<void> {
   const usage = await ctx.db.query('runnerStorage').withIndex('by_runnerId', (q) => q.eq('runnerId', runnerId)).unique();
   if (usage) await ctx.db.patch(usage._id, { messageBytes: Math.max(0, (usage.messageBytes ?? 0) + delta) });
   else if (delta > 0) await ctx.db.insert('runnerStorage', { runnerId, bytes: 0, messageBytes: delta });
@@ -553,7 +553,7 @@ async function pushAllowed(ctx: MutationCtx, runnerId: string, now: number): Pro
 
 // Every other runner's sidebar row for a thread, marked gone (watchers drop
 // it, pruneOld deletes it a day later).
-async function buryIndexRows(ctx: MutationCtx, threadId: string, keepRunnerId: string): Promise<void> {
+export async function buryIndexRows(ctx: MutationCtx, threadId: string, keepRunnerId: string): Promise<void> {
   for (const row of await ctx.db.query('threadIndex').withIndex('by_threadId', (q) => q.eq('threadId', threadId)).collect()) {
     if (row.runnerId !== keepRunnerId && !row.deleted) await ctx.db.patch(row._id, { deleted: true, updatedMs: Date.now() });
   }
@@ -587,7 +587,7 @@ async function viewCountsOf(ctx: MutationCtx, runnerId: string) {
 
 // A thread written or deleted: called after the write, so a runner with no
 // count yet is counted from what's there now, this write included.
-async function moveView(ctx: MutationCtx, runnerId: string, from: View | 'overflow' | undefined, to: View | 'overflow' | undefined): Promise<void> {
+export async function moveView(ctx: MutationCtx, runnerId: string, from: View | 'overflow' | undefined, to: View | 'overflow' | undefined): Promise<void> {
   if (from === to) return;
   const row = await ctx.db.query('viewCounts').withIndex('by_runnerId', (q) => q.eq('runnerId', runnerId)).unique();
   if (!row || row.inbox === undefined || row.overflow === undefined || row.total === undefined) return recountViews(ctx, runnerId);
@@ -1646,6 +1646,14 @@ export const redeemUpload = internalMutation({
       await ctx.db.patch(row._id, { usedAt: now, bytes: MAX_RUNNER_UPLOAD_BYTES });
       return false;
     }
+    // A move's chunk (moves.ts moveChunkUrl) is the move's, not one of the
+    // runner's pictures: bounded by the move's tickets, kept with nothing
+    // counted against the runner, and deleted when the move ends.
+    if (row.moveId) {
+      await ctx.db.patch(row._id, { usedAt: now, bytes });
+      await ctx.db.insert('storageOwners', { storageId, runnerId: row.runnerId, at: now, bytes: 0, attachedAt: now });
+      return true;
+    }
     // Each file counts as at least MIN_UPLOAD_CHARGE, so how many a runner key
     // keeps is bounded too (150 MB / 64 KB = 2,400), and with one row per file
     // so are its picture rows, however small the files.
@@ -1656,7 +1664,7 @@ export const redeemUpload = internalMutation({
     // (deleting an upload doesn't give its bytes back), and all a runner
     // keeps stored is capped too.
     let used = 0;
-    for await (const t of ctx.db.query('uploadTickets').withIndex('by_runner_issued', (q) => q.eq('runnerId', row.runnerId).gt('issuedAt', now - 2 * TICKET_MS))) if (t._id !== row._id && t.usedAt && t.usedAt > now - TICKET_MS) used += t.bytes ?? 0;
+    for await (const t of ctx.db.query('uploadTickets').withIndex('by_runner_issued', (q) => q.eq('runnerId', row.runnerId).gt('issuedAt', now - 2 * TICKET_MS))) if (t._id !== row._id && !t.moveId && t.usedAt && t.usedAt > now - TICKET_MS) used += t.bytes ?? 0;
     if (used + bytes > UPLOAD_BYTES_PER_HOUR) return 'later';
     const usage = await ctx.db.query('runnerStorage').withIndex('by_runnerId', (q) => q.eq('runnerId', row.runnerId)).unique();
     if ((usage?.bytes ?? 0) + bytes > STORED_BYTES_PER_RUNNER) return 'later';
@@ -2473,7 +2481,7 @@ function cleanBody<T extends { text?: string; input?: string; diffs?: string; re
 const sameBody = (a: Record<string, unknown>, b: Record<string, unknown>) =>
   (['withheld', 'reason', 'text', 'ok', 'truncated', 'input', 'diffs', 'reasoning', 'images', 'cut'] as const).every((k) => a[k] === b[k]);
 
-async function countBodyBytes(ctx: MutationCtx, runnerId: string, delta: number): Promise<void> {
+export async function countBodyBytes(ctx: MutationCtx, runnerId: string, delta: number): Promise<void> {
   const usage = await ctx.db.query('runnerStorage').withIndex('by_runnerId', (q) => q.eq('runnerId', runnerId)).unique();
   if (usage) await ctx.db.patch(usage._id, { bodyBytes: Math.max(0, (usage.bodyBytes ?? 0) + delta) });
   else if (delta > 0) await ctx.db.insert('runnerStorage', { runnerId, bytes: 0, bodyBytes: delta });

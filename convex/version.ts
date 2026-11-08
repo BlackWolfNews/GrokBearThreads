@@ -272,4 +272,10 @@
 //    runner key can't save a schedule under an id gone from another runner
 //    within the day (scheduleGone). An older runner never asks, and does
 //    as before.
-export const API_VERSION = 60;
+// 61: moving a thread to another runner (docs/protocol.md, "Moving a thread
+//    to another runner"; convex/moves.ts). The threadMoves table, startMove
+//    and cancelMove for the main Mac, moves and each step for the move's
+//    own runners, and move chunks through /runner/upload outside a runner
+//    key's picture allowances. An older runner never starts one or watches
+//    its moves, so a move to or from it fails when nobody answers.
+export const API_VERSION = 61;

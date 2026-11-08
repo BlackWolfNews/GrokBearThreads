@@ -155,6 +155,9 @@ export const threadFields = {
 // is at the top of the phone's inbox.
 export const views = ['inbox', 'hibernating', 'den'] as const;
 
+// A move's states, in order (docs/protocol.md, "Moving a thread to another runner").
+export const moveStates = ['asking', 'ready', 'packing', 'unpacking', 'claimed', 'done', 'failed', 'cancelled'] as const;
+
 export default defineSchema({
   // One row per runner (the Mac, Tinker Desk later), written every minute.
   // A phone treats one not seen for 3 minutes as offline.
@@ -296,8 +299,12 @@ export default defineSchema({
     // What was uploaded with it: the hour's allowance counts these, which
     // stay a day whatever happens to the file.
     bytes: v.optional(v.number()),
+    // A move's chunk (moves.ts moveChunkUrl): outside the runner's picture
+    // allowances, bounded by the move instead, and gone when it ends.
+    moveId: v.optional(v.string()),
   })
     .index('by_hash', ['ticketHash'])
+    .index('by_move', ['moveId'])
     .index('by_runner_issued', ['runnerId', 'issuedAt'])
     .index('by_issued', ['issuedAt']),
 
@@ -454,6 +461,34 @@ export default defineSchema({
     .index('by_state_done', ['state', 'doneAt'])
     // pruneOld: ones no runner took in COMMAND_KEEP_MS, by when they were made.
     .index('by_state_created', ['state', 'createdAt']),
+
+  // A thread moving from one runner to another (docs/protocol.md, "Moving a
+  // thread to another runner", API 61). Only the owner key starts one; each
+  // step is the runner whose turn it is (moves.ts), and the switch itself
+  // (moveClaim) is the one mutation where the thread changes hands.
+  threadMoves: defineTable({
+    moveId: v.string(),
+    threadId: v.string(),
+    from: v.string(),
+    to: v.string(),
+    state: v.union(...moveStates.map((x) => v.literal(x))),
+    cwd: v.optional(v.string()), // what Mike picked; absent, T chooses
+    accountId: v.optional(v.string()),
+    plan: v.optional(v.any()), // T's answer (moveReady), JSON at most 16 KB
+    key: v.optional(v.string()), // T's sealing key, raw X25519 base64
+    chunks: v.optional(v.array(v.id('_storage'))),
+    sha256: v.optional(v.string()),
+    bytes: v.optional(v.number()),
+    note: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    frozenAt: v.optional(v.number()),
+  })
+    .index('by_moveId', ['moveId'])
+    .index('by_thread', ['threadId', 'createdAt'])
+    .index('by_from', ['from', 'updatedAt'])
+    .index('by_to', ['to', 'updatedAt'])
+    .index('by_state', ['state', 'updatedAt']),
 
   // A runner on a runner key asking for a new thread on another runner
   // (docs/protocol.md, "Asking another runner"). It can't queue work there
