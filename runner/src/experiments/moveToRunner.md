@@ -9,9 +9,9 @@ reminder: be94a128
 
 ## What it does
 
-A thread's menu has **Move to**, with each of your other machines. Pick one, check the folder and login it will use there, and the thread moves: the same thread, with its whole conversation, its pictures and Highlights, and the git work in its own worktree (commits and uncommitted changes alike). It waits for the turn it's on to end, and messages you send meanwhile go with it. Its next message carries on in the same Claude session on the other machine. If anything goes wrong before it lands, it stays where it was and says why. An agent can do it too, with `move_thread` and a `runner`.
+A thread moves to another of your machines whole: the same thread, with its whole conversation, its pictures and Highlights, and the git work in its own worktree (commits and uncommitted changes alike). It waits for the turn it's on to end, and messages sent meanwhile go with it. Its next message carries on in the same Claude session on the other machine. If anything goes wrong before it lands, it stays where it was and says why.
 
-It needs Threadbear's backend, and the experiment on in both machines' runners.
+So far it's started from the main Mac's runner (`threads.move`); the Mac app's **Move to** menu and `move_thread` with a `runner` come next. It needs Threadbear's backend, and the experiment on in both machines' runners.
 
 ## Lives in
 
