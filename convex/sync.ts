@@ -1714,7 +1714,7 @@ export const setSchedules = mutation({
       if (row.owned) owned.add(row.id);
       else if (row.runnerId === runnerId) {
         await ctx.db.delete(row._id);
-        await dropWake(ctx, row.id);
+        await mirrorGone(ctx, row.id);
       }
     }
     for (const row of schedules) {
@@ -1764,6 +1764,16 @@ async function ownedCount(ctx: { db: MutationCtx['db'] }, runnerId: string): Pro
   let n = 0;
   for await (const r of ctx.db.query('schedules').withIndex('by_runnerId', (q) => q.eq('runnerId', runnerId))) if (r.owned) n++;
   return n;
+}
+
+// A mirrored row (from before API 9) has gone. An owned schedule can share
+// its id, from another runner, and the wake is that one's then: dropping it
+// would take the thread out of Hibernating on the website and the phone
+// while phone:schedules still has it.
+async function mirrorGone(ctx: { db: MutationCtx['db'] }, scheduleId: string): Promise<void> {
+  const left = await scheduleRow(ctx, scheduleId);
+  if (left) await syncWake(ctx, left);
+  else await dropWake(ctx, scheduleId);
 }
 
 function visibleTo<T extends { runnerId: string }>(caller: Caller, row: T | undefined): T | undefined {
@@ -1943,7 +1953,7 @@ export const adoptSchedules = mutation({
     for await (const row of ctx.db.query('schedules').withIndex('by_runnerId', (q) => q.eq('runnerId', runnerId))) {
       if (!row.owned) {
         await ctx.db.delete(row._id);
-        await dropWake(ctx, row.id);
+        await mirrorGone(ctx, row.id);
       }
     }
     for (const s of fresh) {
