@@ -345,8 +345,11 @@ type QueuedGrant = { name: string; input: string; code: CodeWrite };
 // call can't change what an answer here covers: Codex review).
 type WaitingCard = { toolUseId: string; queued: QueuedCall[]; grants: Map<string, QueuedGrant> };
 
-// What the agent is told about a queued call Mike denied on the card.
-export const QUEUED_DENIED = 'The user denied this. Ask them how to proceed.';
+// What the agent is told about a queued call Mike denied on the card. The
+// CLI words a hook's refusal as "PreToolUse:Write hook error: ...", and an
+// agent told only "denied" passed it on as a permission hook having
+// blocked it (8 Nov 2026), so this says whose decision it was.
+export const QUEUED_DENIED = 'The user said no to this call on its permission card. It is their decision, not an error or a hook failing, so don\'t retry it: ask them how to proceed.';
 
 class ClaudeSession implements AgentSession {
   private opts: StartSessionOptions;
