@@ -256,6 +256,9 @@ export type ThreadSummary = {
   // (docs/protocol.md, "Sharing"). Absent until it's first shared; "off"
   // keeps the link for when it's shared again.
   share?: ThreadShare;
+  // Moving to another runner (docs/protocol.md, "Moving a thread to another
+  // runner"): while it goes, and for a minute after it fails, with why.
+  moving?: { moveId: string; to: string; toName: string; state: string; note?: string };
   sample?: true; // one of the tour's sample threads (threads.samples): made up, never sent to
   // What's still open on the done card of its last turn (experiment
   // looseEnds; docs/protocol.md, "Loose ends"): seq is that card's

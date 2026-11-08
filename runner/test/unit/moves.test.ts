@@ -74,9 +74,10 @@ async function world() {
 const names: Record<string, string> = { [M5]: 'M5', [BRUCE]: 'bruce' };
 const log = { info() {}, warn() {} };
 
-function source(threadId: string) {
+type Source = { idle: boolean; present: boolean; putAway: number; seen: (ThreadMoving | undefined)[]; host: Partial<MovesHost> };
+function source(threadId: string): Source {
   const seen: (ThreadMoving | undefined)[] = [];
-  const h = {
+  const h: Source = {
     idle: true,
     present: true,
     putAway: 0,
@@ -95,7 +96,7 @@ function source(threadId: string) {
         h.present = false;
       },
       has: () => h.present,
-    } as Partial<MovesHost>,
+    },
   };
   return h;
 }

@@ -7,9 +7,9 @@ import type { RunnerPart } from './part.ts';
 import type { Action, EventBody } from '../protocol.ts';
 import type { ThreadRecord } from '../store.ts';
 import { BIN_DIR, threadEnv } from '../restart.ts';
-import { cleanUpWorktree, makeWorktree, sameSubfolder, worktreeGone } from '../worktrees.ts';
+import { cleanUpWorktree, makeWorktree, sameSubfolder, worktreeGone, type WorktreeRecord } from '../worktrees.ts';
 import { isDirectory } from '../fsutil.ts';
-import { automaticTrust, findWorktreePatch, isInside, readWorktreePatch, runCommand, type PatchSet, worktreePatchFiles } from '../patches.ts';
+import { automaticTrust, findWorktreePatch, isInside, readWorktreePatch, runCommand, type PatchSet, type WorktreePatch, worktreePatchFiles } from '../patches.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ThreadState } from '../runner.ts';
@@ -61,6 +61,14 @@ export const worktreesPart = {
     this.markDirty(st);
     this.log.info('made a worktree', { threadId: rec.id, path: made.worktree.path, branch: made.worktree.branch });
     this.emit(st, { type: 'system.note', text: `Working in a worktree of its own at ${made.worktree.path}, on the branch ${made.worktree.branch}. tb land puts it on main.` }, turnId);
+    await this.setUpWorktree(st, made, patch, turnId);
+  },
+
+  // A new worktree's setup (the patch's `setup`), run from the worktree's
+  // own copy of the patch once that's trusted. A moved thread's worktree
+  // (runner/moves.ts) runs it too.
+  async setUpWorktree(this: Runner, st: ThreadState, made: { worktree: WorktreeRecord; patchFile: string }, patch: WorktreePatch, turnId?: string): Promise<void> {
+    const { rec, rt } = st;
     if (!patch.setup) return;
     const setup = await this.worktreeSetup(made.patchFile, patch.patch);
     if (rt.deleted) return;

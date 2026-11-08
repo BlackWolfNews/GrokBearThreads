@@ -104,6 +104,7 @@ export function readTree(dir: string, prefix: string, skip: string[] = []): Pack
  */
 export function writeTree(entries: PackEntry[], prefix: string, dir: string): number {
   const root = path.resolve(dir);
+  fs.mkdirSync(root, { recursive: true, mode: 0o700 });
   let n = 0;
   for (const e of entries) {
     if (!e.path.startsWith(`${prefix}/`)) continue;

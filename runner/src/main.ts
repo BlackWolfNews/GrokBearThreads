@@ -65,6 +65,7 @@ import { devicesMethods } from './devices.ts';
 import { flushSentry, reportException, reportLoggedError, reportLoggedWarning, startSentry } from './sentry.ts';
 import { ALWAYS_ASK_TOOLS, NEVER_ASK_TOOLS, RICH_BLOCKS_LINE, SERVER_NAME, buildThreadbearTools, threadbearMcpServer, type RemoteControl } from './threadbear-mcp.ts';
 import { CrossRunner } from './cross-runner.ts';
+import { Moves } from './moves.ts';
 import { EFFORT_LEVELS, ErrorCode, RpcError, isPermissionMode, type EffortLevel, type PermissionMode } from './protocol.ts';
 
 // Tells launch.mjs this runner calls its listening() hook (release.ts), so
@@ -402,6 +403,8 @@ async function main(): Promise<void> {
   runner.secrets.onWritten = (value) => scrubber.known.add(value);
   // Set once the relay is made, further down; sync's list goes through it.
   let relayRef: Relay | undefined;
+  // Set once moves are made, further down; sync leaves out what's moved away.
+  let movesRef: Moves | undefined;
   const sync = new ConvexSync({
     config: { ...cfg.sync, runnerId: syncRunnerId, icon: runnerIcon },
     key: syncKey,
@@ -409,9 +412,16 @@ async function main(): Promise<void> {
     cachePath: `${cfg.home}/sync-sent.json`,
     presence: async () => (atMac = isAtMac(rpcServer?.appConnected() ?? false, await hidIdleMs())),
     appConnected: () => rpcServer?.appConnected() ?? false,
+    // A thread past a move's switch is the other runner's: never written
+    // from here again (runner/moves.ts).
     runner: {
-      onNotification: (fn) => runner.onNotification(fn),
-      list: (include) => runner.list(include),
+      onNotification: (fn) =>
+        runner.onNotification((n) => {
+          const id = (n.params as { threadId?: unknown } | undefined)?.threadId;
+          if (typeof id === 'string' && movesRef?.gone(id)) return;
+          fn(n);
+        }),
+      list: (include) => runner.list(include).filter((t) => !movesRef?.gone(t.id)),
       get: (id) => runner.get(id),
       events: (id, o) => runner.events(id, o),
       cuts: (id) => runner.cuts(id),
@@ -665,6 +675,90 @@ async function main(): Promise<void> {
   });
   crossHooks = {
     start: (threadId, req) => cross.start(threadId, req),
+  };
+  // Moving a thread to another runner (src/moves.ts, runner/moves.ts).
+  let runnerNames = new Map<string, string>();
+  const refreshNames = () =>
+    void scheduler
+      .runners()
+      .then((rs) => (runnerNames = new Map(rs.map((r) => [r.id, r.name]))))
+      .catch(() => undefined);
+  runner.runnerNames = (id) => runnerNames.get(id);
+  const moves = (movesRef = new Moves({
+    self: () => syncRunnerId,
+    on: () => experimentOn(cfg.home, 'moveToRunner'),
+    backend: () => sync.movesBackend(),
+    log,
+    host: {
+      describe: (id) => runner.describeForMove(id, scheduler.list(id).filter((sc) => sc.threadId === id && !sc.finishedAt).length),
+      idle: (id) => runner.moveIdle(id),
+      setMoving: (id, m) => runner.setMoving(id, m),
+      has: (id) => runner.threads.has(id),
+      async pack(id, row) {
+        const packed = await runner.packForMove(id, row);
+        const keep = scheduler.list(id).filter((sc) => sc.threadId === id && !sc.finishedAt);
+        if (keep.some((sc) => sc.check)) packed.leftBehind.push("Its schedules' shell checks stayed behind: set them again here if they're still wanted.");
+        const carried = keep.map((sc) => ({ text: sc.text, title: sc.title, ...(sc.cron ? { cron: sc.cron } : { at: sc.at }), ...(sc.timezone ? { timezone: sc.timezone } : {}), ...(sc.paused ? { paused: true } : {}), ...(sc.createdBy ? { createdBy: sc.createdBy } : {}) }));
+        if (carried.length) packed.entries.push({ path: 'schedules.json', data: Buffer.from(JSON.stringify(carried)) });
+        return packed;
+      },
+      async putAway(id) {
+        for (const sc of scheduler.list(id).filter((sc) => sc.threadId === id)) await scheduler.delete(sc.id).catch(() => undefined);
+        await runner.putAwayMoved(id);
+      },
+      plan: (row) => runner.planMove(row),
+      place: (row, entries) => runner.placeMove(row, entries),
+      async adopt(row) {
+        const r = await runner.adoptMoved(row);
+        for (const sc of (r.schedules ?? []) as Record<string, unknown>[]) {
+          await scheduler.create({ ...(sc as { text: string }), threadId: row.threadId }).catch((e) => log.warn("couldn't make a moved thread's schedule again", { threadId: row.threadId, error: String(e) }));
+        }
+      },
+      discard: (row) => runner.discardMove(row),
+      sealKey: () => runner.secrets.publicKey(),
+      open: (sealed, info) => runner.secrets.openBytes(sealed, info),
+      runnerName: (id) => runnerNames.get(id) ?? (id === syncRunnerId ? (cfg.sync.name ?? defaultRunnerName()) : id),
+    },
+  }));
+  // The backend's version is known once sync has heard from it: until the
+  // watch starts, it's tried again (start does nothing once it has).
+  refreshNames();
+  const movesTimer = setInterval(() => {
+    refreshNames();
+    moves.start();
+  }, 30_000);
+  movesTimer.unref();
+  moves.start();
+  const startedMoves = new Map<string, string>();
+  const moveOn = () => {
+    if (!experimentOn(cfg.home, 'moveToRunner')) throw new RpcError(ErrorCode.badParams, 'Moving threads to another runner is an experiment that is off on this runner.');
+    if (!sync.ownerKey()) throw new RpcError(ErrorCode.badParams, "Only the main Mac's runner can move a thread.");
+  };
+  methods['threads.move'] = async (p) => {
+    moveOn();
+    const threadId = String(p.threadId ?? '');
+    const to = String(p.runnerId ?? '');
+    if (!threadId || !to) throw new RpcError(ErrorCode.badParams, 'threadId and runnerId are needed');
+    try {
+      const moveId = await sync.startMove({ threadId, to, ...(typeof p.cwd === 'string' && p.cwd ? { cwd: p.cwd } : {}), ...(typeof p.accountId === 'string' && p.accountId ? { accountId: p.accountId } : {}) });
+      startedMoves.set(threadId, moveId);
+      return { moveId };
+    } catch (e) {
+      throw new RpcError(ErrorCode.badParams, e instanceof Error ? e.message : String(e));
+    }
+  };
+  methods['threads.moveCancel'] = async (p) => {
+    moveOn();
+    // One this runner is in, or one it started between two others.
+    const threadId = String(p.threadId ?? '');
+    const moveId = moves.movingOf(threadId)?.moveId ?? startedMoves.get(threadId);
+    if (!moveId) throw new RpcError(ErrorCode.badParams, "That thread isn't moving.");
+    try {
+      await sync.cancelMove(moveId);
+    } catch (e) {
+      throw new RpcError(ErrorCode.badParams, e instanceof Error ? e.message : String(e));
+    }
+    return {};
   };
   methods['requests.get'] = (p) => cross.get(String(p.threadId ?? ''), String(p.approvalId ?? ''));
   methods['requests.answer'] = (p) => cross.answer(String(p.threadId ?? ''), String(p.approvalId ?? ''), p.allow === true, typeof p.runnerId === 'string' ? p.runnerId : undefined, typeof p.fingerprint === 'string' ? p.fingerprint : undefined);
