@@ -511,6 +511,9 @@ the thread. The Archived section at the foot of the list has
 them, most recently archived first, with the older ones behind Show more
 (the search at the top finds any of them). Unarchive, or the same swipe
 there, puts one back.
+To get rid of one for good, hover it there and click the trash, or
+right-click it and choose Delete…; after you confirm, it goes to the
+runner's trash folder, with no Undo in the app.
 
 Back and Forward (⌘[ and ⌘], in the Go menu) step through the threads and
 pages you've had open, as a browser does. A mouse's side buttons do the same,

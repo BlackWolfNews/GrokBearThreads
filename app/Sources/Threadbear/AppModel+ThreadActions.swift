@@ -591,6 +591,27 @@ extension AppModel {
         update(threadId, ThreadUpdate(starred: starred))
     }
 
+    /// Delete from the sidebar, only for an archived chat, after asking:
+    /// the runner moves its folder to its trash.
+    func deleteThread(_ threadId: String) {
+        guard !isBusy(BusyKey.deleteThread(threadId)), let thread = threads[threadId], thread.isArchived,
+              let client = client(for: threadId) else { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Delete \u{201C}\(thread.title)\u{201D}?"
+        alert.informativeText = "This removes the chat from Threadbear and moves it to the runner's trash. It can't be undone in the app."
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+        // It may have been unarchived while the alert was up.
+        guard alert.runModal() == .alertFirstButtonReturn, threads[threadId]?.isArchived == true else { return }
+        whileBusy(BusyKey.deleteThread(threadId), note: "Deleting chat…") { [self] in
+            do {
+                try await client.deleteThread(threadId)
+                forget(threadId)
+            } catch { show(error) }
+        }
+    }
+
     /// Archive (Mike calls it settling): leaves the inbox, stops its CLI.
     /// Its row slides off first, as a swiped one does;
     /// `slid` is a swipe that's already done that.
