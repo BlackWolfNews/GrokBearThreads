@@ -36,6 +36,13 @@ public struct NavigationHistory<Place: Equatable>: Sendable where Place: Sendabl
         step(by: 1, where: isValid)
     }
 
+    /// Where `back` or `forward` would go, without going: what a swipe's
+    /// card names before the fingers lift.
+    public func peek(back: Bool, where isValid: (Place) -> Bool = { _ in true }) -> Place? {
+        var copy = self
+        return back ? copy.back(where: isValid) : copy.forward(where: isValid)
+    }
+
     private mutating func step(by delta: Int, where isValid: (Place) -> Bool) -> Place? {
         var next = index + delta
         while entries.indices.contains(next) {

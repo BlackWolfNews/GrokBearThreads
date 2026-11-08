@@ -46,4 +46,17 @@ final class NavigationHistoryTests: XCTestCase {
         XCTAssertEqual(history.entries, [3, 4, 5])
         XCTAssertEqual(history.back(), 4)
     }
+
+    /// Peeking says where Back and Forward go, skipping what can't be
+    /// shown, and moves nothing.
+    func testPeekSaysWhereItWouldGoWithoutGoing() {
+        var history = NavigationHistory<String>()
+        for place in ["a", "b", "c"] { history.record(place) }
+        XCTAssertEqual(history.peek(back: true), "b")
+        XCTAssertEqual(history.peek(back: true, where: { $0 != "b" }), "a")
+        XCTAssertNil(history.peek(back: false))
+        XCTAssertEqual(history.current, "c")
+        _ = history.back()
+        XCTAssertEqual(history.peek(back: false), "c")
+    }
 }

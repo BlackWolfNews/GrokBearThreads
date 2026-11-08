@@ -59,6 +59,32 @@ extension AppModel {
         if let place = history.forward(where: canShow) { show(place) }
     }
 
+    /// Where Back or Forward would go, named for a swipe's card: the
+    /// thread's title and its place line, or the page.
+    func destination(back: Bool) -> (title: String, detail: String?)? {
+        guard let place = history.peek(back: back, where: canShow) else { return nil }
+        return describe(place)
+    }
+
+    func describe(_ place: NavigationPlace) -> (title: String, detail: String?) {
+        if let subagent = place.subagent, let thread = threads[subagent.threadId] {
+            return (thread.title.isEmpty ? "Untitled" : thread.title, "Sub-agent")
+        }
+        if let id = place.projectId, let project = project(id) { return (project.title, "Project") }
+        if place.projectsHome { return ("Projects", nil) }
+        if place.librarianHome { return ("Librarian", nil) }
+        if place.scheduledHome { return ("Scheduled", nil) }
+        if let id = place.threadId, let thread = threads[id] {
+            return (thread.title.isEmpty ? "Untitled" : thread.title, ProjectMark.place(thread))
+        }
+        switch place.mode {
+        case .inbox: return ("New thread", nil)
+        case .scheduled: return ("Scheduled", nil)
+        case .projects: return ("Projects", nil)
+        case .librarian: return ("Librarian", nil)
+        }
+    }
+
     /// A deleted thread, a merged project or a view the runner no longer
     /// has is skipped rather than shown empty.
     private func canShow(_ place: NavigationPlace) -> Bool {

@@ -266,30 +266,71 @@ final class SwipeNavigation {
     }
 }
 
-/// The arrow at the window's edge while a page swipe is under way: it
-/// slides in with the fingers and fills once letting go will go there.
+/// The card in the middle of the window while a page swipe is under way:
+/// which thread or page letting go will open, with a bar that fills to the
+/// line and turns blue there, as the arrow and the bar both do. Mike picked
+/// this from four designs on 8 Nov (big arrow, this, a ring at the pointer,
+/// a pill sliding in) for saying where Back goes, as it crosses views.
 struct SwipeNavigationArrow: View {
+    @Environment(AppModel.self) private var app
     private var swipe: NavigationSwipe { SwipeNavigation.shared.swipe }
 
     var body: some View {
-        if let direction = swipe.direction {
-            let back = direction == .back
-            let armed = swipe.armed
-            Image(systemName: back ? "chevron.left" : "chevron.right")
-                .font(.system(size: zoomed(15), weight: .semibold))
-                .foregroundStyle(armed ? Color.white : Color.secondary)
-                .frame(width: zoomed(36), height: zoomed(36))
-                .background(Circle().fill(armed ? Color.accentColor : Color(nsColor: .controlBackgroundColor)))
-                .overlay(Circle().strokeBorder(Color.primary.opacity(armed ? 0 : 0.1)))
-                .shadow(color: .black.opacity(0.18), radius: 6, y: 1)
-                .scaleEffect(armed && !Juice.reduceMotion ? 1.08 : 1)
-                .animation(Juice.hover, value: armed)
-                // From just off the edge to 16 points in.
-                .offset(x: (back ? 1 : -1) * (CGFloat(swipe.progress) * zoomed(52) - zoomed(36)))
-                .opacity(min(1, swipe.progress * 3))
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: back ? .leading : .trailing)
+        if let direction = swipe.direction, let place = app.destination(back: direction == .back) {
+            card(back: direction == .back, place: place)
+                // In as soon as it's clear it's a swipe, not with the line.
+                .opacity(min(1, 0.4 + swipe.progress * 2))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
         }
+    }
+
+    private func card(back: Bool, place: (title: String, detail: String?)) -> some View {
+        let armed = swipe.armed
+        let accent = Color(nsColor: .controlAccentColor)
+        let shape = RoundedRectangle(cornerRadius: zoomed(14), style: .continuous)
+        return VStack(alignment: .leading, spacing: zoomed(14)) {
+            HStack(spacing: zoomed(12)) {
+                Image(systemName: back ? "chevron.left" : "chevron.right")
+                    .font(.system(size: zoomed(14), weight: .semibold))
+                    .foregroundStyle(armed ? Color.white : Color.secondary)
+                    .frame(width: zoomed(34), height: zoomed(34))
+                    .background(Circle().fill(armed ? accent : Color.primary.opacity(0.08)))
+                VStack(alignment: .leading, spacing: zoomed(2)) {
+                    Text(back ? "Back to" : "Forward to")
+                        .font(.system(size: TypeScale.label))
+                        .foregroundStyle(.secondary)
+                    Text(place.title)
+                        .font(.system(size: zoomed(14), weight: .semibold))
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let detail = place.detail {
+                        Text(detail)
+                            .font(.system(size: TypeScale.label))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.primary.opacity(0.1))
+                    Capsule().fill(armed ? accent : Color.primary.opacity(0.45))
+                        .frame(width: geo.size.width * swipe.progress)
+                }
+            }
+            .frame(height: 3)
+        }
+        .padding(.horizontal, zoomed(18))
+        .padding(.vertical, zoomed(16))
+        .frame(width: zoomed(340))
+        .background {
+            shape.fill(.regularMaterial)
+                .shadow(color: .black.opacity(0.4), radius: zoomed(20), y: zoomed(6))
+        }
+        .overlay(shape.strokeBorder(armed ? accent : Color(nsColor: .separatorColor), lineWidth: armed ? 1 : 0.5))
+        .animation(Juice.hover, value: armed)
     }
 }

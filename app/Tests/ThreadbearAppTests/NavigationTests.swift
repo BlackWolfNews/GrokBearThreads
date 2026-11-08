@@ -251,4 +251,23 @@ final class NavigationTests: XCTestCase {
         app.goBack()
         XCTAssertEqual(app.selection, "a")
     }
+
+    /// A swipe's card names where it goes: the thread and its place line,
+    /// or the page.
+    func testASwipesCardNamesWhereItGoes() async {
+        let app = app()
+        app.select("a")
+        await settle()
+        app.showProjects()
+        await settle()
+        app.select("b")
+        await settle()
+        XCTAssertEqual(app.destination(back: true)?.title, "Projects")
+        XCTAssertNil(app.destination(back: false))
+        app.goBack()
+        XCTAssertEqual(app.destination(back: true)?.title, "a")
+        XCTAssertEqual(app.destination(back: false)?.title, "b")
+        app.threads["a"] = nil
+        XCTAssertNil(app.destination(back: true), "a deleted thread is skipped")
+    }
 }
