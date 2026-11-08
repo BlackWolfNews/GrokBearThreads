@@ -4734,8 +4734,11 @@ runner that's this one is the usual create.
   `/home/<name>/x`) starts in that one, as its real path, which must be
   in this Mac's home with symlinks followed. `requests.get` gives that
   folder, so the card shows where it really starts, and its fingerprint
-  holds it, so a folder appearing or a link moving before Start it is
-  "changed since the card showed it", never a start somewhere else. One
+  holds it and its real path (whichever machine the card shows), so a
+  folder appearing or a link moving before Start it is "changed since
+  the card showed it", never a start somewhere else. The app reads the
+  request again after Start it fails, so a second click answers the card
+  as it is now. One
   that's still not a folder here is `missingFolder` and the card says so;
   Start it then starts nothing: it declines the card with a message
   naming the folder and this Mac's home, which the asking agent is told

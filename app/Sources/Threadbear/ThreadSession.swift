@@ -774,6 +774,12 @@ final class ThreadSession {
             } catch {
                 self.stopAnswering(approvalId)
                 app?.show(error)
+                // Read it again, so the card shows what's true now and a
+                // second click answers that: a request refused as changed
+                // since the card showed it (a folder made since, or a
+                // runner updated in between) never starts on the old card,
+                // which would otherwise be all a retry could send.
+                self.loadStartRequest(approvalId)
             }
         }
         return true

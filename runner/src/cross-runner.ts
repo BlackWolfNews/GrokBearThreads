@@ -103,6 +103,10 @@ export function folderHere(cwd: string, home: string, realDir: (p: string) => st
     const exact = path.resolve(asked);
     if (realDir(exact)) return exact;
   }
+  return underHome(asked, tilde, home, realDir);
+}
+
+function underHome(asked: string, tilde: RegExpExecArray | null, home: string, realDir: (p: string) => string | undefined): string | undefined {
   const homed = tilde ?? /^\/(?:Users|home)\/[^/]+(\/.*)?$/.exec(asked);
   if (!homed) return undefined;
   const inside = (p: string, root: string) => p === root || p.startsWith(root + path.sep);
@@ -112,8 +116,10 @@ export function folderHere(cwd: string, home: string, realDir: (p: string) => st
   return real && inside(real, realDir(home) ?? home) ? real : undefined;
 }
 
-// Where a request would start on this Mac, for the card and its fingerprint.
-type Place = { folder: string } | { missing: string };
+// Where a request would start on this Mac, for the card and its fingerprint:
+// the folder (as named, or as read under this home) and its real path, so a
+// link moved between the card and Start it changes the fingerprint too.
+type Place = { folder: string; real: string } | { missing: string };
 
 export class CrossRunner {
   private deps: CrossRunnerDeps;
@@ -194,16 +200,21 @@ export class CrossRunner {
     // One starting here shows the folder it would really start in (the
     // app starts a request naming a machine it doesn't know here too), and
     // the fingerprint holds it, so Start it starts there or not at all.
-    const place = this.place(row, !target || target.self);
-    const request = place && 'folder' in place ? { ...row, cwd: place.folder } : row;
-    const missing = place && 'missing' in place ? { missingFolder: place.missing } : {};
+    // The fingerprint holds the place whichever machine the card shows, so
+    // Start it on another machine than the card's (`runnerId`) isn't
+    // refused for that alone.
+    const place = this.place(row);
+    const here = !target || target.self;
+    const request = here && place && 'folder' in place ? { ...row, cwd: place.folder } : row;
+    const missing = here && place && 'missing' in place ? { missingFolder: place.missing } : {};
     return { request, ...(target ? { target } : {}), runners, fingerprint: fingerprint(row, place), ...missing };
   }
 
-  private place(row: RunnerRequestRow, here: boolean): Place | undefined {
-    if (!here || !row.cwd) return undefined;
+  private place(row: RunnerRequestRow): Place | undefined {
+    if (!row.cwd) return undefined;
     const folder = folderHere(row.cwd, this.deps.home(), this.deps.realDir);
-    return folder ? { folder } : { missing: row.cwd };
+    const real = folder ? this.deps.realDir(folder) : undefined;
+    return folder && real ? { folder, real } : { missing: row.cwd };
   }
 
   /** requests.answer, on the main Mac: start it (on `runnerId`, or the one it asked for) or say no. */
@@ -213,7 +224,7 @@ export class CrossRunner {
     if (row.state !== 'pending') throw bad(`That request is ${row.state === 'claimed' ? 'being started' : `already ${row.state}`}.`);
     const target = allow ? (runnerId ? (await this.deps.runners()).find((r) => r.id === runnerId) : await this.resolve(row.target)) : undefined;
     if (allow && !target) throw bad(`No runner called ${runnerId ?? row.target}. Pick one.`);
-    const place = target ? this.place(row, target.self) : undefined;
+    const place = this.place(row);
     if (allow && shown !== fingerprint(row, place)) throw bad('That request has changed since the card showed it. Open the thread again to read it.');
     // Only while its card is still open: one that expired or was answered
     // from the phone has an agent that's no longer waiting.
@@ -230,7 +241,7 @@ export class CrossRunner {
       // Said before claiming, so it can be tried again once that Mac is back.
       if (!target.self && target.online === false) throw other(`${target.name} is offline. Try again once it's back.`);
       const { text, title, model, effort, permissionMode, why } = row;
-      if (place && 'missing' in place) {
+      if (target.self && place && 'missing' in place) {
         // Nothing Mike can pick here would make it right, and the agent
         // waits an hour for a card that can't start: it's told why
         // instead, so it can ask again with a folder that's here. Told
@@ -246,7 +257,7 @@ export class CrossRunner {
         await backend.decideRequest({ requestId: approvalId, docId: row.docId, state: 'denied' }).catch(() => {});
         throw bad(`${place.missing} isn't a folder on this Mac, so nothing was started. The thread that asked has been told, so it can ask again with one that is.`);
       }
-      const cwd = place && 'folder' in place ? place.folder : row.cwd;
+      const cwd = target.self && place && 'folder' in place ? place.folder : row.cwd;
       const p: RunnerRequestInput = { text: askedHeader(row) + text, ...(title ? { title } : {}), ...(cwd ? { cwd } : {}), ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(permissionMode ? { permissionMode } : {}) };
       // Claimed in the backend before anything starts, so a retry, a second
       // click or this runner restarting midway can't start it twice.

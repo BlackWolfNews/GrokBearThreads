@@ -370,3 +370,31 @@ test("answering on the main Mac: a missing folder's reason that can't be sent le
   assert.equal(f.rows.get('req-15')!.state, 'pending');
   assert.deepEqual(f.log, []);
 });
+
+// Codex's second round, 8 Nov 2026.
+test('answering on the main Mac: a link in a folder named exactly that moves after the card is read starts nothing', async () => {
+  const links = LINKS.slice();
+  const f = fake({ owner: true });
+  const row: RunnerRequestRow = { docId: 'doc1', requestId: 'req-16', runnerId: 'cloud1', runnerName: 'Hetzner Cloud', threadId: 'c', target: 'main', text: 'x', cwd: `${HOME}/alias/project`, createdAt: 1, state: 'pending' };
+  f.rows.set('req-16', row);
+  f.setOpen('req-16');
+  const got = await f.cross.get('c', 'req-16');
+  assert.equal(got.request.cwd, `${HOME}/alias/project`, 'shown as named');
+  try {
+    LINKS.splice(1, 1, [`${HOME}/alias`, '/Volumes/private']);
+    await assert.rejects(f.cross.answer('c', 'req-16', true, undefined, got.fingerprint), /changed since/);
+  } finally {
+    LINKS.splice(0, LINKS.length, ...links);
+  }
+});
+
+test("answering on the main Mac: Start it on another machine than the card's isn't refused for its folder", async () => {
+  const f = fake({ owner: true });
+  const row: RunnerRequestRow = { docId: 'doc1', requestId: 'req-17', runnerId: 'cloud1', runnerName: 'Hetzner Cloud', threadId: 'c', target: 'bruce', text: 'x', cwd: '/opt/work', createdAt: 1, state: 'pending' };
+  f.rows.set('req-17', row);
+  f.setOpen('req-17');
+  const got = await f.cross.get('c', 'req-17');
+  assert.equal(got.target?.id, 'bruce1');
+  await f.cross.answer('c', 'req-17', true, 'm5', got.fingerprint);
+  assert.equal(JSON.parse(f.log[1]!.slice('here '.length)).cwd, '/opt/work');
+});
