@@ -17,6 +17,7 @@ const HOSTS: Record<Provider, string> = {
   claude: 'api.anthropic.com',
   // Codex logins are ChatGPT ones; its requests go to chatgpt.com.
   codex: 'chatgpt.com',
+  grok: 'api.x.ai',
 };
 
 const PROBE_TIMEOUT_MS = 5_000;

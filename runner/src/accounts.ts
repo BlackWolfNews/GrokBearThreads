@@ -84,7 +84,7 @@ export function isCodexLogin(dir: string): boolean {
 }
 
 export type DiscoveryConfig = Pick<Config, 'claudeMainDir' | 'claudeMainJson' | 'tokenStatsAccountsDir'> &
-  Partial<Pick<Config, 'codexMainDir' | 'accountNotes' | 'accountsDir'>>;
+  Partial<Pick<Config, 'codexMainDir' | 'grokMainDir' | 'accountNotes' | 'accountsDir'>>;
 
 // claude-main is ~/.claude (its .claude.json sits at ~/.claude.json);
 // codex-main is ~/.codex. Token Stats' Accounts folder holds claude-N and
@@ -121,6 +121,9 @@ export function discoverAccounts(cfg: DiscoveryConfig): Account[] {
   for (const { id, dir } of [...codex, ...numbered('codex')]) {
     if (isCodexLogin(dir)) out.push(codexAccount(id, dir));
   }
+  // Grok Build keeps its login under ~/.grok. One account: the CLI's own
+  // login, not a pool of subscription files.
+  if (cfg.grokMainDir && isDirectory(cfg.grokMainDir)) out.push(grokAccount('grok-main', cfg.grokMainDir));
   for (const a of out) {
     const note = cfg.accountNotes?.[a.id];
     if (note) a.note = note;
@@ -134,6 +137,10 @@ function claudeAccount(id: string, configDir: string, email: string | undefined)
   const model = resolveDefaultModel(readSettingsModel(path.join(configDir, 'settings.json')), undefined);
   if (model) account.defaultModel = model;
   return account;
+}
+
+function grokAccount(id: string, configDir: string): Account {
+  return { id, provider: 'grok', title: 'Grok', configDir };
 }
 
 function codexAccount(id: string, configDir: string): Account {
@@ -154,6 +161,7 @@ function codexTitle(email: string | undefined, id: string): string {
 // settings.json, Codex's config.toml.
 function settingsModel(account: Account): string | undefined {
   if (account.provider === 'codex') return readCodexConfig(path.join(account.configDir, 'config.toml')).model;
+  if (account.provider === 'grok') return undefined;
   return readSettingsModel(path.join(account.configDir, 'settings.json'));
 }
 

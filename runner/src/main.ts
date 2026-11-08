@@ -35,6 +35,7 @@ import { ClaudeAdapter } from './adapters/claude/adapter.ts';
 import { ProcessRegistry } from './proc.ts';
 import { Runner } from './runner.ts';
 import { CodexAdapter } from './adapters/codex/adapter.ts';
+import { GrokAdapter } from './adapters/grok/adapter.ts';
 import { resolveCodexBinary } from './adapters/codex/appserver.ts';
 import { checkSurface, testedVersion } from './adapters/codex/surface.ts';
 import { CliUpdates } from './updates/manager.ts';
@@ -221,6 +222,14 @@ async function main(): Promise<void> {
     onNotice: (text) => runner.notice('warning', text),
     extraGuidance: () => (experimentOn(cfg.home, 'richBlocks') ? RICH_BLOCKS_LINE : ''),
   });
+  // One `grok agent stdio` process per live Grok thread. Threadbear's own
+  // tools are not on it yet: those are an in-process MCP server built for
+  // Claude, and Grok needs them as a stdio server.
+  const grok = new GrokAdapter({
+    grokPath: cfg.grokPath,
+    registry,
+    log,
+  });
   // The runner's own small-model calls, on the settings' Claude pool.
   const models = new Models({
     home: cfg.home,
@@ -243,7 +252,7 @@ async function main(): Promise<void> {
     atMac: () => atMac,
     config: cfg,
     store,
-    adapters: { claude, codex },
+    adapters: { claude, codex, grok },
     accounts,
     // A draining runner's readings go to the primary, which owns
     // usage.json (docs/protocol.md, "Handovers").

@@ -1801,7 +1801,15 @@ export class Runner {
     // A thread shut in a sandbox starts in one or not at all (the adapters
     // check too); one that starts in one is shut in it from now on.
     const inSandbox = rec.provider === 'claude' && this.sandboxed(rec.cwd);
-    if (rec.confined && !inSandbox) throw new Error(rec.provider === 'claude' ? CONFINED_NO_SANDBOX(rec.cwd) : "This thread runs in a sandbox, and Codex can't, so it wasn't started. Move it to a Claude login.");
+    if (rec.confined && !inSandbox) {
+      const why =
+        rec.provider === 'claude'
+          ? CONFINED_NO_SANDBOX(rec.cwd)
+          : rec.provider === 'grok'
+            ? "This thread runs in a sandbox, and Grok isn't started in one here, so it wasn't started."
+            : "This thread runs in a sandbox, and Codex can't, so it wasn't started. Move it to a Claude login.";
+      throw new Error(why);
+    }
     if (inSandbox) rec.confined = true;
     const claude = rec.provider === 'claude' ? this.patchTrust.checkClaude(rec.cwd, claudeOptions(rec)) : undefined;
     rt.claudeSkipped = claude && !claude.trusted ? claude.hash : undefined;

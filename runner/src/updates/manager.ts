@@ -200,16 +200,18 @@ export class CliUpdates {
     const latestVersion = s.latestVersion;
     const codexState = p === 'codex' && this.managedCodex() ? this.copies.state() : undefined;
     const hold = codexState?.hold;
-    const binary = p === 'claude' ? this.cfg.claudePath : this.codexBinary();
+    const binary = p === 'claude' ? this.cfg.claudePath : p === 'grok' ? this.cfg.grokPath : this.codexBinary();
     let status: CliStatus['status'];
     if (!installedVersion) status = fs.existsSync(binary) ? 'unknown' : 'missing';
     else if (hold && latestVersion === hold.version && compareVersions(installedVersion, hold.version) < 0) status = 'held';
     else if (!latestVersion) status = 'unknown';
     else status = compareVersions(installedVersion, latestVersion) < 0 ? 'behind' : 'current';
+    // `grok` on PATH is not a file existsSync can see.
+    if (p === 'grok' && status === 'missing' && !path.isAbsolute(binary)) status = 'unknown';
     const out: CliStatus = {
       provider: p,
       path: binary,
-      managedBy: p === 'claude' ? 'cli' : this.cfg.codexPath ? 'none' : 'threadbear',
+      managedBy: p === 'grok' || p === 'claude' ? 'cli' : this.cfg.codexPath ? 'none' : 'threadbear',
       status,
       policy: this.policy(p),
       inUse: this.d.hooks.versionsInUse(p),
@@ -227,12 +229,15 @@ export class CliUpdates {
   // "off" can't be turned on from the app; a Codex binary set by hand is
   // never updated.
   private policy(p: Provider): CliPolicy {
+    // Grok Build updates itself. Threadbear does not install or replace it.
+    if (p === 'grok') return 'off';
     if (this.configOff(p)) return 'off';
     if (p === 'codex' && this.cfg.codexPath) return 'off';
     return this.st[p]?.policy ?? this.cfg.cliUpdates[p];
   }
 
   private configOff(p: Provider): boolean {
+    if (p === 'grok') return true;
     return this.env.THREADBEAR_CLI_UPDATES === 'off' || this.cfg.cliUpdates[p] === 'off';
   }
 
@@ -278,6 +283,7 @@ export class CliUpdates {
   }
 
   private async runCheck(p: Provider, asked: boolean): Promise<void> {
+    if (p === 'grok') return;
     await this.refreshInstalled();
     const policy = this.policy(p);
     if (policy === 'off' && !asked) return;
@@ -315,6 +321,10 @@ export class CliUpdates {
   // ---- updating
 
   private startUpdate(p: Provider, o: UpdateOptions, attempt = 1): void {
+    if (p === 'grok') {
+      this.finish(p, { state: 'failed', message: 'Grok Build updates itself. Threadbear does not install it.' });
+      return;
+    }
     if (this.running[p] || this.stopped) return;
     const target = o.version ?? this.st[p]?.latestVersion;
     if (this.d.hooks.restartPending()) {

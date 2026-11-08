@@ -79,6 +79,10 @@ export type Config = {
   codexPath?: string;
   codexArgs: string[]; // extra `codex app-server` arguments
   codexMainDir: string; // codex-main's CODEX_HOME
+  // Grok Build. `grok` on PATH unless runner.json or THREADBEAR_GROK_PATH
+  // names a binary. grok-main is ~/.grok.
+  grokPath: string;
+  grokMainDir: string;
   tokenStatsLimitsFile: string; // Token Stats' limits.json, read only
   cliUpdates: CliUpdatesConfig;
   // Reads the CLIs' transcripts for the Usage panel's token counts
@@ -150,6 +154,7 @@ export type RunnerJson = {
   idleMinutes?: number;
   maxLiveCLIs?: number;
   codexPath?: string;
+  grokPath?: string;
   codexArgs?: string[];
   cliUpdates?: Partial<CliUpdatesConfig>;
   accountNotes?: Record<string, string>;
@@ -278,6 +283,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     ...(codexPath ? { codexPath: expandHome(codexPath) } : {}),
     codexArgs: Array.isArray(json.codexArgs) ? json.codexArgs.filter((a): a is string => typeof a === 'string') : [],
     codexMainDir: expandHome(env.THREADBEAR_CODEX_MAIN_DIR || '~/.codex'),
+    grokPath: expandHome(env.THREADBEAR_GROK_PATH || json.grokPath || 'grok'),
+    grokMainDir: expandHome(env.THREADBEAR_GROK_MAIN_DIR || '~/.grok'),
     tokenStatsLimitsFile: expandHome(
       env.THREADBEAR_TOKEN_STATS_LIMITS || '~/Library/Application Support/Token Stats/limits.json',
     ),
