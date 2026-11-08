@@ -91,6 +91,13 @@ struct ThreadView: View {
         // model.connection in each id: a fresh Convex client after the app
         // comes back from the background, so these follow it, not the old one.
         .task(id: "\(threadId):\(model.connection)") { await follow() }
+        .task {
+            // For sim-shots.sh: a reply box with something typed in.
+            if let text = model.draftText {
+                draft = text
+                model.draftText = nil
+            }
+        }
         .task(id: "\(threadId):\(limit):\(model.hasMessagePages):\(model.connection)") { await followMessages() }
         .task(id: "\(sent?.id ?? ""):\(model.connection)") { await followCommand() }
         .task(id: answeredCommand) {
@@ -234,7 +241,7 @@ struct ThreadView: View {
                 if quick.voiceThreadId == threadId, !typing {
                     VoiceBar(threadId: threadId, afterSeq: messages.last?.seq ?? 0, working: thread.isBusy) { typing = true }
                 } else {
-                    Composer(text: $draft, placeholder: composerPlaceholder(thread), links: thread.links ?? []) { text, photos in
+                    Composer(text: $draft, placeholder: composerPlaceholder(thread), links: thread.links ?? [], threadId: thread.id, provider: thread.provider) { text, photos in
                         await send(text, photos: photos, to: thread)
                     }
                 }

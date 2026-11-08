@@ -489,6 +489,10 @@ function setupFull(opts: { heads?: { threadId: string; lastSeq: number }[]; take
       buttons: (id) => h.runner.listButtons(id).buttons,
     },
     commands: {
+      threadCommands: (id) => {
+        applied.push(`commands ${id}`);
+        return h.runner.threadCommands(id);
+      },
       pressButton: (id, buttonId) => {
         applied.push(`press ${id} ${buttonId}`);
         return h.runner.pressButton(id, buttonId);
@@ -3174,4 +3178,20 @@ test('commands: an update with snooze.said hibernates the thread in those words 
   const finished = calls.filter((c) => c.fn === 'sync:finishCommand').map((c) => c.args);
   assert.equal(finished.length, 1);
   assert.equal(finished[0]!.ok, true);
+});
+
+test('the phone asks for a thread\'s slash commands: the list goes back as the command\'s result', async () => {
+  const { h, sync, calls, push, applied } = setupFull({ apiVersion: BACKEND_API_VERSION });
+  h.adapter.commands = async () => [{ name: 'compact', source: 'cli' }, { name: 'deslop', source: 'skill', description: 'Clean up' }];
+  sync.start();
+  await sync.flushNow();
+  const t = h.runner.create({ text: 'hi', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  push([{ commandId: 'sc1', kind: 'slashCommands', threadId: t.id, args: {}, createdAt: 1 }]);
+  await tick(20);
+  assert.deepEqual(applied.filter((a) => a.startsWith('commands')), [`commands ${t.id}`]);
+  const done = calls.find((c) => c.fn === 'sync:finishCommand' && c.args.commandId === 'sc1')!;
+  assert.equal(done.args.ok, true);
+  const list = JSON.parse(done.args.result as string) as { name: string }[];
+  assert.deepEqual(list.map((c) => c.name), ['model', 'effort', 'compact', 'deslop']);
+  await sync.stop();
 });

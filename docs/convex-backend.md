@@ -569,7 +569,8 @@ Queries:
 - `phone:images({ token, threadId, from })` (API 37) → the thread's pictures
   from that seq on, for a client passing `noImages: true` to `phone:messages`.
 - `phone:command({ token, commandId })` → `{ state: "pending" | "taken" |
-  "done" | "failed", note?, threadId? }`.
+  "done" | "failed", note?, threadId?, result? }`. `result` (API 62) is a
+  `slashCommands` command's answer, the thread's list.
 - `phone:waiting({ token, threadId })` (API 57) → the thread's `send`
   commands not yet finished, oldest first: `{ commandId, state: "pending" |
   "taken", text, photos, createdAt }`. The phone shows each as a faded
@@ -612,6 +613,12 @@ phone names must be one that has heartbeated (or `"any"`), else
   `press` command with `{ buttonId }`. Its `resultThreadId` is the thread
   the button started or messaged. `phone:messages` rows carry `buttons`,
   the state of the buttons an assistant message links, since API 59.
+- `phone:slashCommands({ token, threadId })` (API 62) → commandId: asks
+  the thread's runner for the slash commands it can run, for the reply
+  box's palette (docs/protocol.md, "Slash commands"). The runner answers
+  with its `threads.commands` list as the command's `result` (kept by
+  `sync:finishCommand` as for a `call`); an older runner fails it as
+  unknown.
 - `phone:respond({ token, threadId, approvalId, decision: "allow" |
   "allowAlways" | "deny", message? })`
 - `phone:answer({ token, threadId, approvalId, answers: Record<string,

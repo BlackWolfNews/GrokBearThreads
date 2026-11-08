@@ -277,4 +277,9 @@
 //    card as its own runner's (rows with a line under each answer), not
 //    plain buttons (Mike, 8 Nov, on a Hetzner thread). An older runner sends
 //    none, and an older backend gets the asks without them.
-export const API_VERSION = 61;
+// 62: phone:slashCommands, which asks a thread's runner for the slash
+//    commands it can run (a `slashCommands` command, answered with its
+//    threads.commands list), and phone:command returns that list as
+//    `result`. An older runner fails it as unknown, and the phone shows no
+//    palette; an older phone never asks.
+export const API_VERSION = 62;

@@ -116,6 +116,9 @@ final class AppModel {
     /// `-ThreadbearCompose <text>` (Debug only): open New thread with this
     /// typed in, for the screenshots.
     var composeText: String?
+    /// `-ThreadbearDraft <text>` (Debug only): start the open thread's reply
+    /// box with this typed in ("/co" shows the slash command palette).
+    var draftText: String?
     /// `-ThreadbearSearch <text>` (Debug only): start with this in the
     /// inbox's search, for the screenshots.
     var searchText: String?
@@ -132,6 +135,54 @@ final class AppModel {
     /// Whether messages waiting for their runner can be listed and cancelled
     /// (backend API 57, phone:waiting and phone:cancel).
     var canSeeWaiting: Bool { isFake || (apiVersion ?? 0) >= BackendCompatibility.waitingSendsAPIVersion }
+    /// Whether the reply box's slash command palette can ask the runner
+    /// for a thread's list (backend API 62, phone:slashCommands).
+    var canUseSlashCommands: Bool { isFake || (apiVersion ?? 0) >= BackendCompatibility.slashCommandsAPIVersion }
+    /// Each thread's slash commands once its runner has answered (SlashPaletteList).
+    var slashCommands: [String: [SlashCommand]] = [:]
+    /// Why a thread's list didn't come: its runner is away, or it failed.
+    var slashCommandsProblem: [String: String] = [:]
+    @ObservationIgnored private var slashLoading: Set<String> = []
+    /// The commands picked from the palette lately, newest first.
+    var recentSlashCommands: [String] = UserDefaults.standard.stringArray(forKey: "recentSlashCommands") ?? [] {
+        didSet { UserDefaults.standard.set(recentSlashCommands, forKey: "recentSlashCommands") }
+    }
+
+    /// Asks the thread's runner for its commands when the palette opens,
+    /// once at a time. Kept for the session: a folder's skills change
+    /// rarely, and the runner keeps its own copy fresh. A runner that's
+    /// away leaves the command waiting; after a while the palette says so.
+    func loadSlashCommands(_ threadId: String) {
+        guard canUseSlashCommands, let backend, slashCommands[threadId] == nil, !slashLoading.contains(threadId) else { return }
+        slashLoading.insert(threadId)
+        slashCommandsProblem[threadId] = nil
+        Task { [weak self] in
+            defer { self?.slashLoading.remove(threadId) }
+            do {
+                let commandId = try await backend.slashCommands(threadId: threadId)
+                let list: [SlashCommand]? = try await withThrowingTaskGroup(of: [SlashCommand]?.self) { group in
+                    group.addTask {
+                        for try await status in backend.command(commandId) {
+                            if status?.state == .done { return status?.commands ?? [] }
+                            if status?.state == .failed { throw TransportError.server(status?.note ?? "The runner couldn't list them.") }
+                        }
+                        return nil
+                    }
+                    group.addTask {
+                        try await Task.sleep(for: .seconds(20))
+                        return nil
+                    }
+                    let first = try await group.next() ?? nil
+                    group.cancelAll()
+                    return first
+                }
+                if let list { self?.slashCommands[threadId] = list }
+                else { self?.slashCommandsProblem[threadId] = "Its Mac hasn't answered yet. You can still type a command and send it." }
+            } catch {
+                self?.slashCommandsProblem[threadId] = "Couldn't get its commands: \(error.localizedDescription)"
+            }
+        }
+    }
 
     /// The thread's own runner by name while it's offline. Not offlineText,
     /// which only speaks up once every runner is: with Bruce and the cloud
@@ -375,6 +426,7 @@ final class AppModel {
         // `-ThreadbearOpen <threadId>`: start on that thread, for screenshots.
         if let i = args.firstIndex(of: "-ThreadbearOpen"), i + 1 < args.count { openThreadId = args[i + 1] }
         if let i = args.firstIndex(of: "-ThreadbearCompose"), i + 1 < args.count { composeText = args[i + 1] }
+        if let i = args.firstIndex(of: "-ThreadbearDraft"), i + 1 < args.count { draftText = args[i + 1] }
         if let i = args.firstIndex(of: "-ThreadbearSearch"), i + 1 < args.count { searchText = args[i + 1] }
         // `-ThreadbearStart <text>`: start a thread with it, as the sheet's Start does.
         if let i = args.firstIndex(of: "-ThreadbearStart"), i + 1 < args.count, let backend {

@@ -2045,7 +2045,10 @@ wait for the next message).
 and folder, with Claude's terminal-only ones left out. Claude's come from
 the live session's `supportedCommands()`, or a CLI started with no prompt
 in the folder (a second or two); Codex's are its `skills/list`. Cached for
-ten minutes per login and folder.
+ten minutes per login and folder. The phone asks for the same list through
+the backend: a `slashCommands` command (API 62, docs/convex-backend.md,
+`phone:slashCommands`), which the runner answers with this list as the
+command's result.
 
 ```ts
 type SlashCommand = {

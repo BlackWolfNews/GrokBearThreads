@@ -11,6 +11,10 @@ struct Composer: View {
     /// The thread's patch link buttons, in a row over the box as the Mac
     /// has its chips over its composer.
     var links: [PhoneLink] = []
+    /// The thread it replies to, and its CLI, for the slash command
+    /// palette; none for a box with no thread yet.
+    var threadId: String? = nil
+    var provider: String = "claude"
     /// Returns whether it went, so a failed send keeps the text.
     var onSend: (String, [PickedPhoto]) async -> Bool
     @State private var photos: [PickedPhoto] = []
@@ -24,6 +28,12 @@ struct Composer: View {
 
     var body: some View {
         VStack(spacing: 6) {
+            // Over the box while what's typed is a command being typed.
+            if let threadId, model.canUseSlashCommands, !hearing, let query = SlashPalette.query(in: text) {
+                SlashPaletteList(threadId: threadId, provider: provider, query: query) { command in
+                    text = SlashPalette.fill(command, forArguments: !(command.argumentHint ?? "").trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
             if !links.isEmpty {
                 LinkChips(links: links)
             }

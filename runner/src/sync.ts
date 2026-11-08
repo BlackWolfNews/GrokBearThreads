@@ -125,7 +125,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 61;
+export const BACKEND_API_VERSION = 62;
 // From this one sync:sharedThreads lists a runner's rows shared by link, which
 // it checks against its own threads on every start and every
 // SHARE_RECONCILE_MS (reconcileShares).
@@ -538,6 +538,8 @@ export type CommandHost = {
   schedule?: (p: { scheduleId: string; action: 'pause' | 'resume' | 'run' }) => unknown;
   // A reply button's press from the phone or website (API 59), buttons.press.
   pressButton?: (threadId: string, buttonId: string) => unknown;
+  // The phone's slash command palette (API 62): threads.commands.
+  threadCommands?: (threadId: string) => unknown;
 };
 
 export type SyncDeps = {
@@ -3813,6 +3815,13 @@ export class ConvexSync {
         // the press is done (its row goes up first, as a create's does).
         const pressed = r?.button?.pressed?.threadId;
         return pressed ? { threadId: pressed } : undefined;
+      }
+      case 'slashCommands': {
+        // The phone's palette (API 62): the thread's list, as the Mac
+        // app's threads.commands has it, sent back as the command's result.
+        if (!host.threadCommands) throw new Error("This runner can't list a thread's commands for the phone.");
+        const r = (await host.threadCommands(needThread())) as { commands?: unknown[] } | undefined;
+        return { result: r?.commands ?? [] };
       }
       case 'schedule': {
         if (!host.schedule) throw new Error('this runner can\'t change schedules');

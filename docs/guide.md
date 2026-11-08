@@ -476,6 +476,12 @@ lines between its columns to size them. It keeps the sizes for next
 time. Right-click it for its default size or column widths, or
 double-click a line to put that column back.
 
+The iPhone app has it too: type `/` in a thread's reply box and a list of
+its commands opens above it, with the categories as buttons along the top.
+Tap one to put it in the box, then send it (add details first if it takes
+any). It comes from the thread's Mac, so with that Mac asleep it says so,
+and a command typed in full still runs.
+
 A command waits for a running turn to finish rather than going into it.
 Commands that only make sense in a CLI's terminal (`/resume`, `/rewind`,
 `/login`) get a line saying how to do that here. Anything else starting

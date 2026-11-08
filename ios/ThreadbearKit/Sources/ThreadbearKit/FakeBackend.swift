@@ -554,6 +554,27 @@ public final class FakeBackend: Backend, @unchecked Sendable {
         return newCommand(threadId: started)
     }
 
+    /// A Claude thread's list, as a runner would send it, for the palette
+    /// in the simulator and the screenshots.
+    public func slashCommands(threadId: String) async throws -> String {
+        let id = "cmd_" + UUID().uuidString.prefix(8)
+        lock.withLock { commands[id] = CommandStatus(state: .done, commands: Self.sampleCommands) }
+        return id
+    }
+
+    public static let sampleCommands: [SlashCommand] = [
+        SlashCommand(name: "model", description: "Switch this thread's model", argumentHint: "[model]", source: "threadbear"),
+        SlashCommand(name: "effort", description: "Set this thread's effort level", argumentHint: "[low|medium|high|xhigh|max]", source: "threadbear"),
+        SlashCommand(name: "clear", description: "Clear conversation history and free up context", source: "cli", scope: "system"),
+        SlashCommand(name: "compact", description: "Clear conversation history but keep a summary in context", argumentHint: "<optional custom summarization instructions>", source: "cli", scope: "system"),
+        SlashCommand(name: "context", description: "Show current context usage", source: "cli", scope: "system"),
+        SlashCommand(name: "cost", description: "Show the total cost and duration of the current session", source: "cli", aliases: ["usage", "stats"], scope: "system"),
+        SlashCommand(name: "code-review", description: "Review the current diff, or a PR number, branch or path, for correctness bugs, at the effort level given first.", argumentHint: "[low|medium|high] [target]", source: "skill", scope: "user"),
+        SlashCommand(name: "computercub", description: "Drive Mac apps and the parts of Chrome extensions can't reach, with the `computercub` command.", source: "skill", scope: "user"),
+        SlashCommand(name: "deslop", description: "A second-pass cleanup over AI-written code using the repo's style guide.", source: "skill", scope: "user"),
+        SlashCommand(name: "ship", description: "Drive a branch to merge-ready: PR, checks, bot comments.", source: "skill", scope: "user"),
+    ]
+
     /// Runs `land` when the runner would take the answer: now, or after
     /// `answerDelay`, or never if it's refusing them.
     private func answered(_ land: @escaping @Sendable (FakeBackend) -> Void) -> String {

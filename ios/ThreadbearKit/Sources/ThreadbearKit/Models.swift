@@ -853,6 +853,10 @@ public enum BackendCompatibility {
     /// taken yet, and phone:cancel takes one back. Older backends have
     /// neither, so the phone only shows a line for the last one it sent.
     public static let waitingSendsAPIVersion = 57
+    /// From 62 phone:slashCommands asks a thread's runner for its slash
+    /// commands, for the palette over the reply box. Older backends get no
+    /// palette; what's typed still runs as a command.
+    public static let slashCommandsAPIVersion = 62
 
     /// The line to show, or nil when the backend is fine.
     public static func problem(_ identity: PhoneIdentity) -> String? {
@@ -870,10 +874,24 @@ public struct CommandStatus: Codable, Sendable, Hashable {
     public var state: CommandState
     public var note: String?
     public var threadId: String?
-    public init(state: CommandState, note: String? = nil, threadId: String? = nil) {
+    /// A slashCommands command's answer (API 62): phone:command's `result`.
+    /// Anything that isn't a list of commands reads as none.
+    public var commands: [SlashCommand]?
+    public init(state: CommandState, note: String? = nil, threadId: String? = nil, commands: [SlashCommand]? = nil) {
         self.state = state
         self.note = note
         self.threadId = threadId
+        self.commands = commands
+    }
+
+    private enum CodingKeys: String, CodingKey { case state, note, threadId, commands = "result" }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        state = try c.decode(CommandState.self, forKey: .state)
+        note = try c.decodeIfPresent(String.self, forKey: .note)
+        threadId = try c.decodeIfPresent(String.self, forKey: .threadId)
+        commands = try? c.decodeIfPresent([SlashCommand].self, forKey: .commands)
     }
 }
 

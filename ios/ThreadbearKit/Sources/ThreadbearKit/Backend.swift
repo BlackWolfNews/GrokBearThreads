@@ -68,6 +68,9 @@ public protocol Backend: Sendable {
     /// Presses a reply button (backend API 59): queues it for the thread's
     /// runner, which presses it once however many times it's asked.
     func press(threadId: String, buttonId: String) async throws -> String
+    /// Asks the thread's runner for the slash commands it can run (backend
+    /// API 62). The list comes back as the command's `commands`.
+    func slashCommands(threadId: String) async throws -> String
     /// Answers keyed by question text, several choices joined with ", ",
     /// as the Mac app sends them. `summary` goes in the transcript.
     func answer(threadId: String, approvalId: String, answers: [String: String], summary: String) async throws -> String
@@ -320,6 +323,10 @@ public final class ConvexBackend: Backend, @unchecked Sendable {
 
     public func press(threadId: String, buttonId: String) async throws -> String {
         try await command("phone:press", ["threadId": .string(threadId), "buttonId": .string(buttonId)])
+    }
+
+    public func slashCommands(threadId: String) async throws -> String {
+        try await command("phone:slashCommands", ["threadId": .string(threadId)])
     }
 
     public func respond(threadId: String, approvalId: String, decision: ApprovalOption) async throws -> String {
